@@ -125,7 +125,10 @@ export function resolveTerminalTheme(
   return Number.isFinite(background) && background >= 7 ? "light" : "dark";
 }
 
-export type SlashCommandId = "new" | "sessions" | "resume" | "rename" | "delete" | "model" | "export" | "plan" | "status" | "context" | "diff" | "undo" | "clear" | "help" | "exit";
+export type SlashCommandId =
+  | "new" | "sessions" | "resume" | "rename" | "delete" | "model" | "export" | "plan"
+  | "status" | "context" | "diff" | "undo" | "clear" | "help" | "exit"
+  | `custom:${string}`;
 export type SlashCommandArgument = "none" | "optional" | "required";
 export type SlashCommandSection = "session" | "inspect" | "control";
 
@@ -173,20 +176,20 @@ export function slashCommandCompletion(command: SlashCommand): string {
   return command.argument === "none" ? command.name : `${command.name} `;
 }
 
-export function slashCommandMatches(value: string): SlashCommand[] {
+export function slashCommandMatches(value: string, commands: readonly SlashCommand[] = SLASH_COMMANDS): SlashCommand[] {
   const query = value.trimStart().toLowerCase();
   if (!query.startsWith("/") || /\s/.test(query)) return [];
-  return SLASH_COMMANDS.filter((command) =>
+  return commands.filter((command) =>
     command.name.toLowerCase().startsWith(query) || command.aliases.some((alias) => alias.startsWith(query))
   );
 }
 
-export function resolveSlashCommand(value: string): SlashCommandInvocation | null {
+export function resolveSlashCommand(value: string, commands: readonly SlashCommand[] = SLASH_COMMANDS): SlashCommandInvocation | null {
   const input = value.trim();
   if (!input.startsWith("/")) return null;
   const separator = input.search(/\s/);
   const matchedName = (separator === -1 ? input : input.slice(0, separator)).toLowerCase();
-  const command = SLASH_COMMANDS.find((candidate) =>
+  const command = commands.find((candidate) =>
     candidate.name === matchedName || candidate.aliases.includes(matchedName as `/${string}`)
   );
   if (!command) return null;

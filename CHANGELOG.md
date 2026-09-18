@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plan mode: `/plan <prompt>` and `--plan` submit a read-only turn that offers
   only inspection tools and denies write or execution calls even if the model
   requests them (schema v5 stores the flag).
+- Custom slash commands from Markdown files in `~/.demesne/commands/` and
+  `<workspace>/.demesne/commands/`, with optional frontmatter descriptions,
+  `$ARGUMENTS` substitution, project-over-user precedence, and built-in names
+  protected from shadowing.
 
 ## [0.1.0] - 2026-09-18
 

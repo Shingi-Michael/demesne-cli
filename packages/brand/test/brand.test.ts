@@ -37,6 +37,7 @@ import {
   slashCommandMatches,
   slashCommandCompletion,
   slashCommandValidationError,
+  SLASH_COMMANDS,
   terminalPalette,
   TerminalMarkdownStream,
   TerminalReasoningStream,
@@ -346,6 +347,24 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(slashCommandMatches("/pl").map((command) => command.name)).toEqual(["/plan"]);
     expect(slashCommandValidationError(resolveSlashCommand("/plan")!)).toBe("Usage: /plan <prompt>");
     expect(slashCommandValidationError(resolveSlashCommand("/plan tighten the loop")!)).toBeNull();
+  });
+
+  test("matches and resolves custom commands from a provided list", () => {
+    const custom = {
+      id: "custom:review" as const,
+      name: "/review" as const,
+      aliases: [],
+      argument: "optional" as const,
+      argumentLabel: "arguments",
+      description: "Review the working tree",
+      section: "session" as const,
+    };
+    expect(slashCommandMatches("/rev", [custom]).map((command) => command.name)).toEqual(["/review"]);
+    expect(slashCommandMatches("/rev", SLASH_COMMANDS)).toEqual([]);
+    expect(resolveSlashCommand("/review src/a.ts", [custom])?.argument).toBe("src/a.ts");
+    const menu = formatSlashCommandMenu([custom], 0, 80, createPainter(false));
+    expect(menu).toContain("/review");
+    expect(menu).toContain("Review the working tree");
   });
 
   test("help reflects the single-model reasoning-off runtime", () => {

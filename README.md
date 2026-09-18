@@ -71,6 +71,24 @@ History is stored privately at `<data-dir>/history.jsonl` (mode `0600`),
 tagged with the workspace, and capped at 500 entries. A malformed or unreadable
 history never blocks startup.
 
+### Custom Commands
+
+Markdown files in `~/.demesne/commands/` and
+`<workspace>/.demesne/commands/` become slash commands named after the file
+(`review.md` becomes `/review`). An optional `---` frontmatter block supplies
+the palette description, and the body is submitted as the prompt:
+
+```markdown
+---
+description: Review a path with fresh eyes
+---
+Review $ARGUMENTS carefully and list concrete findings.
+```
+
+`$ARGUMENTS` is substituted when present; otherwise the argument is appended as
+a final paragraph. Project files override user files on a name collision, and
+built-in command names cannot be shadowed.
+
 Typing while a turn is running queues the text instead of interrupting it. The
 footer shows a `⏎ …` preview, and the queue submits automatically when the turn
 finishes; slash commands queue the same way. Control keys and the approval

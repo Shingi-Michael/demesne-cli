@@ -46,6 +46,7 @@ import {
   SPINNER_PERIOD_MS,
   sanitizeTerminalLine,
   sanitizeTerminalText,
+  SLASH_COMMANDS,
   slashCommandMatches,
   slashCommandValidationError,
   TerminalMarkdownStream,
@@ -56,6 +57,7 @@ import {
   type BeaconActivity,
   type Painter,
   type PaletteColor,
+  type SlashCommand,
   type SlashCommandId,
 } from "@demesne/brand";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -79,6 +81,7 @@ import { createPromptEditorState, mentionMatches, mentionTokenAt, reducePromptEd
 import { queueSummary, reduceQueuedInput } from "./input-queue.ts";
 import { notify, shouldNotifyApproval, shouldNotifyCompletion, type NotificationOptions } from "./notifications.ts";
 import { derivePersistedRule } from "./allow-rules.ts";
+import { expandCustomCommand, loadCustomCommands, mergeSlashCommands, type CustomCommand } from "./custom-commands.ts";
 import { VERSION } from "./version.ts";
 import { loadCliSettings, type CliSettings } from "./cli-config.ts";
 import {
@@ -264,7 +267,11 @@ function getConversationWidth(stream: { columns?: number } = process.stdout): nu
   return Math.min(100, getTerminalWidth(stream));
 }
 
-async function readCommandPrompt(history: PromptHistory, mentions: readonly string[] = []): Promise<string> {
+async function readCommandPrompt(
+  history: PromptHistory,
+  mentions: readonly string[] = [],
+  commands: readonly SlashCommand[] = SLASH_COMMANDS,
+): Promise<string> {
   const input = process.stdin;
   const output = process.stdout;
   const wasRaw = input.isRaw;
@@ -277,7 +284,7 @@ async function readCommandPrompt(history: PromptHistory, mentions: readonly stri
   input.resume();
 
   return new Promise((resolve) => {
-    const matchingCommands = () => (state.menuDismissed ? [] : slashCommandMatches(state.value).slice(0, 10));
+    const matchingCommands = () => (state.menuDismissed ? [] : slashCommandMatches(state.value, commands).slice(0, 10));
 
     const render = () => {
       const commands = matchingCommands();
@@ -686,6 +693,12 @@ async function runChat(command: string[]): Promise<void> {
   const interactive = process.stdin.isTTY && process.stdout.isTTY;
   const history = PromptHistory.load(join(settings.dataDirectory, "history.jsonl"));
   let mentionFiles: string[] = [];
+  let customCommands: CustomCommand[] = loadCustomCommands(process.cwd());
+  let allCommands: SlashCommand[] = mergeSlashCommands(SLASH_COMMANDS, customCommands);
+  const refreshCustomCommands = (workspaceRoot: string): void => {
+    customCommands = loadCustomCommands(workspaceRoot);
+    allCommands = mergeSlashCommands(SLASH_COMMANDS, customCommands);
+  };
   let sessionId = sessionIdOverride;
   const thinkingEnabled: boolean | undefined = undefined;
 
@@ -722,6 +735,7 @@ async function runChat(command: string[]): Promise<void> {
   const initialState = await request<SessionStateResponse>(`/v1/sessions/${sessionId}`);
   mentionFiles = await fetchMentionFiles(sessionId);
   let currentWorkspace = initialState.session.workspace?.root ?? process.cwd();
+  refreshCustomCommands(currentWorkspace);
   const historicalModel = initialState.latestProviderCall
     ? discoveredModels.find((model) =>
       model.id === initialState.latestProviderCall?.model && model.provider === initialState.latestProviderCall.provider
@@ -819,6 +833,7 @@ async function runChat(command: string[]): Promise<void> {
       contextRail.hydrate(result.latestProviderCall, thinkingEnabled, currentWorkspace);
       contextRail.setBranch(result.session.workspace?.gitBranch ?? null);
       mentionFiles = await fetchMentionFiles(sessionId);
+      refreshCustomCommands(currentWorkspace);
       const preferred = result.session.preferredModel;
       if (preferred && preferred !== activeModel.id) {
         console.log(paint.dim(
@@ -832,7 +847,7 @@ async function runChat(command: string[]): Promise<void> {
     }
   };
 
-  const slashHandlers: Record<SlashCommandId, (argument: string) => Promise<void>> = {
+  const slashHandlers: Partial<Record<SlashCommandId, (argument: string) => Promise<void>>> = {
     exit: async () => leaveChat(),
     undo: async (argument) => {
       try {
@@ -910,6 +925,7 @@ async function runChat(command: string[]): Promise<void> {
       contextRail.hydrate(null, thinkingEnabled, currentWorkspace);
       contextRail.setBranch(created.session.workspace?.gitBranch ?? null);
       mentionFiles = await fetchMentionFiles(sessionId);
+      refreshCustomCommands(currentWorkspace);
       console.log(`\n  ${paint.text("●", "citron")} Started new session ${paint.bold(title, "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}\n`);
     },
     status: async () => {
@@ -1019,7 +1035,7 @@ async function runChat(command: string[]): Promise<void> {
       }
       await request(`/v1/sessions/${sessionId}`, { method: "DELETE" });
       console.log(`\n  ${paint.text("●", "citron")} Archived ${paint.bold(sanitizeTerminalLine(title), "paper")}\n`);
-      await slashHandlers.new("");
+      await slashHandlers.new!("");
     },
     export: async (argument) => {
       const format = argument.trim().toLowerCase() || "md";
@@ -1053,7 +1069,7 @@ async function runChat(command: string[]): Promise<void> {
       line = queued;
     } else {
       try {
-        line = await readCommandPrompt(history, mentionFiles);
+        line = await readCommandPrompt(history, mentionFiles, allCommands);
       } catch {
         leaveChat();
       }
@@ -1064,7 +1080,7 @@ async function runChat(command: string[]): Promise<void> {
     history.add(input, currentWorkspace);
 
     if (input.startsWith("/")) {
-      const invocation = resolveSlashCommand(input);
+      const invocation = resolveSlashCommand(input, allCommands);
       if (!invocation) {
         console.log(`  ${paint.text(`Unknown command: ${input.split(/\s/, 1)[0]}. Type /help for available commands.`, "signal")}\n`);
         continue;
@@ -1075,7 +1091,17 @@ async function runChat(command: string[]): Promise<void> {
         continue;
       }
       try {
-        await slashHandlers[invocation.command.id](invocation.argument);
+        const handler = slashHandlers[invocation.command.id];
+        if (handler) {
+          await handler(invocation.argument);
+        } else {
+          const custom = customCommands.find((entry) => entry.command.id === invocation.command.id);
+          if (!custom) {
+            console.log(`  ${paint.text(`Unknown command: ${invocation.matchedName}`, "signal")}\n`);
+            continue;
+          }
+          await executePrompt(expandCustomCommand(custom, invocation.argument));
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : `${invocation.command.name} failed`;
         console.log(`  ${paint.text(sanitizeTerminalText(message), "signal")}\n`);

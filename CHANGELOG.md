@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   submits automatically when the turn finishes.
 - `@` file mentions with a ranked completion menu backed by a workspace file
   listing endpoint that applies the sensitive-path policy.
+- Persistent approval allowlists: a fourth approval option saves scoped rules
+  to `[permissions] allow`, the daemon re-reads them on change, and host
+  commands persist exact argv while bare `run_command` rules are rejected.
 
 ## [0.1.0] - 2026-09-18
 

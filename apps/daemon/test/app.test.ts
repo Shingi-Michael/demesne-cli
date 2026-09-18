@@ -1845,6 +1845,60 @@ describe("Demesne daemon", () => {
     const listing = await jsonRequest<WorkspaceFilesResponse>(running.url, `/v1/sessions/${created.session.id}/files`);
     expect(listing.files).toEqual(["src/main.ts"]);
   });
+
+  test("persisted allowlist rules skip the permission prompt", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    mkdirSync(join(workspacePath, "src"));
+    writeFileSync(join(workspacePath, "src", "target.txt"), "original\n");
+    const configPath = join(directory, "config.toml");
+    writeFileSync(configPath, `[permissions]\nallow = ["edit_file:src"]\n`);
+
+    let round = 0;
+    const processor: TurnProcessor = {
+      providerId: "allow-provider",
+      modelId: "allow-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream() {
+        if (round++ === 0) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "call-e",
+            nameDelta: "edit_file",
+            argumentsDelta: JSON.stringify({ path: "src/target.txt", oldText: "original", newText: "updated" }),
+          };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: "edited" };
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor, undefined, {}, configPath);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Allowlist", workspacePath }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "edit", permissionMode: "ask" }) },
+    );
+
+    let permissionRequested = false;
+    const eventsUrl = new URL(`/v1/events?session_id=${created.session.id}&after=${submitted.eventId}`, running.url);
+    for await (const event of readServerSentEvents(await fetch(eventsUrl))) {
+      if (event.type === "permission.requested") permissionRequested = true;
+      if (event.type === "turn.completed") break;
+    }
+    expect(permissionRequested).toBe(false);
+    expect(readFileSync(join(workspacePath, "src", "target.txt"), "utf8")).toBe("updated\n");
+  });
 });
 
 function startApp(
@@ -1852,12 +1906,13 @@ function startApp(
   processor?: TurnProcessor,
   inferenceBoundaryHook?: InferenceBoundaryHook,
   providerLimits: { providerFirstEventTimeoutMs?: number; providerRequestTimeoutMs?: number } = {},
+  allowlistPath?: string,
 ): {
   app: DaemonApp;
   server: Bun.Server<unknown>;
   url: URL;
 } {
-  const app = createDaemonApp({ databasePath, processor, inferenceBoundaryHook, ...providerLimits });
+  const app = createDaemonApp({ databasePath, processor, inferenceBoundaryHook, allowlistPath, ...providerLimits });
   const server = Bun.serve({ port: 0, fetch: app.fetch });
   apps.push(app);
   servers.push(server);

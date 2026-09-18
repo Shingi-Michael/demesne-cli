@@ -12,13 +12,17 @@ export interface ApprovalSelectionState {
   cancelledTurn: boolean;
 }
 
-export function approvalOptions(allowSession: boolean): {
+export function approvalOptions(allowSession: boolean, allowPersist = false): {
   options: PermissionDecision[];
   selectedIndex: number;
 } {
   const options: PermissionDecision[] = allowSession
-    ? ["allow_once", "allow_session", "deny"]
-    : ["allow_once", "deny"];
+    ? allowPersist
+      ? ["allow_once", "allow_session", "allow_always", "deny"]
+      : ["allow_once", "allow_session", "deny"]
+    : allowPersist
+      ? ["allow_once", "allow_always", "deny"]
+      : ["allow_once", "deny"];
   return {
     options,
     // Host execution is explicitly not sandboxed, so Enter must fail safe.
@@ -30,12 +34,14 @@ export function reduceApprovalSelection(
   selectedIndex: number,
   allowSession: boolean,
   key: ApprovalKey,
+  allowPersist = false,
 ): ApprovalSelectionState {
-  const { options } = approvalOptions(allowSession);
+  const { options } = approvalOptions(allowSession, allowPersist);
   if (key.ctrl && key.name === "c") return { selectedIndex, decision: "deny", cancelledTurn: true };
   if (key.name === "escape" || key.name === "n") return { selectedIndex, decision: "deny", cancelledTurn: false };
   if (key.name === "y") return { selectedIndex, decision: "allow_once", cancelledTurn: false };
   if (key.name === "a" && allowSession) return { selectedIndex, decision: "allow_session", cancelledTurn: false };
+  if (key.name === "s" && allowPersist) return { selectedIndex, decision: "allow_always", cancelledTurn: false };
   if (key.name === "left" || key.name === "up") {
     return { selectedIndex: (selectedIndex - 1 + options.length) % options.length, decision: null, cancelledTurn: false };
   }
@@ -53,21 +59,29 @@ export function formatApprovalSelection(
   allowSession: boolean,
   width: number,
   painter: Painter,
+  allowPersist = false,
 ): string {
-  const { options } = approvalOptions(allowSession);
+  const { options } = approvalOptions(allowSession, allowPersist);
   const labels: Record<PermissionDecision, string> = {
     allow_once: "Allow once",
     allow_session: "Always this session",
+    allow_always: "Always allow (save)",
     deny: "Deny",
   };
-  const colors = allowSession ? ["citron", "electric", "signal"] as const : ["citron", "signal"] as const;
+  const colors = allowSession
+    ? allowPersist
+      ? ["citron", "electric", "electricBright", "signal"] as const
+      : ["citron", "electric", "signal"] as const
+    : allowPersist
+      ? ["citron", "electricBright", "signal"] as const
+      : ["citron", "signal"] as const;
   const choices = options.map((option, index) => index === selectedIndex
     ? painter.bold(`› ${labels[option]}`, colors[index]!)
     : painter.dim(labels[option])).join("   ");
-  const full = `  ${painter.bold("Allow this action?", "paper")}  ${choices}${painter.dim("   (←/→ · y/a/n · enter · esc denies)")}`;
+  const keys = allowPersist ? (allowSession ? "y/a/s/n" : "y/s/n") : (allowSession ? "y/a/n" : "y/n");
+  const full = `  ${painter.bold("Allow this action?", "paper")}  ${choices}${painter.dim(`   (←/→ · ${keys} · enter · esc denies)`)}`;
   if (visibleLength(full) <= width) return full;
   const selected = options[selectedIndex]!;
-  const keys = allowSession ? "y/a/n" : "y/n";
   const compact = `  ${painter.bold("APPROVAL", "paper")} ${selectedIndex + 1}/${options.length} ${painter.bold(`› ${labels[selected]}`, colors[selectedIndex]!)} ${painter.dim(`· ←/→ · ${keys} · enter`)}`;
   return truncateText(compact, Math.max(1, width));
 }

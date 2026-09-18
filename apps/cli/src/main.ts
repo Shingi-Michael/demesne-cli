@@ -74,6 +74,7 @@ import { composeInEditor } from "./external-editor.ts";
 import { createPromptEditorState, mentionMatches, mentionTokenAt, reducePromptEditor, reverseSearchMatches, setPromptValue } from "./prompt-editor.ts";
 import { queueSummary, reduceQueuedInput } from "./input-queue.ts";
 import { notify, shouldNotifyApproval, shouldNotifyCompletion, type NotificationOptions } from "./notifications.ts";
+import { derivePersistedRule } from "./allow-rules.ts";
 import { VERSION } from "./version.ts";
 import { loadCliSettings, type CliSettings } from "./cli-config.ts";
 import {
@@ -1367,11 +1368,32 @@ async function resolvePermission(event: EventEnvelope, onCancel?: () => void): P
 
   if (process.stdin.isTTY && process.stdout.isTTY) {
     const width = getTerminalWidth(process.stdout);
+    const persistedRule = derivePersistedRule(toolName, rawArgs);
     console.log(formatPermissionCard(summary, toolName, width, paint, previewRows.length > 0 ? previewRows : undefined));
-    const selection = await promptApprovalSelection(toolName !== "run_command", onCancel);
+    const selection = await promptApprovalSelection(toolName !== "run_command", onCancel, persistedRule !== null);
     decision = selection.decision;
+    if (decision === "allow_always" && persistedRule) {
+      try {
+        const existing = settings.loaded.config.permissions.allow;
+        if (!existing.includes(persistedRule)) {
+          updateUserConfig(settings.configPath, { permissions: { allow: [...existing, persistedRule] } });
+          existing.push(persistedRule);
+        }
+      } catch (error) {
+        decision = "allow_session";
+        console.log(`\n  ${paint.text("!", "signal")} ${paint.dim(
+          `Could not save the rule (${error instanceof Error ? error.message : String(error)}); allowed for this session instead.`,
+        )}\n`);
+      }
+    }
     if (!selection.cancelledTurn) {
-      const outcome = decision === "deny" ? "Denied" : decision === "allow_session" ? "Allowed for session" : "Allowed once";
+      const outcome = decision === "deny"
+        ? "Denied"
+        : decision === "allow_always"
+          ? "Always allowed"
+          : decision === "allow_session"
+            ? "Allowed for session"
+            : "Allowed once";
       console.log(`\n  ${paint.text("●", decision === "deny" ? "signal" : "citron")} ${paint.dim(`${outcome} — ${summary}`)}\n`);
     }
   } else {
@@ -1398,11 +1420,12 @@ async function resolvePermission(event: EventEnvelope, onCancel?: () => void): P
 function promptApprovalSelection(
   allowSession: boolean,
   onCancel?: () => void,
+  allowPersist = false,
 ): Promise<{ decision: PermissionDecision; cancelledTurn: boolean }> {
   const input = process.stdin;
   const output = process.stdout;
   const wasRaw = input.isRaw;
-  const approval = approvalOptions(allowSession);
+  const approval = approvalOptions(allowSession, allowPersist);
   let selected = approval.selectedIndex;
   emitKeypressEvents(input);
   input.setRawMode(true);
@@ -1410,7 +1433,7 @@ function promptApprovalSelection(
 
   return new Promise((resolve) => {
     const render = () => {
-      output.write(`\r\x1b[2K${formatApprovalSelection(selected, allowSession, getTerminalWidth(output), paint)}`);
+      output.write(`\r\x1b[2K${formatApprovalSelection(selected, allowSession, getTerminalWidth(output), paint, allowPersist)}`);
     };
 
     const cleanup = () => {
@@ -1426,7 +1449,7 @@ function promptApprovalSelection(
     };
 
     const onKeypress = (_text: string, key: { name?: string; ctrl?: boolean }) => {
-      const next = reduceApprovalSelection(selected, allowSession, key);
+      const next = reduceApprovalSelection(selected, allowSession, key, allowPersist);
       selected = next.selectedIndex;
       if (next.cancelledTurn) onCancel?.();
       if (next.decision) finish(next.decision, next.cancelledTurn);

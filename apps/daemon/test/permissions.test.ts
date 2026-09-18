@@ -1,5 +1,21 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PermissionBroker } from "../src/permissions.ts";
+import { ConfigAllowlist } from "../src/allowlist.ts";
+
+const temporaryDirectories: string[] = [];
+
+function temporaryDirectory(): string {
+  const directory = mkdtempSync(join(tmpdir(), "demesne-permissions-test-"));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
 
 describe("PermissionBroker session grants", () => {
   test("allow_session stores a scoped rule that preapproves matching calls", async () => {
@@ -49,5 +65,43 @@ describe("PermissionBroker session grants", () => {
     broker.resolve("d", "deny");
     await w2;
     expect(broker.listGrants("s")).toEqual([]);
+  });
+});
+
+describe("PermissionBroker persisted allowlist", () => {
+  test("preapproves matching calls from the user config", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "config.toml");
+    writeFileSync(path, `
+[permissions]
+allow = ["edit_file:src", "run_command:git status"]
+`);
+    const broker = new PermissionBroker(new ConfigAllowlist(path));
+    expect(broker.preapproved("session", "edit_file", { path: "src/a.ts" })).toBe(true);
+    expect(broker.preapproved("session", "edit_file", { path: "docs/a.md" })).toBe(false);
+    expect(broker.preapproved("session", "run_command", { argv: ["git", "status", "--short"] })).toBe(true);
+    expect(broker.preapproved("session", "run_command", { argv: ["git", "push"] })).toBe(false);
+  });
+
+  test("picks up a rule saved while the daemon is running", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "config.toml");
+    writeFileSync(path, `[permissions]\nallow = []\n`);
+    const broker = new PermissionBroker(new ConfigAllowlist(path));
+    expect(broker.preapproved("session", "edit_file", { path: "src/a.ts" })).toBe(false);
+
+    writeFileSync(path, `[permissions]\nallow = ["edit_file:src"]\n`);
+    const future = new Date(Date.now() + 2_000);
+    utimesSync(path, future, future);
+    expect(broker.preapproved("session", "edit_file", { path: "src/a.ts" })).toBe(true);
+  });
+
+  test("allow_always also grants the session immediately", async () => {
+    const broker = new PermissionBroker();
+    const controller = new AbortController();
+    const waiter = broker.wait("p", "t", "s", "edit_file", JSON.stringify({ path: "src/util/a.ts" }), controller.signal);
+    broker.resolve("p", "allow_always");
+    await waiter;
+    expect(broker.preapproved("s", "edit_file", { path: "src/util/b.ts" })).toBe(true);
   });
 });

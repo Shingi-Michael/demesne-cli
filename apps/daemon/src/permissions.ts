@@ -1,4 +1,5 @@
 import { isRecord, type PermissionDecision } from "@demesne/protocol";
+import { allowRuleMatches, type ConfigAllowlist } from "./allowlist.ts";
 
 interface PendingPermission {
   turnId: string;
@@ -18,11 +19,14 @@ export interface SessionRule {
 
 const MAX_SESSION_RULES = 16;
 
-/// In-memory per-session approval grants ("always this session"). They never
+/// In-memory per-session approval grants ("always this session") plus the
+/// persisted user allowlist, which is consulted first. Session grants never
 /// outlive the daemon process and expire implicitly when a session ends.
 export class PermissionBroker {
   private readonly pending = new Map<string, PendingPermission>();
   private readonly grants = new Map<string, SessionRule[]>();
+
+  constructor(private readonly allowlist?: ConfigAllowlist) {}
 
   wait(
     permissionId: string,
@@ -50,8 +54,8 @@ export class PermissionBroker {
 
   preapproved(sessionId: string, toolName: string, input: unknown): boolean {
     const rules = this.grants.get(sessionId);
-    if (!rules?.length) return false;
-    return rules.some((rule) => ruleMatches(rule, toolName, input));
+    if (rules?.some((rule) => ruleMatches(rule, toolName, input))) return true;
+    return this.allowlist?.rulesFor().some((rule) => allowRuleMatches(rule, toolName, input)) ?? false;
   }
 
   listGrants(sessionId: string): SessionRule[] {
@@ -63,7 +67,7 @@ export class PermissionBroker {
     if (!pending) return false;
     this.pending.delete(permissionId);
     clearTimeout(pending.timeout);
-    if (decision === "allow_session" && pending.toolName) {
+    if ((decision === "allow_session" || decision === "allow_always") && pending.toolName) {
       const rule = deriveRule(pending.toolName, pending.argsJson);
       if (rule) this.grant(pending.sessionId, rule);
     }

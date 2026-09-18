@@ -269,7 +269,7 @@ The model can use these bounded tools:
 | `run_command` | Executes an argv array with a minimal environment; `background: true` returns a handle instead of blocking | Per-call approval |
 | `command_logs` / `command_stop` | Read incremental output from, or terminate, a backgrounded command | Automatic |
 
-Write prompts offer **Allow once**, **Always this session** scoped to the file's directory, and **Deny**. Unsandboxed `run_command` prompts offer only **Allow once** and **Deny**; every distinct command requires approval. In-memory write grants remain attached to their session until the daemon exits and are listed under `/context`. Redirected or otherwise non-interactive CLI use denies these operations by default. Override the turn policy explicitly with `--permission ask` or `--permission deny`.
+Write prompts offer **Allow once**, **Always this session** scoped to the file's directory, and **Deny**. When a rule can be expressed safely, a fourth option, **Always allow (save)**, appends a persistent entry to `[permissions] allow` in the user config; the daemon re-reads the file, so the rule applies immediately and survives restarts. `run_command` prompts persist the exact argv (never a bare `run_command`) and otherwise offer only **Allow once** and **Deny**; every unlisted command still requires approval. In-memory write grants remain attached to their session until the daemon exits and are listed under `/context`. Redirected or otherwise non-interactive CLI use denies these operations by default. Override the turn policy explicitly with `--permission ask` or `--permission deny`.
 
 `run_command` is host execution, not an OS sandbox. It starts in the workspace with filtered environment variables and process limits, but an approved executable still has the access of the daemon's operating-system user.
 
@@ -301,6 +301,8 @@ runtime_profile = "llama-ngram-mod-f16-kv-100k-b256-32gb"
 reasoning_effort = "none"
 
 [permissions]
+# Persistent approvals: "edit_file:src", "write_file:README.md",
+# "run_command:git status", or a bare tool name for non-execution tools.
 allow = []
 
 [notifications]

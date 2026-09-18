@@ -19,6 +19,7 @@ import { AgentEngine } from "./engine.ts";
 import type { ContextPlanner } from "./context-planner.ts";
 import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
+import { ConfigAllowlist } from "./allowlist.ts";
 import { canonicalWorkspace, listWorkspaceFiles, resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { detectGitBranch } from "./git-branch.ts";
 import { backgroundProcesses } from "./background.ts";
@@ -61,6 +62,7 @@ export function createDaemonApp(options: {
   authToken?: string;
   version?: string;
   inferenceSlots?: number;
+  allowlistPath?: string;
   inferenceBoundaryHook?: InferenceBoundaryHook;
   contextPlanner?: ContextPlanner;
   providerFirstEventTimeoutMs?: number;
@@ -70,7 +72,12 @@ export function createDaemonApp(options: {
   const hub = new EventHub();
   const store = new DemesneStore(options.databasePath, (event) => hub.publish(event));
   const processor: TurnProcessor = options.processor ?? new PlaceholderTurnProcessor();
-  const permissions = new PermissionBroker();
+  const allowlist = new ConfigAllowlist(options.allowlistPath ?? null);
+  const invalidRules = allowlist.invalidEntries();
+  if (invalidRules.length > 0) {
+    console.warn(`Ignoring ${invalidRules.length} invalid permissions.allow entr${invalidRules.length === 1 ? "y" : "ies"}: ${invalidRules.join(", ")}`);
+  }
+  const permissions = new PermissionBroker(allowlist);
   const inferenceSlots = options.inferenceSlots ?? 1;
   const runtimeProfile = processor.runtimeStatus?.().profile;
   if (runtimeProfileRequiresSingleInferenceSlot(runtimeProfile) && inferenceSlots !== 1) {

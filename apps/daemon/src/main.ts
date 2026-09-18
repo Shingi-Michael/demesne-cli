@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { ConfigError, loadConfig } from "@demesne/config";
+import { ConfigError, loadConfig, userConfigPath } from "@demesne/config";
 import { OpenAICompatibleProvider } from "@demesne/providers";
 import { createDaemonApp } from "./app.ts";
 import {
@@ -22,7 +22,7 @@ import { VERSION } from "./version.ts";
 // (`~/.demesne/config.toml`). Project files are intentionally ignored: daemon
 // provider settings are machine-wide, and a workspace cannot reconfigure the
 // shared runtime. Environment variables still win over the file.
-const { config } = loadDaemonConfig();
+const { config, files: configFiles } = loadDaemonConfig();
 
 const host = parseHost(config.daemon.host ?? "127.0.0.1");
 const port = config.daemon.port ?? 7337;
@@ -66,6 +66,7 @@ try {
     authToken: loadDaemonToken(dataDirectory),
     version: VERSION,
     inferenceSlots,
+    allowlistPath: process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(),
     providerFirstEventTimeoutMs,
     providerRequestTimeoutMs,
   });

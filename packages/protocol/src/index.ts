@@ -214,7 +214,7 @@ export interface Turn {
 }
 
 export type PermissionMode = "ask" | "deny";
-export type PermissionDecision = "allow_once" | "allow_session" | "deny";
+export type PermissionDecision = "allow_once" | "allow_session" | "allow_always" | "deny";
 
 export interface Workspace {
   id: string;
@@ -347,8 +347,8 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
 
 export function parseResolvePermissionRequest(value: unknown): ResolvePermissionRequest {
   if (!isRecord(value)) throw new ProtocolValidationError("Request body must be a JSON object");
-  if (value.decision !== "allow_once" && value.decision !== "allow_session" && value.decision !== "deny") {
-    throw new ProtocolValidationError("decision must be allow_once, allow_session, or deny");
+  if (value.decision !== "allow_once" && value.decision !== "allow_session" && value.decision !== "allow_always" && value.decision !== "deny") {
+    throw new ProtocolValidationError("decision must be allow_once, allow_session, allow_always, or deny");
   }
   return { decision: value.decision };
 }

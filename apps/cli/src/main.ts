@@ -13,6 +13,7 @@ import {
   type Session,
   type SessionStateResponse,
   type SubmitTurnResponse,
+  type TokenUsage,
   type TurnChangesResponse,
   type UndoTurnResponse,
   type UpdateSessionResponse,
@@ -597,14 +598,25 @@ async function run(command: string[]): Promise<void> {
   if (command[0] === "prompt") {
     const permissionMode = takeOption(command, "--permission") ?? (process.stdin.isTTY && process.stdout.isTTY ? "ask" : "deny");
     if (permissionMode !== "ask" && permissionMode !== "deny") throw new Error("--permission must be ask or deny");
+    const output = takeOption(command, "--output") ?? "text";
+    if (output !== "text" && output !== "json" && output !== "stream-json") {
+      throw new Error("--output must be text, json, or stream-json");
+    }
     const sessionOverride = takeOption(command, "--session");
     const planOnly = command.includes("--plan");
     if (planOnly) command.splice(command.indexOf("--plan"), 1);
-    const content = command.slice(1).join(" ").trim();
+    let content = command.slice(1).join(" ").trim();
+    if (!content || content === "-") content = (await Bun.stdin.text()).trim();
     if (!content) throw new Error("prompt requires text");
     await ensureDaemonOrExit();
-    const sessionId = sessionOverride ?? (await createAutomaticSession(command)).id;
-    await submitAndRender(sessionId, content, permissionMode, undefined, "exit", false, undefined, undefined, undefined, planOnly);
+    const sessionId = sessionOverride ?? (await createAutomaticSession(command, output !== "text")).id;
+    if (output === "text") {
+      await submitAndRender(sessionId, content, permissionMode, undefined, "exit", false, undefined, undefined, undefined, planOnly);
+      return;
+    }
+    const result = await runHeadlessTurn({ sessionId, content, permissionMode, planOnly, output });
+    if (result.status === "failed") process.exitCode = 1;
+    else if (result.status === "cancelled" || result.status === "interrupted") process.exitCode = 130;
     return;
   }
 
@@ -627,14 +639,14 @@ async function run(command: string[]): Promise<void> {
   if (command.length > 0) process.exitCode = 1;
 }
 
-async function createAutomaticSession(command: string[]): Promise<Session> {
+async function createAutomaticSession(command: string[], quiet = false): Promise<Session> {
   const content = command.slice(1).join(" ").trim();
   const title = content.slice(0, 80) || "New session";
   const created = await request<CreateSessionResponse>("/v1/sessions", {
     method: "POST",
     body: JSON.stringify({ title, workspacePath: process.cwd() }),
   });
-  console.error(`Session ${created.session.id}`);
+  if (!quiet) console.error(`Session ${created.session.id}`);
   return created.session;
 }
 
@@ -1117,6 +1129,121 @@ async function runChat(command: string[]): Promise<void> {
 /// terminal; OSC 9 sequences are harmless elsewhere but pointless.
 function notificationOptions(interactive: boolean): NotificationOptions {
   return { enabled: settings.notifications.enabled, isTTY: interactive };
+}
+
+/// Machine-readable turn execution for scripting and CI.
+///
+/// `json` prints one result object; `stream-json` prints every event envelope
+/// as it arrives and then a final result line. Permission requests are denied
+/// with a note on stderr because there is no interactive approval path.
+interface HeadlessResult {
+  sessionId: string;
+  turnId: string;
+  status: "completed" | "failed" | "cancelled" | "interrupted";
+  response: string;
+  rounds: number;
+  tools: number;
+  changes: Array<{ path: string; operation: string; state: string }>;
+  validations: Array<{ command: string; state: string; exitCode?: number }>;
+  usage: TokenUsage | null;
+  metrics: { durationMs: number | null; timeToFirstTokenMs: number | null; queueDurationMs: number | null };
+  error?: string;
+}
+
+async function runHeadlessTurn(options: {
+  sessionId: string;
+  content: string;
+  permissionMode: "ask" | "deny";
+  planOnly: boolean;
+  output: "json" | "stream-json";
+}): Promise<HeadlessResult> {
+  const submitted = await request<SubmitTurnResponse>(`/v1/sessions/${options.sessionId}/turns`, {
+    method: "POST",
+    body: JSON.stringify({
+      content: options.content,
+      permissionMode: options.permissionMode,
+      ...(options.planOnly ? { planOnly: true } : {}),
+    }),
+  });
+  const ledger = new TurnActivityLedger();
+  let response = "";
+  let usage: TokenUsage | null = null;
+  let metrics: HeadlessResult["metrics"] = { durationMs: null, timeToFirstTokenMs: null, queueDurationMs: null };
+  let status: HeadlessResult["status"] = "completed";
+  let error: string | undefined;
+
+  for await (const event of streamEvents(options.sessionId, submitted.eventId)) {
+    if (event.turnId !== submitted.turn.id) continue;
+    if (options.output === "stream-json") console.log(JSON.stringify(event));
+    ledger.apply(event);
+    if (event.type === "message.delta" && typeof event.payload.delta === "string") response += event.payload.delta;
+    if (event.type === "model.usage") {
+      usage = {
+        inputTokens: typeof event.payload.inputTokens === "number" ? event.payload.inputTokens : null,
+        outputTokens: typeof event.payload.outputTokens === "number" ? event.payload.outputTokens : null,
+        totalTokens: typeof event.payload.totalTokens === "number" ? event.payload.totalTokens : null,
+        ...(typeof event.payload.cachedInputTokens === "number" ? { cachedInputTokens: event.payload.cachedInputTokens } : {}),
+      };
+    }
+    if (event.type === "model.metrics") {
+      metrics = {
+        durationMs: typeof event.payload.durationMs === "number" ? event.payload.durationMs : null,
+        timeToFirstTokenMs: typeof event.payload.timeToFirstTokenMs === "number" ? event.payload.timeToFirstTokenMs : null,
+        queueDurationMs: typeof event.payload.queueDurationMs === "number" ? event.payload.queueDurationMs : null,
+      };
+    }
+    if (event.type === "permission.requested") {
+      const permissionId = typeof event.payload.permissionId === "string" ? event.payload.permissionId : null;
+      if (permissionId) {
+        console.error(`Permission denied (non-interactive): ${String(event.payload.summary ?? event.payload.name ?? "operation")}`);
+        await request(`/v1/permissions/${permissionId}`, {
+          method: "POST",
+          body: JSON.stringify({ decision: "deny" }),
+        }).catch(() => undefined);
+      }
+    }
+    if (event.type === "turn.failed") {
+      status = "failed";
+      error = typeof event.payload.message === "string" ? event.payload.message : "Turn failed";
+      break;
+    }
+    if (event.type === "turn.cancelled") {
+      status = "cancelled";
+      break;
+    }
+    if (event.type === "turn.interrupted") {
+      status = "interrupted";
+      error = typeof event.payload.message === "string" ? event.payload.message : "Turn interrupted";
+      break;
+    }
+    if (event.type === "turn.completed") break;
+  }
+
+  const evidence = ledger.snapshot();
+  const result: HeadlessResult = {
+    sessionId: options.sessionId,
+    turnId: submitted.turn.id,
+    status,
+    response,
+    rounds: evidence.rounds,
+    tools: evidence.tools,
+    changes: evidence.changes.map((change) => ({
+      path: change.path,
+      operation: change.operation,
+      state: change.state,
+    })),
+    validations: evidence.validations.map((validation) => ({
+      command: validation.command,
+      state: validation.state,
+      ...(validation.exitCode !== undefined ? { exitCode: validation.exitCode } : {}),
+    })),
+    usage,
+    metrics,
+    ...(error ? { error } : {}),
+  };
+  if (options.output === "json") console.log(JSON.stringify(result));
+  else console.log(JSON.stringify({ type: "result", ...result }));
+  return result;
 }
 
 async function renderTurn(

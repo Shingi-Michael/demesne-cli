@@ -51,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `<workspace>/.demesne/commands/`, with optional frontmatter descriptions,
   `$ARGUMENTS` substitution, project-over-user precedence, and built-in names
   protected from shadowing.
+- Headless output for scripting: `--output json` and `--output stream-json`,
+  stdin prompt piping, automatic non-interactive permission denial, and
+  status-based exit codes.
 
 ## [0.1.0] - 2026-09-18
 

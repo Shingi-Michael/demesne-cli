@@ -112,7 +112,16 @@ bun run demesne prompt "Inspect this repository"
 bun run demesne session list
 bun run demesne doctor --json
 bun run demesne daemon status
+bun run demesne prompt --output json "Summarize the test suite"
+echo "Explain this failure" | bun run demesne prompt --output stream-json
 ```
+
+`--output json` prints one result object with the response, usage, metrics, and
+recorded changes and validations; `--output stream-json` prints every event
+envelope and then a final `{"type":"result",…}` line. Prompts can be piped on
+stdin (or passed as `-`), permission requests are denied with a note on stderr,
+and the exit code is 0 for a completed turn, 1 for a failure, and 130 for a
+cancelled or interrupted turn.
 
 The daemon listens on `127.0.0.1:7337` and stores data in `~/.demesne/demesne.sqlite` by default. Override these values with `DEMESNE_HOST`, `DEMESNE_PORT`, `DEMESNE_DATA_DIR`, or `DEMESNE_SERVER`. A custom data directory must already be private to the current user. Token authentication protects non-health routes, and `DEMESNE_HOST` remains loopback-only until paired-device authentication is implemented.
 

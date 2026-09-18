@@ -2076,6 +2076,117 @@ describe("Demesne daemon", () => {
     const invalid = await fetch(new URL(`/v1/sessions/${created.session.id}/export?format=xml`, running.url));
     expect(invalid.status).toBe(400);
   });
+
+  test("emits a machine-readable result for scripted prompts", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const processor: TurnProcessor = {
+      providerId: "json-provider",
+      modelId: "json-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream() {
+        yield { type: "text_delta" as const, delta: "done" };
+        yield { type: "usage" as const, usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 } };
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
+    const child = Bun.spawn(
+      [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "json", "Say done"],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout) as Record<string, unknown>;
+    expect(result.status).toBe("completed");
+    expect(result.response).toBe("done");
+    expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 2, totalTokens: 7 });
+    expect(result.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(stderr).not.toContain("Session ");
+  });
+
+  test("streams event JSON lines and a final result", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const processor: TurnProcessor = {
+      providerId: "stream-provider",
+      modelId: "stream-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream() {
+        yield { type: "text_delta" as const, delta: "streamed" };
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
+    const child = Bun.spawn(
+      [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "stream-json", "Go"],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
+    await new Response(child.stderr).text();
+
+    expect(exitCode).toBe(0);
+    const lines = stdout.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.at(-1)).toMatchObject({ type: "result", status: "completed", response: "streamed" });
+    expect(lines.some((entry) => entry.type === "model.request_started")).toBe(true);
+    expect(lines.some((entry) => entry.type === "message.delta")).toBe(true);
+  });
+
+  test("reads the prompt from stdin when no text argument is given", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const running = startApp(join(directory, "demesne.sqlite"));
+    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
+    const child = Bun.spawn(
+      [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "json"],
+      { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+    );
+    child.stdin.write("Piped prompt");
+    child.stdin.end();
+    const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
+    await new Response(child.stderr).text();
+
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout) as Record<string, unknown>;
+    expect(result.response).toBe("Request accepted: Piped prompt");
+  });
+
+  test("exits non-zero and reports failures in JSON mode", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const processor: TurnProcessor = {
+      providerId: "fail-provider",
+      modelId: "fail-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream() {
+        throw new ProviderError("model exploded");
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
+    const child = Bun.spawn(
+      [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "json", "Fail"],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
+    await new Response(child.stderr).text();
+
+    expect(exitCode).toBe(1);
+    const result = JSON.parse(stdout) as Record<string, unknown>;
+    expect(result.status).toBe("failed");
+    expect(String(result.error)).toContain("model exploded");
+  });
 });
 
 function startApp(

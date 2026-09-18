@@ -61,6 +61,7 @@ interface TurnRow {
   completed_at: string | null;
   permission_mode: PermissionMode;
   thinking_enabled: number | null;
+  plan_only: number | null;
 }
 
 interface EventRow {
@@ -117,7 +118,7 @@ export class NotFoundError extends Error {}
 export class InvalidStateError extends Error {}
 
 export type EventSink = (event: EventEnvelope) => void;
-const STORAGE_SCHEMA_VERSION = 4;
+const STORAGE_SCHEMA_VERSION = 5;
 
 export class DemesneStore {
   readonly database: Database;
@@ -561,6 +562,7 @@ export class DemesneStore {
     content: string,
     permissionMode: PermissionMode = "deny",
     thinkingEnabled?: boolean,
+    planOnly = false,
   ): { turn: Turn; event: EventEnvelope } {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -572,13 +574,22 @@ export class DemesneStore {
       if (active.count > 0) throw new InvalidStateError("Session already has an active turn");
       this.database
         .query(
-          "INSERT INTO turns (id, session_id, content, response_text, status, created_at, permission_mode, thinking_enabled) VALUES (?, ?, ?, '', 'queued', ?, ?, ?)",
+          "INSERT INTO turns (id, session_id, content, response_text, status, created_at, permission_mode, thinking_enabled, plan_only) VALUES (?, ?, ?, '', 'queued', ?, ?, ?, ?)",
         )
-        .run(id, sessionId, content, now, permissionMode, thinkingEnabled === undefined ? null : thinkingEnabled ? 1 : 0);
+        .run(
+          id,
+          sessionId,
+          content,
+          now,
+          permissionMode,
+          thinkingEnabled === undefined ? null : thinkingEnabled ? 1 : 0,
+          planOnly ? 1 : 0,
+        );
       this.database.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now, sessionId);
       const event = this.insertEvent("turn.created", sessionId, id, {
         content,
         ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),
+        ...(planOnly ? { planOnly: true } : {}),
       }, now);
       return { turn: this.getTurnOrThrow(id), event };
     })();
@@ -1081,6 +1092,9 @@ export class DemesneStore {
     if (!this.hasColumn("turns", "reverted_at")) {
       this.database.run("ALTER TABLE turns ADD COLUMN reverted_at TEXT");
     }
+    if (!this.hasColumn("turns", "plan_only")) {
+      this.database.run("ALTER TABLE turns ADD COLUMN plan_only INTEGER NOT NULL DEFAULT 0");
+    }
     this.database.run(`
       CREATE TABLE IF NOT EXISTS provider_calls (
         id TEXT PRIMARY KEY,
@@ -1420,6 +1434,7 @@ function mapTurn(row: TurnRow): Turn {
     completedAt: row.completed_at,
     permissionMode: row.permission_mode,
     thinkingEnabled: row.thinking_enabled === null ? null : row.thinking_enabled !== 0,
+    ...(row.plan_only ? { planOnly: true } : {}),
   };
 }
 

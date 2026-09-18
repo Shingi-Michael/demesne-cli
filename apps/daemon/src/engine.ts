@@ -54,11 +54,15 @@ export class AgentEngine {
     const userMessage = { role: "user" as const, content: turn.content };
     const currentUser = this.store.appendModelMessage(turnId, userMessage);
     const currentMessages: ProviderMessage[] = [userMessage];
-    const definitions = session.workspace ? selectToolsForTurn(this.tools.definitions(), turn.content) : [];
+    const definitions = session.workspace
+      ? planModeDefinitions(selectToolsForTurn(this.tools.definitions(), turn.content), turn.planOnly === true)
+      : [];
     const baseSystemPrompt = this.configuredSystemPrompt?.trim() || defaultSystemPrompt(session.workspace?.root);
     const projectInstructions = loadProjectInstructions(session.workspace?.root);
     const guidedSystemPrompt = composeSystemPrompt(baseSystemPrompt, projectInstructions);
-    const guidance = turnToolGuidance(turn.content);
+    const guidance = [turnToolGuidance(turn.content), planModeGuidance(turn.planOnly === true)]
+      .filter((entry): entry is string => Boolean(entry))
+      .join("\n");
     const systemPrompt = guidance ? `${guidedSystemPrompt}\n${guidance}` : guidedSystemPrompt;
     let totalToolCalls = 0;
     let totalToolResultBytes = 0;
@@ -247,7 +251,7 @@ export class AgentEngine {
       if (allReadOnly && callRecords.length > 1) {
         const results = await Promise.all(
           callRecords.map(async ({ call, toolCallId }) => {
-            const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal);
+            const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal, turn.planOnly === true);
             return { call, result };
           }),
         );
@@ -260,7 +264,7 @@ export class AgentEngine {
         }
       } else {
         for (const { call, toolCallId } of callRecords) {
-          const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal);
+          const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal, turn.planOnly === true);
           totalToolResultBytes += Buffer.byteLength(result);
           if (totalToolResultBytes > 512 * 1024) throw new Error("Turn exceeded the tool result limit");
           const toolMessage = { role: "tool" as const, toolCallId: call.id, content: result };
@@ -330,6 +334,7 @@ export class AgentEngine {
     turnId: string,
     sessionId: string,
     signal: AbortSignal,
+    planOnly: boolean,
   ): Promise<string> {
     if (!workspaceRoot) {
       const result = "Error: this session is not bound to a workspace";
@@ -348,6 +353,11 @@ export class AgentEngine {
     if (!tool) {
       const result = `Error: unknown tool ${call.name}`;
       this.store.settleToolCall(toolCallId, "failed", result);
+      return result;
+    }
+    if (planOnly && !PLAN_MODE_TOOL_NAMES.has(call.name)) {
+      const result = `Error: ${call.name} is not available in plan mode`;
+      this.store.settleToolCall(toolCallId, "denied", result);
       return result;
     }
     let permission;
@@ -482,6 +492,30 @@ Inspect before editing with focused list, search, and read tools; batch related 
 }
 
 const qualitativeInspectionTools = new Set(["list_files", "read_file", "read_files", "search_files"]);
+
+/// Tools a plan-mode turn may use. The engine also enforces this at execution
+/// time, so a hallucinated write tool call is denied rather than executed.
+export const PLAN_MODE_TOOL_NAMES = new Set([
+  "list_files",
+  "read_file",
+  "read_files",
+  "search_files",
+  "git_status",
+  "git_diff",
+]);
+
+export function planModeDefinitions(
+  definitions: ProviderToolDefinition[],
+  planOnly: boolean,
+): ProviderToolDefinition[] {
+  return planOnly ? definitions.filter((definition) => PLAN_MODE_TOOL_NAMES.has(definition.name)) : definitions;
+}
+
+export function planModeGuidance(planOnly: boolean): string | null {
+  return planOnly
+    ? "Plan mode: this turn is read-only. Inspect with the available tools, do not attempt edits or commands, and finish with a concise, ordered plan the user can approve."
+    : null;
+}
 
 export function selectToolsForTurn(definitions: ProviderToolDefinition[], request: string): ProviderToolDefinition[] {
   if (!isQualitativeWorkspaceOverview(request)) return definitions;

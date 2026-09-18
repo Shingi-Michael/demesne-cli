@@ -53,4 +53,14 @@ describe("turn request validation", () => {
     expect(() => parseSubmitTurnRequest({ content: "Explain this", thinkingEnabled: "yes" }))
       .toThrow(ProtocolValidationError);
   });
+
+  test("accepts and validates plan-only turns", () => {
+    expect(parseSubmitTurnRequest({ content: "Draft a plan", planOnly: true })).toEqual({
+      content: "Draft a plan",
+      planOnly: true,
+    });
+    expect(parseSubmitTurnRequest({ content: "Draft a plan" })).toEqual({ content: "Draft a plan" });
+    expect(() => parseSubmitTurnRequest({ content: "Draft a plan", planOnly: "yes" }))
+      .toThrow(ProtocolValidationError);
+  });
 });

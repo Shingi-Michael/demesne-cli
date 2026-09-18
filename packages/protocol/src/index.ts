@@ -213,6 +213,8 @@ export interface Turn {
   completedAt: string | null;
   permissionMode: PermissionMode;
   thinkingEnabled: boolean | null;
+  /// Read-only planning turn: write and execution tools are not offered.
+  planOnly?: boolean;
 }
 
 export type PermissionMode = "ask" | "deny";
@@ -303,6 +305,7 @@ export interface SubmitTurnRequest {
   content: string;
   permissionMode?: PermissionMode;
   thinkingEnabled?: boolean;
+  planOnly?: boolean;
 }
 
 export interface SubmitTurnResponse {
@@ -441,10 +444,14 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
   if (value.thinkingEnabled !== undefined && typeof value.thinkingEnabled !== "boolean") {
     throw new ProtocolValidationError("thinkingEnabled must be a boolean");
   }
+  if (value.planOnly !== undefined && typeof value.planOnly !== "boolean") {
+    throw new ProtocolValidationError("planOnly must be a boolean");
+  }
   return {
     content,
     ...(value.permissionMode ? { permissionMode: value.permissionMode } : {}),
     ...(value.thinkingEnabled !== undefined ? { thinkingEnabled: value.thinkingEnabled } : {}),
+    ...(value.planOnly !== undefined ? { planOnly: value.planOnly } : {}),
   };
 }
 

@@ -125,7 +125,7 @@ export function resolveTerminalTheme(
   return Number.isFinite(background) && background >= 7 ? "light" : "dark";
 }
 
-export type SlashCommandId = "new" | "sessions" | "resume" | "rename" | "delete" | "model" | "export" | "status" | "context" | "diff" | "undo" | "clear" | "help" | "exit";
+export type SlashCommandId = "new" | "sessions" | "resume" | "rename" | "delete" | "model" | "export" | "plan" | "status" | "context" | "diff" | "undo" | "clear" | "help" | "exit";
 export type SlashCommandArgument = "none" | "optional" | "required";
 export type SlashCommandSection = "session" | "inspect" | "control";
 
@@ -156,6 +156,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: "context", name: "/context", aliases: [], argument: "none", description: "Show context and run details", section: "inspect" },
   { id: "export", name: "/export", aliases: [], argument: "optional", argumentLabel: "md|json", description: "Export the session transcript", section: "inspect" },
   { id: "diff", name: "/diff", aliases: [], argument: "none", description: "Review the last turn's changes", section: "inspect" },
+  { id: "plan", name: "/plan", aliases: [], argument: "required", argumentLabel: "prompt", description: "Draft a read-only plan before changing anything", section: "control" },
   { id: "undo", name: "/undo", aliases: [], argument: "optional", argumentLabel: "path", description: "Revert last turn's changes", section: "control" },
   { id: "clear", name: "/clear", aliases: [], argument: "none", description: "Refresh the current view", section: "control" },
   { id: "help", name: "/help", aliases: [], argument: "none", description: "Show command help", section: "control" },

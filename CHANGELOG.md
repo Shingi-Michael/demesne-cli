@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-file additions, modifications, deletions, and plain diffs, `/diff`
   renders them, and `/undo <path>` reverts a single file while the remaining
   files stay undoable (schema v4 tracks per-file revert state).
+- Plan mode: `/plan <prompt>` and `--plan` submit a read-only turn that offers
+  only inspection tools and denies write or execution calls even if the model
+  requests them (schema v5 stores the flag).
 
 ## [0.1.0] - 2026-09-18
 

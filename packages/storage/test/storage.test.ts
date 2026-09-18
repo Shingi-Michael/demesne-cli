@@ -301,6 +301,19 @@ describe("DemesneStore", () => {
     store.close();
   });
 
+  test("stores plan-only turns and reports them on the turn", () => {
+    const store = new DemesneStore(":memory:");
+    const { session } = store.createSession("Plan mode");
+    const { turn, event } = store.createTurn(session.id, "Draft a plan", "deny", undefined, true);
+    expect(turn.planOnly).toBe(true);
+    expect(event.payload.planOnly).toBe(true);
+    expect(store.getTurn(turn.id)?.planOnly).toBe(true);
+    const { session: chatSession } = store.createSession("Chat mode");
+    const { turn: regular } = store.createTurn(chatSession.id, "Just chat");
+    expect(regular.planOnly).toBeUndefined();
+    store.close();
+  });
+
   test("records and clears a session's preferred model", () => {
     const store = new DemesneStore(":memory:");
     const { session } = store.createSession("Model preference");

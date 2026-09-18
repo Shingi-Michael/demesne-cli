@@ -1984,6 +1984,60 @@ describe("Demesne daemon", () => {
     expect(existsSync(join(workspacePath, "b.txt"))).toBe(false);
   });
 
+  test("plan mode offers read-only tools and denies write attempts", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    writeFileSync(join(workspacePath, "notes.txt"), "existing\n");
+    let offered: string[] = [];
+    let denial = "";
+    let round = 0;
+    const processor: TurnProcessor = {
+      providerId: "plan-provider",
+      modelId: "plan-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream(messages, tools) {
+        if (round++ === 0) {
+          offered = tools.map((tool) => tool.name);
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "w",
+            nameDelta: "write_file",
+            argumentsDelta: JSON.stringify({ path: "plan.txt", content: "should not exist" }),
+          };
+          return;
+        }
+        denial = messages.findLast((message) => message.role === "tool")?.content ?? "";
+        yield { type: "text_delta" as const, delta: "1. Inspect notes\n2. Apply the change" };
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Plan", workspacePath }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "plan the change", permissionMode: "deny", planOnly: true }) },
+    );
+    expect(submitted.turn.planOnly).toBe(true);
+    for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${created.session.id}&after=${submitted.eventId}`, running.url)))) {
+      if (event.type === "turn.completed") break;
+    }
+    expect(offered).toContain("read_file");
+    expect(offered).not.toContain("write_file");
+    expect(offered).not.toContain("run_command");
+    expect(denial).toContain("not available in plan mode");
+    expect(existsSync(join(workspacePath, "plan.txt"))).toBe(false);
+  });
+
   test("renames, searches, exports, and archives sessions over HTTP", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

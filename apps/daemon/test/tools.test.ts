@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalWorkspace, listWorkspaceFiles, ToolRegistry } from "../src/tools.ts";
-import { defaultSystemPrompt, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
+import { defaultSystemPrompt, planModeDefinitions, planModeGuidance, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 import { applyEdits, EditApplyError } from "../src/edit-engine.ts";
 
 const temporaryDirectories: string[] = [];
@@ -31,8 +31,16 @@ describe("built-in tools", () => {
     expect(turnToolGuidance("summarize this repository and fix the failing tests")).toBeNull();
   });
 
-  test("lists workspace files for mentions without sensitive or dependency paths", () => {
-    const root = workspace();
+  test("plan mode restricts tool definitions and explains the boundary", () => {
+    const definitions = new ToolRegistry().definitions();
+    const readOnly = planModeDefinitions(definitions, true).map((tool) => tool.name).sort();
+    expect(readOnly).toEqual(["git_diff", "git_status", "list_files", "read_file", "read_files", "search_files"]);
+    expect(planModeDefinitions(definitions, false)).toEqual(definitions);
+    expect(planModeGuidance(true)).toContain("read-only");
+    expect(planModeGuidance(false)).toBeNull();
+  });
+
+  test("lists workspace files for mentions without sensitive or dependency paths", () => {    const root = workspace();
     writeFileSync(join(root, "README.md"), "docs\n");
     writeFileSync(join(root, "src", "main.ts"), "export {};\n");
     writeFileSync(join(root, ".env"), "SECRET=1\n");

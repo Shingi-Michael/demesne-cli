@@ -591,11 +591,13 @@ async function run(command: string[]): Promise<void> {
     const permissionMode = takeOption(command, "--permission") ?? (process.stdin.isTTY && process.stdout.isTTY ? "ask" : "deny");
     if (permissionMode !== "ask" && permissionMode !== "deny") throw new Error("--permission must be ask or deny");
     const sessionOverride = takeOption(command, "--session");
+    const planOnly = command.includes("--plan");
+    if (planOnly) command.splice(command.indexOf("--plan"), 1);
     const content = command.slice(1).join(" ").trim();
     if (!content) throw new Error("prompt requires text");
     await ensureDaemonOrExit();
     const sessionId = sessionOverride ?? (await createAutomaticSession(command)).id;
-    await submitAndRender(sessionId, content, permissionMode, undefined, "exit", false);
+    await submitAndRender(sessionId, content, permissionMode, undefined, "exit", false, undefined, undefined, undefined, planOnly);
     return;
   }
 
@@ -639,6 +641,7 @@ async function submitAndRender(
   providerName?: string,
   contextRail?: CliContextRail,
   workspaceRoot?: string,
+  planOnly = false,
 ): Promise<"completed" | "stopped"> {
   const submitted = await request<SubmitTurnResponse>(`/v1/sessions/${sessionId}/turns`, {
     method: "POST",
@@ -646,6 +649,7 @@ async function submitAndRender(
       content,
       permissionMode,
       ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),
+      ...(planOnly ? { planOnly: true } : {}),
     }),
   });
   return renderTurn(sessionId, submitted.turn.id, submitted.eventId, {
@@ -765,10 +769,11 @@ async function runChat(command: string[]): Promise<void> {
     else leaveChat();
   });
 
-  const executePrompt = async (text: string): Promise<void> => {
+  const executePrompt = async (text: string, planOnly = false): Promise<void> => {
     const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const width = getConversationWidth(process.stdout);
     console.log(formatUserMessage(text, timeStr, width, paint));
+    if (planOnly) console.log(`  ${paint.dim("plan · read-only tools · approve before changes")}`);
 
     chatState.streamActive = true;
     chatState.queuedInput = undefined;
@@ -785,6 +790,7 @@ async function runChat(command: string[]): Promise<void> {
         activeModel.provider,
         contextRail,
         currentWorkspace,
+        planOnly,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Turn failed";
@@ -843,6 +849,14 @@ async function runChat(command: string[]): Promise<void> {
         const message = error instanceof Error ? error.message : "undo failed";
         console.log(`  ${paint.text(message, "signal")}\n`);
       }
+    },
+    plan: async (argument) => {
+      const text = sanitizeTerminalLine(argument).trim();
+      if (!text) {
+        console.log(`  ${paint.text("Usage: /plan <prompt>", "signal")}\n`);
+        return;
+      }
+      await executePrompt(text, true);
     },
     diff: async () => {
       try {

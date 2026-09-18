@@ -353,6 +353,7 @@ export function createDaemonApp(options: {
           body.content,
           body.permissionMode ?? "deny",
           body.thinkingEnabled,
+          body.planOnly ?? false,
         );
         queueTurn(turn, inference);
         const response: SubmitTurnResponse = { turn, eventId: event.eventId };

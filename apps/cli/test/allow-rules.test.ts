@@ -20,6 +20,10 @@ describe("derivePersistedRule", () => {
       .toBe("run_command:bun test --filter unit");
   });
 
+  test("persists MCP tools as bare allowlist rules", () => {
+    expect(derivePersistedRule("mcp__files__read_file", { path: "/tmp/x" })).toBe("mcp__files__read_file");
+  });
+
   test("returns null for unsupported or ambiguous requests", () => {
     expect(derivePersistedRule("run_command", { argv: ["echo", "hello world"] })).toBeNull();
     expect(derivePersistedRule("run_command", { argv: [] })).toBeNull();

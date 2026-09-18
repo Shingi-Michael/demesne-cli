@@ -8,6 +8,7 @@ import { isRecord } from "@demesne/protocol";
 /// scope; a root-level file persists as its own exact path.
 export function derivePersistedRule(toolName: string | undefined, rawArguments: unknown): string | null {
   if (!toolName) return null;
+  if (toolName.startsWith("mcp__")) return toolName;
   const input = parseArguments(rawArguments);
   if (toolName === "run_command") {
     const argv = input.argv;

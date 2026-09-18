@@ -384,6 +384,27 @@ Setup preserves unrelated settings, backs up an existing file to
 `config.toml.bak`, validates the merged result, and writes atomically with mode
 `0600`.
 
+### MCP Servers
+
+Model Context Protocol servers extend the tool set. Each server is declared in
+the user config:
+
+```toml
+[mcp.servers.files]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+env = { TOKEN = "secret" }   # optional
+timeout_ms = 15000           # optional, default 30000
+```
+
+The daemon spawns each server over stdio, performs the MCP handshake, and
+registers its tools as `mcp__<server>__<tool>`. Every MCP tool requires
+per-call approval; a bare allowlist entry such as
+`allow = ["mcp__files__read_file"]` persists approval for that tool. A server
+that fails to start is skipped without stopping the daemon, and a crashed
+server is restarted lazily on its next call. MCP servers are read from the user
+config only, not project files.
+
 ## Authentication
 
 On first launch, `demesned` creates `~/.demesne/daemon.token` with mode `0600`. The CLI reads the selected data directory's token automatically for loopback connections and authenticates every non-health request. Set `DEMESNE_DAEMON_TOKEN` explicitly for other deployments. Non-loopback CLI connections require HTTPS.

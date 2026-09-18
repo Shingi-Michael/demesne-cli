@@ -46,6 +46,13 @@ export interface UiConfig {
   hyperlinks: boolean;
 }
 
+export interface McpServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  timeoutMs?: number;
+}
+
 export interface DemesneConfig {
   server?: string;
   dataDir?: string;
@@ -56,6 +63,7 @@ export interface DemesneConfig {
   permissions: { allow: string[] };
   notifications: NotificationConfig;
   ui: UiConfig;
+  mcp: { servers: Record<string, McpServerConfig> };
 }
 
 export interface LoadedConfig {
@@ -104,6 +112,7 @@ export function defaultConfig(): DemesneConfig {
     permissions: { allow: [] },
     notifications: { enabled: true, minimumDurationMs: 30_000 },
     ui: { intro: true, hyperlinks: true },
+    mcp: { servers: {} },
   };
 }
 
@@ -188,7 +197,7 @@ function applyDocument(
   const path = source === "user" ? "user config" : "project config";
   assertKnownKeys(document, [
     "server", "data_dir", "theme", "inference_slots",
-    "provider", "daemon", "permissions", "notifications", "ui",
+    "provider", "daemon", "permissions", "notifications", "ui", "mcp",
   ], path);
 
   assign(config, "server", document.server, source, sources, (value, key) => {
@@ -258,6 +267,36 @@ function applyDocument(
     assertKnownKeys(ui, ["intro", "hyperlinks"], `${path}.ui`);
     assignInto(config.ui, "intro", ui.intro, source, sources, "ui.intro", optionalBoolean);
     assignInto(config.ui, "hyperlinks", ui.hyperlinks, source, sources, "ui.hyperlinks", optionalBoolean);
+  }
+
+  if (document.mcp !== undefined) {
+    const mcp = objectValue(document.mcp, "mcp");
+    assertKnownKeys(mcp, ["servers"], `${path}.mcp`);
+    if (mcp.servers !== undefined) {
+      const servers = objectValue(mcp.servers, "mcp.servers");
+      const parsed: Record<string, McpServerConfig> = {};
+      for (const [name, value] of Object.entries(servers)) {
+        if (!/^[a-z0-9][a-z0-9-]*$/i.test(name)) {
+          throw new ConfigError(`mcp.servers.${name} must start with a letter or digit and contain only letters, digits, and dashes`);
+        }
+        const server = objectValue(value, `mcp.servers.${name}`);
+        assertKnownKeys(server, ["command", "args", "env", "timeout_ms"], `mcp.servers.${name}`);
+        const command = stringValue(server.command, `mcp.servers.${name}.command`);
+        const args = server.args === undefined ? undefined : stringArray(server.args, `mcp.servers.${name}.args`);
+        const env = server.env === undefined ? undefined : stringRecord(server.env, `mcp.servers.${name}.env`);
+        const timeoutMs = server.timeout_ms === undefined
+          ? undefined
+          : optionalPositiveInteger(server.timeout_ms, `mcp.servers.${name}.timeout_ms`);
+        parsed[name] = {
+          command,
+          ...(args ? { args } : {}),
+          ...(env ? { env } : {}),
+          ...(timeoutMs ? { timeoutMs } : {}),
+        };
+      }
+      config.mcp.servers = parsed;
+      sources["mcp.servers"] = source;
+    }
   }
 }
 
@@ -457,7 +496,6 @@ function writeTomlTable(record: Record<string, unknown>, path: string[], lines: 
     lines.push(`${key} = ${tomlValue(value, [...path, key])}`);
   }
   for (const [key, value] of tables) {
-    if (depth >= 1) throw new ConfigError(`${[...path, key].join(".")} must not be a nested table`);
     if (lines.length > 0) lines.push("");
     const tablePath = [...path, key];
     lines.push(`[${tablePath.join(".")}]`);
@@ -595,6 +633,16 @@ function stringArray(value: unknown, key: string): string[] | undefined {
   }
   if (new Set(entries).size !== entries.length) throw new ConfigError(`${key} must not contain duplicates`);
   return entries as string[];
+}
+
+function stringRecord(value: unknown, key: string): Record<string, string> | undefined {
+  if (!isRecord(value)) throw new ConfigError(`${key} must be a table of strings`);
+  const record: Record<string, string> = {};
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    if (typeof entryValue !== "string") throw new ConfigError(`${key}.${entryKey} must be a string`);
+    record[entryKey] = entryValue;
+  }
+  return record;
 }
 
 function objectValue(value: unknown, key: string): Record<string, unknown> {

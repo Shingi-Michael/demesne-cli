@@ -49,6 +49,13 @@ export class ToolRegistry {
     for (const tool of tools) this.tools.set(tool.definition.name, tool);
   }
 
+  /// Adds or replaces a tool. Used for MCP servers that become ready after the
+  /// daemon has started; definitions are read per turn, so late registration
+  /// still reaches the next model request.
+  register(tool: AgentTool): void {
+    this.tools.set(tool.definition.name, tool);
+  }
+
   definitions(): ProviderToolDefinition[] {
     return [...this.tools.values()]
       .map((tool) => tool.definition)

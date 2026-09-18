@@ -67,6 +67,7 @@ try {
     version: VERSION,
     inferenceSlots,
     allowlistPath: process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(),
+    mcpServers: config.mcp.servers,
     providerFirstEventTimeoutMs,
     providerRequestTimeoutMs,
   });

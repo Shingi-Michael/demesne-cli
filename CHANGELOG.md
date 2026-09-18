@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resumable SSE event stream with backoff and replay, now used by the CLI.
 - `GET /v1/status` plus `demesne ps [--watch] [--json]` for active sessions and
   inference counts, and a cached daily update check with an opt-out.
+- MCP client support: config-declared stdio servers are spawned and
+  handshaken, tools are bridged as `mcp__<server>__<tool>` with per-call
+  approval and bare-rule allowlisting, and crashed servers restart lazily.
 
 ## [0.1.0] - 2026-09-18
 

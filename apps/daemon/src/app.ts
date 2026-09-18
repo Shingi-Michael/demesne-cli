@@ -31,6 +31,8 @@ import { canonicalWorkspace, listWorkspaceFiles, resolveWorkspacePath, ToolRegis
 import { detectGitBranch } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
+import { McpManager } from "./mcp.ts";
+import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, type InferenceBoundaryHook } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
@@ -61,6 +63,8 @@ class EventHub {
 
 export interface DaemonApp {
   fetch(request: Request): Response | Promise<Response>;
+  /// Resolves once configured MCP servers have started and registered tools.
+  ready: Promise<void>;
   close(): Promise<void>;
 }
 
@@ -72,6 +76,7 @@ export function createDaemonApp(options: {
   version?: string;
   inferenceSlots?: number;
   allowlistPath?: string;
+  mcpServers?: Record<string, McpServerConfig>;
   inferenceBoundaryHook?: InferenceBoundaryHook;
   contextPlanner?: ContextPlanner;
   providerFirstEventTimeoutMs?: number;
@@ -94,9 +99,19 @@ export function createDaemonApp(options: {
     throw new Error(`The ${runtimeProfile} runtime profile requires one inference slot`);
   }
   const scheduler = new InferenceScheduler(inferenceSlots, undefined, options.inferenceBoundaryHook);
+  const tools = new ToolRegistry();
+  const mcp = new McpManager({
+    servers: options.mcpServers ?? {},
+    log: (message) => console.warn(message),
+  });
+  const mcpReady = mcp.serverCount > 0
+    ? mcp.start(tools).catch((error) => {
+        console.warn("MCP startup failed", error);
+      })
+    : Promise.resolve();
   const engine = new AgentEngine(
     store,
-    new ToolRegistry(),
+    tools,
     permissions,
     scheduler,
     options.systemPrompt,
@@ -482,6 +497,7 @@ export function createDaemonApp(options: {
 
   return {
     fetch,
+    ready: mcpReady,
     close() {
       closePromise ??= closeApplication();
       return closePromise;
@@ -502,6 +518,8 @@ export function createDaemonApp(options: {
       }
       await scheduler.close(new DOMException("Daemon shutting down", "AbortError"));
       await Promise.allSettled(activeTurns);
+      await mcpReady.catch(() => undefined);
+      mcp.stop();
       backgroundProcesses.shutdownAll();
       store.close();
   }

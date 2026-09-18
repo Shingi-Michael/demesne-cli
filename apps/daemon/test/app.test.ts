@@ -2119,6 +2119,88 @@ describe("Demesne daemon", () => {
     expect(idle.active).toEqual([]);
   });
 
+  test("bridges MCP tools with allowlist approval", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    const configPath = join(directory, "config.toml");
+    writeFileSync(configPath, `[permissions]\nallow = ["mcp__stub__echo"]\n`);
+    const stub = `
+let buffer = "";
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk.toString();
+  let index;
+  while ((index = buffer.indexOf("\\n")) >= 0) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (message.method === "initialize") send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "stub", version: "1.0.0" } } });
+    else if (message.method === "tools/list") send({ jsonrpc: "2.0", id: message.id, result: { tools: [{ name: "echo", description: "Echo text", inputSchema: { type: "object", properties: { text: { type: "string" } } } }] } });
+    else if (message.method === "tools/call") send({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: "echo: " + message.params.arguments.text }] } });
+  }
+});
+`;
+    let offered: string[] = [];
+    let toolResult = "";
+    let round = 0;
+    const processor: TurnProcessor = {
+      providerId: "mcp-provider",
+      modelId: "mcp-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream(messages, tools) {
+        if (round++ === 0) {
+          offered = tools.map((tool) => tool.name);
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "m1",
+            nameDelta: "mcp__stub__echo",
+            argumentsDelta: JSON.stringify({ text: "hi" }),
+          };
+          return;
+        }
+        toolResult = messages.findLast((message) => message.role === "tool")?.content ?? "";
+        yield { type: "text_delta" as const, delta: "mcp done" };
+      },
+    };
+    const app = createDaemonApp({
+      databasePath: join(dataPath, "demesne.sqlite"),
+      processor,
+      allowlistPath: configPath,
+      mcpServers: { stub: { command: process.execPath, args: ["-e", stub] } },
+    });
+    const server = Bun.serve({ port: 0, fetch: app.fetch });
+    apps.push(app);
+    servers.push(server);
+    await app.ready;
+
+    const created = await jsonRequest<CreateSessionResponse>(server.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "MCP", workspacePath }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      server.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "use echo", permissionMode: "ask" }) },
+    );
+
+    let permissionRequested = false;
+    for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${created.session.id}&after=${submitted.eventId}`, server.url)))) {
+      if (event.type === "permission.requested") permissionRequested = true;
+      if (event.type === "turn.completed") break;
+    }
+    expect(permissionRequested).toBe(false);
+    expect(offered).toContain("mcp__stub__echo");
+    expect(toolResult).toBe("echo: hi");
+  });
+
   test("emits a machine-readable result for scripted prompts", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

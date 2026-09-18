@@ -182,6 +182,38 @@ context_window = 8192
     expect(() => assertProviderUrl("http://127.0.0.1:11434/v1")).not.toThrow();
     expect(() => assertProviderUrl("https://models.example.com/v1")).not.toThrow();
   });
+
+  test("reads MCP server configuration", () => {
+    const directory = temporaryDirectory();
+    const path = writeConfig(directory, `
+[mcp.servers.files]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+env = { TOKEN = "secret" }
+timeout_ms = 15000
+`);
+    const loaded = loadConfig({ env: {}, userConfigPath: path, projectConfigPath: null });
+    expect(loaded.config.mcp.servers).toEqual({
+      files: {
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+        env: { TOKEN: "secret" },
+        timeoutMs: 15_000,
+      },
+    });
+    expect(loaded.sources["mcp.servers"]).toBe("user");
+  });
+
+  test("rejects malformed MCP servers", () => {
+    expect(() => validateConfigDocument({ mcp: { servers: { files: { args: ["x"] } } } }))
+      .toThrow(/command/);
+    expect(() => validateConfigDocument({ mcp: { servers: { "bad name": { command: "x" } } } }))
+      .toThrow(/mcp\.servers/);
+    expect(() => validateConfigDocument({ mcp: { servers: { files: { command: "x", env: { A: 1 } } } } }))
+      .toThrow(/env/);
+    expect(() => validateConfigDocument({ mcp: { servers: { files: { command: "x", timeout_ms: -1 } } } }))
+      .toThrow(/positive integer/);
+  });
 });
 
 describe("parseConfigDocument", () => {
@@ -242,8 +274,21 @@ describe("renderConfigDocument", () => {
     validateConfigDocument(parseConfigDocument(rendered));
   });
 
-  test("rejects unsupported nested values", () => {
-    expect(() => renderConfigDocument({ provider: { model: { nested: true } } }))
+  test("renders nested tables such as MCP servers", () => {
+    const document = {
+      mcp: {
+        servers: {
+          files: { command: "npx", args: ["-y", "server"], env: { TOKEN: "secret" } },
+        },
+      },
+    };
+    const rendered = renderConfigDocument(document);
+    expect(parseConfigDocument(rendered)).toEqual(document);
+    validateConfigDocument(parseConfigDocument(rendered));
+  });
+
+  test("rejects unsupported values such as arrays of tables", () => {
+    expect(() => renderConfigDocument({ provider: { model: [{ nested: true }] } }))
       .toThrow(ConfigError);
   });
 });

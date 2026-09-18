@@ -1,0 +1,564 @@
+import {
+  encodeServerSentEvent,
+  isRecord,
+  parseCreateSessionRequest,
+  parseResolvePermissionRequest,
+  parseSubmitTurnRequest,
+  ProtocolValidationError,
+  type ApiErrorBody,
+  type CancelTurnResponse,
+  type CreateSessionResponse,
+  type EventEnvelope,
+  type SubmitTurnResponse,
+  type Turn,
+  type UndoTurnResponse,
+} from "@demesne/protocol";
+import { DemesneStore, InvalidStateError, NotFoundError } from "@demesne/storage";
+import { PlaceholderTurnProcessor, snapshotTurnInference, type TurnInference, type TurnProcessor } from "./processor.ts";
+import { AgentEngine } from "./engine.ts";
+import type { ContextPlanner } from "./context-planner.ts";
+import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
+import { PermissionBroker } from "./permissions.ts";
+import { canonicalWorkspace, resolveWorkspacePath, ToolRegistry } from "./tools.ts";
+import { backgroundProcesses } from "./background.ts";
+import { InferenceScheduler, type InferenceBoundaryHook } from "./inference-scheduler.ts";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
+
+export { PlaceholderTurnProcessor, type TurnProcessor } from "./processor.ts";
+
+type EventListener = (event: EventEnvelope) => void;
+
+class EventHub {
+  private readonly listeners = new Map<string, Set<EventListener>>();
+
+  publish(event: EventEnvelope): void {
+    this.listeners.get(event.sessionId)?.forEach((listener) => listener(event));
+  }
+
+  subscribe(sessionId: string, listener: EventListener): () => void {
+    const listeners = this.listeners.get(sessionId) ?? new Set<EventListener>();
+    listeners.add(listener);
+    this.listeners.set(sessionId, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.listeners.delete(sessionId);
+    };
+  }
+}
+
+export interface DaemonApp {
+  fetch(request: Request): Response | Promise<Response>;
+  close(): Promise<void>;
+}
+
+export function createDaemonApp(options: {
+  databasePath: string;
+  processor?: TurnProcessor;
+  systemPrompt?: string;
+  authToken?: string;
+  inferenceSlots?: number;
+  inferenceBoundaryHook?: InferenceBoundaryHook;
+  contextPlanner?: ContextPlanner;
+  providerFirstEventTimeoutMs?: number;
+  providerRequestTimeoutMs?: number;
+  providerEventLimit?: number;
+}): DaemonApp {
+  const hub = new EventHub();
+  const store = new DemesneStore(options.databasePath, (event) => hub.publish(event));
+  const processor: TurnProcessor = options.processor ?? new PlaceholderTurnProcessor();
+  const permissions = new PermissionBroker();
+  const inferenceSlots = options.inferenceSlots ?? 1;
+  const runtimeProfile = processor.runtimeStatus?.().profile;
+  if (runtimeProfileRequiresSingleInferenceSlot(runtimeProfile) && inferenceSlots !== 1) {
+    store.close();
+    throw new Error(`The ${runtimeProfile} runtime profile requires one inference slot`);
+  }
+  const scheduler = new InferenceScheduler(inferenceSlots, undefined, options.inferenceBoundaryHook);
+  const engine = new AgentEngine(
+    store,
+    new ToolRegistry(),
+    permissions,
+    scheduler,
+    options.systemPrompt,
+    options.contextPlanner,
+    {
+      providerFirstEventTimeoutMs: options.providerFirstEventTimeoutMs,
+      providerRequestTimeoutMs: options.providerRequestTimeoutMs,
+      providerEventLimit: options.providerEventLimit,
+    },
+  );
+  const activeTurns = new Set<Promise<void>>();
+  const activeControllers = new Map<string, AbortController>();
+  const activeStreamClosers = new Set<() => void>();
+  const requestDrainWaiters = new Set<() => void>();
+  let activeRequests = 0;
+  let closing = false;
+  let closePromise: Promise<void> | undefined;
+
+  function queueTurn(turn: Turn, inference: TurnInference): void {
+    const controller = new AbortController();
+    activeControllers.set(turn.id, controller);
+    const task = runTurn(turn, inference, controller.signal).finally(() => {
+      activeTurns.delete(task);
+      activeControllers.delete(turn.id);
+    });
+    activeTurns.add(task);
+  }
+
+  async function runTurn(turn: Turn, inference: TurnInference, signal: AbortSignal): Promise<void> {
+    try {
+      await engine.run(turn.id, inference, signal);
+    } catch (error) {
+      if (signal.aborted) return;
+      const message = error instanceof Error ? error.message : "Unknown turn failure";
+      try {
+        store.failTurn(turn.id, message);
+      } catch (persistenceError) {
+        console.error(`Could not persist failure for turn ${turn.id}`, persistenceError);
+      }
+    } finally {
+      scheduler.finishTurn(turn.id);
+    }
+  }
+
+  async function undoSession(sessionId: string): Promise<Response> {
+    const target = store.latestUndoableTurn(sessionId);
+    if (!target) return apiError("not_found", "No reversible turn with snapshots", 404);
+    const workspaceRoot = store.getSession(sessionId)?.workspace?.root;
+    if (!workspaceRoot) return apiError("invalid_state", "Session has no workspace", 409);
+
+    const prepared: Array<{ file: (typeof target.files)[number]; absolute: string; current: Uint8Array | null }> = [];
+    try {
+      for (const file of [...target.files].reverse()) {
+        if (file.postExisted === null || file.postExisted === undefined) {
+          return apiError("invalid_state", "Snapshot predates conflict-safe undo", 409);
+        }
+        const absolute = resolveWorkspacePath(workspaceRoot, file.path, true, true);
+        const exists = existsSync(absolute);
+        if (exists !== file.postExisted) return apiError("conflict", `Workspace changed at ${file.path}; undo refused`, 409);
+        let current: Uint8Array | null = null;
+        if (exists) {
+          const stat = lstatSync(absolute);
+          if (!stat.isFile() || stat.nlink > 1) return apiError("conflict", `Workspace changed at ${file.path}; undo refused`, 409);
+          current = new Uint8Array(readFileSync(absolute));
+          if (!file.postHash || hashBytes(current) !== file.postHash) {
+            return apiError("conflict", `Workspace changed at ${file.path}; undo refused`, 409);
+          }
+        }
+        prepared.push({ file, absolute, current });
+      }
+    } catch {
+      return apiError("conflict", "Workspace boundary changed; undo refused", 409);
+    }
+
+    const applied: typeof prepared = [];
+    try {
+      for (const entry of prepared) {
+        restoreFile(entry.absolute, entry.file.existed ? entry.file.data : null);
+        applied.push(entry);
+      }
+    } catch (error) {
+      console.error("Undo failed; restoring post-turn state", error);
+      for (const entry of [...applied].reverse()) {
+        try { restoreFile(entry.absolute, entry.current); } catch (rollbackError) {
+          console.error("Undo rollback failed for", entry.absolute, rollbackError);
+        }
+      }
+      return apiError("invalid_state", "Undo could not be completed", 409);
+    }
+    const reverted = prepared.map((entry) => entry.file.path);
+    const event = store.markTurnReverted(sessionId, target.turnId, reverted);
+    const response: UndoTurnResponse = { turnId: target.turnId, files: reverted };
+    return json({ ...response, eventId: event.eventId });
+  }
+
+  async function fetch(request: Request): Promise<Response> {
+    if (closing) return apiError("shutting_down", "Daemon is shutting down", 503);
+    activeRequests += 1;
+    try {
+      const url = new URL(request.url);
+      const path = url.pathname.split("/").filter(Boolean);
+
+      if (request.method === "GET" && url.pathname === "/healthz") {
+        return json({ status: "ok", provider: processor.providerId, model: processor.modelId });
+      }
+
+      if (options.authToken && request.headers.get("authorization") !== `Bearer ${options.authToken}`) {
+        return apiError("unauthorized", "Daemon authentication required", 401);
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/models") {
+        try {
+          return json({ models: await processor.listModels(request.signal) });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Model discovery failed";
+          return apiError("provider_error", message, 502);
+        }
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/runtime") {
+        return json(processor.runtimeStatus?.() ?? {
+          profile: null,
+          state: "unconfigured",
+          expected: null,
+          observed: null,
+          mismatches: [],
+          observedAt: null,
+        });
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/model") {
+        const body = await readJson(request);
+        if (!isRecord(body) || typeof body.model !== "string" || !body.model.trim()) {
+          return apiError("invalid_request", "model must be a non-empty string", 400);
+        }
+        const modelName = body.model.trim();
+        if (processor && typeof processor.setModel === "function") {
+          processor.setModel(modelName);
+          return json({ status: "ok", model: modelName });
+        }
+        return apiError("not_supported", "Model switching is not supported by this processor", 400);
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/sessions") {
+        const body = parseCreateSessionRequest(await readJson(request));
+        let workspaceRoot: string | undefined;
+        if (body.workspacePath) {
+          try {
+            workspaceRoot = canonicalWorkspace(body.workspacePath);
+            const dataRoot = realpathSync(dirname(options.databasePath));
+            if (pathsOverlap(workspaceRoot, dataRoot)) {
+              return apiError("invalid_workspace", "Workspace cannot overlap the Demesne data directory", 400);
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Invalid workspace";
+            return apiError("invalid_workspace", message, 400);
+          }
+        }
+        const { session, event } = store.createSession(body.title, workspaceRoot);
+        const response: CreateSessionResponse = { session, eventId: event.eventId };
+        return json(response, 201);
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/sessions") {
+        return json({ sessions: store.listSessions() });
+      }
+
+      if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {
+        const state = store.getSessionState(path[2]!);
+        if (!state) return apiError("not_found", "Session not found", 404);
+        return json({ ...state, sessionGrants: permissions.listGrants(path[2]!) });
+      }
+
+      if (
+        request.method === "POST" &&
+        path.length === 4 &&
+        path[0] === "v1" &&
+        path[1] === "sessions" &&
+        path[3] === "turns"
+      ) {
+        const body = parseSubmitTurnRequest(await readJson(request));
+        let inference: TurnInference;
+        try {
+          inference = snapshotTurnInference(processor, body.thinkingEnabled);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Turn processor cannot snapshot inference configuration";
+          return apiError("not_supported", message, 400);
+        }
+        const { turn, event } = store.createTurn(
+          path[2]!,
+          body.content,
+          body.permissionMode ?? "deny",
+          body.thinkingEnabled,
+        );
+        queueTurn(turn, inference);
+        const response: SubmitTurnResponse = { turn, eventId: event.eventId };
+        return json(response, 202);
+      }
+
+      if (
+        request.method === "POST" &&
+        path.length === 3 &&
+        path[0] === "v1" &&
+        path[1] === "permissions"
+      ) {
+        const body = parseResolvePermissionRequest(await readJson(request));
+        if (!permissions.resolve(path[2]!, body.decision)) {
+          return apiError("invalid_state", "Permission is no longer pending", 409);
+        }
+        return json({ permissionId: path[2], decision: body.decision }, 202);
+      }
+
+      if (
+        request.method === "POST" &&
+        path.length === 4 &&
+        path[0] === "v1" &&
+        path[1] === "turns" &&
+        path[3] === "cancel"
+      ) {
+        const turnId = path[2]!;
+        const controller = activeControllers.get(turnId);
+        if (!controller) {
+          const turn = store.getTurn(turnId);
+          if (!turn) return apiError("not_found", "Turn not found", 404);
+          return apiError("invalid_state", `Turn cannot be cancelled from ${turn.status}`, 409);
+        }
+        const { turn, event } = store.cancelTurn(turnId);
+        controller.abort(new DOMException("Turn cancelled", "AbortError"));
+        permissions.cancelTurn(turnId, controller.signal.reason);
+        const response: CancelTurnResponse = { turn, eventId: event.eventId };
+        return json(response);
+      }
+
+      if (
+        request.method === "POST" &&
+        path.length === 4 &&
+        path[0] === "v1" &&
+        path[1] === "sessions" &&
+        path[3] === "undo"
+      ) {
+        return undoSession(path[2]!);
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/events") {
+        const sessionId = url.searchParams.get("session_id")?.trim();
+        if (!sessionId) return apiError("invalid_request", "session_id is required", 400);
+        if (!store.getSession(sessionId)) return apiError("not_found", "Session not found", 404);
+        const after = parseEventCursor(url.searchParams.get("after"), request.headers.get("last-event-id"));
+        return eventStream(store, hub, sessionId, after, (close) => {
+          activeStreamClosers.add(close);
+          return () => activeStreamClosers.delete(close);
+        });
+      }
+
+      return apiError("not_found", "Route not found", 404);
+    } catch (error) {
+      if (error instanceof NotFoundError) return apiError("not_found", error.message, 404);
+      if (error instanceof InvalidStateError) return apiError("invalid_state", error.message, 409);
+      if (error instanceof SyntaxError) return apiError("invalid_json", "Request body is not valid JSON", 400);
+      if (error instanceof ProtocolValidationError) return apiError("invalid_request", error.message, 400);
+      console.error("Unhandled daemon request error", error);
+      return apiError("internal_error", "Unexpected server error", 500);
+    } finally {
+      activeRequests -= 1;
+      if (activeRequests === 0) {
+        for (const resolve of requestDrainWaiters) resolve();
+        requestDrainWaiters.clear();
+      }
+    }
+  }
+
+  return {
+    fetch,
+    close() {
+      closePromise ??= closeApplication();
+      return closePromise;
+    },
+  };
+
+  async function closeApplication(): Promise<void> {
+      closing = true;
+      for (const close of [...activeStreamClosers]) close();
+      if (activeRequests > 0) {
+        await new Promise<void>((resolve) => requestDrainWaiters.add(resolve));
+      }
+      for (const [turnId, controller] of activeControllers) {
+        const turn = store.getTurn(turnId);
+        if (turn?.status === "queued" || turn?.status === "running") store.cancelTurn(turnId);
+        controller.abort(new DOMException("Daemon shutting down", "AbortError"));
+        permissions.cancelTurn(turnId, controller.signal.reason);
+      }
+      await scheduler.close(new DOMException("Daemon shutting down", "AbortError"));
+      await Promise.allSettled(activeTurns);
+      backgroundProcesses.shutdownAll();
+      store.close();
+  }
+}
+
+function restoreFile(absolute: string, data: Uint8Array | null): void {
+  if (data === null) {
+    if (existsSync(absolute)) {
+      if (!lstatSync(absolute).isFile()) throw new Error("Undo target is not a regular file");
+      unlinkSync(absolute);
+    }
+    return;
+  }
+  mkdirSync(dirname(absolute), { recursive: true, mode: 0o755 });
+  const temporary = join(dirname(absolute), `.demesne-undo-${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporary, data, { flag: "wx", mode: 0o600 });
+    renameSync(temporary, absolute);
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
+}
+
+function hashBytes(data: Uint8Array): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+function eventStream(
+  store: DemesneStore,
+  hub: EventHub,
+  sessionId: string,
+  afterEventId: number,
+  registerCloser: (close: () => void) => () => void,
+): Response {
+  const encoder = new TextEncoder();
+  let unsubscribe = () => {};
+  let deregisterCloser = () => {};
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let closed = false;
+  let cursor = afterEventId;
+  let replayComplete = false;
+  let replayBuffer: EventEnvelope[] = [];
+
+  const cleanup = () => {
+    unsubscribe();
+    deregisterCloser();
+    if (heartbeat) clearInterval(heartbeat);
+  };
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    cleanup();
+    try {
+      streamController?.close();
+    } catch {
+      // The client may already have cancelled the stream.
+    }
+  };
+
+  const enqueue = (controller: ReadableStreamDefaultController<Uint8Array>, event: EventEnvelope) => {
+    if (closed || event.eventId <= cursor) return;
+    cursor = event.eventId;
+    controller.enqueue(encoder.encode(encodeServerSentEvent(event)));
+  };
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      streamController = controller;
+      controller.enqueue(encoder.encode(": connected\n\n"));
+      unsubscribe = hub.subscribe(sessionId, (event) => {
+        if (closed || event.eventId <= cursor) return;
+        if (!replayComplete || (controller.desiredSize ?? 0) <= 0) {
+          replayComplete = false;
+          return;
+        }
+        try {
+          enqueue(controller, event);
+        } catch {
+          close();
+        }
+      });
+      deregisterCloser = registerCloser(close);
+      heartbeat = setInterval(() => {
+        if (closed || (controller.desiredSize ?? 0) <= 0) return;
+        try {
+          controller.enqueue(encoder.encode(": heartbeat\n\n"));
+        } catch {
+          close();
+        }
+      }, 15_000);
+    },
+    pull(controller) {
+      try {
+        while (!closed && (controller.desiredSize ?? 0) > 0) {
+          if (replayBuffer.length === 0 && !replayComplete) {
+            replayBuffer = store.eventsAfter(sessionId, cursor, 100);
+            if (replayBuffer.length === 0) replayComplete = true;
+          }
+          const event = replayBuffer.shift();
+          if (!event) break;
+          enqueue(controller, event);
+        }
+      } catch (error) {
+        closed = true;
+        cleanup();
+        controller.error(error);
+      }
+    },
+    cancel() {
+      closed = true;
+      cleanup();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "Content-Type": "text/event-stream",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+async function readJson(request: Request): Promise<unknown> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().startsWith("application/json")) {
+    throw new ProtocolValidationError("Content-Type must be application/json");
+  }
+  const maximumBytes = 512 * 1024;
+  const declaredLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    throw new ProtocolValidationError("Request body is too large");
+  }
+  if (!request.body) throw new ProtocolValidationError("Request body is required");
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maximumBytes) throw new ProtocolValidationError("Request body is too large");
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(body);
+  } catch {
+    throw new ProtocolValidationError("Request body must be valid UTF-8");
+  }
+  return JSON.parse(text) as unknown;
+}
+
+function parseEventCursor(queryValue: string | null, headerValue: string | null): number {
+  const values = [queryValue, headerValue].filter((value): value is string => value !== null);
+  const cursors = values.length > 0 ? values.map(Number) : [0];
+  if (cursors.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    throw new ProtocolValidationError("Event cursor must be a non-negative integer");
+  }
+  return Math.max(...cursors);
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  const leftToRight = relative(left, right);
+  const rightToLeft = relative(right, left);
+  const contains = (value: string) => value === "" || (!value.startsWith(`..${sep}`) && value !== ".." && !value.startsWith(sep));
+  return contains(leftToRight) || contains(rightToLeft);
+}
+
+function json(value: unknown, status = 200): Response {
+  return Response.json(value, { status });
+}
+
+function apiError(code: string, message: string, status: number): Response {
+  const body: ApiErrorBody = { error: { code, message } };
+  return json(body, status);
+}

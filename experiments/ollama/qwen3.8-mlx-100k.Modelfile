@@ -1,0 +1,5 @@
+FROM qwen3.8:27b-mlx
+
+# Pin the native MLX runner to the same application capacity as the llama.cpp
+# baseline so backend comparisons do not inherit an implicit context default.
+PARAMETER num_ctx 100000

@@ -1,0 +1,4 @@
+FROM qwen3.8-8k-b256:latest
+
+PARAMETER num_ctx 32768
+PARAMETER num_batch 256

@@ -1,0 +1,5 @@
+FROM qwen3.8:latest
+
+# Experimental control for batch-granularity comparisons.
+PARAMETER num_ctx 8192
+PARAMETER num_batch 1024

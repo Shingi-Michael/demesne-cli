@@ -1,0 +1,9 @@
+{
+  "name": "@demesne/cli",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@demesne/brand": "workspace:*",
+    "@demesne/protocol": "workspace:*"
+  }
+}

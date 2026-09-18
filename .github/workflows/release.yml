@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-darwin-arm64
+            artifact: demesne-darwin-arm64
+            smoke: true
+          - target: bun-darwin-x64
+            artifact: demesne-darwin-x64
+            smoke: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+
+      - name: Build binaries
+        run: |
+          mkdir -p release
+          bun build apps/cli/src/main.ts --compile --target=${{ matrix.target }} --outfile release/demesne
+          bun build apps/daemon/src/main.ts --compile --target=${{ matrix.target }} --outfile release/demesned
+
+      # The arm64 runner can execute the arm64 artifact natively. The x64
+      # artifact is only syntax-checked here; signing and a native smoke test
+      # belong to the notarization step once release credentials exist.
+      - name: Smoke test native artifact
+        if: matrix.smoke
+        run: |
+          ./release/demesne --version
+          ./release/demesned --help 2>&1 || true
+
+      - name: Package and checksum
+        run: |
+          cd release
+          tar -czf "../${{ matrix.artifact }}.tar.gz" demesne demesned
+          cd ..
+          shasum -a 256 "${{ matrix.artifact }}.tar.gz" > "${{ matrix.artifact }}.tar.gz.sha256"
+          cat "${{ matrix.artifact }}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.tar.gz.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+
+  # TODO before public distribution:
+  # - Import a Developer ID certificate and notarize both archives.
+  # - Staple the notarization ticket and publish the stapled archives.
+  # - Add an x86_64 native smoke test on an Intel runner or under Rosetta.

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "baselineApplicationContext": 100000,
+  "fixedRetrievalNominalTokens": 95000,
+  "nearCapacityFraction": 0.93,
+  "rungs": [
+    { "applicationContext": 100000, "servedContext": 100096 },
+    { "applicationContext": 110000, "servedContext": 110080 },
+    { "applicationContext": 120000, "servedContext": 120064 },
+    { "applicationContext": 130000, "servedContext": 130048 },
+    { "applicationContext": 140000, "servedContext": 140032 },
+    { "applicationContext": 150000, "servedContext": 150016 },
+    { "applicationContext": 160000, "servedContext": 160000 },
+    { "applicationContext": 170000, "servedContext": 170240 },
+    { "applicationContext": 180000, "servedContext": 180224 },
+    { "applicationContext": 190000, "servedContext": 190208 },
+    { "applicationContext": 200000, "servedContext": 200192 }
+  ],
+  "fixedConfiguration": {
+    "batchSize": 256,
+    "microBatchSize": 256,
+    "parallelSequences": 1,
+    "keyCacheType": "f16",
+    "valueCacheType": "f16",
+    "flashAttention": true,
+    "loadMode": "mmap",
+    "repack": false,
+    "speculation": "ngram-mod"
+  },
+  "gates": {
+    "exactRetrieval": true,
+    "maximumSwapOutGrowthBytes": 0,
+    "minimumAvailabilityPercent": 10,
+    "maximumFixedPrefillRegressionFraction": 0.05,
+    "maximumDecodeRegressionFraction": 0.05,
+    "maximumCodingLatencyRegressionFraction": 0.1
+  },
+  "stopOnFirstFailure": true
+}

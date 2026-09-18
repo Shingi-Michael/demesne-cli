@@ -1,0 +1,1851 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  readServerSentEvents,
+  type ContextPlan,
+  type CreateSessionResponse,
+  type EventEnvelope,
+  type Session,
+  type SessionStateResponse,
+  type SubmitTurnResponse,
+} from "@demesne/protocol";
+import { ProviderError, type ProviderAdapter, type ProviderMessage } from "@demesne/providers";
+import { DemesneStore } from "@demesne/storage";
+import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
+import { createInferenceRecycleController } from "../src/inference-recycle-controller.ts";
+import type { InferenceBoundaryHook } from "../src/inference-scheduler.ts";
+import { ProviderTurnProcessor } from "../src/provider-processor.ts";
+
+const temporaryDirectories: string[] = [];
+const servers: Bun.Server<unknown>[] = [];
+const apps: DaemonApp[] = [];
+
+afterEach(async () => {
+  for (const server of servers.splice(0)) await server.stop(true);
+  for (const app of apps.splice(0)) await app.close();
+  for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+
+describe("Demesne daemon", () => {
+  test("streams a prompt through the command-line client", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const running = startApp(join(directory, "demesne.sqlite"));
+    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
+    const child = Bun.spawn(
+      [process.execPath, cliPath, "--server", running.url.href, "prompt", "Exercise the full path"],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toMatch(/^Session [0-9a-f-]+\n$/);
+    expect(stdout).toBe("Request accepted: Exercise the full path\n");
+  });
+
+  test("cancels a command-line turn on SIGINT", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const processor: TurnProcessor = {
+      providerId: "test-provider",
+      modelId: "slow-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream(_messages, _tools, signal) {
+        markStarted();
+        await new Promise<void>((_resolve, reject) => {
+          if (signal.aborted) reject(signal.reason);
+          else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
+    const child = Bun.spawn(
+      [process.execPath, cliPath, "--server", running.url.href, "prompt", "Wait for interrupt"],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+
+    await started;
+    await Bun.sleep(25);
+    child.kill("SIGINT");
+    const exitCode = await Promise.race([
+      child.exited,
+      Bun.sleep(2_000).then(() => null),
+    ]);
+    if (exitCode === null) child.kill("SIGKILL");
+    await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
+
+    expect(exitCode).toBe(130);
+    const snapshot = await jsonRequest<{ sessions: Session[] }>(running.url, "/v1/sessions");
+    expect(snapshot.sessions[0]?.turns[0]?.status).toBe("cancelled");
+  });
+
+  test("passes an explicit thinking selection to the turn processor", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let thinkingEnabled: boolean | undefined;
+    const processor: TurnProcessor = {
+      providerId: "test-provider",
+      modelId: "test-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream(_messages, _tools, _signal, selectedThinking) {
+        thinkingEnabled = selectedThinking;
+        yield { type: "reasoning_delta" as const, delta: "This should remain hidden" };
+        yield { type: "text_delta" as const, delta: "Direct answer" };
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Thinking controls" }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "Be direct", thinkingEnabled: false }) },
+    );
+
+    const eventTypes = await collectPersistedEventTypes(running.url, created.session.id, submitted.eventId);
+
+    expect(submitted.turn.thinkingEnabled).toBe(false);
+    expect(thinkingEnabled).toBe(false);
+    expect(eventTypes).not.toContain("reasoning.delta");
+  });
+
+  test("persists one context plan per provider round beside actual usage", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let round = 0;
+    const processor: TurnProcessor = {
+      providerId: "planned-provider",
+      modelId: "planned-model",
+      contextCapacity: 8_192,
+      maxOutputTokens: 1_536,
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId, contextWindow: this.contextCapacity }];
+      },
+      async *stream() {
+        round += 1;
+        if (round === 1) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "call-missing",
+            nameDelta: "missing_tool",
+            argumentsDelta: "{}",
+          };
+          yield { type: "usage" as const, usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 } };
+          return;
+        }
+        yield { type: "usage" as const, usage: { inputTokens: 140, outputTokens: 12, totalTokens: 152 } };
+        yield { type: "text_delta" as const, delta: "Finished" };
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Context plans" }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "Use a tool" }) },
+    );
+
+    const events = await collectPersistedEvents(running.url, created.session.id, submitted.eventId);
+    const starts = events.filter((event) => event.type === "model.request_started");
+    const state = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${created.session.id}`);
+
+    expect(starts).toHaveLength(2);
+    for (const start of starts) {
+      expect(start.payload.contextPlan).toEqual(expect.objectContaining({
+        schemaVersion: 3,
+        capacityTokens: 8_192,
+        budgetStatus: "within_soft_limit",
+      }));
+    }
+    const latestPlan = starts[1]?.payload.contextPlan as ContextPlan | undefined;
+    expect(state.latestProviderCall?.contextPlan).toEqual(latestPlan);
+    expect(state.latestProviderCall?.usage).toEqual({ inputTokens: 140, outputTokens: 12, totalTokens: 152 });
+  });
+
+  test("persists a completed turn and replays its events after restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const databasePath = join(directory, "demesne.sqlite");
+
+    const first = startApp(databasePath);
+    const created = await jsonRequest<CreateSessionResponse>(first.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Persistent session" }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      first.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "Build the runtime" }) },
+    );
+
+    const streamed: EventEnvelope[] = [];
+    const eventsUrl = new URL("/v1/events", first.url);
+    eventsUrl.searchParams.set("session_id", created.session.id);
+    eventsUrl.searchParams.set("after", String(submitted.eventId));
+    for await (const event of readServerSentEvents(await fetch(eventsUrl))) {
+      streamed.push(event);
+      if (event.type === "turn.completed") break;
+    }
+
+    expect(streamed.map((event) => event.type)).toEqual([
+      "agent.started",
+      "model.request_started",
+      "message.delta",
+      "model.metrics",
+      "model.request_completed",
+      "message.completed",
+      "turn.completed",
+    ]);
+    expect(streamed[2]?.payload.delta).toBe("Request accepted: Build the runtime");
+
+    await first.server.stop(true);
+    servers.splice(servers.indexOf(first.server), 1);
+    await first.app.close();
+    apps.splice(apps.indexOf(first.app), 1);
+
+    const second = startApp(databasePath);
+    const snapshot = await jsonRequest<{ session: Session }>(
+      second.url,
+      `/v1/sessions/${created.session.id}`,
+    );
+    expect(snapshot.session.turns).toHaveLength(1);
+    expect(snapshot.session.turns[0]?.status).toBe("completed");
+    expect(snapshot.session.turns[0]?.responseText).toBe("Request accepted: Build the runtime");
+
+    const replayUrl = new URL("/v1/events", second.url);
+    replayUrl.searchParams.set("session_id", created.session.id);
+    replayUrl.searchParams.set("after", String(submitted.eventId));
+    const replayed: EventEnvelope[] = [];
+    for await (const event of readServerSentEvents(await fetch(replayUrl))) {
+      replayed.push(event);
+      if (event.type === "turn.completed") break;
+    }
+    expect(replayed.map((event) => event.eventId)).toEqual(streamed.map((event) => event.eventId));
+  });
+
+  test("cancels an active provider call without completing the turn", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const processor: TurnProcessor = {
+      providerId: "test-provider",
+      modelId: "slow-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream() {
+        await Bun.sleep(20);
+        yield { type: "text_delta" as const, delta: "late output" };
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Cancellation" }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "Wait forever" }) },
+    );
+    const cancelled = await jsonRequest<{ turn: { status: string } }>(
+      running.url,
+      `/v1/turns/${submitted.turn.id}/cancel`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+
+    expect(cancelled.turn.status).toBe("cancelled");
+    const types = await collectPersistedEventTypes(running.url, created.session.id, submitted.eventId);
+    const snapshot = await jsonRequest<{ session: Session }>(
+      running.url,
+      `/v1/sessions/${created.session.id}`,
+    );
+    expect(snapshot.session.turns[0]?.status).toBe("cancelled");
+    expect(snapshot.session.turns[0]?.responseText).toBe("");
+    expect(types).toContain("model.request_cancelled");
+    expect(types).toContain("turn.cancelled");
+    expect(types.indexOf("model.request_cancelled")).toBeLessThan(types.indexOf("turn.cancelled"));
+    expect(types).not.toContain("turn.completed");
+  });
+
+  test("serializes concurrent sessions in FIFO order and records queue time", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let activeStreams = 0;
+    let maximumActiveStreams = 0;
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+    const firstReleased = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const order: string[] = [];
+    const processor: TurnProcessor = {
+      providerId: "scheduled",
+      modelId: "one-slot-model",
+      async listModels() { return []; },
+      async *stream(messages) {
+        const content = messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        activeStreams += 1;
+        maximumActiveStreams = Math.max(maximumActiveStreams, activeStreams);
+        order.push(content);
+        try {
+          if (content === "first") {
+            markFirstStarted();
+            await firstReleased;
+          }
+          yield { type: "text_delta" as const, delta: content };
+        } finally {
+          activeStreams -= 1;
+        }
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const firstSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "First" }),
+    });
+    const secondSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Second" }),
+    });
+    const first = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${firstSession.session.id}/turns`, {
+      method: "POST", body: JSON.stringify({ content: "first" }),
+    });
+    await firstStarted;
+    const second = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${secondSession.session.id}/turns`, {
+      method: "POST", body: JSON.stringify({ content: "second" }),
+    });
+    await Bun.sleep(20);
+
+    expect(order).toEqual(["first"]);
+    releaseFirst();
+    await Promise.all([
+      collectPersistedEventTypes(running.url, firstSession.session.id, first.eventId),
+      collectPersistedEventTypes(running.url, secondSession.session.id, second.eventId),
+    ]);
+    const secondState = await jsonRequest<{
+      latestProviderCall: { metrics: { queueDurationMs: number | null; durationMs: number } | null } | null;
+    }>(running.url, `/v1/sessions/${secondSession.session.id}`);
+
+    expect(order).toEqual(["first", "second"]);
+    expect(maximumActiveStreams).toBe(1);
+    expect(secondState.latestProviderCall?.metrics?.queueDurationMs).toBeGreaterThanOrEqual(20);
+  });
+
+  test("runs benchmark maintenance between concurrent provider requests and includes it in queue time", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    let releaseMaintenance!: () => void;
+    let markMaintenanceStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+    const firstReleased = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const maintenanceStarted = new Promise<void>((resolve) => { markMaintenanceStarted = resolve; });
+    const maintenanceReleased = new Promise<void>((resolve) => { releaseMaintenance = resolve; });
+    const entered: string[] = [];
+    const boundarySnapshots: Array<{
+      activeCount: 0;
+      queuedCount: number;
+      settledLeaseCount: number;
+      pendingContinuationTurnCount: number;
+      continuationDrainActive: boolean;
+    }> = [];
+    const processor: TurnProcessor = {
+      providerId: "scheduled",
+      modelId: "one-slot-model",
+      async listModels() { return []; },
+      async *stream(messages) {
+        const content = messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        entered.push(content);
+        if (content === "first") {
+          markFirstStarted();
+          await firstReleased;
+        }
+        yield { type: "text_delta" as const, delta: content };
+      },
+    };
+    const boundaryHook: InferenceBoundaryHook = async (snapshot) => {
+      boundarySnapshots.push(snapshot);
+      markMaintenanceStarted();
+      await maintenanceReleased;
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor, boundaryHook);
+    const firstSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "First" }),
+    });
+    const secondSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Second" }),
+    });
+    const first = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${firstSession.session.id}/turns`, {
+      method: "POST", body: JSON.stringify({ content: "first" }),
+    });
+    await firstStarted;
+    const second = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${secondSession.session.id}/turns`, {
+      method: "POST", body: JSON.stringify({ content: "second" }),
+    });
+
+    releaseFirst();
+    await maintenanceStarted;
+    expect(entered).toEqual(["first"]);
+    await Bun.sleep(20);
+    releaseMaintenance();
+    await Promise.all([
+      collectPersistedEventTypes(running.url, firstSession.session.id, first.eventId),
+      collectPersistedEventTypes(running.url, secondSession.session.id, second.eventId),
+    ]);
+    const secondState = await jsonRequest<{
+      session: Session;
+      latestProviderCall: { metrics: { queueDurationMs: number | null } | null } | null;
+    }>(running.url, `/v1/sessions/${secondSession.session.id}`);
+
+    expect(boundarySnapshots).toEqual([{
+      activeCount: 0,
+      queuedCount: 1,
+      settledLeaseCount: 1,
+      pendingContinuationTurnCount: 0,
+      continuationDrainActive: false,
+    }]);
+    expect(entered).toEqual(["first", "second"]);
+    expect(secondState.session.turns[0]).toMatchObject({ status: "completed", responseText: "second" });
+    expect(secondState.latestProviderCall?.metrics?.queueDurationMs).toBeGreaterThanOrEqual(20);
+  });
+
+  test("defers benchmark maintenance until concurrent multi-round turns finish", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "workspace");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    writeFileSync(join(workspacePath, "fact.txt"), "turn-aware\n");
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    let releaseMaintenance!: () => void;
+    let markMaintenanceStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+    const firstReleased = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const maintenanceStarted = new Promise<void>((resolve) => { markMaintenanceStarted = resolve; });
+    const maintenanceReleased = new Promise<void>((resolve) => { releaseMaintenance = resolve; });
+    const entered: string[] = [];
+    const snapshots: Array<{ settledLeaseCount: number; pendingContinuationTurnCount: number }> = [];
+    const processor: TurnProcessor = {
+      providerId: "scheduled",
+      modelId: "one-slot-model",
+      async listModels() { return []; },
+      async *stream(messages) {
+        const content = messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        const hasToolResult = messages.some((message) => message.role === "tool");
+        entered.push(`${content}:${hasToolResult ? "final" : "first"}`);
+        if (content === "a" && !hasToolResult) {
+          markFirstStarted();
+          await firstReleased;
+        }
+        if (content !== "next" && !hasToolResult) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: `read-${content}`,
+            nameDelta: "read_file",
+            argumentsDelta: JSON.stringify({ path: "fact.txt" }),
+          };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: `${content} complete` };
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor, async (snapshot) => {
+      snapshots.push({
+        settledLeaseCount: snapshot.settledLeaseCount,
+        pendingContinuationTurnCount: snapshot.pendingContinuationTurnCount,
+      });
+      markMaintenanceStarted();
+      await maintenanceReleased;
+    });
+    const sessions = await Promise.all(["a", "b", "next"].map((title) => jsonRequest<CreateSessionResponse>(
+      running.url,
+      "/v1/sessions",
+      { method: "POST", body: JSON.stringify({ title, workspacePath }) },
+    )));
+    const firstTurn = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${sessions[0]!.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "a" }) },
+    );
+    await firstStarted;
+    const secondTurn = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${sessions[1]!.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "b" }) },
+    );
+    releaseFirst();
+    const pair = [firstTurn, secondTurn];
+    await Promise.all(pair.map((turn, index) => collectPersistedEventTypes(
+      running.url,
+      sessions[index]!.session.id,
+      turn.eventId,
+    )));
+
+    expect(snapshots).toEqual([]);
+    expect(entered).toEqual(["a:first", "b:first", "a:final", "b:final"]);
+    const next = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${sessions[2]!.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "next" }) },
+    );
+    await maintenanceStarted;
+    expect(entered).not.toContain("next:first");
+    expect(snapshots).toEqual([{ settledLeaseCount: 4, pendingContinuationTurnCount: 0 }]);
+
+    releaseMaintenance();
+    await collectPersistedEventTypes(running.url, sessions[2]!.session.id, next.eventId);
+    expect(entered.at(-1)).toBe("next:first");
+  });
+
+  test("drains mixed permission, cancellation, and recoverable-failure turns before fresh work", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "workspace");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    writeFileSync(join(workspacePath, "approved.txt"), "0\n");
+    writeFileSync(join(workspacePath, "cancelled.txt"), "0\n");
+    let releaseApprovedFirst!: () => void;
+    let markApprovedFirstStarted!: () => void;
+    let releaseRecycle!: () => void;
+    let markRecycleStarted!: () => void;
+    const approvedFirstStarted = new Promise<void>((resolve) => { markApprovedFirstStarted = resolve; });
+    const approvedFirstReleased = new Promise<void>((resolve) => { releaseApprovedFirst = resolve; });
+    const recycleStarted = new Promise<void>((resolve) => { markRecycleStarted = resolve; });
+    const recycleReleased = new Promise<void>((resolve) => { releaseRecycle = resolve; });
+    const entries: string[] = [];
+    const processor: TurnProcessor = {
+      providerId: "mixed",
+      modelId: "lifecycle-model",
+      async listModels() { return []; },
+      async *stream(messages) {
+        const content = messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        const toolResult = messages.findLast((message) => message.role === "tool")?.content;
+        const round = messages.filter((message) => message.role === "assistant").length + 1;
+        entries.push(`${content}:${round}`);
+        if (content === "approved" && round === 1) {
+          markApprovedFirstStarted();
+          await approvedFirstReleased;
+        }
+        if ((content === "approved" || content === "cancel-permission") && !toolResult) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: `edit-${content}`,
+            nameDelta: "edit_file",
+            argumentsDelta: JSON.stringify({
+              path: content === "approved" ? "approved.txt" : "cancelled.txt",
+              oldText: "0",
+              newText: "1",
+            }),
+          };
+          return;
+        }
+        if (content === "failure" && !toolResult) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "missing-tool",
+            nameDelta: "missing_tool",
+            argumentsDelta: "{}",
+          };
+          return;
+        }
+        if (content === "failure") {
+          if (!toolResult?.includes("unknown tool missing_tool")) throw new Error("Failure turn did not receive the tool error");
+          yield { type: "text_delta" as const, delta: "recovered" };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: `${content} complete` };
+      },
+    };
+    const controller = createInferenceRecycleController({
+      workThreshold: 3,
+      availablePercentThreshold: 100,
+      maximumRecycles: 1,
+      maximumContinuationDrainMs: 1_000,
+      memorySnapshot: () => ({
+        observedAt: "2026-08-29T00:00:00.000Z",
+        availablePercent: 50,
+        swapUsedBytes: 0,
+        pageSizeBytes: 4_096,
+        pageOuts: 0,
+        swapOuts: 0,
+      }),
+      recycle: async () => {
+        markRecycleStarted();
+        await recycleReleased;
+      },
+    });
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor, controller.hook);
+    const names = ["approved", "queued-cancel", "cancel-permission", "failure", "fresh"] as const;
+    const sessions = new Map<string, CreateSessionResponse>();
+    for (const name of names) {
+      sessions.set(name, await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+        method: "POST",
+        body: JSON.stringify({ title: name, workspacePath }),
+      }));
+    }
+    const submit = (name: typeof names[number], permissionMode: "ask" | "deny" = "deny") => {
+      const session = sessions.get(name)!;
+      return jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${session.session.id}/turns`, {
+        method: "POST",
+        body: JSON.stringify({ content: name, permissionMode }),
+      });
+    };
+
+    const approved = await submit("approved", "ask");
+    await approvedFirstStarted;
+    const queuedCancel = await submit("queued-cancel");
+    const cancelledPermission = await submit("cancel-permission", "ask");
+    const failure = await submit("failure");
+    const fresh = await submit("fresh");
+    await jsonRequest(running.url, `/v1/turns/${queuedCancel.turn.id}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    releaseApprovedFirst();
+
+    const approvedPermission = await waitForPersistedEvent(
+      running.url,
+      sessions.get("approved")!.session.id,
+      approved.eventId,
+      "permission.requested",
+    );
+    const cancelledPermissionEvent = await waitForPersistedEvent(
+      running.url,
+      sessions.get("cancel-permission")!.session.id,
+      cancelledPermission.eventId,
+      "permission.requested",
+    );
+    const failureEvents = await collectPersistedEvents(
+      running.url,
+      sessions.get("failure")!.session.id,
+      failure.eventId,
+    );
+
+    expect(entries).toEqual(["approved:1", "cancel-permission:1", "failure:1", "failure:2"]);
+    expect(failureEvents.map((event) => event.type)).toContain("tool.call_failed");
+    await jsonRequest(running.url, `/v1/turns/${cancelledPermission.turn.id}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    const cancelledState = await jsonRequest<SessionStateResponse>(
+      running.url,
+      `/v1/sessions/${sessions.get("cancel-permission")!.session.id}`,
+    );
+    expect(cancelledState.pendingPermissions).toEqual([]);
+    const lateResolution = await fetch(new URL(
+      `/v1/permissions/${String(cancelledPermissionEvent.payload.permissionId)}`,
+      running.url,
+    ), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision: "allow_once" }) });
+    expect(lateResolution.status).toBe(409);
+
+    await jsonRequest(running.url, `/v1/permissions/${String(approvedPermission.payload.permissionId)}`, {
+      method: "POST",
+      body: JSON.stringify({ decision: "allow_once" }),
+    });
+    await recycleStarted;
+    expect(entries).toEqual(["approved:1", "cancel-permission:1", "failure:1", "failure:2", "approved:2"]);
+    expect(entries).not.toContain("fresh:1");
+
+    releaseRecycle();
+    const [approvedEvents, freshEvents, queuedEvents, cancelledEvents] = await Promise.all([
+      collectPersistedEvents(running.url, sessions.get("approved")!.session.id, approved.eventId),
+      collectPersistedEvents(running.url, sessions.get("fresh")!.session.id, fresh.eventId),
+      collectPersistedEvents(running.url, sessions.get("queued-cancel")!.session.id, queuedCancel.eventId),
+      collectPersistedEvents(running.url, sessions.get("cancel-permission")!.session.id, cancelledPermission.eventId),
+    ]);
+    const report = controller.report();
+    const drain = report.decisions.find((decision) => decision.reason === "continuation_drain");
+    const recycled = report.decisions.find((decision) => decision.recycled);
+
+    expect(entries).toEqual(["approved:1", "cancel-permission:1", "failure:1", "failure:2", "approved:2", "fresh:1"]);
+    expect(report).toMatchObject({ recycleCount: 1, drainTimeoutCount: 0 });
+    expect(drain).toMatchObject({ drainRequested: true, drainTimedOut: false });
+    expect(recycled?.scheduler).toMatchObject({ pendingContinuationTurnCount: 0, continuationDrainActive: true });
+    expect(queuedEvents.map((event) => event.type)).not.toContain("model.request_started");
+    expect(cancelledEvents.map((event) => event.type)).toEqual(expect.arrayContaining([
+      "permission.requested",
+      "tool.call_cancelled",
+      "turn.cancelled",
+    ]));
+    expect(approvedEvents.map((event) => event.type)).toEqual(expect.arrayContaining([
+      "permission.requested",
+      "permission.resolved",
+      "tool.call_completed",
+      "turn.completed",
+    ]));
+    expect(freshEvents.at(-1)?.type).toBe("turn.completed");
+    expect(readFileSync(join(workspacePath, "approved.txt"), "utf8")).toBe("1\n");
+    expect(readFileSync(join(workspacePath, "cancelled.txt"), "utf8")).toBe("0\n");
+  });
+
+  test("drain timeout resumes fresh turns and disables further maintenance", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "workspace");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    writeFileSync(join(workspacePath, "stalled.txt"), "0\n");
+    let releaseStalledFirst!: () => void;
+    let markStalledFirstStarted!: () => void;
+    const stalledFirstStarted = new Promise<void>((resolve) => { markStalledFirstStarted = resolve; });
+    const stalledFirstReleased = new Promise<void>((resolve) => { releaseStalledFirst = resolve; });
+    const entries: string[] = [];
+    const processor: TurnProcessor = {
+      providerId: "mixed",
+      modelId: "timeout-model",
+      async listModels() { return []; },
+      async *stream(messages) {
+        const content = messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        const hasToolResult = messages.some((message) => message.role === "tool");
+        entries.push(content);
+        if (content === "stalled" && !hasToolResult) {
+          markStalledFirstStarted();
+          await stalledFirstReleased;
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "stalled-edit",
+            nameDelta: "edit_file",
+            argumentsDelta: JSON.stringify({ path: "stalled.txt", oldText: "0", newText: "1" }),
+          };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: `${content} complete` };
+      },
+    };
+    const controller = createInferenceRecycleController({
+      workThreshold: 1,
+      availablePercentThreshold: 100,
+      maximumRecycles: 1,
+      maximumContinuationDrainMs: 20,
+      memorySnapshot: () => ({
+        observedAt: "2026-08-29T00:00:00.000Z",
+        availablePercent: 50,
+        swapUsedBytes: 0,
+        pageSizeBytes: 4_096,
+        pageOuts: 0,
+        swapOuts: 0,
+      }),
+      recycle: async () => { throw new Error("Timed-out drain must not recycle"); },
+    });
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor, controller.hook);
+    const stalledSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Stalled", workspacePath }),
+    });
+    const freshSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Fresh", workspacePath }),
+    });
+    const nextSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Next", workspacePath }),
+    });
+    const stalled = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${stalledSession.session.id}/turns`, {
+      method: "POST",
+      body: JSON.stringify({ content: "stalled", permissionMode: "ask" }),
+    });
+    await stalledFirstStarted;
+    const fresh = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${freshSession.session.id}/turns`, {
+      method: "POST",
+      body: JSON.stringify({ content: "fresh" }),
+    });
+    releaseStalledFirst();
+    const permission = await waitForPersistedEvent(
+      running.url,
+      stalledSession.session.id,
+      stalled.eventId,
+      "permission.requested",
+    );
+    await collectPersistedEvents(running.url, freshSession.session.id, fresh.eventId);
+
+    const timedOutReport = controller.report();
+    expect(entries).toEqual(["stalled", "fresh"]);
+    expect(timedOutReport).toMatchObject({ recycleCount: 0, drainTimeoutCount: 1 });
+    expect(timedOutReport.decisions).toContainEqual(expect.objectContaining({
+      reason: "continuation_drain",
+      drainTimedOut: true,
+    }));
+    const decisionCount = timedOutReport.decisions.length;
+    const next = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${nextSession.session.id}/turns`, {
+      method: "POST",
+      body: JSON.stringify({ content: "next" }),
+    });
+    await collectPersistedEvents(running.url, nextSession.session.id, next.eventId);
+    expect(entries).toEqual(["stalled", "fresh", "next"]);
+    expect(controller.report().decisions).toHaveLength(decisionCount);
+
+    await jsonRequest(running.url, `/v1/turns/${stalled.turn.id}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    const stalledState = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${stalledSession.session.id}`);
+    expect(stalledState.pendingPermissions).toEqual([]);
+    const lateResolution = await fetch(new URL(`/v1/permissions/${String(permission.payload.permissionId)}`, running.url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: "allow_once" }),
+    });
+    expect(lateResolution.status).toBe(409);
+  });
+
+  test("cancels a queued turn before it enters the provider", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+    const firstReleased = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const entered: string[] = [];
+    const processor: TurnProcessor = {
+      providerId: "scheduled",
+      modelId: "one-slot-model",
+      async listModels() { return []; },
+      async *stream(messages) {
+        const content = messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        entered.push(content);
+        if (content === "holder") {
+          markFirstStarted();
+          await firstReleased;
+        }
+        yield { type: "text_delta" as const, delta: content };
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const holderSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Holder" }),
+    });
+    const queuedSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Queued" }),
+    });
+    const holder = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${holderSession.session.id}/turns`, {
+      method: "POST", body: JSON.stringify({ content: "holder" }),
+    });
+    await firstStarted;
+    const queued = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${queuedSession.session.id}/turns`, {
+      method: "POST", body: JSON.stringify({ content: "cancel me" }),
+    });
+    await Bun.sleep(10);
+    await jsonRequest(running.url, `/v1/turns/${queued.turn.id}/cancel`, {
+      method: "POST", body: JSON.stringify({}),
+    });
+    const queuedEvents = await collectPersistedEventTypes(running.url, queuedSession.session.id, queued.eventId);
+
+    expect(entered).toEqual(["holder"]);
+    expect(queuedEvents).toContain("turn.cancelled");
+    expect(queuedEvents).not.toContain("model.request_started");
+    releaseFirst();
+    await collectPersistedEventTypes(running.url, holderSession.session.id, holder.eventId);
+  });
+
+  test("releases the slot during permission work and keeps turn configuration immutable", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "workspace");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    writeFileSync(join(workspacePath, "answer.txt"), "41\n");
+    const requests: Array<{ model: string; thinkingEnabled: boolean | undefined; user: string }> = [];
+    const provider: ProviderAdapter = {
+      id: "scripted",
+      async listModels() { return []; },
+      async *stream(request) {
+        const user = request.messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        requests.push({ model: request.model, thinkingEnabled: request.thinkingEnabled, user });
+        const hasToolResult = request.messages.some((message) => message.role === "tool");
+        if (user === "edit" && !hasToolResult) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "call-edit",
+            nameDelta: "edit_file",
+            argumentsDelta: JSON.stringify({ path: "answer.txt", oldText: "41", newText: "42" }),
+          };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: user === "edit" ? "edited" : "second complete" };
+      },
+    };
+    const processor = new ProviderTurnProcessor(provider, "model-one");
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const firstSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Edit", workspacePath }),
+    });
+    const secondSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Second" }),
+    });
+    const first = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${firstSession.session.id}/turns`, {
+      method: "POST", body: JSON.stringify({ content: "edit", permissionMode: "ask", thinkingEnabled: false }),
+    });
+    const eventsUrl = new URL("/v1/events", running.url);
+    eventsUrl.searchParams.set("session_id", firstSession.session.id);
+    eventsUrl.searchParams.set("after", String(first.eventId));
+    for await (const event of readServerSentEvents(await fetch(eventsUrl))) {
+      if (event.type === "permission.requested") {
+        const permissionId = event.payload.permissionId;
+        if (typeof permissionId !== "string") throw new Error("Permission event is malformed");
+        await jsonRequest(running.url, "/v1/model", {
+          method: "POST", body: JSON.stringify({ model: "model-two" }),
+        });
+        const second = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${secondSession.session.id}/turns`, {
+          method: "POST", body: JSON.stringify({ content: "second", thinkingEnabled: true }),
+        });
+        await collectPersistedEventTypes(running.url, secondSession.session.id, second.eventId);
+        expect(requests.map((request) => request.user)).toEqual(["edit", "second"]);
+        await jsonRequest(running.url, `/v1/permissions/${permissionId}`, {
+          method: "POST", body: JSON.stringify({ decision: "allow_once" }),
+        });
+      }
+      if (event.type === "turn.completed") break;
+    }
+
+    expect(readFileSync(join(workspacePath, "answer.txt"), "utf8")).toBe("42\n");
+    expect(requests).toEqual([
+      { model: "model-one", thinkingEnabled: false, user: "edit" },
+      { model: "model-two", thinkingEnabled: true, user: "second" },
+      { model: "model-one", thinkingEnabled: false, user: "edit" },
+    ]);
+  });
+
+  test("uses Last-Event-ID when replaying a session", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const running = startApp(join(directory, "demesne.sqlite"));
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Resume" }),
+    });
+    const eventsUrl = new URL("/v1/events", running.url);
+    eventsUrl.searchParams.set("session_id", created.session.id);
+    eventsUrl.searchParams.set("after", "0");
+    const response = await fetch(eventsUrl, {
+      headers: { "Last-Event-ID": String(created.eventId) },
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "Continue" }) },
+    );
+    const received: EventEnvelope[] = [];
+    for await (const event of readServerSentEvents(response)) {
+      received.push(event);
+      if (event.type === "turn.completed") break;
+    }
+
+    expect(received.every((event) => event.eventId > created.eventId)).toBe(true);
+    expect(received.some((event) => event.eventId === submitted.eventId)).toBe(true);
+    expect(received.some((event) => event.type === "session.created")).toBe(false);
+  });
+
+  test("closes active event streams during application shutdown", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const running = startApp(join(directory, "demesne.sqlite"));
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Shutdown" }),
+    });
+    const eventsUrl = new URL("/v1/events", running.url);
+    eventsUrl.searchParams.set("session_id", created.session.id);
+    eventsUrl.searchParams.set("after", String(created.eventId));
+    const response = await fetch(eventsUrl);
+    const reader = response.body!.getReader();
+    await reader.read();
+    const pendingRead = reader.read();
+
+    const closePromise = running.app.close();
+    const duringShutdown = await running.app.fetch(new Request(new URL("/healthz", running.url)));
+    expect(duringShutdown.status).toBe(503);
+    await closePromise;
+    apps.splice(apps.indexOf(running.app), 1);
+    expect((await pendingRead).done).toBe(true);
+    await running.server.stop(true);
+    servers.splice(servers.indexOf(running.server), 1);
+  });
+
+  test("waits for active inference cancellation and removes queued work during shutdown", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    let observedAbort = false;
+    const entered: string[] = [];
+    const processor: TurnProcessor = {
+      providerId: "shutdown",
+      modelId: "one-slot-model",
+      async listModels() { return []; },
+      async *stream(messages, _tools, signal) {
+        entered.push(messages.findLast((message) => message.role === "user")?.content ?? "missing");
+        markStarted();
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            observedAbort = true;
+            reject(signal.reason);
+          }, { once: true });
+        });
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const firstSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Active" }),
+    });
+    const secondSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Queued" }),
+    });
+    await jsonRequest(running.url, `/v1/sessions/${firstSession.session.id}/turns`, {
+      method: "POST", body: JSON.stringify({ content: "active" }),
+    });
+    await started;
+    await jsonRequest(running.url, `/v1/sessions/${secondSession.session.id}/turns`, {
+      method: "POST", body: JSON.stringify({ content: "queued" }),
+    });
+
+    await running.app.close();
+    apps.splice(apps.indexOf(running.app), 1);
+    expect(observedAbort).toBe(true);
+    expect(entered).toEqual(["active"]);
+    await running.server.stop(true);
+    servers.splice(servers.indexOf(running.server), 1);
+  });
+
+  test("does not hand off the inference slot until iterator cleanup completes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let markCleanupStarted!: () => void;
+    let releaseCleanup!: () => void;
+    const cleanupStarted = new Promise<void>((resolve) => { markCleanupStarted = resolve; });
+    const cleanupReleased = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+    const entered: string[] = [];
+    const processor: TurnProcessor = {
+      providerId: "cleanup",
+      modelId: "one-slot-model",
+      async listModels() { return []; },
+      async *stream(messages) {
+        const content = messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        entered.push(content);
+        try {
+          yield { type: "text_delta" as const, delta: content };
+        } finally {
+          if (content === "first") {
+            markCleanupStarted();
+            await cleanupReleased;
+          }
+        }
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const firstSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "First" }),
+    });
+    const secondSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Second" }),
+    });
+    const first = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${firstSession.session.id}/turns`, {
+      method: "POST", body: JSON.stringify({ content: "first" }),
+    });
+    await cleanupStarted;
+    const second = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${secondSession.session.id}/turns`, {
+      method: "POST", body: JSON.stringify({ content: "second" }),
+    });
+    await Bun.sleep(20);
+
+    expect(entered).toEqual(["first"]);
+    releaseCleanup();
+    await Promise.all([
+      collectPersistedEventTypes(running.url, firstSession.session.id, first.eventId),
+      collectPersistedEventTypes(running.url, secondSession.session.id, second.eventId),
+    ]);
+    expect(entered).toEqual(["first", "second"]);
+  });
+
+  test("executes an approved edit through a multi-round agent turn", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "workspace");
+    mkdirSync(workspacePath);
+    const dataPath = join(directory, "data");
+    mkdirSync(dataPath);
+    writeFileSync(join(workspacePath, "answer.txt"), "41\n");
+    let modelRound = 0;
+    const modelMessages: ProviderMessage[][] = [];
+    const processor: TurnProcessor = {
+      providerId: "scripted",
+      modelId: "tool-model",
+      async listModels() { return [{ id: this.modelId, provider: this.providerId }]; },
+      async *stream(messages) {
+        modelMessages.push(structuredClone(messages));
+        const currentRound = modelRound++;
+        if (currentRound === 0) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "call-edit",
+            nameDelta: "edit_file",
+            argumentsDelta: JSON.stringify({ path: "answer.txt", oldText: "41", newText: "42" }),
+          };
+          return;
+        }
+        if (currentRound === 1) {
+          expect(messages.at(-1)).toMatchObject({ role: "tool", toolCallId: "call-edit" });
+          yield { type: "text_delta" as const, delta: "Updated the answer." };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: "The prior tool transcript is intact." };
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Edit", workspacePath }),
+    });
+    expect(created.session.workspace?.root).toBe(realpathSync(workspacePath));
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "Set the answer to 42", permissionMode: "ask" }) },
+    );
+    const eventsUrl = new URL("/v1/events", running.url);
+    eventsUrl.searchParams.set("session_id", created.session.id);
+    eventsUrl.searchParams.set("after", String(submitted.eventId));
+    const types: string[] = [];
+    for await (const event of readServerSentEvents(await fetch(eventsUrl))) {
+      types.push(event.type);
+      if (event.type === "permission.requested") {
+        const permissionId = event.payload.permissionId;
+        const toolCallId = event.payload.toolCallId;
+        if (typeof permissionId !== "string" || typeof toolCallId !== "string") {
+          throw new Error("Permission event is malformed");
+        }
+        const state = await jsonRequest<{ pendingPermissions: Array<{
+          id: string;
+          turnId: string;
+          toolCallId: string;
+          summary: string;
+        }> }>(
+          running.url,
+          `/v1/sessions/${created.session.id}`,
+        );
+        expect(state.pendingPermissions).toContainEqual({
+          id: permissionId,
+          turnId: submitted.turn.id,
+          toolCallId,
+          summary: expect.any(String),
+        });
+        await jsonRequest(running.url, `/v1/permissions/${permissionId}`, {
+          method: "POST",
+          body: JSON.stringify({ decision: "allow_once" }),
+        });
+      }
+      if (event.type === "turn.completed") break;
+    }
+
+    expect(readFileSync(join(workspacePath, "answer.txt"), "utf8")).toBe("42\n");
+    expect(types).toContain("permission.requested");
+    expect(types).toContain("permission.resolved");
+    expect(types).toContain("tool.call_completed");
+    expect(modelRound).toBe(2);
+
+    const followUp = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "What did you change?" }) },
+    );
+    await collectPersistedEventTypes(running.url, created.session.id, followUp.eventId);
+    expect(modelMessages[2]).toEqual([
+      expect.objectContaining({ role: "system" }),
+      { role: "user", content: "Set the answer to 42" },
+      {
+        role: "assistant",
+        content: null,
+        toolCalls: [{
+          id: "call-edit",
+          name: "edit_file",
+          arguments: JSON.stringify({ path: "answer.txt", oldText: "41", newText: "42" }),
+        }],
+      },
+      expect.objectContaining({ role: "tool", toolCallId: "call-edit" }),
+      { role: "assistant", content: "Updated the answer." },
+      { role: "user", content: "What did you change?" },
+    ]);
+  });
+
+  test("drops only complete oldest turns after a provider-confirmed context overflow", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const databasePath = join(directory, "demesne.sqlite");
+    const requests: ProviderMessage[][] = [];
+    const processor: TurnProcessor = {
+      providerId: "bounded-provider",
+      modelId: "bounded-model",
+      async listModels() { return [{ id: this.modelId, provider: this.providerId, contextWindow: 32 }]; },
+      async *stream(messages) {
+        requests.push(structuredClone(messages));
+        const lastUser = messages.findLast((message) => message.role === "user");
+        const hasFirstTurn = messages.some((message) => message.role === "user" && message.content === "first");
+        const hasSecondTurn = messages.some((message) => message.role === "user" && message.content === "second");
+        if (lastUser?.content === "third" && hasFirstTurn) {
+          throw new ProviderError("maximum context length exceeded", 400);
+        }
+        if (lastUser?.content === "coded overflow" && hasSecondTurn) {
+          throw new ProviderError("maximum context length exceeded", 400, "invalid_request_error");
+        }
+        if (lastUser?.content === "false positive") {
+          throw new ProviderError("context window configuration is invalid", 400, "invalid_request");
+        }
+        yield { type: "text_delta" as const, delta: `answer:${lastUser?.content ?? ""}` };
+      },
+    };
+    const running = startApp(databasePath, processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Bounded context" }),
+    });
+
+    for (const content of ["first", "second"]) {
+      const submitted = await jsonRequest<SubmitTurnResponse>(
+        running.url,
+        `/v1/sessions/${created.session.id}/turns`,
+        { method: "POST", body: JSON.stringify({ content }) },
+      );
+      await collectPersistedEventTypes(running.url, created.session.id, submitted.eventId);
+    }
+    const third = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "third" }) },
+    );
+    const eventTypes = await collectPersistedEventTypes(running.url, created.session.id, third.eventId);
+
+    expect(eventTypes).toContain("model.context_trimmed");
+    const retry = requests.at(-1) ?? [];
+    expect(retry.some((message) => message.role === "user" && message.content === "first")).toBe(false);
+    expect(retry.some((message) => message.role === "user" && message.content === "second")).toBe(true);
+    expect(retry.at(-1)).toEqual({ role: "user", content: "third" });
+
+    await running.server.stop(true);
+    servers.splice(servers.indexOf(running.server), 1);
+    await running.app.close();
+    apps.splice(apps.indexOf(running.app), 1);
+    const restarted = startApp(databasePath, processor);
+    const fourth = await jsonRequest<SubmitTurnResponse>(
+      restarted.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "fourth" }) },
+    );
+    await collectPersistedEventTypes(restarted.url, created.session.id, fourth.eventId);
+    const afterRestart = requests.at(-1) ?? [];
+    expect(afterRestart.some((message) => message.role === "user" && message.content === "first")).toBe(false);
+    expect(afterRestart.some((message) => message.role === "user" && message.content === "second")).toBe(true);
+    expect(afterRestart.some((message) => message.role === "user" && message.content === "third")).toBe(true);
+
+    const codedOverflow = await jsonRequest<SubmitTurnResponse>(
+      restarted.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "coded overflow" }) },
+    );
+    const codedOverflowEvents = await collectPersistedEventTypes(
+      restarted.url,
+      created.session.id,
+      codedOverflow.eventId,
+    );
+    expect(codedOverflowEvents).toContain("turn.completed");
+    expect(codedOverflowEvents).toContain("model.context_trimmed");
+
+    const falsePositive = await jsonRequest<SubmitTurnResponse>(
+      restarted.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "false positive" }) },
+    );
+    const falsePositiveEvents = await collectPersistedEventTypes(
+      restarted.url,
+      created.session.id,
+      falsePositive.eventId,
+    );
+    expect(falsePositiveEvents).toContain("turn.failed");
+    expect(falsePositiveEvents).toContain("model.metrics");
+    expect(falsePositiveEvents).not.toContain("model.context_trimmed");
+  });
+
+  test("proactively drops complete oldest turns at the calibrated soft limit and persists the boundary", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const databasePath = join(directory, "demesne.sqlite");
+    const requests: ProviderMessage[][] = [];
+    const processor: TurnProcessor = {
+      providerId: "planned-bounded-provider",
+      modelId: "planned-bounded-model",
+      contextCapacity: 2_108,
+      maxOutputTokens: 128,
+      async listModels() { return [{ id: this.modelId, provider: this.providerId, contextWindow: this.contextCapacity }]; },
+      async *stream(messages) {
+        requests.push(structuredClone(messages));
+        const lastUser = messages.findLast((message) => message.role === "user");
+        const hasCurrentToolResult = messages.some((message) => message.role === "tool" && message.toolCallId === "planned-missing");
+        if (lastUser?.role === "user" && lastUser.content.startsWith("third-marker") && !hasCurrentToolResult) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "planned-missing",
+            nameDelta: "missing_tool",
+            argumentsDelta: "{}",
+          };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: "answer" };
+      },
+    };
+    const running = startApp(databasePath, processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Proactively bounded context" }),
+    });
+    const contents = [
+      `first-marker:${"a".repeat(500)}`,
+      `second-marker:${"b".repeat(500)}`,
+      `third-marker:${"c".repeat(500)}`,
+    ];
+    for (const content of contents.slice(0, 2)) {
+      const submitted = await jsonRequest<SubmitTurnResponse>(
+        running.url,
+        `/v1/sessions/${created.session.id}/turns`,
+        { method: "POST", body: JSON.stringify({ content }) },
+      );
+      await collectPersistedEventTypes(running.url, created.session.id, submitted.eventId);
+    }
+
+    const third = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: contents[2] }) },
+    );
+    const events = await collectPersistedEvents(running.url, created.session.id, third.eventId);
+    const thirdRequest = requests.at(-1) ?? [];
+    const started = events.find((event) => event.type === "model.request_started");
+    const plan = started?.payload.contextPlan as ContextPlan | undefined;
+
+    expect(events.map((event) => event.type)).toContain("model.context_trimmed");
+    expect(plan?.budgetStatus).toBe("within_soft_limit");
+    expect(plan?.actions).toContainEqual(expect.objectContaining({ kind: "drop_historical_turn" }));
+    expect(thirdRequest.some((message) => message.role === "user" && message.content.startsWith("first-marker"))).toBe(false);
+    expect(thirdRequest.some((message) => message.role === "user" && message.content.startsWith("second-marker"))).toBe(true);
+    expect(thirdRequest.some((message) => message.role === "user" && message.content === contents[2])).toBe(true);
+    expect(thirdRequest.some((message) => message.role === "tool" && message.toolCallId === "planned-missing")).toBe(true);
+
+    await running.server.stop(true);
+    servers.splice(servers.indexOf(running.server), 1);
+    await running.app.close();
+    apps.splice(apps.indexOf(running.app), 1);
+    const persisted = new DemesneStore(databasePath);
+    const persistedUsers = persisted.getCompletedModelTranscript(created.session.id)
+      .flatMap((entry) => entry.message.role === "user" ? [entry.message.content] : []);
+    expect(persistedUsers.some((content) => content.startsWith("first-marker"))).toBe(false);
+    expect(persistedUsers.some((content) => content.startsWith("second-marker"))).toBe(true);
+    expect(persistedUsers).toContain(contents[2]);
+    persisted.close();
+    const restarted = startApp(databasePath, processor);
+    const fourth = await jsonRequest<SubmitTurnResponse>(
+      restarted.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "fourth-marker" }) },
+    );
+    await collectPersistedEventTypes(restarted.url, created.session.id, fourth.eventId);
+    const afterRestart = requests.at(-1) ?? [];
+    expect(afterRestart.some((message) => message.role === "user" && message.content.startsWith("first-marker"))).toBe(false);
+  });
+
+  test("reverts a turn's file changes through /undo", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    writeFileSync(join(workspacePath, "target.txt"), "original\n");
+    let round = 0;
+    const processor: TurnProcessor = {
+      providerId: "undo-provider",
+      modelId: "undo-model",
+      async listModels() { return [{ id: this.modelId, provider: this.providerId }]; },
+      async *stream(messages) {
+        if (round++ === 0) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "call-w",
+            nameDelta: "write_file",
+            argumentsDelta: JSON.stringify({ path: "created.txt", content: "brand new\n" }),
+          };
+          return;
+        }
+        void messages;
+        yield { type: "text_delta" as const, delta: "wrote it" };
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Undo", workspacePath }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "write", permissionMode: "ask" }) },
+    );
+
+    for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${created.session.id}&after=${submitted.eventId}`, running.url)))) {
+      if (event.type === "permission.requested") {
+        await jsonRequest(running.url, `/v1/permissions/${event.payload.permissionId}`, {
+          method: "POST",
+          body: JSON.stringify({ decision: "allow_once" }),
+        });
+      }
+      if (event.type === "turn.completed") break;
+    }
+    expect(readFileSync(join(workspacePath, "created.txt"), "utf8")).toBe("brand new\n");
+
+    const undone = await jsonRequest<{ turnId: string; files: string[] }>(
+      running.url,
+      `/v1/sessions/${created.session.id}/undo`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+    expect(undone.files).toEqual(["created.txt"]);
+    expect(existsSync(join(workspacePath, "created.txt"))).toBe(false);
+    expect(readFileSync(join(workspacePath, "target.txt"), "utf8")).toBe("original\n");
+
+    await expect(fetch(new URL(`/v1/sessions/${created.session.id}/undo`, running.url), { method: "POST" }))
+      .resolves.toMatchObject({ status: 404 });
+  });
+
+  test("undo restores both sides of an overwritten file move", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    writeFileSync(join(workspacePath, "source.txt"), "source\n");
+    writeFileSync(join(workspacePath, "destination.txt"), "destination\n");
+    let round = 0;
+    const processor: TurnProcessor = {
+      providerId: "undo-provider",
+      modelId: "undo-model",
+      async listModels() { return []; },
+      async *stream() {
+        if (round++ === 0) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "call-move",
+            nameDelta: "move_path",
+            argumentsDelta: JSON.stringify({ from: "source.txt", to: "destination.txt", overwrite: true }),
+          };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: "moved it" };
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Undo move", workspacePath }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "move", permissionMode: "ask" }) },
+    );
+    for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${created.session.id}&after=${submitted.eventId}`, running.url)))) {
+      if (event.type === "permission.requested") {
+        await jsonRequest(running.url, `/v1/permissions/${event.payload.permissionId}`, {
+          method: "POST",
+          body: JSON.stringify({ decision: "allow_once" }),
+        });
+      }
+      if (event.type === "turn.completed") break;
+    }
+    expect(existsSync(join(workspacePath, "source.txt"))).toBe(false);
+    expect(readFileSync(join(workspacePath, "destination.txt"), "utf8")).toBe("source\n");
+
+    const undone = await jsonRequest<{ files: string[] }>(running.url, `/v1/sessions/${created.session.id}/undo`, {
+      method: "POST",
+      body: "{}",
+    });
+    expect(undone.files).toEqual(["destination.txt", "source.txt"]);
+    expect(readFileSync(join(workspacePath, "source.txt"), "utf8")).toBe("source\n");
+    expect(readFileSync(join(workspacePath, "destination.txt"), "utf8")).toBe("destination\n");
+  });
+
+  test("undo refuses changed files and symlink substitutions", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    writeFileSync(join(workspacePath, "target.txt"), "before\n");
+    const outside = join(directory, "outside.txt");
+    writeFileSync(outside, "outside\n");
+    let round = 0;
+    const processor: TurnProcessor = {
+      providerId: "undo-provider",
+      modelId: "undo-model",
+      async listModels() { return []; },
+      async *stream() {
+        if (round++ === 0) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "call-write",
+            nameDelta: "write_file",
+            argumentsDelta: JSON.stringify({ path: "target.txt", content: "after\n" }),
+          };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: "wrote it" };
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Undo conflict", workspacePath }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "write", permissionMode: "ask" }) },
+    );
+    for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${created.session.id}&after=${submitted.eventId}`, running.url)))) {
+      if (event.type === "permission.requested") {
+        await jsonRequest(running.url, `/v1/permissions/${event.payload.permissionId}`, {
+          method: "POST",
+          body: JSON.stringify({ decision: "allow_once" }),
+        });
+      }
+      if (event.type === "turn.completed") break;
+    }
+
+    unlinkSync(join(workspacePath, "target.txt"));
+    symlinkSync(outside, join(workspacePath, "target.txt"));
+    const response = await fetch(new URL(`/v1/sessions/${created.session.id}/undo`, running.url), {
+      method: "POST",
+      body: "{}",
+    });
+    expect(response.status).toBe(409);
+    expect(readFileSync(outside, "utf8")).toBe("outside\n");
+  });
+
+  test("requires authentication when configured", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const app = createDaemonApp({ databasePath: join(directory, "demesne.sqlite"), authToken: "private" });
+    const server = Bun.serve({ port: 0, fetch: app.fetch });
+    apps.push(app);
+    servers.push(server);
+
+    expect((await fetch(new URL("/healthz", server.url))).status).toBe(200);
+    expect((await fetch(new URL("/v1/models", server.url))).status).toBe(401);
+    expect((await fetch(new URL("/v1/runtime", server.url))).status).toBe(401);
+    expect((await fetch(new URL("/v1/models", server.url), {
+      headers: { Authorization: "Bearer private" },
+    })).status).toBe(200);
+  });
+
+  test("exposes sanitized runtime profile status on the authenticated route", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const processor: TurnProcessor = {
+      providerId: "ollama",
+      modelId: "profile-model",
+      async listModels() { return []; },
+      async *stream() {},
+      runtimeStatus() {
+        return {
+          profile: "balanced-32gb",
+          state: "mismatch",
+          expected: {
+            contextWindow: 8192,
+            batchSize: 512,
+            microBatchSize: 512,
+            parallelSequences: 1,
+            keyCacheType: "q8_0",
+            valueCacheType: "q8_0",
+            flashAttention: "on",
+            loadedModels: 1,
+          },
+          observed: null,
+          mismatches: ["batch size expected 512, observed 1024"],
+          observedAt: "2026-08-28T01:00:00.000Z",
+        };
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+
+    const status = await jsonRequest<{ state: string; mismatches: string[] }>(running.url, "/v1/runtime");
+
+    expect(status.state).toBe("mismatch");
+    expect(status.mismatches).toEqual(["batch size expected 512, observed 1024"]);
+    expect(JSON.stringify(status)).not.toContain("llama-server");
+    expect(JSON.stringify(status)).not.toContain("/models/");
+  });
+
+  test("rejects multiple inference slots for strict 32 GB runtime profiles", () => {
+    for (const profile of ["balanced-32gb", "experimental-q4-kv-32gb", "experimental-q4-kv-b256-32gb"]) {
+      const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+      temporaryDirectories.push(directory);
+      const processor: TurnProcessor = {
+        providerId: "ollama",
+        modelId: "profile-model",
+        async listModels() { return []; },
+        async *stream() {},
+        runtimeStatus() {
+          return {
+            profile,
+            state: "pending",
+            expected: null,
+            observed: null,
+            mismatches: [],
+            observedAt: null,
+          };
+        },
+      };
+
+      expect(() => createDaemonApp({
+        databasePath: join(directory, "demesne.sqlite"),
+        processor,
+        inferenceSlots: 2,
+      })).toThrow("requires one inference slot");
+    }
+  });
+
+  test("switches active model via /v1/model", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let currentModel = "initial-model";
+    const processor: TurnProcessor = {
+      providerId: "test-provider",
+      get modelId() { return currentModel; },
+      setModel(modelId: string) { currentModel = modelId; },
+      async listModels() { return [{ id: currentModel, provider: this.providerId }]; },
+      async *stream() { yield { type: "text_delta" as const, delta: "ok" }; },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+
+    const initial = await jsonRequest<{ status: string; model: string }>(running.url, "/healthz");
+    expect(initial.model).toBe("initial-model");
+
+    const updated = await jsonRequest<{ status: string; model: string }>(running.url, "/v1/model", {
+      method: "POST",
+      body: JSON.stringify({ model: "qwen3:14b-fast" }),
+    });
+    expect(updated).toEqual({ status: "ok", model: "qwen3:14b-fast" });
+
+    const postHealth = await jsonRequest<{ status: string; model: string }>(running.url, "/healthz");
+    expect(postHealth.model).toBe("qwen3:14b-fast");
+  });
+
+  test("does not persist a turn when processor configuration cannot be snapshotted", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let currentModel = "initial-model";
+    const processor: TurnProcessor = {
+      providerId: "mutable",
+      get modelId() { return currentModel; },
+      setModel(modelId: string) { currentModel = modelId; },
+      async listModels() { return []; },
+      async *stream() { yield { type: "text_delta" as const, delta: "wrong" }; },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "No orphan" }),
+    });
+
+    const response = await fetch(new URL(`/v1/sessions/${created.session.id}/turns`, running.url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "must not persist" }),
+    });
+    const snapshot = await jsonRequest<{ session: Session }>(running.url, `/v1/sessions/${created.session.id}`);
+
+    expect(response.status).toBe(400);
+    expect(snapshot.session.turns).toEqual([]);
+  });
+
+  test("fails a provider request that does not emit before its deadline", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const processor: TurnProcessor = {
+      providerId: "stalled-provider",
+      modelId: "stalled-model",
+      async listModels() { return []; },
+      async *stream(_messages, _tools, signal) {
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor, undefined, {
+      providerFirstEventTimeoutMs: 20,
+      providerRequestTimeoutMs: 100,
+    });
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Stalled provider" }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`, {
+      method: "POST",
+      body: JSON.stringify({ content: "wait" }),
+    });
+    const events = await collectPersistedEvents(running.url, created.session.id, submitted.eventId);
+    expect(events.at(-1)?.type).toBe("turn.failed");
+    expect(events.at(-1)?.payload.message).toContain("did not emit an event");
+  });
+
+  test("preserves the append-only transcript through the soft band for a prompt-cache runtime", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const requests: ProviderMessage[][] = [];
+    const processor: TurnProcessor = {
+      providerId: "llama.cpp",
+      modelId: "cache-aware-model",
+      contextCapacity: 2_600,
+      maxOutputTokens: 128,
+      preservesPromptCache: true,
+      async listModels() { return []; },
+      async *stream(messages) {
+        requests.push(structuredClone(messages));
+        yield { type: "text_delta" as const, delta: "answer" };
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Cache-aware context" }),
+    });
+    const contents = [
+      `first-marker:${"a".repeat(1_000)}`,
+      `second-marker:${"b".repeat(1_000)}`,
+      `third-marker:${"c".repeat(1_000)}`,
+    ];
+    for (const content of contents) {
+      const submitted = await jsonRequest<SubmitTurnResponse>(
+        running.url,
+        `/v1/sessions/${created.session.id}/turns`,
+        { method: "POST", body: JSON.stringify({ content }) },
+      );
+      await collectPersistedEventTypes(running.url, created.session.id, submitted.eventId);
+    }
+
+    const thirdRequest = requests.at(-1) ?? [];
+    const state = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${created.session.id}`);
+    const plan = state.latestProviderCall?.contextPlan;
+
+    expect(plan?.originalEstimatedInputTokens).toBeGreaterThan(plan?.maximumPlannedInputTokens ?? Infinity);
+    expect(plan?.originalEstimatedInputTokens).toBeLessThanOrEqual(plan?.hardInputLimitTokens ?? 0);
+    expect(plan?.actions).toEqual([]);
+    expect(thirdRequest.some((message) => message.role === "user" && message.content === contents[0])).toBe(true);
+    expect(thirdRequest.some((message) => message.role === "user" && message.content === contents[1])).toBe(true);
+    expect(thirdRequest.some((message) => message.role === "user" && message.content === contents[2])).toBe(true);
+  });
+});
+
+function startApp(
+  databasePath: string,
+  processor?: TurnProcessor,
+  inferenceBoundaryHook?: InferenceBoundaryHook,
+  providerLimits: { providerFirstEventTimeoutMs?: number; providerRequestTimeoutMs?: number } = {},
+): {
+  app: DaemonApp;
+  server: Bun.Server<unknown>;
+  url: URL;
+} {
+  const app = createDaemonApp({ databasePath, processor, inferenceBoundaryHook, ...providerLimits });
+  const server = Bun.serve({ port: 0, fetch: app.fetch });
+  apps.push(app);
+  servers.push(server);
+  return { app, server, url: server.url };
+}
+
+async function collectPersistedEventTypes(baseUrl: URL, sessionId: string, after: number): Promise<string[]> {
+  return (await collectPersistedEvents(baseUrl, sessionId, after)).map((event) => event.type);
+}
+
+async function collectPersistedEvents(baseUrl: URL, sessionId: string, after: number): Promise<EventEnvelope[]> {
+  const eventsUrl = new URL("/v1/events", baseUrl);
+  eventsUrl.searchParams.set("session_id", sessionId);
+  eventsUrl.searchParams.set("after", String(after));
+  const events: EventEnvelope[] = [];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1_000);
+  try {
+    for await (const event of readServerSentEvents(await fetch(eventsUrl, { signal: controller.signal }))) {
+      events.push(event);
+      if (["turn.completed", "turn.cancelled", "turn.failed", "turn.interrupted"].includes(event.type)) break;
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+  return events;
+}
+
+async function waitForPersistedEvent(
+  baseUrl: URL,
+  sessionId: string,
+  after: number,
+  type: EventEnvelope["type"],
+): Promise<EventEnvelope> {
+  const eventsUrl = new URL("/v1/events", baseUrl);
+  eventsUrl.searchParams.set("session_id", sessionId);
+  eventsUrl.searchParams.set("after", String(after));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1_000);
+  try {
+    for await (const event of readServerSentEvents(await fetch(eventsUrl, { signal: controller.signal }))) {
+      if (event.type === type) return event;
+      if (["turn.completed", "turn.cancelled", "turn.failed", "turn.interrupted"].includes(event.type)) {
+        throw new Error(`Turn reached ${event.type} before ${type}`);
+      }
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+  throw new Error(`Event stream ended before ${type}`);
+}
+
+async function jsonRequest<T>(baseUrl: URL, path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(new URL(path, baseUrl), {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init?.headers },
+  });
+  const body = await response.text();
+  expect(response.ok, `POST ${path} -> ${response.status}: ${body}`).toBe(true);
+  return JSON.parse(body) as T;
+}

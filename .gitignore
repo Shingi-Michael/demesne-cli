@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.bun-build
+.demesne/*
+!.demesne/config.toml
+!.demesne/commands/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

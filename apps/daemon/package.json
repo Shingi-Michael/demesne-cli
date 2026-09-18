@@ -1,0 +1,10 @@
+{
+  "name": "@demesne/daemon",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@demesne/protocol": "workspace:*",
+    "@demesne/providers": "workspace:*",
+    "@demesne/storage": "workspace:*"
+  }
+}

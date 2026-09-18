@@ -339,6 +339,10 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(slashCommandCompletion(filter.command)).toBe("/sessions ");
     expect(slashCommandMatches("/mod").map((command) => command.name)).toEqual(["/model"]);
     expect(slashCommandValidationError(resolveSlashCommand("/model local")!)).toBeNull();
+    expect(slashCommandMatches("/di").map((command) => command.name)).toEqual(["/diff"]);
+    expect(slashCommandValidationError(resolveSlashCommand("/diff")!)).toBeNull();
+    expect(slashCommandValidationError(resolveSlashCommand("/undo src/a.ts")!)).toBeNull();
+    expect(slashCommandValidationError(resolveSlashCommand("/undo")!)).toBeNull();
   });
 
   test("help reflects the single-model reasoning-off runtime", () => {

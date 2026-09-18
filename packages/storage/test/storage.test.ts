@@ -353,6 +353,37 @@ describe("DemesneStore", () => {
     store.close();
   });
 
+  test("partial reverts keep the turn undoable for the remaining files", () => {
+    const store = new DemesneStore(":memory:");
+    const { session } = store.createSession("Partial undo");
+    const { turn } = store.createTurn(session.id, "edit two files");
+    store.startTurn(turn.id);
+    store.recordSnapshot(turn.id, [
+      { path: "a.txt", existed: true, data: new TextEncoder().encode("a0\n") },
+      { path: "b.txt", existed: true, data: new TextEncoder().encode("b0\n") },
+    ]);
+    store.recordSnapshotPostState(turn.id, [
+      { path: "a.txt", existed: true, data: null, postHash: "ha" },
+      { path: "b.txt", existed: true, data: null, postHash: "hb" },
+    ]);
+    store.completeTurn(turn.id);
+
+    expect(store.undoableTurn(session.id)?.files.map((file) => file.path)).toEqual(["a.txt", "b.txt"]);
+    const first = store.markTurnReverted(session.id, turn.id, ["a.txt"]);
+    expect(first.complete).toBe(false);
+    expect(first.event.payload.complete).toBe(false);
+    expect(store.undoableTurn(session.id)?.files.map((file) => file.path)).toEqual(["b.txt"]);
+
+    const all = store.snapshotsForTurn(session.id, turn.id)!;
+    expect(all.find((file) => file.path === "a.txt")?.revertedAt).toBeTruthy();
+    expect(all.find((file) => file.path === "b.txt")?.revertedAt).toBeUndefined();
+
+    const second = store.markTurnReverted(session.id, turn.id, ["b.txt"]);
+    expect(second.complete).toBe(true);
+    expect(store.undoableTurn(session.id)).toBeNull();
+    store.close();
+  });
+
   test("creates private database files", () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-storage-test-"));
     temporaryDirectories.push(directory);

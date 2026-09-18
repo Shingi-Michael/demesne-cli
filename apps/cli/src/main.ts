@@ -13,6 +13,7 @@ import {
   type Session,
   type SessionStateResponse,
   type SubmitTurnResponse,
+  type TurnChangesResponse,
   type UndoTurnResponse,
   type UpdateSessionResponse,
   type WorkspaceFilesResponse,
@@ -827,17 +828,55 @@ async function runChat(command: string[]): Promise<void> {
 
   const slashHandlers: Record<SlashCommandId, (argument: string) => Promise<void>> = {
     exit: async () => leaveChat(),
-    undo: async () => {
+    undo: async (argument) => {
       try {
+        const path = argument.trim();
         const result = await request<UndoTurnResponse>(`/v1/sessions/${sessionId}/undo`, {
           method: "POST",
-          body: JSON.stringify({}),
+          body: JSON.stringify(path ? { paths: [path] } : {}),
         });
-        console.log(`\n  ${paint.text("●", "citron")} Reverted ${result.files.length} path${result.files.length === 1 ? "" : "s"} from turn ${paint.bold(result.turnId.slice(0, 8), "paper")}`);
+        const suffix = result.complete ? "" : " · partial; run /undo again for the rest";
+        console.log(`\n  ${paint.text("●", "citron")} Reverted ${result.files.length} path${result.files.length === 1 ? "" : "s"} from turn ${paint.bold(result.turnId.slice(0, 8), "paper")}${paint.dim(suffix)}`);
         for (const file of result.files) console.log(paint.dim(`    ↩ ${sanitizeTerminalLine(file)}`));
         console.log("");
       } catch (error) {
         const message = error instanceof Error ? error.message : "undo failed";
+        console.log(`  ${paint.text(message, "signal")}\n`);
+      }
+    },
+    diff: async () => {
+      try {
+        const result = await request<TurnChangesResponse>(`/v1/sessions/${sessionId}/changes`);
+        if (result.changes.length === 0) {
+          console.log(`  ${paint.dim("No changes to review.")}\n`);
+          return;
+        }
+        console.log(`\n  ${paint.bold("CHANGES", "paper")} ${paint.dim(`turn ${result.turnId.slice(0, 8)}`)}`);
+        for (const change of result.changes) {
+          const badge = change.operation === "A"
+            ? paint.text("A", "citron")
+            : change.operation === "D"
+              ? paint.text("D", "signal")
+              : paint.text("M", "electric");
+          const reverted = change.reverted ? paint.dim(" · reverted") : "";
+          console.log(`  ${badge} ${paint.bold(sanitizeTerminalLine(change.path), "paper")}${reverted}`);
+          if (change.binary) {
+            console.log(`    ${paint.dim("binary file · diff unavailable")}`);
+            continue;
+          }
+          for (const line of change.diff) {
+            const safe = sanitizeTerminalLine(line);
+            const colored = line.startsWith("+")
+              ? paint.text(safe, "citron")
+              : line.startsWith("-")
+                ? paint.text(safe, "signal")
+                : paint.dim(safe);
+            console.log(`    ${colored}`);
+          }
+        }
+        console.log("");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "diff failed";
         console.log(`  ${paint.text(message, "signal")}\n`);
       }
     },

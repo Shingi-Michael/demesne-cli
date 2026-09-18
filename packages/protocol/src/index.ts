@@ -315,9 +315,28 @@ export interface CancelTurnResponse {
   eventId: number;
 }
 
+export interface UndoSessionRequest {
+  turnId?: string;
+  paths?: string[];
+}
+
 export interface UndoTurnResponse {
   turnId: string;
   files: string[];
+  complete: boolean;
+}
+
+export interface TurnChange {
+  path: string;
+  operation: "A" | "M" | "D";
+  reverted: boolean;
+  binary?: boolean;
+  diff: string[];
+}
+
+export interface TurnChangesResponse {
+  turnId: string;
+  changes: TurnChange[];
 }
 
 export interface ResolvePermissionRequest {
@@ -358,6 +377,25 @@ export function parseCreateSessionRequest(value: unknown): CreateSessionRequest 
     throw new ProtocolValidationError("workspacePath must be at most 4096 characters");
   }
   return { ...(title ? { title } : {}), ...(workspacePath ? { workspacePath } : {}) };
+}
+
+export function parseUndoSessionRequest(value: unknown): UndoSessionRequest {
+  if (!isRecord(value)) throw new ProtocolValidationError("Request body must be a JSON object");
+  const request: UndoSessionRequest = {};
+  if (value.turnId !== undefined) {
+    if (typeof value.turnId !== "string" || !value.turnId.trim()) {
+      throw new ProtocolValidationError("turnId must be a non-empty string");
+    }
+    request.turnId = value.turnId.trim();
+  }
+  if (value.paths !== undefined) {
+    if (!Array.isArray(value.paths) || value.paths.some((path) => typeof path !== "string" || !path.trim())) {
+      throw new ProtocolValidationError("paths must be a list of non-empty strings");
+    }
+    if (value.paths.length > 100) throw new ProtocolValidationError("paths must contain at most 100 entries");
+    request.paths = value.paths.map((path) => (path as string).trim());
+  }
+  return request;
 }
 
 export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest {

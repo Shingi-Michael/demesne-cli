@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   schema migration that backfills the search index.
 - `/model` picker with exact-id or unique-prefix switching, a per-session
   preferred-model hint on resume, and a storage column to record it.
+- Change review and scoped undo: `GET /v1/sessions/:id/changes` returns
+  per-file additions, modifications, deletions, and plain diffs, `/diff`
+  renders them, and `/undo <path>` reverts a single file while the remaining
+  files stay undoable (schema v4 tracks per-file revert state).
 
 ## [0.1.0] - 2026-09-18
 

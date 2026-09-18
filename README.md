@@ -50,7 +50,8 @@ Type `/` in the CLI to open the `SESSION`, `INSPECT`, and `CONTROL` command pale
 | `/export [md\|json]` | Write the visible transcript to the current directory |
 | `/status` | Show the active session, model, context window, and workspace |
 | `/context` | Show the estimated context plan, provider-reported usage, and run evidence |
-| `/undo` | Revert conflict-free regular-file changes from the last undoable turn |
+| `/diff` | Review the last turn's changes with plain diffs |
+| `/undo [path]` | Revert conflict-free changes from the last undoable turn, or one file |
 | `/clear` | Clear terminal and reprint masthead |
 | `/help` | Show the command reference |
 | `/exit` | Exit the CLI |

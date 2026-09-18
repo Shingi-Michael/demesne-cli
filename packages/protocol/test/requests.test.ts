@@ -1,5 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { parseSubmitTurnRequest, parseUpdateSessionRequest, ProtocolValidationError } from "../src/index.ts";
+import { parseSubmitTurnRequest, parseUndoSessionRequest, parseUpdateSessionRequest, ProtocolValidationError } from "../src/index.ts";
+
+describe("undo request validation", () => {
+  test("accepts empty, turn-scoped, and path-scoped requests", () => {
+    expect(parseUndoSessionRequest({})).toEqual({});
+    expect(parseUndoSessionRequest({ turnId: "turn-1" })).toEqual({ turnId: "turn-1" });
+    expect(parseUndoSessionRequest({ paths: [" a.ts ", "b.ts"] })).toEqual({ paths: ["a.ts", "b.ts"] });
+    expect(parseUndoSessionRequest({ turnId: "turn-1", paths: ["a.ts"] }))
+      .toEqual({ turnId: "turn-1", paths: ["a.ts"] });
+  });
+
+  test("rejects malformed selectors", () => {
+    expect(() => parseUndoSessionRequest({ turnId: "" })).toThrow(ProtocolValidationError);
+    expect(() => parseUndoSessionRequest({ paths: "a.ts" })).toThrow(ProtocolValidationError);
+    expect(() => parseUndoSessionRequest({ paths: [""] })).toThrow(ProtocolValidationError);
+    expect(() => parseUndoSessionRequest({ paths: Array.from({ length: 101 }, (_, index) => `f${index}`) }))
+      .toThrow(ProtocolValidationError);
+  });
+});
 
 describe("session update validation", () => {
   test("accepts a title, a preferred model, or both", () => {

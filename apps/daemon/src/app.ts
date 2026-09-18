@@ -4,6 +4,7 @@ import {
   parseCreateSessionRequest,
   parseResolvePermissionRequest,
   parseSubmitTurnRequest,
+  parseUndoSessionRequest,
   parseUpdateSessionRequest,
   ProtocolValidationError,
   type ApiErrorBody,
@@ -13,6 +14,8 @@ import {
   type EventEnvelope,
   type SubmitTurnResponse,
   type Turn,
+  type TurnChangesResponse,
+  type UndoSessionRequest,
   type UndoTurnResponse,
   type UpdateSessionResponse,
 } from "@demesne/protocol";
@@ -26,6 +29,7 @@ import { ConfigAllowlist } from "./allowlist.ts";
 import { canonicalWorkspace, listWorkspaceFiles, resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { detectGitBranch } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
+import { buildTurnChanges } from "./turn-changes.ts";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, type InferenceBoundaryHook } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
@@ -136,15 +140,27 @@ export function createDaemonApp(options: {
     }
   }
 
-  async function undoSession(sessionId: string): Promise<Response> {
-    const target = store.latestUndoableTurn(sessionId);
+  async function undoSession(sessionId: string, request: UndoSessionRequest): Promise<Response> {
+    const target = store.undoableTurn(sessionId, request.turnId);
     if (!target) return apiError("not_found", "No reversible turn with snapshots", 404);
     const workspaceRoot = store.getSession(sessionId)?.workspace?.root;
     if (!workspaceRoot) return apiError("invalid_state", "Session has no workspace", 409);
 
-    const prepared: Array<{ file: (typeof target.files)[number]; absolute: string; current: Uint8Array | null }> = [];
+    const requested = request.paths ? new Set(request.paths) : null;
+    if (requested) {
+      const known = new Set(target.files.map((file) => file.path));
+      for (const path of requested) {
+        if (!known.has(path)) {
+          return apiError("invalid_state", `Path is not part of turn ${target.turnId.slice(0, 8)}: ${path}`, 409);
+        }
+      }
+    }
+    const selected = requested ? target.files.filter((file) => requested.has(file.path)) : target.files;
+    if (selected.length === 0) return apiError("invalid_state", "No matching files to revert", 409);
+
+    const prepared: Array<{ file: (typeof selected)[number]; absolute: string; current: Uint8Array | null }> = [];
     try {
-      for (const file of [...target.files].reverse()) {
+      for (const file of [...selected].reverse()) {
         if (file.postExisted === null || file.postExisted === undefined) {
           return apiError("invalid_state", "Snapshot predates conflict-safe undo", 409);
         }
@@ -182,8 +198,8 @@ export function createDaemonApp(options: {
       return apiError("invalid_state", "Undo could not be completed", 409);
     }
     const reverted = prepared.map((entry) => entry.file.path);
-    const event = store.markTurnReverted(sessionId, target.turnId, reverted);
-    const response: UndoTurnResponse = { turnId: target.turnId, files: reverted };
+    const { event, complete } = store.markTurnReverted(sessionId, target.turnId, reverted);
+    const response: UndoTurnResponse = { turnId: target.turnId, files: reverted, complete };
     return json({ ...response, eventId: event.eventId });
   }
 
@@ -384,7 +400,33 @@ export function createDaemonApp(options: {
         path[1] === "sessions" &&
         path[3] === "undo"
       ) {
-        return undoSession(path[2]!);
+        return undoSession(path[2]!, parseUndoSessionRequest(await readOptionalJson(request)));
+      }
+
+      if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "changes") {
+        const sessionId = path[2]!;
+        const session = store.getSession(sessionId);
+        if (!session) return apiError("not_found", "Session not found", 404);
+        if (!session.workspace) return apiError("invalid_state", "Session has no workspace", 409);
+        const requestedTurn = url.searchParams.get("turn")?.trim();
+        const target = requestedTurn ? store.undoableTurn(sessionId, requestedTurn) ?? { turnId: requestedTurn } : store.undoableTurn(sessionId);
+        if (!target) return apiError("not_found", "No turn with snapshots to review", 404);
+        const snapshots = store.snapshotsForTurn(sessionId, target.turnId);
+        if (!snapshots) return apiError("not_found", "Turn not found", 404);
+        const workspaceRoot = session.workspace.root;
+        const changes = buildTurnChanges(snapshots, {
+          readCurrent: (relativePath) => {
+            try {
+              const absolute = resolveWorkspacePath(workspaceRoot, relativePath, true, true);
+              if (!existsSync(absolute) || !lstatSync(absolute).isFile()) return null;
+              return readFileSync(absolute).toString("utf8");
+            } catch {
+              return null;
+            }
+          },
+        });
+        const response: TurnChangesResponse = { turnId: target.turnId, changes };
+        return json(response);
       }
 
       if (request.method === "GET" && url.pathname === "/v1/events") {
@@ -561,6 +603,12 @@ function eventStream(
       "X-Accel-Buffering": "no",
     },
   });
+}
+
+async function readOptionalJson(request: Request): Promise<unknown> {
+  const declaredLength = Number(request.headers.get("content-length") ?? "0");
+  if (!request.body || (Number.isFinite(declaredLength) && declaredLength === 0)) return {};
+  return readJson(request);
 }
 
 async function readJson(request: Request): Promise<unknown> {

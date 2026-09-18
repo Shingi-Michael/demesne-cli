@@ -11,6 +11,8 @@ import {
   type Session,
   type SessionStateResponse,
   type SubmitTurnResponse,
+  type TurnChangesResponse,
+  type UndoTurnResponse,
   type UpdateSessionResponse,
   type WorkspaceFilesResponse,
 } from "@demesne/protocol";
@@ -1560,6 +1562,7 @@ describe("Demesne daemon", () => {
     symlinkSync(outside, join(workspacePath, "target.txt"));
     const response = await fetch(new URL(`/v1/sessions/${created.session.id}/undo`, running.url), {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: "{}",
     });
     expect(response.status).toBe(409);
@@ -1900,6 +1903,85 @@ describe("Demesne daemon", () => {
     }
     expect(permissionRequested).toBe(false);
     expect(readFileSync(join(workspacePath, "src", "target.txt"), "utf8")).toBe("updated\n");
+  });
+
+  test("reviews changes and reverts a single file", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    let round = 0;
+    const processor: TurnProcessor = {
+      providerId: "changes-provider",
+      modelId: "changes-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream() {
+        if (round++ === 0) {
+          yield {
+            type: "tool_call_delta" as const,
+            index: 0,
+            idDelta: "c1",
+            nameDelta: "write_file",
+            argumentsDelta: JSON.stringify({ path: "a.txt", content: "A\n" }),
+          };
+          yield {
+            type: "tool_call_delta" as const,
+            index: 1,
+            idDelta: "c2",
+            nameDelta: "write_file",
+            argumentsDelta: JSON.stringify({ path: "b.txt", content: "B\n" }),
+          };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: "wrote both" };
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Changes", workspacePath }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "write both", permissionMode: "ask" }) },
+    );
+    for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${created.session.id}&after=${submitted.eventId}`, running.url)))) {
+      if (event.type === "permission.requested") {
+        await jsonRequest(running.url, `/v1/permissions/${event.payload.permissionId}`, {
+          method: "POST",
+          body: JSON.stringify({ decision: "allow_once" }),
+        });
+      }
+      if (event.type === "turn.completed") break;
+    }
+
+    const changes = await jsonRequest<TurnChangesResponse>(running.url, `/v1/sessions/${created.session.id}/changes`);
+    expect(changes.changes.map((change) => [change.path, change.operation])).toEqual([["a.txt", "A"], ["b.txt", "A"]]);
+    expect(changes.changes[0]!.diff).toEqual(["+ A"]);
+
+    const first = await jsonRequest<UndoTurnResponse>(running.url, `/v1/sessions/${created.session.id}/undo`, {
+      method: "POST",
+      body: JSON.stringify({ paths: ["a.txt"] }),
+    });
+    expect(first).toMatchObject({ files: ["a.txt"], complete: false });
+    expect(existsSync(join(workspacePath, "a.txt"))).toBe(false);
+    expect(existsSync(join(workspacePath, "b.txt"))).toBe(true);
+
+    const reviewed = await jsonRequest<TurnChangesResponse>(running.url, `/v1/sessions/${created.session.id}/changes`);
+    expect(reviewed.turnId).toBe(changes.turnId);
+    expect(reviewed.changes.find((change) => change.path === "a.txt")?.reverted).toBe(true);
+
+    const second = await jsonRequest<UndoTurnResponse>(running.url, `/v1/sessions/${created.session.id}/undo`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    expect(second).toMatchObject({ files: ["b.txt"], complete: true });
+    expect(existsSync(join(workspacePath, "b.txt"))).toBe(false);
   });
 
   test("renames, searches, exports, and archives sessions over HTTP", async () => {

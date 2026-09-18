@@ -26,6 +26,7 @@ export interface SnapshotFile {
   data: Uint8Array | null;
   postExisted?: boolean | null;
   postHash?: string | null;
+  revertedAt?: string;
 }
 
 interface SnapshotRow {
@@ -35,6 +36,7 @@ interface SnapshotRow {
   content: Uint8Array | null;
   post_kind: "file" | "absent" | null;
   post_hash: string | null;
+  reverted_at: string | null;
 }
 
 interface SessionRow {
@@ -115,7 +117,7 @@ export class NotFoundError extends Error {}
 export class InvalidStateError extends Error {}
 
 export type EventSink = (event: EventEnvelope) => void;
-const STORAGE_SCHEMA_VERSION = 3;
+const STORAGE_SCHEMA_VERSION = 4;
 
 export class DemesneStore {
   readonly database: Database;
@@ -470,42 +472,71 @@ export class DemesneStore {
     })();
   }
 
-  latestUndoableTurn(sessionId: string): { turnId: string; files: SnapshotFile[] } | null {
-    const row = this.database.query(`
-      SELECT t.id AS turn_id
-      FROM turns t
-      WHERE t.session_id = ? AND t.status = 'completed' AND t.reverted_at IS NULL
-        AND EXISTS (SELECT 1 FROM turn_snapshots s WHERE s.turn_id = t.id)
-      ORDER BY t.completed_at DESC, t.rowid DESC
-      LIMIT 1
-    `).get(sessionId) as { turn_id: string } | null;
+  /// Returns a turn's un-reverted snapshot files. Without `turnId` the latest
+  /// completed turn that still has un-reverted files is used.
+  undoableTurn(sessionId: string, turnId?: string): { turnId: string; files: SnapshotFile[] } | null {
+    const row = turnId
+      ? this.database.query(`
+          SELECT t.id AS turn_id
+          FROM turns t
+          WHERE t.id = ? AND t.session_id = ? AND t.status = 'completed'
+            AND EXISTS (SELECT 1 FROM turn_snapshots s WHERE s.turn_id = t.id AND s.reverted_at IS NULL)
+        `).get(turnId, sessionId) as { turn_id: string } | null
+      : this.database.query(`
+          SELECT t.id AS turn_id
+          FROM turns t
+          WHERE t.session_id = ? AND t.status = 'completed' AND t.reverted_at IS NULL
+            AND EXISTS (SELECT 1 FROM turn_snapshots s WHERE s.turn_id = t.id AND s.reverted_at IS NULL)
+          ORDER BY t.completed_at DESC, t.rowid DESC
+          LIMIT 1
+        `).get(sessionId) as { turn_id: string } | null;
     if (!row) return null;
     const files = this.database
-      .query("SELECT file_path, kind, content, post_kind, post_hash FROM turn_snapshots WHERE turn_id = ? ORDER BY rowid")
+      .query(`
+        SELECT file_path, kind, content, post_kind, post_hash, reverted_at
+        FROM turn_snapshots WHERE turn_id = ? AND reverted_at IS NULL ORDER BY rowid
+      `)
       .all(row.turn_id) as SnapshotRow[];
-    return {
-      turnId: row.turn_id,
-      files: files.map((file) => ({
-        path: file.file_path,
-        existed: file.kind === "file",
-        data: file.content,
-        postExisted: file.post_kind === null ? null : file.post_kind === "file",
-        postHash: file.post_hash,
-      })),
-    };
+    return { turnId: row.turn_id, files: files.map(mapSnapshotFile) };
   }
 
-  markTurnReverted(sessionId: string, turnId: string, files: string[]): EventEnvelope {
-    const event = this.database.transaction(() => {
+  /// Every snapshot for a turn, including reverted files, for change review.
+  snapshotsForTurn(sessionId: string, turnId: string): SnapshotFile[] | null {
+    const turn = this.getTurn(turnId);
+    if (!turn || turn.sessionId !== sessionId) return null;
+    const files = this.database
+      .query(`
+        SELECT file_path, kind, content, post_kind, post_hash, reverted_at
+        FROM turn_snapshots WHERE turn_id = ? ORDER BY rowid
+      `)
+      .all(turnId) as SnapshotRow[];
+    return files.map(mapSnapshotFile);
+  }
+
+  /// Marks files reverted. The turn itself is marked reverted only once every
+  /// snapshot file has been reverted, so partial reverts stay undoable.
+  markTurnReverted(sessionId: string, turnId: string, files: string[]): { event: EventEnvelope; complete: boolean } {
+    const result = this.database.transaction(() => {
       const now = new Date().toISOString();
-      const updated = this.database
-        .query("UPDATE turns SET reverted_at = ? WHERE id = ? AND session_id = ? AND status = 'completed'")
-        .run(now, turnId, sessionId);
-      if (Number(updated.changes) !== 1) throw new InvalidStateError(`Turn cannot be reverted: ${turnId}`);
-      return this.insertEvent("turn.reverted", sessionId, turnId, { files }, now);
+      for (const file of files) {
+        this.database.query(
+          "UPDATE turn_snapshots SET reverted_at = ? WHERE turn_id = ? AND file_path = ? AND reverted_at IS NULL",
+        ).run(now, turnId, file);
+      }
+      const remaining = this.database
+        .query("SELECT COUNT(*) AS count FROM turn_snapshots WHERE turn_id = ? AND reverted_at IS NULL")
+        .get(turnId) as { count: number };
+      const complete = remaining.count === 0;
+      if (complete) {
+        this.database.query(
+          "UPDATE turns SET reverted_at = ? WHERE id = ? AND session_id = ? AND status = 'completed'",
+        ).run(now, turnId, sessionId);
+      }
+      const event = this.insertEvent("turn.reverted", sessionId, turnId, { files, complete }, now);
+      return { event, complete };
     })();
-    this.eventSink?.(event);
-    return event;
+    this.eventSink?.(result.event);
+    return result;
   }
 
   trimModelContext(turnId: string, firstRetainedMessageId: number, droppedTurnIds: string[]): EventEnvelope {    const event = this.database.transaction(() => {
@@ -1133,6 +1164,9 @@ export class DemesneStore {
     if (!this.hasColumn("turn_snapshots", "post_hash")) {
       this.database.run("ALTER TABLE turn_snapshots ADD COLUMN post_hash TEXT");
     }
+    if (!this.hasColumn("turn_snapshots", "reverted_at")) {
+      this.database.run("ALTER TABLE turn_snapshots ADD COLUMN reverted_at TEXT");
+    }
     if (!this.hasColumn("sessions", "archived_at")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN archived_at TEXT");
     }
@@ -1362,6 +1396,17 @@ export class DemesneStore {
     const rows = this.database.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
     return rows.some((row) => row.name === column);
   }
+}
+
+function mapSnapshotFile(row: SnapshotRow): SnapshotFile {
+  return {
+    path: row.file_path,
+    existed: row.kind === "file",
+    data: row.content,
+    postExisted: row.post_kind === null ? null : row.post_kind === "file",
+    postHash: row.post_hash,
+    ...(row.reverted_at ? { revertedAt: row.reverted_at } : {}),
+  };
 }
 
 function mapTurn(row: TurnRow): Turn {

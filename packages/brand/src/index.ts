@@ -125,7 +125,7 @@ export function resolveTerminalTheme(
   return Number.isFinite(background) && background >= 7 ? "light" : "dark";
 }
 
-export type SlashCommandId = "new" | "sessions" | "resume" | "rename" | "delete" | "export" | "status" | "context" | "undo" | "clear" | "help" | "exit";
+export type SlashCommandId = "new" | "sessions" | "resume" | "rename" | "delete" | "model" | "export" | "status" | "context" | "undo" | "clear" | "help" | "exit";
 export type SlashCommandArgument = "none" | "optional" | "required";
 export type SlashCommandSection = "session" | "inspect" | "control";
 
@@ -151,6 +151,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: "resume", name: "/resume", aliases: ["/switch"], argument: "required", argumentLabel: "id", description: "Switch to a session", section: "session" },
   { id: "rename", name: "/rename", aliases: [], argument: "required", argumentLabel: "title", description: "Rename the current session", section: "session" },
   { id: "delete", name: "/delete", aliases: ["/archive"], argument: "none", description: "Archive the current session", section: "session" },
+  { id: "model", name: "/model", aliases: [], argument: "optional", argumentLabel: "id", description: "Switch the active model", section: "session" },
   { id: "status", name: "/status", aliases: [], argument: "none", description: "Show session and runtime status", section: "inspect" },
   { id: "context", name: "/context", aliases: [], argument: "none", description: "Show context and run details", section: "inspect" },
   { id: "export", name: "/export", aliases: [], argument: "optional", argumentLabel: "md|json", description: "Export the session transcript", section: "inspect" },

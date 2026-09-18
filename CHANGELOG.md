@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Session management: rename, archive, title and transcript search (FTS5 with
   a LIKE fallback), and Markdown or JSON transcript export, backed by a storage
   schema migration that backfills the search index.
+- `/model` picker with exact-id or unique-prefix switching, a per-session
+  preferred-model hint on resume, and a storage column to record it.
 
 ## [0.1.0] - 2026-09-18
 

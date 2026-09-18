@@ -302,7 +302,7 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(menu).toContain("› /status");
     expect(slashCommandMatches("ordinary prompt")).toEqual([]);
     expect(slashCommandMatches("/cont").map((command) => command.name)).toEqual(["/context"]);
-    expect(slashCommandMatches("/model")).toEqual([]);
+    expect(slashCommandMatches("/theme")).toEqual([]);
     expect(slashCommandMatches("/thinking")).toEqual([]);
   });
 
@@ -337,6 +337,8 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     const filter = resolveSlashCommand("/sessions parser")!;
     expect(slashCommandValidationError(filter)).toBeNull();
     expect(slashCommandCompletion(filter.command)).toBe("/sessions ");
+    expect(slashCommandMatches("/mod").map((command) => command.name)).toEqual(["/model"]);
+    expect(slashCommandValidationError(resolveSlashCommand("/model local")!)).toBeNull();
   });
 
   test("help reflects the single-model reasoning-off runtime", () => {

@@ -301,6 +301,16 @@ describe("DemesneStore", () => {
     store.close();
   });
 
+  test("records and clears a session's preferred model", () => {
+    const store = new DemesneStore(":memory:");
+    const { session } = store.createSession("Model preference");
+    expect(session.preferredModel).toBeUndefined();
+    expect(store.setSessionPreferredModel(session.id, "local-model").preferredModel).toBe("local-model");
+    expect(store.getSession(session.id)?.preferredModel).toBe("local-model");
+    expect(store.setSessionPreferredModel(session.id, null).preferredModel).toBeUndefined();
+    store.close();
+  });
+
   test("searches titles and transcripts, excluding archived sessions", () => {
     const store = new DemesneStore(":memory:");
     const { session } = store.createSession("Parser work");

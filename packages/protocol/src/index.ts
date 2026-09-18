@@ -244,15 +244,19 @@ export interface Session {
   /// Set when the session has been archived; archived sessions are excluded
   /// from the default listing but remain readable and exportable.
   archivedAt?: string | null;
+  /// Model this session was last switched to through the CLI. It is a hint for
+  /// the user, not an automatic daemon-side switch.
+  preferredModel?: string | null;
 }
 
-export interface RenameSessionRequest {
-  title: string;
+export interface UpdateSessionRequest {
+  title?: string;
+  preferredModel?: string | null;
 }
 
-export interface RenameSessionResponse {
+export interface UpdateSessionResponse {
   session: Session;
-  eventId: number;
+  eventId: number | null;
 }
 
 export interface ArchiveSessionResponse {
@@ -356,13 +360,33 @@ export function parseCreateSessionRequest(value: unknown): CreateSessionRequest 
   return { ...(title ? { title } : {}), ...(workspacePath ? { workspacePath } : {}) };
 }
 
-export function parseRenameSessionRequest(value: unknown): RenameSessionRequest {
+export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest {
   if (!isRecord(value)) throw new ProtocolValidationError("Request body must be a JSON object");
-  if (typeof value.title !== "string") throw new ProtocolValidationError("title must be a string");
-  const title = value.title.trim();
-  if (!title) throw new ProtocolValidationError("title cannot be empty");
-  if (title.length > 200) throw new ProtocolValidationError("title must be at most 200 characters");
-  return { title };
+  const update: UpdateSessionRequest = {};
+  if (value.title !== undefined) {
+    if (typeof value.title !== "string") throw new ProtocolValidationError("title must be a string");
+    const title = value.title.trim();
+    if (!title) throw new ProtocolValidationError("title cannot be empty");
+    if (title.length > 200) throw new ProtocolValidationError("title must be at most 200 characters");
+    update.title = title;
+  }
+  if (value.preferredModel !== undefined) {
+    if (value.preferredModel !== null && typeof value.preferredModel !== "string") {
+      throw new ProtocolValidationError("preferredModel must be a string or null");
+    }
+    if (typeof value.preferredModel === "string") {
+      const preferredModel = value.preferredModel.trim();
+      if (!preferredModel) throw new ProtocolValidationError("preferredModel cannot be empty");
+      if (preferredModel.length > 200) throw new ProtocolValidationError("preferredModel must be at most 200 characters");
+      update.preferredModel = preferredModel;
+    } else {
+      update.preferredModel = null;
+    }
+  }
+  if (update.title === undefined && update.preferredModel === undefined) {
+    throw new ProtocolValidationError("title or preferredModel is required");
+  }
+  return update;
 }
 
 export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {

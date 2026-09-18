@@ -2,19 +2,19 @@ import {
   encodeServerSentEvent,
   isRecord,
   parseCreateSessionRequest,
-  parseRenameSessionRequest,
   parseResolvePermissionRequest,
   parseSubmitTurnRequest,
+  parseUpdateSessionRequest,
   ProtocolValidationError,
   type ApiErrorBody,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
   type CreateSessionResponse,
   type EventEnvelope,
-  type RenameSessionResponse,
   type SubmitTurnResponse,
   type Turn,
   type UndoTurnResponse,
+  type UpdateSessionResponse,
 } from "@demesne/protocol";
 import { DemesneStore, InvalidStateError, NotFoundError } from "@demesne/storage";
 import { PlaceholderTurnProcessor, snapshotTurnInference, type TurnInference, type TurnProcessor } from "./processor.ts";
@@ -266,9 +266,19 @@ export function createDaemonApp(options: {
       }
 
       if (request.method === "PATCH" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {
-        const body = parseRenameSessionRequest(await readJson(request));
-        const { session, event } = store.renameSession(path[2]!, body.title);
-        const response: RenameSessionResponse = { session, eventId: event.eventId };
+        const body = parseUpdateSessionRequest(await readJson(request));
+        let session = store.getSession(path[2]!);
+        if (!session) return apiError("not_found", "Session not found", 404);
+        let eventId: number | null = null;
+        if (body.title !== undefined) {
+          const renamed = store.renameSession(path[2]!, body.title);
+          session = renamed.session;
+          eventId = renamed.event.eventId;
+        }
+        if (body.preferredModel !== undefined) {
+          session = store.setSessionPreferredModel(path[2]!, body.preferredModel);
+        }
+        const response: UpdateSessionResponse = { session, eventId };
         return json(response);
       }
 

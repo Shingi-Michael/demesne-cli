@@ -46,6 +46,7 @@ interface SessionRow {
   workspace_root: string | null;
   context_start_message_id: number | null;
   archived_at: string | null;
+  preferred_model: string | null;
 }
 
 interface TurnRow {
@@ -114,7 +115,7 @@ export class NotFoundError extends Error {}
 export class InvalidStateError extends Error {}
 
 export type EventSink = (event: EventEnvelope) => void;
-const STORAGE_SCHEMA_VERSION = 2;
+const STORAGE_SCHEMA_VERSION = 3;
 
 export class DemesneStore {
   readonly database: Database;
@@ -181,7 +182,8 @@ export class DemesneStore {
     const row = this.database
       .query(`
         SELECT sessions.id, sessions.title, sessions.created_at, sessions.updated_at,
-               sessions.workspace_id, sessions.archived_at, workspaces.root AS workspace_root
+               sessions.workspace_id, sessions.archived_at, sessions.preferred_model,
+               workspaces.root AS workspace_root
         FROM sessions
         LEFT JOIN workspaces ON workspaces.id = sessions.workspace_id
         WHERE sessions.id = ?
@@ -200,6 +202,7 @@ export class DemesneStore {
         ? { id: row.workspace_id, root: row.workspace_root }
         : null,
       ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
+      ...(row.preferred_model ? { preferredModel: row.preferred_model } : {}),
       turns: turns.map(mapTurn),
     };
   }
@@ -230,6 +233,17 @@ export class DemesneStore {
     })();
     this.eventSink?.(result.event);
     return result;
+  }
+
+  /// Records the model a session was last switched to. The daemon does not
+  /// auto-switch: the preference is a hint so resuming a session can tell the
+  /// user which model it used without forcing an expensive model reload.
+  setSessionPreferredModel(id: string, model: string | null): Session {
+    return this.database.transaction(() => {
+      this.getSessionOrThrow(id);
+      this.database.query("UPDATE sessions SET preferred_model = ? WHERE id = ?").run(model, id);
+      return this.getSessionOrThrow(id);
+    })();
   }
 
   archiveSession(id: string): { session: Session; event: EventEnvelope } {
@@ -1121,6 +1135,9 @@ export class DemesneStore {
     }
     if (!this.hasColumn("sessions", "archived_at")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN archived_at TEXT");
+    }
+    if (!this.hasColumn("sessions", "preferred_model")) {
+      this.database.run("ALTER TABLE sessions ADD COLUMN preferred_model TEXT");
     }
     this.backfillModelMessages();
     this.migrateSearchIndex();

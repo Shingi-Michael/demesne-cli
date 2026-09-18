@@ -9,12 +9,12 @@ import {
   type EventEnvelope,
   type ModelDescriptor,
   type PermissionDecision,
-  type RenameSessionResponse,
   type RuntimeProfileStatus,
   type Session,
   type SessionStateResponse,
   type SubmitTurnResponse,
   type UndoTurnResponse,
+  type UpdateSessionResponse,
   type WorkspaceFilesResponse,
 } from "@demesne/protocol";
 import {
@@ -28,6 +28,7 @@ import {
   formatPermissionCard,
   formatSlashCommandMenu,
   formatSessionsTable,
+  formatTokenCount,
   formatToolPhaseHeader,
   formatToolResultLine,
   formatTurnReceipt,
@@ -64,6 +65,7 @@ import { TurnThroughputTracker } from "./turn-throughput.ts";
 import { TurnActivityLedger, type TurnPhase } from "./turn-activity.ts";
 import { TerminalTextPacer } from "./terminal-text-pacer.ts";
 import { selectSessionInteractive, sessionListItem } from "./session-picker.ts";
+import { matchModel, selectModelInteractive } from "./model-picker.ts";
 import { reducedMotionEnabled } from "./motion.ts";
 import { ApiRequestError, isStalePermissionResolution } from "./api-request-error.ts";
 import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } from "./approval-selection.ts";
@@ -708,7 +710,7 @@ async function runChat(command: string[]): Promise<void> {
   ]);
   await playTensorIntro(paint);
   const [health, discoveredModels, runtimeStatus] = await boot;
-  const activeModel = discoveredModels.find((model) => model.id === health?.model) ?? {
+  let activeModel = discoveredModels.find((model) => model.id === health?.model) ?? {
     id: health?.model ?? "model",
     provider: health?.provider ?? "local",
   };
@@ -810,6 +812,13 @@ async function runChat(command: string[]): Promise<void> {
       contextRail.hydrate(result.latestProviderCall, thinkingEnabled, currentWorkspace);
       contextRail.setBranch(result.session.workspace?.gitBranch ?? null);
       mentionFiles = await fetchMentionFiles(sessionId);
+      const preferred = result.session.preferredModel;
+      if (preferred && preferred !== activeModel.id) {
+        console.log(paint.dim(
+          `    This session last used ${sanitizeTerminalLine(preferred)}; active model is ${sanitizeTerminalLine(activeModel.id)}. `
+            + `Use /model ${sanitizeTerminalLine(preferred)} to switch.`,
+        ));
+      }
       console.log(`\n  ${paint.text("●", "citron")} Switched to ${paint.bold(sanitizeTerminalLine(result.session.title), "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}\n`);
     } catch {
       console.log(`  ${paint.text(`Could not find session: ${targetId}`, "signal")}\n`);
@@ -902,13 +911,47 @@ async function runChat(command: string[]): Promise<void> {
       else if (!selected) console.log(`  ${paint.dim("Session selection cancelled.")}\n`);
     },
     resume: activateSession,
+    model: async (argument) => {
+      const discovered = await request<{ models: ModelDescriptor[] }>("/v1/models");
+      const query = argument.trim();
+      let selected: ModelDescriptor;
+      if (query) {
+        const match = matchModel(discovered.models, query);
+        if ("error" in match) {
+          console.log(`  ${paint.text(match.error, "signal")}\n`);
+          return;
+        }
+        selected = match.model;
+      } else {
+        const picked = await selectModelInteractive(discovered.models, activeModel.id, paint);
+        if (!picked) {
+          console.log(`  ${paint.dim("Model selection cancelled.")}\n`);
+          return;
+        }
+        selected = picked;
+      }
+      if (selected.id === activeModel.id) {
+        console.log(`  ${paint.dim(`${sanitizeTerminalLine(selected.id)} is already active.`)}\n`);
+        return;
+      }
+      await request("/v1/model", { method: "POST", body: JSON.stringify({ model: selected.id }) });
+      activeModel = selected;
+      contextRail.setModel(selected);
+      if (fixedFooter?.isActive()) fixedFooter.update("", statusLineText());
+      await request(`/v1/sessions/${sessionId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ preferredModel: selected.id }),
+      }).catch(() => null);
+      const context = selected.contextWindow ? paint.dim(` · ctx ${formatTokenCount(selected.contextWindow)}`) : "";
+      console.log(`\n  ${paint.text("●", "citron")} Switched to ${paint.bold(sanitizeTerminalLine(selected.id), "paper")}${context}\n`);
+    },
     rename: async (argument) => {
       const title = sanitizeTerminalLine(argument).trim();
       if (!title) {
         console.log(`  ${paint.text("Usage: /rename <title>", "signal")}\n`);
         return;
       }
-      const result = await request<RenameSessionResponse>(`/v1/sessions/${sessionId}`, {
+      const result = await request<UpdateSessionResponse>(`/v1/sessions/${sessionId}`, {
         method: "PATCH",
         body: JSON.stringify({ title }),
       });

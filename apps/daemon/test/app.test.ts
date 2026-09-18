@@ -8,10 +8,10 @@ import {
   type ContextPlan,
   type CreateSessionResponse,
   type EventEnvelope,
-  type RenameSessionResponse,
   type Session,
   type SessionStateResponse,
   type SubmitTurnResponse,
+  type UpdateSessionResponse,
   type WorkspaceFilesResponse,
 } from "@demesne/protocol";
 import { ProviderError, type ProviderAdapter, type ProviderMessage } from "@demesne/providers";
@@ -1911,11 +1911,17 @@ describe("Demesne daemon", () => {
       body: JSON.stringify({ title: "Original" }),
     });
 
-    const renamed = await jsonRequest<RenameSessionResponse>(running.url, `/v1/sessions/${created.session.id}`, {
+    const renamed = await jsonRequest<UpdateSessionResponse>(running.url, `/v1/sessions/${created.session.id}`, {
       method: "PATCH",
       body: JSON.stringify({ title: "Renamed session" }),
     });
     expect(renamed.session.title).toBe("Renamed session");
+
+    const withModel = await jsonRequest<UpdateSessionResponse>(running.url, `/v1/sessions/${created.session.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ preferredModel: "local-model" }),
+    });
+    expect(withModel.session.preferredModel).toBe("local-model");
 
     const searched = await jsonRequest<{ sessions: Session[] }>(running.url, "/v1/sessions?query=Renamed");
     expect(searched.sessions.map((session) => session.id)).toEqual([created.session.id]);

@@ -46,6 +46,7 @@ Type `/` in the CLI to open the `SESSION`, `INSPECT`, and `CONTROL` command pale
 | `/resume <id>` | Switch to an existing session |
 | `/rename <title>` | Rename the current session |
 | `/delete` | Archive the current session after confirmation |
+| `/model [id]` | Switch the active model with a picker or an exact id/prefix |
 | `/export [md\|json]` | Write the visible transcript to the current directory |
 | `/status` | Show the active session, model, context window, and workspace |
 | `/context` | Show the estimated context plan, provider-reported usage, and run evidence |

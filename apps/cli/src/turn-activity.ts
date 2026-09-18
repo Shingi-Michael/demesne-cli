@@ -13,6 +13,7 @@ export interface TurnActivity {
   durationMs?: number;
   exitCode?: number;
   created?: boolean;
+  diff?: { oldText: string; newText: string };
 }
 
 export interface TurnChangeReceipt {
@@ -67,6 +68,7 @@ export class TurnActivityLedger {
         phase: classifyTurnPhase(name, input, this.hasChanges()),
         state: "queued",
         detail: toolActivityDetail(name, input),
+        diff: editDiffFrom(name, input),
       });
       return;
     }
@@ -192,6 +194,18 @@ function toolActivityDetail(name: string, input: Record<string, unknown>): strin
 function commandFrom(input: Record<string, unknown>): string | undefined {
   return Array.isArray(input.argv) && input.argv.every((value) => typeof value === "string")
     ? (input.argv as string[]).map(shellWord).join(" ")
+    : undefined;
+}
+
+/// Keeps only the replacement pair needed for an inline diff; full tool
+/// arguments are not retained for the whole turn.
+function editDiffFrom(
+  name: string,
+  input: Record<string, unknown>,
+): { oldText: string; newText: string } | undefined {
+  if (name !== "edit_file") return undefined;
+  return typeof input.oldText === "string" && typeof input.newText === "string"
+    ? { oldText: input.oldText, newText: input.newText }
     : undefined;
 }
 

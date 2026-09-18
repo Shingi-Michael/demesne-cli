@@ -39,6 +39,29 @@ describe("TurnActivityLedger", () => {
     expect(ledger.activity("test")).toMatchObject({ phase: "verify", durationMs: 125 });
   });
 
+  test("retains edit replacements for an inline diff and nothing else", () => {
+    const ledger = new TurnActivityLedger();
+    ledger.apply(event(1, "tool.call_requested", {
+      toolCallId: "edit",
+      name: "edit_file",
+      arguments: JSON.stringify({ path: "src/a.ts", oldText: "old", newText: "new" }),
+    }));
+    ledger.apply(event(2, "tool.call_requested", {
+      toolCallId: "read",
+      name: "read_file",
+      arguments: JSON.stringify({ path: "src/a.ts" }),
+    }));
+    ledger.apply(event(3, "tool.call_requested", {
+      toolCallId: "edit-batch",
+      name: "edit_file",
+      arguments: JSON.stringify({ path: "src/b.ts", hunks: [{ oldText: "a", newText: "b" }] }),
+    }));
+
+    expect(ledger.activity("edit")?.diff).toEqual({ oldText: "old", newText: "new" });
+    expect(ledger.activity("read")?.diff).toBeUndefined();
+    expect(ledger.activity("edit-batch")?.diff).toBeUndefined();
+  });
+
   test("uses failed command outcomes and ignores replayed events", () => {
     const ledger = new TurnActivityLedger();
     const requested = event(1, "tool.call_requested", {

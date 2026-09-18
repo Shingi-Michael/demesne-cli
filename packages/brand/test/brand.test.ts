@@ -728,8 +728,11 @@ describe("Demesne Brand & Mathematical Alignment", () => {
 
   test("formats compact unified diff previews", () => {
     const diff = formatDiffPreview("const a = 1;\nconst b = 2;", "const a = 1;\nconst b = 3;", 4, createPainter(false));
-    expect(diff.some((line) => line.startsWith("- const a = 1;"))).toBe(true);
-    expect(diff.some((line) => line.startsWith("+ const a = 1;"))).toBe(true);
+    expect(diff).toEqual([
+      "  const a = 1;",
+      "- const b = 2;",
+      "+ const b = 3;",
+    ]);
   });
 
   test("computes multiline visual wrapping and paragraph layout for chat prompt input", () => {

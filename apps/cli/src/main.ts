@@ -31,6 +31,8 @@ import {
   formatTurnReceipt,
   formatUserMessage,
   formatWelcomeCard,
+  fileUrl,
+  formatHyperlink,
   humanToolTitle,
   renderBeaconText,
   renderSpinner,
@@ -52,7 +54,7 @@ import {
   type SlashCommandId,
 } from "@demesne/brand";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { CliContextRail } from "./context-rail.ts";
 import { TurnThroughputTracker } from "./turn-throughput.ts";
@@ -576,6 +578,7 @@ async function submitAndRender(
   interactive = true,
   providerName?: string,
   contextRail?: CliContextRail,
+  workspaceRoot?: string,
 ): Promise<"completed" | "stopped"> {
   const submitted = await request<SubmitTurnResponse>(`/v1/sessions/${sessionId}/turns`, {
     method: "POST",
@@ -591,6 +594,7 @@ async function submitAndRender(
     providerName,
     thinkingEnabled: submitted.turn.thinkingEnabled ?? thinkingEnabled,
     contextRail,
+    workspaceRoot,
   });
 }
 
@@ -716,6 +720,7 @@ async function runChat(command: string[]): Promise<void> {
         true,
         activeModel.provider,
         contextRail,
+        currentWorkspace,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Turn failed";
@@ -878,6 +883,7 @@ async function renderTurn(
     providerName?: string;
     thinkingEnabled?: boolean;
     contextRail?: CliContextRail;
+    workspaceRoot?: string;
   } = {},
 ): Promise<"completed" | "stopped"> {
   const stream = new AbortController();
@@ -900,6 +906,16 @@ async function renderTurn(
   let visiblePhase: TurnPhase | null = null;
 
   const interactive = options.interactive ?? true;
+  const workspaceRoot = options.workspaceRoot;
+  const linkPath = interactive && settings.ui.hyperlinks && workspaceRoot
+    ? (styledDisplay: string, path: string): string => {
+        try {
+          return formatHyperlink(styledDisplay, fileUrl(resolve(workspaceRoot, path)));
+        } catch {
+          return styledDisplay;
+        }
+      }
+    : undefined;
   const reduceMotion = reducedMotionEnabled();
   const waitingActivity: BeaconActivity = options.thinkingEnabled === false ? "loading" : "thinking";
   const waitingLabel = options.thinkingEnabled === false ? "Working" : "Thinking";
@@ -1128,15 +1144,25 @@ async function renderTurn(
             console.log(formatToolPhaseHeader(phase, 1, paint));
             visiblePhase = phase;
           }
+          const failureMessage = state === "failed" && typeof event.payload.message === "string"
+            ? event.payload.message
+            : undefined;
           console.log(formatToolResultLine(
             state,
             toolName,
-            activity?.detail,
+            failureMessage ?? activity?.detail,
             activity?.durationMs,
             activityLedger.pendingCount(phase) === 0,
             getConversationWidth(process.stdout),
             paint,
+            { linkPath },
           ));
+          const diff = activity?.diff;
+          if (state === "done" && diff) {
+            for (const line of formatDiffPreview(diff.oldText, diff.newText, 12, paint)) {
+              console.log(`    ${line}`);
+            }
+          }
         }
         const pending = activityLedger.snapshot().activities.find((candidate) =>
           candidate.state === "queued" || candidate.state === "running"

@@ -65,6 +65,13 @@ History is stored privately at `<data-dir>/history.jsonl` (mode `0600`),
 tagged with the workspace, and capped at 500 entries. A malformed or unreadable
 history never blocks startup.
 
+Code fences are syntax-highlighted for TypeScript/JavaScript, JSON, Bash, YAML,
+Python, Go, Rust, and diffs; unknown languages fall back to a common keyword
+set, and `NO_COLOR` output is unchanged. Completed `edit_file` calls render a
+compact inline diff in scrollback, failed tools print their error message, and
+path-like tool details are OSC 8 hyperlinks in terminals that support them.
+Disable links with `[ui] hyperlinks = false` or `DEMESNE_NO_HYPERLINKS=1`.
+
 For one-off scriptable queries or Unix piping:
 
 ```sh

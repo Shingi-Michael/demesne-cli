@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prompt editor with history, readline keybindings, kill ring, undo, reverse
   search, word motion, and `$EDITOR` composition. History persists privately in
   the data directory and is tagged by workspace.
+- Syntax highlighting for fenced code blocks, real unified diffs for edit
+  previews and scrollback, visible failure messages for tools, and optional
+  OSC 8 hyperlinks for file paths.
 
 ## [0.1.0] - 2026-09-18
 

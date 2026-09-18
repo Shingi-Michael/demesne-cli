@@ -6,6 +6,7 @@
 /// local state, paper on ink is the canvas pair.
 
 import { sliceAnsi, stringWidth } from "bun";
+import { highlightCode as highlightCodeWithLanguage, type CodeHighlightState } from "./highlight.ts";
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
@@ -756,21 +757,114 @@ export function formatDiffPreview(
   maxLines = 6,
   painter: Painter = createPainter(true),
 ): string[] {
-  const oldLines = oldText ? oldText.split("\n") : [];
-  const newLines = newText ? newText.split("\n") : [];
-  const rows: string[] = [];
+  const lines = formatUnifiedDiff(oldText, newText, { context: 1, maxLines, compact: true, painter });
+  return lines.length > 0 ? lines : [painter.dim("(no textual change)")];
+}
 
-  const half = Math.max(1, Math.floor(maxLines / 2));
-  for (const line of oldLines.slice(0, half)) {
-    rows.push(painter.text(`- ${sanitizeTerminalLine(line)}`, "signal"));
+export interface UnifiedDiffOptions {
+  context?: number;
+  maxLines?: number;
+  compact?: boolean;
+  painter?: Painter;
+}
+
+interface UnifiedDiffRow {
+  kind: "header" | "context" | "removed" | "added";
+  line: string;
+  number?: number;
+}
+
+/// Formats a line-level unified diff.
+///
+/// The implementation trims the common prefix and suffix, then renders the
+/// remaining change block with surrounding context. That is exact for the
+/// contiguous hunks produced by `edit_file`; a file with several distant
+/// changes is presented as one block between the first and last change rather
+/// than as separate hunks. Output is bounded by `maxLines` with an explicit
+/// omission row, and every line is sanitized before styling.
+export function formatUnifiedDiff(
+  oldText: string,
+  newText: string,
+  options: UnifiedDiffOptions = {},
+): string[] {
+  const painter = options.painter ?? createPainter(true);
+  const context = Math.max(0, options.context ?? 3);
+  const maxLines = Math.max(2, options.maxLines ?? 40);
+  const compact = options.compact ?? false;
+  const oldLines = oldText === "" ? [] : oldText.split("\n");
+  const newLines = newText === "" ? [] : newText.split("\n");
+
+  let prefix = 0;
+  while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) {
+    prefix += 1;
   }
-  for (const line of newLines.slice(0, half)) {
-    rows.push(painter.text(`+ ${sanitizeTerminalLine(line)}`, "citron"));
+  let suffix = 0;
+  while (
+    suffix < oldLines.length - prefix
+    && suffix < newLines.length - prefix
+    && oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]
+  ) {
+    suffix += 1;
   }
-  if (oldLines.length + newLines.length > maxLines) {
-    rows.push(painter.dim(`... (${oldLines.length + newLines.length - maxLines} more lines)`));
+
+  const removed = oldLines.slice(prefix, oldLines.length - suffix);
+  const added = newLines.slice(prefix, newLines.length - suffix);
+  if (removed.length === 0 && added.length === 0) return [];
+
+  const contextBeforeStart = Math.max(0, prefix - context);
+  const contextBefore = oldLines.slice(contextBeforeStart, prefix);
+  const contextAfter = oldLines.slice(oldLines.length - suffix, oldLines.length - suffix + Math.min(context, suffix));
+
+  const rows: UnifiedDiffRow[] = [];
+  if (!compact) {
+    rows.push({ kind: "header", line: `@@ -${prefix + 1},${removed.length} +${prefix + 1},${added.length} @@` });
   }
-  return rows;
+  contextBefore.forEach((line, offset) => {
+    rows.push({ kind: "context", line, number: contextBeforeStart + offset + 1 });
+  });
+  removed.forEach((line, offset) => {
+    rows.push({ kind: "removed", line, number: prefix + offset + 1 });
+  });
+  added.forEach((line, offset) => {
+    rows.push({ kind: "added", line, number: prefix + offset + 1 });
+  });
+  contextAfter.forEach((line, offset) => {
+    rows.push({ kind: "context", line, number: oldLines.length - suffix + offset + 1 });
+  });
+
+  const rendered = rows.map((row) => renderUnifiedDiffRow(row, compact, painter));
+  if (rendered.length <= maxLines) return rendered;
+
+  const headCount = Math.max(1, Math.ceil(maxLines / 2) - 1);
+  const tailCount = Math.max(1, maxLines - headCount - 1);
+  const head = rendered.slice(0, headCount);
+  const tail = rendered.slice(rendered.length - tailCount);
+  const omitted = rendered.length - headCount - tailCount;
+  return [...head, painter.dim(`${compact ? "" : "     │ "}… ${omitted} more lines`), ...tail];
+}
+
+function renderUnifiedDiffRow(row: UnifiedDiffRow, compact: boolean, painter: Painter): string {
+  if (row.kind === "header") return painter.text(row.line, "electric");
+  const text = sanitizeTerminalLine(row.line);
+  if (compact) {
+    if (row.kind === "removed") return painter.text(`- ${text}`, "signal");
+    if (row.kind === "added") return painter.text(`+ ${text}`, "citron");
+    return painter.dim(`  ${text}`);
+  }
+  const number = String(row.number ?? 0).padStart(4);
+  if (row.kind === "removed") return painter.text(`${number} │ - ${text}`, "signal");
+  if (row.kind === "added") return painter.text(`${number} │ + ${text}`, "citron");
+  return painter.dim(`${number} │   ${text}`);
+}
+
+/// Wraps text in an OSC 8 hyperlink. Terminals without support ignore the
+/// sequence, and the visible text is unchanged either way.
+export function formatHyperlink(text: string, url: string, enabled = true): string {
+  return enabled ? `\x1b]8;;${url}\x07${text}\x1b]8;;\x07` : text;
+}
+
+export function fileUrl(absolutePath: string): string {
+  return new URL(`file://${absolutePath}`).href;
 }
 
 /// Formats an authored user turn block spanning the width of the terminal.
@@ -851,6 +945,7 @@ export function formatToolResultLine(
   last: boolean,
   width = 80,
   painter: Painter = createPainter(true),
+  options: { linkPath?: (styledDisplay: string, path: string) => string } = {},
 ): string {
   const badge = toolKindBadge(sanitizeTerminalLine(name));
   const color: PaletteColor = state === "done" ? "citron" : "signal";
@@ -860,8 +955,19 @@ export function formatToolResultLine(
   const duration = durationMs === undefined ? "" : ` · ${durationMs}ms`;
   const fallback = badge.title;
   const available = Math.max(8, width - visibleLength(prefix) - visibleLength(duration));
-  const description = truncateText(sanitizeTerminalLine(detail ?? fallback), available);
-  return `${prefix}${painter.text(description, state === "done" ? "paper" : "signal")}${painter.dim(duration)}`;
+  const sanitized = sanitizeTerminalLine(detail ?? fallback);
+  const description = truncateText(sanitized, available);
+  const styled = painter.text(description, state === "done" ? "paper" : "signal");
+  const linked = state === "done" && options.linkPath && looksLikePath(sanitized)
+    ? options.linkPath(styled, sanitized)
+    : styled;
+  return `${prefix}${linked}${painter.dim(duration)}`;
+}
+
+function looksLikePath(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || /\s/.test(trimmed)) return false;
+  return trimmed.includes("/") || /\.[A-Za-z0-9]{1,8}$/.test(trimmed);
 }
 
 /// Formats one step in the compact tool activity timeline.
@@ -1469,6 +1575,7 @@ export class TerminalMarkdownStream {
   private buffer = "";
   private inCodeBlock = false;
   private codeBlockLang = "";
+  private highlightState: CodeHighlightState = { inBlockComment: false };
   private tableLines: string[] = [];
   private painter: Painter;
   private width: number;
@@ -1630,6 +1737,7 @@ export class TerminalMarkdownStream {
     // Fenced code block boundary
     if (trimmed.startsWith("```")) {
       this.inCodeBlock = !this.inCodeBlock;
+      this.highlightState = { inBlockComment: false };
       if (this.inCodeBlock) {
         this.codeBlockLang = trimmed.slice(3).trim();
         const rawHeader = this.codeBlockLang ? ` [${this.codeBlockLang}] ` : " ";
@@ -1752,13 +1860,9 @@ export class TerminalMarkdownStream {
   }
 
   private highlightCode(code: string): string {
-    if (!this.painter.enabled) return code;
-    // Highlight keywords in code
-    return code.replace(
-      /\b(const|let|var|function|return|import|export|from|async|await|if|else|switch|case|class|interface|type|def|fn|pub|struct|impl)\b/g,
-      (match) => this.painter.bold(match, "electric"),
-    );
+    return highlightCodeWithLanguage(code, this.codeBlockLang, this.painter, this.highlightState);
   }
 }
 
+export * from "./highlight.ts";
 export * from "./tensor-mark.ts";

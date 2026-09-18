@@ -37,27 +37,21 @@ import {
   resolveSlashCommand,
   resolveTerminalTheme,
   SPINNER_PERIOD_MS,
-  nextGraphemeBoundary,
-  previousGraphemeBoundary,
   sanitizeTerminalLine,
   sanitizeTerminalText,
-  slashCommandCompletion,
   slashCommandMatches,
   slashCommandValidationError,
   TerminalMarkdownStream,
   TerminalReasoningStream,
-  textIndexAtVisualColumn,
   toolKindBadge,
   truncateText,
   visibleLength,
   type BeaconActivity,
   type Painter,
   type PaletteColor,
-  type PromptLineInfo,
   type SlashCommandId,
 } from "@demesne/brand";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { CliContextRail } from "./context-rail.ts";
@@ -71,6 +65,9 @@ import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } fro
 import { applyFooterScrollRegion, resetFooterScrollRegion } from "./terminal-control.ts";
 import { reduceInterruptKey } from "./interrupt-key.ts";
 import { playTensorIntro } from "./tensor-intro.ts";
+import { PromptHistory } from "./prompt-history.ts";
+import { composeInEditor } from "./external-editor.ts";
+import { createPromptEditorState, reducePromptEditor, reverseSearchMatches, setPromptValue } from "./prompt-editor.ts";
 import { VERSION } from "./version.ts";
 import { loadCliSettings, type CliSettings } from "./cli-config.ts";
 import {
@@ -216,50 +213,58 @@ function getConversationWidth(stream: { columns?: number } = process.stdout): nu
   return Math.min(100, getTerminalWidth(stream));
 }
 
-async function readCommandPrompt(): Promise<string> {
+async function readCommandPrompt(history: PromptHistory): Promise<string> {
   const input = process.stdin;
   const output = process.stdout;
   const wasRaw = input.isRaw;
-  let value = "";
-  let cursor = 0;
-  let selectedIndex = 0;
-  let menuDismissed = false;
+  let state = createPromptEditorState();
   let prevCursorVisualLine = 0;
+  let prevTotalLines = 1;
 
   emitKeypressEvents(input);
   input.setRawMode(true);
   input.resume();
 
   return new Promise((resolve) => {
-    const matchingCommands = () => (menuDismissed ? [] : slashCommandMatches(value).slice(0, 10));
-
-    let currentLineInfos: PromptLineInfo[] = [];
-    let currentCursorLine = 0;
-    let currentCursorCol = 0;
-
-    let prevTotalLines = 1;
+    const matchingCommands = () => (state.menuDismissed ? [] : slashCommandMatches(state.value).slice(0, 10));
 
     const render = () => {
       const commands = matchingCommands();
-      selectedIndex = Math.min(selectedIndex, Math.max(0, commands.length - 1));
+      state.menuSelected = Math.min(state.menuSelected, Math.max(0, commands.length - 1));
       const inputWidth = Math.max(10, getConversationWidth(output) - 4);
-      const layout = computePromptVisualLines(value, cursor, inputWidth);
-      currentLineInfos = layout.lineInfos;
-      currentCursorLine = layout.cursorLine;
-      currentCursorCol = layout.cursorCol;
 
-      const placeholder = value.length === 0 && commands.length === 0
+      // Reverse search replaces the draft with a one-line query display. The
+      // draft itself stays in the editor state and is restored on cancel.
+      const searchMatches = state.search ? reverseSearchMatches(history.entries(), state.search.query) : [];
+      const searchMatch = state.search
+        ? searchMatches[Math.min(state.search.index, Math.max(0, searchMatches.length - 1))] ?? ""
+        : "";
+      const searchLine = state.search
+        ? `(reverse-i-search)\`${state.search.query}\`: ${searchMatch || (searchMatches.length === 0 ? "no match" : "")}`
+        : null;
+
+      const layout = computePromptVisualLines(
+        searchLine ?? state.value,
+        searchLine === null ? state.cursor : searchLine.length,
+        inputWidth,
+      );
+
+      const placeholder = searchLine === null && state.value.length === 0 && commands.length === 0
         ? paint.dim(truncateText("Ask anything or type / for commands...", inputWidth))
         : "";
       const promptLines: string[] = [];
       for (let i = 0; i < layout.lines.length; i++) {
         const prefix = i === 0 ? `  ${paint.text("◆", "electric")} ` : "    ";
-        promptLines.push(`${prefix}${layout.lines[i] || (i === 0 ? placeholder : "")}`);
+        const line = layout.lines[i] ?? "";
+        const rendered = searchLine !== null
+          ? paint.dim(line)
+          : line || (i === 0 ? placeholder : "");
+        promptLines.push(`${prefix}${rendered}`);
       }
 
       const trailingContent: string[] = [];
-      if (commands.length > 0) {
-        trailingContent.push(...formatSlashCommandMenu(commands, selectedIndex, getConversationWidth(output), paint).split("\n"));
+      if (commands.length > 0 && searchLine === null) {
+        trailingContent.push(...formatSlashCommandMenu(commands, state.menuSelected, getConversationWidth(output), paint).split("\n"));
       } else if (!chatState.footer?.isActive()) {
         const statusLine = chatState.inputStatusLine?.() ?? "";
         if (statusLine && (!output.rows || output.rows >= 6)) {
@@ -343,178 +348,49 @@ async function readCommandPrompt(): Promise<string> {
       resolve(result);
     };
 
+    const openExternalEditor = async () => {
+      input.removeListener("keypress", onKeypress);
+      output.removeListener("resize", onResize);
+      input.setRawMode(Boolean(wasRaw));
+      try {
+        state = setPromptValue(state, await composeInEditor(state.value, { env: process.env }));
+      } catch (error) {
+        output.write(`${paint.text(`External editor failed: ${error instanceof Error ? error.message : String(error)}`, "signal")}\n`);
+      } finally {
+        emitKeypressEvents(input);
+        input.setRawMode(true);
+        input.resume();
+        input.on("keypress", onKeypress);
+        output.on("resize", onResize);
+        prevCursorVisualLine = 0;
+        render();
+      }
+    };
+
     const onKeypress = (
       text: string,
       key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean },
     ) => {
-      const commands = matchingCommands();
-      if (key.ctrl && key.name === "c") {
+      const result = reducePromptEditor(state, {
+        key,
+        text,
+        commands: matchingCommands(),
+        history: history.entries(),
+      });
+      state = result.state;
+      if (result.action.type === "cancel") {
         cleanup();
         leaveChat();
       }
-      if (key.ctrl && key.name === "d" && !value) {
-        cleanup();
-        leaveChat();
-      }
-
-      // 1. Up arrow: menu navigation OR move cursor up one visual line
-      if (key.name === "up") {
-        if (commands.length > 0) {
-          selectedIndex = (selectedIndex - 1 + commands.length) % commands.length;
-          render();
-        } else if (currentLineInfos.length > 1) {
-          if (currentCursorLine > 0) {
-            const targetLine = currentLineInfos[currentCursorLine - 1]!;
-            cursor = targetLine.start + textIndexAtVisualColumn(targetLine.text, currentCursorCol);
-          } else {
-            cursor = 0;
-          }
-          render();
-        }
+      if (result.action.type === "submit") {
+        finish(result.action.value);
         return;
       }
-
-      // 2. Down arrow: menu navigation OR move cursor down one visual line
-      if (key.name === "down") {
-        if (commands.length > 0) {
-          selectedIndex = (selectedIndex + 1) % commands.length;
-          render();
-        } else if (currentLineInfos.length > 1) {
-          if (currentCursorLine < currentLineInfos.length - 1) {
-            const targetLine = currentLineInfos[currentCursorLine + 1]!;
-            cursor = targetLine.start + textIndexAtVisualColumn(targetLine.text, currentCursorCol);
-          } else {
-            cursor = value.length;
-          }
-          render();
-        }
+      if (result.action.type === "compose") {
+        void openExternalEditor();
         return;
       }
-
-      // 3. Tab: auto-complete slash command
-      if (key.name === "tab" && commands.length > 0) {
-        const command = commands[selectedIndex]!;
-        if (command.argument !== "none") {
-          value = slashCommandCompletion(command);
-          cursor = value.length;
-          menuDismissed = true;
-          render();
-        } else {
-          finish(command.name);
-        }
-        return;
-      }
-
-      // 4. Shift+Enter / Option+Enter / Alt+Enter / Ctrl+J -> Insert Newline (New Paragraph)
-      const isNewlineKey =
-        Boolean(key.meta && (key.name === "return" || key.name === "enter")) ||
-        Boolean(key.shift && (key.name === "return" || key.name === "enter")) ||
-        Boolean(key.ctrl && key.name === "j") ||
-        key.name === "linefeed" ||
-        text === "\x1b\r" ||
-        text === "\x1b\n";
-
-      if (isNewlineKey) {
-        value = value.slice(0, cursor) + "\n" + value.slice(cursor);
-        cursor += 1;
-        selectedIndex = 0;
-        menuDismissed = true;
-        render();
-        return;
-      }
-
-      // 5. Enter -> Finish / Execute (or select command if menu is active)
-      if (key.name === "return" || key.name === "enter") {
-        if (commands.length > 0) {
-          const command = commands[selectedIndex]!;
-          if (command.argument !== "none") {
-            value = slashCommandCompletion(command);
-            cursor = value.length;
-            menuDismissed = true;
-            render();
-          } else {
-            finish(command.name);
-          }
-          return;
-        }
-        finish(value);
-        return;
-      }
-
-      // 6. Escape -> Clear input or dismiss menu
-      if (key.name === "escape") {
-        value = "";
-        cursor = 0;
-        selectedIndex = 0;
-        menuDismissed = false;
-        render();
-        return;
-      }
-
-      // 7. Backspace
-      if (key.name === "backspace") {
-        if (cursor > 0) {
-          const previous = previousGraphemeBoundary(value, cursor);
-          value = value.slice(0, previous) + value.slice(cursor);
-          cursor = previous;
-          selectedIndex = 0;
-          menuDismissed = false;
-          render();
-        }
-        return;
-      }
-
-      // 8. Delete
-      if (key.name === "delete") {
-        if (cursor < value.length) {
-          value = value.slice(0, cursor) + value.slice(nextGraphemeBoundary(value, cursor));
-          menuDismissed = false;
-          render();
-        }
-        return;
-      }
-
-      // 9. Left arrow
-      if (key.name === "left") {
-        cursor = previousGraphemeBoundary(value, cursor);
-        render();
-        return;
-      }
-
-      // 10. Right arrow
-      if (key.name === "right") {
-        cursor = nextGraphemeBoundary(value, cursor);
-        render();
-        return;
-      }
-
-      // 11. Home
-      if (key.name === "home") {
-        const curLine = currentLineInfos[currentCursorLine];
-        cursor = curLine ? curLine.start : 0;
-        render();
-        return;
-      }
-
-      // 12. End
-      if (key.name === "end") {
-        const curLine = currentLineInfos[currentCursorLine];
-        cursor = curLine ? curLine.start + curLine.text.length : value.length;
-        render();
-        return;
-      }
-
-      // 13. Regular typing or pasting text (including multi-line pasted text)
-      if (!key.ctrl && !key.meta && text) {
-        const cleaned = text.replace(/\r\n|\r/g, "\n").replaceAll("\t", "  ").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
-        if (cleaned.length > 0) {
-          value = value.slice(0, cursor) + cleaned + value.slice(cursor);
-          cursor += cleaned.length;
-          selectedIndex = 0;
-          menuDismissed = false;
-          render();
-        }
-      }
+      render();
     };
 
     input.on("keypress", onKeypress);
@@ -740,6 +616,7 @@ async function runChat(command: string[]): Promise<void> {
   }
 
   const interactive = process.stdin.isTTY && process.stdout.isTTY;
+  const history = PromptHistory.load(join(settings.dataDirectory, "history.jsonl"));
   let sessionId = sessionIdOverride;
   const thinkingEnabled: boolean | undefined = undefined;
 
@@ -951,19 +828,21 @@ async function runChat(command: string[]): Promise<void> {
   };
 
   if (initial) {
+    history.add(initial, currentWorkspace);
     await executePrompt(initial);
   }
 
   while (true) {
     let line: string;
     try {
-      line = await readCommandPrompt();
+      line = await readCommandPrompt(history);
     } catch {
       leaveChat();
     }
 
     const input = line.trim();
     if (!input) continue;
+    history.add(input, currentWorkspace);
 
     if (input.startsWith("/")) {
       const invocation = resolveSlashCommand(input);

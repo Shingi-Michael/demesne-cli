@@ -51,6 +51,20 @@ Type `/` in the CLI to open the `SESSION`, `INSPECT`, and `CONTROL` command pale
 | `/help` | Show the command reference |
 | `/exit` | Exit the CLI |
 
+### Prompt Editing
+
+The prompt supports readline-style editing: `Up`/`Down` walk history (or the
+slash menu when it is open), `Ctrl+P`/`Ctrl+N` do the same for multi-line
+drafts, `Ctrl+R` starts an incremental reverse search, `Ctrl+A`/`Ctrl+E` move
+to the line edges, `Ctrl+U`/`Ctrl+K`/`Ctrl+W` kill text and `Ctrl+Y` yanks it,
+`Ctrl+_` undoes, `Alt+B`/`Alt+F` (or `Ctrl+Left`/`Ctrl+Right`) move by word,
+and `Ctrl+O` composes the prompt in `$VISUAL`/`$EDITOR`. `Shift+Enter` inserts
+a new line.
+
+History is stored privately at `<data-dir>/history.jsonl` (mode `0600`),
+tagged with the workspace, and capped at 500 entries. A malformed or unreadable
+history never blocks startup.
+
 For one-off scriptable queries or Unix piping:
 
 ```sh

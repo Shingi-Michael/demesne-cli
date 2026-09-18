@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace instructions from `DEMESNE.md` or `AGENTS.md`, read per turn and
   capped at 32 KiB.
 - Product version in `/healthz`, single-sourced from the root package manifest.
+- Prompt editor with history, readline keybindings, kill ring, undo, reverse
+  search, word motion, and `$EDITOR` composition. History persists privately in
+  the data directory and is tagged by workspace.
 
 ## [0.1.0] - 2026-09-18
 

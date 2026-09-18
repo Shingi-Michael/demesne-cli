@@ -112,9 +112,16 @@ bun run demesne prompt "Inspect this repository"
 bun run demesne session list
 bun run demesne doctor --json
 bun run demesne daemon status
+bun run demesne ps
 bun run demesne prompt --output json "Summarize the test suite"
 echo "Explain this failure" | bun run demesne prompt --output stream-json
 ```
+
+`demesne ps` lists sessions with queued or running turns alongside inference
+counts; `--watch` refreshes every two seconds and `--json` emits the raw
+status. `demesne --version` checks for a newer release once a day when stdout
+is a terminal (`--check` forces it, `--no-check` or
+`DEMESNE_NO_UPDATE_CHECK=1` disables it).
 
 `--output json` prints one result object with the response, usage, metrics, and
 recorded changes and validations; `--output stream-json` prints every event

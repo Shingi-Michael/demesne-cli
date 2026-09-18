@@ -314,6 +314,28 @@ describe("DemesneStore", () => {
     store.close();
   });
 
+  test("lists sessions with active turns", () => {
+    const store = new DemesneStore(":memory:");
+    const { session } = store.createSession("Active work");
+    const { turn } = store.createTurn(session.id, "do it");
+
+    const queued = store.listActiveTurns();
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({
+      sessionId: session.id,
+      title: "Active work",
+      turnId: turn.id,
+      status: "queued",
+      workspaceRoot: null,
+    });
+
+    store.startTurn(turn.id);
+    expect(store.listActiveTurns()[0]?.status).toBe("running");
+    store.completeTurn(turn.id);
+    expect(store.listActiveTurns()).toEqual([]);
+    store.close();
+  });
+
   test("records and clears a session's preferred model", () => {
     const store = new DemesneStore(":memory:");
     const { session } = store.createSession("Model preference");

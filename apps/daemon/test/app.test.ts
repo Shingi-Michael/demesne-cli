@@ -7,6 +7,7 @@ import {
   type ArchiveSessionResponse,
   type ContextPlan,
   type CreateSessionResponse,
+  type DaemonStatusResponse,
   type EventEnvelope,
   type Session,
   type SessionStateResponse,
@@ -2075,6 +2076,47 @@ describe("Demesne daemon", () => {
 
     const invalid = await fetch(new URL(`/v1/sessions/${created.session.id}/export?format=xml`, running.url));
     expect(invalid.status).toBe(400);
+  });
+
+  test("reports daemon and active session status", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const processor: TurnProcessor = {
+      providerId: "status-provider",
+      modelId: "status-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream() {
+        await gate;
+        yield { type: "text_delta" as const, delta: "done" };
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Status check" }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      running.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "wait" }) },
+    );
+
+    const active = await jsonRequest<DaemonStatusResponse>(running.url, "/v1/status");
+    expect(active).toMatchObject({ provider: "status-provider", model: "status-model", inferenceSlots: 1 });
+    expect(active.active).toHaveLength(1);
+    expect(active.active[0]).toMatchObject({ id: created.session.id, title: "Status check" });
+    expect(["queued", "running"]).toContain(active.active[0]!.turnStatus);
+
+    release();
+    await collectPersistedEvents(running.url, created.session.id, submitted.eventId);
+    const idle = await jsonRequest<DaemonStatusResponse>(running.url, "/v1/status");
+    expect(idle.active).toEqual([]);
   });
 
   test("emits a machine-readable result for scripted prompts", async () => {

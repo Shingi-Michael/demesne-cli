@@ -57,6 +57,7 @@ describe("DemesneClient typed methods", () => {
       if (call.path === "/v1/models") return json({ models: [{ id: "local", provider: "llama.cpp" }] });
       if (call.path === "/v1/model") return json({ status: "ok", model: "local" });
       if (call.path === "/v1/runtime") return json({ profile: null, state: "unconfigured", expected: null, observed: null, mismatches: [], observedAt: null });
+      if (call.path === "/v1/status") return json({ provider: "llama.cpp", model: "local", inferenceSlots: 1, activeInferences: 0, queuedInferences: 0, active: [] });
       if (call.path === "/v1/sessions?query=fix") return json({ sessions: [{ id: "s1" }] });
       if (call.path === "/v1/sessions") return json({ sessions: [] });
       if (call.path === "/v1/sessions/s1") return json({ session: { id: "s1" }, eventId: 1 });
@@ -72,6 +73,7 @@ describe("DemesneClient typed methods", () => {
 
     expect(await client.health()).toMatchObject({ status: "ok", version: "0.1.0" });
     expect(await client.listModels()).toEqual([{ id: "local", provider: "llama.cpp" }]);
+    expect((await client.status()).inferenceSlots).toBe(1);
     await client.setModel("local");
     expect((await client.listSessions("fix")).map((session) => session.id)).toEqual(["s1"]);
     await client.updateSession("s1", { title: "Renamed" });

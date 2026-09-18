@@ -291,6 +291,26 @@ export interface WorkspaceFilesResponse {
   files: string[];
 }
 
+export interface ActiveSessionStatus {
+  id: string;
+  title: string;
+  workspace: string | null;
+  turnId: string;
+  turnStatus: TurnStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DaemonStatusResponse {
+  version?: string;
+  provider: string;
+  model: string;
+  inferenceSlots: number;
+  activeInferences: number;
+  queuedInferences: number;
+  active: ActiveSessionStatus[];
+}
+
 export interface CreateSessionRequest {
   title?: string;
   workspacePath?: string;

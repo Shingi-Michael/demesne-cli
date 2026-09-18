@@ -6,6 +6,7 @@ import {
   type CancelTurnResponse,
   type CreateSessionRequest,
   type CreateSessionResponse,
+  type DaemonStatusResponse,
   type EventEnvelope,
   type ModelDescriptor,
   type PermissionDecision,
@@ -108,6 +109,10 @@ export class DemesneClient {
 
   async runtimeStatus(): Promise<RuntimeProfileStatus> {
     return this.request<RuntimeProfileStatus>("/v1/runtime");
+  }
+
+  async status(): Promise<DaemonStatusResponse> {
+    return this.request<DaemonStatusResponse>("/v1/status");
   }
 
   async listSessions(query?: string): Promise<Session[]> {

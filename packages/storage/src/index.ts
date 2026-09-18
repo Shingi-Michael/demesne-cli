@@ -354,6 +354,46 @@ export class DemesneStore {
     return { session, turns };
   }
 
+  /// Sessions with a queued or running turn, oldest turn first. Used by the
+  /// daemon status route and the `demesne ps` dashboard.
+  listActiveTurns(): Array<{
+    sessionId: string;
+    title: string;
+    workspaceRoot: string | null;
+    turnId: string;
+    status: TurnStatus;
+    createdAt: string;
+    updatedAt: string;
+  }> {
+    const rows = this.database.query(`
+      SELECT turns.id AS turn_id, turns.status AS status, turns.created_at AS created_at,
+             sessions.id AS session_id, sessions.title AS title, sessions.updated_at AS updated_at,
+             workspaces.root AS workspace_root
+      FROM turns
+      JOIN sessions ON sessions.id = turns.session_id
+      LEFT JOIN workspaces ON workspaces.id = sessions.workspace_id
+      WHERE turns.status IN ('queued', 'running')
+      ORDER BY turns.created_at, turns.rowid
+    `).all() as Array<{
+      turn_id: string;
+      status: TurnStatus;
+      created_at: string;
+      session_id: string;
+      title: string;
+      updated_at: string;
+      workspace_root: string | null;
+    }>;
+    return rows.map((row) => ({
+      sessionId: row.session_id,
+      title: row.title,
+      workspaceRoot: row.workspace_root,
+      turnId: row.turn_id,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
   getSessionState(id: string): {
     session: Session;
     lastEventId: number;

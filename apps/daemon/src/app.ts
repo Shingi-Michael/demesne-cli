@@ -11,6 +11,7 @@ import {
   type ArchiveSessionResponse,
   type CancelTurnResponse,
   type CreateSessionResponse,
+  type DaemonStatusResponse,
   type EventEnvelope,
   type SubmitTurnResponse,
   type Turn,
@@ -241,6 +242,27 @@ export function createDaemonApp(options: {
           mismatches: [],
           observedAt: null,
         });
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/status") {
+        const response: DaemonStatusResponse = {
+          ...(options.version ? { version: options.version } : {}),
+          provider: processor.providerId,
+          model: processor.modelId,
+          inferenceSlots,
+          activeInferences: scheduler.activeCount,
+          queuedInferences: scheduler.queuedCount,
+          active: store.listActiveTurns().map((entry) => ({
+            id: entry.sessionId,
+            title: entry.title,
+            workspace: entry.workspaceRoot,
+            turnId: entry.turnId,
+            turnStatus: entry.status,
+            createdAt: entry.createdAt,
+            updatedAt: entry.updatedAt,
+          })),
+        };
+        return json(response);
       }
 
       if (request.method === "POST" && url.pathname === "/v1/model") {

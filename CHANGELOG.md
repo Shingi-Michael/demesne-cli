@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   status-based exit codes.
 - New `@demesne/client` package: typed REST methods for every route plus a
   resumable SSE event stream with backoff and replay, now used by the CLI.
+- `GET /v1/status` plus `demesne ps [--watch] [--json]` for active sessions and
+  inference counts, and a cached daily update check with an opt-out.
 
 ## [0.1.0] - 2026-09-18
 

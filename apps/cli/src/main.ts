@@ -74,6 +74,8 @@ import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } fro
 import { applyFooterScrollRegion, resetFooterScrollRegion } from "./terminal-control.ts";
 import { reduceInterruptKey } from "./interrupt-key.ts";
 import { playTensorIntro } from "./tensor-intro.ts";
+import { formatProcessView } from "./process-view.ts";
+import { checkForUpdate } from "./update-check.ts";
 import { PromptHistory } from "./prompt-history.ts";
 import { composeInEditor } from "./external-editor.ts";
 import { createPromptEditorState, mentionMatches, mentionTokenAt, reducePromptEditor, reverseSearchMatches, setPromptValue } from "./prompt-editor.ts";
@@ -484,6 +486,17 @@ try {
 async function run(command: string[]): Promise<void> {
   if (command[0] === "--version" || command[0] === "version") {
     console.log(VERSION);
+    const wantsCheck = command.includes("--check")
+      || (Boolean(process.stdout.isTTY) && !command.includes("--no-check"));
+    if (wantsCheck) {
+      const update = await checkForUpdate({
+        currentVersion: VERSION,
+        cachePath: join(settings.dataDirectory, "update-check.json"),
+      });
+      if (update.updateAvailable && update.latest) {
+        console.log(`Update available: ${update.latest} (current ${VERSION}).`);
+      }
+    }
     return;
   }
   if (command[0] === "--help" || command[0] === "help") {
@@ -591,6 +604,28 @@ async function run(command: string[]): Promise<void> {
     }
     console.log("Usage: demesne daemon start|stop|status|logs");
     process.exitCode = 1;
+    return;
+  }
+
+  if (command[0] === "ps") {
+    const json = command.includes("--json");
+    const watch = command.includes("--watch");
+    const render = async (): Promise<void> => {
+      const status = await client.status();
+      if (json) {
+        console.log(JSON.stringify(status, null, 2));
+        return;
+      }
+      console.log(formatProcessView(status, getTerminalWidth(process.stdout), paint));
+    };
+    if (watch && process.stdout.isTTY) {
+      for (;;) {
+        process.stdout.write("\x1b[2J\x1b[H");
+        await render();
+        await Bun.sleep(2_000);
+      }
+    }
+    await render();
     return;
   }
 
@@ -1845,7 +1880,8 @@ function printUsage(): void {
   demesne setup [--provider-url <url> --model <id>] [--context-window <n>] [--max-output-tokens <n>] [--theme auto|dark|light] [--yes]
   demesne doctor [--json]
   demesne daemon start|stop|status|logs
-  demesne prompt [--session <session-id>] [--permission ask|deny] <text>
+  demesne ps [--watch] [--json]
+  demesne prompt [--session <session-id>] [--permission ask|deny] [--output text|json|stream-json] [--plan] <text>
   demesne session list
   demesne session create [--workspace <path>] [title]
   demesne session show <session-id>

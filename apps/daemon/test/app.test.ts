@@ -1775,6 +1775,40 @@ describe("Demesne daemon", () => {
     expect(thirdRequest.some((message) => message.role === "user" && message.content === contents[1])).toBe(true);
     expect(thirdRequest.some((message) => message.role === "user" && message.content === contents[2])).toBe(true);
   });
+
+  test("injects workspace instructions into the system prompt", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspace = mkdtempSync(join(tmpdir(), "demesne-workspace-"));
+    temporaryDirectories.push(workspace);
+    writeFileSync(join(workspace, "DEMESNE.md"), "Always use tabs and run focused tests.\n");
+    let systemMessage = "";
+    const processor: TurnProcessor = {
+      providerId: "test-provider",
+      modelId: "instructions-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream(messages) {
+        systemMessage = messages.find((message) => message.role === "system")?.content ?? "";
+        yield { type: "text_delta", delta: "done" };
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Instructions", workspacePath: workspace }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`, {
+      method: "POST",
+      body: JSON.stringify({ content: "hello", permissionMode: "deny" }),
+    });
+    await collectPersistedEvents(running.url, created.session.id, submitted.eventId);
+
+    expect(systemMessage).toContain("DEMESNE.md");
+    expect(systemMessage).toContain("Always use tabs and run focused tests.");
+    expect(systemMessage).toContain("take precedence");
+  });
 });
 
 function startApp(

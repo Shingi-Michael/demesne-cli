@@ -4,6 +4,8 @@
   "type": "module",
   "dependencies": {
     "@demesne/brand": "workspace:*",
-    "@demesne/protocol": "workspace:*"
+    "@demesne/config": "workspace:*",
+    "@demesne/protocol": "workspace:*",
+    "@demesne/providers": "workspace:*"
   }
 }

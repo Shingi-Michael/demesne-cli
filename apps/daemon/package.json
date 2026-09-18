@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@demesne/config": "workspace:*",
     "@demesne/protocol": "workspace:*",
     "@demesne/providers": "workspace:*",
     "@demesne/storage": "workspace:*"

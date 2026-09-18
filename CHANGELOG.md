@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MIT license, security policy, and contribution guide.
 - Continuous integration and multi-architecture release workflows.
 - Install script for macOS release artifacts.
+- User and project TOML configuration with strict key validation and
+  environment-variable precedence.
+- `demesne setup` provider wizard and `demesne doctor` diagnostics with
+  `--json` output.
+- Daemon auto-start policy plus `demesne daemon start|stop|status|logs`.
+- Workspace instructions from `DEMESNE.md` or `AGENTS.md`, read per turn and
+  capped at 32 KiB.
+- Product version in `/healthz`, single-sourced from the root package manifest.
 
 ## [0.1.0] - 2026-09-18
 

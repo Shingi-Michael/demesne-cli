@@ -58,6 +58,7 @@ export function createDaemonApp(options: {
   processor?: TurnProcessor;
   systemPrompt?: string;
   authToken?: string;
+  version?: string;
   inferenceSlots?: number;
   inferenceBoundaryHook?: InferenceBoundaryHook;
   contextPlanner?: ContextPlanner;
@@ -182,7 +183,12 @@ export function createDaemonApp(options: {
       const path = url.pathname.split("/").filter(Boolean);
 
       if (request.method === "GET" && url.pathname === "/healthz") {
-        return json({ status: "ok", provider: processor.providerId, model: processor.modelId });
+        return json({
+          status: "ok",
+          provider: processor.providerId,
+          model: processor.modelId,
+          ...(options.version ? { version: options.version } : {}),
+        });
       }
 
       if (options.authToken && request.headers.get("authorization") !== `Bearer ${options.authToken}`) {

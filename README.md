@@ -15,6 +15,18 @@ In another terminal:
 bun run demesne
 ```
 
+On a fresh machine, run the setup wizard first instead of hand-writing environment variables:
+
+```sh
+bun run demesne setup   # probes Ollama, LM Studio, and llama.cpp; writes ~/.demesne/config.toml
+bun run demesne doctor  # verifies config, daemon, provider, runtime profile, workspace, and memory
+```
+
+`demesne` and `demesne prompt` start the daemon automatically. With the default
+`auto_start = "prompt"` policy the CLI asks once and remembers a yes as
+`auto_start = "always"`; `demesne daemon start|stop|status|logs` manages it
+explicitly. `demesne doctor --json` emits machine-readable checks for scripts.
+
 This launches the interactive streaming CLI directly in your terminal. A compact masthead shows the active model, workspace, and approval policy. While output is silent, a phase-aware beacon occupies the fixed footer; it is cleared before permanent reasoning, tool, or response output is written. Interactive TTY responses pass through an ANSI- and grapheme-safe jitter buffer that turns speculative decoding bursts into a smooth typing cadence. The cadence adapts to visible text arrival and catches up within a bounded 1.5-second backlog; tools, errors, cancellation, and completion always drain or flush it before rendering. Scripted `prompt` output, pipes, event JSON, and persisted response text remain immediate and byte-for-byte unchanged.
 
 The conversation remains a scrollable stream; Demesne does not use an alternate screen. Interactive terminals reserve the final line for a cursor-addressed footer and restore the normal scroll region afterward. Its left side reports the active phase and elapsed time while its right side prioritizes runtime verification, model identity, and context state. The footer preserves the cursor during resize, degrades to inline status on very short terminals, and avoids rewriting unchanged content.
@@ -44,6 +56,8 @@ For one-off scriptable queries or Unix piping:
 ```sh
 bun run demesne prompt "Inspect this repository"
 bun run demesne session list
+bun run demesne doctor --json
+bun run demesne daemon status
 ```
 
 The daemon listens on `127.0.0.1:7337` and stores data in `~/.demesne/demesne.sqlite` by default. Override these values with `DEMESNE_HOST`, `DEMESNE_PORT`, `DEMESNE_DATA_DIR`, or `DEMESNE_SERVER`. A custom data directory must already be private to the current user. Token authentication protects non-health routes, and `DEMESNE_HOST` remains loopback-only until paired-device authentication is implemented.
@@ -230,6 +244,68 @@ Write prompts offer **Allow once**, **Always this session** scoped to the file's
 `run_command` is host execution, not an OS sandbox. It starts in the workspace with filtered environment variables and process limits, but an approved executable still has the access of the daemon's operating-system user.
 
 Sensitive paths such as `.env`, `.git`, `.ssh`, `.aws`, `.docker`, common credential files, and private-key formats are excluded from automatic reads and searches.
+
+## Configuration
+
+Demesne reads two TOML files and merges them over built-in defaults:
+`~/.demesne/config.toml` (user) and `<workspace>/.demesne/config.toml`
+(project). Environment variables override both, and an explicit CLI flag such
+as `--server` overrides everything. Unknown keys are rejected with the file
+path so a typo cannot silently disable a setting.
+
+```toml
+server = "http://127.0.0.1:7337"
+theme = "auto"
+
+[daemon]
+auto_start = "prompt"   # prompt, always, or never
+port = 7337
+
+[provider]
+url = "http://127.0.0.1:11436/v1"
+id = "llama.cpp"
+model = "qwen3.8-q4_0-100k-b256"
+context_window = 100000
+max_output_tokens = 1536
+runtime_profile = "llama-ngram-mod-f16-kv-100k-b256-32gb"
+reasoning_effort = "none"
+
+[permissions]
+allow = []
+
+[notifications]
+enabled = true
+minimum_duration_ms = 30000
+
+[ui]
+intro = true
+hyperlinks = true
+```
+
+The daemon uses the user file and environment only: provider settings are
+machine-wide, so a workspace cannot reconfigure the shared runtime. The CLI
+merges the project file for workspace-specific defaults. `DEMESNE_CONFIG_FILE`
+points the loader at a different user config for testing or nonstandard homes.
+
+A workspace can also provide instructions for the model. `DEMESNE.md` is
+preferred, and `AGENTS.md` is accepted so repositories that already target
+other agents work unchanged. The file is read per turn (capped at 32 KiB),
+appended to the system prompt, and framed as taking precedence over general
+guidance when the two conflict.
+
+Run `demesne setup` to create the user config interactively, or
+non-interactively for automation:
+
+```sh
+bun run demesne setup --yes \
+  --provider-url http://127.0.0.1:11436/v1 \
+  --model qwen3.8-q4_0-100k-b256 \
+  --context-window 100000 --max-output-tokens 1536
+```
+
+Setup preserves unrelated settings, backs up an existing file to
+`config.toml.bak`, validates the merged result, and writes atomically with mode
+`0600`.
 
 ## Authentication
 

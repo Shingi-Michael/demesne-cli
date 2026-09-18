@@ -4,7 +4,6 @@
   "workspaces": {
     "": {
       "name": "demesne-cli",
-      "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "1.4.0",
         "typescript": "7.0.2",
@@ -14,12 +13,15 @@
       "name": "@demesne/cli",
       "dependencies": {
         "@demesne/brand": "workspace:*",
+        "@demesne/config": "workspace:*",
         "@demesne/protocol": "workspace:*",
+        "@demesne/providers": "workspace:*",
       },
     },
     "apps/daemon": {
       "name": "@demesne/daemon",
       "dependencies": {
+        "@demesne/config": "workspace:*",
         "@demesne/protocol": "workspace:*",
         "@demesne/providers": "workspace:*",
         "@demesne/storage": "workspace:*",
@@ -27,6 +29,9 @@
     },
     "packages/brand": {
       "name": "@demesne/brand",
+    },
+    "packages/config": {
+      "name": "@demesne/config",
     },
     "packages/protocol": {
       "name": "@demesne/protocol",
@@ -48,6 +53,8 @@
     "@demesne/brand": ["@demesne/brand@workspace:packages/brand"],
 
     "@demesne/cli": ["@demesne/cli@workspace:apps/cli"],
+
+    "@demesne/config": ["@demesne/config@workspace:packages/config"],
 
     "@demesne/daemon": ["@demesne/daemon@workspace:apps/daemon"],
 

@@ -14,7 +14,12 @@ describe("daemon configuration", () => {
   test("requires capacity and output limits for configured providers", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-main-test-"));
     temporaryDirectories.push(directory);
-    const env: Record<string, string | undefined> = { ...process.env, DEMESNE_DATA_DIR: directory, DEMESNE_MODEL: "model" };
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      DEMESNE_DATA_DIR: directory,
+      DEMESNE_MODEL: "model",
+      DEMESNE_CONFIG_FILE: join(directory, "missing-config.toml"),
+    };
     delete env.DEMESNE_CONTEXT_WINDOW;
     delete env.DEMESNE_MAX_OUTPUT_TOKENS;
     delete env.DEMESNE_RUNTIME_PROFILE;

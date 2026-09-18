@@ -71,15 +71,41 @@ import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } fro
 import { applyFooterScrollRegion, resetFooterScrollRegion } from "./terminal-control.ts";
 import { reduceInterruptKey } from "./interrupt-key.ts";
 import { playTensorIntro } from "./tensor-intro.ts";
+import { VERSION } from "./version.ts";
+import { loadCliSettings, type CliSettings } from "./cli-config.ts";
+import {
+  createDaemonControlDependencies,
+  daemonStatus,
+  ensureDaemon,
+  readDaemonLog,
+  startDaemon,
+  stopDaemon,
+} from "./daemon-control.ts";
+import { formatDoctorReport, runDoctor } from "./doctor.ts";
+import { runSetup } from "./setup.ts";
+import { updateUserConfig } from "@demesne/config";
+import { createInterface } from "node:readline/promises";
 
 const args = process.argv.slice(2);
-const VERSION = "0.1.0";
-const server = validateServerUrl(takeOption(args, "--server") ?? process.env.DEMESNE_SERVER ?? "http://127.0.0.1:7337");
-const daemonToken = loadDaemonToken();
+const settings = loadSettings();
+const server = validateServerUrl(settings.server);
+const daemonToken = loadDaemonToken(settings.dataDirectory);
 const colorEnabled = (stream: { isTTY?: boolean }) => Boolean(stream.isTTY) && !process.env.NO_COLOR;
-const terminalTheme = resolveTerminalTheme(process.env.DEMESNE_THEME, process.env.COLORFGBG);
+const terminalTheme = resolveTerminalTheme(
+  settings.theme === "auto" ? undefined : settings.theme,
+  process.env.COLORFGBG,
+);
 const paint = createPainter(colorEnabled(process.stdout), terminalTheme);
 const paintLog = createPainter(colorEnabled(process.stderr), terminalTheme);
+
+function loadSettings(): CliSettings {
+  try {
+    return loadCliSettings({ serverOverride: takeOption(args, "--server") });
+  } catch (error) {
+    console.error(`Configuration error: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
 
 class CliFixedFooter {
   private active = false;
@@ -550,12 +576,86 @@ async function run(command: string[]): Promise<void> {
     return;
   }
 
+  if (command[0] === "setup") {
+    const result = await runSetup({
+      providerUrl: takeOption(command, "--provider-url"),
+      providerId: takeOption(command, "--provider-id"),
+      model: takeOption(command, "--model"),
+      contextWindow: takeNumberOption(command, "--context-window"),
+      maxOutputTokens: takeNumberOption(command, "--max-output-tokens"),
+      theme: takeThemeOption(command, "--theme"),
+      yes: command.includes("--yes"),
+      painter: paint,
+    });
+    console.log(`  ${paint.text("●", "citron")} Wrote ${result.configPath}`);
+    if (result.backup) console.log(paint.dim(`    Previous config backed up to ${result.backup}`));
+    console.log(paint.dim("    Next: `demesne doctor`, then `demesne`."));
+    return;
+  }
+
+  if (command[0] === "doctor") {
+    const result = await runDoctor({
+      server,
+      dataDirectory: settings.dataDirectory,
+      token: daemonToken,
+      loaded: settings.loaded,
+      workspaceRoot: process.cwd(),
+      runCommand: runCommandCapture,
+    });
+    if (command.includes("--json")) {
+      console.log(JSON.stringify({ ok: result.ok, checks: result.checks }, null, 2));
+    } else {
+      console.log(formatDoctorReport(result.checks, paint));
+    }
+    if (!result.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (command[0] === "daemon") {
+    const deps = createDaemonControlDependencies(server, settings.dataDirectory);
+    const action = command[1];
+    if (action === "start") {
+      const result = await startDaemon(deps);
+      console.log(result.message);
+      if (!result.started && !result.health) process.exitCode = 1;
+      return;
+    }
+    if (action === "stop") {
+      const result = await stopDaemon(deps);
+      console.log(result.message);
+      if (!result.stopped) process.exitCode = 1;
+      return;
+    }
+    if (action === "status") {
+      const status = await daemonStatus(deps);
+      if (!status.running) {
+        console.log(`Daemon is not running at ${server}.`);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`Daemon is running at ${server}.`);
+      console.log(`  pid:      ${status.pid ?? "unknown"}`);
+      console.log(`  provider: ${status.health?.provider ?? "unknown"}`);
+      console.log(`  model:    ${status.health?.model ?? "unknown"}`);
+      if (status.health?.version) console.log(`  version:  ${status.health.version}`);
+      return;
+    }
+    if (action === "logs") {
+      console.log(readDaemonLog(deps) || "No daemon log yet.");
+      return;
+    }
+    console.log("Usage: demesne daemon start|stop|status|logs");
+    process.exitCode = 1;
+    return;
+  }
+
   if (command[0] === "prompt") {
     const permissionMode = takeOption(command, "--permission") ?? (process.stdin.isTTY && process.stdout.isTTY ? "ask" : "deny");
     if (permissionMode !== "ask" && permissionMode !== "deny") throw new Error("--permission must be ask or deny");
     const sessionOverride = takeOption(command, "--session");
     const content = command.slice(1).join(" ").trim();
     if (!content) throw new Error("prompt requires text");
+    await ensureDaemonOrExit();
     const sessionId = sessionOverride ?? (await createAutomaticSession(command)).id;
     await submitAndRender(sessionId, content, permissionMode, undefined, "exit", false);
     return;
@@ -627,6 +727,7 @@ function leaveChat(): never {
 async function runChat(command: string[]): Promise<void> {
   const permissionMode = takeOption(command, "--permission") ?? (process.stdin.isTTY ? "ask" : "deny");
   if (permissionMode !== "ask" && permissionMode !== "deny") throw new Error("--permission must be ask or deny");
+  await ensureDaemonOrExit();
   const modelOverride = takeOption(command, "--model");
   const sessionIdOverride = takeOption(command, "--session");
   const initial = command.join(" ").trim();
@@ -1413,9 +1514,61 @@ function takeOption(command: string[], name: string): string | undefined {
   return value;
 }
 
+function takeNumberOption(command: string[], name: string): number | undefined {
+  const value = takeOption(command, name);
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error(`${name} requires a positive integer`);
+  return parsed;
+}
+
+function takeThemeOption(command: string[], name: string): "dark" | "light" | "auto" | undefined {
+  const value = takeOption(command, name);
+  if (value === undefined) return undefined;
+  if (!["dark", "light", "auto"].includes(value)) throw new Error(`${name} must be auto, dark, or light`);
+  return value as "dark" | "light" | "auto";
+}
+
+async function ensureDaemonOrExit(): Promise<void> {
+  const deps = createDaemonControlDependencies(server, settings.dataDirectory);
+  const prompt = async (question: string): Promise<boolean> => {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      const answer = (await rl.question(question)).trim();
+      return answer === "" || /^y/i.test(answer);
+    } finally {
+      rl.close();
+    }
+  };
+  const result = await ensureDaemon(deps, settings.autoStart, prompt);
+  if (result.remember) {
+    try {
+      updateUserConfig(settings.configPath, { daemon: { auto_start: "always" } });
+    } catch (error) {
+      console.error(paintLog.dim(
+        `  Could not save the auto-start preference: ${error instanceof Error ? error.message : String(error)}`,
+      ));
+    }
+  }
+}
+
+async function runCommandCapture(command: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  const child = Bun.spawn(command, { stdout: "pipe", stderr: "pipe" });
+  const [code, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  return { code, stdout, stderr };
+}
+
 function printUsage(): void {
   console.log(`Usage:
   demesne [chat] [initial message]
+  demesne setup [--provider-url <url> --model <id>] [--context-window <n>] [--max-output-tokens <n>] [--theme auto|dark|light] [--yes]
+  demesne doctor [--json]
+  demesne daemon start|stop|status|logs
   demesne prompt [--session <session-id>] [--permission ask|deny] <text>
   demesne session list
   demesne session create [--workspace <path>] [title]
@@ -1426,19 +1579,23 @@ function printUsage(): void {
   demesne --version
 
 Options:
-  --server <url>  Daemon URL (default: http://127.0.0.1:7337)`);
+  --server <url>  Daemon URL (default: http://127.0.0.1:7337)
+
+Configuration:
+  ~/.demesne/config.toml and <workspace>/.demesne/config.toml are merged with
+  environment variables; environment variables win. Run \`demesne setup\` to
+  create the user config.`);
 }
 
 function authHeaders(): Record<string, string> {
   return daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {};
 }
 
-function loadDaemonToken(): string | undefined {
+function loadDaemonToken(dataDirectory: string): string | undefined {
   const configured = process.env.DEMESNE_DAEMON_TOKEN?.trim();
   if (configured) return configured;
   const hostname = new URL(server).hostname;
   if (!["127.0.0.1", "::1", "localhost"].includes(hostname)) return undefined;
-  const dataDirectory = process.env.DEMESNE_DATA_DIR ?? join(homedir(), ".demesne");
   const path = join(dataDirectory, "daemon.token");
   return existsSync(path) ? readFileSync(path, "utf8").trim() || undefined : undefined;
 }

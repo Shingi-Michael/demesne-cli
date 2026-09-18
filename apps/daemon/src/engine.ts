@@ -7,6 +7,7 @@ import type { TurnInference } from "./processor.ts";
 import { PermissionBroker } from "./permissions.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { InferenceScheduler } from "./inference-scheduler.ts";
+import { composeSystemPrompt, loadProjectInstructions } from "./instructions.ts";
 import {
   planCacheAwareContextRequest,
   planContextRequest,
@@ -55,8 +56,10 @@ export class AgentEngine {
     const currentMessages: ProviderMessage[] = [userMessage];
     const definitions = session.workspace ? selectToolsForTurn(this.tools.definitions(), turn.content) : [];
     const baseSystemPrompt = this.configuredSystemPrompt?.trim() || defaultSystemPrompt(session.workspace?.root);
+    const projectInstructions = loadProjectInstructions(session.workspace?.root);
+    const guidedSystemPrompt = composeSystemPrompt(baseSystemPrompt, projectInstructions);
     const guidance = turnToolGuidance(turn.content);
-    const systemPrompt = guidance ? `${baseSystemPrompt}\n${guidance}` : baseSystemPrompt;
+    const systemPrompt = guidance ? `${guidedSystemPrompt}\n${guidance}` : guidedSystemPrompt;
     let totalToolCalls = 0;
     let totalToolResultBytes = 0;
     let visibleCharacters = 0;

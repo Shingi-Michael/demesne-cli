@@ -40,7 +40,7 @@ describe("DemesneStore", () => {
     temporaryDirectories.push(directory);
     const databasePath = join(directory, "demesne.sqlite");
     const database = new Database(databasePath, { create: true });
-    database.run("PRAGMA user_version = 2");
+    database.run("PRAGMA user_version = 99");
     database.close();
     expect(() => new DemesneStore(databasePath)).toThrow("newer than supported schema");
   });
@@ -282,6 +282,65 @@ describe("DemesneStore", () => {
     ]));
     expect(migrated.database.query("PRAGMA foreign_key_check").all()).toEqual([]);
     migrated.close();
+  });
+
+  test("renames and archives sessions without losing transcripts", () => {
+    const store = new DemesneStore(":memory:");
+    const { session } = store.createSession("Original");
+    const renamed = store.renameSession(session.id, "  Better title  ");
+    expect(renamed.session.title).toBe("Better title");
+    expect(renamed.event.type).toBe("session.renamed");
+    expect(store.listSessions().map((entry) => entry.id)).toEqual([session.id]);
+
+    const archived = store.archiveSession(session.id);
+    expect(archived.session.archivedAt).toBeTruthy();
+    expect(archived.event.type).toBe("session.archived");
+    expect(store.listSessions()).toEqual([]);
+    expect(store.listSessions(100, { includeArchived: true }).map((entry) => entry.id)).toEqual([session.id]);
+    expect(() => store.archiveSession(session.id)).toThrow("already archived");
+    store.close();
+  });
+
+  test("searches titles and transcripts, excluding archived sessions", () => {
+    const store = new DemesneStore(":memory:");
+    const { session } = store.createSession("Parser work");
+    const { turn } = store.createTurn(session.id, "Fix the tokenizer bug");
+    store.startTurn(turn.id);
+    store.appendModelMessage(turn.id, { role: "user", content: "Fix the tokenizer bug" });
+    store.appendModelMessage(turn.id, { role: "assistant", content: "The lexer now handles unicode." });
+    store.completeTurn(turn.id);
+
+    const { session: archived } = store.createSession("Unrelated archived");
+    store.archiveSession(archived.id);
+
+    expect(store.searchSessions("tokenizer").map((entry) => entry.id)).toEqual([session.id]);
+    expect(store.searchSessions("Parser").map((entry) => entry.id)).toEqual([session.id]);
+    expect(store.searchSessions("unicode").map((entry) => entry.id)).toEqual([session.id]);
+    expect(store.searchSessions("Unrelated")).toEqual([]);
+    expect(store.searchSessions("missing")).toEqual([]);
+    store.close();
+  });
+
+  test("exports visible requests and responses only", () => {
+    const store = new DemesneStore(":memory:");
+    const { session } = store.createSession("Export me");
+    const { turn } = store.createTurn(session.id, "Summarize the parser");
+    store.startTurn(turn.id);
+    store.appendModelMessage(turn.id, { role: "user", content: "Summarize the parser" });
+    store.appendReasoningDelta(turn.id, "hidden reasoning");
+    store.appendModelMessage(turn.id, { role: "assistant", content: "It tokenizes and parses." });
+    store.completeTurn(turn.id);
+
+    const exported = store.getSessionExport(session.id);
+    expect(exported.session.title).toBe("Export me");
+    expect(exported.turns).toEqual([{
+      id: turn.id,
+      content: "Summarize the parser",
+      status: "completed",
+      createdAt: expect.any(String),
+      responses: ["It tokenizes and parses."],
+    }]);
+    store.close();
   });
 
   test("creates private database files", () => {

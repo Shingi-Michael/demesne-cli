@@ -42,8 +42,11 @@ Type `/` in the CLI to open the `SESSION`, `INSPECT`, and `CONTROL` command pale
 | Command | Action |
 | --- | --- |
 | `/new [title]` | Start a fresh session |
-| `/sessions` | Browse and resume recent sessions with arrows, j/k, or number keys |
+| `/sessions [filter]` | Browse recent sessions, or search titles and transcripts |
 | `/resume <id>` | Switch to an existing session |
+| `/rename <title>` | Rename the current session |
+| `/delete` | Archive the current session after confirmation |
+| `/export [md\|json]` | Write the visible transcript to the current directory |
 | `/status` | Show the active session, model, context window, and workspace |
 | `/context` | Show the estimated context plan, provider-reported usage, and run evidence |
 | `/undo` | Revert conflict-free regular-file changes from the last undoable turn |

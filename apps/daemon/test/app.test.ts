@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   readServerSentEvents,
+  type ArchiveSessionResponse,
   type ContextPlan,
   type CreateSessionResponse,
   type EventEnvelope,
+  type RenameSessionResponse,
   type Session,
   type SessionStateResponse,
   type SubmitTurnResponse,
@@ -1898,6 +1900,39 @@ describe("Demesne daemon", () => {
     }
     expect(permissionRequested).toBe(false);
     expect(readFileSync(join(workspacePath, "src", "target.txt"), "utf8")).toBe("updated\n");
+  });
+
+  test("renames, searches, exports, and archives sessions over HTTP", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const running = startApp(join(directory, "demesne.sqlite"));
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Original" }),
+    });
+
+    const renamed = await jsonRequest<RenameSessionResponse>(running.url, `/v1/sessions/${created.session.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title: "Renamed session" }),
+    });
+    expect(renamed.session.title).toBe("Renamed session");
+
+    const searched = await jsonRequest<{ sessions: Session[] }>(running.url, "/v1/sessions?query=Renamed");
+    expect(searched.sessions.map((session) => session.id)).toEqual([created.session.id]);
+
+    const exported = await fetch(new URL(`/v1/sessions/${created.session.id}/export?format=md`, running.url));
+    expect(exported.headers.get("content-type")).toContain("text/markdown");
+    expect(await exported.text()).toContain("# Renamed session");
+
+    const archived = await jsonRequest<ArchiveSessionResponse>(running.url, `/v1/sessions/${created.session.id}`, {
+      method: "DELETE",
+    });
+    expect(archived.session.archivedAt).toBeTruthy();
+    const after = await jsonRequest<{ sessions: Session[] }>(running.url, "/v1/sessions");
+    expect(after.sessions).toEqual([]);
+
+    const invalid = await fetch(new URL(`/v1/sessions/${created.session.id}/export?format=xml`, running.url));
+    expect(invalid.status).toBe(400);
   });
 });
 

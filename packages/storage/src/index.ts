@@ -13,6 +13,7 @@ import {
   type ProviderCallSnapshot,
   type ProviderMetrics,
   type Session,
+  type SessionExportTurn,
   type StoredModelMessage,
   type TokenUsage,
   type Turn,
@@ -44,6 +45,7 @@ interface SessionRow {
   workspace_id: string | null;
   workspace_root: string | null;
   context_start_message_id: number | null;
+  archived_at: string | null;
 }
 
 interface TurnRow {
@@ -112,11 +114,12 @@ export class NotFoundError extends Error {}
 export class InvalidStateError extends Error {}
 
 export type EventSink = (event: EventEnvelope) => void;
-const STORAGE_SCHEMA_VERSION = 1;
+const STORAGE_SCHEMA_VERSION = 2;
 
 export class DemesneStore {
   readonly database: Database;
   private eventSink: EventSink | undefined;
+  private ftsEnabled = false;
 
   constructor(filename: string, eventSink?: EventSink) {
     if (filename !== ":memory:") {
@@ -178,7 +181,7 @@ export class DemesneStore {
     const row = this.database
       .query(`
         SELECT sessions.id, sessions.title, sessions.created_at, sessions.updated_at,
-               sessions.workspace_id, workspaces.root AS workspace_root
+               sessions.workspace_id, sessions.archived_at, workspaces.root AS workspace_root
         FROM sessions
         LEFT JOIN workspaces ON workspaces.id = sessions.workspace_id
         WHERE sessions.id = ?
@@ -196,19 +199,142 @@ export class DemesneStore {
       workspace: row.workspace_id && row.workspace_root
         ? { id: row.workspace_id, root: row.workspace_root }
         : null,
+      ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
       turns: turns.map(mapTurn),
     };
   }
 
-  listSessions(limit = 100): Session[] {
+  listSessions(limit = 100, options: { includeArchived?: boolean } = {}): Session[] {
     const boundedLimit = Math.max(1, Math.min(limit, 100));
     const rows = this.database
-      .query("SELECT id FROM sessions ORDER BY updated_at DESC, id LIMIT ?")
+      .query(options.includeArchived
+        ? "SELECT id FROM sessions ORDER BY updated_at DESC, id LIMIT ?"
+        : "SELECT id FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC, id LIMIT ?")
       .all(boundedLimit) as Array<{ id: string }>;
     return rows.flatMap((row) => {
       const session = this.getSession(row.id);
       return session ? [session] : [];
     });
+  }
+
+  renameSession(id: string, title: string): { session: Session; event: EventEnvelope } {
+    const trimmed = title.trim();
+    if (!trimmed) throw new InvalidStateError("Session title cannot be empty");
+    if (trimmed.length > 200) throw new InvalidStateError("Session title must be at most 200 characters");
+    const result = this.database.transaction(() => {
+      this.getSessionOrThrow(id);
+      const now = new Date().toISOString();
+      this.database.query("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?").run(trimmed, now, id);
+      const event = this.insertEvent("session.renamed", id, null, { title: trimmed }, now);
+      return { session: this.getSessionOrThrow(id), event };
+    })();
+    this.eventSink?.(result.event);
+    return result;
+  }
+
+  archiveSession(id: string): { session: Session; event: EventEnvelope } {
+    const result = this.database.transaction(() => {
+      const session = this.getSessionOrThrow(id);
+      if (session.archivedAt) throw new InvalidStateError("Session is already archived");
+      const now = new Date().toISOString();
+      this.database.query("UPDATE sessions SET archived_at = ? WHERE id = ?").run(now, id);
+      const event = this.insertEvent("session.archived", id, null, {}, now);
+      return { session: this.getSessionOrThrow(id), event };
+    })();
+    this.eventSink?.(result.event);
+    return result;
+  }
+
+  /// Title and transcript search. Transcript matches use FTS5 when the SQLite
+  /// build provides it and a bounded LIKE scan otherwise; both cover user and
+  /// assistant messages only, never tool output or hidden reasoning.
+  searchSessions(query: string, limit = 20): Session[] {
+    const trimmed = query.trim();
+    if (!trimmed) return this.listSessions(limit);
+    const bounded = Math.max(1, Math.min(limit, 100));
+    const ids = new Set<string>();
+    const escaped = trimmed.replace(/[\\%_]/g, (character) => `\\${character}`);
+    const like = `%${escaped}%`;
+    const titleRows = this.database.query(
+      "SELECT id FROM sessions WHERE archived_at IS NULL AND title LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT ?",
+    ).all(like, bounded) as Array<{ id: string }>;
+    for (const row of titleRows) ids.add(row.id);
+
+    if (this.ftsEnabled) {
+      // Bare quotes would be a syntax error in MATCH; drop them and let the
+      // remaining terms run as an AND query.
+      const matchQuery = trimmed.replace(/["']/g, " ").replace(/\s+/g, " ").trim();
+      if (matchQuery) {
+        try {
+          const rows = this.database.query(`
+            SELECT DISTINCT sessions.id AS id
+            FROM message_search
+            JOIN sessions ON sessions.id = message_search.session_id
+            WHERE message_search MATCH ? AND sessions.archived_at IS NULL
+            ORDER BY sessions.updated_at DESC LIMIT ?
+          `).all(matchQuery, bounded) as Array<{ id: string }>;
+          for (const row of rows) ids.add(row.id);
+        } catch {
+          // Malformed full-text queries fall back to the title matches.
+        }
+      }
+    } else {
+      const rows = this.database.query(`
+        SELECT DISTINCT model_messages.session_id AS id
+        FROM model_messages
+        JOIN sessions ON sessions.id = model_messages.session_id
+        WHERE sessions.archived_at IS NULL
+          AND model_messages.role IN ('user', 'assistant')
+          AND model_messages.content LIKE ? ESCAPE '\\'
+        ORDER BY sessions.updated_at DESC LIMIT ?
+      `).all(like, bounded) as Array<{ id: string }>;
+      for (const row of rows) ids.add(row.id);
+    }
+
+    return [...ids]
+      .flatMap((id) => {
+        const session = this.getSession(id);
+        return session ? [session] : [];
+      })
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .slice(0, bounded);
+  }
+
+  /// Structured transcript export: each turn's request plus its visible
+  /// assistant responses. Hidden reasoning and tool output are excluded.
+  getSessionExport(id: string): { session: Session; turns: SessionExportTurn[] } {
+    const session = this.getSessionOrThrow(id);
+    const rows = this.database.query(`
+      SELECT turns.id, turns.content, turns.status, turns.created_at,
+             model_messages.content AS response
+      FROM turns
+      LEFT JOIN model_messages
+        ON model_messages.turn_id = turns.id AND model_messages.role = 'assistant'
+      WHERE turns.session_id = ?
+      ORDER BY turns.rowid, model_messages.id
+    `).all(id) as Array<{
+      id: string;
+      content: string;
+      status: TurnStatus;
+      created_at: string;
+      response: string | null;
+    }>;
+    const turns: SessionExportTurn[] = [];
+    for (const row of rows) {
+      const last = turns.at(-1);
+      if (last && last.id === row.id) {
+        if (row.response) last.responses.push(row.response);
+        continue;
+      }
+      turns.push({
+        id: row.id,
+        content: row.content,
+        status: row.status,
+        createdAt: row.created_at,
+        responses: row.response ? [row.response] : [],
+      });
+    }
+    return { session, turns };
   }
 
   getSessionState(id: string): {
@@ -993,7 +1119,49 @@ export class DemesneStore {
     if (!this.hasColumn("turn_snapshots", "post_hash")) {
       this.database.run("ALTER TABLE turn_snapshots ADD COLUMN post_hash TEXT");
     }
+    if (!this.hasColumn("sessions", "archived_at")) {
+      this.database.run("ALTER TABLE sessions ADD COLUMN archived_at TEXT");
+    }
     this.backfillModelMessages();
+    this.migrateSearchIndex();
+  }
+
+  /// FTS5 index over visible user and assistant messages. SQLite builds
+  /// without FTS5 fall back to a bounded LIKE scan in `searchSessions`.
+  private migrateSearchIndex(): void {
+    const existing = this.database
+      .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'message_search'")
+      .get() as { name: string } | null;
+    if (!existing) {
+      try {
+        this.database.run(
+          "CREATE VIRTUAL TABLE message_search USING fts5(content, session_id UNINDEXED, turn_id UNINDEXED)",
+        );
+      } catch {
+        this.ftsEnabled = false;
+        return;
+      }
+      this.ftsEnabled = true;
+      this.database.run(`
+        INSERT INTO message_search(rowid, content, session_id, turn_id)
+        SELECT id, content, session_id, turn_id FROM model_messages
+        WHERE role IN ('user', 'assistant') AND content IS NOT NULL AND content <> ''
+      `);
+    } else {
+      this.ftsEnabled = true;
+    }
+    this.database.run(`
+      CREATE TRIGGER IF NOT EXISTS model_messages_search_insert AFTER INSERT ON model_messages
+      WHEN new.role IN ('user', 'assistant') AND new.content IS NOT NULL AND new.content <> ''
+      BEGIN
+        INSERT INTO message_search(rowid, content, session_id, turn_id)
+        VALUES (new.id, new.content, new.session_id, new.turn_id);
+      END;
+      CREATE TRIGGER IF NOT EXISTS model_messages_search_delete AFTER DELETE ON model_messages
+      BEGIN
+        DELETE FROM message_search WHERE rowid = old.id;
+      END;
+    `);
   }
 
   private backfillModelMessages(): void {

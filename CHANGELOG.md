@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Persistent approval allowlists: a fourth approval option saves scoped rules
   to `[permissions] allow`, the daemon re-reads them on change, and host
   commands persist exact argv while bare `run_command` rules are rejected.
+- Session management: rename, archive, title and transcript search (FTS5 with
+  a LIKE fallback), and Markdown or JSON transcript export, backed by a storage
+  schema migration that backfills the search index.
 
 ## [0.1.0] - 2026-09-18
 

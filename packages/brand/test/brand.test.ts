@@ -323,6 +323,22 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(slashCommandValidationError(extraArgument)).toBe("Usage: /status");
   });
 
+  test("exposes session management commands through the same grammar", () => {
+    expect(slashCommandMatches("/ren").map((command) => command.name)).toEqual(["/rename"]);
+    expect(slashCommandMatches("/exp").map((command) => command.name)).toEqual(["/export"]);
+    expect(resolveSlashCommand("/archive")?.command.id).toBe("delete");
+
+    const rename = resolveSlashCommand("/rename Parser hardening")!;
+    expect(slashCommandValidationError(rename)).toBeNull();
+    expect(slashCommandValidationError(resolveSlashCommand("/rename")!)).toBe("Usage: /rename <title>");
+
+    const exportJson = resolveSlashCommand("/export json")!;
+    expect(slashCommandValidationError(exportJson)).toBeNull();
+    const filter = resolveSlashCommand("/sessions parser")!;
+    expect(slashCommandValidationError(filter)).toBeNull();
+    expect(slashCommandCompletion(filter.command)).toBe("/sessions ");
+  });
+
   test("help reflects the single-model reasoning-off runtime", () => {
     const help = formatHelpCard(createPainter(false), 84);
 

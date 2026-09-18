@@ -2,13 +2,16 @@ import {
   encodeServerSentEvent,
   isRecord,
   parseCreateSessionRequest,
+  parseRenameSessionRequest,
   parseResolvePermissionRequest,
   parseSubmitTurnRequest,
   ProtocolValidationError,
   type ApiErrorBody,
+  type ArchiveSessionResponse,
   type CancelTurnResponse,
   type CreateSessionResponse,
   type EventEnvelope,
+  type RenameSessionResponse,
   type SubmitTurnResponse,
   type Turn,
   type UndoTurnResponse,
@@ -22,6 +25,7 @@ import { PermissionBroker } from "./permissions.ts";
 import { ConfigAllowlist } from "./allowlist.ts";
 import { canonicalWorkspace, listWorkspaceFiles, resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { detectGitBranch } from "./git-branch.ts";
+import { formatSessionMarkdown } from "./session-export.ts";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, type InferenceBoundaryHook } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
@@ -257,7 +261,33 @@ export function createDaemonApp(options: {
       }
 
       if (request.method === "GET" && url.pathname === "/v1/sessions") {
-        return json({ sessions: store.listSessions() });
+        const query = url.searchParams.get("query")?.trim();
+        return json({ sessions: query ? store.searchSessions(query) : store.listSessions() });
+      }
+
+      if (request.method === "PATCH" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {
+        const body = parseRenameSessionRequest(await readJson(request));
+        const { session, event } = store.renameSession(path[2]!, body.title);
+        const response: RenameSessionResponse = { session, eventId: event.eventId };
+        return json(response);
+      }
+
+      if (request.method === "DELETE" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {
+        const { session, event } = store.archiveSession(path[2]!);
+        const response: ArchiveSessionResponse = { session, eventId: event.eventId };
+        return json(response);
+      }
+
+      if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "export") {
+        const format = url.searchParams.get("format") ?? "md";
+        if (format !== "md" && format !== "json") {
+          return apiError("invalid_request", "format must be md or json", 400);
+        }
+        const exported = store.getSessionExport(path[2]!);
+        if (format === "json") return json(exported);
+        return new Response(formatSessionMarkdown(exported), {
+          headers: { "Content-Type": "text/markdown; charset=utf-8" },
+        });
       }
 
       if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "files") {

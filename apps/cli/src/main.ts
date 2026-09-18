@@ -9,6 +9,7 @@ import {
   type EventEnvelope,
   type ModelDescriptor,
   type PermissionDecision,
+  type RenameSessionResponse,
   type RuntimeProfileStatus,
   type Session,
   type SessionStateResponse,
@@ -55,7 +56,7 @@ import {
   type PaletteColor,
   type SlashCommandId,
 } from "@demesne/brand";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { CliContextRail } from "./context-rail.ts";
@@ -235,6 +236,19 @@ async function fetchMentionFiles(sessionId: string): Promise<string[]> {
   return request<WorkspaceFilesResponse>(`/v1/sessions/${sessionId}/files`)
     .then((result) => result.files)
     .catch(() => []);
+}
+
+/// Interactive confirmation for destructive commands. Non-interactive use
+/// fails safe by returning false.
+async function confirmPrompt(question: string): Promise<boolean> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question(question)).trim();
+    return /^y/i.test(answer);
+  } finally {
+    rl.close();
+  }
 }
 
 function getTerminalWidth(stream: { columns?: number } = process.stdout): number {
@@ -871,9 +885,16 @@ async function runChat(command: string[]): Promise<void> {
       }
       console.log(`\n${detail.join("\n")}\n`);
     },
-    sessions: async () => {
-      const result = await request<{ sessions: Session[] }>("/v1/sessions");
+    sessions: async (argument) => {
+      const query = argument.trim();
+      const result = await request<{ sessions: Session[] }>(
+        query ? `/v1/sessions?query=${encodeURIComponent(query)}` : "/v1/sessions",
+      );
       const recent = result.sessions.slice(0, 10);
+      if (query && recent.length === 0) {
+        console.log(`  ${paint.dim(`No sessions match "${sanitizeTerminalLine(query)}".`)}\n`);
+        return;
+      }
       console.log(formatSessionsTable(recent.map(sessionListItem), sessionId, getTerminalWidth(process.stdout), paint));
       if (recent.length === 0) return;
       const selected = await selectSessionInteractive(recent, sessionId, paint);
@@ -881,6 +902,47 @@ async function runChat(command: string[]): Promise<void> {
       else if (!selected) console.log(`  ${paint.dim("Session selection cancelled.")}\n`);
     },
     resume: activateSession,
+    rename: async (argument) => {
+      const title = sanitizeTerminalLine(argument).trim();
+      if (!title) {
+        console.log(`  ${paint.text("Usage: /rename <title>", "signal")}\n`);
+        return;
+      }
+      const result = await request<RenameSessionResponse>(`/v1/sessions/${sessionId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title }),
+      });
+      console.log(`\n  ${paint.text("●", "citron")} Renamed to ${paint.bold(sanitizeTerminalLine(result.session.title), "paper")}\n`);
+    },
+    delete: async () => {
+      const current = await request<{ session: Session }>(`/v1/sessions/${sessionId}`).catch(() => null);
+      const title = current?.session.title ?? "this session";
+      if (!await confirmPrompt(`Archive ${sanitizeTerminalLine(title)}? The transcript is kept. [y/N] `)) {
+        console.log(`  ${paint.dim("Archive cancelled.")}\n`);
+        return;
+      }
+      await request(`/v1/sessions/${sessionId}`, { method: "DELETE" });
+      console.log(`\n  ${paint.text("●", "citron")} Archived ${paint.bold(sanitizeTerminalLine(title), "paper")}\n`);
+      await slashHandlers.new("");
+    },
+    export: async (argument) => {
+      const format = argument.trim().toLowerCase() || "md";
+      if (format !== "md" && format !== "json") {
+        console.log(`  ${paint.text("Usage: /export [md|json]", "signal")}\n`);
+        return;
+      }
+      const response = await fetch(new URL(`/v1/sessions/${sessionId}/export?format=${format}`, server), {
+        headers: authHeaders(),
+      });
+      if (!response.ok) {
+        const body: unknown = await response.json().catch(() => null);
+        throw new Error(parseApiError(body) ?? `Export failed with HTTP ${response.status}`);
+      }
+      const text = await response.text();
+      const path = join(process.cwd(), `demesne-${sessionId!.slice(0, 8)}.${format}`);
+      writeFileSync(path, text, { encoding: "utf8", mode: 0o600 });
+      console.log(`\n  ${paint.text("●", "citron")} Exported to ${paint.bold(sanitizeTerminalLine(path), "paper")}\n`);
+    },
   };
 
   if (initial) {

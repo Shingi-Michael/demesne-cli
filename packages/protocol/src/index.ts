@@ -2,6 +2,8 @@ export const PROTOCOL_VERSION = 1 as const;
 
 export type EventType =
   | "session.created"
+  | "session.renamed"
+  | "session.archived"
   | "turn.created"
   | "agent.started"
   | "model.request_started"
@@ -239,6 +241,36 @@ export interface Session {
   updatedAt: string;
   workspace: Workspace | null;
   turns: Turn[];
+  /// Set when the session has been archived; archived sessions are excluded
+  /// from the default listing but remain readable and exportable.
+  archivedAt?: string | null;
+}
+
+export interface RenameSessionRequest {
+  title: string;
+}
+
+export interface RenameSessionResponse {
+  session: Session;
+  eventId: number;
+}
+
+export interface ArchiveSessionResponse {
+  session: Session;
+  eventId: number;
+}
+
+export interface SessionExportTurn {
+  id: string;
+  content: string;
+  status: TurnStatus;
+  createdAt: string;
+  responses: string[];
+}
+
+export interface SessionExport {
+  session: Session;
+  turns: SessionExportTurn[];
 }
 
 export interface SessionStateResponse {
@@ -322,6 +354,15 @@ export function parseCreateSessionRequest(value: unknown): CreateSessionRequest 
     throw new ProtocolValidationError("workspacePath must be at most 4096 characters");
   }
   return { ...(title ? { title } : {}), ...(workspacePath ? { workspacePath } : {}) };
+}
+
+export function parseRenameSessionRequest(value: unknown): RenameSessionRequest {
+  if (!isRecord(value)) throw new ProtocolValidationError("Request body must be a JSON object");
+  if (typeof value.title !== "string") throw new ProtocolValidationError("title must be a string");
+  const title = value.title.trim();
+  if (!title) throw new ProtocolValidationError("title cannot be empty");
+  if (title.length > 200) throw new ProtocolValidationError("title must be at most 200 characters");
+  return { title };
 }
 
 export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {

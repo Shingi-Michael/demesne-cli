@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ApiRequestError, isStalePermissionResolution } from "../src/api-request-error.ts";
+import { ApiRequestError, isStalePermissionResolution } from "../src/index.ts";
 
 describe("permission resolution API errors", () => {
   test("recognizes only the cancelled-permission conflict", () => {

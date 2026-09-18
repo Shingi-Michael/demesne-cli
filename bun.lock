@@ -13,6 +13,7 @@
       "name": "@demesne/cli",
       "dependencies": {
         "@demesne/brand": "workspace:*",
+        "@demesne/client": "workspace:*",
         "@demesne/config": "workspace:*",
         "@demesne/protocol": "workspace:*",
         "@demesne/providers": "workspace:*",
@@ -29,6 +30,12 @@
     },
     "packages/brand": {
       "name": "@demesne/brand",
+    },
+    "packages/client": {
+      "name": "@demesne/client",
+      "dependencies": {
+        "@demesne/protocol": "workspace:*",
+      },
     },
     "packages/config": {
       "name": "@demesne/config",
@@ -53,6 +60,8 @@
     "@demesne/brand": ["@demesne/brand@workspace:packages/brand"],
 
     "@demesne/cli": ["@demesne/cli@workspace:apps/cli"],
+
+    "@demesne/client": ["@demesne/client@workspace:packages/client"],
 
     "@demesne/config": ["@demesne/config@workspace:packages/config"],
 

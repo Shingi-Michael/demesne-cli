@@ -406,9 +406,27 @@ bun test
 ```text
 apps/daemon/       HTTP daemon and turn runner
 apps/cli/          Streaming command-line client
+packages/client/   Typed REST and SSE client used by the CLI
 packages/protocol/ Shared API and event contracts
 packages/providers/OpenAI-compatible provider adapters
 packages/storage/  SQLite state and event journal
+packages/config/   User and project configuration loading
+packages/brand/    Palette, command grammar, and terminal rendering
 ```
+
+The typed client can be used directly by scripts and editor integrations:
+
+```ts
+import { DemesneClient } from "@demesne/client";
+
+const client = new DemesneClient({ server: "http://127.0.0.1:7337", token });
+const { turn } = await client.submitTurn(sessionId, { content: "Run the tests" });
+for await (const event of client.streamEvents(sessionId, turn.id)) {
+  if (event.type === "message.delta") process.stdout.write(String(event.payload.delta));
+}
+```
+
+It reconnects with exponential backoff, resumes from the last event ID, and
+throws `ApiRequestError` with the daemon's error code for failed requests.
 
 Sessions, structured model transcripts, reasoning, model requests, token usage, tool calls and results, permissions, cancellation, and file undo snapshots are persisted in the event journal. Active model and tool work is marked interrupted after a crash and is never replayed automatically. One daemon holds an exclusive data-directory lock; another process using the same directory fails before opening SQLite.

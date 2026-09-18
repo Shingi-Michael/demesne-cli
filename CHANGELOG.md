@@ -54,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Headless output for scripting: `--output json` and `--output stream-json`,
   stdin prompt piping, automatic non-interactive permission denial, and
   status-based exit codes.
+- New `@demesne/client` package: typed REST methods for every route plus a
+  resumable SSE event stream with backoff and replay, now used by the CLI.
 
 ## [0.1.0] - 2026-09-18
 

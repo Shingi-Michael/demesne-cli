@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
 
 import {
-  EventStreamHttpError,
   isRecord,
-  readServerSentEvents,
   type CancelTurnResponse,
   type CreateSessionResponse,
   type EventEnvelope,
@@ -71,7 +69,7 @@ import { TerminalTextPacer } from "./terminal-text-pacer.ts";
 import { selectSessionInteractive, sessionListItem } from "./session-picker.ts";
 import { matchModel, selectModelInteractive } from "./model-picker.ts";
 import { reducedMotionEnabled } from "./motion.ts";
-import { ApiRequestError, isStalePermissionResolution } from "./api-request-error.ts";
+import { DemesneClient, isStalePermissionResolution } from "@demesne/client";
 import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } from "./approval-selection.ts";
 import { applyFooterScrollRegion, resetFooterScrollRegion } from "./terminal-control.ts";
 import { reduceInterruptKey } from "./interrupt-key.ts";
@@ -109,6 +107,7 @@ const terminalTheme = resolveTerminalTheme(
 );
 const paint = createPainter(colorEnabled(process.stdout), terminalTheme);
 const paintLog = createPainter(colorEnabled(process.stderr), terminalTheme);
+const client = new DemesneClient({ server, token: daemonToken });
 
 function loadSettings(): CliSettings {
   try {
@@ -631,7 +630,7 @@ async function run(command: string[]): Promise<void> {
 
   if (command[0] === "events" && command[1]) {
     const after = Number(takeOption(command, "--after") ?? "0");
-    for await (const event of streamEvents(command[1], after)) console.log(JSON.stringify(event));
+    for await (const event of client.streamEvents(command[1], after)) console.log(JSON.stringify(event));
     return;
   }
 
@@ -1172,7 +1171,7 @@ async function runHeadlessTurn(options: {
   let status: HeadlessResult["status"] = "completed";
   let error: string | undefined;
 
-  for await (const event of streamEvents(options.sessionId, submitted.eventId)) {
+  for await (const event of client.streamEvents(options.sessionId, submitted.eventId)) {
     if (event.turnId !== submitted.turn.id) continue;
     if (options.output === "stream-json") console.log(JSON.stringify(event));
     ledger.apply(event);
@@ -1427,7 +1426,7 @@ async function renderTurn(
   else process.once("SIGINT", onInterrupt);
 
   try {
-    for await (const event of streamEvents(sessionId, after, stream.signal)) {
+    for await (const event of client.streamEvents(sessionId, after, stream.signal)) {
       if (event.turnId !== turnId) continue;
       options.contextRail?.apply(event);
       throughput.apply(event);
@@ -1773,65 +1772,13 @@ function promptApprovalSelection(
   });
 }
 
-async function* streamEvents(
-  sessionId: string,
-  after: number,
-  signal?: AbortSignal,
-): AsyncGenerator<EventEnvelope> {
-  let cursor = after;
-  let retryDelay = 100;
-  while (!signal?.aborted) {
-    try {
-      const url = new URL("/v1/events", server);
-      url.searchParams.set("session_id", sessionId);
-      url.searchParams.set("after", String(cursor));
-      const response = await fetch(url, {
-        headers: {
-          ...(cursor > 0 ? { "Last-Event-ID": String(cursor) } : {}),
-          ...authHeaders(),
-        },
-        signal,
-      });
-      for await (const event of readServerSentEvents(response)) {
-        cursor = Math.max(cursor, event.eventId);
-        retryDelay = 100;
-        yield event;
-      }
-    } catch (error) {
-      if (signal?.aborted) return;
-      if (error instanceof SyntaxError) throw error;
-      if (error instanceof EventStreamHttpError && error.status >= 400 && error.status < 500) throw error;
-    }
-    await Bun.sleep(retryDelay);
-    retryDelay = Math.min(retryDelay * 2, 2_000);
-  }
-}
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(new URL(path, server), {
-    ...init,
-    headers: {
-      ...authHeaders(),
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers,
-    },
-  });
-  const body: unknown = await response.json();
-  if (!response.ok) {
-    const message = parseApiError(body) ?? `Request failed with HTTP ${response.status}`;
-    throw new ApiRequestError(message, response.status, parseApiErrorCode(body));
-  }
-  return body as T;
+  return client.request<T>(path, init);
 }
 
 function parseApiError(value: unknown): string | null {
   if (!isRecord(value) || !isRecord(value.error) || typeof value.error.message !== "string") return null;
   return value.error.message;
-}
-
-function parseApiErrorCode(value: unknown): string | null {
-  if (!isRecord(value) || !isRecord(value.error) || typeof value.error.code !== "string") return null;
-  return value.error.code;
 }
 
 function takeOption(command: string[], name: string): string | undefined {

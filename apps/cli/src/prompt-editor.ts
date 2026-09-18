@@ -35,6 +35,7 @@ export interface PromptEditorState {
   undoStack: Array<{ value: string; cursor: number }>;
   search: { query: string; index: number } | null;
   searchDraft: string;
+  mentionSelected: number;
 }
 
 export type PromptEditorAction =
@@ -48,6 +49,7 @@ export interface PromptEditorInput {
   text: string;
   commands: readonly SlashCommand[];
   history: readonly string[];
+  mentions?: readonly string[];
 }
 
 export interface PromptEditorResult {
@@ -69,6 +71,7 @@ export function createPromptEditorState(): PromptEditorState {
     undoStack: [],
     search: null,
     searchDraft: "",
+    mentionSelected: 0,
   };
 }
 
@@ -82,6 +85,7 @@ export function setPromptValue(state: PromptEditorState, value: string): PromptE
     menuSelected: 0,
     menuDismissed: false,
     historyIndex: null,
+    mentionSelected: 0,
     undoStack: pushUndo(state),
   };
 }
@@ -117,6 +121,22 @@ export function reducePromptEditor(state: PromptEditorState, input: PromptEditor
   if (key.ctrl && key.name === "p") return none(historyPrevious(state, input.history));
   if (key.ctrl && key.name === "n") return none(historyNext(state, input.history));
 
+  const mention = mentionTokenAt(state.value, state.cursor);
+  const mentionCandidates = mention && (input.mentions?.length ?? 0) > 0
+    ? mentionMatches(input.mentions!, mention.query)
+    : [];
+  const mentionActive = mention !== null && mentionCandidates.length > 0;
+
+  if (mentionActive && key.name === "up") {
+    return none({
+      ...state,
+      mentionSelected: (state.mentionSelected - 1 + mentionCandidates.length) % mentionCandidates.length,
+    });
+  }
+  if (mentionActive && key.name === "down") {
+    return none({ ...state, mentionSelected: (state.mentionSelected + 1) % mentionCandidates.length });
+  }
+
   if (menuOpen && key.name === "up") {
     return none({ ...state, menuSelected: (state.menuSelected - 1 + input.commands.length) % input.commands.length });
   }
@@ -127,6 +147,13 @@ export function reducePromptEditor(state: PromptEditorState, input: PromptEditor
   if (isNewlineKey(key, input.text)) {
     const value = `${state.value.slice(0, state.cursor)}\n${state.value.slice(state.cursor)}`;
     return none(mutate(state, value, state.cursor + 1, { dismissMenu: true }));
+  }
+
+  if (mentionActive && (key.name === "tab" || key.name === "return" || key.name === "enter")) {
+    const file = mentionCandidates[Math.min(state.mentionSelected, mentionCandidates.length - 1)]!;
+    const completed = `@${file} `;
+    const value = state.value.slice(0, mention.start) + completed + state.value.slice(state.cursor);
+    return none(mutate(state, value, mention.start + completed.length));
   }
 
   if (menuOpen && (key.name === "tab" || key.name === "return" || key.name === "enter")) {
@@ -148,6 +175,7 @@ export function reducePromptEditor(state: PromptEditorState, input: PromptEditor
       menuSelected: 0,
       menuDismissed: false,
       historyIndex: null,
+      mentionSelected: 0,
       undoStack: pushUndo(state),
     });
   }
@@ -288,6 +316,7 @@ function reduceSearch(state: PromptEditorState, input: PromptEditorInput): Promp
       historyIndex: null,
       menuSelected: 0,
       menuDismissed: false,
+      mentionSelected: 0,
       undoStack: pushUndo(state),
     });
   }
@@ -314,6 +343,7 @@ function mutate(state: PromptEditorState, value: string, cursor: number, options
     menuSelected: 0,
     menuDismissed: options.dismissMenu ?? false,
     historyIndex: null,
+    mentionSelected: 0,
     undoStack: pushUndo(state),
   };
 }
@@ -431,4 +461,47 @@ export function lineStart(value: string, cursor: number): number {
 export function lineEnd(value: string, cursor: number): number {
   const index = value.indexOf("\n", cursor);
   return index === -1 ? value.length : index;
+}
+
+export interface MentionToken {
+  start: number;
+  query: string;
+}
+
+/// Returns the `@` token the cursor is inside, if any. A mention must start at
+/// the beginning of the line or after whitespace, so `user@host` is not one.
+export function mentionTokenAt(value: string, cursor: number): MentionToken | null {
+  let index = cursor - 1;
+  while (index >= 0) {
+    const character = value[index]!;
+    if (character === "@") {
+      const before = value[index - 1];
+      if (before === undefined || /\s/.test(before)) {
+        return { start: index, query: value.slice(index + 1, cursor) };
+      }
+      return null;
+    }
+    if (/\s/.test(character)) return null;
+    index -= 1;
+  }
+  return null;
+}
+
+/// Ranks workspace files for a mention query: basename prefixes first, then
+/// earlier substring matches, then shorter paths. Paths containing whitespace
+/// are excluded because completion inserts a bare token.
+export function mentionMatches(files: readonly string[], query: string, limit = 8): string[] {
+  const normalized = query.toLowerCase();
+  const scored: Array<{ file: string; score: number }> = [];
+  for (const file of files) {
+    if (/\s/.test(file)) continue;
+    const lower = file.toLowerCase();
+    const index = normalized ? lower.indexOf(normalized) : 0;
+    if (normalized && index === -1) continue;
+    const basename = lower.slice(lower.lastIndexOf("/") + 1);
+    const basePrefix = normalized && !basename.startsWith(normalized) ? 1 : 0;
+    scored.push({ file, score: basePrefix * 1_000 + index + file.length / 100 });
+  }
+  scored.sort((left, right) => left.score - right.score || left.file.localeCompare(right.file));
+  return scored.slice(0, limit).map((entry) => entry.file);
 }

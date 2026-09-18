@@ -230,6 +230,25 @@ export function formatSlashCommandMenu(
   return lines.join("\n");
 }
 
+/// Formats the `@` file-mention menu. Paths are workspace-relative and the
+/// selected entry is emphasized; the caller caps the list.
+export function formatMentionMenu(
+  files: readonly string[],
+  selectedIndex: number,
+  width = 80,
+  painter: Painter = createPainter(true),
+): string {
+  const available = Math.max(18, width - 6);
+  return files.map((file, index) => {
+    const marker = index === selectedIndex ? painter.bold("›", "electric") : " ";
+    const label = truncateText(sanitizeTerminalLine(file), available);
+    const styled = index === selectedIndex
+      ? painter.bold(label, "paper")
+      : painter.text(label, "secondary");
+    return `  ${marker} ${styled}`;
+  }).join("\n");
+}
+
 /// Strips ANSI codes to compute visual string length.
 export function visibleLength(str: string): number {
   return stringWidth(str);

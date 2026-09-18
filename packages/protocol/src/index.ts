@@ -249,6 +249,10 @@ export interface SessionStateResponse {
   sessionGrants?: Array<{ tool: string; pathPrefix: string }>;
 }
 
+export interface WorkspaceFilesResponse {
+  files: string[];
+}
+
 export interface CreateSessionRequest {
   title?: string;
   workspacePath?: string;

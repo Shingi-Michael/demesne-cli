@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalWorkspace, ToolRegistry } from "../src/tools.ts";
+import { canonicalWorkspace, listWorkspaceFiles, ToolRegistry } from "../src/tools.ts";
 import { defaultSystemPrompt, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 import { applyEdits, EditApplyError } from "../src/edit-engine.ts";
 
@@ -29,6 +29,19 @@ describe("built-in tools", () => {
     expect(turnToolGuidance("summarize this project and count its lines")).toBeNull();
     expect(selectToolsForTurn(definitions, "summarize this repository and fix the failing tests")).toEqual(definitions);
     expect(turnToolGuidance("summarize this repository and fix the failing tests")).toBeNull();
+  });
+
+  test("lists workspace files for mentions without sensitive or dependency paths", () => {
+    const root = workspace();
+    writeFileSync(join(root, "README.md"), "docs\n");
+    writeFileSync(join(root, "src", "main.ts"), "export {};\n");
+    writeFileSync(join(root, ".env"), "SECRET=1\n");
+    writeFileSync(join(root, "id_rsa"), "key\n");
+    mkdirSync(join(root, "node_modules", "pkg"), { recursive: true });
+    writeFileSync(join(root, "node_modules", "pkg", "index.js"), "module.exports = {};\n");
+
+    expect(listWorkspaceFiles(root)).toEqual(["README.md", "src/main.ts"]);
+    expect(listWorkspaceFiles(root, 1)).toHaveLength(1);
   });
 
   test("keeps reads inside the workspace and excludes sensitive files and symlinks", async () => {

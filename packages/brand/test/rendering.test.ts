@@ -4,6 +4,7 @@ import {
   fileUrl,
   formatDiffPreview,
   formatHyperlink,
+  formatMentionMenu,
   formatToolResultLine,
   formatUnifiedDiff,
 } from "../src/index.ts";
@@ -48,6 +49,22 @@ describe("formatUnifiedDiff", () => {
   test("sanitizes control characters in diff content", () => {
     const diff = formatUnifiedDiff("safe", "spoof\u001b[2J", { painter, compact: true });
     expect(diff.join("\n")).not.toContain("\u001b");
+  });
+});
+
+describe("formatMentionMenu", () => {
+  test("marks the selected path and sanitizes entries", () => {
+    const menu = formatMentionMenu(["src/main.ts", "bad\u001b[2J.ts"], 1, 80, painter);
+    const lines = menu.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe("    src/main.ts");
+    expect(lines[1]).toContain("› bad");
+    expect(menu).not.toContain("\u001b");
+  });
+
+  test("truncates long paths to the width", () => {
+    const menu = formatMentionMenu(["a/".repeat(80) + "file.ts"], 0, 40, painter);
+    expect(menu.length).toBeLessThan(60);
   });
 });
 

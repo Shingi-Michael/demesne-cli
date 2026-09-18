@@ -14,6 +14,7 @@ import {
   type SessionStateResponse,
   type SubmitTurnResponse,
   type UndoTurnResponse,
+  type WorkspaceFilesResponse,
 } from "@demesne/protocol";
 import {
   computePromptVisualLines,
@@ -33,6 +34,7 @@ import {
   formatWelcomeCard,
   fileUrl,
   formatHyperlink,
+  formatMentionMenu,
   humanToolTitle,
   renderBeaconText,
   renderSpinner,
@@ -69,7 +71,7 @@ import { reduceInterruptKey } from "./interrupt-key.ts";
 import { playTensorIntro } from "./tensor-intro.ts";
 import { PromptHistory } from "./prompt-history.ts";
 import { composeInEditor } from "./external-editor.ts";
-import { createPromptEditorState, reducePromptEditor, reverseSearchMatches, setPromptValue } from "./prompt-editor.ts";
+import { createPromptEditorState, mentionMatches, mentionTokenAt, reducePromptEditor, reverseSearchMatches, setPromptValue } from "./prompt-editor.ts";
 import { queueSummary, reduceQueuedInput } from "./input-queue.ts";
 import { notify, shouldNotifyApproval, shouldNotifyCompletion, type NotificationOptions } from "./notifications.ts";
 import { VERSION } from "./version.ts";
@@ -226,6 +228,14 @@ function takeQueuedInput(): string | undefined {
   return queued ? queued : undefined;
 }
 
+/// Workspace files for `@` mentions. A missing workspace or a failed listing
+/// simply disables the menu.
+async function fetchMentionFiles(sessionId: string): Promise<string[]> {
+  return request<WorkspaceFilesResponse>(`/v1/sessions/${sessionId}/files`)
+    .then((result) => result.files)
+    .catch(() => []);
+}
+
 function getTerminalWidth(stream: { columns?: number } = process.stdout): number {
   const cols = stream.columns ?? process.stdout.columns ?? 80;
   if (!cols || cols <= 0) return 80;
@@ -236,7 +246,7 @@ function getConversationWidth(stream: { columns?: number } = process.stdout): nu
   return Math.min(100, getTerminalWidth(stream));
 }
 
-async function readCommandPrompt(history: PromptHistory): Promise<string> {
+async function readCommandPrompt(history: PromptHistory, mentions: readonly string[] = []): Promise<string> {
   const input = process.stdin;
   const output = process.stdout;
   const wasRaw = input.isRaw;
@@ -286,7 +296,17 @@ async function readCommandPrompt(history: PromptHistory): Promise<string> {
       }
 
       const trailingContent: string[] = [];
-      if (commands.length > 0 && searchLine === null) {
+      const mention = mentionTokenAt(state.value, state.cursor);
+      const mentionCandidates = mention && mentions.length > 0 ? mentionMatches(mentions, mention.query) : [];
+      if (mentionCandidates.length > 0 && searchLine === null) {
+        state.mentionSelected = Math.min(state.mentionSelected, mentionCandidates.length - 1);
+        trailingContent.push(...formatMentionMenu(
+          mentionCandidates,
+          state.mentionSelected,
+          getConversationWidth(output),
+          paint,
+        ).split("\n"));
+      } else if (commands.length > 0 && searchLine === null) {
         trailingContent.push(...formatSlashCommandMenu(commands, state.menuSelected, getConversationWidth(output), paint).split("\n"));
       } else if (!chatState.footer?.isActive()) {
         const statusLine = chatState.inputStatusLine?.() ?? "";
@@ -399,6 +419,7 @@ async function readCommandPrompt(history: PromptHistory): Promise<string> {
         text,
         commands: matchingCommands(),
         history: history.entries(),
+        mentions,
       });
       state = result.state;
       if (result.action.type === "cancel") {
@@ -642,6 +663,7 @@ async function runChat(command: string[]): Promise<void> {
 
   const interactive = process.stdin.isTTY && process.stdout.isTTY;
   const history = PromptHistory.load(join(settings.dataDirectory, "history.jsonl"));
+  let mentionFiles: string[] = [];
   let sessionId = sessionIdOverride;
   const thinkingEnabled: boolean | undefined = undefined;
 
@@ -676,6 +698,7 @@ async function runChat(command: string[]): Promise<void> {
     provider: health?.provider ?? "local",
   };
   const initialState = await request<SessionStateResponse>(`/v1/sessions/${sessionId}`);
+  mentionFiles = await fetchMentionFiles(sessionId);
   let currentWorkspace = initialState.session.workspace?.root ?? process.cwd();
   const historicalModel = initialState.latestProviderCall
     ? discoveredModels.find((model) =>
@@ -771,6 +794,7 @@ async function runChat(command: string[]): Promise<void> {
       }
       contextRail.hydrate(result.latestProviderCall, thinkingEnabled, currentWorkspace);
       contextRail.setBranch(result.session.workspace?.gitBranch ?? null);
+      mentionFiles = await fetchMentionFiles(sessionId);
       console.log(`\n  ${paint.text("●", "citron")} Switched to ${paint.bold(sanitizeTerminalLine(result.session.title), "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}\n`);
     } catch {
       console.log(`  ${paint.text(`Could not find session: ${targetId}`, "signal")}\n`);
@@ -808,6 +832,7 @@ async function runChat(command: string[]): Promise<void> {
       contextRail.setModel(activeModel);
       contextRail.hydrate(null, thinkingEnabled, currentWorkspace);
       contextRail.setBranch(created.session.workspace?.gitBranch ?? null);
+      mentionFiles = await fetchMentionFiles(sessionId);
       console.log(`\n  ${paint.text("●", "citron")} Started new session ${paint.bold(title, "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}\n`);
     },
     status: async () => {
@@ -869,7 +894,7 @@ async function runChat(command: string[]): Promise<void> {
       line = queued;
     } else {
       try {
-        line = await readCommandPrompt(history);
+        line = await readCommandPrompt(history, mentionFiles);
       } catch {
         leaveChat();
       }

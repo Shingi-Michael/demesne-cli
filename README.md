@@ -70,6 +70,10 @@ footer shows a `⏎ …` preview, and the queue submits automatically when the t
 finishes; slash commands queue the same way. Control keys and the approval
 selector keep their normal behavior.
 
+Type `@` to open a workspace file menu for prompt mentions; `Tab` or `Enter`
+inserts the selected path. The listing excludes sensitive paths, dependency and
+build directories, and paths containing whitespace.
+
 Code fences are syntax-highlighted for TypeScript/JavaScript, JSON, Bash, YAML,
 Python, Go, Rust, and diffs; unknown languages fall back to a common keyword
 set, and `NO_COLOR` output is unchanged. Completed `edit_file` calls render a

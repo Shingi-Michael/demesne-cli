@@ -1167,6 +1167,34 @@ function isSensitivePath(path: string): boolean {
     protectedNames.has(name) || /\.(?:pem|key|p12|mobileprovision)$/i.test(name);
 }
 
+/// Heavy build and dependency directories that are never useful as prompt
+/// mentions and can dominate a workspace listing.
+const MENTION_SKIPPED_DIRECTORIES = new Set([
+  "node_modules", ".venv", "venv", "__pycache__", ".next", "target", "Pods", "DerivedData",
+]);
+
+/// Lists workspace files for `@` prompt mentions.
+///
+/// Paths are relative, lexically sorted, filtered by the same sensitive-path
+/// policy as automatic reads, and capped. Symlinks are skipped by the shared
+/// walker.
+export function listWorkspaceFiles(workspaceRoot: string, limit = 2_000): string[] {
+  const controller = new AbortController();
+  const files: string[] = [];
+  walkFiles(
+    workspaceRoot,
+    workspaceRoot,
+    controller.signal,
+    (_absolute, relativePath) => {
+      files.push(relativePath);
+    },
+    limit,
+    () => files.length >= limit,
+    (relativeDirectory) => !relativeDirectory.split(sep).some((part) => MENTION_SKIPPED_DIRECTORIES.has(part)),
+  );
+  return files.sort();
+}
+
 /// Translates a user/model glob (supports **, *, ?) into a path-matching RegExp.
 function globToRegExp(pattern: string): RegExp {
   if (!pattern || pattern.length > 512) throw new Error("invalid glob");

@@ -19,7 +19,7 @@ import { AgentEngine } from "./engine.ts";
 import type { ContextPlanner } from "./context-planner.ts";
 import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
-import { canonicalWorkspace, resolveWorkspacePath, ToolRegistry } from "./tools.ts";
+import { canonicalWorkspace, listWorkspaceFiles, resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { detectGitBranch } from "./git-branch.ts";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, type InferenceBoundaryHook } from "./inference-scheduler.ts";
@@ -251,6 +251,13 @@ export function createDaemonApp(options: {
 
       if (request.method === "GET" && url.pathname === "/v1/sessions") {
         return json({ sessions: store.listSessions() });
+      }
+
+      if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "files") {
+        const session = store.getSession(path[2]!);
+        if (!session) return apiError("not_found", "Session not found", 404);
+        if (!session.workspace) return apiError("invalid_state", "Session has no workspace", 409);
+        return json({ files: listWorkspaceFiles(session.workspace.root) });
       }
 
       if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {

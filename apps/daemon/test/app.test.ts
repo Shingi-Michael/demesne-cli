@@ -10,6 +10,7 @@ import {
   type Session,
   type SessionStateResponse,
   type SubmitTurnResponse,
+  type WorkspaceFilesResponse,
 } from "@demesne/protocol";
 import { ProviderError, type ProviderAdapter, type ProviderMessage } from "@demesne/providers";
 import { DemesneStore } from "@demesne/storage";
@@ -1825,6 +1826,24 @@ describe("Demesne daemon", () => {
     });
     const state = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${created.session.id}`);
     expect(state.session.workspace?.gitBranch).toBe("main");
+  });
+
+  test("lists workspace files for prompt mentions", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspace = mkdtempSync(join(tmpdir(), "demesne-files-workspace-"));
+    temporaryDirectories.push(workspace);
+    mkdirSync(join(workspace, "src"));
+    writeFileSync(join(workspace, "src", "main.ts"), "export {};\n");
+    writeFileSync(join(workspace, ".env"), "SECRET=1\n");
+
+    const running = startApp(join(directory, "demesne.sqlite"));
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Files", workspacePath: workspace }),
+    });
+    const listing = await jsonRequest<WorkspaceFilesResponse>(running.url, `/v1/sessions/${created.session.id}/files`);
+    expect(listing.files).toEqual(["src/main.ts"]);
   });
 });
 

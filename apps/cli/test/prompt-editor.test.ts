@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { SLASH_COMMANDS, type SlashCommand } from "@demesne/brand";
 import {
   createPromptEditorState,
+  mentionMatches,
+  mentionTokenAt,
   reducePromptEditor,
   setPromptValue,
   type PromptEditorKey,
@@ -17,13 +19,14 @@ function press(
   current: PromptEditorState,
   key: PromptEditorKey,
   text = "",
-  options: { commands?: readonly SlashCommand[]; history?: readonly string[] } = {},
+  options: { commands?: readonly SlashCommand[]; history?: readonly string[]; mentions?: readonly string[] } = {},
 ): PromptEditorResult {
   return reducePromptEditor(current, {
     key,
     text,
     commands: options.commands ?? [],
     history: options.history ?? [],
+    mentions: options.mentions ?? [],
   });
 }
 
@@ -243,6 +246,45 @@ describe("prompt editor submission and cancellation", () => {
 
   test("requests an external editor on ctrl+o", () => {
     expect(press(state("text"), { name: "o", ctrl: true }, "").action).toEqual({ type: "compose" });
+  });
+});
+
+describe("prompt editor mentions", () => {
+  const mentions = ["src/main.ts", "src/cli/main.ts", "packages/brand/src/index.ts", "README.md"];
+
+  test("detects mention tokens only at word boundaries", () => {
+    expect(mentionTokenAt("fix @src", 8)).toEqual({ start: 4, query: "src" });
+    expect(mentionTokenAt("@", 1)).toEqual({ start: 0, query: "" });
+    expect(mentionTokenAt("user@host", 9)).toBeNull();
+    expect(mentionTokenAt("fix @a b", 7)).toBeNull();
+    expect(mentionTokenAt("no mention", 10)).toBeNull();
+  });
+
+  test("ranks basename prefixes first, then earlier and shorter paths", () => {
+    expect(mentionMatches(mentions, "main")[0]).toBe("src/main.ts");
+    expect(mentionMatches(mentions, "index")[0]).toBe("packages/brand/src/index.ts");
+    expect(mentionMatches(mentions, "")[0]).toBe("README.md");
+    expect(mentionMatches(mentions, "zzz")).toEqual([]);
+  });
+
+  test("completes the selected mention with tab or enter", () => {
+    const tabbed = press(state("fix @src"), { name: "tab" }, "", { mentions }).state;
+    expect(tabbed.value).toBe("fix @src/main.ts ");
+    const entered = press(state("@read"), { name: "enter" }, "", { mentions }).state;
+    expect(entered.value).toBe("@README.md ");
+  });
+
+  test("navigates mentions with up and down, ahead of history", () => {
+    let current = press(state("@"), { name: "down" }, "", { mentions, history: ["older"] }).state;
+    expect(current.mentionSelected).toBe(1);
+    expect(current.historyIndex).toBeNull();
+    current = press(current, { name: "up" }, "", { mentions, history: ["older"] }).state;
+    expect(current.mentionSelected).toBe(0);
+  });
+
+  test("shift+enter still inserts a newline while a mention is open", () => {
+    const current = press(state("@read"), { name: "return", shift: true }, "", { mentions }).state;
+    expect(current.value).toBe("@read\n");
   });
 });
 

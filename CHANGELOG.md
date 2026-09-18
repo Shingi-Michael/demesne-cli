@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OSC 8 hyperlinks for file paths.
 - Workspace git branch in session state and the footer, a five-cell context
   meter, and desktop notifications for long completions and pending approvals.
+- Type-ahead queue: text typed while a turn streams appears in the footer and
+  submits automatically when the turn finishes.
 
 ## [0.1.0] - 2026-09-18
 

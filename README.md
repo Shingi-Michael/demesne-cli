@@ -65,6 +65,11 @@ History is stored privately at `<data-dir>/history.jsonl` (mode `0600`),
 tagged with the workspace, and capped at 500 entries. A malformed or unreadable
 history never blocks startup.
 
+Typing while a turn is running queues the text instead of interrupting it. The
+footer shows a `⏎ …` preview, and the queue submits automatically when the turn
+finishes; slash commands queue the same way. Control keys and the approval
+selector keep their normal behavior.
+
 Code fences are syntax-highlighted for TypeScript/JavaScript, JSON, Bash, YAML,
 Python, Go, Rust, and diffs; unknown languages fall back to a common keyword
 set, and `NO_COLOR` output is unchanged. Completed `edit_file` calls render a

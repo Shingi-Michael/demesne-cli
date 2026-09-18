@@ -70,6 +70,7 @@ import { playTensorIntro } from "./tensor-intro.ts";
 import { PromptHistory } from "./prompt-history.ts";
 import { composeInEditor } from "./external-editor.ts";
 import { createPromptEditorState, reducePromptEditor, reverseSearchMatches, setPromptValue } from "./prompt-editor.ts";
+import { queueSummary, reduceQueuedInput } from "./input-queue.ts";
 import { notify, shouldNotifyApproval, shouldNotifyCompletion, type NotificationOptions } from "./notifications.ts";
 import { VERSION } from "./version.ts";
 import { loadCliSettings, type CliSettings } from "./cli-config.ts";
@@ -175,6 +176,8 @@ const chatState: {
   refreshStreams?: () => void;
   inputStatusLine?: () => string | null;
   footer?: CliFixedFooter;
+  queuedInput?: string;
+  refreshQueued?: () => void;
 } = { streamActive: false, permissionActive: false };
 let restoreTerminalState = () => {};
 
@@ -189,8 +192,18 @@ function watchForDoubleEscapeInterrupt(): () => void {
   input.setRawMode(true);
   input.resume();
 
-  const onKeypress = (_text: string, key: { name?: string; ctrl?: boolean; meta?: boolean }): void => {
-    if (chatState.permissionActive && key.ctrl && key.name === "c") return;
+  const onKeypress = (_text: string, key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean }): void => {
+    if (chatState.permissionActive) {
+      // The approval selector handles Ctrl+C itself; other keys still reach
+      // the double-Escape interrupt path.
+      if (key.ctrl && key.name === "c") return;
+    } else if (chatState.streamActive && key.name !== "escape") {
+      const nextQueue = reduceQueuedInput(chatState.queuedInput ?? "", key, _text ?? "");
+      if (nextQueue !== chatState.queuedInput) {
+        chatState.queuedInput = nextQueue;
+        chatState.refreshQueued?.();
+      }
+    }
     const next = reduceInterruptKey(lastEscapeAt, key, Date.now());
     lastEscapeAt = next.lastEscapeAt;
     if (next.interrupt) chatState.interrupt?.();
@@ -204,6 +217,13 @@ function watchForDoubleEscapeInterrupt(): () => void {
 
   input.on("keypress", onKeypress);
   return detach;
+}
+
+/// Consumes any type-ahead text queued during the previous turn.
+function takeQueuedInput(): string | undefined {
+  const queued = chatState.queuedInput?.trim();
+  chatState.queuedInput = undefined;
+  return queued ? queued : undefined;
 }
 
 function getTerminalWidth(stream: { columns?: number } = process.stdout): number {
@@ -710,6 +730,7 @@ async function runChat(command: string[]): Promise<void> {
     console.log(formatUserMessage(text, timeStr, width, paint));
 
     chatState.streamActive = true;
+    chatState.queuedInput = undefined;
     contextRail.setModel(activeModel);
     const stopWatching = watchForDoubleEscapeInterrupt();
     try {
@@ -843,10 +864,15 @@ async function runChat(command: string[]): Promise<void> {
 
   while (true) {
     let line: string;
-    try {
-      line = await readCommandPrompt(history);
-    } catch {
-      leaveChat();
+    const queued = takeQueuedInput();
+    if (queued) {
+      line = queued;
+    } else {
+      try {
+        line = await readCommandPrompt(history);
+      } catch {
+        leaveChat();
+      }
     }
 
     const input = line.trim();
@@ -949,6 +975,10 @@ async function renderTurn(
   };
 
   const updateBeacon = () => {
+    const queuedBeaconText = () => {
+      const summary = queueSummary(chatState.queuedInput ?? "");
+      return summary ? ` ${paint.text(`· ⏎ ${summary}`, "electricBright")}` : "";
+    };
     const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
     const phase = reduceMotion ? 0 : ((Date.now() - beaconStartedAt) % 2_100) / 2_100;
     const spinPhase = reduceMotion ? 0 : ((Date.now() - beaconStartedAt) % SPINNER_PERIOD_MS) / SPINNER_PERIOD_MS;
@@ -956,7 +986,7 @@ async function renderTurn(
     const tokSpeed = throughput.snapshot().tokensPerSecond;
     const speedLabel = tokSpeed === null ? "" : `${tokSpeed.toFixed(0)} tok/s`;
     const speedStr = speedLabel ? ` · ${speedLabel}` : "";
-    const left = `  ${spinner} ${paint.bold(beaconLabel, "paper")} ${paint.dim(`· ${elapsedSec}s${speedStr}`)}`;
+    const left = `  ${spinner} ${paint.bold(beaconLabel, "paper")} ${paint.dim(`· ${elapsedSec}s${speedStr}`)}${queuedBeaconText()}`;
     const modelText = options.contextRail?.modelId || modelName;
     const animatedModel = modelText ? renderBeaconText(sanitizeTerminalLine(modelText), phase, beaconActivity, paint) : undefined;
     if (fixedFooter?.isActive()) {
@@ -966,6 +996,7 @@ async function renderTurn(
       beaconVisible = true;
     }
   };
+  chatState.refreshQueued = updateBeacon;
 
   const stopBeacon = () => {
     const shouldClear = beaconVisible || beaconTimer !== null;
@@ -1272,6 +1303,7 @@ async function renderTurn(
     textPacer?.flushNow();
     stopBeacon();
     if (interactive && chatState.refreshStreams === resizeStreams) chatState.refreshStreams = undefined;
+    if (chatState.refreshQueued === updateBeacon) chatState.refreshQueued = undefined;
     if (cancelFallback) clearTimeout(cancelFallback);
     if (useChatInterrupt) {
       if (chatState.interrupt === onInterrupt) chatState.interrupt = undefined;

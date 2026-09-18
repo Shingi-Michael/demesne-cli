@@ -20,6 +20,7 @@ import type { ContextPlanner } from "./context-planner.ts";
 import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
 import { canonicalWorkspace, resolveWorkspacePath, ToolRegistry } from "./tools.ts";
+import { detectGitBranch } from "./git-branch.ts";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, type InferenceBoundaryHook } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
@@ -255,7 +256,11 @@ export function createDaemonApp(options: {
       if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {
         const state = store.getSessionState(path[2]!);
         if (!state) return apiError("not_found", "Session not found", 404);
-        return json({ ...state, sessionGrants: permissions.listGrants(path[2]!) });
+        const branch = state.session.workspace ? await detectGitBranch(state.session.workspace.root) : null;
+        const session = state.session.workspace && branch
+          ? { ...state.session, workspace: { ...state.session.workspace, gitBranch: branch } }
+          : state.session;
+        return json({ ...state, session, sessionGrants: permissions.listGrants(path[2]!) });
       }
 
       if (

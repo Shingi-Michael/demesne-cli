@@ -219,6 +219,10 @@ export type PermissionDecision = "allow_once" | "allow_session" | "deny";
 export interface Workspace {
   id: string;
   root: string;
+  /// Current branch of the workspace repository, when it is a clean git
+  /// checkout. Populated by the daemon when session state is read; absent for
+  /// non-repositories and detached HEADs.
+  gitBranch?: string;
 }
 
 export interface PendingPermissionSnapshot {

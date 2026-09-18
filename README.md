@@ -29,7 +29,7 @@ explicitly. `demesne doctor --json` emits machine-readable checks for scripts.
 
 This launches the interactive streaming CLI directly in your terminal. A compact masthead shows the active model, workspace, and approval policy. While output is silent, a phase-aware beacon occupies the fixed footer; it is cleared before permanent reasoning, tool, or response output is written. Interactive TTY responses pass through an ANSI- and grapheme-safe jitter buffer that turns speculative decoding bursts into a smooth typing cadence. The cadence adapts to visible text arrival and catches up within a bounded 1.5-second backlog; tools, errors, cancellation, and completion always drain or flush it before rendering. Scripted `prompt` output, pipes, event JSON, and persisted response text remain immediate and byte-for-byte unchanged.
 
-The conversation remains a scrollable stream; Demesne does not use an alternate screen. Interactive terminals reserve the final line for a cursor-addressed footer and restore the normal scroll region afterward. Its left side reports the active phase and elapsed time while its right side prioritizes runtime verification, model identity, and context state. The footer preserves the cursor during resize, degrades to inline status on very short terminals, and avoids rewriting unchanged content.
+The conversation remains a scrollable stream; Demesne does not use an alternate screen. Interactive terminals reserve the final line for a cursor-addressed footer and restore the normal scroll region afterward. Its left side reports the active phase and elapsed time while its right side prioritizes runtime verification, model identity, the workspace git branch, and a five-cell context meter with an estimated percentage. The footer preserves the cursor during resize, degrades to inline status on very short terminals, and avoids rewriting unchanged content.
 
 Completion receipts separate prompt latency from generation: `ttft` is the summed time to first token across model rounds, and `tok/s decode` excludes that prefill interval. If a provider omits TTFT, the CLI falls back to the broader effective rate rather than inventing decode speed. Receipts also list paths changed and validation commands run using only recorded tool evidence. `/context` explicitly separates the pre-request **estimated context plan** from the last provider-reported token usage, cached input, and request timing; it does not present last-call usage as remaining conversation capacity.
 
@@ -307,6 +307,11 @@ The daemon uses the user file and environment only: provider settings are
 machine-wide, so a workspace cannot reconfigure the shared runtime. The CLI
 merges the project file for workspace-specific defaults. `DEMESNE_CONFIG_FILE`
 points the loader at a different user config for testing or nonstandard homes.
+
+Interactive terminals emit a desktop notification (OSC 9) when a turn finishes
+after at least `minimum_duration_ms` or when an approval is waiting.
+`DEMESNE_NO_NOTIFICATIONS=1` disables them, and terminals without OSC 9 support
+ignore the sequence.
 
 A workspace can also provide instructions for the model. `DEMESNE.md` is
 preferred, and `AGENTS.md` is accepted so repositories that already target

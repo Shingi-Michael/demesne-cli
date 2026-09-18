@@ -1809,6 +1809,23 @@ describe("Demesne daemon", () => {
     expect(systemMessage).toContain("Always use tabs and run focused tests.");
     expect(systemMessage).toContain("take precedence");
   });
+
+  test("reports the workspace git branch in session state", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspace = mkdtempSync(join(tmpdir(), "demesne-git-workspace-"));
+    temporaryDirectories.push(workspace);
+    const init = Bun.spawn(["git", "init", "-q", "-b", "main", workspace], { stdout: "pipe", stderr: "pipe" });
+    expect(await init.exited).toBe(0);
+
+    const running = startApp(join(directory, "demesne.sqlite"));
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Git", workspacePath: workspace }),
+    });
+    const state = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${created.session.id}`);
+    expect(state.session.workspace?.gitBranch).toBe("main");
+  });
 });
 
 function startApp(

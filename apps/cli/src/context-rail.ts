@@ -49,6 +49,7 @@ export class CliContextRail {
   private validations: RailResult[] = [];
   private activity: string[] = [];
   private runtime: RuntimeProfileStatus | null = null;
+  private branch: string | null = null;
 
   constructor(model: ModelDescriptor, private workspace: string) {
     this.model = model;
@@ -109,6 +110,10 @@ export class CliContextRail {
 
   setRuntime(runtime: RuntimeProfileStatus | null): void {
     this.runtime = runtime;
+  }
+
+  setBranch(branch: string | null): void {
+    this.branch = branch;
   }
 
   apply(event: EventEnvelope): void {
@@ -276,23 +281,30 @@ export class CliContextRail {
     const percentage = displayTokens !== null && contextWindow
       ? Math.min(999, Math.round((displayTokens / contextWindow) * 100))
       : null;
-    const usagePart = plannedTokens !== null
-      ? `est ~${formatTokenCount(plannedTokens)}${contextWindow ? `/${formatTokenCount(contextWindow)}` : ""}${percentage === null ? "" : ` · ${percentage}%`}`
-      : reportedTokens !== null
-        ? `last ${formatTokenCount(reportedTokens)}${contextWindow ? `/${formatTokenCount(contextWindow)}` : ""}${percentage === null ? "" : ` · ${percentage}%`}`
-        : contextWindow
-          ? `ctx ${formatTokenCount(contextWindow)} · no request yet`
-          : "context pending";
     const color = (this.plan && budgetColor(this.plan, percentage) === "signal") || (percentage !== null && percentage >= 90)
       ? "signal"
       : "secondary";
+    const usageBase = plannedTokens !== null
+      ? `est ~${formatTokenCount(plannedTokens)}${contextWindow ? `/${formatTokenCount(contextWindow)}` : ""}`
+      : reportedTokens !== null
+        ? `last ${formatTokenCount(reportedTokens)}${contextWindow ? `/${formatTokenCount(contextWindow)}` : ""}`
+        : contextWindow
+          ? `ctx ${formatTokenCount(contextWindow)} · no request yet`
+          : "context pending";
+    const percentSuffix = percentage === null
+      ? ""
+      : `${painter.dim(" · ")}${compactContextMeter(percentage, painter)}${painter.text(` ${percentage}%`, color)}`;
+    const usageText = painter.text(usageBase, color) + percentSuffix;
     const modelText = modelLabel ?? painter.text(sanitizeTerminalLine(this.model.id), color);
     const runtimePart = compactRuntimeStatus(this.runtime);
     const runtimeText = runtimePart
       ? painter.text(runtimePart.label, runtimePart.state === "verified" ? "citron" : runtimePart.state === "mismatch" ? "signal" : "secondary")
       : "";
-    const restText = painter.text(` · ${usagePart}`, color);
-    return truncateText(`${runtimeText ? `${runtimeText} · ` : ""}${modelText}${restText}`, safeWidth);
+    const branchText = this.branch ? painter.dim(` · ${sanitizeTerminalLine(this.branch)}`) : "";
+    return truncateText(
+      `${runtimeText ? `${runtimeText} · ` : ""}${modelText}${branchText}${painter.dim(" · ")}${usageText}`,
+      safeWidth,
+    );
   }
 
   private trackTool(event: EventEnvelope): void {
@@ -384,6 +396,16 @@ function formatContextMeter(
   const filled = Math.round(ratio * meterWidth);
   const color = ratio >= 0.9 ? "signal" : ratio >= 0.7 ? "citron" : "electric";
   return painter.text(`[${"■".repeat(filled)}${"·".repeat(meterWidth - filled)}]`, color);
+}
+
+/// A five-cell meter for the single-line footer, where the full meter would
+/// crowd out the model and runtime segments.
+function compactContextMeter(percentage: number, painter: Painter): string {
+  const meterWidth = 5;
+  const ratio = Math.max(0, Math.min(1, percentage / 100));
+  const filled = Math.round(ratio * meterWidth);
+  const color = ratio >= 0.9 ? "signal" : ratio >= 0.7 ? "citron" : "electric";
+  return painter.text(`${"▰".repeat(filled)}${"▱".repeat(meterWidth - filled)}`, color);
 }
 
 function formatBudgetStatus(plan: ContextPlan): string {

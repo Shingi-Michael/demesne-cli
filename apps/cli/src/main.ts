@@ -70,6 +70,7 @@ import { playTensorIntro } from "./tensor-intro.ts";
 import { PromptHistory } from "./prompt-history.ts";
 import { composeInEditor } from "./external-editor.ts";
 import { createPromptEditorState, reducePromptEditor, reverseSearchMatches, setPromptValue } from "./prompt-editor.ts";
+import { notify, shouldNotifyApproval, shouldNotifyCompletion, type NotificationOptions } from "./notifications.ts";
 import { VERSION } from "./version.ts";
 import { loadCliSettings, type CliSettings } from "./cli-config.ts";
 import {
@@ -663,6 +664,7 @@ async function runChat(command: string[]): Promise<void> {
     : undefined;
   const contextRail = new CliContextRail(historicalModel ?? activeModel, currentWorkspace);
   contextRail.hydrate(initialState.latestProviderCall, thinkingEnabled, currentWorkspace);
+  contextRail.setBranch(initialState.session.workspace?.gitBranch ?? null);
   contextRail.setRuntime(runtimeStatus);
   const fixedFooter = new CliFixedFooter();
   chatState.footer = fixedFooter;
@@ -747,6 +749,7 @@ async function runChat(command: string[]): Promise<void> {
         if (historical) contextRail.setModel(historical);
       }
       contextRail.hydrate(result.latestProviderCall, thinkingEnabled, currentWorkspace);
+      contextRail.setBranch(result.session.workspace?.gitBranch ?? null);
       console.log(`\n  ${paint.text("●", "citron")} Switched to ${paint.bold(sanitizeTerminalLine(result.session.title), "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}\n`);
     } catch {
       console.log(`  ${paint.text(`Could not find session: ${targetId}`, "signal")}\n`);
@@ -783,6 +786,7 @@ async function runChat(command: string[]): Promise<void> {
       currentWorkspace = created.session.workspace?.root ?? process.cwd();
       contextRail.setModel(activeModel);
       contextRail.hydrate(null, thinkingEnabled, currentWorkspace);
+      contextRail.setBranch(created.session.workspace?.gitBranch ?? null);
       console.log(`\n  ${paint.text("●", "citron")} Started new session ${paint.bold(title, "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}\n`);
     },
     status: async () => {
@@ -871,6 +875,12 @@ async function runChat(command: string[]): Promise<void> {
 
     await executePrompt(input);
   }
+}
+
+/// Notifications follow the configured policy and only fire on an interactive
+/// terminal; OSC 9 sequences are harmless elsewhere but pointless.
+function notificationOptions(interactive: boolean): NotificationOptions {
+  return { enabled: settings.notifications.enabled, isTTY: interactive };
 }
 
 async function renderTurn(
@@ -1104,6 +1114,9 @@ async function renderTurn(
         await drainResponse();
         closeReasoning();
         stopBeacon();
+        if (shouldNotifyApproval(notificationOptions(interactive))) {
+          notify(`Approval needed: ${String(event.payload.name ?? "a tool")}`, notificationOptions(interactive));
+        }
         chatState.permissionActive = true;
         try {
           await resolvePermission(event, onInterrupt);
@@ -1183,8 +1196,12 @@ async function renderTurn(
         process.stdout.write("\n");
         stopBeacon();
 
-        const runtime = await request<RuntimeProfileStatus>("/v1/runtime").catch(() => null);
+        const [runtime, sessionState] = await Promise.all([
+          request<RuntimeProfileStatus>("/v1/runtime").catch(() => null),
+          request<SessionStateResponse>(`/v1/sessions/${sessionId}`).catch(() => null),
+        ]);
         options.contextRail?.setRuntime(runtime);
+        options.contextRail?.setBranch(sessionState?.session.workspace?.gitBranch ?? null);
         if (fixedFooter?.isActive()) fixedFooter.update("", currentRightStatus());
 
         if (interactive) {
@@ -1205,6 +1222,14 @@ async function renderTurn(
             painter: paint,
           }));
         }
+        const completionDurationMs = Date.now() - startTime;
+        if (shouldNotifyCompletion({
+          ...notificationOptions(interactive),
+          durationMs: completionDurationMs,
+          minimumDurationMs: settings.notifications.minimumDurationMs,
+        })) {
+          notify(`Turn complete in ${(completionDurationMs / 1000).toFixed(0)}s`, notificationOptions(interactive));
+        }
         return "completed";
       }
 
@@ -1213,6 +1238,14 @@ async function renderTurn(
         closeReasoning();
         stopBeacon();
         const message = typeof event.payload.message === "string" ? event.payload.message : "Turn failed";
+        const failureDurationMs = Date.now() - startTime;
+        if (shouldNotifyCompletion({
+          ...notificationOptions(interactive),
+          durationMs: failureDurationMs,
+          minimumDurationMs: settings.notifications.minimumDurationMs,
+        })) {
+          notify(`Turn failed after ${(failureDurationMs / 1000).toFixed(0)}s`, notificationOptions(interactive));
+        }
         throw new Error(message);
       }
 

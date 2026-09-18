@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Syntax highlighting for fenced code blocks, real unified diffs for edit
   previews and scrollback, visible failure messages for tools, and optional
   OSC 8 hyperlinks for file paths.
+- Workspace git branch in session state and the footer, a five-cell context
+  meter, and desktop notifications for long completions and pending approvals.
 
 ## [0.1.0] - 2026-09-18
 

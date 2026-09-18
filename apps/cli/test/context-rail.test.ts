@@ -73,7 +73,7 @@ describe("CLI context rail", () => {
     rail.begin(false);
     expect(rail.statusLine(80, createPainter(false))).toBe("qwen3:14b · ctx 32.8k · no request yet");
     rail.apply(event("model.usage", { inputTokens: 7_000, outputTokens: 1_192, totalTokens: 8_192 }));
-    expect(rail.statusLine(80, createPainter(false))).toBe("qwen3:14b · last 8.2k/32.8k · 25%");
+    expect(rail.statusLine(80, createPainter(false))).toBe("qwen3:14b · last 8.2k/32.8k · ▰▱▱▱▱ 25%");
 
     // Turn 2 begins: prior usage must not be attributed to the new provider request.
     rail.begin(false);
@@ -83,11 +83,20 @@ describe("CLI context rail", () => {
 
     // Turn 2 provider usage arrives and updates context counts
     rail.apply(event("model.usage", { inputTokens: 9_000, outputTokens: 1_000, totalTokens: 10_000 }));
-    expect(rail.statusLine(80, createPainter(false))).toBe("qwen3:14b · last 10k/32.8k · 31%");
+    expect(rail.statusLine(80, createPainter(false))).toBe("qwen3:14b · last 10k/32.8k · ▰▰▱▱▱ 31%");
 
     const unknown = new CliContextRail({ id: "m", provider: "local" }, "/tmp/project");
     unknown.apply(event("model.usage", { inputTokens: 10, outputTokens: 5, totalTokens: 15 }));
     expect(unknown.statusLine(80, createPainter(false))).toBe("m · last 15");
+  });
+
+  test("shows the workspace branch in the persistent status", () => {
+    const rail = new CliContextRail({ id: "qwen", provider: "llama.cpp", contextWindow: 32_768 }, "/tmp/project");
+    rail.setBranch("feature/durable-sessions");
+    expect(rail.statusLine(100, createPainter(false)))
+      .toBe("qwen · feature/durable-sessions · ctx 32.8k · no request yet");
+    rail.setBranch(null);
+    expect(rail.statusLine(100, createPainter(false))).toBe("qwen · ctx 32.8k · no request yet");
   });
 
   test("surfaces verified speculation in the persistent status", () => {
@@ -128,7 +137,7 @@ describe("CLI context rail", () => {
 
     const output = rail.lines(40, 30, createPainter(false)).join("\n");
     expect(output).toContain("local · resumed");
-    expect(rail.statusLine(80, createPainter(false))).toContain("last 10.5k/32.8k · 32%");
+    expect(rail.statusLine(80, createPainter(false))).toContain("last 10.5k/32.8k · ▰▰▱▱▱ 32%");
   });
 
   test("separates the estimated context plan from provider-reported usage", () => {
@@ -169,7 +178,7 @@ describe("CLI context rail", () => {
     expect(output).toContain("within soft limit · soft limit 29.4k");
     expect(output).toContain("1 context reduction · saved ~2k");
     expect(output).toContain("10.2k total");
-    expect(rail.statusLine(80, createPainter(false))).toBe("model · est ~10k/32.8k · 31%");
+    expect(rail.statusLine(80, createPainter(false))).toBe("model · est ~10k/32.8k · ▰▰▱▱▱ 31%");
   });
 
   test("tracks changed files and validation outcomes", () => {

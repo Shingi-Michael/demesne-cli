@@ -10,7 +10,8 @@ export interface CliSettings {
   loaded: LoadedConfig;
   server: string;
   dataDirectory: string;
-  theme: "dark" | "light" | "auto";
+  /// A named theme, or `auto` to follow the terminal background.
+  theme: string;
   autoStart: AutoStartPolicy;
   notifications: NotificationConfig;
   ui: UiConfig;

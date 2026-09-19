@@ -10,7 +10,9 @@ import { dirname, join } from "node:path";
 /// rejected rather than ignored so a typo cannot silently disable a setting.
 
 export type ReasoningEffort = "none" | "low" | "medium" | "high" | "max";
-export type ThemePreference = "dark" | "light" | "auto";
+/// A named theme, or `auto` to follow the terminal background. `dark` and
+/// `light` are accepted for configurations written before named themes existed.
+export type ThemePreference = string;
 export type AutoStartPolicy = "prompt" | "always" | "never";
 export type ConfigSource = "env" | "user" | "project";
 
@@ -206,7 +208,7 @@ function applyDocument(
     return text;
   });
   assign(config, "dataDir", document.data_dir, source, sources, (value, key) => optionalString(value, key));
-  assign(config, "theme", document.theme, source, sources, (value, key) => optionalEnum(value, ["dark", "light", "auto"], key));
+  assign(config, "theme", document.theme, source, sources, (value, key) => optionalString(value, key));
   assign(config, "inferenceSlots", document.inference_slots, source, sources, (value, key) => optionalPositiveInteger(value, key));
 
   if (document.provider !== undefined) {
@@ -334,8 +336,7 @@ function applyEnvironment(
     return value;
   });
   setFromEnv(config, "dataDir", env.DEMESNE_DATA_DIR, "dataDir", sources, optionalString);
-  setFromEnv(config, "theme", env.DEMESNE_THEME, "theme", sources,
-    (value, key) => optionalEnum(value, ["dark", "light", "auto"], key));
+  setFromEnv(config, "theme", env.DEMESNE_THEME, "theme", sources, optionalString);
   setFromEnv(config, "inferenceSlots", env.DEMESNE_INFERENCE_SLOTS, "inferenceSlots", sources, optionalPositiveInteger);
 
   setFromEnv(config.provider, "url", env.DEMESNE_PROVIDER_URL, "provider.url", sources, (value, key) => {

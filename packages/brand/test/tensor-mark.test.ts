@@ -46,9 +46,12 @@ describe("tensor mark", () => {
     const redDominant = (frame: string[]) => [...frame.join("\n")
       .matchAll(/\x1b\[38;2;(\d+);(\d+);(\d+)m/g)]
       .filter((match) => {
+        // The signal color comes from the theme's role now, so it is the muted
+        // terminal red rather than the saturated canonical one; the ratio is
+        // loosened to match while still excluding the neutral and accent cells.
         const r = Number(match[1]);
         const g = Number(match[2]);
-        return r > 70 && r > g * 1.8;
+        return r > 90 && r > g * 1.5;
       })
       .length;
     expect(redDominant(renderTensorMark(TENSOR_INTRO_END_S, createPainter(true)))).toBeGreaterThan(0);

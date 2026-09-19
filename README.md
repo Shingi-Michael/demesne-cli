@@ -58,6 +58,23 @@ Identity and state are separated so nothing repeats: the header carries the bran
 
 Run `bun run ui:preview` to watch this design animate through its states. Reduced motion and `NO_COLOR` keep every glyph static and byte-stable.
 
+### Themes
+
+Every drawing call names a semantic role — `electric` for authorship and primary actions, `citron` for verified and local state, `signal` for boundaries and errors, `paper`/`secondary` for text, `rule` for structure — and never a color. A theme maps those roles onto concrete colors, so a swap re-themes the whole interface, including the intro art, without touching a renderer.
+
+```toml
+# ~/.demesne/config.toml
+theme = "tokyo-night"
+```
+
+`DEMESNE_THEME` overrides the file. `auto` follows the terminal background via `COLORFGBG`; `dark` and `light` still work for configurations written before named themes existed, and an unknown name falls back to the default rather than failing startup.
+
+Shipped: `demesne`, `demesne-light`, `dracula`, `tokyo-night`, `tokyo-night-storm`, `nord`, `gruvbox-dark`, `catppuccin-mocha`, `catppuccin-latte`, `github-light`.
+
+`/theme` switches live — the painter is shared, so one call re-themes the interface on the next frame — and prints the value to set for it to persist.
+
+The inference spinner is deliberately uncolored: it is the mark on screen the longest, and an accent there competes with the turn's real status. Color is reserved for states that mean something, so `waiting` is `signal` and `verifying`/`done` are `citron`.
+
 To exercise a real turn without a model, run `bun run fake:provider [edit|trace|fail|sweep]` and point a `[provider]` block at `http://127.0.0.1:11437/v1`. The scenarios cover a single edit, a narrated read-heavy turn, a failing command, and six reads issued in parallel so the inspection collapsing is visible.
 
 The footer's left side reports the active phase and elapsed time while its right side prioritizes runtime verification, model identity, the workspace git branch, and a five-cell context meter with an estimated percentage. The footer preserves the cursor during resize, degrades to inline status on very short terminals, and avoids rewriting unchanged content.

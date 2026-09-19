@@ -23,6 +23,13 @@ const SHEET_ROWS = BAND_COUNT + 2;
 const SHEET_SHIFT_X = 2;
 const SHEET_SHIFT_Y = 1;
 
+/// The mark draws from the active theme's roles, so the intro looks native to
+/// whichever theme is selected rather than always to Demesne.
+function rgbFromHex(hex: string): readonly [number, number, number] {
+  const value = Number.parseInt(hex.replace("#", ""), 16);
+  return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
+}
+
 const NEUTRAL_DARK: readonly [number, number, number] = [255, 255, 255];
 const NEUTRAL_LIGHT: readonly [number, number, number] = [17, 16, 20];
 /// AppColor.activeElectric: electricBright on dark canvases, electric on light.
@@ -30,7 +37,11 @@ const ELECTRIC_DARK: readonly [number, number, number] = [0x8c, 0xa3, 0xff];
 const ELECTRIC_LIGHT: readonly [number, number, number] = [0x38, 0x57, 0xeb];
 const SIGNAL: readonly [number, number, number] = [0xd6, 0x3d, 0x1f];
 
-export function tensorCanvasBase(theme: "dark" | "light"): string {
+export function tensorCanvasBase(
+  theme: "dark" | "light",
+  colors?: Record<string, string>,
+): string {
+  if (colors) return theme === "light" ? colors.surface! : colors.ink!;
   return theme === "light" ? "#EDE9E1" : "#15151A";
 }
 
@@ -130,9 +141,12 @@ function weightMagnitude(sheet: number, layer: number, band: number): number {
 export function renderTensorMark(elapsedSeconds: number, painter: Painter): string[] {
   const elapsed = Math.max(0, elapsedSeconds);
   const dark = painter.theme !== "light";
-  const neutral = dark ? NEUTRAL_DARK : NEUTRAL_LIGHT;
-  const electric = dark ? ELECTRIC_DARK : ELECTRIC_LIGHT;
-  const base = parseHex(tensorCanvasBase(painter.theme));
+  const neutral = rgbFromHex(painter.colors.paper);
+  // `electricBright` reads as the active accent on a dark canvas; on a light one
+  // the deeper `electric` carries the same role.
+  const electric = rgbFromHex(dark ? painter.colors.electricBright : painter.colors.electric);
+  const signal = rgbFromHex(painter.colors.signal);
+  const base = parseHex(tensorCanvasBase(painter.theme, painter.colors));
 
   const settledAttention = easedProgress(elapsed, 1.84, 2.24);
   const grid: Array<Array<MarkCell | null>> = Array.from(
@@ -212,7 +226,7 @@ export function renderTensorMark(elapsedSeconds: number, painter: Painter): stri
         }];
         if (scanStrength > 0.01) stamps.push({ rgb: electric, a: scanStrength });
         if (encodedStrength > 0.01) stamps.push({ rgb: electric, a: encodedStrength });
-        if (signalStrength > 0.01) stamps.push({ rgb: SIGNAL, a: signalStrength });
+        if (signalStrength > 0.01) stamps.push({ rgb: signal, a: signalStrength });
 
         const color = stampHex(base, stamps);
         if (color) {

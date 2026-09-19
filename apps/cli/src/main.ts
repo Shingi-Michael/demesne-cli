@@ -44,7 +44,9 @@ import {
   renderPresence,
   renderSpinner,
   resolveSlashCommand,
-  resolveTerminalTheme,
+  resolveTheme,
+  themeLabel,
+  themeNames,
   SPINNER_PERIOD_MS,
   sanitizeTerminalLine,
   sanitizeTerminalText,
@@ -111,12 +113,12 @@ const settings = loadSettings();
 const server = validateServerUrl(settings.server);
 const daemonToken = loadDaemonToken(settings.dataDirectory);
 const colorEnabled = (stream: { isTTY?: boolean }) => Boolean(stream.isTTY) && !process.env.NO_COLOR;
-const terminalTheme = resolveTerminalTheme(
+const activeTheme = resolveTheme(
   settings.theme === "auto" ? undefined : settings.theme,
   process.env.COLORFGBG,
 );
-const paint = createPainter(colorEnabled(process.stdout), terminalTheme);
-const paintLog = createPainter(colorEnabled(process.stderr), terminalTheme);
+const paint = createPainter(colorEnabled(process.stdout), activeTheme);
+const paintLog = createPainter(colorEnabled(process.stderr), activeTheme);
 const client = new DemesneClient({ server, token: daemonToken });
 
 function loadSettings(): CliSettings {
@@ -1113,6 +1115,43 @@ async function runChat(command: string[]): Promise<void> {
       mentionFiles = await fetchMentionFiles(sessionId);
       refreshCustomCommands(currentWorkspace);
       say(`Started new session ${title} (${sessionId.slice(0, 8)})`, "success");
+    },
+    theme: async (argument) => {
+      const names = themeNames();
+      const query = argument.trim().toLowerCase();
+      let chosen: string | undefined;
+      if (query) {
+        chosen = names.find((name) => name === query)
+          ?? names.find((name) => name.startsWith(query))
+          ?? names.find((name) => themeLabel(name).toLowerCase().includes(query));
+        if (!chosen) {
+          say(`No theme matches "${sanitizeTerminalLine(argument.trim())}". Try /theme.`, "error");
+          return;
+        }
+      } else if (workbench) {
+        const index = await workbench.choose(
+          "Themes",
+          names.map((name) => `${themeLabel(name)} · ${name}${name === paint.themeName ? " · active" : ""}`),
+          Math.max(0, names.indexOf(paint.themeName)),
+        );
+        if (index === null || !names[index]) {
+          say("Theme selection cancelled.");
+          return;
+        }
+        chosen = names[index]!;
+      } else {
+        say(`Themes: ${names.join(", ")}. Use /theme <name>.`);
+        return;
+      }
+      if (chosen === paint.themeName) {
+        say(`${themeLabel(chosen)} is already active.`);
+        return;
+      }
+      // The painter is shared by every renderer, so one swap re-themes the
+      // whole interface on the next frame.
+      paint.setTheme(chosen);
+      paintLog.setTheme(chosen);
+      say(`${themeLabel(chosen)} · set DEMESNE_THEME=${chosen} to keep it`, "success");
     },
     status: async () => {
       const current = await request<{ session: Session }>(`/v1/sessions/${sessionId}`).catch(() => null);

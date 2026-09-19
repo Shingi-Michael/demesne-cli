@@ -3,6 +3,8 @@ import {
   buildCard,
   computePromptVisualLines,
   createPainter,
+  detectAppearance,
+  resolveTheme,
   formatAssistantHeader,
   formatHelpCard,
   formatInfoCard,
@@ -24,7 +26,6 @@ import {
   getBeaconSegments,
   humanToolTitle,
   palette,
-  resolveTerminalTheme,
   resolveSlashCommand,
   renderBeacon,
   renderSpinner,
@@ -63,9 +64,9 @@ describe("Demesne Brand & Mathematical Alignment", () => {
   });
 
   test("selects a higher-contrast palette for light terminals", () => {
-    expect(resolveTerminalTheme(undefined, "15;0")).toBe("dark");
-    expect(resolveTerminalTheme(undefined, "0;15")).toBe("light");
-    expect(resolveTerminalTheme("dark", "0;15")).toBe("dark");
+    expect(detectAppearance("15;0")).toBe("dark");
+    expect(detectAppearance("0;15")).toBe("light");
+    expect(resolveTheme("dark", "0;15").appearance).toBe("dark");
     expect(createPainter(true, "light").text("accent", "electric")).toContain("38;2;64;87;181");
   });
 
@@ -298,7 +299,7 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(menu).toContain("› /status");
     expect(slashCommandMatches("ordinary prompt")).toEqual([]);
     expect(slashCommandMatches("/cont").map((command) => command.name)).toEqual(["/context"]);
-    expect(slashCommandMatches("/theme")).toEqual([]);
+    expect(slashCommandMatches("/theme").map((command) => command.name)).toEqual(["/theme"]);
     expect(slashCommandMatches("/thinking")).toEqual([]);
   });
 

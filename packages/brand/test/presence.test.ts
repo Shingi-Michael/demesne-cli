@@ -46,22 +46,24 @@ describe("renderPresence", () => {
     }
   });
 
-  test("pulses between two palette colors instead of holding one flat tone", () => {
-    // The first half of the cycle is the state's color, the second half its
-    // accent, so the mark moves through the brand's colors as it moves.
+  test("holds one flat color, and the inference spinner is uncolored", () => {
+    // The spinner was briefly given a two-color pulse. It is the mark on screen
+    // the longest, and a color there competes with the turn's real status, so
+    // every state holds a single color and `thinking` is deliberately neutral.
     const colors = (state: (typeof STATES)[number]) => {
       const seen = new Set<string>();
       for (let step = 0; step < 400; step += 10) {
-        // Match the color code before stripping it.
         seen.add(renderPresence(state, step * 10, painter).match(/38;2;[\d;]+/)?.[0] ?? "default");
       }
       return seen;
     };
-    for (const state of ["thinking", "working", "writing", "verifying", "waiting"] as const) {
-      expect(colors(state).size).toBeGreaterThan(1);
+    for (const state of STATES) {
+      expect(colors(state).size).toBe(1);
     }
-    // Terminal states hold one color.
-    expect(colors("done").size).toBe(1);
+    expect(colors("thinking")).toEqual(colors("idle"));
+    // States that mean something still carry their color.
+    expect(colors("waiting")).not.toEqual(colors("idle"));
+    expect(colors("done")).not.toEqual(colors("idle"));
   });
 
   test("uses one light glyph family per state, never quadrant blocks", () => {

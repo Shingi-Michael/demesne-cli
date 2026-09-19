@@ -166,7 +166,11 @@ context_window = 8192
   test("rejects invalid types and ranges", () => {
     expect(() => validateConfigDocument({ inference_slots: 0 })).toThrow(/positive integer/);
     expect(() => validateConfigDocument({ inference_slots: 1.5 })).toThrow(/positive integer/);
-    expect(() => validateConfigDocument({ theme: "sepia" })).toThrow(/dark, light, auto/);
+    // Themes are named and extensible, so an unknown name is accepted here and
+    // degrades to the default when it is resolved. Only a non-string is wrong.
+    expect(() => validateConfigDocument({ theme: "sepia" })).not.toThrow();
+    expect(() => validateConfigDocument({ theme: 7 })).toThrow(/must be a string/);
+    expect(() => validateConfigDocument({ theme: "  " })).toThrow(/must not be empty/);
     expect(() => validateConfigDocument({ provider: { reasoning_effort: "turbo" } })).toThrow(/none, low, medium, high, max/);
     expect(() => validateConfigDocument({ daemon: { port: 70000 } })).toThrow(/between 1 and 65535/);
     expect(() => validateConfigDocument({ permissions: { allow: ["a", "a"] } })).toThrow(/duplicates/);

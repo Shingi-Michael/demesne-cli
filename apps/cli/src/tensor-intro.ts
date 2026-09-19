@@ -9,7 +9,6 @@ import {
   TENSOR_MARK_COLS,
   type Painter,
 } from "@demesne/brand";
-import { lightTerminalPalette, terminalPalette } from "@demesne/brand";
 import { emitKeypressEvents } from "node:readline";
 import { reducedMotionEnabled } from "./motion.ts";
 
@@ -38,9 +37,13 @@ export function composeIntroFrame(
 ): string[] {
   const elapsed = Math.max(0, elapsedSeconds);
   const dark = painter.theme !== "light";
-  const baseHex = tensorCanvasBase(dark ? "dark" : "light");
-  const secondaryHex = (dark ? terminalPalette : lightTerminalPalette).secondary;
-  const barColors = dark ? BAR_COLORS_DARK : BAR_COLORS_LIGHT;
+  const baseHex = tensorCanvasBase(dark ? "dark" : "light", painter.colors);
+  const secondaryHex = painter.colors.secondary;
+  const barColors = [
+    dark ? painter.colors.electricBright : painter.colors.electric,
+    painter.colors.signal,
+    painter.colors.citron,
+  ] as const;
 
   const markLines = renderTensorMark(elapsed, painter);
   const markLeft = Math.max(0, Math.floor((cols - TENSOR_MARK_COLS) / 2));

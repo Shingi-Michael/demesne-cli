@@ -109,6 +109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   survives: `✓ ngram-mod · qwen3.8-q4_0-100k-b256 · ▰▰▱▱▱ 3%`.
 - The footer no longer repeats the workspace branch, which the header already
   carries beside the workspace.
+- Themes. Every drawing call names a semantic role and never a color, so a
+  theme swap re-themes the whole interface, including the intro art. Ships
+  demesne (dark and light), dracula, tokyo-night, tokyo-night-storm, nord,
+  gruvbox-dark, catppuccin-mocha, catppuccin-latte, and github-light, selected
+  with `theme` in the config or `DEMESNE_THEME`. `/theme` switches live: the
+  painter is shared, so one call re-themes on the next frame. The spinner is
+  uncolored now — it is on screen the longest, and an accent there competes
+  with the turn's status.
 - The composer clears when a prompt is submitted and then shows what is being
   queued for the next turn. It previously kept the submitted text on screen,
   which read as though the prompt had not been sent, and type-ahead was visible

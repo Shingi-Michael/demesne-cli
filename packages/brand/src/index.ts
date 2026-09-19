@@ -10,50 +10,31 @@ import { highlightCode as highlightCodeWithLanguage, type CodeHighlightState } f
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-export const palette = {
-  ink: "#111014",
-  paper: "#F7F3EA",
-  surface: "#181820",
-  raised: "#21212B",
-  rule: "#3B3B3F",
-  secondary: "#AAA7A0",
-  electric: "#3857EB",
-  electricBright: "#8CA3FF",
-  signal: "#D63D1F",
-  citron: "#B8DB47",
-} as const;
-
-export type PaletteColor = keyof typeof palette;
-
-// Terminal color occupies less visual space than the iOS surfaces, so the CLI
-// uses lower-chroma accents while retaining the canonical palette above.
-export const terminalPalette: Record<PaletteColor, string> = {
-  ink: "#111014",
-  paper: "#F7F3EA",
-  surface: "#1A1A20",
-  raised: "#23232A",
-  rule: "#56545B",
-  secondary: "#918E88",
-  electric: "#6678C8",
-  electricBright: "#8493D0",
-  signal: "#C16B59",
-  citron: "#96A865",
-};
-
-export const lightTerminalPalette: Record<PaletteColor, string> = {
-  ink: "#111014",
-  paper: "#27242A",
-  surface: "#EEEAE2",
-  raised: "#E4E0D8",
-  rule: "#77727B",
-  secondary: "#625E63",
-  electric: "#4057B5",
-  electricBright: "#314AAE",
-  signal: "#A9422F",
-  citron: "#5F741E",
-};
-
-export type TerminalTheme = "dark" | "light";
+export {
+  palette,
+  terminalPalette,
+  lightTerminalPalette,
+  THEMES,
+  DEFAULT_DARK_THEME,
+  DEFAULT_LIGHT_THEME,
+  detectAppearance,
+  isThemeName,
+  resolveTheme,
+  themeLabel,
+  themeNames,
+  type PaletteColor,
+  type TerminalTheme,
+  type Theme,
+} from "./theme.ts";
+import {
+  DEFAULT_DARK_THEME,
+  THEMES,
+  detectAppearance,
+  isThemeName,
+  type PaletteColor,
+  type TerminalTheme,
+  type Theme,
+} from "./theme.ts";
 
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 
@@ -76,7 +57,15 @@ function ansiPalette(source: Record<PaletteColor, string>, mode: "38" | "48"): R
 
 export interface Painter {
   readonly enabled: boolean;
-  readonly theme: TerminalTheme;
+  /// The terminal background the active theme is built for.
+  theme: TerminalTheme;
+  /// The active theme's name.
+  themeName: string;
+  /// The active theme's colors, by semantic role.
+  colors: Record<PaletteColor, string>;
+  /// Swaps the theme in place. Every consumer shares this painter, so one call
+  /// re-themes the whole interface on the next frame.
+  setTheme(theme: string | Theme): void;
   text(value: string, color?: PaletteColor): string;
   bold(value: string, color?: PaletteColor): string;
   dim(value: string): string;
@@ -86,20 +75,38 @@ export interface Painter {
   chip(label: string, color: PaletteColor): string;
 }
 
-export function createPainter(enabled: boolean, theme: TerminalTheme = "dark"): Painter {
-  return buildPainter(enabled, theme, terminalPalette, lightTerminalPalette);
+/// Resolves a name, or an already-resolved theme, to a theme. `dark` and
+/// `light` stay accepted for the configurations written before named themes.
+export function themeByName(theme: string | Theme | undefined): Theme {
+  if (theme && typeof theme === "object") return theme;
+  const wanted = theme?.trim().toLowerCase();
+  if (!wanted || wanted === "dark") return THEMES[DEFAULT_DARK_THEME]!;
+  if (wanted === "light") return THEMES["demesne-light"]!;
+  return isThemeName(wanted) ? THEMES[wanted]! : THEMES[DEFAULT_DARK_THEME]!;
 }
 
-function buildPainter(
-  enabled: boolean,
-  theme: TerminalTheme,
-  dark: Record<PaletteColor, string>,
-  light: Record<PaletteColor, string>,
-): Painter {
+export function createPainter(enabled: boolean, theme: string | Theme = DEFAULT_DARK_THEME): Painter {
+  return buildPainter(enabled, themeByName(theme));
+}
+
+function buildPainter(enabled: boolean, initial: Theme): Painter {
+  let active = initial;
+  const apply = (theme: string | Theme): void => {
+    active = themeByName(theme);
+    if (enabled) {
+      fg = ansiPalette(active.colors, "38");
+      bg = ansiPalette(active.colors, "48");
+    }
+  };
+  let fg: Record<PaletteColor, string> = enabled ? ansiPalette(initial.colors, "38") : ({} as Record<PaletteColor, string>);
+  let bg: Record<PaletteColor, string> = enabled ? ansiPalette(initial.colors, "48") : ({} as Record<PaletteColor, string>);
   if (!enabled) {
     return {
       enabled,
-      theme,
+      get theme() { return active.appearance; },
+      get themeName() { return active.name; },
+      get colors() { return active.colors; },
+      setTheme: apply,
       text: (value) => value,
       bold: (value) => value,
       dim: (value) => value,
@@ -109,12 +116,12 @@ function buildPainter(
       chip: (label) => `[${label}]`,
     };
   }
-  const source = theme === "light" ? light : dark;
-  const fg = ansiPalette(source, "38");
-  const bg = ansiPalette(source, "48");
   return {
     enabled,
-    theme,
+    get theme() { return active.appearance; },
+    get themeName() { return active.name; },
+    get colors() { return active.colors; },
+    setTheme: apply,
     text: (value, color) => (color && color !== "paper" ? `${fg[color]}${value}${RESET}` : value),
     bold: (value, color) => (color && color !== "paper" ? `${BOLD}${fg[color]}${value}${RESET}` : `${BOLD}${value}${RESET}`),
     dim: (value) => `${DIM}${value}${RESET}`,
@@ -125,18 +132,9 @@ function buildPainter(
   };
 }
 
-export function resolveTerminalTheme(
-  configured: string | undefined,
-  colorForegroundBackground: string | undefined,
-): TerminalTheme {
-  if (configured === "light" || configured === "dark") return configured;
-  const background = Number(colorForegroundBackground?.split(";").at(-1));
-  return Number.isFinite(background) && background >= 7 ? "light" : "dark";
-}
-
 export type SlashCommandId =
   | "new" | "sessions" | "resume" | "rename" | "delete" | "model" | "export" | "plan"
-  | "status" | "context" | "diff" | "undo" | "clear" | "help" | "exit"
+  | "status" | "context" | "diff" | "undo" | "clear" | "help" | "theme" | "exit"
   | `custom:${string}`;
 export type SlashCommandArgument = "none" | "optional" | "required";
 export type SlashCommandSection = "session" | "inspect" | "control";
@@ -164,6 +162,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: "rename", name: "/rename", aliases: [], argument: "required", argumentLabel: "title", description: "Rename the current session", section: "session" },
   { id: "delete", name: "/delete", aliases: ["/archive"], argument: "none", description: "Archive the current session", section: "session" },
   { id: "model", name: "/model", aliases: [], argument: "optional", argumentLabel: "id", description: "Switch the active model", section: "session" },
+  { id: "theme", name: "/theme", aliases: [], argument: "optional", argumentLabel: "name", description: "Change the color theme", section: "session" },
   { id: "status", name: "/status", aliases: [], argument: "none", description: "Show session and runtime status", section: "inspect" },
   { id: "context", name: "/context", aliases: [], argument: "none", description: "Show context and run details", section: "inspect" },
   { id: "export", name: "/export", aliases: [], argument: "optional", argumentLabel: "md|json", description: "Export the session transcript", section: "inspect" },
@@ -723,9 +722,9 @@ function beaconPalettes(source: Record<PaletteColor, string>): Record<BeaconActi
   };
 }
 
-/// The iOS beacon's state-driven color order, adapted to the quieter terminal palette.
-export const BEACON_PALETTES = beaconPalettes(terminalPalette);
-export const LIGHT_BEACON_PALETTES = beaconPalettes(lightTerminalPalette);
+/// The iOS beacon's state-driven color order, resolved from a theme's roles.
+export const BEACON_PALETTES = beaconPalettes(THEMES[DEFAULT_DARK_THEME]!.colors);
+export const LIGHT_BEACON_PALETTES = beaconPalettes(THEMES["demesne-light"]!.colors);
 
 /// 2.1-second rotation cycle mirroring the iOS Dynamic Island beacon (ChatView.swift).
 export const BEACON_PERIOD_MS = 2_100;
@@ -733,9 +732,11 @@ export const BEACON_PERIOD_MS = 2_100;
 export function sampleBeaconRGB(
   phase: number,
   activity: BeaconActivity = "thinking",
-  theme: TerminalTheme = "dark",
+  theme: TerminalTheme | Record<PaletteColor, string> = "dark",
 ): RGBTuple {
-  const stops = (theme === "light" ? LIGHT_BEACON_PALETTES : BEACON_PALETTES)[activity];
+  const stops = (typeof theme === "object"
+    ? beaconPalettes(theme)
+    : theme === "light" ? LIGHT_BEACON_PALETTES : BEACON_PALETTES)[activity];
   const stopCount = stops.length;
   const wrapped = ((phase % 1.0) + 1.0) % 1.0;
   const scaled = wrapped * stopCount;

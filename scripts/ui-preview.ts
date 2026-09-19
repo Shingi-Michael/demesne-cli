@@ -93,7 +93,7 @@ const scenes: Scene[] = [
   },
   {
     state: "waiting",
-    status: "needs your go-ahead · 0:19",
+    status: "needs approval · 0:19",
     rows: () => [
       ...transcript("waiting"),
       toolRow("waiting", "change", "edit", "src/lexer.ts", "needs you", renderPresence("waiting", Date.now(), paint)),
@@ -116,7 +116,7 @@ const scenes: Scene[] = [
       "",
       `${" ".repeat(HARNESS.rail)}${bar} ${paint.text("◆", "citron")} I changed the guard and the tests pass.`,
       "",
-      formatTurnCloser("I’m done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s", width, paint),
+      formatTurnCloser("done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s", width, paint),
     ],
   },
 ];

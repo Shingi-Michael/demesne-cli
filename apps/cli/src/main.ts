@@ -1532,7 +1532,7 @@ async function runWorkbenchTurn(options: {
         const plan = event.payload.contextPlan;
         if (!softLimitWarned && isRecord(plan) && plan.budgetStatus === "over_soft_limit") {
           softLimitWarned = true;
-          options.workbench.notice("I’m past the soft limit — I’ll keep our history intact and compact only if I must.", "info");
+          options.workbench.notice("past the soft limit · history kept · compaction only if required", "info");
         }
       } else if (event.type === "reasoning.delta" && typeof event.payload.delta === "string") {
         presence = "reasoning";

@@ -62,14 +62,14 @@ describe("formatToolRow", () => {
 describe("formatApprovalAsk", () => {
   test("stays on the harness grid and speaks in the agent's voice", () => {
     const rows = formatApprovalAsk({
-      ask: "I need your go-ahead: edit_file: src/lexer.ts",
+      ask: "needs approval: edit_file: src/lexer.ts",
       toolName: "edit_file",
       previewRows: ["- old", "+ new"],
       width: 80,
       painter,
       waitingMark: "◆",
     });
-    expect(rows[0]).toStartWith(`${" ".repeat(HARNESS.rail)}│ ◆ I need your go-ahead: edit_file: src/lexer.ts`);
+    expect(rows[0]).toStartWith(`${" ".repeat(HARNESS.rail)}│ ◆ needs approval: edit_file: src/lexer.ts`);
     expect(rows[0]).toContain("file edit");
     // Preview rows align under the tool target column.
     expect(rows[1]!.indexOf("- old")).toBe(HARNESS.toolTarget);
@@ -88,9 +88,9 @@ describe("formatApprovalAsk", () => {
   });
 
   test("renders without a tool name or preview", () => {
-    const rows = formatApprovalAsk({ ask: "I need your go-ahead: something", width: 80, painter, waitingMark: "◇" });
+    const rows = formatApprovalAsk({ ask: "needs approval: something", width: 80, painter, waitingMark: "◇" });
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toContain("I need your go-ahead: something");
+    expect(rows[0]).toContain("needs approval: something");
   });
 });
 

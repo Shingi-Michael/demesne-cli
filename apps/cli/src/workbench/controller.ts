@@ -289,7 +289,7 @@ export class Workbench {
 
   beginTurn(options: { userText: string; at: string; planOnly?: boolean }): void {
     this.entries.push({ id: this.nextId++, type: "user", text: options.userText, at: options.at });
-    if (options.planOnly) this.notice("plan · read-only tools · I'll propose before changing anything");
+    if (options.planOnly) this.notice("plan · read-only tools · proposals before changes");
     this.requestRender();
   }
 

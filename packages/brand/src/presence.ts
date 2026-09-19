@@ -2,11 +2,11 @@ import type { Painter, PaletteColor } from "./index.ts";
 
 /// The agent's visible presence.
 ///
-/// A single animated glyph carries the agent's state — idle, listening,
-/// considering, reasoning, working, writing, checking, waiting, done — so the
-/// interface feels alive without pretending to be conscious. Motion is
-/// deterministic for a given timestamp and fully disabled under reduced motion
-/// or `NO_COLOR`, where the state's static glyph is used.
+/// A single animated glyph carries the state — idle, listening, thinking,
+/// reasoning, working, writing, checking, waiting, done — so the interface shows
+/// what is happening without narrating it. Motion is deterministic for a given
+/// timestamp and fully disabled under reduced motion or `NO_COLOR`, where the
+/// state's static glyph is used.
 
 export type PresenceState =
   | "idle"
@@ -53,21 +53,22 @@ export function renderPresence(state: PresenceState, nowMs: number, painter: Pai
   return painter.text(spec.frames[index]!, spec.color);
 }
 
-/// Narrative wording for the footer. Present tense, no false claims: the label
-/// says what is actually happening, not what the agent "feels".
+/// The state's name in the footer. These are the conventional words for what a
+/// model is doing, not a narration of it: the footer says which state the turn
+/// is in, and nothing speaks as though it had feelings or intentions.
 export function presenceLabel(state: PresenceState): string {
   switch (state) {
     case "idle": return "ready";
     case "listening": return "listening";
-    case "thinking": return "considering";
+    case "thinking": return "thinking";
     case "reasoning": return "reasoning";
     case "working": return "working";
     case "writing": return "writing";
     case "verifying": return "checking";
-    case "waiting": return "needs your go-ahead";
+    case "waiting": return "needs approval";
     case "done": return "done";
     case "stopped": return "stopped";
-    case "error": return "hit a problem";
+    case "error": return "failed";
   }
 }
 

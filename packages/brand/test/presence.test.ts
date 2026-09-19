@@ -33,12 +33,25 @@ describe("renderPresence", () => {
 });
 
 describe("presenceLabel", () => {
-  test("describes the state in present tense", () => {
-    expect(presenceLabel("thinking")).toBe("considering");
+  test("names the state with the conventional word, not a narration of it", () => {
+    expect(presenceLabel("thinking")).toBe("thinking");
     expect(presenceLabel("writing")).toBe("writing");
     expect(presenceLabel("verifying")).toBe("checking");
-    expect(presenceLabel("waiting")).toBe("needs your go-ahead");
+    expect(presenceLabel("waiting")).toBe("needs approval");
     expect(presenceLabel("idle")).toBe("ready");
+    expect(presenceLabel("error")).toBe("failed");
+  });
+
+  test("never speaks in the first person", () => {
+    const states = [
+      "idle", "listening", "thinking", "reasoning", "working",
+      "writing", "verifying", "waiting", "done", "stopped", "error",
+    ] as const;
+    for (const state of states) {
+      const label = presenceLabel(state);
+      expect(label).not.toMatch(/\bI\b|I’m|I'm|I’ll|I'll/);
+      expect(label).not.toMatch(/your|our|my/i);
+    }
   });
 });
 

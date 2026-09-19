@@ -1,27 +1,22 @@
-/// The agent's voice for turn-level narration.
+/// The harness's own wording for turn boundaries.
 ///
-/// Tool rows are structural (verb, target, duration) so they can be scanned,
-/// which means the first-person voice belongs at the boundaries of a turn: the
-/// question it asks before acting, and the account it gives when finished.
+/// These are status lines, not narration. The footer and the turn closer say
+/// which state the turn reached; nothing speaks in the first person or claims
+/// intentions. The model's own prose is untouched and is the only voice in the
+/// transcript.
 
-/// A soft first-person cue for a turn that needs approval.
+/// A status cue for a turn that is blocked on the user.
 export function narrateWaiting(summary: string): string {
-  return `I need your go-ahead: ${sentence(summary)}`;
+  return `needs approval: ${sentence(summary)}`;
 }
 
-/// Closers for turn ends, in the agent's voice.
+/// Closers for turn ends.
 export function narrateTurnEnd(
   kind: "completed" | "stopped" | "failed",
   details: string,
 ): string {
-  switch (kind) {
-    case "completed":
-      return `I’m done${details ? ` — ${details}` : "."}`;
-    case "stopped":
-      return `I stopped${details ? ` — ${details}` : "."}`;
-    case "failed":
-      return `I hit a problem${details ? ` — ${details}` : "."}`;
-  }
+  const label = kind === "completed" ? "done" : kind === "stopped" ? "stopped" : "failed";
+  return details ? `${label} — ${details}` : label;
 }
 
 /// Normalizes untrusted text into a single safe clause: control characters

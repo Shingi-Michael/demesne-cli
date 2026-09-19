@@ -74,11 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   swap pressure in the sidebar. The sidebar now appears from 84 columns (72 in
   wide mode).
 - The clean redesign: all chrome except the wordmark, the core, and the
-  footer is gone. A new voice module narrates every tool action in the first
-  person (`I read src/lexer.ts.`, `I ran bun test — it passed.`), actions
-  pending approval ask in the agent's voice, and turns close with `I'm done —
-  ...`. The composer is a plain prompt line, and custom commands in the
-  workbench follow per-turn input.
+  footer is gone. The composer is a plain prompt line, and custom commands in
+  the workbench follow per-turn input.
 - The neon identity: a deep-space palette with cyan/violet/mint/amber accents,
   a glass-panel header with a gradient wordmark, a glass sidebar column, a
   gradient-bordered composer that turns amber on approval, and a glowing core
@@ -93,12 +90,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   neon palette, glass panels, gradient wordmark, and gradient composer border.
 - Tool rows are structural (`✓ edit  src/lexer.ts  8ms`) instead of narrated
   sentences, which collided with the verb column; the agent's voice stays in
-  its prose and turn notices.
+  its prose.
 - Assistant prose now closes per model round and the pacer drains before tool
   and permission events, fixing a split-sentence defect where paced text
   flushed after the block had closed.
 - Motion is bound to meaning: only the active turn animates, and the sidebar is
   hidden by default.
+- Status, not narration: the harness's own text names the state (`thinking`,
+  `writing`, `checking`, `needs approval`, `done`) instead of narrating it.
+  Nothing in the interface speaks in the first person — the footer, the approval
+  line, and the turn closer are status lines, and the only voice in the
+  transcript is the model's own prose.
 - Inspection collapses: three or more contiguous reads or searches in one round
   render as `✓ read src/lexer.ts +5` with the total time. The run must be
   contiguous, so narration between calls ends it and the agent never appears to

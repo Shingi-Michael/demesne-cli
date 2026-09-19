@@ -14,9 +14,6 @@ import {
   formatFooterLine,
   formatSlashCommandMenu,
   formatSessionsTable,
-  formatToolCard,
-  formatToolEvent,
-  formatToolGroupHeader,
   formatToolPhaseHeader,
   formatToolResultLine,
   formatTokenCount,
@@ -186,7 +183,6 @@ describe("Demesne Brand & Mathematical Alignment", () => {
 
   test("renders one compact, state-distinct line per completed tool", () => {
     const painter = createPainter(false);
-    expect(formatToolGroupHeader(3, painter)).toBe("  ⋮ 3 tools");
     expect(formatToolResultLine("done", "read_file", "src/main.ts", 12, false, 80, painter))
       .toContain("├ ✓ [READ] src/main.ts · 12ms");
     expect(formatToolResultLine("failed", "run_command", "$ bun test", 20, true, 80, painter))
@@ -567,18 +563,6 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(humanToolTitle("edit_file")).toBe("File Edit");
     expect(humanToolTitle("run_command")).toBe("Host Shell Command");
     expect(humanToolTitle("search_files")).toBe("Workspace Search");
-  });
-
-  test("renders tool activity as a compact timeline", () => {
-    const painter = createPainter(true);
-    const running = formatToolCard("running", "list_files", undefined, undefined, 100, painter);
-    const complete = formatToolCard("done", "list_files", undefined, 12, 100, painter);
-
-    expect(running).toContain("├");
-    expect(running).toContain("running");
-    expect(complete).toContain("└");
-    expect(complete).toContain("complete");
-    expect(complete).toContain("12ms");
   });
 
   test("streams unboxed terminal markdown cleanly", () => {

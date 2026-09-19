@@ -410,6 +410,37 @@ export function formatTurnCloser(
   return truncateText(head, safeWidth);
 }
 
+/// The harness approval block: rail-aligned, box-free, and consistent with the
+/// rest of the transcript. The scrollback path keeps `formatPermissionCard`.
+export function formatApprovalAsk(options: {
+  summary: string;
+  toolName?: string;
+  previewRows?: string[];
+  width: number;
+  painter: Painter;
+  waitingMark: string;
+}): string[] {
+  const { summary, toolName, previewRows, width, painter } = options;
+  const safeWidth = Math.max(24, width);
+  const rail = turnRail(painter);
+  const badge = toolName ? toolKindBadge(sanitizeTerminalLine(toolName)) : null;
+  const label = badge ? badge.title : sanitizeTerminalLine(toolName ?? "this action");
+  const lines = [
+    `${" ".repeat(HARNESS.rail)}${painter.text("│", "rule")} ${options.waitingMark} `
+      + painter.text(`I need your go-ahead: ${truncateText(sentenceCase(summary), Math.max(8, safeWidth - HARNESS.content - 24))}`, "paper")
+      + painter.dim(`  ${label.toLowerCase()}`),
+  ];
+  for (const row of previewRows ?? []) {
+    lines.push(`${" ".repeat(HARNESS.toolTarget)}${row}`);
+  }
+  return lines;
+}
+
+function sentenceCase(value: string): string {
+  const text = value.replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim();
+  return text.length > 200 ? `${text.slice(0, 199)}…` : text;
+}
+
 /// A block caret shown at the end of streaming prose.
 export function streamingCaret(painter: Painter): string {
   return painter.text("▍", "electric");
@@ -1075,10 +1106,7 @@ export function formatAssistantHeader(
   return `${left}${" ".repeat(padding)}${time}\n\n`;
 }
 
-export function formatToolGroupHeader(count: number, painter: Painter = createPainter(true)): string {
-  const label = `${count} tool${count === 1 ? "" : "s"}`;
-  return `  ${painter.text("⋮", "secondary")} ${painter.dim(label)}`;
-}
+
 
 export type ToolPhase = "inspect" | "change" | "verify";
 
@@ -1129,55 +1157,9 @@ function looksLikePath(value: string): boolean {
   return trimmed.includes("/") || /\.[A-Za-z0-9]{1,8}$/.test(trimmed);
 }
 
-/// Formats one step in the compact tool activity timeline.
-export function formatToolCard(
-  state: "running" | "done" | "failed" | "denied",
-  name: string,
-  detail?: string,
-  durationMs?: number,
-  width = 80,
-  painter: Painter = createPainter(true),
-): string {
-  const badge = toolKindBadge(sanitizeTerminalLine(name));
-  const title = badge.title;
-  const dotColor: PaletteColor =
-    state === "done" ? "citron" : state === "running" ? "electric" : "signal";
-  const stateLabel =
-    state === "done" ? "complete" : state === "running" ? "running" : state === "denied" ? "denied" : "failed";
 
-  const branch = painter.text(state === "running" ? "├" : "└", dotColor);
-  const chipStr = painter.bold(`[${badge.chip}]`, badge.color);
-  const leftHeader = `  ${branch} ${chipStr} ${painter.bold(title, "paper")}`;
-  const statusStr = painter.text(stateLabel, dotColor);
-  const timeStr = durationMs !== undefined ? painter.dim(` · ${durationMs}ms`) : "";
-  const headerRow = `${leftHeader}  ${statusStr}${timeStr}`;
 
-  if (detail) {
-    const maxDetailLen = Math.max(16, width - 8);
-    return `${headerRow}\n  ${painter.dim("│")} ${painter.text(truncateText(sanitizeTerminalLine(detail), maxDetailLen), "secondary")}`;
-  }
-  return headerRow;
-}
 
-/// Formats a tool activity line.
-export function formatToolEvent(
-  state: "running" | "done" | "failed" | "denied",
-  name: string,
-  argsSummary?: string,
-  painter: Painter = createPainter(true),
-): string {
-  const dotColor: PaletteColor =
-    state === "done" ? "citron" : state === "running" ? "electric" : "signal";
-  const stateLabel =
-    state === "done" ? "done" : state === "running" ? "running" : state === "denied" ? "denied" : "failed";
-
-  const dot = painter.text("●", dotColor);
-  const toolName = painter.bold(sanitizeTerminalLine(name), "paper");
-  const args = argsSummary ? ` ${painter.dim(sanitizeTerminalLine(argsSummary))}` : "";
-  const status = painter.text(` (${stateLabel})`, dotColor);
-
-  return `  ${dot} ${toolName}${args}${state === "running" ? "" : status}`;
-}
 
 /// Formats a rich boundary approval card when a dangerous tool is invoked.
 export function formatPermissionCard(

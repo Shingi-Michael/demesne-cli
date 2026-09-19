@@ -3,7 +3,7 @@ import {
   formatDiffPreview,
   formatFooterLine,
   formatMentionMenu,
-  formatPermissionCard,
+  formatApprovalAsk,
   formatSlashCommandMenu,
   formatToolRow,
   formatTurnCloser,
@@ -328,6 +328,10 @@ export class Workbench {
   }
 
   toolRequested(input: { toolCallId: string; name: string; arguments: unknown }): void {
+    // The caller drains the pacer before this, so the round's prose is
+    // complete: stop its caret and animation. The entry stays open as the same
+    // paragraph, and `beginRound` separates it from the next round's prose.
+    this.finishAssistant();
     const parsed = parseArguments(input.arguments);
     this.entries.push({
       id: this.nextId++,
@@ -596,7 +600,8 @@ export class Workbench {
 
   private inputLineCount(): number {
     if (this.mode === "approval") {
-      return Math.max(6, 5 + (this.approval?.previewRows?.length ?? 0) + 2);
+      // Voice line + permission card + preview rows + selection row.
+      return Math.max(7, 6 + (this.approval?.previewRows?.length ?? 0) + 2);
     }
     if (this.mode === "dialog") {
       return 4 + Math.min(this.dialogItems.length, 10);
@@ -776,10 +781,12 @@ export class Workbench {
 
   /// The header carries identity: brand, session, workspace, branch. The model
   /// lives in the footer with live runtime state, so it is never shown twice.
+  /// The brand mark doubles as the agent's state mark, so the header breathes
+  /// with the turn instead of sitting static.
   private composeHeader(width: number): { mark: string } {
     const paint = this.options.paint;
     const branch = this.options.contextRail.workspaceBranch;
-    const left = `${" ".repeat(HARNESS.margin)}${paint.text("◈", "electric")} `
+    const left = `${" ".repeat(HARNESS.margin)}${renderPresence(this.state, Date.now(), paint)} `
       + paint.bold("demesne", "paper")
       + paint.dim(` · ${truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(6, Math.floor(width / 4)))}`);
     const root = this.options.workspaceRoot;
@@ -828,13 +835,16 @@ export class Workbench {
 
     if (this.mode === "approval" && this.approval) {
       const allowSession = this.approval.toolName !== "run_command";
-      lines.push(...formatPermissionCard(
-        this.approval.summary,
-        this.approval.toolName,
+      // Rail-aligned and box-free so the request reads as part of the turn
+      // rather than as a modal from a different interface.
+      lines.push(...formatApprovalAsk({
+        summary: this.approval.summary,
+        toolName: this.approval.toolName,
+        previewRows: this.approval.previewRows,
         width,
-        paint,
-        this.approval.previewRows,
-      ).split("\n"));
+        painter: paint,
+        waitingMark: renderPresence("waiting", Date.now(), paint),
+      }));
       lines.push(formatApprovalSelection(this.approvalSelected, allowSession, width, paint, this.approval.allowPersist));
       return { lines, cursor: null };
     }

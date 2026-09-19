@@ -79,13 +79,4 @@ export function presenceForTool(name: string, isValidation: boolean): PresenceSt
   return "working";
 }
 
-/// A traveling highlight for the assistant rail while text streams. Returns
-/// the styled rail cell for a given row; reduced motion and plain output get a
-/// steady dim rail.
-export function renderRailCell(row: number, nowMs: number, painter: Painter, streaming: boolean): string {
-  if (!streaming || !painter.enabled) return painter.text("│", "rule");
-  const wave = Math.sin((nowMs / 420) - row * 0.55);
-  if (wave > 0.82) return painter.text("┃", "electric");
-  if (wave > 0.4) return painter.text("│", "secondary");
-  return painter.text("│", "rule");
-}
+

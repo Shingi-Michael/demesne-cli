@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createPainter } from "../src/index.ts";
-import { presenceForTool, presenceLabel, renderPresence, renderRailCell } from "../src/presence.ts";
+import { presenceForTool, presenceLabel, renderPresence } from "../src/presence.ts";
 
 const painter = createPainter(true, "dark");
 const plain = createPainter(false, "dark");
@@ -49,17 +49,5 @@ describe("presenceForTool", () => {
     expect(presenceForTool("run_command", true)).toBe("verifying");
     expect(presenceForTool("run_command", false)).toBe("working");
     expect(presenceForTool("read_file", false)).toBe("working");
-  });
-});
-
-describe("renderRailCell", () => {
-  test("shimmers only while streaming with a painter", () => {
-    const cells = new Set<string>();
-    for (let step = 0; step < 12; step += 1) {
-      cells.add(stripAnsi(renderRailCell(0, step * 200, painter, true)));
-    }
-    expect(cells.size).toBeGreaterThan(1);
-    expect(renderRailCell(0, 0, plain, true)).toBe("│");
-    expect(renderRailCell(0, 0, painter, false)).toBe(painter.text("│", "rule"));
   });
 });

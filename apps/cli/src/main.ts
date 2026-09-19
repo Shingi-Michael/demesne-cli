@@ -75,6 +75,7 @@ import { applyFooterScrollRegion, resetFooterScrollRegion } from "./terminal-con
 import { reduceInterruptKey } from "./interrupt-key.ts";
 import { playTensorIntro } from "./tensor-intro.ts";
 import { formatProcessView } from "./process-view.ts";
+import { Workbench } from "./workbench/controller.ts";
 import { checkForUpdate } from "./update-check.ts";
 import { PromptHistory } from "./prompt-history.ts";
 import { composeInEditor } from "./external-editor.ts";
@@ -737,6 +738,9 @@ async function runChat(command: string[]): Promise<void> {
   }
 
   const interactive = process.stdin.isTTY && process.stdout.isTTY;
+  const noTui = command.includes("--no-tui") || process.env.DEMESNE_NO_TUI === "1";
+  if (command.includes("--no-tui")) command.splice(command.indexOf("--no-tui"), 1);
+  const useWorkbench = interactive && !noTui;
   const history = PromptHistory.load(join(settings.dataDirectory, "history.jsonl"));
   let mentionFiles: string[] = [];
   let customCommands: CustomCommand[] = loadCustomCommands(process.cwd());
@@ -772,7 +776,7 @@ async function runChat(command: string[]): Promise<void> {
     request<{ models: ModelDescriptor[] }>("/v1/models").then((result) => result.models).catch(() => []),
     request<RuntimeProfileStatus>("/v1/runtime").catch(() => null),
   ]);
-  await playTensorIntro(paint);
+  if (!useWorkbench) await playTensorIntro(paint);
   const [health, discoveredModels, runtimeStatus] = await boot;
   let activeModel = discoveredModels.find((model) => model.id === health?.model) ?? {
     id: health?.model ?? "model",
@@ -781,6 +785,7 @@ async function runChat(command: string[]): Promise<void> {
   const initialState = await request<SessionStateResponse>(`/v1/sessions/${sessionId}`);
   mentionFiles = await fetchMentionFiles(sessionId);
   let currentWorkspace = initialState.session.workspace?.root ?? process.cwd();
+  let sessionTitle = initialState.session.title;
   refreshCustomCommands(currentWorkspace);
   const historicalModel = initialState.latestProviderCall
     ? discoveredModels.find((model) =>
@@ -792,8 +797,27 @@ async function runChat(command: string[]): Promise<void> {
   contextRail.setBranch(initialState.session.workspace?.gitBranch ?? null);
   contextRail.setRuntime(runtimeStatus);
   const fixedFooter = new CliFixedFooter();
-  chatState.footer = fixedFooter;
-  fixedFooter.enable();
+  const workbench = useWorkbench
+    ? new Workbench({
+        paint,
+        contextRail,
+        sessionTitle: initialState.session.title,
+        version: VERSION,
+        onExit: () => leaveChat(),
+        onInterrupt: () => chatState.interrupt?.(),
+        queue: {
+          get: () => chatState.queuedInput ?? "",
+          set: (value) => {
+            chatState.queuedInput = value;
+            chatState.refreshQueued?.();
+          },
+        },
+      })
+    : null;
+  if (!workbench) {
+    chatState.footer = fixedFooter;
+    fixedFooter.enable();
+  }
 
   const statusLineText = () => contextRail.statusLine(getTerminalWidth(process.stdout), paint);
   const renderWelcome = () => {
@@ -811,6 +835,7 @@ async function runChat(command: string[]): Promise<void> {
     fixedFooter.update("", statusLineText());
   };
   restoreTerminalState = () => {
+    workbench?.stop();
     fixedFooter.disable();
     process.stdout.removeListener("resize", onTerminalResize);
     chatState.inputStatusLine = undefined;
@@ -822,7 +847,15 @@ async function runChat(command: string[]): Promise<void> {
     chatState.refreshStreams?.();
   };
   process.stdout.on("resize", onTerminalResize);
-  renderWelcome();
+  if (workbench) workbench.start();
+  else renderWelcome();
+
+  /// Command output helper: the workbench appends blocks to the conversation,
+  /// while the scrollback renderer prints directly.
+  const emit = (text = ""): void => {
+    if (workbench) workbench.showBlock(text.split("\n"));
+    else console.log(text);
+  };
 
   process.on("SIGINT", () => {
     if (chatState.streamActive) chatState.interrupt?.();
@@ -830,6 +863,32 @@ async function runChat(command: string[]): Promise<void> {
   });
 
   const executePrompt = async (text: string, planOnly = false): Promise<void> => {
+    if (workbench) {
+      chatState.streamActive = true;
+      chatState.queuedInput = undefined;
+      contextRail.setModel(activeModel);
+      workbench.setSessionTitle(sessionTitle);
+      workbench.beginTurn({ userText: text, at: timeLabel(), planOnly });
+      try {
+        await runWorkbenchTurn({
+          sessionId: sessionId!,
+          content: text,
+          permissionMode,
+          planOnly,
+          workbench,
+          contextRail,
+          paint,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Turn failed";
+        workbench.finishTurn("failed", `Turn failed · ${sanitizeTerminalText(message)}`);
+      } finally {
+        chatState.streamActive = false;
+        workbench.setFooter("", statusLineText());
+      }
+      return;
+    }
+
     const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const width = getConversationWidth(process.stdout);
     console.log(formatUserMessage(text, timeStr, width, paint));
@@ -865,6 +924,8 @@ async function runChat(command: string[]): Promise<void> {
     try {
       const result = await request<SessionStateResponse>(`/v1/sessions/${targetId}`);
       sessionId = result.session.id;
+      sessionTitle = result.session.title;
+      workbench?.setSessionTitle(sessionTitle);
       currentWorkspace = result.session.workspace?.root ?? process.cwd();
       contextRail.setModel(activeModel);
       if (result.latestProviderCall) {
@@ -882,14 +943,14 @@ async function runChat(command: string[]): Promise<void> {
       refreshCustomCommands(currentWorkspace);
       const preferred = result.session.preferredModel;
       if (preferred && preferred !== activeModel.id) {
-        console.log(paint.dim(
-          `    This session last used ${sanitizeTerminalLine(preferred)}; active model is ${sanitizeTerminalLine(activeModel.id)}. `
+        emit(paint.dim(
+          `This session last used ${sanitizeTerminalLine(preferred)}; active model is ${sanitizeTerminalLine(activeModel.id)}. `
             + `Use /model ${sanitizeTerminalLine(preferred)} to switch.`,
         ));
       }
-      console.log(`\n  ${paint.text("●", "citron")} Switched to ${paint.bold(sanitizeTerminalLine(result.session.title), "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}\n`);
+      emit(`  ${paint.text("●", "citron")} Switched to ${paint.bold(sanitizeTerminalLine(result.session.title), "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}`);
     } catch {
-      console.log(`  ${paint.text(`Could not find session: ${targetId}`, "signal")}\n`);
+      emit(`  ${paint.text(`Could not find session: ${targetId}`, "signal")}`);
     }
   };
 
@@ -903,18 +964,17 @@ async function runChat(command: string[]): Promise<void> {
           body: JSON.stringify(path ? { paths: [path] } : {}),
         });
         const suffix = result.complete ? "" : " · partial; run /undo again for the rest";
-        console.log(`\n  ${paint.text("●", "citron")} Reverted ${result.files.length} path${result.files.length === 1 ? "" : "s"} from turn ${paint.bold(result.turnId.slice(0, 8), "paper")}${paint.dim(suffix)}`);
-        for (const file of result.files) console.log(paint.dim(`    ↩ ${sanitizeTerminalLine(file)}`));
-        console.log("");
+        emit(`  ${paint.text("●", "citron")} Reverted ${result.files.length} path${result.files.length === 1 ? "" : "s"} from turn ${paint.bold(result.turnId.slice(0, 8), "paper")}${paint.dim(suffix)}`);
+        for (const file of result.files) emit(paint.dim(`    ↩ ${sanitizeTerminalLine(file)}`));
       } catch (error) {
         const message = error instanceof Error ? error.message : "undo failed";
-        console.log(`  ${paint.text(message, "signal")}\n`);
+        emit(`  ${paint.text(message, "signal")}`);
       }
     },
     plan: async (argument) => {
       const text = sanitizeTerminalLine(argument).trim();
       if (!text) {
-        console.log(`  ${paint.text("Usage: /plan <prompt>", "signal")}\n`);
+        emit(`  ${paint.text("Usage: /plan <prompt>", "signal")}`);
         return;
       }
       await executePrompt(text, true);
@@ -923,10 +983,10 @@ async function runChat(command: string[]): Promise<void> {
       try {
         const result = await request<TurnChangesResponse>(`/v1/sessions/${sessionId}/changes`);
         if (result.changes.length === 0) {
-          console.log(`  ${paint.dim("No changes to review.")}\n`);
+          emit(`  ${paint.dim("No changes to review.")}`);
           return;
         }
-        console.log(`\n  ${paint.bold("CHANGES", "paper")} ${paint.dim(`turn ${result.turnId.slice(0, 8)}`)}`);
+        const lines = [`  ${paint.bold("CHANGES", "paper")} ${paint.dim(`turn ${result.turnId.slice(0, 8)}`)}`];
         for (const change of result.changes) {
           const badge = change.operation === "A"
             ? paint.text("A", "citron")
@@ -934,30 +994,28 @@ async function runChat(command: string[]): Promise<void> {
               ? paint.text("D", "signal")
               : paint.text("M", "electric");
           const reverted = change.reverted ? paint.dim(" · reverted") : "";
-          console.log(`  ${badge} ${paint.bold(sanitizeTerminalLine(change.path), "paper")}${reverted}`);
+          lines.push(`  ${badge} ${paint.bold(sanitizeTerminalLine(change.path), "paper")}${reverted}`);
           if (change.binary) {
-            console.log(`    ${paint.dim("binary file · diff unavailable")}`);
+            lines.push(`    ${paint.dim("binary file · diff unavailable")}`);
             continue;
           }
           for (const line of change.diff) {
             const safe = sanitizeTerminalLine(line);
-            const colored = line.startsWith("+")
-              ? paint.text(safe, "citron")
-              : line.startsWith("-")
-                ? paint.text(safe, "signal")
-                : paint.dim(safe);
-            console.log(`    ${colored}`);
+            lines.push(`    ${line.startsWith("+") ? paint.text(safe, "citron") : line.startsWith("-") ? paint.text(safe, "signal") : paint.dim(safe)}`);
           }
         }
-        console.log("");
+        emit(lines.join("\n"));
       } catch (error) {
         const message = error instanceof Error ? error.message : "diff failed";
-        console.log(`  ${paint.text(message, "signal")}\n`);
+        emit(`  ${paint.text(message, "signal")}`);
       }
     },
-    clear: async () => renderWelcome(),
+    clear: async () => {
+      if (workbench) workbench.notice("view refreshed");
+      else renderWelcome();
+    },
     help: async () => {
-      console.log(formatHelpCard(paint, getTerminalWidth(process.stdout)));
+      emit(formatHelpCard(paint, getTerminalWidth(process.stdout)));
     },
     new: async (customTitle) => {
       const title = sanitizeTerminalLine(customTitle).trim() || `Session ${new Date().toLocaleTimeString()}`;
@@ -966,48 +1024,43 @@ async function runChat(command: string[]): Promise<void> {
         body: JSON.stringify({ title, workspacePath: process.cwd() }),
       });
       sessionId = created.session.id;
+      sessionTitle = title;
+      workbench?.setSessionTitle(title);
       currentWorkspace = created.session.workspace?.root ?? process.cwd();
       contextRail.setModel(activeModel);
       contextRail.hydrate(null, thinkingEnabled, currentWorkspace);
       contextRail.setBranch(created.session.workspace?.gitBranch ?? null);
       mentionFiles = await fetchMentionFiles(sessionId);
       refreshCustomCommands(currentWorkspace);
-      console.log(`\n  ${paint.text("●", "citron")} Started new session ${paint.bold(title, "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}\n`);
+      emit(`  ${paint.text("●", "citron")} Started new session ${paint.bold(title, "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}`);
     },
     status: async () => {
       const current = await request<{ session: Session }>(`/v1/sessions/${sessionId}`).catch(() => null);
-      console.log(
-        formatInfoCard({
-          sessionId: sessionId!,
-          title: current?.session.title ?? "Untitled",
-          turnCount: current?.session.turns.length ?? 0,
-          model: activeModel.id,
-          provider: activeModel.provider,
-          contextWindow: activeModel.contextWindow,
-          workspace: current?.session.workspace?.root ?? currentWorkspace,
-          width: getTerminalWidth(process.stdout),
-          painter: paint,
-        }),
-      );
+      emit(formatInfoCard({
+        sessionId: sessionId!,
+        title: current?.session.title ?? "Untitled",
+        turnCount: current?.session.turns.length ?? 0,
+        model: activeModel.id,
+        provider: activeModel.provider,
+        contextWindow: activeModel.contextWindow,
+        workspace: current?.session.workspace?.root ?? currentWorkspace,
+        width: getTerminalWidth(process.stdout),
+        painter: paint,
+      }));
     },
     context: async () => {
       const state = await request<SessionStateResponse>(`/v1/sessions/${sessionId}`).catch(() => null);
       const contextWidth = Math.max(1, Math.min(72, getTerminalWidth(process.stdout) - 4));
-      const detail = contextRail.lines(
-        contextWidth,
-        100,
-        paint,
-      ).map((line) => `  ${line}`);
+      const detail = contextRail.lines(contextWidth, 100, paint);
       const grants = state?.sessionGrants ?? [];
       if (grants.length > 0) {
-        detail.push(`  ${paint.bold("SESSION GRANTS", "secondary")}`);
+        detail.push(paint.bold("SESSION GRANTS", "secondary"));
         for (const grant of grants) {
           const scope = grant.pathPrefix ? ` under ${sanitizeTerminalLine(grant.pathPrefix)}/` : " (whole workspace)";
-          const grantLine = `· ${sanitizeTerminalLine(grant.tool)}${scope}`;
-          detail.push(`  ${truncateText(paint.dim(grantLine), contextWidth)}`);
+          detail.push(truncateText(paint.dim(`· ${sanitizeTerminalLine(grant.tool)}${scope}`), contextWidth));
         }
       }
-      console.log(`\n${detail.join("\n")}\n`);
+      emit(detail.join("\n"));
     },
     sessions: async (argument) => {
       const query = argument.trim();
@@ -1016,14 +1069,28 @@ async function runChat(command: string[]): Promise<void> {
       );
       const recent = result.sessions.slice(0, 10);
       if (query && recent.length === 0) {
-        console.log(`  ${paint.dim(`No sessions match "${sanitizeTerminalLine(query)}".`)}\n`);
+        emit(`  ${paint.dim(`No sessions match "${sanitizeTerminalLine(query)}".`)}`);
         return;
       }
-      console.log(formatSessionsTable(recent.map(sessionListItem), sessionId, getTerminalWidth(process.stdout), paint));
       if (recent.length === 0) return;
+      if (workbench) {
+        const currentIndex = Math.max(0, recent.findIndex((session) => session.id === sessionId));
+        const selected = await workbench.choose(
+          query ? `Sessions matching "${sanitizeTerminalLine(query)}"` : "Recent sessions",
+          recent.map((session) => `${session.title}  ${paint.dim(`(${session.id.slice(0, 8)})`)}`),
+          currentIndex,
+        );
+        if (selected === null) {
+          emit(`  ${paint.dim("Session selection cancelled.")}`);
+        } else if (recent[selected] && recent[selected]!.id !== sessionId) {
+          await activateSession(recent[selected]!.id);
+        }
+        return;
+      }
+      emit(formatSessionsTable(recent.map(sessionListItem), sessionId, getTerminalWidth(process.stdout), paint));
       const selected = await selectSessionInteractive(recent, sessionId, paint);
       if (selected && selected.id !== sessionId) await activateSession(selected.id);
-      else if (!selected) console.log(`  ${paint.dim("Session selection cancelled.")}\n`);
+      else if (!selected) emit(`  ${paint.dim("Session selection cancelled.")}`);
     },
     resume: activateSession,
     model: async (argument) => {
@@ -1033,20 +1100,31 @@ async function runChat(command: string[]): Promise<void> {
       if (query) {
         const match = matchModel(discovered.models, query);
         if ("error" in match) {
-          console.log(`  ${paint.text(match.error, "signal")}\n`);
+          emit(`  ${paint.text(match.error, "signal")}`);
           return;
         }
         selected = match.model;
+      } else if (workbench) {
+        const index = await workbench.choose(
+          "Models",
+          discovered.models.map((model) => `${model.id}${model.contextWindow ? paint.dim(` · ctx ${formatTokenCount(model.contextWindow)}`) : ""}`),
+          Math.max(0, discovered.models.findIndex((model) => model.id === activeModel.id)),
+        );
+        if (index === null || !discovered.models[index]) {
+          emit(`  ${paint.dim("Model selection cancelled.")}`);
+          return;
+        }
+        selected = discovered.models[index]!;
       } else {
         const picked = await selectModelInteractive(discovered.models, activeModel.id, paint);
         if (!picked) {
-          console.log(`  ${paint.dim("Model selection cancelled.")}\n`);
+          emit(`  ${paint.dim("Model selection cancelled.")}`);
           return;
         }
         selected = picked;
       }
       if (selected.id === activeModel.id) {
-        console.log(`  ${paint.dim(`${sanitizeTerminalLine(selected.id)} is already active.`)}\n`);
+        emit(`  ${paint.dim(`${sanitizeTerminalLine(selected.id)} is already active.`)}`);
         return;
       }
       await request("/v1/model", { method: "POST", body: JSON.stringify({ model: selected.id }) });
@@ -1058,35 +1136,40 @@ async function runChat(command: string[]): Promise<void> {
         body: JSON.stringify({ preferredModel: selected.id }),
       }).catch(() => null);
       const context = selected.contextWindow ? paint.dim(` · ctx ${formatTokenCount(selected.contextWindow)}`) : "";
-      console.log(`\n  ${paint.text("●", "citron")} Switched to ${paint.bold(sanitizeTerminalLine(selected.id), "paper")}${context}\n`);
+      emit(`  ${paint.text("●", "citron")} Switched to ${paint.bold(sanitizeTerminalLine(selected.id), "paper")}${context}`);
     },
     rename: async (argument) => {
       const title = sanitizeTerminalLine(argument).trim();
       if (!title) {
-        console.log(`  ${paint.text("Usage: /rename <title>", "signal")}\n`);
+        emit(`  ${paint.text("Usage: /rename <title>", "signal")}`);
         return;
       }
       const result = await request<UpdateSessionResponse>(`/v1/sessions/${sessionId}`, {
         method: "PATCH",
         body: JSON.stringify({ title }),
       });
-      console.log(`\n  ${paint.text("●", "citron")} Renamed to ${paint.bold(sanitizeTerminalLine(result.session.title), "paper")}\n`);
+      sessionTitle = result.session.title;
+      workbench?.setSessionTitle(sessionTitle);
+      emit(`  ${paint.text("●", "citron")} Renamed to ${paint.bold(sanitizeTerminalLine(result.session.title), "paper")}`);
     },
     delete: async () => {
       const current = await request<{ session: Session }>(`/v1/sessions/${sessionId}`).catch(() => null);
       const title = current?.session.title ?? "this session";
-      if (!await confirmPrompt(`Archive ${sanitizeTerminalLine(title)}? The transcript is kept. [y/N] `)) {
-        console.log(`  ${paint.dim("Archive cancelled.")}\n`);
+      const confirmed = workbench
+        ? await workbench.suspend(() => confirmPrompt(`Archive ${sanitizeTerminalLine(title)}? The transcript is kept. [y/N] `))
+        : await confirmPrompt(`Archive ${sanitizeTerminalLine(title)}? The transcript is kept. [y/N] `);
+      if (!confirmed) {
+        emit(`  ${paint.dim("Archive cancelled.")}`);
         return;
       }
       await request(`/v1/sessions/${sessionId}`, { method: "DELETE" });
-      console.log(`\n  ${paint.text("●", "citron")} Archived ${paint.bold(sanitizeTerminalLine(title), "paper")}\n`);
+      emit(`  ${paint.text("●", "citron")} Archived ${paint.bold(sanitizeTerminalLine(title), "paper")}`);
       await slashHandlers.new!("");
     },
     export: async (argument) => {
       const format = argument.trim().toLowerCase() || "md";
       if (format !== "md" && format !== "json") {
-        console.log(`  ${paint.text("Usage: /export [md|json]", "signal")}\n`);
+        emit(`  ${paint.text("Usage: /export [md|json]", "signal")}`);
         return;
       }
       const response = await fetch(new URL(`/v1/sessions/${sessionId}/export?format=${format}`, server), {
@@ -1099,7 +1182,7 @@ async function runChat(command: string[]): Promise<void> {
       const text = await response.text();
       const path = join(process.cwd(), `demesne-${sessionId!.slice(0, 8)}.${format}`);
       writeFileSync(path, text, { encoding: "utf8", mode: 0o600 });
-      console.log(`\n  ${paint.text("●", "citron")} Exported to ${paint.bold(sanitizeTerminalLine(path), "paper")}\n`);
+      emit(`  ${paint.text("●", "citron")} Exported to ${paint.bold(sanitizeTerminalLine(path), "paper")}`);
     },
   };
 
@@ -1115,7 +1198,9 @@ async function runChat(command: string[]): Promise<void> {
       line = queued;
     } else {
       try {
-        line = await readCommandPrompt(history, mentionFiles, allCommands);
+        line = workbench
+          ? await workbench.readPrompt({ history: history.entries(), mentions: mentionFiles, commands: allCommands })
+          : await readCommandPrompt(history, mentionFiles, allCommands);
       } catch {
         leaveChat();
       }
@@ -1278,6 +1363,188 @@ async function runHeadlessTurn(options: {
   if (options.output === "json") console.log(JSON.stringify(result));
   else console.log(JSON.stringify({ type: "result", ...result }));
   return result;
+}
+
+/// Drives one turn inside the full-screen workbench: submits it, consumes the
+/// event stream, updates the conversation and telemetry, and resolves approvals
+/// in the workbench's input area. Persisted-rule handling stays here so the UI
+/// controller never touches configuration.
+async function runWorkbenchTurn(options: {
+  sessionId: string;
+  content: string;
+  permissionMode: "ask" | "deny";
+  planOnly: boolean;
+  workbench: Workbench;
+  contextRail: CliContextRail;
+  paint: Painter;
+}): Promise<void> {
+  const submitted = await request<SubmitTurnResponse>(`/v1/sessions/${options.sessionId}/turns`, {
+    method: "POST",
+    body: JSON.stringify({
+      content: options.content,
+      permissionMode: options.permissionMode,
+      ...(options.planOnly ? { planOnly: true } : {}),
+    }),
+  });
+
+  const controller = new AbortController();
+  chatState.interrupt = () => {
+    void request(`/v1/turns/${submitted.turn.id}/cancel`, { method: "POST", body: JSON.stringify({}) })
+      .catch(() => controller.abort());
+  };
+
+  const activity = new TurnActivityLedger();
+  const throughput = new TurnThroughputTracker();
+  const startedAt = Date.now();
+  let phase = "Thinking";
+  let status: "completed" | "stopped" | "failed" = "completed";
+  let failure: string | undefined;
+
+  const updateFooter = () => {
+    const elapsed = ((Date.now() - startedAt) / 1_000).toFixed(1);
+    const speed = throughput.snapshot().tokensPerSecond;
+    const queued = queueSummary(chatState.queuedInput ?? "");
+    const spinner = renderSpinner(
+      ((Date.now() % SPINNER_PERIOD_MS) / SPINNER_PERIOD_MS),
+      phase === "Responding" ? "generating" : phase === "Reasoning" ? "reasoning" : "thinking",
+      options.paint,
+    );
+    const left = `  ${spinner} ${options.paint.bold(phase, "paper")} ${options.paint.dim(
+      `· ${elapsed}s${speed === null ? "" : ` · ${speed.toFixed(0)} tok/s`}${queued ? ` · ⏎ ${queued}` : ""}`,
+    )}`;
+    options.workbench.setFooter(left, options.contextRail.statusLine(getTerminalWidth(process.stdout), options.paint));
+  };
+  const footerTimer = setInterval(updateFooter, 120);
+  updateFooter();
+
+  try {
+    for await (const event of client.streamEvents(options.sessionId, submitted.eventId, controller.signal)) {
+      if (event.turnId !== submitted.turn.id) continue;
+      options.contextRail.apply(event);
+      activity.apply(event);
+      throughput.apply(event);
+
+      if (event.type === "model.request_started") {
+        phase = "Thinking";
+      } else if (event.type === "reasoning.delta" && typeof event.payload.delta === "string") {
+        phase = "Reasoning";
+        options.workbench.reasoningDelta(event.payload.delta);
+      } else if (event.type === "message.delta" && typeof event.payload.delta === "string") {
+        phase = "Responding";
+        options.workbench.assistantDelta(event.payload.delta);
+      } else if (event.type === "tool.call_requested") {
+        options.workbench.toolRequested({
+          toolCallId: String(event.payload.toolCallId ?? ""),
+          name: String(event.payload.name ?? "tool"),
+          arguments: event.payload.arguments,
+        });
+      } else if (event.type === "tool.call_started") {
+        phase = "Working";
+      } else if (["tool.call_completed", "tool.call_failed", "tool.call_denied", "tool.call_cancelled", "tool.call_interrupted"].includes(event.type)) {
+        const state = event.type === "tool.call_completed" && event.payload.timedOut !== true
+          && (typeof event.payload.exitCode !== "number" || event.payload.exitCode === 0)
+          ? "done"
+          : event.type === "tool.call_denied" ? "denied" : "failed";
+        options.workbench.toolFinished({
+          toolCallId: String(event.payload.toolCallId ?? ""),
+          name: String(event.payload.name ?? "tool"),
+          state,
+          ...(typeof event.payload.durationMs === "number" ? { durationMs: event.payload.durationMs } : {}),
+          ...(state === "failed" && typeof event.payload.message === "string" ? { message: event.payload.message } : {}),
+        });
+        phase = "Thinking";
+      } else if (event.type === "model.context_trimmed") {
+        const count = Array.isArray(event.payload.droppedTurnIds) ? event.payload.droppedTurnIds.length : 0;
+        options.workbench.notice(`Context window reached; dropped ${count} older turn${count === 1 ? "" : "s"}.`, "info");
+      } else if (event.type === "permission.requested") {
+        const permissionId = typeof event.payload.permissionId === "string" ? event.payload.permissionId : null;
+        const toolName = typeof event.payload.name === "string" ? event.payload.name : undefined;
+        const summary = typeof event.payload.summary === "string" ? event.payload.summary : "operation";
+        const rawArgs = event.payload.arguments;
+        const rule = derivePersistedRule(toolName, rawArgs);
+        let decision: PermissionDecision = "deny";
+        if (permissionId) {
+          decision = await options.workbench.askApproval({
+            summary,
+            toolName,
+            previewRows: permissionPreviewRows(toolName, rawArgs, options.paint),
+            allowPersist: rule !== null,
+          });
+          if (decision === "allow_always" && rule) {
+            try {
+              const existing = settings.loaded.config.permissions.allow;
+              if (!existing.includes(rule)) {
+                updateUserConfig(settings.configPath, { permissions: { allow: [...existing, rule] } });
+                existing.push(rule);
+              }
+            } catch {
+              decision = "allow_session";
+            }
+          }
+          await request(`/v1/permissions/${permissionId}`, {
+            method: "POST",
+            body: JSON.stringify({ decision }),
+          }).catch(() => undefined);
+        }
+      } else if (event.type === "turn.completed") {
+        status = "completed";
+        break;
+      } else if (event.type === "turn.cancelled") {
+        status = "stopped";
+        break;
+      } else if (event.type === "turn.failed") {
+        status = "failed";
+        failure = typeof event.payload.message === "string" ? event.payload.message : "Turn failed";
+        break;
+      } else if (event.type === "turn.interrupted") {
+        status = "failed";
+        failure = typeof event.payload.message === "string" ? event.payload.message : "Turn interrupted";
+        break;
+      }
+      updateFooter();
+    }
+  } finally {
+    clearInterval(footerTimer);
+    chatState.interrupt = undefined;
+    controller.abort();
+  }
+
+  const evidence = activity.snapshot();
+  const duration = ((Date.now() - startedAt) / 1_000).toFixed(1);
+  const measured = throughput.snapshot();
+  const speed = measured.decodeTokensPerSecond ?? measured.tokensPerSecond;
+  const summary = status === "completed"
+    ? `complete · ${duration}s · ${evidence.rounds} round${evidence.rounds === 1 ? "" : "s"} · ${evidence.tools} tool${evidence.tools === 1 ? "" : "s"}`
+      + (measured.outputTokens ? ` · ${measured.outputTokens} tok` : "")
+      + (speed ? ` · ${speed.toFixed(1)} tok/s` : "")
+    : failure ?? "turn stopped";
+  options.workbench.finishTurn(status, summary);
+}
+
+function permissionPreviewRows(toolName: string | undefined, rawArgs: unknown, painter: Painter): string[] {
+  const rows: string[] = [];
+  let parsed: Record<string, unknown> | null = null;
+  if (typeof rawArgs === "string") {
+    try {
+      const value: unknown = JSON.parse(rawArgs);
+      if (isRecord(value)) parsed = value;
+    } catch {
+      parsed = null;
+    }
+  } else if (isRecord(rawArgs)) {
+    parsed = rawArgs;
+  }
+  if (!parsed) return rows;
+  if (toolName === "edit_file" && typeof parsed.oldText === "string" && typeof parsed.newText === "string") {
+    rows.push(...formatDiffPreview(parsed.oldText, parsed.newText, 6, painter));
+  } else if (toolName === "run_command" && Array.isArray(parsed.argv)) {
+    rows.push(painter.text(`$ ${parsed.argv.map((value: unknown) => JSON.stringify(value)).join(" ")}`, "paper"));
+  }
+  return rows;
+}
+
+function timeLabel(): string {
+  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 async function renderTurn(
@@ -1876,7 +2143,7 @@ async function runCommandCapture(command: string[]): Promise<{ code: number; std
 
 function printUsage(): void {
   console.log(`Usage:
-  demesne [chat] [initial message]
+  demesne [chat] [initial message] [--no-tui]
   demesne setup [--provider-url <url> --model <id>] [--context-window <n>] [--max-output-tokens <n>] [--theme auto|dark|light] [--yes]
   demesne doctor [--json]
   demesne daemon start|stop|status|logs

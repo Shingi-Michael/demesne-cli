@@ -61,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP client support: config-declared stdio servers are spawned and
   handshaken, tools are bridged as `mcp__<server>__<tool>` with per-call
   approval and bare-rule allowlisting, and crashed servers restart lazily.
+- Full-screen workbench for interactive terminals: header, scrollable
+  conversation with inline diffs, live telemetry sidebar, list dialogs,
+  in-frame approvals, and the unchanged fixed footer. `--no-tui` and
+  `DEMESNE_NO_TUI=1` retain the streaming scrollback renderer.
 
 ## [0.1.0] - 2026-09-18
 

@@ -363,13 +363,16 @@ export function formatToolRow(
   return `${prefix}${targetText}${" ".repeat(gap)}${metaText}${" ".repeat(HARNESS.gutter)}`;
 }
 
+/// The transcript's status glyphs. These are static and deliberately outside the
+/// footer's animated vocabulary (`◇ ◆ ◌ ○ ◍ ● ◜ ◝ ◞ ◟ ▏ ▎ ▍ ▌ · • ✓ ×`), so a
+/// row and the status line below it never draw the same mark at the same time.
 function defaultToolGlyph(state: ToolRowState, painter: Painter): string {
   switch (state) {
     case "done": return painter.text("✓", "citron");
     case "failed": return painter.text("×", "signal");
-    case "denied": return painter.text("!", "signal");
-    case "waiting": return painter.text("◆", "signal");
-    case "running": return painter.text("◌", "secondary");
+    case "denied": return painter.text("⊘", "signal");
+    case "waiting": return painter.text("!", "signal");
+    case "running": return painter.text("▸", "secondary");
   }
 }
 

@@ -124,7 +124,8 @@ const scenes: Scene[] = [
 const ROWS = 22;
 
 function composer(scene: Scene): string {
-  const mark = renderPresence(scene.state === "waiting" ? "waiting" : "listening", Date.now(), paint);
+  // The composer has its own prompt mark; the footer owns the state glyph.
+  const mark = paint.text("❯", scene.state === "waiting" ? "signal" : "electric");
   const prompt = scene.state === "waiting"
     ? paint.dim("waiting for you")
     : paint.dim("ask anything · / for commands");

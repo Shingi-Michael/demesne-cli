@@ -50,6 +50,36 @@ const PRESENCE: Record<PresenceState, PresenceSpec> = {
   error: { frames: ["×"], periodMs: 0, color: "signal" },
 };
 
+/// Glyphs drawn by states that animate.
+///
+/// A flickering shape repeated in two places reads as a rendering fault, so the
+/// transcript's static marks stay outside this set. Single-frame states (`done`,
+/// `stopped`, `error`) are excluded: `✓` and `×` mean the same thing wherever
+/// they appear, and a finished tool row and a finished turn sharing one is not
+/// the duplication that reads as a mistake.
+export function animatedPresenceGlyphs(): Set<string> {
+  const glyphs = new Set<string>();
+  for (const spec of Object.values(PRESENCE)) {
+    if (spec.frames.length > 1) {
+      for (const frame of spec.frames) glyphs.add(frame);
+    }
+  }
+  return glyphs;
+}
+
+/// Every glyph the footer's states can draw.
+///
+/// The transcript's static marks must stay outside this set, so a row and the
+/// status line below it never show the same shape at the same time. That
+/// duplication has been reported more than once, so it is asserted in tests.
+export function presenceGlyphs(): Set<string> {
+  const glyphs = new Set<string>();
+  for (const spec of Object.values(PRESENCE)) {
+    for (const frame of spec.frames) glyphs.add(frame);
+  }
+  return glyphs;
+}
+
 /// The state's glyph at a moment in time. Static when the frame set has one
 /// entry or the painter is disabled, so plain output stays byte-stable.
 export function renderPresence(state: PresenceState, nowMs: number, painter: Painter): string {

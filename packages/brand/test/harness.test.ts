@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createPainter, formatApprovalAsk, formatToolRow, formatTurnCloser, formatTurnOpener, HARNESS, toolPhaseColor, turnRail, visibleLength } from "../src/index.ts";
+import { animatedPresenceGlyphs, presenceGlyphs } from "../src/presence.ts";
 
 const painter = createPainter(false, "dark");
 const color = createPainter(true, "dark");
@@ -91,6 +92,30 @@ describe("formatApprovalAsk", () => {
     const rows = formatApprovalAsk({ ask: "needs approval: something", width: 80, painter, waitingMark: "◇" });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toContain("needs approval: something");
+  });
+});
+
+describe("mark vocabulary", () => {
+  test("no transcript status glyph is one the footer animates", () => {
+    // Two diamonds on adjacent lines — the composer above the footer, or a
+    // waiting row above it — read as a rendering mistake. The footer owns the
+    // animated shapes; the transcript uses its own static ones.
+    const animated = animatedPresenceGlyphs();
+    const states = ["running", "done", "failed", "denied", "waiting"] as const;
+    for (const state of states) {
+      const row = formatToolRow(state, "read", "src/a.ts", undefined, 60, painter);
+      const mark = [...row][HARNESS.toolMark];
+      expect(mark, `tool row "${state}" reuses the footer's ${mark}`).toBeDefined();
+      expect(animated.has(mark!)).toBe(false);
+    }
+  });
+
+  test("the footer's vocabulary covers every animated state", () => {
+    const animated = presenceGlyphs();
+    // Sanity: the guard above is only meaningful if the set is populated.
+    expect(animated.size).toBeGreaterThan(10);
+    expect(animated.has("◇")).toBe(true);
+    expect(animated.has("◆")).toBe(true);
   });
 });
 

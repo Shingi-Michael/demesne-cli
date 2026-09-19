@@ -109,6 +109,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   survives: `✓ ngram-mod · qwen3.8-q4_0-100k-b256 · ▰▰▱▱▱ 3%`.
 - The footer no longer repeats the workspace branch, which the header already
   carries beside the workspace.
+- Each surface has its own mark. The composer and the footer were both drawing
+  the turn's state glyph, which put two diamonds on adjacent lines:
+  `◇ ask anything · / for commands` directly above `◇ ready`. The header is the
+  brand's `◈`, the composer is a `❯` prompt (signal-colored when it wants a
+  decision), and the footer is the only place the state animates. Transcript
+  marks are static and outside the animated vocabulary: a waiting row is `!` and
+  a denied row is `⊘`, so no flickering shape is ever drawn twice.
 - Themes. Every drawing call names a semantic role and never a color, so a
   theme swap re-themes the whole interface, including the intro art. Ships
   demesne (dark and light), dracula, tokyo-night, tokyo-night-storm, nord,

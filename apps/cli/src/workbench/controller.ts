@@ -9,8 +9,6 @@ import {
   formatTurnCloser,
   formatTurnOpener,
   HARNESS,
-  presenceForTool,
-  renderPresence,
   sanitizeTerminalLine,
   shortenPath,
   slashCommandMatches,
@@ -44,7 +42,7 @@ import { reduceInterruptKey } from "../interrupt-key.ts";
 import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } from "../approval-selection.ts";
 import { reduceSessionPicker, type SessionPickerKey } from "../session-picker.ts";
 import { planTranscript, type PlannedTool } from "./transcript.ts";
-import { classifyTurnPhase, isValidationCommand } from "../turn-activity.ts";
+import { classifyTurnPhase } from "../turn-activity.ts";
 import { composeInEditor } from "../external-editor.ts";
 import { narrateWaiting } from "../voice.ts";
 import type { CliContextRail } from "../context-rail.ts";
@@ -662,9 +660,8 @@ export class Workbench {
     const running = entries.some((entry) => entry.state === "running" && !entry.waiting);
     const failed = entries.some((entry) => entry.state === "failed");
     const state: ToolRowState = running ? "running" : failed ? "failed" : "done";
-    const mark = running
-      ? renderPresence(presenceForTool(first.name, isValidationCommand(first.detail ?? "")), Date.now(), paint)
-      : undefined;
+    // No animated mark: the footer is the only place the turn's state animates.
+    const mark = undefined;
     const total = entries.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0);
     const target = first.detail === undefined
       ? `${entries.length} files`
@@ -703,9 +700,11 @@ export class Workbench {
       case "reasoning": {
         const body = wrapDisplayText(sanitizeTerminalLine(entry.raw.trim()), Math.max(8, proseWidth));
         if (entry.streaming) {
-          const mark = renderPresence("reasoning", Date.now(), paint);
+          // `⋯` for both the live and settled trace, so reasoning has one glyph
+          // in the transcript. It used to animate the footer's reasoning glyph
+          // here as well, putting the same mark on screen twice.
           return [
-            `${" ".repeat(HARNESS.rail)}${bar} ${mark} ${paint.dim("thinking")}`,
+            `${" ".repeat(HARNESS.rail)}${bar} ${paint.text("⋯", "electricBright")} ${paint.dim("thinking")}`,
             ...body.slice(-2).map((line) => `${rail}${paint.dim(line)}`),
           ];
         }
@@ -760,11 +759,9 @@ export class Workbench {
     const verb = toolVerb(entry.name);
     const running = entry.state === "running" && !entry.waiting;
     const state: ToolRowState = entry.waiting ? "waiting" : entry.state;
-    const mark = running
-      ? renderPresence(presenceForTool(entry.name, isValidationCommand(entry.detail ?? "")), Date.now(), paint)
-      : entry.waiting
-        ? renderPresence("waiting", Date.now(), paint)
-        : undefined;
+    // Settled, running, and waiting rows all use the transcript's own static
+    // glyphs; the footer is the only place the turn's state animates.
+    const mark = undefined;
     const meta = entry.waiting
       ? "needs you"
       : running
@@ -836,14 +833,15 @@ export class Workbench {
   /// The brand mark doubles as the agent's state mark, so the header breathes
   /// with the turn instead of sitting static.
   /// The header carries identity: brand, session, workspace, branch, model, and
-  /// the runtime verification. The footer carries live state, so nothing is
-  /// shown twice. The right side drops whole items rather than being cut
+  /// the runtime verification. The footer is the only place the turn's state is
+  /// drawn, so the brand mark here is static rather than the animated state
+  /// glyph it briefly was. The right side drops whole items rather than being cut
   /// mid-token: the runtime goes first, then the branch, then the model, and the
   /// workspace anchors the row.
   private composeHeader(width: number): { mark: string } {
     const paint = this.options.paint;
     const rail = this.options.contextRail;
-    const left = `${" ".repeat(HARNESS.margin)}${renderPresence(this.state, Date.now(), paint)} `
+    const left = `${" ".repeat(HARNESS.margin)}${paint.text("◈", "electric")} `
       + paint.bold("demesne", "paper")
       + paint.dim(` · ${truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(6, Math.floor(width / 4)))}`);
     const separator = paint.dim(" · ");
@@ -929,7 +927,9 @@ export class Workbench {
         previewRows: this.approval.previewRows,
         width,
         painter: paint,
-        waitingMark: renderPresence("waiting", Date.now(), paint),
+        // The composer's own mark, in the signal color because it wants a
+        // decision: the footer already shows the waiting glyph.
+        waitingMark: paint.text("❯", "signal"),
       }));
       lines.push(formatApprovalSelection(this.approvalSelected, allowSession, width, paint, this.approval.allowPersist));
       return { lines, cursor: null };
@@ -962,7 +962,10 @@ export class Workbench {
         promptWidth,
       ))
       : "";
-    const mark = renderPresence(this.mode === "streaming" ? "working" : "listening", Date.now(), paint);
+    // The prompt mark is static and belongs to the composer alone. It used to be
+    // the turn's state glyph, which put the same animated diamond in the footer
+    // on the line directly below it.
+    const mark = paint.text("❯", streaming ? "secondary" : "electric");
     for (let index = 0; index < layout.lines.length; index += 1) {
       const prefix = index === 0
         ? `${" ".repeat(HARNESS.mark)}${mark} `

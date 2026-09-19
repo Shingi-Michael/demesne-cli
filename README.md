@@ -52,7 +52,7 @@ Identity and state are separated so nothing repeats: the header carries the bran
   │   I changed the guard and the tests pass.
   └─ ✓ done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s
 ──────────────────────────────────────────────────────────────────────────────
-  ◇ ask anything · / for commands                       ⏎ send · ^O editor
+  ❯ ask anything · / for commands                       ⏎ send · ^O editor
   ◍ writing · 0:06 · 18.2 tok/s                                    ▰▰▱▱▱ 4%
 ```
 

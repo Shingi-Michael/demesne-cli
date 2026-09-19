@@ -47,6 +47,7 @@ import { reduceSessionPicker, type SessionPickerKey } from "../session-picker.ts
 import { planTranscript, type PlannedTool } from "./transcript.ts";
 import { classifyTurnPhase, isValidationCommand } from "../turn-activity.ts";
 import { composeInEditor } from "../external-editor.ts";
+import { narrateWaiting } from "../voice.ts";
 import type { CliContextRail } from "../context-rail.ts";
 
 /// The Demesne harness.
@@ -885,7 +886,7 @@ export class Workbench {
       // Rail-aligned and box-free so the request reads as part of the turn
       // rather than as a modal from a different interface.
       lines.push(...formatApprovalAsk({
-        summary: this.approval.summary,
+        ask: narrateWaiting(this.approval.summary),
         toolName: this.approval.toolName,
         previewRows: this.approval.previewRows,
         width,

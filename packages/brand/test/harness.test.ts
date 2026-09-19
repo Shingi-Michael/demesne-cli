@@ -62,7 +62,7 @@ describe("formatToolRow", () => {
 describe("formatApprovalAsk", () => {
   test("stays on the harness grid and speaks in the agent's voice", () => {
     const rows = formatApprovalAsk({
-      summary: "edit_file: src/lexer.ts",
+      ask: "I need your go-ahead: edit_file: src/lexer.ts",
       toolName: "edit_file",
       previewRows: ["- old", "+ new"],
       width: 80,
@@ -76,9 +76,9 @@ describe("formatApprovalAsk", () => {
     expect(rows.every((row) => visibleLength(row) <= 120)).toBe(true);
   });
 
-  test("bounds a hostile summary without leaking control characters", () => {
+  test("bounds a hostile ask without leaking control characters", () => {
     const rows = formatApprovalAsk({
-      summary: `evil\x1b[2J${"x".repeat(400)}`,
+      ask: `evil\x1b[2J${"x".repeat(400)}`,
       width: 60,
       painter,
       waitingMark: "◆",
@@ -88,7 +88,7 @@ describe("formatApprovalAsk", () => {
   });
 
   test("renders without a tool name or preview", () => {
-    const rows = formatApprovalAsk({ summary: "something", width: 80, painter, waitingMark: "◇" });
+    const rows = formatApprovalAsk({ ask: "I need your go-ahead: something", width: 80, painter, waitingMark: "◇" });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toContain("I need your go-ahead: something");
   });

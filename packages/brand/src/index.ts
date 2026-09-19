@@ -412,33 +412,31 @@ export function formatTurnCloser(
 
 /// The harness approval block: rail-aligned, box-free, and consistent with the
 /// rest of the transcript. The scrollback path keeps `formatPermissionCard`.
+///
+/// The ask itself is composed by the caller, because the words the agent uses
+/// are the CLI's business and this function only owns the layout.
 export function formatApprovalAsk(options: {
-  summary: string;
+  ask: string;
   toolName?: string;
   previewRows?: string[];
   width: number;
   painter: Painter;
   waitingMark: string;
 }): string[] {
-  const { summary, toolName, previewRows, width, painter } = options;
+  const { ask, toolName, previewRows, width, painter } = options;
   const safeWidth = Math.max(24, width);
   const rail = turnRail(painter);
   const badge = toolName ? toolKindBadge(sanitizeTerminalLine(toolName)) : null;
   const label = badge ? badge.title : sanitizeTerminalLine(toolName ?? "this action");
   const lines = [
     `${" ".repeat(HARNESS.rail)}${painter.text("│", "rule")} ${options.waitingMark} `
-      + painter.text(`I need your go-ahead: ${truncateText(sentenceCase(summary), Math.max(8, safeWidth - HARNESS.content - 24))}`, "paper")
+      + painter.text(truncateText(sanitizeTerminalLine(ask), Math.max(8, safeWidth - HARNESS.content - 24)), "paper")
       + painter.dim(`  ${label.toLowerCase()}`),
   ];
   for (const row of previewRows ?? []) {
     lines.push(`${" ".repeat(HARNESS.toolTarget)}${row}`);
   }
   return lines;
-}
-
-function sentenceCase(value: string): string {
-  const text = value.replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim();
-  return text.length > 200 ? `${text.slice(0, 199)}…` : text;
 }
 
 /// Shows a path as its last two segments, so the header and the welcome panel

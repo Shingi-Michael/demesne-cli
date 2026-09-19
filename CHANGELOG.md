@@ -109,6 +109,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   survives: `✓ ngram-mod · qwen3.8-q4_0-100k-b256 · ▰▰▱▱▱ 3%`.
 - The footer no longer repeats the workspace branch, which the header already
   carries beside the workspace.
+- The composer clears when a prompt is submitted and then shows what is being
+  queued for the next turn. It previously kept the submitted text on screen,
+  which read as though the prompt had not been sent, and type-ahead was visible
+  only as a truncated footer note. The footer no longer repeats it.
 - Esc Esc now interrupts. A terminal delivers two quick presses as one
   keypress event with `meta: true` and a two-byte escape sequence, and the
   reducer discarded anything carrying `meta`, so the second press was invisible

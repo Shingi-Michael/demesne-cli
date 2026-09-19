@@ -1504,10 +1504,11 @@ async function runWorkbenchTurn(options: {
   const updateFooter = () => {
     const elapsed = ((Date.now() - startedAt) / 1_000).toFixed(1);
     const speed = throughput.snapshot().tokensPerSecond;
-    const queued = queueSummary(chatState.queuedInput ?? "");
+    // The queued text is not repeated here: the composer draws it, and showing
+    // it in both places put the same words on screen twice.
     const left = `  ${renderPresence(presence, Date.now(), options.paint)} `
       + `${options.paint.bold(presenceLabel(presence), "paper")} ${options.paint.dim(
-        `· ${elapsed}s${speed === null ? "" : ` · ${speed.toFixed(0)} tok/s`}${queued ? ` · noted ${queued}` : ""}`,
+        `· ${elapsed}s${speed === null ? "" : ` · ${speed.toFixed(0)} tok/s`}`,
       )}`;
     options.workbench.setPresence(presence);
     options.workbench.setFooter(left, options.contextRail.statusLine(getTerminalWidth(process.stdout), options.paint));

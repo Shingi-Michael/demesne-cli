@@ -557,6 +557,11 @@ export class Workbench {
       const resolve = this.promptResolver;
       this.promptResolver = null;
       this.mode = "streaming";
+      // Clear the composer: the prompt was sent, and leaving it on screen read
+      // as though it had not been. What the user types next is queued for the
+      // following turn and is drawn in its place.
+      this.editor = createPromptEditorState();
+      this.requestRender();
       resolve?.(result.action.value);
       return;
     }
@@ -624,8 +629,11 @@ export class Workbench {
       return 4 + Math.min(this.dialogItems.length, 10);
     }
     const width = Math.max(10, (process.stdout.columns ?? 80) - HARNESS.content);
-    const valueLines = computePromptVisualLines(this.editor.value, this.editor.cursor, width).lines.length;
-    const commands = this.matchingCommands().length;
+    const streaming = this.mode === "streaming";
+    const value = streaming ? this.options.queue.get() : this.editor.value;
+    const cursor = streaming ? value.length : this.editor.cursor;
+    const valueLines = computePromptVisualLines(value, cursor, width).lines.length;
+    const commands = streaming ? 0 : this.matchingCommands().length;
     const menuLines = commands > 0 ? Math.min(commands, 10) + (commands >= 6 ? 3 : 0) : 0;
     // One rule above the prompt, then the prompt and any menu.
     return 1 + Math.max(1, valueLines + menuLines);
@@ -939,11 +947,20 @@ export class Workbench {
       return { lines, cursor: null };
     }
 
+    // While a turn runs, the composer shows what is being queued rather than
+    // the prompt that was already submitted. The queue is what the next turn
+    // will receive, so it belongs where the user is typing.
+    const streaming = this.mode === "streaming";
+    const value = streaming ? this.options.queue.get() : this.editor.value;
+    const valueCursor = streaming ? value.length : this.editor.cursor;
     const promptWidth = Math.max(10, width - HARNESS.content - 1);
-    const layout = computePromptVisualLines(this.editor.value, this.editor.cursor, promptWidth);
-    const commands = this.matchingCommands();
-    const placeholder = this.editor.value.length === 0 && commands.length === 0
-      ? paint.dim(truncateText("ask anything · / for commands", promptWidth))
+    const layout = computePromptVisualLines(value, valueCursor, promptWidth);
+    const commands = streaming ? [] : this.matchingCommands();
+    const placeholder = value.length === 0 && commands.length === 0
+      ? paint.dim(truncateText(
+        streaming ? "type to queue a message for when this turn ends" : "ask anything · / for commands",
+        promptWidth,
+      ))
       : "";
     const mark = renderPresence(this.mode === "streaming" ? "working" : "listening", Date.now(), paint);
     for (let index = 0; index < layout.lines.length; index += 1) {

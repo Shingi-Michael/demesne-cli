@@ -27,13 +27,17 @@ interface PresenceSpec {
   color: PaletteColor;
 }
 
+/// The animated states, each in one glyph family so no frame jumps in weight
+/// or shape. `writing` is a left-bar pulse: it reads as a cursor advancing, and
+/// it deliberately avoids the quadrant blocks (`▛`, `▜`, `▖`), whose heavy
+/// asymmetric shapes clashed with every other state's light geometry.
 const PRESENCE: Record<PresenceState, PresenceSpec> = {
   idle: { frames: ["◇", "◆", "◆", "◇"], periodMs: 2600, color: "secondary" },
   listening: { frames: ["◆", "◇", "◆", "◇"], periodMs: 1500, color: "electric" },
   thinking: { frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], periodMs: 900, color: "electric" },
   reasoning: { frames: ["◌", "○", "◍", "●", "◍", "○"], periodMs: 1300, color: "electricBright" },
   working: { frames: ["◐", "◓", "◑", "◒"], periodMs: 760, color: "electric" },
-  writing: { frames: ["▖", "▌", "▛", "▜", "▌", "▖"], periodMs: 620, color: "electric" },
+  writing: { frames: ["▏", "▎", "▍", "▌", "▍", "▎"], periodMs: 620, color: "electric" },
   verifying: { frames: ["·", "•", "●", "•"], periodMs: 680, color: "citron" },
   waiting: { frames: ["◆", "◇", "◇", "◆"], periodMs: 1100, color: "signal" },
   done: { frames: ["✓"], periodMs: 0, color: "citron" },

@@ -30,6 +30,36 @@ describe("renderPresence", () => {
     expect(renderPresence("idle", 0, plain)).toBe("◇");
     expect(renderPresence("thinking", 0, plain)).not.toContain("\x1b");
   });
+
+  test("uses one light glyph family per state, never quadrant blocks", () => {
+    // Quadrant blocks (▖ ▛ ▜ and friends) are heavy and asymmetric, so a frame
+    // built from them jumps in weight against every other state. `writing` used
+    // them and read as noise, so the whole family is off limits.
+    const quadrantBlocks = /[\u2596-\u259f]/;
+    const states = [
+      "idle", "listening", "thinking", "reasoning", "working",
+      "writing", "verifying", "waiting", "done", "stopped", "error",
+    ] as const;
+    for (const state of states) {
+      const frames = new Set<string>();
+      for (let step = 0; step < 24; step += 1) {
+        const glyph = stripAnsi(renderPresence(state, step * 60, painter));
+        frames.add(glyph);
+        expect(glyph).not.toMatch(quadrantBlocks);
+        // Every frame is one glyph, so the mark column never shifts.
+        expect([...glyph]).toHaveLength(1);
+      }
+      expect(frames.size).toBeGreaterThan(0);
+    }
+  });
+
+  test("the writing pulse is left-aligned bars, all the same height", () => {
+    const frames = new Set<string>();
+    for (let step = 0; step < 24; step += 1) {
+      frames.add(stripAnsi(renderPresence("writing", step * 40, painter)));
+    }
+    expect(frames).toEqual(new Set(["▏", "▎", "▍", "▌"]));
+  });
 });
 
 describe("presenceLabel", () => {

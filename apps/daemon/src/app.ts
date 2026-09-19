@@ -231,6 +231,9 @@ export function createDaemonApp(options: {
           status: "ok",
           provider: processor.providerId,
           model: processor.modelId,
+          // Reported so a client can show the configured window even when the
+          // model server is down and /v1/models cannot be served.
+          ...(processor.contextCapacity !== undefined ? { contextCapacity: processor.contextCapacity } : {}),
           ...(options.version ? { version: options.version } : {}),
         });
       }

@@ -784,7 +784,7 @@ async function runChat(command: string[]): Promise<void> {
   }
 
   const boot = Promise.all([
-    request<{ provider: string; model: string }>("/healthz").catch(() => undefined),
+    request<{ provider: string; model: string; contextCapacity?: number }>("/healthz").catch(() => undefined),
     request<{ models: ModelDescriptor[] }>("/v1/models").then((result) => result.models).catch(() => []),
     request<RuntimeProfileStatus>("/v1/runtime").catch(() => null),
   ]);
@@ -794,6 +794,18 @@ async function runChat(command: string[]): Promise<void> {
     id: health?.model ?? "model",
     provider: health?.provider ?? "local",
   };
+  // The provider's model list is the usual source of the context window, but it
+  // is unavailable whenever the model server is down — exactly when the welcome
+  // panel is on screen. The runtime profile records the window the profile was
+  // configured with, and /healthz reports the provider's configured window; both
+  // are local facts, so prefer either over reporting that the window is unknown.
+  const configuredWindow = runtimeStatus?.expected?.contextWindow
+    ?? runtimeStatus?.observed?.contextWindow
+    ?? health?.contextCapacity
+    ?? undefined;
+  if (activeModel.contextWindow === undefined && configuredWindow !== undefined) {
+    activeModel = { ...activeModel, contextWindow: configuredWindow };
+  }
   const initialState = await request<SessionStateResponse>(`/v1/sessions/${sessionId}`);
   mentionFiles = await fetchMentionFiles(sessionId);
   let currentWorkspace = initialState.session.workspace?.root ?? process.cwd();

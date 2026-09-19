@@ -1,5 +1,6 @@
 import {
   computePromptVisualLines,
+  createPainter,
   formatDiffPreview,
   formatFooterLine,
   formatMentionMenu,
@@ -18,6 +19,7 @@ import {
   type PresenceState,
   type SlashCommand,
 } from "@demesne/brand";
+import { bgCode, fgCode, gradientRule, rgb, NEON, RESET } from "./color.ts";
 import type { EventEnvelope, PermissionDecision } from "@demesne/protocol";
 import { emitKeypressEvents } from "node:readline";
 import { computeWorkbenchLayout, type SidebarMode, type WorkbenchLayout } from "./layout.ts";
@@ -130,6 +132,45 @@ export interface WorkbenchOptions {
     get(): string;
     set(value: string): void;
   };
+}
+
+const BOLD = "\x1b[1m";
+const DIM_RENDER = "\x1b[2m";
+/// Painter stripped of color, used only to extract presence glyph characters.
+const GLYPH = createPainter(false, "dark");
+
+/// Wraps content in the header panel background, re-establishing the
+/// background after every inner reset so nested colors never leak off-panel.
+function panelSpan(value: string): string {
+  return `${bgCode(NEON.raised)}${value.replace(/\x1b\[0m/g, `${fgCode(NEON.text)}${bgCode(NEON.raised)}`)}${RESET}`;
+}
+
+/// The agent's core avatar: a raised block with a glowing state glyph.
+function avatar(state: PresenceState, now: number, color: string): string {
+  const glyph = renderPresence(state, now, GLYPH);
+  return panelSpan(` ${BOLD}${rgb(glyph, color)} `);
+}
+
+/// Wraps sidebar rows in the surface background for a glass column.
+function surfaceSpan(value: string, padTo: number): string {
+  const text = `${value}${" ".repeat(Math.max(0, padTo - visibleLength(value)))}`;
+  return `${bgCode(NEON.surface)}${text.replace(/\x1b\[0m/g, `${fgCode(NEON.text)}${bgCode(NEON.surface)}`)}${RESET}`;
+}
+
+/// A horizontal gradient hairline for the composer border.
+function hairline(from: string, to: string, width: number): string {
+  return gradientRule("─", from, to, Math.max(1, width));
+}
+
+function stripAll(value: string): string {
+  return value.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
+}
+
+function midHex(a: string, b: string, t: number): string {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const f = (shift: number) => Math.round(((pa >> shift) & 0xff) + (((pb >> shift) & 0xff) - ((pa >> shift) & 0xff)) * t);
+  return `#${[f(16), f(8), f(0)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
 export class Workbench {
@@ -577,9 +618,9 @@ export class Workbench {
       }
       case "assistant": {
         const now = Date.now();
-        const glyph = renderPresence(entry.streaming ? "writing" : "done", now, paint);
+        const core = avatar(entry.streaming ? "writing" : "done", now, NEON.cyan);
         const body = entry.raw ? this.renderedMarkdown(entry, width) : [paint.dim("…")];
-        return [`  ${glyph}`, "", ...body.map((line) => `  ${line}`), ""];
+        return [`  ${core}`, "", ...body.map((line) => `  ${line}`), ""];
       }
       case "reasoning": {
         const now = Date.now();
@@ -602,13 +643,15 @@ export class Workbench {
         const now = Date.now();
         const input = entry.input;
         const running = entry.state === "running";
-        const glyph = entry.waiting
-          ? renderPresence("waiting", now, paint)
+        const state: PresenceState = entry.waiting
+          ? "waiting"
           : running
-            ? renderPresence(presenceForTool(entry.name, isValidationCommand(entry.detail ?? "")), now, paint)
+            ? presenceForTool(entry.name, isValidationCommand(entry.detail ?? ""))
             : entry.state === "done"
-              ? paint.text("✓", "citron")
-              : paint.text("×", "signal");
+              ? "done"
+              : "error";
+        const avatarColor = entry.waiting ? NEON.amber : running ? NEON.cyan : entry.state === "done" ? NEON.mint : NEON.red;
+        const core = avatar(state, now, avatarColor);
         const narration = entry.waiting
           ? `${paint.dim(narrateToolIntent(entry.name, input))} ${paint.text("· I need your go-ahead", "signal")}`
           : entry.state === "running"
@@ -622,7 +665,7 @@ export class Workbench {
         const diffLines = entry.state === "done" && entry.diff
           ? formatDiffPreview(entry.diff.oldText, entry.diff.newText, 12, paint).map((line) => `      ${line}`)
           : [];
-        return [`  ${glyph} ${narration}${duration}`, ...diffLines];
+        return [`  ${core} ${narration}${duration}`, ...diffLines];
       }
       case "notice": {
         const color: PaletteColor = entry.tone === "success" ? "citron" : entry.tone === "error" ? "signal" : "secondary";
@@ -682,11 +725,15 @@ export class Workbench {
     const paint = this.options.paint;
     const model = this.options.contextRail.modelId;
     const branch = this.options.contextRail.workspaceBranch;
-    const glyph = renderPresence("idle", Date.now(), paint);
-    const left = `  ${glyph} ${paint.bold("demesne", "paper")} · ${paint.dim(truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(8, Math.floor(width / 3))))}`;
+    const wordmark = "demesne".split("").map((letter, index) =>
+      rgb(letter, midHex(NEON.cyan, NEON.violet, index / 6))
+    ).join("");
+    const left = `  ${avatar("idle", Date.now(), NEON.cyan)}  ${BOLD}${wordmark}${RESET} ${paint.dim(`· ${truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(8, Math.floor(width / 3)))}`)}`;
     const right = paint.dim(`${truncateText(sanitizeTerminalLine(model), 26)}${branch ? ` · ${sanitizeTerminalLine(branch)}` : ""}`);
-    const padding = Math.max(1, width - visibleLength(left) - visibleLength(right));
-    return truncateText(`${left}${" ".repeat(padding)}${right}`, width);
+    const plainWidth = visibleLength(stripAll(left)) + visibleLength(stripAll(right));
+    const padding = Math.max(1, width - plainWidth);
+    const content = `${left}${" ".repeat(padding)}${right}`;
+    return panelSpan(truncateText(content, width));
   }
 
   private sidebarLines(): string[] {
@@ -696,13 +743,33 @@ export class Workbench {
     const ambient = this.ambient.length > 0 ? ["", ...this.ambient] : [];
     const railHeight = Math.max(4, height - ambient.length);
     const rail = this.options.contextRail
-      .lines(Math.max(16, width - 2), railHeight, this.options.paint)
-      .map((line) => ` ${truncateText(line, width - 2)}`);
-    const memory = ambient.map((line) => ` ${truncateText(line, width - 2)}`);
-    return [...rail, ...memory].slice(0, height);
+      .lines(Math.max(16, width - 4), railHeight, this.options.paint)
+      .map((line) => truncateText(line, width - 4));
+    const memory = ambient.map((line) => truncateText(line, width - 4));
+    return [...rail, ...memory].slice(0, height).map((line) => surfaceSpan(line, width - 2));
   }
 
   private composeInput(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
+    const paint = this.options.paint;
+    const inner = Math.max(10, width - 4);
+    const content = this.composeInputContent(inner);
+    const accent = this.mode === "approval" ? NEON.amber : NEON.cyan;
+    const tail = this.mode === "approval" ? NEON.red : NEON.violet;
+    const top = `  ${rgb("╭", accent)}${hairline(accent, tail, inner)}${rgb("╮", tail)}`;
+    const bottom = `  ${rgb("╰", tail)}${hairline(tail, accent, inner)}${rgb("╯", accent)}`;
+    const edge = rgb("│", NEON.rule);
+    const lines = [top];
+    for (const line of content.lines) {
+      lines.push(`  ${edge}${line}${edge}`);
+    }
+    lines.push(bottom);
+    const cursor = content.cursor
+      ? { row: content.cursor.row + 1, column: content.cursor.column + 3 }
+      : null;
+    return { lines, cursor };
+  }
+
+  private composeInputContent(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
     const paint = this.options.paint;
     const lines: string[] = [];
     let cursor: { row: number; column: number } | null = null;
@@ -721,13 +788,13 @@ export class Workbench {
     }
 
     if (this.mode === "dialog") {
-      lines.push(`  ${paint.bold(this.dialogTitle, "paper")} ${paint.dim(`(${this.dialogSelected + 1}/${this.dialogItems.length})`)}`);
+      lines.push(` ${paint.bold(this.dialogTitle, "paper")} ${paint.dim(`(${this.dialogSelected + 1}/${this.dialogItems.length})`)}`);
       this.dialogItems.slice(0, 10).forEach((item, index) => {
         const marker = index === this.dialogSelected ? paint.bold("›", "electric") : " ";
         const label = truncateText(sanitizeTerminalLine(item), Math.max(8, width - 6));
-        lines.push(`  ${marker} ${index === this.dialogSelected ? paint.bold(label, "paper") : paint.text(label, "secondary")}`);
+        lines.push(` ${marker} ${index === this.dialogSelected ? paint.bold(label, "paper") : paint.text(label, "secondary")}`);
       });
-      lines.push(`  ${paint.dim("↑/↓ · enter selects · esc cancels")}`);
+      lines.push(` ${paint.dim("↑/↓ · enter selects · esc cancels")}`);
       return { lines, cursor: null };
     }
 
@@ -737,10 +804,10 @@ export class Workbench {
       ? paint.dim(truncateText("this is where we talk — type / for commands", promptWidth))
       : "";
     for (let index = 0; index < layout.lines.length; index += 1) {
-      const prefix = index === 0 ? `  ${renderPresence("listening", Date.now(), paint)} ` : "    ";
+      const prefix = index === 0 ? `${avatar("listening", Date.now(), NEON.cyan)} ` : "   ";
       lines.push(`${prefix}${layout.lines[index] || (index === 0 ? placeholder : "")}`);
     }
-    cursor = { row: layout.cursorLine, column: 4 + layout.cursorCol };
+    cursor = { row: layout.cursorLine, column: 5 + layout.cursorCol };
 
     const commands = this.matchingCommands();
     const mention = mentionTokenAt(this.editor.value, this.editor.cursor);
@@ -748,9 +815,9 @@ export class Workbench {
       ? mentionMatches(this.promptContext.mentions, mention.query)
       : [];
     if (mentionCandidates.length > 0) {
-      lines.push(...formatMentionMenu(mentionCandidates, this.editor.mentionSelected, width, paint).split("\n"));
+      lines.push(...formatMentionMenu(mentionCandidates, this.editor.mentionSelected, width, paint).split("\n").map((line) => ` ${line}`));
     } else if (commands.length > 0) {
-      lines.push(...formatSlashCommandMenu(commands, this.editor.menuSelected, width, paint).split("\n"));
+      lines.push(...formatSlashCommandMenu(commands, this.editor.menuSelected, width, paint).split("\n").map((line) => ` ${line}`));
     }
     return { lines, cursor };
   }

@@ -74,6 +74,40 @@ function ansiPalette(source: Record<PaletteColor, string>, mode: "38" | "48"): R
   ) as Record<PaletteColor, string>;
 }
 
+/// The workbench's own identity: a deep-space stage with neon accents. The
+/// scrollback renderer keeps the canonical warm palette so scripted output
+/// stays byte-stable, while the full-screen interface reads unmistakably as
+/// a different, brighter machine.
+export const neonTerminalPalette: Record<PaletteColor, string> = {
+  ink: "#0A0C14",
+  paper: "#E8ECF8",
+  surface: "#0F1220",
+  raised: "#161A2B",
+  rule: "#2A3250",
+  secondary: "#7C86A6",
+  electric: "#58C6FF",
+  electricBright: "#9FDBFF",
+  signal: "#FF5C7A",
+  citron: "#3DF0B0",
+};
+
+export const neonLightTerminalPalette: Record<PaletteColor, string> = {
+  ink: "#0A0C14",
+  paper: "#10131F",
+  surface: "#E9EDF5",
+  raised: "#DDE3F0",
+  rule: "#B9C2D8",
+  secondary: "#5A6480",
+  electric: "#1E8AD1",
+  electricBright: "#146DA8",
+  signal: "#D63A5C",
+  citron: "#0B9E6F",
+};
+
+export function createNeonPainter(enabled: boolean, theme: TerminalTheme = "dark"): Painter {
+  return buildPainter(enabled, theme, neonTerminalPalette, neonLightTerminalPalette);
+}
+
 export interface Painter {
   readonly enabled: boolean;
   readonly theme: TerminalTheme;
@@ -87,6 +121,15 @@ export interface Painter {
 }
 
 export function createPainter(enabled: boolean, theme: TerminalTheme = "dark"): Painter {
+  return buildPainter(enabled, theme, terminalPalette, lightTerminalPalette);
+}
+
+function buildPainter(
+  enabled: boolean,
+  theme: TerminalTheme,
+  dark: Record<PaletteColor, string>,
+  light: Record<PaletteColor, string>,
+): Painter {
   if (!enabled) {
     return {
       enabled,
@@ -100,7 +143,7 @@ export function createPainter(enabled: boolean, theme: TerminalTheme = "dark"): 
       chip: (label) => `[${label}]`,
     };
   }
-  const source = theme === "light" ? lightTerminalPalette : terminalPalette;
+  const source = theme === "light" ? light : dark;
   const fg = ansiPalette(source, "38");
   const bg = ansiPalette(source, "48");
   return {

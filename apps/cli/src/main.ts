@@ -20,6 +20,7 @@ import {
 import {
   computePromptVisualLines,
   createPainter,
+  createNeonPainter,
   formatAssistantHeader,
   formatDiffPreview,
   formatFooterLine,
@@ -117,6 +118,8 @@ const terminalTheme = resolveTerminalTheme(
 );
 const paint = createPainter(colorEnabled(process.stdout), terminalTheme);
 const paintLog = createPainter(colorEnabled(process.stderr), terminalTheme);
+/// The workbench's own neon identity; scrollback and scripts keep `paint`.
+const workbenchPaint = createNeonPainter(colorEnabled(process.stdout), terminalTheme);
 const client = new DemesneClient({ server, token: daemonToken });
 
 function loadSettings(): CliSettings {
@@ -810,7 +813,7 @@ async function runChat(command: string[]): Promise<void> {
   const fixedFooter = new CliFixedFooter();
   const workbench = useWorkbench
     ? new Workbench({
-        paint,
+        paint: workbenchPaint,
         contextRail,
         sessionTitle: initialState.session.title,
         version: VERSION,
@@ -864,7 +867,7 @@ async function runChat(command: string[]): Promise<void> {
     workbench.start();
     const refreshAmbient = async (): Promise<void> => {
       const used = await readAmbientMemory();
-      if (workbench && used !== null) workbench.setAmbient(formatAmbientMemory(used, paint));
+      if (workbench && used !== null) workbench.setAmbient(formatAmbientMemory(used, workbenchPaint));
     };
     void refreshAmbient();
     ambientTimer = setInterval(() => void refreshAmbient(), 10_000);
@@ -904,14 +907,14 @@ async function runChat(command: string[]): Promise<void> {
           planOnly,
           workbench,
           contextRail,
-          paint,
+          paint: workbenchPaint,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Turn failed";
         workbench.finishTurn("failed", `Turn failed · ${sanitizeTerminalText(message)}`);
       } finally {
         chatState.streamActive = false;
-        workbench.setFooter(`  ${renderPresence("idle", Date.now(), paint)} ${paint.dim("ready")}`, statusLineText());
+        workbench.setFooter(`  ${renderPresence("idle", Date.now(), workbenchPaint)} ${workbenchPaint.dim("ready")}`, statusLineText());
       }
       return;
     }

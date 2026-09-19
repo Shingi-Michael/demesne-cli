@@ -79,6 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pending approval ask in the agent's voice, and turns close with `I'm done —
   ...`. The composer is a plain prompt line, and custom commands in the
   workbench follow per-turn input.
+- The neon identity: a deep-space palette with cyan/violet/mint/amber accents,
+  a glass-panel header with a gradient wordmark, a glass sidebar column, a
+  gradient-bordered composer that turns amber on approval, and a glowing core
+  avatar whose color tracks the agent's state. Only the workbench uses it —
+  scripted output keeps the canonical palette.
 
 ## [0.1.0] - 2026-09-18
 

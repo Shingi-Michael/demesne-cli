@@ -29,7 +29,15 @@ explicitly. `demesne doctor --json` emits machine-readable checks for scripts.
 
 This launches the interactive streaming CLI directly in your terminal. A compact masthead shows the active model, workspace, and approval policy. While output is silent, a phase-aware beacon occupies the fixed footer; it is cleared before permanent reasoning, tool, or response output is written. Interactive TTY responses pass through an ANSI- and grapheme-safe jitter buffer that turns speculative decoding bursts into a smooth typing cadence. The cadence adapts to visible text arrival and catches up within a bounded 1.5-second backlog; tools, errors, cancellation, and completion always drain or flush it before rendering. Scripted `prompt` output, pipes, event JSON, and persisted response text remain immediate and byte-for-byte unchanged.
 
-Interactive terminals open a full-screen workbench: a raised header bar with the session and model, a scrollable conversation with right-aligned turns, inline diffs, and syntax highlighting, a boxed composer, a live telemetry sidebar (context plan, last request, runtime, activity, changes, validations, tokens, and live memory pressure), and the fixed footer. `Ctrl+T` cycles the sidebar (auto/wide/hidden), `PgUp`/`PgDn` scroll, `Ctrl+G` returns to the bottom, `Ctrl+X` expands the last thought, and double-Escape or Ctrl+C interrupts. Non-interactive use, `--no-tui`, and `DEMESNE_NO_TUI=1` keep the streaming scrollback output byte-for-byte, so pipes and scripts are unaffected.
+The workbench carries its own visual identity, separate from the scrollback's
+warm palette: a deep-space stage (`#0A0C14`) with neon accents — cyan
+`#58C6FF`, violet `#8F7BFF`, mint `#3DF0B0`, amber `#FFB454`, signal
+`#FF5C7A`. The header is a glass panel with a cyan-to-violet gradient wordmark,
+the sidebar is a distinct surface column, the composer is framed by a gradient
+border that turns amber when approval is pending, and the agent's core sits in
+a glowing raised block that changes color with its state. The footer keeps its
+contract and the scrollback renderer keeps its byte-stable palette for pipes,
+`prompt`, and `--no-tui`.
 
 The workbench is deliberately present rather than mechanical, and deliberately
 quiet. The agent speaks in the first person: `I read src/lexer.ts.`, `I ran bun

@@ -12,6 +12,7 @@ import {
   presenceForTool,
   renderPresence,
   sanitizeTerminalLine,
+  shortenPath,
   slashCommandMatches,
   streamingCaret,
   TerminalMarkdownStream,
@@ -904,14 +905,6 @@ export class Workbench {
     }
     return { lines, cursor };
   }
-}
-
-/// Shows the workspace as its last two path segments so the header stays short
-/// without hiding which project the session is bound to.
-function shortenPath(root: string): string {
-  const parts = root.split("/").filter(Boolean);
-  if (parts.length <= 2) return root;
-  return `…/${parts.slice(-2).join("/")}`;
 }
 
 function formatDuration(durationMs: number | undefined, exitCode: number | undefined): string | undefined {

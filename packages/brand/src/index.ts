@@ -441,6 +441,14 @@ function sentenceCase(value: string): string {
   return text.length > 200 ? `${text.slice(0, 199)}…` : text;
 }
 
+/// Shows a path as its last two segments, so the header and the welcome panel
+/// agree on how the workspace is named without hiding which project it is.
+export function shortenPath(root: string): string {
+  const parts = root.split("/").filter(Boolean);
+  if (parts.length <= 2) return root;
+  return `…/${parts.slice(-2).join("/")}`;
+}
+
 /// A section heading inside harness command output.
 export function formatGridHeading(label: string, painter: Painter): string {
   return `${" ".repeat(HARNESS.content)}${painter.text(sanitizeTerminalLine(label).toUpperCase(), "secondary")}`;

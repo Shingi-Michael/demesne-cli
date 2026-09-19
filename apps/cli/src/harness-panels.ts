@@ -4,7 +4,9 @@ import {
   formatGridRows,
   formatToolRow,
   sanitizeTerminalLine,
+  shortenPath,
   slashCommandUsage,
+  truncateText,
   HARNESS,
   type GridRow,
   type Painter,
@@ -107,6 +109,57 @@ export function renderHarnessDiff(
     }
   }
   return lines;
+}
+
+export interface HarnessWelcomeInput {
+  model: string;
+  provider: string;
+  contextWindow?: number;
+  workspace: string;
+  branch: string | null;
+  permissionMode: "ask" | "deny";
+  runtime: RuntimeProfileStatus | null;
+  width: number;
+  paint: Painter;
+}
+
+/// First-run orientation for a brand-new session.
+///
+/// The harness deliberately has no masthead card, so a new session would
+/// otherwise open to an empty screen with no model, workspace, or policy
+/// context. This states the four things that determine what the agent may do,
+/// on the same grid as every other panel.
+export function renderHarnessWelcome(input: HarnessWelcomeInput): string[] {
+  const { paint } = input;
+  const rows: GridRow[] = [
+    { label: "model", value: `${input.model}${input.provider ? ` · ${input.provider}` : ""}` },
+    {
+      label: "workspace",
+      value: input.branch
+        ? `${shortenPath(input.workspace)} · ${input.branch}`
+        : shortenPath(input.workspace),
+    },
+    {
+      label: "policy",
+      value: input.permissionMode === "ask"
+        ? "approval on write and execute"
+        : "automatic · writes and commands are denied",
+    },
+    {
+      label: "context",
+      value: input.contextWindow ? `${input.contextWindow.toLocaleString("en-US")} token window` : "window unknown",
+      dimValue: true,
+    },
+  ];
+  const runtime = runtimeSummary(input.runtime);
+  if (runtime) rows.push({ label: "runtime", value: runtime, dimValue: true });
+  const hint = "ask anything · / for commands · ctrl+t for telemetry";
+  return [
+    formatCommandOpener("demesne", input.width, paint),
+    ...formatGridRows(rows, input.width, paint, { labelWidth: 12 }),
+    "",
+    `${" ".repeat(HARNESS.content)}${paint.dim(truncateText(hint, Math.max(8, input.width - HARNESS.content)))}`,
+  ];
 }
 
 export interface HarnessStatusInput {

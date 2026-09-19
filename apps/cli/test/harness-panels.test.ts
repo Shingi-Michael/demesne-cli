@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createPainter, HARNESS, SLASH_COMMANDS, visibleLength } from "@demesne/brand";
-import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus } from "../src/harness-panels.ts";
+import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus, renderHarnessWelcome } from "../src/harness-panels.ts";
 
 const painter = createPainter(false, "dark");
 const color = createPainter(true, "dark");
@@ -95,6 +95,72 @@ describe("renderHarnessDiff", () => {
   test("stays inside narrow widths", () => {
     for (const line of renderHarnessDiff(changes, "4f2a9c1e", 46, painter)) {
       expect(visibleLength(line)).toBeLessThanOrEqual(46);
+    }
+  });
+});
+
+describe("renderHarnessWelcome", () => {
+  const base = {
+    model: "qwen3.8-27b",
+    provider: "llama.cpp",
+    contextWindow: 100_000,
+    workspace: "/Users/me/projects/demesne-cli",
+    branch: "main",
+    permissionMode: "ask" as const,
+    runtime: null,
+    width: 100,
+    paint: painter,
+  };
+
+  test("states the four things that determine what the agent may do", () => {
+    const joined = renderHarnessWelcome(base).join("\n");
+    expect(joined).toStartWith(`${" ".repeat(HARNESS.rail)}┌ demesne ─`);
+    expect(joined).toContain("qwen3.8-27b · llama.cpp");
+    // Shortened the same way as the header, so the two agree on the workspace.
+    expect(joined).toContain("…/projects/demesne-cli · main");
+    expect(joined).toContain("approval on write and execute");
+    expect(joined).toContain("100,000 token window");
+  });
+
+  test("warns when the policy denies writes instead of implying approval", () => {
+    const joined = renderHarnessWelcome({ ...base, permissionMode: "deny" }).join("\n");
+    expect(joined).toContain("writes and commands are denied");
+    expect(joined).not.toContain("approval on write");
+  });
+
+  test("points at the commands and telemetry keys", () => {
+    const joined = renderHarnessWelcome(base).join("\n");
+    expect(joined).toContain("/ for commands");
+    expect(joined).toContain("ctrl+t for telemetry");
+  });
+
+  test("includes the runtime only when one is configured", () => {
+    expect(renderHarnessWelcome(base).join("\n")).not.toContain("runtime");
+    const verified = renderHarnessWelcome({
+      ...base,
+      runtime: {
+        profile: "llama-ngram-mod-f16-kv-100k-b256-32gb",
+        state: "verified",
+        expected: null,
+        observed: null,
+        mismatches: [],
+        observedAt: null,
+      },
+    }).join("\n");
+    expect(verified).toContain("runtime");
+    expect(verified).toContain("✓ llama-ngram-mod-f16-kv-100k-b256-32gb");
+  });
+
+  test("aligns values on one column and stays inside narrow widths", () => {
+    for (const width of [46, 80, 120]) {
+      const lines = renderHarnessWelcome({ ...base, width });
+      for (const line of lines) expect(visibleLength(line)).toBeLessThanOrEqual(width);
+      const columns = new Set<number>();
+      for (const line of lines) {
+        const match = /^ {6}(\S.*)  (\S.*)$/.exec(line);
+        if (match) columns.add(6 + match[1]!.length + 2);
+      }
+      expect(columns.size).toBeLessThanOrEqual(1);
     }
   });
 });

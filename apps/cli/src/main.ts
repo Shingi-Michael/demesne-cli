@@ -102,7 +102,7 @@ import {
 } from "./daemon-control.ts";
 import { formatDoctorReport, runDoctor } from "./doctor.ts";
 import { runSetup } from "./setup.ts";
-import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus } from "./harness-panels.ts";
+import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus, renderHarnessWelcome } from "./harness-panels.ts";
 import { narrateTurnEnd } from "./voice.ts";
 import { updateUserConfig } from "@demesne/config";
 import { createInterface } from "node:readline/promises";
@@ -876,6 +876,20 @@ async function runChat(command: string[]): Promise<void> {
         `resumed · last active ${formatRelativeAge(initialState.session.updatedAt)} · `
           + `${turns} turn${turns === 1 ? "" : "s"} · ${sanitizeTerminalLine(initialState.session.title)}`,
       );
+    } else {
+      // A new session would otherwise open to an empty screen with no model,
+      // workspace, or policy context.
+      workbench.showPanel(renderHarnessWelcome({
+        model: activeModel.id,
+        provider: activeModel.provider,
+        contextWindow: activeModel.contextWindow,
+        workspace: currentWorkspace,
+        branch: initialState.session.workspace?.gitBranch ?? null,
+        permissionMode,
+        runtime: runtimeStatus,
+        width: getTerminalWidth(process.stdout),
+        paint,
+      }));
     }
   } else renderWelcome();
 
@@ -884,6 +898,22 @@ async function runChat(command: string[]): Promise<void> {
   const emit = (text = ""): void => {
     if (workbench) workbench.showBlock(text.split("\n"));
     else console.log(text);
+  };
+
+  /// One-line command feedback in the harness voice.
+  ///
+  /// The workbench renders it as a notice on the grid with a status glyph from
+  /// the harness vocabulary; the scrollback path keeps its long-standing form.
+  /// Callers pass plain text so each renderer owns the styling.
+  const say = (text: string, tone: "info" | "success" | "error" = "info"): void => {
+    if (workbench) {
+      workbench.notice(text, tone);
+      return;
+    }
+    const glyph = tone === "success" ? "●" : tone === "error" ? "×" : "·";
+    const color = tone === "success" ? "citron" : tone === "error" ? "signal" : "secondary";
+    const body = tone === "error" ? paint.text(text, "signal") : paint.dim(text);
+    console.log(`  ${paint.text(glyph, color)} ${body}`);
   };
 
   process.on("SIGINT", () => {
@@ -978,9 +1008,9 @@ async function runChat(command: string[]): Promise<void> {
             + `Use /model ${sanitizeTerminalLine(preferred)} to switch.`,
         ));
       }
-      emit(`  ${paint.text("●", "citron")} Switched to ${paint.bold(sanitizeTerminalLine(result.session.title), "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}`);
+      say(`Switched to ${sanitizeTerminalLine(result.session.title)} (${sessionId.slice(0, 8)})`, "success");
     } catch {
-      emit(`  ${paint.text(`Could not find session: ${targetId}`, "signal")}`);
+      say(`Could not find session: ${targetId}`, "error");
     }
   };
 
@@ -993,18 +1023,19 @@ async function runChat(command: string[]): Promise<void> {
           method: "POST",
           body: JSON.stringify(path ? { paths: [path] } : {}),
         });
-        const suffix = result.complete ? "" : " · partial; run /undo again for the rest";
-        emit(`  ${paint.text("●", "citron")} Reverted ${result.files.length} path${result.files.length === 1 ? "" : "s"} from turn ${paint.bold(result.turnId.slice(0, 8), "paper")}${paint.dim(suffix)}`);
-        for (const file of result.files) emit(paint.dim(`    ↩ ${sanitizeTerminalLine(file)}`));
+        const suffix = result.complete ? "" : " · partial, run /undo again for the rest";
+        const names = result.files.slice(0, 3).map((file) => sanitizeTerminalLine(file)).join(", ");
+        const more = result.files.length > 3 ? ` +${result.files.length - 3}` : "";
+        say(`Reverted ${result.files.length} path${result.files.length === 1 ? "" : "s"} from turn ${result.turnId.slice(0, 8)} · ${names}${more}${suffix}`, "success");
       } catch (error) {
         const message = error instanceof Error ? error.message : "undo failed";
-        emit(`  ${paint.text(message, "signal")}`);
+        say(message, "error");
       }
     },
     plan: async (argument) => {
       const text = sanitizeTerminalLine(argument).trim();
       if (!text) {
-        emit(`  ${paint.text("Usage: /plan <prompt>", "signal")}`);
+        say("Usage: /plan <prompt>", "error");
         return;
       }
       await executePrompt(text, true);
@@ -1013,7 +1044,7 @@ async function runChat(command: string[]): Promise<void> {
       try {
         const result = await request<TurnChangesResponse>(`/v1/sessions/${sessionId}/changes`);
         if (result.changes.length === 0) {
-          emit(`  ${paint.dim("No changes to review.")}`);
+          say("No changes to review.");
           return;
         }
         if (workbench) {
@@ -1041,7 +1072,7 @@ async function runChat(command: string[]): Promise<void> {
         emit(lines.join("\n"));
       } catch (error) {
         const message = error instanceof Error ? error.message : "diff failed";
-        emit(`  ${paint.text(message, "signal")}`);
+        say(message, "error");
       }
     },
     clear: async () => {
@@ -1070,7 +1101,7 @@ async function runChat(command: string[]): Promise<void> {
       contextRail.setBranch(created.session.workspace?.gitBranch ?? null);
       mentionFiles = await fetchMentionFiles(sessionId);
       refreshCustomCommands(currentWorkspace);
-      emit(`  ${paint.text("●", "citron")} Started new session ${paint.bold(title, "paper")} ${paint.dim(`(${sessionId.slice(0, 8)})`)}`);
+      say(`Started new session ${title} (${sessionId.slice(0, 8)})`, "success");
     },
     status: async () => {
       const current = await request<{ session: Session }>(`/v1/sessions/${sessionId}`).catch(() => null);
@@ -1124,7 +1155,7 @@ async function runChat(command: string[]): Promise<void> {
       );
       const recent = result.sessions.slice(0, 10);
       if (query && recent.length === 0) {
-        emit(`  ${paint.dim(`No sessions match "${sanitizeTerminalLine(query)}".`)}`);
+        say(`No sessions match "${sanitizeTerminalLine(query)}".`);
         return;
       }
       if (recent.length === 0) return;
@@ -1136,7 +1167,7 @@ async function runChat(command: string[]): Promise<void> {
           currentIndex,
         );
         if (selected === null) {
-          emit(`  ${paint.dim("Session selection cancelled.")}`);
+          say("Session selection cancelled.");
         } else if (recent[selected] && recent[selected]!.id !== sessionId) {
           await activateSession(recent[selected]!.id);
         }
@@ -1145,7 +1176,7 @@ async function runChat(command: string[]): Promise<void> {
       emit(formatSessionsTable(recent.map(sessionListItem), sessionId, getTerminalWidth(process.stdout), paint));
       const selected = await selectSessionInteractive(recent, sessionId, paint);
       if (selected && selected.id !== sessionId) await activateSession(selected.id);
-      else if (!selected) emit(`  ${paint.dim("Session selection cancelled.")}`);
+      else if (!selected) say("Session selection cancelled.");
     },
     resume: activateSession,
     model: async (argument) => {
@@ -1155,7 +1186,7 @@ async function runChat(command: string[]): Promise<void> {
       if (query) {
         const match = matchModel(discovered.models, query);
         if ("error" in match) {
-          emit(`  ${paint.text(match.error, "signal")}`);
+          say(match.error, "error");
           return;
         }
         selected = match.model;
@@ -1166,20 +1197,20 @@ async function runChat(command: string[]): Promise<void> {
           Math.max(0, discovered.models.findIndex((model) => model.id === activeModel.id)),
         );
         if (index === null || !discovered.models[index]) {
-          emit(`  ${paint.dim("Model selection cancelled.")}`);
+          say("Model selection cancelled.");
           return;
         }
         selected = discovered.models[index]!;
       } else {
         const picked = await selectModelInteractive(discovered.models, activeModel.id, paint);
         if (!picked) {
-          emit(`  ${paint.dim("Model selection cancelled.")}`);
+          say("Model selection cancelled.");
           return;
         }
         selected = picked;
       }
       if (selected.id === activeModel.id) {
-        emit(`  ${paint.dim(`${sanitizeTerminalLine(selected.id)} is already active.`)}`);
+        say(`${sanitizeTerminalLine(selected.id)} is already active.`);
         return;
       }
       await request("/v1/model", { method: "POST", body: JSON.stringify({ model: selected.id }) });
@@ -1190,13 +1221,12 @@ async function runChat(command: string[]): Promise<void> {
         method: "PATCH",
         body: JSON.stringify({ preferredModel: selected.id }),
       }).catch(() => null);
-      const context = selected.contextWindow ? paint.dim(` · ctx ${formatTokenCount(selected.contextWindow)}`) : "";
-      emit(`  ${paint.text("●", "citron")} Switched to ${paint.bold(sanitizeTerminalLine(selected.id), "paper")}${context}`);
+      say(`Switched to ${sanitizeTerminalLine(selected.id)}${selected.contextWindow ? ` · ctx ${formatTokenCount(selected.contextWindow)}` : ""}`, "success");
     },
     rename: async (argument) => {
       const title = sanitizeTerminalLine(argument).trim();
       if (!title) {
-        emit(`  ${paint.text("Usage: /rename <title>", "signal")}`);
+        say("Usage: /rename <title>", "error");
         return;
       }
       const result = await request<UpdateSessionResponse>(`/v1/sessions/${sessionId}`, {
@@ -1205,7 +1235,7 @@ async function runChat(command: string[]): Promise<void> {
       });
       sessionTitle = result.session.title;
       workbench?.setSessionTitle(sessionTitle);
-      emit(`  ${paint.text("●", "citron")} Renamed to ${paint.bold(sanitizeTerminalLine(result.session.title), "paper")}`);
+      say(`Renamed to ${sanitizeTerminalLine(result.session.title)}`, "success");
     },
     delete: async () => {
       const current = await request<{ session: Session }>(`/v1/sessions/${sessionId}`).catch(() => null);
@@ -1214,17 +1244,17 @@ async function runChat(command: string[]): Promise<void> {
         ? await workbench.suspend(() => confirmPrompt(`Archive ${sanitizeTerminalLine(title)}? The transcript is kept. [y/N] `))
         : await confirmPrompt(`Archive ${sanitizeTerminalLine(title)}? The transcript is kept. [y/N] `);
       if (!confirmed) {
-        emit(`  ${paint.dim("Archive cancelled.")}`);
+        say("Archive cancelled.");
         return;
       }
       await request(`/v1/sessions/${sessionId}`, { method: "DELETE" });
-      emit(`  ${paint.text("●", "citron")} Archived ${paint.bold(sanitizeTerminalLine(title), "paper")}`);
+      say(`Archived ${sanitizeTerminalLine(title)}`, "success");
       await slashHandlers.new!("");
     },
     export: async (argument) => {
       const format = argument.trim().toLowerCase() || "md";
       if (format !== "md" && format !== "json") {
-        emit(`  ${paint.text("Usage: /export [md|json]", "signal")}`);
+        say("Usage: /export [md|json]", "error");
         return;
       }
       const response = await fetch(new URL(`/v1/sessions/${sessionId}/export?format=${format}`, server), {
@@ -1237,7 +1267,7 @@ async function runChat(command: string[]): Promise<void> {
       const text = await response.text();
       const path = join(process.cwd(), `demesne-${sessionId!.slice(0, 8)}.${format}`);
       writeFileSync(path, text, { encoding: "utf8", mode: 0o600 });
-      emit(`  ${paint.text("●", "citron")} Exported to ${paint.bold(sanitizeTerminalLine(path), "paper")}`);
+      say(`Exported to ${sanitizeTerminalLine(path)}`, "success");
     },
   };
 

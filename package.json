@@ -54,7 +54,8 @@
     "build:daemon": "bun build apps/daemon/src/main.ts --compile --outfile dist/demesned && rm -f .*.bun-build",
     "clean": "rm -rf dist && rm -f .*.bun-build",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "ui:preview": "bun run scripts/ui-preview.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

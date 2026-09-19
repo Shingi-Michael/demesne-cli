@@ -90,13 +90,59 @@ describe("CLI context rail", () => {
     expect(unknown.statusLine(80, createPainter(false))).toBe("m · last 15");
   });
 
-  test("shows the workspace branch in the persistent status", () => {
+  test("does not repeat the workspace branch, which the header already carries", () => {
     const rail = new CliContextRail({ id: "qwen", provider: "llama.cpp", contextWindow: 32_768 }, "/tmp/project");
     rail.setBranch("feature/durable-sessions");
-    expect(rail.statusLine(100, createPainter(false)))
-      .toBe("qwen · feature/durable-sessions · ctx 32.8k · no request yet");
-    rail.setBranch(null);
     expect(rail.statusLine(100, createPainter(false))).toBe("qwen · ctx 32.8k · no request yet");
+    // The branch is still available for the header to render.
+    expect(rail.workspaceBranch).toBe("feature/durable-sessions");
+  });
+
+  test("drops the verbose counts before the identity as the footer narrows", () => {
+    const rail = new CliContextRail({ id: "qwen3.8-q4_0-100k-b256", provider: "llama.cpp", contextWindow: 100_000 }, "/tmp/project");
+    rail.setRuntime({
+      profile: "llama-ngram-mod-f16-kv-100k-b256-32gb",
+      state: "verified",
+      expected: null,
+      observed: {
+        model: "qwen3.8-q4_0-100k-b256",
+        contextWindow: 100_000,
+        batchSize: 256,
+        microBatchSize: 256,
+        parallelSequences: 1,
+        keyCacheType: "f16",
+        valueCacheType: "f16",
+        flashAttention: "on",
+        loadedModels: 1,
+        runnerProcesses: 1,
+        speculationType: "ngram-mod",
+      },
+      mismatches: [],
+      observedAt: "2026-08-30T00:00:00.000Z",
+    });
+    rail.apply(event("model.usage", { inputTokens: 3_400, outputTokens: 120, totalTokens: 3_520 }));
+
+    // Wide: everything, including the absolute counts.
+    const wide = rail.statusLine(200, createPainter(false));
+    expect(wide).toBe("✓ ngram-mod · qwen3.8-q4_0-100k-b256 · last 3.5k/100k · ▱▱▱▱▱ 4%");
+
+    // Typical 110-column terminal: the absolute counts go, the meter stays.
+    const typical = rail.statusLine(110, createPainter(false));
+    expect(typical).toBe("✓ ngram-mod · qwen3.8-q4_0-100k-b256 · ▱▱▱▱▱ 4%");
+    expect(typical).not.toContain("last");
+
+    // Narrow: the meter is the last thing standing.
+    expect(rail.statusLine(24, createPainter(false))).toBe("▱▱▱▱▱ 4%");
+  });
+
+  test("never exceeds the space the footer gives its right side", () => {
+    const rail = new CliContextRail({ id: "a-very-long-model-identifier-that-will-not-fit", provider: "llama.cpp", contextWindow: 100_000 }, "/tmp/project");
+    rail.apply(event("model.usage", { inputTokens: 50_000, outputTokens: 120, totalTokens: 50_120 }));
+    for (const width of [20, 30, 40, 60, 80, 100, 140]) {
+      const line = rail.statusLine(width, createPainter(false));
+      // formatFooterLine hands this side ~55% of the width and then truncates.
+      expect(visibleLength(line)).toBeLessThanOrEqual(Math.max(20, Math.floor(width * 0.55)));
+    }
   });
 
   test("surfaces verified speculation in the persistent status", () => {

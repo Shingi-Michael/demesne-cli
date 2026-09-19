@@ -96,6 +96,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flushed after the block had closed.
 - Motion is bound to meaning: only the active turn animates, and the sidebar is
   hidden by default.
+- The footer's right side composes to the space it actually gets. It was built
+  as one string and then truncated from the right, so the context meter — the
+  last item and the one worth glancing at — was the first thing lost on a
+  narrow terminal or with a long model id. It now drops the least important
+  part first (absolute counts, then runtime, then model), so the meter always
+  survives: `✓ ngram-mod · qwen3.8-q4_0-100k-b256 · ▰▰▱▱▱ 3%`.
+- The footer no longer repeats the workspace branch, which the header already
+  carries beside the workspace.
 - The model's reply carries no mark. It was a `◆`, and while the model streamed
   it was the same animated glyph the footer showed, so one glyph appeared twice
   on screen at once. Prose is now plain text on the content column, which also

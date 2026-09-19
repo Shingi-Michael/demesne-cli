@@ -99,6 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flushed after the block had closed.
 - Motion is bound to meaning: only the active turn animates, and the sidebar is
   hidden by default.
+- Inspection collapses: three or more contiguous reads or searches in one round
+  render as `✓ read src/lexer.ts +5` with the total time. The run must be
+  contiguous, so narration between calls ends it and the agent never appears to
+  have said less than it did. Changes and verification are never collapsed.
+- Added `bun run fake:provider` with `edit`, `trace`, `fail`, and `sweep`
+  scenarios, so the harness can be exercised against a real turn without a
+  model.
 - Added harness structure and color: a turn rail binds each turn between a
   `┌ you ───` opener and a `└─ ✓` closer, static rules frame the transcript
   between header and composer, and tool verbs are colored by phase (inspect,

@@ -44,6 +44,7 @@ import { reduceQueuedInput } from "../input-queue.ts";
 import { reduceInterruptKey } from "../interrupt-key.ts";
 import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } from "../approval-selection.ts";
 import { reduceSessionPicker, type SessionPickerKey } from "../session-picker.ts";
+import { planTranscript, type PlannedTool } from "./transcript.ts";
 import { classifyTurnPhase, isValidationCommand } from "../turn-activity.ts";
 import { composeInEditor } from "../external-editor.ts";
 import type { CliContextRail } from "../context-rail.ts";
@@ -633,10 +634,38 @@ export class Workbench {
   private rebuildConversation(): void {
     const width = this.layout.conversation.width;
     const lines: string[] = [];
-    for (const entry of this.entries) {
-      lines.push(...this.renderEntry(entry, width));
+    for (const item of planTranscript(this.entries)) {
+      if (item.kind === "group") {
+        lines.push(this.renderToolGroup(item.tools, width));
+        continue;
+      }
+      lines.push(...this.renderEntry(item.entry, width));
     }
     this.viewport.setLines(lines);
+  }
+
+  /// One row for a run of inspection calls: the first target names what was
+  /// looked at, `+n` says how much more, and the meta column carries the total
+  /// time. The row is failed if any member failed, so a bad read is never
+  /// hidden inside a summary that reads as success.
+  private renderToolGroup(entries: PlannedTool[], width: number): string {
+    const paint = this.options.paint;
+    const first = entries[0]!;
+    const running = entries.some((entry) => entry.state === "running" && !entry.waiting);
+    const failed = entries.some((entry) => entry.state === "failed");
+    const state: ToolRowState = running ? "running" : failed ? "failed" : "done";
+    const mark = running
+      ? renderPresence(presenceForTool(first.name, isValidationCommand(first.detail ?? "")), Date.now(), paint)
+      : undefined;
+    const total = entries.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0);
+    const target = first.detail === undefined
+      ? `${entries.length} files`
+      : `${first.detail} +${entries.length - 1}`;
+    const meta = running ? undefined : failed ? "failed" : formatDuration(total, undefined);
+    return formatToolRow(state, toolVerb(first.name), target, meta, width, paint, {
+      phase: first.phase,
+      ...(mark ? { mark } : {}),
+    });
   }
 
   private renderEntry(entry: WorkbenchEntry, width: number): string[] {

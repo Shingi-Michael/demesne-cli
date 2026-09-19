@@ -62,7 +62,9 @@ const transcript = (state: PresenceState): string[] => [
   formatTurnOpener("you", "21:03", width, paint),
   `${indent}${paint.bold("fix the parser", "paper")}`,
   `${rail}${paint.text("⋯", "rule")} ${paint.dim("thought 4.2s · ctrl+x")}`,
-  toolRow("done", "inspect", "read", "src/lexer.ts", "12ms"),
+  // Six files read in one round collapse to a single row; the run is what
+  // matters, not six lines naming each file.
+  toolRow("done", "inspect", "read", "src/lexer.ts +5", "10ms"),
   "",
   `${" ".repeat(HARNESS.rail)}${bar} ${state === "done" ? paint.text("◆", "citron") : renderPresence("writing", Date.now(), paint)} `
     + `I read the guard. It rejects everything above 127, so I will`,

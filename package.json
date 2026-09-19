@@ -55,6 +55,7 @@
     "clean": "rm -rf dist && rm -f .*.bun-build",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "fake:provider": "bun run scripts/fake-provider.ts",
     "ui:preview": "bun run scripts/ui-preview.ts"
   },
   "devDependencies": {

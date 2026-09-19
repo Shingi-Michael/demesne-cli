@@ -26,7 +26,6 @@ import {
   palette,
   resolveTerminalTheme,
   resolveSlashCommand,
-  renderBeaconText,
   renderBeacon,
   renderSpinner,
   sanitizeTerminalText,
@@ -711,13 +710,6 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(segments[0]?.char).toBe("◖");
     expect(segments[segments.length - 1]?.char).toBe("◗");
     expect(segments.every((s) => s.hex.startsWith("#"))).toBe(true);
-
-    const animated = renderBeaconText("qwen3:14b", 0.5, "thinking", createPainter(true));
-    expect(visibleLength(animated)).toBe(9);
-    expect(animated).toContain("\x1b[38;2;");
-
-    const plain = renderBeaconText("qwen3:14b", 0.5, "thinking", createPainter(false));
-    expect(plain).toBe("qwen3:14b");
   });
 
   test("renders the quiet single-accent activity spinner", () => {

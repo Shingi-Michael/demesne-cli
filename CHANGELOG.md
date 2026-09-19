@@ -96,6 +96,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flushed after the block had closed.
 - Motion is bound to meaning: only the active turn animates, and the sidebar is
   hidden by default.
+- The footer carries live state only. The model and the runtime verification
+  moved to the header, which now drops whole items as it narrows (runtime, then
+  branch, then model, with the workspace anchoring the row) instead of being cut
+  mid-token. The footer's right side is the context window and nothing else:
+  `est ~3k/100k · ▰▰▱▱▱ 3%`.
 - The footer's right side composes to the space it actually gets. It was built
   as one string and then truncated from the right, so the context meter — the
   last item and the one worth glancing at — was the first thing lost on a

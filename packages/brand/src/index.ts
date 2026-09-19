@@ -810,27 +810,6 @@ export function renderBeacon(
     .join("");
 }
 
-/// Applies the dynamic beacon truecolor gradient sweep across the characters of a string.
-export function renderBeaconText(
-  text: string,
-  phase: number,
-  activity: BeaconActivity = "thinking",
-  painter: Painter = createPainter(true),
-): string {
-  if (!painter.enabled || text.length === 0) {
-    return text;
-  }
-
-  const len = text.length;
-  return text
-    .split("")
-    .map((char, index) => {
-      const charPhase = phase + index / Math.max(1, len * 1.5);
-      const [r, g, b] = sampleBeaconRGB(charPhase, activity, painter.theme);
-      return `\x1b[38;2;${r};${g};${b}m${char}\x1b[0m`;
-    })
-    .join("");
-}
 
 /// One accent color per activity: the quiet terminal replacement for the
 /// hue-cycling capsule. A single glyph in a single color carries the state.

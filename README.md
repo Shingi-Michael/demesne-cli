@@ -33,10 +33,10 @@ Interactive terminals open the Demesne harness: one clean column on a strict ali
 
 The harness follows five rules. **One grid**: a turn rail at column 2 binds every line of a turn, and marks, verbs, targets, and durations sit on fixed columns, so order comes from alignment rather than boxes. **Color means something**: tool verbs are colored by phase (inspection is quiet, changes take the accent, verification is bright), status glyphs are citron for done and signal for failed, denied, or waiting, and prose stays monochrome. **Inspection collapses**: three or more contiguous reads or searches in one round become `✓ read src/lexer.ts +5`, because six files is one act of homework rather than six lines; changes and verification are never collapsed, since they are the evidence of what happened. The run must be contiguous — narration between two calls ends it, so the agent never appears to have said less than it did. **Motion is confined**: only the footer animates, and only while a turn is live, so settled scrollback never flickers and nothing travels across the screen. The model's reply carries no mark at all — it is plain text on the content column, and the footer is the single place the turn's state is shown. **Status, not narration**: the harness's own text names the state and nothing more — the footer reads `thinking`, `writing`, `checking`, `needs approval`, `done`, a pending action reports `needs approval: <tool>`, and a turn closes with `└─ ✓ done — 7.4s · 3 tools`. Nothing in the interface speaks in the first person; the only voice in the transcript is the model's own prose.
 
-Identity and state are separated so nothing repeats: the header carries the brand, session, workspace, and branch; the footer carries the model, runtime verification, and context meter.
+Identity and state are separated so nothing repeats: the header carries the brand, session, workspace, branch, model, and runtime verification, dropping whole items as it narrows (runtime, then branch, then model, with the workspace anchoring the row); the footer carries live state only — the turn's status on the left and the context window on the right.
 
 ```text
-  ◆ demesne · parser hardening                     …/projects/demesne-cli · main
+  ◆ demesne · parser hardening    …/projects/demesne-cli · main · qwen3.8-27b
 ──────────────────────────────────────────────────────────────────────────────
   ┌ you ────────────────────────────────────────────────────────────── 21:03
       fix the parser
@@ -53,7 +53,7 @@ Identity and state are separated so nothing repeats: the header carries the bran
   └─ ✓ done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s
 ──────────────────────────────────────────────────────────────────────────────
   ◇ ask anything · / for commands                       ⏎ send · ^O editor
-  ◍ writing · 0:06 · 18.2 tok/s          ✓ ngram-mod · qwen3.8-27b · ▰▰▱▱▱ 4%
+  ◍ writing · 0:06 · 18.2 tok/s                                    ▰▰▱▱▱ 4%
 ```
 
 Run `bun run ui:preview` to watch this design animate through its states. Reduced motion and `NO_COLOR` keep every glyph static and byte-stable.

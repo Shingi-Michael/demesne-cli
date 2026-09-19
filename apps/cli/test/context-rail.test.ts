@@ -71,67 +71,42 @@ describe("CLI context rail", () => {
   test("renders a persistent one-line context status", () => {
     const rail = new CliContextRail({ id: "qwen3:14b", provider: "ollama", contextWindow: 32_768 }, "/tmp/project");
     rail.begin(false);
-    expect(rail.statusLine(80, createPainter(false))).toBe("qwen3:14b · ctx 32.8k · no request yet");
+    expect(rail.statusLine(80, createPainter(false))).toBe("ctx 32.8k · no request yet");
     rail.apply(event("model.usage", { inputTokens: 7_000, outputTokens: 1_192, totalTokens: 8_192 }));
-    expect(rail.statusLine(80, createPainter(false))).toBe("qwen3:14b · last 8.2k/32.8k · ▰▱▱▱▱ 25%");
+    expect(rail.statusLine(80, createPainter(false))).toBe("last 8.2k/32.8k · ▰▱▱▱▱ 25%");
 
     // Turn 2 begins: prior usage must not be attributed to the new provider request.
     rail.begin(false);
     rail.apply(event("model.request_started", { model: "qwen3:14b" }));
-    expect(rail.statusLine(80, createPainter(false))).toBe("qwen3:14b · ctx 32.8k · no request yet");
+    expect(rail.statusLine(80, createPainter(false))).toBe("ctx 32.8k · no request yet");
     expect(rail.lines(40, 30, createPainter(false)).join("\n")).toContain("LAST REQUEST · PROVIDER REPORTED\nusage pending");
 
     // Turn 2 provider usage arrives and updates context counts
     rail.apply(event("model.usage", { inputTokens: 9_000, outputTokens: 1_000, totalTokens: 10_000 }));
-    expect(rail.statusLine(80, createPainter(false))).toBe("qwen3:14b · last 10k/32.8k · ▰▰▱▱▱ 31%");
+    expect(rail.statusLine(80, createPainter(false))).toBe("last 10k/32.8k · ▰▰▱▱▱ 31%");
 
     const unknown = new CliContextRail({ id: "m", provider: "local" }, "/tmp/project");
     unknown.apply(event("model.usage", { inputTokens: 10, outputTokens: 5, totalTokens: 15 }));
-    expect(unknown.statusLine(80, createPainter(false))).toBe("m · last 15");
+    expect(unknown.statusLine(80, createPainter(false))).toBe("last 15");
   });
 
   test("does not repeat the workspace branch, which the header already carries", () => {
     const rail = new CliContextRail({ id: "qwen", provider: "llama.cpp", contextWindow: 32_768 }, "/tmp/project");
     rail.setBranch("feature/durable-sessions");
-    expect(rail.statusLine(100, createPainter(false))).toBe("qwen · ctx 32.8k · no request yet");
+    expect(rail.statusLine(100, createPainter(false))).toBe("ctx 32.8k · no request yet");
     // The branch is still available for the header to render.
     expect(rail.workspaceBranch).toBe("feature/durable-sessions");
   });
 
-  test("drops the verbose counts before the identity as the footer narrows", () => {
+  test("drops the verbose counts before the meter as the footer narrows", () => {
     const rail = new CliContextRail({ id: "qwen3.8-q4_0-100k-b256", provider: "llama.cpp", contextWindow: 100_000 }, "/tmp/project");
-    rail.setRuntime({
-      profile: "llama-ngram-mod-f16-kv-100k-b256-32gb",
-      state: "verified",
-      expected: null,
-      observed: {
-        model: "qwen3.8-q4_0-100k-b256",
-        contextWindow: 100_000,
-        batchSize: 256,
-        microBatchSize: 256,
-        parallelSequences: 1,
-        keyCacheType: "f16",
-        valueCacheType: "f16",
-        flashAttention: "on",
-        loadedModels: 1,
-        runnerProcesses: 1,
-        speculationType: "ngram-mod",
-      },
-      mismatches: [],
-      observedAt: "2026-08-30T00:00:00.000Z",
-    });
     rail.apply(event("model.usage", { inputTokens: 3_400, outputTokens: 120, totalTokens: 3_520 }));
 
-    // Wide: everything, including the absolute counts.
-    const wide = rail.statusLine(200, createPainter(false));
-    expect(wide).toBe("✓ ngram-mod · qwen3.8-q4_0-100k-b256 · last 3.5k/100k · ▱▱▱▱▱ 4%");
+    // Wide: the absolute counts and the meter.
+    expect(rail.statusLine(200, createPainter(false))).toBe("last 3.5k/100k · ▱▱▱▱▱ 4%");
 
-    // Typical 110-column terminal: the absolute counts go, the meter stays.
-    const typical = rail.statusLine(110, createPainter(false));
-    expect(typical).toBe("✓ ngram-mod · qwen3.8-q4_0-100k-b256 · ▱▱▱▱▱ 4%");
-    expect(typical).not.toContain("last");
-
-    // Narrow: the meter is the last thing standing.
+    // Narrow: the meter is the last thing standing, because the warning outranks
+    // the verbose counts.
     expect(rail.statusLine(24, createPainter(false))).toBe("▱▱▱▱▱ 4%");
   });
 
@@ -145,7 +120,7 @@ describe("CLI context rail", () => {
     }
   });
 
-  test("surfaces verified speculation in the persistent status", () => {
+  test("exposes verified speculation for the header, not the footer", () => {
     const rail = new CliContextRail({ id: "qwen", provider: "llama.cpp", contextWindow: 32_768 }, "/tmp/project");
     rail.setRuntime({
       profile: "llama-ngram-mod-f16-kv-32k-b256-32gb",
@@ -167,8 +142,10 @@ describe("CLI context rail", () => {
       mismatches: [],
       observedAt: "2026-08-30T00:00:00.000Z",
     });
-    expect(rail.statusLine(100, createPainter(false))).toContain("✓ ngram-mod · qwen · ctx 32.8k");
-    expect(rail.statusLine(30, createPainter(false))).toStartWith("✓ ngram-mod");
+    // The runtime is identity, so the header renders it and the footer does not.
+    expect(rail.runtimeSummary).toEqual({ label: "✓ ngram-mod", state: "verified" });
+    expect(rail.statusLine(100, createPainter(false))).not.toContain("ngram-mod");
+    expect(rail.statusLine(100, createPainter(false))).not.toContain("qwen");
   });
 
   test("hydrates exact context and workspace when resuming a session", () => {
@@ -224,7 +201,7 @@ describe("CLI context rail", () => {
     expect(output).toContain("within soft limit · soft limit 29.4k");
     expect(output).toContain("1 context reduction · saved ~2k");
     expect(output).toContain("10.2k total");
-    expect(rail.statusLine(80, createPainter(false))).toBe("model · est ~10k/32.8k · ▰▰▱▱▱ 31%");
+    expect(rail.statusLine(80, createPainter(false))).toBe("est ~10k/32.8k · ▰▰▱▱▱ 31%");
   });
 
   test("tracks changed files and validation outcomes", () => {

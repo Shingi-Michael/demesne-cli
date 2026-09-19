@@ -276,15 +276,19 @@ export class CliContextRail {
     return this.branch;
   }
 
-  /// The footer's right side: runtime, model, and live context.
+  /// The runtime verification, as the short label the header renders. The footer
+  /// no longer shows it, because it is identity rather than live state.
+  get runtimeSummary(): { label: string; state: RuntimeProfileStatus["state"] } | null {
+    return compactRuntimeStatus(this.runtime);
+  }
+
+  /// The footer's right side: the context window, and nothing else.
   ///
-  /// `formatFooterLine` gives this side roughly 55% of the width and then
-  /// truncates it from the right, so the last item was the first thing lost —
-  /// and the last item is the context meter. This composes to that budget
-  /// instead, dropping the least important part first, so the meter always
-  /// survives. The branch is not repeated here: the header already carries it
-  /// beside the workspace.
-  statusLine(width: number, painter: Painter, modelLabel?: string): string {
+  /// The model and the runtime verification are identity, so they live in the
+  /// header. The absolute counts are the most verbose part of the context
+  /// display and go first when the footer narrows, leaving the meter, which is
+  /// the part worth glancing at.
+  statusLine(width: number, painter: Painter): string {
     const safeWidth = Math.max(16, width);
     const budget = Math.max(20, Math.floor(safeWidth * 0.55));
     const reportedTokens = exactUsageTotal(this.usage);
@@ -304,33 +308,16 @@ export class CliContextRail {
         : contextWindow
           ? `ctx ${formatTokenCount(contextWindow)} · no request yet`
           : "context pending";
-    const modelText = modelLabel ?? painter.text(sanitizeTerminalLine(this.model.id), color);
-    const runtimePart = compactRuntimeStatus(this.runtime);
-    const runtimeText = runtimePart
-      ? painter.text(runtimePart.label, runtimePart.state === "verified" ? "citron" : runtimePart.state === "mismatch" ? "signal" : "secondary")
-      : "";
-    const separator = painter.dim(" · ");
-    const head = runtimeText ? `${runtimeText}${separator}` : "";
     const absoluteText = painter.text(usageBase, color);
     const meterText = percentage === null
       ? ""
       : `${compactContextMeter(percentage, painter)}${painter.text(` ${percentage}%`, color)}`;
 
-    // Richest form first, then drop the least important part until it fits:
-    // the absolute counts are the most verbose and go first, the meter is the
-    // glanceable warning and goes last.
+    // Richest form first, then the meter alone: the warning outranks the
+    // verbose counts when the footer has to give something up.
     const candidates: string[] = meterText
-      ? [
-        `${head}${modelText}${separator}${absoluteText}${separator}${meterText}`,
-        `${head}${modelText}${separator}${meterText}`,
-        `${modelText}${separator}${meterText}`,
-        meterText,
-      ]
-      : [
-        `${head}${modelText}${separator}${absoluteText}`,
-        `${head}${modelText}`,
-        modelText,
-      ];
+      ? [`${absoluteText}${painter.dim(" · ")}${meterText}`, meterText]
+      : [absoluteText];
     for (const candidate of candidates) {
       if (visibleLength(candidate) <= budget) return candidate;
     }

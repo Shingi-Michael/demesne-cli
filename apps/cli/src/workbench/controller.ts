@@ -827,20 +827,54 @@ export class Workbench {
   /// lives in the footer with live runtime state, so it is never shown twice.
   /// The brand mark doubles as the agent's state mark, so the header breathes
   /// with the turn instead of sitting static.
+  /// The header carries identity: brand, session, workspace, branch, model, and
+  /// the runtime verification. The footer carries live state, so nothing is
+  /// shown twice. The right side drops whole items rather than being cut
+  /// mid-token: the runtime goes first, then the branch, then the model, and the
+  /// workspace anchors the row.
   private composeHeader(width: number): { mark: string } {
     const paint = this.options.paint;
-    const branch = this.options.contextRail.workspaceBranch;
+    const rail = this.options.contextRail;
     const left = `${" ".repeat(HARNESS.margin)}${renderPresence(this.state, Date.now(), paint)} `
       + paint.bold("demesne", "paper")
       + paint.dim(` · ${truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(6, Math.floor(width / 4)))}`);
+    const separator = paint.dim(" · ");
     const root = this.options.workspaceRoot;
-    const workspace = root ? shortenPath(root) : null;
-    const right = paint.dim(
-      [
-        workspace ? truncateText(sanitizeTerminalLine(workspace), 30) : null,
-        branch ? sanitizeTerminalLine(branch) : null,
-      ].filter((part): part is string => part !== null).join(" · "),
-    );
+    const workspace = root ? paint.dim(truncateText(sanitizeTerminalLine(shortenPath(root)), 34)) : "";
+    const branch = rail.workspaceBranch ? paint.dim(sanitizeTerminalLine(rail.workspaceBranch)) : "";
+    const model = paint.dim(truncateText(sanitizeTerminalLine(rail.modelId), 30));
+    const runtimePart = rail.runtimeSummary;
+    const runtime = runtimePart
+      ? paint.text(
+        runtimePart.label,
+        runtimePart.state === "verified" ? "citron" : runtimePart.state === "mismatch" ? "signal" : "secondary",
+      )
+      : "";
+
+    const candidates: string[] = workspace
+      ? [
+        [workspace, branch, model, runtime].filter(Boolean).join(separator),
+        [workspace, branch, model].filter(Boolean).join(separator),
+        [workspace, model].filter(Boolean).join(separator),
+        workspace,
+      ]
+      : [
+        [branch, model, runtime].filter(Boolean).join(separator),
+        [model, runtime].filter(Boolean).join(separator),
+        model,
+      ];
+    const available = width - visibleLength(left) - HARNESS.gutter;
+    let right = "";
+    for (const candidate of candidates) {
+      if (visibleLength(candidate) <= available) {
+        right = candidate;
+        break;
+      }
+    }
+    if (!right && available >= 8) {
+      right = truncateText(candidates[candidates.length - 1]!, available);
+    }
+    if (!right) return { mark: truncateText(left, width) };
     const padding = Math.max(1, width - visibleLength(left) - visibleLength(right));
     return { mark: truncateText(`${left}${" ".repeat(padding)}${right}`, width) };
   }

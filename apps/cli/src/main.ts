@@ -41,7 +41,6 @@ import {
   humanToolTitle,
   presenceForTool,
   presenceLabel,
-  renderBeaconText,
   renderPresence,
   renderSpinner,
   resolveSlashCommand,
@@ -1762,8 +1761,8 @@ async function renderTurn(
   options.contextRail?.begin(options.thinkingEnabled);
 
   const fixedFooter = chatState.footer;
-  const currentRightStatus = (animatedModelLabel?: string) => {
-    return options.contextRail?.statusLine(getTerminalWidth(process.stdout), paint, animatedModelLabel) ?? chatState.inputStatusLine?.() ?? "";
+  const currentRightStatus = () => {
+    return options.contextRail?.statusLine(getTerminalWidth(process.stdout), paint) ?? chatState.inputStatusLine?.() ?? "";
   };
 
   const updateBeacon = () => {
@@ -1779,10 +1778,8 @@ async function renderTurn(
     const speedLabel = tokSpeed === null ? "" : `${tokSpeed.toFixed(0)} tok/s`;
     const speedStr = speedLabel ? ` · ${speedLabel}` : "";
     const left = `  ${spinner} ${paint.bold(beaconLabel, "paper")} ${paint.dim(`· ${elapsedSec}s${speedStr}`)}${queuedBeaconText()}`;
-    const modelText = options.contextRail?.modelId || modelName;
-    const animatedModel = modelText ? renderBeaconText(sanitizeTerminalLine(modelText), phase, beaconActivity, paint) : undefined;
     if (fixedFooter?.isActive()) {
-      fixedFooter.update(left, currentRightStatus(animatedModel));
+      fixedFooter.update(left, currentRightStatus());
     } else {
       process.stdout.write(`\r\x1b[2K${left}`);
       beaconVisible = true;

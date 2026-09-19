@@ -13,6 +13,7 @@
 ///   trace  six reads, an edit, then a test run — a long turn
 ///   fail   a turn whose command fails, to check the failure row
 ///   sweep  six reads in one round, then an edit and a run — tests collapsing
+///   wrap   a reply long enough to wrap — tests prose alignment
 ///
 /// Point the CLI at it with a config that names this URL:
 ///   [provider]
@@ -23,7 +24,7 @@
 /// Steps are derived from the conversation rather than a call counter, so a
 /// retried request replays the same step instead of skipping ahead.
 
-const SCENARIOS = ["edit", "trace", "fail", "sweep"] as const;
+const SCENARIOS = ["edit", "trace", "fail", "sweep", "wrap"] as const;
 type Scenario = (typeof SCENARIOS)[number];
 
 const scenario = (process.argv[2] ?? "edit") as Scenario;
@@ -104,6 +105,19 @@ function stepsFor(s: Scenario): Step[] {
         { content: "I narrowed the guard; the suite passes." },
       ];
     }
+    case "wrap":
+      // A reply that must wrap several times, so the continuation lines can be
+      // checked against the first line's column.
+      return [
+        {
+          content: "I read the guard in src/lexer.ts and it rejects every byte above 127, "
+            + "which is wrong for UTF-8 input. The parser, the tokenizer, and the emitter all "
+            + "normalize before they call it, so the guard only ever sees ASCII in practice, "
+            + "but the checker calls it directly on raw input and would throw on any non-ASCII "
+            + "source file. I will narrow it to a proper unicode check and add a regression "
+            + "test that feeds it a multi-byte character.",
+        },
+      ];
     case "fail":
       return [
         { tools: [{ id: "f1", name: "run_command", arguments: { argv: ["bun", "test"] } }] },

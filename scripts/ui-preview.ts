@@ -12,7 +12,6 @@ import {
   formatTurnOpener,
   HARNESS,
   renderPresence,
-  streamingCaret,
   toolPhaseColor,
   turnRail,
   visibleLength,
@@ -34,6 +33,8 @@ const rail = turnRail(paint);
 const bar = paint.text("│", "rule");
 const rule = paint.text(`${" ".repeat(HARNESS.margin)}${"─".repeat(Math.max(4, width - HARNESS.margin - HARNESS.gutter))}`, "rule");
 const indent = " ".repeat(HARNESS.content);
+// The model's reply carries no mark: prose starts on the content column.
+const prose = `${rail}  `;
 
 /// The header carries identity; the footer carries live state. The model
 /// appears once, in the footer.
@@ -66,9 +67,8 @@ const transcript = (state: PresenceState): string[] => [
   // matters, not six lines naming each file.
   toolRow("done", "inspect", "read", "src/lexer.ts +5", "10ms"),
   "",
-  `${" ".repeat(HARNESS.rail)}${bar} ${state === "done" ? paint.text("◆", "citron") : renderPresence("writing", Date.now(), paint)} `
-    + `I read the guard. It rejects everything above 127, so I will`,
-  `${rail}narrow it to a proper unicode check and add a regression test.`,
+  `${prose}I read the guard. It rejects everything above 127, so I will`,
+  `${prose}narrow it to a proper unicode check and add a regression test.`,
   "",
 ];
 
@@ -88,7 +88,7 @@ const scenes: Scene[] = [
       `${indent}${paint.text("- if (c > 127) throw new Error(\"bad byte\")", "signal")}`,
       `${indent}${paint.text("+ if (c > 0x7f) continue", "citron")}`,
       "",
-      `${" ".repeat(HARNESS.rail)}${bar} ${renderPresence("writing", Date.now(), paint)} ${paint.dim("so the fix is")}${streamingCaret(paint)}`,
+      `${prose}${paint.dim("so the fix is")}`,
     ],
   },
   {
@@ -114,7 +114,7 @@ const scenes: Scene[] = [
       toolRow("done", "verify", "run", "$ bun test", "1.2s"),
       `${rail}${paint.dim("610 pass · 0 fail")}`,
       "",
-      `${" ".repeat(HARNESS.rail)}${bar} ${paint.text("◆", "citron")} I changed the guard and the tests pass.`,
+      `${prose}I changed the guard and the tests pass.`,
       "",
       formatTurnCloser("done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s", width, paint),
     ],

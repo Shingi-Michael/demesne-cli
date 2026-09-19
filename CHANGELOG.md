@@ -96,6 +96,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flushed after the block had closed.
 - Motion is bound to meaning: only the active turn animates, and the sidebar is
   hidden by default.
+- The model's reply carries no mark. It was a `◆`, and while the model streamed
+  it was the same animated glyph the footer showed, so one glyph appeared twice
+  on screen at once. Prose is now plain text on the content column, which also
+  fixed wrapped replies: their continuation lines sat two columns left of the
+  first line.
 - Status, not narration: the harness's own text names the state (`thinking`,
   `writing`, `checking`, `needs approval`, `done`) instead of narrating it.
   Nothing in the interface speaks in the first person — the footer, the approval

@@ -31,25 +31,25 @@ This launches the interactive streaming CLI directly in your terminal. A compact
 
 Interactive terminals open the Demesne harness: one clean column on a strict alignment grid, with a header, a rule, the transcript, the composer, and the fixed footer. `Ctrl+T` toggles the telemetry sidebar, `PgUp`/`PgDn` scroll, `Ctrl+G` returns to the bottom, `Ctrl+X` expands the last thought, and double-Escape or Ctrl+C interrupts. Non-interactive use, `--no-tui`, and `DEMESNE_NO_TUI=1` keep the streaming scrollback output byte-for-byte, so pipes and scripts are unaffected.
 
-The harness follows five rules. **One grid**: a turn rail at column 2 binds every line of a turn, and marks, verbs, targets, and durations sit on fixed columns, so order comes from alignment rather than boxes. **Color means something**: tool verbs are colored by phase (inspection is quiet, changes take the accent, verification is bright), status glyphs are citron for done and signal for failed, denied, or waiting, and prose stays monochrome. **Inspection collapses**: three or more contiguous reads or searches in one round become `✓ read src/lexer.ts +5`, because six files is one act of homework rather than six lines; changes and verification are never collapsed, since they are the evidence of what happened. The run must be contiguous — narration between two calls ends it, so the agent never appears to have said less than it did. **Motion is confined**: only the active turn animates — its mark and the streaming caret — so settled scrollback never flickers and nothing travels across the screen. **Status, not narration**: the harness's own text names the state and nothing more — the footer reads `thinking`, `writing`, `checking`, `needs approval`, `done`, a pending action reports `needs approval: <tool>`, and a turn closes with `└─ ✓ done — 7.4s · 3 tools`. Nothing in the interface speaks in the first person; the only voice in the transcript is the model's own prose.
+The harness follows five rules. **One grid**: a turn rail at column 2 binds every line of a turn, and marks, verbs, targets, and durations sit on fixed columns, so order comes from alignment rather than boxes. **Color means something**: tool verbs are colored by phase (inspection is quiet, changes take the accent, verification is bright), status glyphs are citron for done and signal for failed, denied, or waiting, and prose stays monochrome. **Inspection collapses**: three or more contiguous reads or searches in one round become `✓ read src/lexer.ts +5`, because six files is one act of homework rather than six lines; changes and verification are never collapsed, since they are the evidence of what happened. The run must be contiguous — narration between two calls ends it, so the agent never appears to have said less than it did. **Motion is confined**: only the footer animates, and only while a turn is live, so settled scrollback never flickers and nothing travels across the screen. The model's reply carries no mark at all — it is plain text on the content column, and the footer is the single place the turn's state is shown. **Status, not narration**: the harness's own text names the state and nothing more — the footer reads `thinking`, `writing`, `checking`, `needs approval`, `done`, a pending action reports `needs approval: <tool>`, and a turn closes with `└─ ✓ done — 7.4s · 3 tools`. Nothing in the interface speaks in the first person; the only voice in the transcript is the model's own prose.
 
 Identity and state are separated so nothing repeats: the header carries the brand, session, workspace, and branch; the footer carries the model, runtime verification, and context meter.
 
 ```text
-  ◈ demesne · parser hardening                     …/projects/demesne-cli · main
+  ◆ demesne · parser hardening                     …/projects/demesne-cli · main
 ──────────────────────────────────────────────────────────────────────────────
   ┌ you ────────────────────────────────────────────────────────────── 21:03
       fix the parser
   │ ⋯ thought 4.2s · ctrl+x
   │ ✓ read    src/lexer.ts                                            12ms
-  │ ◆ I read the guard. It rejects everything above 127, so I will
+  │   I read the guard. It rejects everything above 127, so I will
   │   narrow it to a proper unicode check.
   │ ✓ edit    src/lexer.ts                                             8ms
               - if (c > 127) throw new Error("bad byte")
               + if (c > 0x7f) continue
   │ ✓ run     $ bun test                                              1.2s
               610 pass · 0 fail
-  │ ◆ I changed the guard and the tests pass.
+  │   I changed the guard and the tests pass.
   └─ ✓ done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s
 ──────────────────────────────────────────────────────────────────────────────
   ◇ ask anything · / for commands                       ⏎ send · ^O editor

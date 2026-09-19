@@ -498,10 +498,6 @@ export function formatCommandOpener(label: string, width: number, painter: Paint
   return formatTurnOpener(label, undefined, width, painter);
 }
 
-/// A block caret shown at the end of streaming prose.
-export function streamingCaret(painter: Painter): string {
-  return painter.text("▍", "electric");
-}
 
 export function formatFooterLine(left: string, right: string, width: number): string {
   const safeWidth = Math.max(0, Math.floor(width));

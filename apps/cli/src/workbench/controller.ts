@@ -14,7 +14,6 @@ import {
   sanitizeTerminalLine,
   shortenPath,
   slashCommandMatches,
-  streamingCaret,
   TerminalMarkdownStream,
   truncateText,
   turnRail,
@@ -682,17 +681,14 @@ export class Workbench {
       }
       case "assistant": {
         const body = entry.raw ? this.renderedMarkdown(entry, proseWidth) : [];
-        const mark = entry.streaming
-          ? renderPresence("writing", Date.now(), paint)
-          : paint.text("◆", "citron");
-        const caret = entry.streaming ? streamingCaret(paint) : "";
-        if (body.length === 0) {
-          return [`${" ".repeat(HARNESS.rail)}${bar} ${mark} ${paint.dim("…")}`];
-        }
+        if (body.length === 0) return [];
+        // The model's reply carries no mark. The footer is the only place the
+        // turn's state is shown, and a mark here put the same glyph on screen
+        // twice at once. Prose is plain text, and every line starts on the
+        // content column so a wrapped reply stays flush with its first line.
+        const prefix = `${rail}  `;
         return [
-          `${" ".repeat(HARNESS.rail)}${bar} ${mark} ${body[0]}${body.length === 1 ? caret : ""}`,
-          ...body.slice(1).map((line, index) =>
-            `${rail}${line}${body.length - 2 === index ? caret : ""}`),
+          ...body.map((line) => `${prefix}${line}`),
           "",
         ];
       }

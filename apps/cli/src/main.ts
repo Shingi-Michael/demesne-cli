@@ -102,7 +102,7 @@ import {
 } from "./daemon-control.ts";
 import { formatDoctorReport, runDoctor } from "./doctor.ts";
 import { runSetup } from "./setup.ts";
-import { renderHarnessHelp, renderHarnessStatus } from "./harness-panels.ts";
+import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus } from "./harness-panels.ts";
 import { narrateTurnEnd } from "./voice.ts";
 import { updateUserConfig } from "@demesne/config";
 import { createInterface } from "node:readline/promises";
@@ -1014,6 +1014,10 @@ async function runChat(command: string[]): Promise<void> {
         const result = await request<TurnChangesResponse>(`/v1/sessions/${sessionId}/changes`);
         if (result.changes.length === 0) {
           emit(`  ${paint.dim("No changes to review.")}`);
+          return;
+        }
+        if (workbench) {
+          workbench.showPanel(renderHarnessDiff(result.changes, result.turnId, getTerminalWidth(process.stdout), paint));
           return;
         }
         const lines = [`  ${paint.bold("CHANGES", "paper")} ${paint.dim(`turn ${result.turnId.slice(0, 8)}`)}`];

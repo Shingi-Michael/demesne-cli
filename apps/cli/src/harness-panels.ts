@@ -2,12 +2,15 @@ import {
   formatCommandOpener,
   formatGridHeading,
   formatGridRows,
+  formatToolRow,
+  sanitizeTerminalLine,
   slashCommandUsage,
+  HARNESS,
   type GridRow,
   type Painter,
   type SlashCommand,
 } from "@demesne/brand";
-import type { RuntimeProfileStatus } from "@demesne/protocol";
+import type { RuntimeProfileStatus, TurnChange } from "@demesne/protocol";
 
 /// Harness-native panels for command output.
 ///
@@ -62,6 +65,47 @@ export function renderHarnessHelp(
     painter,
     { labelWidth: 18 },
   ));
+  return lines;
+}
+
+/// `/diff` on the harness grid.
+///
+/// Each file reuses the tool-row geometry — operation in the verb column, path
+/// in the target column, state in the meta column — so a reviewed change lines
+/// up exactly with the tool row that produced it earlier in the transcript.
+export function renderHarnessDiff(
+  changes: readonly TurnChange[],
+  turnId: string,
+  width: number,
+  painter: Painter,
+): string[] {
+  const lines: string[] = [formatCommandOpener("changes", width, painter)];
+  if (turnId) {
+    lines.push(`${" ".repeat(HARNESS.content)}${painter.dim(`turn ${turnId.slice(0, 8)}`)}`);
+  }
+  for (const change of changes) {
+    const verb = change.operation === "A" ? "added" : change.operation === "D" ? "deleted" : "edited";
+    const meta = change.reverted ? "reverted" : change.binary ? "binary" : undefined;
+    lines.push(formatToolRow(
+      change.reverted ? "denied" : "done",
+      verb,
+      change.path,
+      meta,
+      width,
+      painter,
+      { phase: "change", ...(change.reverted ? { mark: painter.text("↩", "secondary") } : {}) },
+    ));
+    if (change.binary) continue;
+    for (const row of change.diff) {
+      const safe = sanitizeTerminalLine(row);
+      const styled = row.startsWith("+")
+        ? painter.text(safe, "citron")
+        : row.startsWith("-")
+          ? painter.text(safe, "signal")
+          : painter.dim(safe);
+      lines.push(`${" ".repeat(HARNESS.toolTarget)}${styled}`);
+    }
+  }
   return lines;
 }
 

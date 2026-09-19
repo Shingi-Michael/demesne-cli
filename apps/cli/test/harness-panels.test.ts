@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createPainter, HARNESS, SLASH_COMMANDS, visibleLength } from "@demesne/brand";
-import { renderHarnessHelp, renderHarnessStatus } from "../src/harness-panels.ts";
+import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus } from "../src/harness-panels.ts";
 
 const painter = createPainter(false, "dark");
 const color = createPainter(true, "dark");
@@ -54,6 +54,48 @@ describe("renderHarnessHelp", () => {
     const joined = renderHarnessHelp([...SLASH_COMMANDS, custom], 100, painter).join("\n");
     expect(joined).toContain("/review");
     expect(joined).toContain("Review the working tree");
+  });
+});
+
+describe("renderHarnessDiff", () => {
+  const changes = [
+    { path: "src/lexer.ts", operation: "A" as const, reverted: false, diff: ["+ if (c > 0x7f) continue;"] },
+    { path: "src/token.ts", operation: "M" as const, reverted: true, diff: ["- old", "+ new"] },
+    { path: "assets/logo.png", operation: "M" as const, reverted: false, binary: true, diff: [] },
+  ];
+
+  test("places every path on the tool target column", () => {
+    const lines = renderHarnessDiff(changes, "4f2a9c1e-long", 100, painter);
+    expect(lines[0]).toStartWith(`${" ".repeat(HARNESS.rail)}┌ changes ─`);
+    const paths = lines.filter((line) => line.includes("src/") || line.includes("assets/"));
+    expect(paths.length).toBe(3);
+    for (const line of paths) {
+      const index = line.search(/src\/|assets\//);
+      expect(index).toBe(HARNESS.toolTarget);
+    }
+  });
+
+  test("names the operation as a verb and reports state in the meta column", () => {
+    const joined = renderHarnessDiff(changes, "4f2a9c1e", 100, painter).join("\n");
+    expect(joined).toContain("added");
+    expect(joined).toContain("edited");
+    expect(joined).toContain("reverted");
+    expect(joined).toContain("binary");
+    expect(joined).toContain("turn 4f2a9c1e");
+  });
+
+  test("indents diff bodies under their file and skips binary content", () => {
+    const lines = renderHarnessDiff(changes, "4f2a9c1e", 100, painter);
+    const added = lines.find((line) => line.includes("+ if (c > 0x7f) continue;"));
+    expect(added).toBeDefined();
+    expect(added!.indexOf("+ if")).toBe(HARNESS.toolTarget);
+    expect(lines.some((line) => line.includes("binary"))).toBe(true);
+  });
+
+  test("stays inside narrow widths", () => {
+    for (const line of renderHarnessDiff(changes, "4f2a9c1e", 46, painter)) {
+      expect(visibleLength(line)).toBeLessThanOrEqual(46);
+    }
   });
 });
 

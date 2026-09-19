@@ -28,6 +28,7 @@ import {
   formatPermissionCard,
   formatSlashCommandMenu,
   formatSessionsTable,
+  formatRelativeAge,
   formatTokenCount,
   formatToolPhaseHeader,
   formatToolResultLine,
@@ -38,7 +39,10 @@ import {
   formatHyperlink,
   formatMentionMenu,
   humanToolTitle,
+  presenceForTool,
+  presenceLabel,
   renderBeaconText,
+  renderPresence,
   renderSpinner,
   resolveSlashCommand,
   resolveTerminalTheme,
@@ -56,6 +60,7 @@ import {
   type BeaconActivity,
   type Painter,
   type PaletteColor,
+  type PresenceState,
   type SlashCommand,
   type SlashCommandId,
 } from "@demesne/brand";
@@ -64,7 +69,7 @@ import { join, resolve } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { CliContextRail } from "./context-rail.ts";
 import { TurnThroughputTracker } from "./turn-throughput.ts";
-import { TurnActivityLedger, type TurnPhase } from "./turn-activity.ts";
+import { TurnActivityLedger, isValidationCommand, type TurnPhase } from "./turn-activity.ts";
 import { TerminalTextPacer } from "./terminal-text-pacer.ts";
 import { selectSessionInteractive, sessionListItem } from "./session-picker.ts";
 import { matchModel, selectModelInteractive } from "./model-picker.ts";
@@ -472,8 +477,12 @@ async function readCommandPrompt(
 }
 
 try {
-  if (args.length === 0 || args[0] === "chat") {
-    await runChat(args[0] === "chat" ? args.slice(1) : args);
+  const first = args[0];
+  const chatFlags = first !== undefined
+    && first.startsWith("--")
+    && !["--version", "--help"].includes(first);
+  if (args.length === 0 || first === "chat" || chatFlags) {
+    await runChat(first === "chat" ? args.slice(1) : args);
   } else {
     await run(args);
   }
@@ -847,8 +856,16 @@ async function runChat(command: string[]): Promise<void> {
     chatState.refreshStreams?.();
   };
   process.stdout.on("resize", onTerminalResize);
-  if (workbench) workbench.start();
-  else renderWelcome();
+  if (workbench) {
+    workbench.start();
+    const turns = initialState.session.turns.length;
+    if (turns > 0) {
+      workbench.notice(
+        `resumed · last active ${formatRelativeAge(initialState.session.updatedAt)} · `
+          + `${turns} turn${turns === 1 ? "" : "s"} · ${sanitizeTerminalLine(initialState.session.title)}`,
+      );
+    }
+  } else renderWelcome();
 
   /// Command output helper: the workbench appends blocks to the conversation,
   /// while the scrollback renderer prints directly.
@@ -884,7 +901,7 @@ async function runChat(command: string[]): Promise<void> {
         workbench.finishTurn("failed", `Turn failed · ${sanitizeTerminalText(message)}`);
       } finally {
         chatState.streamActive = false;
-        workbench.setFooter("", statusLineText());
+        workbench.setFooter(`  ${renderPresence("idle", Date.now(), paint)} ${paint.dim("ready")}`, statusLineText());
       }
       return;
     }
@@ -1396,22 +1413,22 @@ async function runWorkbenchTurn(options: {
   const activity = new TurnActivityLedger();
   const throughput = new TurnThroughputTracker();
   const startedAt = Date.now();
-  let phase = "Thinking";
+  let presence: PresenceState = "thinking";
   let status: "completed" | "stopped" | "failed" = "completed";
   let failure: string | undefined;
+  const reduceMotion = reducedMotionEnabled();
+  const pacer = reduceMotion ? null : new TerminalTextPacer({
+    sink: (text) => options.workbench.assistantDelta(text),
+  });
 
   const updateFooter = () => {
     const elapsed = ((Date.now() - startedAt) / 1_000).toFixed(1);
     const speed = throughput.snapshot().tokensPerSecond;
     const queued = queueSummary(chatState.queuedInput ?? "");
-    const spinner = renderSpinner(
-      ((Date.now() % SPINNER_PERIOD_MS) / SPINNER_PERIOD_MS),
-      phase === "Responding" ? "generating" : phase === "Reasoning" ? "reasoning" : "thinking",
-      options.paint,
-    );
-    const left = `  ${spinner} ${options.paint.bold(phase, "paper")} ${options.paint.dim(
-      `· ${elapsed}s${speed === null ? "" : ` · ${speed.toFixed(0)} tok/s`}${queued ? ` · ⏎ ${queued}` : ""}`,
-    )}`;
+    const left = `  ${renderPresence(presence, Date.now(), options.paint)} `
+      + `${options.paint.bold(presenceLabel(presence), "paper")} ${options.paint.dim(
+        `· ${elapsed}s${speed === null ? "" : ` · ${speed.toFixed(0)} tok/s`}${queued ? ` · noted ${queued}` : ""}`,
+      )}`;
     options.workbench.setFooter(left, options.contextRail.statusLine(getTerminalWidth(process.stdout), options.paint));
   };
   const footerTimer = setInterval(updateFooter, 120);
@@ -1425,21 +1442,29 @@ async function runWorkbenchTurn(options: {
       throughput.apply(event);
 
       if (event.type === "model.request_started") {
-        phase = "Thinking";
+        presence = "thinking";
       } else if (event.type === "reasoning.delta" && typeof event.payload.delta === "string") {
-        phase = "Reasoning";
+        presence = "reasoning";
         options.workbench.reasoningDelta(event.payload.delta);
       } else if (event.type === "message.delta" && typeof event.payload.delta === "string") {
-        phase = "Responding";
-        options.workbench.assistantDelta(event.payload.delta);
+        presence = "writing";
+        if (pacer) {
+          pacer.observe(event.payload.delta);
+          pacer.write(event.payload.delta);
+        } else {
+          options.workbench.assistantDelta(event.payload.delta);
+        }
       } else if (event.type === "tool.call_requested") {
+        const name = String(event.payload.name ?? "tool");
         options.workbench.toolRequested({
           toolCallId: String(event.payload.toolCallId ?? ""),
-          name: String(event.payload.name ?? "tool"),
+          name,
           arguments: event.payload.arguments,
         });
+        presence = presenceForTool(name, isValidationCommand(toolDetailForPresence(name, event.payload.arguments)));
       } else if (event.type === "tool.call_started") {
-        phase = "Working";
+        const name = String(event.payload.name ?? "tool");
+        presence = presenceForTool(name, false);
       } else if (["tool.call_completed", "tool.call_failed", "tool.call_denied", "tool.call_cancelled", "tool.call_interrupted"].includes(event.type)) {
         const state = event.type === "tool.call_completed" && event.payload.timedOut !== true
           && (typeof event.payload.exitCode !== "number" || event.payload.exitCode === 0)
@@ -1452,7 +1477,7 @@ async function runWorkbenchTurn(options: {
           ...(typeof event.payload.durationMs === "number" ? { durationMs: event.payload.durationMs } : {}),
           ...(state === "failed" && typeof event.payload.message === "string" ? { message: event.payload.message } : {}),
         });
-        phase = "Thinking";
+        presence = "thinking";
       } else if (event.type === "model.context_trimmed") {
         const count = Array.isArray(event.payload.droppedTurnIds) ? event.payload.droppedTurnIds.length : 0;
         options.workbench.notice(`Context window reached; dropped ${count} older turn${count === 1 ? "" : "s"}.`, "info");
@@ -1464,12 +1489,15 @@ async function runWorkbenchTurn(options: {
         const rule = derivePersistedRule(toolName, rawArgs);
         let decision: PermissionDecision = "deny";
         if (permissionId) {
+          presence = "waiting";
+          updateFooter();
           decision = await options.workbench.askApproval({
             summary,
             toolName,
             previewRows: permissionPreviewRows(toolName, rawArgs, options.paint),
             allowPersist: rule !== null,
           });
+          presence = "working";
           if (decision === "allow_always" && rule) {
             try {
               const existing = settings.loaded.config.permissions.allow;
@@ -1488,16 +1516,20 @@ async function runWorkbenchTurn(options: {
         }
       } else if (event.type === "turn.completed") {
         status = "completed";
+        presence = "done";
         break;
       } else if (event.type === "turn.cancelled") {
         status = "stopped";
+        presence = "stopped";
         break;
       } else if (event.type === "turn.failed") {
         status = "failed";
+        presence = "error";
         failure = typeof event.payload.message === "string" ? event.payload.message : "Turn failed";
         break;
       } else if (event.type === "turn.interrupted") {
         status = "failed";
+        presence = "error";
         failure = typeof event.payload.message === "string" ? event.payload.message : "Turn interrupted";
         break;
       }
@@ -1505,6 +1537,7 @@ async function runWorkbenchTurn(options: {
     }
   } finally {
     clearInterval(footerTimer);
+    if (pacer) await pacer.drain();
     chatState.interrupt = undefined;
     controller.abort();
   }
@@ -1513,12 +1546,30 @@ async function runWorkbenchTurn(options: {
   const duration = ((Date.now() - startedAt) / 1_000).toFixed(1);
   const measured = throughput.snapshot();
   const speed = measured.decodeTokensPerSecond ?? measured.tokensPerSecond;
+  const findings = `${evidence.tools} finding${evidence.tools === 1 ? "" : "s"}`;
   const summary = status === "completed"
-    ? `complete · ${duration}s · ${evidence.rounds} round${evidence.rounds === 1 ? "" : "s"} · ${evidence.tools} tool${evidence.tools === 1 ? "" : "s"}`
+    ? `done · ${duration}s · ${evidence.rounds} round${evidence.rounds === 1 ? "" : "s"} · ${evidence.tools} tool${evidence.tools === 1 ? "" : "s"}`
       + (measured.outputTokens ? ` · ${measured.outputTokens} tok` : "")
       + (speed ? ` · ${speed.toFixed(1)} tok/s` : "")
-    : failure ?? "turn stopped";
+    : status === "stopped"
+      ? `stopped after ${duration}s · kept ${findings}`
+      : failure ?? "hit a problem";
   options.workbench.finishTurn(status, summary);
+}
+
+/// Best-effort command extraction for presence purposes; the activity ledger
+/// owns the full detail rendering.
+function toolDetailForPresence(name: string, rawArguments: unknown): string {
+  if (name !== "run_command" || typeof rawArguments !== "string") return "";
+  try {
+    const parsed: unknown = JSON.parse(rawArguments);
+    if (isRecord(parsed) && Array.isArray(parsed.argv) && parsed.argv.every((value) => typeof value === "string")) {
+      return (parsed.argv as string[]).join(" ");
+    }
+  } catch {
+    // Fall through to the non-validation state.
+  }
+  return "";
 }
 
 function permissionPreviewRows(toolName: string | undefined, rawArgs: unknown, painter: Painter): string[] {

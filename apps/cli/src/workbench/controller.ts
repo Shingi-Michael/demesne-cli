@@ -5,16 +5,19 @@ import {
   formatMentionMenu,
   formatPermissionCard,
   formatSlashCommandMenu,
-  renderSpinner,
+  presenceForTool,
+  presenceLabel,
+  renderPresence,
+  renderRailCell,
   sanitizeTerminalLine,
   slashCommandMatches,
-  SPINNER_PERIOD_MS,
   TerminalMarkdownStream,
   truncateText,
   visibleLength,
   wrapDisplayText,
   type Painter,
   type PaletteColor,
+  type PresenceState,
   type SlashCommand,
 } from "@demesne/brand";
 import type { EventEnvelope, PermissionDecision } from "@demesne/protocol";
@@ -34,6 +37,7 @@ import { reduceQueuedInput } from "../input-queue.ts";
 import { reduceInterruptKey } from "../interrupt-key.ts";
 import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } from "../approval-selection.ts";
 import { reduceSessionPicker, type SessionPickerKey } from "../session-picker.ts";
+import { isValidationCommand } from "../turn-activity.ts";
 import { composeInEditor } from "../external-editor.ts";
 import type { CliContextRail } from "../context-rail.ts";
 
@@ -165,6 +169,7 @@ export class Workbench {
   private previousRows: string[] = [];
   private lastInterruptEscapeAt = 0;
   private sessionTitle: string;
+  private readonly expandedReasoning = new Set<number>();
 
   constructor(private readonly options: WorkbenchOptions) {
     this.sessionTitle = options.sessionTitle;
@@ -414,6 +419,15 @@ export class Workbench {
       this.requestRender();
       return;
     }
+    if (key.ctrl && key.name === "x") {
+      const last = this.entries.findLast((candidate): candidate is ReasoningEntry => candidate.type === "reasoning");
+      if (last) {
+        if (this.expandedReasoning.has(last.id)) this.expandedReasoning.delete(last.id);
+        else this.expandedReasoning.add(last.id);
+        this.requestRender();
+      }
+      return;
+    }
     if (key.name === "pageup") {
       this.viewport.scrollUp(10);
       this.requestRender();
@@ -535,39 +549,52 @@ export class Workbench {
         return [`  ${paint.text("›", "electric")} ${text}  ${paint.dim(entry.at)}`, ""];
       }
       case "assistant": {
-        const rail = paint.text("  │ ", "rule");
-        const header = `  ${paint.text("◆", "citron")} ${paint.dim("demesne")}`;
+        const header = `  ${renderPresence(entry.streaming ? "writing" : "done", Date.now(), paint)} ${paint.dim("demesne")}`;
         const body = entry.raw ? this.renderedMarkdown(entry, width) : [paint.dim("…")];
-        return [header, ...body.map((line) => `${rail}${line}`), ""];
+        const now = Date.now();
+        return [
+          header,
+          ...body.map((line, index) => `${renderRailCell(index, now, paint, entry.streaming)}${line}`),
+          "",
+        ];
       }
       case "reasoning": {
-        const body = wrapDisplayText(sanitizeTerminalLine(entry.raw.trim()), Math.max(8, width - 4));
-        const shown = entry.streaming ? body.slice(-3) : body.slice(0, 5);
-        const hidden = body.length - shown.length;
-        const more = hidden > 0 ? [paint.dim(`  ⋯ ${hidden} more lines`)] : [];
-        const tail = entry.streaming
-          ? [paint.dim("  reasoning…")]
-          : [paint.dim(`  thought for ${((entry.durationMs ?? 0) / 1_000).toFixed(1)}s`)];
-        return [...shown.map((line) => `${paint.dim("  ⋯ ")}${paint.dim(line)}`), ...more, ...tail, ""];
+        const now = Date.now();
+        const glyph = renderPresence("reasoning", now, paint);
+        const body = wrapDisplayText(sanitizeTerminalLine(entry.raw.trim()), Math.max(8, width - 6));
+        const duration = ((entry.durationMs ?? 0) / 1_000).toFixed(1);
+        if (entry.streaming) {
+          return [
+            `  ${glyph} ${paint.dim("thinking it through")}`,
+            ...body.slice(-3).map((line) => `    ${paint.dim(line)}`),
+            "",
+          ];
+        }
+        const expanded = this.expandedReasoning.has(entry.id);
+        const summary = `  ${paint.text("⋯", "rule")} ${paint.dim(`considered for ${duration}s${expanded ? "" : " · ctrl+x"}`)}`;
+        if (!expanded) return [summary, ""];
+        return [summary, ...body.map((line) => `    ${paint.dim(line)}`), ""];
       }
       case "tool": {
         const verb = toolVerb(entry.name);
-        const glyph = entry.state === "running"
-          ? renderSpinner((Date.now() % SPINNER_PERIOD_MS) / SPINNER_PERIOD_MS, "tool", paint, "electric")
+        const running = entry.state === "running";
+        const glyph = running
+          ? renderPresence(presenceForTool(entry.name, isValidationCommand(entry.detail ?? "")), Date.now(), paint)
           : entry.state === "done"
             ? paint.text("✓", "citron")
             : paint.text("×", "signal");
         const detail = entry.detail
-          ? ` ${paint.text(truncateText(sanitizeTerminalLine(entry.detail), Math.max(8, width - verb.length - 16)), "secondary")}`
+          ? ` ${paint.text(truncateText(sanitizeTerminalLine(entry.detail), Math.max(8, width - verb.length - 16)), running ? "rule" : "secondary")}`
           : "";
-        const duration = entry.state === "running" || entry.durationMs === undefined ? "" : paint.dim(` ${entry.durationMs}ms`);
+        const verbStyled = running ? paint.dim(verb) : paint.text(verb, "paper");
+        const duration = running || entry.durationMs === undefined ? "" : paint.dim(` ${entry.durationMs}ms`);
         const message = entry.state === "failed" && entry.message
           ? [`    ${paint.text(truncateText(sanitizeTerminalLine(entry.message), Math.max(8, width - 6)), "signal")}`]
           : [];
         const diffLines = entry.state === "done" && entry.diff
           ? formatDiffPreview(entry.diff.oldText, entry.diff.newText, 12, paint).map((line) => `    ${line}`)
           : [];
-        return [`  ${glyph} ${paint.text(verb, "paper")}${detail}${duration}`, ...message, ...diffLines];
+        return [`  ${glyph} ${verbStyled}${detail}${duration}`, ...message, ...diffLines];
       }
       case "notice": {
         const color: PaletteColor = entry.tone === "success" ? "citron" : entry.tone === "error" ? "signal" : "secondary";
@@ -626,7 +653,7 @@ export class Workbench {
   private composeHeader(width: number): string {
     const paint = this.options.paint;
     const model = this.options.contextRail.modelId;
-    const left = `  ${paint.bold("◆ DEMESNE", "paper")} ${paint.dim(this.options.version)} `
+    const left = `  ${renderPresence("idle", Date.now(), paint)} ${paint.bold("DEMESNE", "paper")} ${paint.dim(this.options.version)} `
       + `${paint.text("·", "rule")} ${paint.bold(truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(8, Math.floor(width / 3))), "paper")}`;
     const right = paint.dim(`${truncateText(sanitizeTerminalLine(model), 24)} · ctrl+t sidebar · pgup/pgdn scroll`);
     const padding = Math.max(1, width - visibleLength(left) - visibleLength(right));
@@ -678,7 +705,7 @@ export class Workbench {
       ? paint.dim(truncateText("Ask anything or type / for commands…", promptWidth))
       : "";
     for (let index = 0; index < layout.lines.length; index += 1) {
-      const prefix = index === 0 ? `  ${paint.text("◆", "electric")} ` : "    ";
+      const prefix = index === 0 ? `  ${renderPresence("listening", Date.now(), paint)} ` : "    ";
       lines.push(`${prefix}${layout.lines[index] || (index === 0 ? placeholder : "")}`);
     }
     cursor = { row: layout.cursorLine, column: 4 + layout.cursorCol };

@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conversation with inline diffs, live telemetry sidebar, list dialogs,
   in-frame approvals, and the unchanged fixed footer. `--no-tui` and
   `DEMESNE_NO_TUI=1` retain the streaming scrollback renderer.
+- Agent presence: state-driven animated glyphs, narrative footer labels,
+  a shimmering assistant rail, self-typing output, a collapsible thought
+  stream, ghost tools that solidify, and a resume greeting. `demesne
+  --session <id>` now starts chat directly.
 
 ## [0.1.0] - 2026-09-18
 

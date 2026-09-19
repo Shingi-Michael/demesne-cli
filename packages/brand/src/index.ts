@@ -1893,4 +1893,5 @@ export class TerminalMarkdownStream {
 }
 
 export * from "./highlight.ts";
+export * from "./presence.ts";
 export * from "./tensor-mark.ts";

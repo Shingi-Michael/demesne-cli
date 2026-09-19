@@ -102,6 +102,7 @@ import {
 } from "./daemon-control.ts";
 import { formatDoctorReport, runDoctor } from "./doctor.ts";
 import { runSetup } from "./setup.ts";
+import { narrateTurnEnd } from "./voice.ts";
 import { updateUserConfig } from "@demesne/config";
 import { createInterface } from "node:readline/promises";
 
@@ -1456,7 +1457,7 @@ async function runWorkbenchTurn(options: {
         const plan = event.payload.contextPlan;
         if (!softLimitWarned && isRecord(plan) && plan.budgetStatus === "over_soft_limit") {
           softLimitWarned = true;
-          options.workbench.notice("context is past the soft limit · keeping the prefix, compacting only if needed", "info");
+          options.workbench.notice("I’m past the soft limit — I’ll keep our history intact and compact only if I must.", "info");
         }
       } else if (event.type === "reasoning.delta" && typeof event.payload.delta === "string") {
         presence = "reasoning";
@@ -1565,14 +1566,19 @@ async function runWorkbenchTurn(options: {
   const measured = throughput.snapshot();
   const speed = measured.decodeTokensPerSecond ?? measured.tokensPerSecond;
   const findings = `${evidence.tools} finding${evidence.tools === 1 ? "" : "s"}`;
-  const summary = status === "completed"
-    ? `done · ${duration}s · ${evidence.rounds} round${evidence.rounds === 1 ? "" : "s"} · ${evidence.tools} tool${evidence.tools === 1 ? "" : "s"}`
+  const details = status === "completed"
+    ? `${duration}s · ${evidence.rounds} round${evidence.rounds === 1 ? "" : "s"} · ${evidence.tools} tool${evidence.tools === 1 ? "" : "s"}`
       + (measured.outputTokens ? ` · ${measured.outputTokens} tok` : "")
       + (speed ? ` · ${speed.toFixed(1)} tok/s` : "")
     : status === "stopped"
-      ? `stopped after ${duration}s · kept ${findings}`
-      : failure ?? "hit a problem";
-  options.workbench.finishTurn(status, summary);
+      ? `after ${duration}s I kept ${findings}`
+      : failure ? sentence(failure) : "";
+  options.workbench.finishTurn(status, narrateTurnEnd(status, details));
+}
+
+function sentence(value: string): string {
+  const text = value.replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim();
+  return (text.length > 200 ? `${text.slice(0, 199)}…` : text).replace(/[.!?]+$/, "");
 }
 
 /// Best-effort command extraction for presence purposes; the activity ledger

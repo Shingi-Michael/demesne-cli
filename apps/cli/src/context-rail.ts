@@ -272,6 +272,10 @@ export class CliContextRail {
     return this.model.id;
   }
 
+  get workspaceBranch(): string | null {
+    return this.branch;
+  }
+
   statusLine(width: number, painter: Painter, modelLabel?: string): string {
     const safeWidth = Math.max(16, width);
     const reportedTokens = exactUsageTotal(this.usage);

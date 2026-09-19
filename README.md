@@ -31,7 +31,19 @@ This launches the interactive streaming CLI directly in your terminal. A compact
 
 Interactive terminals open a full-screen workbench: a raised header bar with the session and model, a scrollable conversation with right-aligned turns, inline diffs, and syntax highlighting, a boxed composer, a live telemetry sidebar (context plan, last request, runtime, activity, changes, validations, tokens, and live memory pressure), and the fixed footer. `Ctrl+T` cycles the sidebar (auto/wide/hidden), `PgUp`/`PgDn` scroll, `Ctrl+G` returns to the bottom, `Ctrl+X` expands the last thought, and double-Escape or Ctrl+C interrupts. Non-interactive use, `--no-tui`, and `DEMESNE_NO_TUI=1` keep the streaming scrollback output byte-for-byte, so pipes and scripts are unaffected.
 
-The workbench is deliberately present rather than mechanical. An animated glyph in the header, prompt, and footer reflects the real state — listening, considering, reasoning, working, writing, checking, waiting for approval — and the footer says what is actually happening instead of a generic spinner. The assistant rail shimmers while text streams, output types itself at a human cadence, reasoning shows as a live thought stream that collapses to `considered for 4.2s · ctrl+x`, running tools render as ghosts that solidify when they finish, and resuming a session greets you with `resumed · last active 3h ago`. Reduced motion and `NO_COLOR` keep every glyph static and byte-stable.
+The workbench is deliberately present rather than mechanical, and deliberately
+quiet. The agent speaks in the first person: `I read src/lexer.ts.`, `I ran bun
+test — it passed.`, `I need your go-ahead: changing src/lexer.ts.`, and closes
+each turn with `I'm done — 1.2s · 3 tools · 14 t/s`. There are no frames, boxes,
+rules, or panes; only the wordmark, the breathing core, your right-aligned
+words, and the agent's voice. An animated glyph in the header, prompt, and
+footer reflects the real state — listening, considering, reasoning, working,
+writing, checking, waiting for approval — and the footer says what is actually
+happening instead of a generic spinner. Output types itself at a human cadence,
+reasoning streams live and collapses to `I thought about this for 4.2s ·
+ctrl+x`, a resumed session greets you (`resumed · last active 3h ago`), and a
+turn that starts past the soft limit warns you once in the agent's voice.
+Reduced motion and `NO_COLOR` keep every glyph static and byte-stable.
 
 The footer's left side reports the active phase and elapsed time while its right side prioritizes runtime verification, model identity, the workspace git branch, and a five-cell context meter with an estimated percentage. The footer preserves the cursor during resize, degrades to inline status on very short terminals, and avoids rewriting unchanged content.
 

@@ -1,16 +1,12 @@
 import {
   computePromptVisualLines,
-  createPainter,
   formatDiffPreview,
   formatFooterLine,
   formatMentionMenu,
   formatPermissionCard,
   formatSlashCommandMenu,
-  padVisibleEnd,
   presenceForTool,
-  presenceLabel,
   renderPresence,
-  renderRailCell,
   sanitizeTerminalLine,
   slashCommandMatches,
   TerminalMarkdownStream,
@@ -41,6 +37,7 @@ import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } fro
 import { reduceSessionPicker, type SessionPickerKey } from "../session-picker.ts";
 import { isValidationCommand } from "../turn-activity.ts";
 import { composeInEditor } from "../external-editor.ts";
+import { narrateToolIntent, narrateToolOutcome } from "../voice.ts";
 import type { CliContextRail } from "../context-rail.ts";
 
 /// Full-screen workbench.
@@ -82,10 +79,13 @@ interface ToolEntry {
   type: "tool";
   toolCallId: string;
   name: string;
+  input: Record<string, unknown>;
   detail?: string;
   state: ToolState;
   durationMs?: number;
   message?: string;
+  exitCode?: number;
+  created?: boolean;
   diff?: { oldText: string; newText: string };
   startedAt: number;
   waiting?: boolean;
@@ -98,18 +98,13 @@ interface NoticeEntry {
   tone: "info" | "success" | "error";
 }
 
-interface RuleEntry {
-  id: number;
-  type: "rule";
-}
-
 interface BlockEntry {
   id: number;
   type: "block";
   lines: string[];
 }
 
-type WorkbenchEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry | RuleEntry | BlockEntry;
+type WorkbenchEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry | BlockEntry;
 
 export interface ApprovalRequest {
   summary: string;
@@ -136,25 +131,6 @@ export interface WorkbenchOptions {
     set(value: string): void;
   };
 }
-
-/// Plain painter used for bar chrome where nested colors would reset the
-/// background; the animated glyph shape still carries state.
-const PLAIN_PAINTER = createPainter(false, "dark");
-
-const TOOL_VERBS: Record<string, string> = {  list_files: "list",
-  read_file: "read",
-  read_files: "read",
-  search_files: "search",
-  edit_file: "edit",
-  write_file: "write",
-  git_status: "status",
-  git_diff: "diff",
-  move_path: "move",
-  delete_path: "delete",
-  run_command: "run",
-  command_logs: "logs",
-  command_stop: "stop",
-};
 
 export class Workbench {
   private readonly viewport = new ConversationViewport();
@@ -309,6 +285,7 @@ export class Workbench {
       type: "tool",
       toolCallId: input.toolCallId,
       name: input.name,
+      input: parsed,
       detail: toolDetail(input.name, parsed),
       state: "running",
       startedAt: Date.now(),
@@ -319,7 +296,15 @@ export class Workbench {
     this.requestRender();
   }
 
-  toolFinished(input: { toolCallId: string; name: string; state: ToolState; durationMs?: number; message?: string }): void {
+  toolFinished(input: {
+    toolCallId: string;
+    name: string;
+    state: ToolState;
+    durationMs?: number;
+    message?: string;
+    exitCode?: number;
+    created?: boolean;
+  }): void {
     const entry = this.entries.findLast(
       (candidate): candidate is ToolEntry => candidate.type === "tool" && candidate.toolCallId === input.toolCallId,
     );
@@ -328,6 +313,8 @@ export class Workbench {
     entry.waiting = false;
     entry.durationMs = input.durationMs ?? Math.max(0, Date.now() - entry.startedAt);
     if (input.message) entry.message = input.message;
+    if (input.exitCode !== undefined) entry.exitCode = input.exitCode;
+    if (input.created !== undefined) entry.created = input.created;
     this.requestRender();
   }
 
@@ -346,7 +333,7 @@ export class Workbench {
     this.closeReasoning();
     this.finishAssistant();
     this.notice(summary, status === "completed" ? "success" : status === "failed" ? "error" : "info");
-    this.entries.push({ id: this.nextId++, type: "rule" });
+    this.entries.push({ id: this.nextId++, type: "block", lines: [] as string[] });
     this.requestRender();
   }
 
@@ -589,14 +576,10 @@ export class Workbench {
         ];
       }
       case "assistant": {
-        const header = `  ${renderPresence(entry.streaming ? "writing" : "done", Date.now(), paint)} ${paint.dim("demesne")}`;
-        const body = entry.raw ? this.renderedMarkdown(entry, width) : [paint.dim("…")];
         const now = Date.now();
-        return [
-          header,
-          ...body.map((line, index) => `${renderRailCell(index, now, paint, entry.streaming)}${line}`),
-          "",
-        ];
+        const glyph = renderPresence(entry.streaming ? "writing" : "done", now, paint);
+        const body = entry.raw ? this.renderedMarkdown(entry, width) : [paint.dim("…")];
+        return [`  ${glyph}`, "", ...body.map((line) => `  ${line}`), ""];
       }
       case "reasoning": {
         const now = Date.now();
@@ -611,43 +594,43 @@ export class Workbench {
           ];
         }
         const expanded = this.expandedReasoning.has(entry.id);
-        const summary = `  ${paint.text("⋯", "rule")} ${paint.dim(`considered for ${duration}s${expanded ? "" : " · ctrl+x"}`)}`;
+        const summary = `  ${paint.text("⋯", "rule")} ${paint.dim(`I thought about this for ${duration}s${expanded ? "" : " · ctrl+x"}`)}`;
         if (!expanded) return [summary, ""];
         return [summary, ...body.map((line) => `    ${paint.dim(line)}`), ""];
       }
       case "tool": {
-        const verb = toolVerb(entry.name);
+        const now = Date.now();
+        const input = entry.input;
         const running = entry.state === "running";
         const glyph = entry.waiting
-          ? renderPresence("waiting", Date.now(), paint)
+          ? renderPresence("waiting", now, paint)
           : running
-            ? renderPresence(presenceForTool(entry.name, isValidationCommand(entry.detail ?? "")), Date.now(), paint)
+            ? renderPresence(presenceForTool(entry.name, isValidationCommand(entry.detail ?? "")), now, paint)
             : entry.state === "done"
               ? paint.text("✓", "citron")
               : paint.text("×", "signal");
-        const detail = entry.detail
-          ? ` ${paint.text(truncateText(sanitizeTerminalLine(entry.detail), Math.max(8, width - verb.length - 30)), running ? "rule" : "secondary")}`
-          : "";
-        const verbStyled = running ? paint.dim(verb) : paint.text(verb, "paper");
-        const waiting = entry.waiting ? ` ${paint.text("· waiting for your go-ahead", "signal")}` : "";
-        const duration = running || entry.durationMs === undefined ? "" : paint.dim(` ${entry.durationMs}ms`);
-        const message = entry.state === "failed" && entry.message
-          ? [`    ${paint.text(truncateText(sanitizeTerminalLine(entry.message), Math.max(8, width - 6)), "signal")}`]
-          : [];
+        const narration = entry.waiting
+          ? `${paint.dim(narrateToolIntent(entry.name, input))} ${paint.text("· I need your go-ahead", "signal")}`
+          : entry.state === "running"
+            ? paint.dim(narrateToolOutcome(entry.name, input, { state: "running" }))
+            : narrateToolOutcome(entry.name, input, entry.state === "failed"
+              ? { state: "failed", ...(entry.message ? { message: entry.message } : {}) }
+              : entry.state === "denied"
+                ? { state: "denied" }
+                : { state: "done", ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}), ...(entry.created !== undefined ? { created: entry.created } : {}) });
+        const duration = running || entry.durationMs === undefined ? "" : ` ${paint.dim(`${entry.durationMs}ms`)}`;
         const diffLines = entry.state === "done" && entry.diff
-          ? formatDiffPreview(entry.diff.oldText, entry.diff.newText, 12, paint).map((line) => `    ${line}`)
+          ? formatDiffPreview(entry.diff.oldText, entry.diff.newText, 12, paint).map((line) => `      ${line}`)
           : [];
-        return [`  ${glyph} ${verbStyled}${detail}${waiting}${duration}`, ...message, ...diffLines];
+        return [`  ${glyph} ${narration}${duration}`, ...diffLines];
       }
       case "notice": {
         const color: PaletteColor = entry.tone === "success" ? "citron" : entry.tone === "error" ? "signal" : "secondary";
         const glyph = entry.tone === "success" ? "✓" : entry.tone === "error" ? "×" : "·";
         return [`  ${paint.text(glyph, color)} ${paint.dim(truncateText(sanitizeTerminalLine(entry.text), Math.max(8, width - 4)))}`, ""];
       }
-      case "rule":
-        return [`  ${paint.text("─".repeat(Math.max(4, width - 4)), "rule")}`, ""];
       case "block":
-        return [...entry.lines.map((line) => `  ${line}`), ""];
+        return entry.lines.length === 0 ? [""] : [...entry.lines.map((line) => `  ${line}`), ""];
     }
   }
 
@@ -698,14 +681,12 @@ export class Workbench {
   private composeHeader(width: number): string {
     const paint = this.options.paint;
     const model = this.options.contextRail.modelId;
-    const glyph = renderPresence("idle", Date.now(), PLAIN_PAINTER);
-    const left = ` ${glyph} DEMESNE ${this.options.version}  ·  ${truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(8, Math.floor(width / 3)))}`;
-    const right = `${truncateText(sanitizeTerminalLine(model), 24)} · ctrl+t `;
+    const branch = this.options.contextRail.workspaceBranch;
+    const glyph = renderPresence("idle", Date.now(), paint);
+    const left = `  ${glyph} ${paint.bold("demesne", "paper")} · ${paint.dim(truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(8, Math.floor(width / 3))))}`;
+    const right = paint.dim(`${truncateText(sanitizeTerminalLine(model), 26)}${branch ? ` · ${sanitizeTerminalLine(branch)}` : ""}`);
     const padding = Math.max(1, width - visibleLength(left) - visibleLength(right));
-    const content = truncateText(`${left}${" ".repeat(padding)}${right}`, width);
-    // A raised background bar reads as application chrome rather than another
-    // line of output; the fixed footer below stays plain.
-    return paint.onBackground(paint.bold(content, "paper"), "raised");
+    return truncateText(`${left}${" ".repeat(padding)}${right}`, width);
   }
 
   private sidebarLines(): string[] {
@@ -721,26 +702,7 @@ export class Workbench {
     return [...rail, ...memory].slice(0, height);
   }
 
-  /// Draws the input region as a boxed composer; the fixed footer below it is
-  /// intentionally left plain.
   private composeInput(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
-    const paint = this.options.paint;
-    const inner = Math.max(12, width - 6);
-    const content = this.composeInputContent(inner);
-    const border = (text: string) => paint.text(text, "rule");
-    const horizontal = "─".repeat(inner + 2);
-    const lines = [`  ${border(`╭${horizontal}╮`)}`];
-    for (const line of content.lines) {
-      lines.push(`  ${border("│")} ${padVisibleEnd(line, inner)} ${border("│")}`);
-    }
-    lines.push(`  ${border(`╰${horizontal}╯`)}`);
-    const cursor = content.cursor
-      ? { row: content.cursor.row + 1, column: content.cursor.column + 4 }
-      : null;
-    return { lines, cursor };
-  }
-
-  private composeInputContent(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
     const paint = this.options.paint;
     const lines: string[] = [];
     let cursor: { row: number; column: number } | null = null;
@@ -772,7 +734,7 @@ export class Workbench {
     const promptWidth = Math.max(10, width - 4);
     const layout = computePromptVisualLines(this.editor.value, this.editor.cursor, promptWidth);
     const placeholder = this.editor.value.length === 0 && this.matchingCommands().length === 0
-      ? paint.dim(truncateText("Ask anything or type / for commands…", promptWidth))
+      ? paint.dim(truncateText("this is where we talk — type / for commands", promptWidth))
       : "";
     for (let index = 0; index < layout.lines.length; index += 1) {
       const prefix = index === 0 ? `  ${renderPresence("listening", Date.now(), paint)} ` : "    ";
@@ -822,13 +784,4 @@ function toolDetail(name: string, input: Record<string, unknown>): string | unde
   }
   if (typeof input.query === "string") return `"${input.query}"`;
   return undefined;
-}
-
-function toolVerb(name: string): string {
-  if (TOOL_VERBS[name]) return TOOL_VERBS[name];
-  if (name.startsWith("mcp__")) {
-    const [, server, tool] = name.split("__");
-    return `${server}/${tool}`;
-  }
-  return name;
 }

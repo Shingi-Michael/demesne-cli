@@ -73,6 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   turns, turn rules, approval-pending ghosts, a soft-limit heads-up, and live
   swap pressure in the sidebar. The sidebar now appears from 84 columns (72 in
   wide mode).
+- The clean redesign: all chrome except the wordmark, the core, and the
+  footer is gone. A new voice module narrates every tool action in the first
+  person (`I read src/lexer.ts.`, `I ran bun test — it passed.`), actions
+  pending approval ask in the agent's voice, and turns close with `I'm done —
+  ...`. The composer is a plain prompt line, and custom commands in the
+  workbench follow per-turn input.
 
 ## [0.1.0] - 2026-09-18
 

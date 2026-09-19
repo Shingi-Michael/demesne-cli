@@ -74,40 +74,6 @@ function ansiPalette(source: Record<PaletteColor, string>, mode: "38" | "48"): R
   ) as Record<PaletteColor, string>;
 }
 
-/// The workbench's own identity: a deep-space stage with neon accents. The
-/// scrollback renderer keeps the canonical warm palette so scripted output
-/// stays byte-stable, while the full-screen interface reads unmistakably as
-/// a different, brighter machine.
-export const neonTerminalPalette: Record<PaletteColor, string> = {
-  ink: "#0A0C14",
-  paper: "#E8ECF8",
-  surface: "#0F1220",
-  raised: "#161A2B",
-  rule: "#2A3250",
-  secondary: "#7C86A6",
-  electric: "#58C6FF",
-  electricBright: "#9FDBFF",
-  signal: "#FF5C7A",
-  citron: "#3DF0B0",
-};
-
-export const neonLightTerminalPalette: Record<PaletteColor, string> = {
-  ink: "#0A0C14",
-  paper: "#10131F",
-  surface: "#E9EDF5",
-  raised: "#DDE3F0",
-  rule: "#B9C2D8",
-  secondary: "#5A6480",
-  electric: "#1E8AD1",
-  electricBright: "#146DA8",
-  signal: "#D63A5C",
-  citron: "#0B9E6F",
-};
-
-export function createNeonPainter(enabled: boolean, theme: TerminalTheme = "dark"): Painter {
-  return buildPainter(enabled, theme, neonTerminalPalette, neonLightTerminalPalette);
-}
-
 export interface Painter {
   readonly enabled: boolean;
   readonly theme: TerminalTheme;
@@ -325,6 +291,123 @@ export function truncateText(str: string, maxLen: number): string {
   if (visibleLength(str) <= maxLen) return str;
   if (maxLen <= 0) return "";
   return sliceAnsi(str, 0, maxLen, { ellipsis: "…" });
+}
+
+/// The harness alignment grid.
+///
+/// Every line in the conversation is placed on this grid so marks, verbs,
+/// targets, and durations line up in columns. Cleanliness comes from the grid,
+/// not from decoration: one accent, monochrome text, and status color that
+/// always means the same thing.
+export const HARNESS = {
+  /// Left margin before any mark.
+  margin: 2,
+  /// Column where the agent's mark sits.
+  mark: 2,
+  /// Column where the agent's prose starts.
+  content: 4,
+  /// Column where a tool row's status glyph sits.
+  toolMark: 4,
+  /// Column where a tool row's target starts.
+  toolTarget: 15,
+  /// Width reserved for the tool verb.
+  toolVerb: 8,
+  /// Right margin for aligned durations.
+  gutter: 2,
+} as const;
+
+export type ToolRowState = "running" | "done" | "failed" | "denied" | "waiting";
+
+/// One aligned tool row: `    ✓ read    src/lexer.ts              12ms`.
+///
+/// The mark is supplied by the caller so running rows can animate while
+/// settled rows stay static and byte-stable.
+export function formatToolRow(
+  state: ToolRowState,
+  verb: string,
+  target: string | undefined,
+  meta: string | undefined,
+  width: number,
+  painter: Painter,
+  mark?: string,
+): string {
+  const safeWidth = Math.max(HARNESS.toolTarget + 12, width);
+  const glyph = mark ?? defaultToolGlyph(state, painter);
+  const color: PaletteColor = state === "done" ? "citron" : state === "running" ? "secondary" : "signal";
+  const label = truncateText(sanitizeTerminalLine(verb), HARNESS.toolVerb);
+  // mark + gap + verb field + gap == HARNESS.toolTarget, so every target
+  // starts on the same column regardless of verb or state length.
+  const prefix = `${" ".repeat(HARNESS.toolMark)}${glyph} ${painter.text(label.padEnd(HARNESS.toolVerb), color)} `;
+  const metaText = meta === undefined ? "" : painter.dim(sanitizeTerminalLine(meta));
+  const metaWidth = visibleLength(metaText);
+  const available = Math.max(6, safeWidth - HARNESS.gutter - visibleLength(prefix));
+  const targetWidth = Math.max(4, available - metaWidth - (metaWidth > 0 ? 1 : 0));
+  const targetText = target === undefined
+    ? ""
+    : painter.text(truncateText(sanitizeTerminalLine(target), targetWidth), state === "done" ? "paper" : color);
+  const gap = Math.max(metaWidth > 0 ? 1 : 0, available - visibleLength(targetText) - metaWidth);
+  return `${prefix}${targetText}${" ".repeat(gap)}${metaText}${" ".repeat(HARNESS.gutter)}`;
+}
+
+function defaultToolGlyph(state: ToolRowState, painter: Painter): string {
+  switch (state) {
+    case "done": return painter.text("✓", "citron");
+    case "failed": return painter.text("×", "signal");
+    case "denied": return painter.text("!", "signal");
+    case "waiting": return painter.text("◆", "signal");
+    case "running": return painter.text("◌", "secondary");
+  }
+}
+
+/// Opens a turn with a labeled rule: `  ┌ you ──────────────────── 21:03`.
+export function formatTurnOpener(
+  label: string,
+  timestamp: string | undefined,
+  width: number,
+  painter: Painter,
+): string {
+  const safeWidth = Math.max(24, width);
+  const head = `${" ".repeat(HARNESS.margin)}${painter.text("┌", "rule")} ${painter.text(sanitizeTerminalLine(label).toLowerCase(), "secondary")}`;
+  const time = timestamp ? painter.dim(sanitizeTerminalLine(timestamp)) : "";
+  const timeWidth = visibleLength(time);
+  const used = visibleLength(head) + 1 + (timeWidth > 0 ? timeWidth + 1 : 0);
+  const ruleWidth = Math.max(3, safeWidth - used);
+  const rule = painter.text("─".repeat(ruleWidth), "rule");
+  return `${head} ${rule}${timeWidth > 0 ? ` ${time}` : ""}`;
+}
+
+/// The harness's single ambient element: a hairline carrying a traveling
+/// light. `progress` is the light's position (0..1) and `intensity` how bright
+/// and wide it is, so the line visibly quickens while the model streams and
+/// settles to a faint drift when idle. Quantized to palette roles so it works
+/// without truecolor and stays byte-stable when color is disabled.
+export function formatPulseLine(
+  width: number,
+  progress: number,
+  intensity: number,
+  painter: Painter,
+): string {
+  const safeWidth = Math.max(8, Math.floor(width));
+  const center = Math.max(0, Math.min(1, progress)) * (safeWidth - 1);
+  const spread = 2 + Math.max(0, Math.min(1, intensity)) * 7;
+  const levels: Array<{ color: PaletteColor; threshold: number }> = [
+    { color: "electricBright", threshold: 0.78 },
+    { color: "electric", threshold: 0.45 },
+    { color: "secondary", threshold: 0.16 },
+  ];
+  let line = "";
+  for (let index = 0; index < safeWidth; index += 1) {
+    const distance = Math.abs(index - center);
+    const falloff = Math.max(0, 1 - distance / spread) * Math.max(0, Math.min(1, intensity));
+    const level = levels.find((candidate) => falloff >= candidate.threshold);
+    line += level ? painter.text("─", level.color) : painter.text("─", "rule");
+  }
+  return line;
+}
+
+/// A block caret shown at the end of streaming prose.
+export function streamingCaret(painter: Painter): string {
+  return painter.text("▍", "electric");
 }
 
 export function formatFooterLine(left: string, right: string, width: number): string {

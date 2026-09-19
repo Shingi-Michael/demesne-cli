@@ -29,29 +29,36 @@ explicitly. `demesne doctor --json` emits machine-readable checks for scripts.
 
 This launches the interactive streaming CLI directly in your terminal. A compact masthead shows the active model, workspace, and approval policy. While output is silent, a phase-aware beacon occupies the fixed footer; it is cleared before permanent reasoning, tool, or response output is written. Interactive TTY responses pass through an ANSI- and grapheme-safe jitter buffer that turns speculative decoding bursts into a smooth typing cadence. The cadence adapts to visible text arrival and catches up within a bounded 1.5-second backlog; tools, errors, cancellation, and completion always drain or flush it before rendering. Scripted `prompt` output, pipes, event JSON, and persisted response text remain immediate and byte-for-byte unchanged.
 
-The workbench carries its own visual identity, separate from the scrollback's
-warm palette: a deep-space stage (`#0A0C14`) with neon accents — cyan
-`#58C6FF`, violet `#8F7BFF`, mint `#3DF0B0`, amber `#FFB454`, signal
-`#FF5C7A`. The header is a glass panel with a cyan-to-violet gradient wordmark,
-the sidebar is a distinct surface column, the composer is framed by a gradient
-border that turns amber when approval is pending, and the agent's core sits in
-a glowing raised block that changes color with its state. The footer keeps its
-contract and the scrollback renderer keeps its byte-stable palette for pipes,
-`prompt`, and `--no-tui`.
+Interactive terminals open the Demesne harness: one clean column on a strict alignment grid, with a header, the transcript, a pulse hairline, the composer, and the fixed footer. `Ctrl+T` toggles the telemetry sidebar, `PgUp`/`PgDn` scroll, `Ctrl+G` returns to the bottom, `Ctrl+X` expands the last thought, and double-Escape or Ctrl+C interrupts. Non-interactive use, `--no-tui`, and `DEMESNE_NO_TUI=1` keep the streaming scrollback output byte-for-byte, so pipes and scripts are unaffected.
 
-The workbench is deliberately present rather than mechanical, and deliberately
-quiet. The agent speaks in the first person: `I read src/lexer.ts.`, `I ran bun
-test — it passed.`, `I need your go-ahead: changing src/lexer.ts.`, and closes
-each turn with `I'm done — 1.2s · 3 tools · 14 t/s`. There are no frames, boxes,
-rules, or panes; only the wordmark, the breathing core, your right-aligned
-words, and the agent's voice. An animated glyph in the header, prompt, and
-footer reflects the real state — listening, considering, reasoning, working,
-writing, checking, waiting for approval — and the footer says what is actually
-happening instead of a generic spinner. Output types itself at a human cadence,
-reasoning streams live and collapses to `I thought about this for 4.2s ·
-ctrl+x`, a resumed session greets you (`resumed · last active 3h ago`), and a
-turn that starts past the soft limit warns you once in the agent's voice.
-Reduced motion and `NO_COLOR` keep every glyph static and byte-stable.
+The harness follows four rules. **One grid**: marks, verbs, targets, and durations sit on fixed columns, so order comes from alignment rather than boxes. **One accent**: text is monochrome and color is reserved for the agent's mark and for status that always means the same thing (`✓` done, `×` failed, `!` denied, `◆` needs you). **Motion means something**: only the active turn animates — its mark, the pulse hairline whose speed tracks real token throughput, and the streaming caret — so settled scrollback never flickers. **The agent speaks**: turns close in its own voice, a pending action reports `needs you`, reasoning collapses to `⋯ thought 4.2s`, and a resumed session says how long it has been away.
+
+```text
+  ◈ demesne · parser hardening                    qwen3.8-27b · llama.cpp
+  ┌ you ──────────────────────────────────────────────────────── 21:03
+    fix the parser
+
+    ⋯ thought 4.2s · ctrl+x
+    ✓ read     src/lexer.ts                                      12ms
+
+  ◍ I read the guard. It rejects everything above 127, so I will
+    narrow it to a proper unicode check.
+
+    ✓ edit     src/lexer.ts                                       8ms
+               - if (c > 127) throw new Error("bad byte")
+               + if (c > 0x7f) continue
+    ✓ run      $ bun test                                        1.2s
+               610 pass · 0 fail
+
+  ◆ I changed the guard and the tests pass.
+
+    ✓ I'm done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s
+──────────────────────────────────────────────────────────────────────
+  ◇ ask anything · / for commands
+  ◍ writing · 0:06 · 18.2 tok/s      qwen3.8-27b · main · ▰▰▱▱▱ 4%
+```
+
+Run `bun run ui:preview` to watch this design animate through its states. Reduced motion and `NO_COLOR` keep every glyph static and byte-stable.
 
 The footer's left side reports the active phase and elapsed time while its right side prioritizes runtime verification, model identity, the workspace git branch, and a five-cell context meter with an estimated percentage. The footer preserves the cursor during resize, degrades to inline status on very short terminals, and avoids rewriting unchanged content.
 

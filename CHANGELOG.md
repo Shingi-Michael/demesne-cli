@@ -85,6 +85,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   avatar whose color tracks the agent's state. Only the workbench uses it —
   scripted output keeps the canonical palette.
 
+### Changed
+
+- Replaced the decorated workbench with the Demesne harness: one clean column
+  on a strict alignment grid (`HARNESS`), monochrome text with a single accent,
+  and color reserved for status that always means the same thing. Removed the
+  neon palette, glass panels, gradient wordmark, and gradient composer border.
+- Tool rows are structural (`✓ edit  src/lexer.ts  8ms`) instead of narrated
+  sentences, which collided with the verb column; the agent's voice stays in
+  its prose and turn notices.
+- Assistant prose now closes per model round and the pacer drains before tool
+  and permission events, fixing a split-sentence defect where paced text
+  flushed after the block had closed.
+- Motion is bound to meaning: only the active turn animates, the pulse hairline
+  speed tracks real token throughput, and the sidebar is hidden by default.
+
 ## [0.1.0] - 2026-09-18
 
 ### Added

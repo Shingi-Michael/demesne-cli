@@ -1,15 +1,19 @@
 import {
   computePromptVisualLines,
-  createPainter,
   formatDiffPreview,
   formatFooterLine,
   formatMentionMenu,
   formatPermissionCard,
+  formatPulseLine,
   formatSlashCommandMenu,
+  formatToolRow,
+  formatTurnOpener,
+  HARNESS,
   presenceForTool,
   renderPresence,
   sanitizeTerminalLine,
   slashCommandMatches,
+  streamingCaret,
   TerminalMarkdownStream,
   truncateText,
   visibleLength,
@@ -18,8 +22,8 @@ import {
   type PaletteColor,
   type PresenceState,
   type SlashCommand,
+  type ToolRowState,
 } from "@demesne/brand";
-import { bgCode, fgCode, gradientRule, rgb, NEON, RESET } from "./color.ts";
 import type { EventEnvelope, PermissionDecision } from "@demesne/protocol";
 import { emitKeypressEvents } from "node:readline";
 import { computeWorkbenchLayout, type SidebarMode, type WorkbenchLayout } from "./layout.ts";
@@ -39,15 +43,21 @@ import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } fro
 import { reduceSessionPicker, type SessionPickerKey } from "../session-picker.ts";
 import { isValidationCommand } from "../turn-activity.ts";
 import { composeInEditor } from "../external-editor.ts";
-import { narrateToolIntent, narrateToolOutcome } from "../voice.ts";
 import type { CliContextRail } from "../context-rail.ts";
 
-/// Full-screen workbench.
+/// The Demesne harness.
 ///
-/// The controller owns the alternate screen, a single keypress listener, and
-/// the conversation model. It renders a complete frame on demand (header,
-/// viewport, telemetry sidebar, input, fixed footer) and writes only changed
-/// rows, so beacon ticks touch just the footer.
+/// Design rules, in order of importance:
+///
+/// 1. One grid. Every line sits on `HARNESS` columns so marks, verbs, targets,
+///    and durations align. Order comes from alignment, not from boxes.
+/// 2. One accent. Text is monochrome; color is reserved for the agent's mark
+///    and for status that always means the same thing.
+/// 3. Motion means something. Only the active turn animates: its mark, the
+///    pulse hairline, and the streaming caret. Settled turns are static, so
+///    scrollback never flickers and diffs of output stay stable.
+/// 4. The agent speaks. Tool activity is narrated in the first person, so the
+///    transcript reads as a presence describing its work.
 
 export type WorkbenchMode = "input" | "streaming" | "approval" | "dialog";
 export type ToolState = "running" | "done" | "failed" | "denied";
@@ -134,44 +144,23 @@ export interface WorkbenchOptions {
   };
 }
 
-const BOLD = "\x1b[1m";
-const DIM_RENDER = "\x1b[2m";
-/// Painter stripped of color, used only to extract presence glyph characters.
-const GLYPH = createPainter(false, "dark");
-
-/// Wraps content in the header panel background, re-establishing the
-/// background after every inner reset so nested colors never leak off-panel.
-function panelSpan(value: string): string {
-  return `${bgCode(NEON.raised)}${value.replace(/\x1b\[0m/g, `${fgCode(NEON.text)}${bgCode(NEON.raised)}`)}${RESET}`;
-}
-
-/// The agent's core avatar: a raised block with a glowing state glyph.
-function avatar(state: PresenceState, now: number, color: string): string {
-  const glyph = renderPresence(state, now, GLYPH);
-  return panelSpan(` ${BOLD}${rgb(glyph, color)} `);
-}
-
-/// Wraps sidebar rows in the surface background for a glass column.
-function surfaceSpan(value: string, padTo: number): string {
-  const text = `${value}${" ".repeat(Math.max(0, padTo - visibleLength(value)))}`;
-  return `${bgCode(NEON.surface)}${text.replace(/\x1b\[0m/g, `${fgCode(NEON.text)}${bgCode(NEON.surface)}`)}${RESET}`;
-}
-
-/// A horizontal gradient hairline for the composer border.
-function hairline(from: string, to: string, width: number): string {
-  return gradientRule("─", from, to, Math.max(1, width));
-}
-
-function stripAll(value: string): string {
-  return value.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
-}
-
-function midHex(a: string, b: string, t: number): string {
-  const pa = parseInt(a.slice(1), 16);
-  const pb = parseInt(b.slice(1), 16);
-  const f = (shift: number) => Math.round(((pa >> shift) & 0xff) + (((pb >> shift) & 0xff) - ((pa >> shift) & 0xff)) * t);
-  return `#${[f(16), f(8), f(0)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
-}
+/// Verbs for the aligned tool column. Short and lowercase so the column reads
+/// as a label, not as prose.
+const TOOL_VERBS: Record<string, string> = {
+  list_files: "list",
+  read_file: "read",
+  read_files: "read",
+  search_files: "search",
+  edit_file: "edit",
+  write_file: "write",
+  git_status: "git",
+  git_diff: "diff",
+  move_path: "move",
+  delete_path: "delete",
+  run_command: "run",
+  command_logs: "logs",
+  command_stop: "stop",
+};
 
 export class Workbench {
   private readonly viewport = new ConversationViewport();
@@ -179,7 +168,9 @@ export class Workbench {
   private entries: WorkbenchEntry[] = [];
   private nextId = 1;
   private layout: WorkbenchLayout;
-  private sidebarMode: SidebarMode = "auto";
+  /// Hidden by default: the harness stays a single clean column until the
+  /// reader asks for telemetry.
+  private sidebarMode: SidebarMode = "hidden";
   private mode: WorkbenchMode = "input";
   private editor: PromptEditorState = createPromptEditorState();
   private promptContext: PromptContext = { history: [], mentions: [], commands: [] };
@@ -194,6 +185,8 @@ export class Workbench {
   private footerLeft = "";
   private footerRight = "";
   private ambient: string[] = [];
+  private state: PresenceState = "idle";
+  private pulseIntensity = 0.12;
   private started = false;
   private previousRows: string[] = [];
   private lastInterruptEscapeAt = 0;
@@ -243,6 +236,19 @@ export class Workbench {
     this.requestRender();
   }
 
+  /// Drives the mark in the header and the pulse hairline. `intensity` is
+  /// 0..1 and should track real throughput so the line quickens under load.
+  setPresence(state: PresenceState, intensity = this.pulseIntensity): void {
+    this.state = state;
+    this.pulseIntensity = Math.max(0, Math.min(1, intensity));
+    this.requestRender();
+  }
+
+  setAmbient(lines: readonly string[]): void {
+    this.ambient = [...lines];
+    this.requestRender();
+  }
+
   tick(): void {
     this.requestRender();
   }
@@ -253,19 +259,14 @@ export class Workbench {
   }
 
   showBlock(lines: readonly string[]): void {
+    if (lines.length === 0) return;
     this.entries.push({ id: this.nextId++, type: "block", lines: [...lines] });
-    this.requestRender();
-  }
-
-  /// Ambient machine state (memory pressure) rendered at the sidebar's end.
-  setAmbient(lines: readonly string[]): void {
-    this.ambient = [...lines];
     this.requestRender();
   }
 
   beginTurn(options: { userText: string; at: string; planOnly?: boolean }): void {
     this.entries.push({ id: this.nextId++, type: "user", text: options.userText, at: options.at });
-    if (options.planOnly) this.notice("plan · read-only tools · approve before changes");
+    if (options.planOnly) this.notice("plan · read-only tools · I'll propose before changing anything");
     this.requestRender();
   }
 
@@ -274,14 +275,7 @@ export class Workbench {
       (candidate): candidate is ReasoningEntry => candidate.type === "reasoning" && candidate.streaming,
     );
     if (!entry) {
-      entry = {
-        id: this.nextId++,
-        type: "reasoning",
-        raw: "",
-        streaming: true,
-        startedAt: Date.now(),
-        durationMs: null,
-      };
+      entry = { id: this.nextId++, type: "reasoning", raw: "", streaming: true, startedAt: Date.now(), durationMs: null };
       this.entries.push(entry);
     }
     entry.raw += delta;
@@ -299,6 +293,9 @@ export class Workbench {
   }
 
   assistantDelta(delta: string): void {
+    // The entry belongs to the current model round; only `beginRound` and
+    // `finishTurn` close it. Closing on tool events split a single sentence
+    // whenever the pacer flushed after the tool call arrived.
     let entry = this.entries.findLast(
       (candidate): candidate is AssistantEntry => candidate.type === "assistant" && candidate.streaming,
     );
@@ -310,6 +307,12 @@ export class Workbench {
     entry.raw += delta;
     entry.revision += 1;
     this.requestRender();
+  }
+
+  /// Closes the previous round's prose so the next round starts a new
+  /// paragraph. Called on `model.request_started`.
+  beginRound(): void {
+    this.finishAssistant();
   }
 
   finishAssistant(): void {
@@ -359,8 +362,8 @@ export class Workbench {
     this.requestRender();
   }
 
-  /// Marks a tool call as blocked on user approval, so it renders as an
-  /// anticipatory ghost instead of a running action.
+  /// Marks a tool call as blocked on approval so it renders as an anticipatory
+  /// row instead of a running one.
   toolWaiting(toolCallId: string, waiting: boolean): void {
     const entry = this.entries.findLast(
       (candidate): candidate is ToolEntry => candidate.type === "tool" && candidate.toolCallId === toolCallId,
@@ -374,7 +377,6 @@ export class Workbench {
     this.closeReasoning();
     this.finishAssistant();
     this.notice(summary, status === "completed" ? "success" : status === "failed" ? "error" : "info");
-    this.entries.push({ id: this.nextId++, type: "block", lines: [] as string[] });
     this.requestRender();
   }
 
@@ -403,7 +405,7 @@ export class Workbench {
     });
   }
 
-  /// Temporarily restores the normal screen for an external picker or editor.
+  /// Temporarily restores the normal screen for an external editor.
   async suspend<T>(run: () => Promise<T>): Promise<T> {
     const wasStarted = this.started;
     if (wasStarted) this.stop();
@@ -417,7 +419,6 @@ export class Workbench {
     }
   }
 
-  /// Runs a simple list dialog and resolves the chosen index, or null.
   choose(title: string, items: readonly string[], selectedIndex = 0): Promise<number | null> {
     this.dialogTitle = title;
     this.dialogItems = [...items];
@@ -473,7 +474,7 @@ export class Workbench {
     }
 
     if (key.ctrl && key.name === "t") {
-      this.sidebarMode = this.sidebarMode === "hidden" ? "auto" : this.sidebarMode === "auto" ? "wide" : "hidden";
+      this.sidebarMode = this.sidebarMode === "hidden" ? "auto" : "hidden";
       this.previousRows = [];
       this.requestRender();
       return;
@@ -582,13 +583,14 @@ export class Workbench {
       return Math.max(5, 4 + (this.approval?.previewRows?.length ?? 0) + 2);
     }
     if (this.mode === "dialog") {
-      return 4 + Math.min(this.dialogItems.length, 10);
+      return 3 + Math.min(this.dialogItems.length, 10);
     }
-    const width = Math.max(10, (process.stdout.columns ?? 80) - 4);
+    const width = Math.max(10, (process.stdout.columns ?? 80) - HARNESS.content);
     const valueLines = computePromptVisualLines(this.editor.value, this.editor.cursor, width).lines.length;
     const commands = this.matchingCommands().length;
     const menuLines = commands > 0 ? Math.min(commands, 10) + (commands >= 6 ? 3 : 0) : 0;
-    return Math.max(3, valueLines + menuLines + 1) + 2;
+    // One hairline above the prompt, then the prompt and any menu.
+    return Math.max(1, valueLines + menuLines);
   }
 
   private rebuildConversation(): void {
@@ -602,87 +604,110 @@ export class Workbench {
 
   private renderEntry(entry: WorkbenchEntry, width: number): string[] {
     const paint = this.options.paint;
+    const proseWidth = Math.max(16, width - HARNESS.content);
     switch (entry.type) {
       case "user": {
-        const lines = wrapDisplayText(sanitizeTerminalLine(entry.text), Math.max(20, Math.floor(width * 0.6)));
-        const time = paint.dim(entry.at);
+        const body = wrapDisplayText(sanitizeTerminalLine(entry.text), proseWidth)
+          .map((line) => `${" ".repeat(HARNESS.content)}${paint.bold(line, "paper")}`);
+        return [formatTurnOpener("you", entry.at, width, paint), ...body, ""];
+      }
+      case "assistant": {
+        const body = entry.raw ? this.renderedMarkdown(entry, proseWidth) : [];
+        const mark = entry.streaming
+          ? renderPresence("writing", Date.now(), paint)
+          : paint.text("◆", "citron");
+        const caret = entry.streaming ? streamingCaret(paint) : "";
+        const head = `${" ".repeat(HARNESS.mark)}${mark} `;
+        if (body.length === 0) {
+          return [`${head}${paint.dim("…")}`];
+        }
+        const indent = " ".repeat(HARNESS.content);
         return [
-          ...lines.map((line, index) => {
-            const styled = paint.bold(line, "paper");
-            const suffix = index === lines.length - 1 ? `  ${time}` : "";
-            const padding = Math.max(2, width - visibleLength(styled) - visibleLength(suffix) - 2);
-            return `${" ".repeat(padding)}${styled}${suffix}`;
-          }),
+          `${head}${body[0]}${body.length === 1 ? caret : ""}`,
+          ...body.slice(1).map((line, index) =>
+            `${indent}${line}${body.length - 2 === index ? caret : ""}`),
           "",
         ];
       }
-      case "assistant": {
-        const now = Date.now();
-        const core = avatar(entry.streaming ? "writing" : "done", now, NEON.cyan);
-        const body = entry.raw ? this.renderedMarkdown(entry, width) : [paint.dim("…")];
-        return [`  ${core}`, "", ...body.map((line) => `  ${line}`), ""];
-      }
       case "reasoning": {
-        const now = Date.now();
-        const glyph = renderPresence("reasoning", now, paint);
-        const body = wrapDisplayText(sanitizeTerminalLine(entry.raw.trim()), Math.max(8, width - 6));
-        const duration = ((entry.durationMs ?? 0) / 1_000).toFixed(1);
+        const body = wrapDisplayText(sanitizeTerminalLine(entry.raw.trim()), Math.max(8, proseWidth));
         if (entry.streaming) {
+          const mark = renderPresence("reasoning", Date.now(), paint);
           return [
-            `  ${glyph} ${paint.dim("thinking it through")}`,
-            ...body.slice(-3).map((line) => `    ${paint.dim(line)}`),
-            "",
+            `${" ".repeat(HARNESS.mark)}${mark} ${paint.dim("thinking")}`,
+            ...body.slice(-2).map((line) => `${" ".repeat(HARNESS.content)}${paint.dim(line)}`),
           ];
         }
+        const duration = ((entry.durationMs ?? 0) / 1_000).toFixed(1);
         const expanded = this.expandedReasoning.has(entry.id);
-        const summary = `  ${paint.text("⋯", "rule")} ${paint.dim(`I thought about this for ${duration}s${expanded ? "" : " · ctrl+x"}`)}`;
-        if (!expanded) return [summary, ""];
-        return [summary, ...body.map((line) => `    ${paint.dim(line)}`), ""];
+        const trace = `${" ".repeat(HARNESS.content)}${paint.text("⋯", "rule")} `
+          + paint.dim(`thought ${duration}s${expanded ? "" : " · ctrl+x"}`);
+        return expanded
+          ? [trace, ...body.map((line) => `${" ".repeat(HARNESS.content)}  ${paint.dim(line)}`)]
+          : [trace];
       }
       case "tool": {
-        const now = Date.now();
-        const input = entry.input;
-        const running = entry.state === "running";
-        const state: PresenceState = entry.waiting
-          ? "waiting"
-          : running
-            ? presenceForTool(entry.name, isValidationCommand(entry.detail ?? ""))
-            : entry.state === "done"
-              ? "done"
-              : "error";
-        const avatarColor = entry.waiting ? NEON.amber : running ? NEON.cyan : entry.state === "done" ? NEON.mint : NEON.red;
-        const core = avatar(state, now, avatarColor);
-        const narration = entry.waiting
-          ? `${paint.dim(narrateToolIntent(entry.name, input))} ${paint.text("· I need your go-ahead", "signal")}`
-          : entry.state === "running"
-            ? paint.dim(narrateToolOutcome(entry.name, input, { state: "running" }))
-            : narrateToolOutcome(entry.name, input, entry.state === "failed"
-              ? { state: "failed", ...(entry.message ? { message: entry.message } : {}) }
-              : entry.state === "denied"
-                ? { state: "denied" }
-                : { state: "done", ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}), ...(entry.created !== undefined ? { created: entry.created } : {}) });
-        const duration = running || entry.durationMs === undefined ? "" : ` ${paint.dim(`${entry.durationMs}ms`)}`;
+        const row = this.renderToolRow(entry, width);
         const diffLines = entry.state === "done" && entry.diff
-          ? formatDiffPreview(entry.diff.oldText, entry.diff.newText, 12, paint).map((line) => `      ${line}`)
+          ? formatDiffPreview(entry.diff.oldText, entry.diff.newText, 12, paint)
+            .map((line) => `${" ".repeat(HARNESS.toolTarget)}${line}`)
           : [];
-        return [`  ${core} ${narration}${duration}`, ...diffLines];
+        const message = entry.state === "failed" && entry.message
+          ? [`${" ".repeat(HARNESS.toolTarget)}${paint.text(truncateText(sanitizeTerminalLine(entry.message), Math.max(8, width - HARNESS.toolTarget - HARNESS.gutter)), "signal")}`]
+          : [];
+        return [row, ...diffLines, ...message];
       }
       case "notice": {
         const color: PaletteColor = entry.tone === "success" ? "citron" : entry.tone === "error" ? "signal" : "secondary";
         const glyph = entry.tone === "success" ? "✓" : entry.tone === "error" ? "×" : "·";
-        return [`  ${paint.text(glyph, color)} ${paint.dim(truncateText(sanitizeTerminalLine(entry.text), Math.max(8, width - 4)))}`, ""];
+        return [
+          `${" ".repeat(HARNESS.content)}${paint.text(glyph, color)} `
+            + paint.dim(truncateText(sanitizeTerminalLine(entry.text), Math.max(8, proseWidth - 2))),
+          "",
+        ];
       }
       case "block":
-        return entry.lines.length === 0 ? [""] : [...entry.lines.map((line) => `  ${line}`), ""];
+        return [
+          ...entry.lines.map((line) => `${" ".repeat(HARNESS.content)}${line}`),
+          "",
+        ];
     }
+  }
+
+  /// A tool row is a status mark, a verb, a target, and right-aligned meta.
+  ///
+  /// The row is structural rather than a sentence: the grid exists for
+  /// scanning, and the agent's voice lives in its prose and in the turn
+  /// notices. Narration inside this column collided with the verb column and
+  /// read as noise.
+  private renderToolRow(entry: ToolEntry, width: number): string {
+    const paint = this.options.paint;
+    const verb = toolVerb(entry.name);
+    const running = entry.state === "running" && !entry.waiting;
+    const state: ToolRowState = entry.waiting ? "waiting" : entry.state;
+    const mark = running
+      ? renderPresence(presenceForTool(entry.name, isValidationCommand(entry.detail ?? "")), Date.now(), paint)
+      : entry.waiting
+        ? renderPresence("waiting", Date.now(), paint)
+        : undefined;
+    const meta = entry.waiting
+      ? "needs you"
+      : running
+        ? undefined
+        : entry.state === "failed"
+          ? "failed"
+          : entry.state === "denied"
+            ? "denied"
+            : formatDuration(entry.durationMs, entry.exitCode);
+    return formatToolRow(state, verb, entry.detail, meta, width, paint, mark);
   }
 
   private renderedMarkdown(entry: AssistantEntry, width: number): string[] {
     const cached = this.rendered.get(entry.id);
     if (cached && cached.revision === entry.revision && cached.width === width) return cached.lines;
-    const stream = new TerminalMarkdownStream(this.options.paint, Math.max(16, width - 4), 0);
-    // A fresh stream per revision keeps the trailing partial line visible while
-    // the model streams; flush() would otherwise only run at turn end.
+    const stream = new TerminalMarkdownStream(this.options.paint, Math.max(16, width), 0);
+    // A fresh stream per revision keeps the trailing partial line visible
+    // while the model streams; flush() alone would only run at turn end.
     const rendered = `${stream.write(entry.raw)}${stream.flush()}`;
     const lines = rendered.split("\n");
     const result = lines.at(-1) === "" ? lines.slice(0, -1) : lines;
@@ -696,12 +721,24 @@ export class Workbench {
     const rows: string[] = Array.from({ length: layout.height }, () => "");
     const pad = (line: string, width: number) => `${line}${" ".repeat(Math.max(0, width - visibleLength(line)))}`;
 
-    rows[layout.header.row] = this.composeHeader(layout.width);
-    const conversation = this.viewport.visible(layout.conversation.height);
+    const chrome = this.composeHeader(layout.width);
+    rows[layout.header.row] = chrome.mark;
+    // The pulse lives on the second row when there is room; the layout reserves
+    // a single header row, so the hairline is drawn at the top of the
+    // conversation area instead of stealing a row.
+    const conversation = this.viewport.visible(Math.max(1, layout.conversation.height - 1));
     const sidebar = layout.sidebar ? this.sidebarLines() : null;
+    const pulse = formatPulseLine(
+      layout.conversation.width,
+      pulseProgress(this.state),
+      this.pulseIntensity,
+      paint,
+    );
     for (let index = 0; index < layout.conversation.height; index += 1) {
       const row = layout.conversation.row + index;
-      const conversationLine = truncateText(conversation[index] ?? "", layout.conversation.width);
+      const conversationLine = index === layout.conversation.height - 1
+        ? pulse
+        : truncateText(conversation[index] ?? "", layout.conversation.width);
       if (layout.sidebar && layout.dividerColumn !== null && sidebar) {
         const sidebarLine = sidebar[index] ?? "";
         rows[row] = `${pad(conversationLine, layout.conversation.width)}${paint.text("│", "rule")}${pad(sidebarLine, layout.sidebar.width)}`;
@@ -721,19 +758,18 @@ export class Workbench {
     };
   }
 
-  private composeHeader(width: number): string {
+  private composeHeader(width: number): { mark: string } {
     const paint = this.options.paint;
     const model = this.options.contextRail.modelId;
     const branch = this.options.contextRail.workspaceBranch;
-    const wordmark = "demesne".split("").map((letter, index) =>
-      rgb(letter, midHex(NEON.cyan, NEON.violet, index / 6))
-    ).join("");
-    const left = `  ${avatar("idle", Date.now(), NEON.cyan)}  ${BOLD}${wordmark}${RESET} ${paint.dim(`· ${truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(8, Math.floor(width / 3)))}`)}`;
-    const right = paint.dim(`${truncateText(sanitizeTerminalLine(model), 26)}${branch ? ` · ${sanitizeTerminalLine(branch)}` : ""}`);
-    const plainWidth = visibleLength(stripAll(left)) + visibleLength(stripAll(right));
-    const padding = Math.max(1, width - plainWidth);
-    const content = `${left}${" ".repeat(padding)}${right}`;
-    return panelSpan(truncateText(content, width));
+    const left = `${" ".repeat(HARNESS.margin)}${paint.text("◈", "electric")} `
+      + paint.bold("demesne", "paper")
+      + paint.dim(` · ${truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(6, Math.floor(width / 4)))}`);
+    const right = paint.dim(
+      `${truncateText(sanitizeTerminalLine(model), 28)}${branch ? ` · ${sanitizeTerminalLine(branch)}` : ""}`,
+    );
+    const padding = Math.max(1, width - visibleLength(left) - visibleLength(right));
+    return { mark: truncateText(`${left}${" ".repeat(padding)}${right}`, width) };
   }
 
   private sidebarLines(): string[] {
@@ -742,37 +778,22 @@ export class Workbench {
     const width = this.layout.sidebar.width;
     const ambient = this.ambient.length > 0 ? ["", ...this.ambient] : [];
     const railHeight = Math.max(4, height - ambient.length);
-    const rail = this.options.contextRail
-      .lines(Math.max(16, width - 4), railHeight, this.options.paint)
-      .map((line) => truncateText(line, width - 4));
-    const memory = ambient.map((line) => truncateText(line, width - 4));
-    return [...rail, ...memory].slice(0, height).map((line) => surfaceSpan(line, width - 2));
+    const rail = this.options.contextRail.lines(Math.max(16, width - 3), railHeight, this.options.paint);
+    return [...rail, ...ambient]
+      .slice(0, height)
+      .map((line) => ` ${truncateText(line, width - 2)}`);
   }
 
+  /// The pulse hairline at the bottom of the transcript is the only separator
+  /// between conversation and composer; a second rule here read as noise.
   private composeInput(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
-    const paint = this.options.paint;
-    const inner = Math.max(10, width - 4);
-    const content = this.composeInputContent(inner);
-    const accent = this.mode === "approval" ? NEON.amber : NEON.cyan;
-    const tail = this.mode === "approval" ? NEON.red : NEON.violet;
-    const top = `  ${rgb("╭", accent)}${hairline(accent, tail, inner)}${rgb("╮", tail)}`;
-    const bottom = `  ${rgb("╰", tail)}${hairline(tail, accent, inner)}${rgb("╯", accent)}`;
-    const edge = rgb("│", NEON.rule);
-    const lines = [top];
-    for (const line of content.lines) {
-      lines.push(`  ${edge}${line}${edge}`);
-    }
-    lines.push(bottom);
-    const cursor = content.cursor
-      ? { row: content.cursor.row + 1, column: content.cursor.column + 3 }
-      : null;
-    return { lines, cursor };
+    const content = this.composeInputContent(width);
+    return { lines: content.lines, cursor: content.cursor };
   }
 
   private composeInputContent(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
     const paint = this.options.paint;
     const lines: string[] = [];
-    let cursor: { row: number; column: number } | null = null;
 
     if (this.mode === "approval" && this.approval) {
       const allowSession = this.approval.toolName !== "run_command";
@@ -788,39 +809,60 @@ export class Workbench {
     }
 
     if (this.mode === "dialog") {
-      lines.push(` ${paint.bold(this.dialogTitle, "paper")} ${paint.dim(`(${this.dialogSelected + 1}/${this.dialogItems.length})`)}`);
+      lines.push(`${" ".repeat(HARNESS.margin)}${paint.bold(this.dialogTitle, "paper")} ${paint.dim(`(${this.dialogSelected + 1}/${this.dialogItems.length})`)}`);
       this.dialogItems.slice(0, 10).forEach((item, index) => {
-        const marker = index === this.dialogSelected ? paint.bold("›", "electric") : " ";
-        const label = truncateText(sanitizeTerminalLine(item), Math.max(8, width - 6));
-        lines.push(` ${marker} ${index === this.dialogSelected ? paint.bold(label, "paper") : paint.text(label, "secondary")}`);
+        const selected = index === this.dialogSelected;
+        const marker = selected ? paint.text("›", "electric") : " ";
+        const label = truncateText(sanitizeTerminalLine(item), Math.max(8, width - HARNESS.content - 2));
+        lines.push(`${" ".repeat(HARNESS.margin)} ${marker} ${selected ? paint.bold(label, "paper") : paint.text(label, "secondary")}`);
       });
-      lines.push(` ${paint.dim("↑/↓ · enter selects · esc cancels")}`);
+      lines.push(`${" ".repeat(HARNESS.margin)}  ${paint.dim("↑/↓ move · enter select · esc cancel")}`);
       return { lines, cursor: null };
     }
 
-    const promptWidth = Math.max(10, width - 4);
+    const promptWidth = Math.max(10, width - HARNESS.content - 1);
     const layout = computePromptVisualLines(this.editor.value, this.editor.cursor, promptWidth);
-    const placeholder = this.editor.value.length === 0 && this.matchingCommands().length === 0
-      ? paint.dim(truncateText("this is where we talk — type / for commands", promptWidth))
+    const commands = this.matchingCommands();
+    const placeholder = this.editor.value.length === 0 && commands.length === 0
+      ? paint.dim(truncateText("ask anything · / for commands", promptWidth))
       : "";
+    const mark = renderPresence(this.mode === "streaming" ? "working" : "listening", Date.now(), paint);
     for (let index = 0; index < layout.lines.length; index += 1) {
-      const prefix = index === 0 ? `${avatar("listening", Date.now(), NEON.cyan)} ` : "   ";
+      const prefix = index === 0
+        ? `${" ".repeat(HARNESS.mark)}${mark} `
+        : " ".repeat(HARNESS.content);
       lines.push(`${prefix}${layout.lines[index] || (index === 0 ? placeholder : "")}`);
     }
-    cursor = { row: layout.cursorLine, column: 5 + layout.cursorCol };
+    const cursor = { row: layout.cursorLine, column: HARNESS.content + layout.cursorCol };
 
-    const commands = this.matchingCommands();
     const mention = mentionTokenAt(this.editor.value, this.editor.cursor);
     const mentionCandidates = mention && this.promptContext.mentions.length > 0
       ? mentionMatches(this.promptContext.mentions, mention.query)
       : [];
     if (mentionCandidates.length > 0) {
-      lines.push(...formatMentionMenu(mentionCandidates, this.editor.mentionSelected, width, paint).split("\n").map((line) => ` ${line}`));
+      lines.push(...formatMentionMenu(mentionCandidates, this.editor.mentionSelected, width, paint).split("\n"));
     } else if (commands.length > 0) {
-      lines.push(...formatSlashCommandMenu(commands, this.editor.menuSelected, width, paint).split("\n").map((line) => ` ${line}`));
+      lines.push(...formatSlashCommandMenu(commands, this.editor.menuSelected, width, paint).split("\n"));
     }
     return { lines, cursor };
   }
+}
+
+/// The pulse travels faster while the agent is actively producing output and
+/// drifts slowly when idle, so the hairline reads as a heartbeat rather than
+/// as decoration.
+function pulseProgress(state: PresenceState): number {
+  const now = Date.now();
+  const active = state === "writing" || state === "working" || state === "verifying";
+  const thinking = state === "thinking" || state === "reasoning";
+  const period = active ? 1_100 : thinking ? 2_600 : 7_000;
+  return (now % period) / period;
+}
+
+function formatDuration(durationMs: number | undefined, exitCode: number | undefined): string | undefined {
+  if (durationMs === undefined) return exitCode === undefined ? undefined : `exit ${exitCode}`;
+  const time = durationMs >= 1_000 ? `${(durationMs / 1_000).toFixed(1)}s` : `${durationMs}ms`;
+  return exitCode === undefined || exitCode === 0 ? time : `${time} · exit ${exitCode}`;
 }
 
 function parseArguments(value: unknown): Record<string, unknown> {
@@ -851,4 +893,13 @@ function toolDetail(name: string, input: Record<string, unknown>): string | unde
   }
   if (typeof input.query === "string") return `"${input.query}"`;
   return undefined;
+}
+
+function toolVerb(name: string): string {
+  if (TOOL_VERBS[name]) return TOOL_VERBS[name];
+  if (name.startsWith("mcp__")) {
+    const [, server, tool] = name.split("__");
+    return `${server}/${tool}`;
+  }
+  return name;
 }

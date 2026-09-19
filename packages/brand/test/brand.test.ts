@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   buildCard,
   computePromptVisualLines,
-  createNeonPainter,
   createPainter,
   formatAssistantHeader,
   formatHelpCard,
@@ -57,17 +56,6 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(palette.electricBright).toBe("#8CA3FF");
     expect(palette.signal).toBe("#D63D1F");
     expect(palette.citron).toBe("#B8DB47");
-  });
-
-  test("the neon painter gives the workbench its own identity without touching the canonical palette", () => {
-    const neon = createNeonPainter(true);
-    expect(neon.text("x", "electric")).toContain("88;198;255");
-    expect(neon.text("x", "citron")).toContain("61;240;176");
-    expect(neon.onBackground("y", "raised")).toContain("22;26;43");
-    expect(neon.bold("z", "signal")).toContain("255;92;122");
-    // The scrollback identity is unchanged.
-    expect(createPainter(true).text("x", "electric")).toContain("102;120;200");
-    expect(createNeonPainter(false).text("x", "electric")).toBe("x");
   });
 
   test("terminal rendering keeps neutral text native and tones down accents", () => {

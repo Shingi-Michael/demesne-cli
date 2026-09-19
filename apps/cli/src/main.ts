@@ -20,7 +20,6 @@ import {
 import {
   computePromptVisualLines,
   createPainter,
-  createNeonPainter,
   formatAssistantHeader,
   formatDiffPreview,
   formatFooterLine,
@@ -118,8 +117,6 @@ const terminalTheme = resolveTerminalTheme(
 );
 const paint = createPainter(colorEnabled(process.stdout), terminalTheme);
 const paintLog = createPainter(colorEnabled(process.stderr), terminalTheme);
-/// The workbench's own neon identity; scrollback and scripts keep `paint`.
-const workbenchPaint = createNeonPainter(colorEnabled(process.stdout), terminalTheme);
 const client = new DemesneClient({ server, token: daemonToken });
 
 function loadSettings(): CliSettings {
@@ -813,7 +810,7 @@ async function runChat(command: string[]): Promise<void> {
   const fixedFooter = new CliFixedFooter();
   const workbench = useWorkbench
     ? new Workbench({
-        paint: workbenchPaint,
+        paint,
         contextRail,
         sessionTitle: initialState.session.title,
         version: VERSION,
@@ -867,7 +864,7 @@ async function runChat(command: string[]): Promise<void> {
     workbench.start();
     const refreshAmbient = async (): Promise<void> => {
       const used = await readAmbientMemory();
-      if (workbench && used !== null) workbench.setAmbient(formatAmbientMemory(used, workbenchPaint));
+      if (workbench && used !== null) workbench.setAmbient(formatAmbientMemory(used, paint));
     };
     void refreshAmbient();
     ambientTimer = setInterval(() => void refreshAmbient(), 10_000);
@@ -907,14 +904,15 @@ async function runChat(command: string[]): Promise<void> {
           planOnly,
           workbench,
           contextRail,
-          paint: workbenchPaint,
+          paint,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Turn failed";
         workbench.finishTurn("failed", `Turn failed · ${sanitizeTerminalText(message)}`);
       } finally {
         chatState.streamActive = false;
-        workbench.setFooter(`  ${renderPresence("idle", Date.now(), workbenchPaint)} ${workbenchPaint.dim("ready")}`, statusLineText());
+        workbench.setPresence("idle", 0.1);
+        workbench.setFooter(`  ${renderPresence("idle", Date.now(), paint)} ${paint.dim("ready")}`, statusLineText());
       }
       return;
     }
@@ -1435,6 +1433,21 @@ async function runWorkbenchTurn(options: {
     sink: (text) => options.workbench.assistantDelta(text),
   });
 
+  /// Pulse intensity tracks real throughput so the hairline quickens under
+  /// load instead of animating at a fixed decorative rate.
+  const pulseIntensityFor = (state: PresenceState, speed: number | null): number => {
+    if (speed !== null) return Math.max(0.2, Math.min(1, speed / 25));
+    switch (state) {
+      case "writing": return 0.55;
+      case "working":
+      case "verifying": return 0.4;
+      case "thinking":
+      case "reasoning": return 0.3;
+      case "waiting": return 0.2;
+      default: return 0.12;
+    }
+  };
+
   const updateFooter = () => {
     const elapsed = ((Date.now() - startedAt) / 1_000).toFixed(1);
     const speed = throughput.snapshot().tokensPerSecond;
@@ -1443,6 +1456,7 @@ async function runWorkbenchTurn(options: {
       + `${options.paint.bold(presenceLabel(presence), "paper")} ${options.paint.dim(
         `· ${elapsed}s${speed === null ? "" : ` · ${speed.toFixed(0)} tok/s`}${queued ? ` · noted ${queued}` : ""}`,
       )}`;
+    options.workbench.setPresence(presence, pulseIntensityFor(presence, speed));
     options.workbench.setFooter(left, options.contextRail.statusLine(getTerminalWidth(process.stdout), options.paint));
   };
   const footerTimer = setInterval(updateFooter, 120);
@@ -1456,6 +1470,10 @@ async function runWorkbenchTurn(options: {
       throughput.apply(event);
 
       if (event.type === "model.request_started") {
+        // Flush paced text first so the previous round's prose is complete
+        // before the new round opens a fresh paragraph.
+        if (pacer) await pacer.drain();
+        options.workbench.beginRound();
         presence = "thinking";
         const plan = event.payload.contextPlan;
         if (!softLimitWarned && isRecord(plan) && plan.budgetStatus === "over_soft_limit") {
@@ -1474,6 +1492,9 @@ async function runWorkbenchTurn(options: {
           options.workbench.assistantDelta(event.payload.delta);
         }
       } else if (event.type === "tool.call_requested") {
+        // Drain first: the tool row must appear after the prose that announced
+        // it, not in the middle of a still-buffered sentence.
+        if (pacer) await pacer.drain();
         const name = String(event.payload.name ?? "tool");
         options.workbench.toolRequested({
           toolCallId: String(event.payload.toolCallId ?? ""),
@@ -1501,6 +1522,7 @@ async function runWorkbenchTurn(options: {
         const count = Array.isArray(event.payload.droppedTurnIds) ? event.payload.droppedTurnIds.length : 0;
         options.workbench.notice(`Context window reached; dropped ${count} older turn${count === 1 ? "" : "s"}.`, "info");
       } else if (event.type === "permission.requested") {
+        if (pacer) await pacer.drain();
         const permissionId = typeof event.payload.permissionId === "string" ? event.payload.permissionId : null;
         const toolName = typeof event.payload.name === "string" ? event.payload.name : undefined;
         const summary = typeof event.payload.summary === "string" ? event.payload.summary : "operation";

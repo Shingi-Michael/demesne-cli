@@ -441,6 +441,57 @@ function sentenceCase(value: string): string {
   return text.length > 200 ? `${text.slice(0, 199)}…` : text;
 }
 
+/// A section heading inside harness command output.
+export function formatGridHeading(label: string, painter: Painter): string {
+  return `${" ".repeat(HARNESS.content)}${painter.text(sanitizeTerminalLine(label).toUpperCase(), "secondary")}`;
+}
+
+export interface GridRow {
+  label: string;
+  value: string;
+  /// Colors the label; used for command names and status keys.
+  labelColor?: PaletteColor;
+  /// Dims the value for secondary detail.
+  dimValue?: boolean;
+}
+
+/// Aligned label/value rows on the harness grid. This replaces boxed cards for
+/// command output so `/help`, `/status`, and `/context` share the transcript's
+/// columns instead of arriving as a different visual language.
+export function formatGridRows(
+  rows: readonly GridRow[],
+  width: number,
+  painter: Painter,
+  options: { labelWidth?: number } = {},
+): string[] {
+  const safeWidth = Math.max(24, width);
+  const labelWidth = Math.max(
+    8,
+    Math.min(
+      options.labelWidth ?? Math.max(...rows.map((row) => visibleLength(row.label)), 8),
+      Math.floor(safeWidth / 3),
+    ),
+  );
+  const valueColumn = HARNESS.content + labelWidth + 2;
+  const valueWidth = Math.max(8, safeWidth - HARNESS.gutter - valueColumn);
+  return rows.map((row) => {
+    const label = painter.text(
+      truncateText(sanitizeTerminalLine(row.label), labelWidth).padEnd(labelWidth),
+      row.labelColor ?? "paper",
+    );
+    const value = row.dimValue
+      ? painter.dim(truncateText(sanitizeTerminalLine(row.value), valueWidth))
+      : painter.text(truncateText(sanitizeTerminalLine(row.value), valueWidth), "secondary");
+    return `${" ".repeat(HARNESS.content)}${label}  ${value}`;
+  });
+}
+
+/// Opens harness command output as a bounded unit, matching a turn opener so
+/// command results read as part of the same interface.
+export function formatCommandOpener(label: string, width: number, painter: Painter): string {
+  return formatTurnOpener(label, undefined, width, painter);
+}
+
 /// A block caret shown at the end of streaming prose.
 export function streamingCaret(painter: Painter): string {
   return painter.text("▍", "electric");

@@ -120,7 +120,13 @@ interface BlockEntry {
   lines: string[];
 }
 
-type WorkbenchEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry | BlockEntry;
+interface PanelEntry {
+  id: number;
+  type: "panel";
+  lines: string[];
+}
+
+type WorkbenchEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry | BlockEntry | PanelEntry;
 
 export interface ApprovalRequest {
   summary: string;
@@ -260,6 +266,15 @@ export class Workbench {
 
   notice(text: string, tone: "info" | "success" | "error" = "info"): void {
     this.entries.push({ id: this.nextId++, type: "notice", text, tone });
+    this.requestRender();
+  }
+
+  /// Command output that already draws its own opener and grid. Rendered
+  /// verbatim: adding the turn rail here double-indented the panel and forced
+  /// its opener to truncate.
+  showPanel(lines: readonly string[]): void {
+    if (lines.length === 0) return;
+    this.entries.push({ id: this.nextId++, type: "panel", lines: [...lines] });
     this.requestRender();
   }
 
@@ -689,6 +704,8 @@ export class Workbench {
             + paint.dim(truncateText(sanitizeTerminalLine(entry.text), Math.max(8, proseWidth - 2))),
         ];
       }
+      case "panel":
+        return [...entry.lines, ""];
       case "block":
         return [
           ...entry.lines.map((line) => `${rail}${line}`),

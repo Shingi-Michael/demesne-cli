@@ -102,6 +102,7 @@ import {
 } from "./daemon-control.ts";
 import { formatDoctorReport, runDoctor } from "./doctor.ts";
 import { runSetup } from "./setup.ts";
+import { renderHarnessHelp, renderHarnessStatus } from "./harness-panels.ts";
 import { narrateTurnEnd } from "./voice.ts";
 import { updateUserConfig } from "@demesne/config";
 import { createInterface } from "node:readline/promises";
@@ -1044,6 +1045,10 @@ async function runChat(command: string[]): Promise<void> {
       else renderWelcome();
     },
     help: async () => {
+      if (workbench) {
+        workbench.showPanel(renderHarnessHelp(allCommands, getTerminalWidth(process.stdout), paint));
+        return;
+      }
       emit(formatHelpCard(paint, getTerminalWidth(process.stdout)));
     },
     new: async (customTitle) => {
@@ -1065,6 +1070,23 @@ async function runChat(command: string[]): Promise<void> {
     },
     status: async () => {
       const current = await request<{ session: Session }>(`/v1/sessions/${sessionId}`).catch(() => null);
+      if (workbench) {
+        const runtime = await request<RuntimeProfileStatus>("/v1/runtime").catch(() => null);
+        workbench.showPanel(renderHarnessStatus({
+          title: current?.session.title ?? "Untitled",
+          sessionId: sessionId!,
+          turnCount: current?.session.turns.length ?? 0,
+          model: activeModel.id,
+          provider: activeModel.provider,
+          contextWindow: activeModel.contextWindow,
+          workspace: current?.session.workspace?.root ?? currentWorkspace,
+          branch: current?.session.workspace?.gitBranch ?? null,
+          runtime,
+          width: getTerminalWidth(process.stdout),
+          paint,
+        }));
+        return;
+      }
       emit(formatInfoCard({
         sessionId: sessionId!,
         title: current?.session.title ?? "Untitled",

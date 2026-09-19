@@ -121,9 +121,11 @@ a final paragraph. Project files override user files on a name collision, and
 built-in command names cannot be shadowed.
 
 Typing while a turn is running queues the text instead of interrupting it. The
-footer shows a `⏎ …` preview, and the queue submits automatically when the turn
-finishes; slash commands queue the same way. Control keys and the approval
-selector keep their normal behavior.
+composer clears when a prompt is sent and then draws the queue, so the next
+message is visible where you are typing it; the queue submits automatically when
+the turn finishes, and slash commands queue the same way. The scrollback
+renderer, which has no composer, previews the queue in its footer instead.
+Control keys and the approval selector keep their normal behavior.
 
 Type `@` to open a workspace file menu for prompt mentions; `Tab` or `Enter`
 inserts the selected path. The listing excludes sensitive paths, dependency and

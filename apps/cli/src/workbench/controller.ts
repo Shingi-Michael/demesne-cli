@@ -4,9 +4,9 @@ import {
   formatFooterLine,
   formatMentionMenu,
   formatPermissionCard,
-  formatPulseLine,
   formatSlashCommandMenu,
   formatToolRow,
+  formatTurnCloser,
   formatTurnOpener,
   HARNESS,
   presenceForTool,
@@ -16,12 +16,14 @@ import {
   streamingCaret,
   TerminalMarkdownStream,
   truncateText,
+  turnRail,
   visibleLength,
   wrapDisplayText,
   type Painter,
   type PaletteColor,
   type PresenceState,
   type SlashCommand,
+  type ToolPhaseName,
   type ToolRowState,
 } from "@demesne/brand";
 import type { EventEnvelope, PermissionDecision } from "@demesne/protocol";
@@ -41,7 +43,7 @@ import { reduceQueuedInput } from "../input-queue.ts";
 import { reduceInterruptKey } from "../interrupt-key.ts";
 import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } from "../approval-selection.ts";
 import { reduceSessionPicker, type SessionPickerKey } from "../session-picker.ts";
-import { isValidationCommand } from "../turn-activity.ts";
+import { classifyTurnPhase, isValidationCommand } from "../turn-activity.ts";
 import { composeInEditor } from "../external-editor.ts";
 import type { CliContextRail } from "../context-rail.ts";
 
@@ -101,6 +103,7 @@ interface ToolEntry {
   diff?: { oldText: string; newText: string };
   startedAt: number;
   waiting?: boolean;
+  phase: ToolPhaseName;
 }
 
 interface NoticeEntry {
@@ -108,6 +111,7 @@ interface NoticeEntry {
   type: "notice";
   text: string;
   tone: "info" | "success" | "error";
+  closesTurn?: boolean;
 }
 
 interface BlockEntry {
@@ -136,6 +140,8 @@ export interface WorkbenchOptions {
   contextRail: CliContextRail;
   sessionTitle: string;
   version: string;
+  /// Shown in the header instead of the model, which the footer already owns.
+  workspaceRoot?: string;
   onExit: () => void;
   onInterrupt: () => void;
   queue: {
@@ -186,7 +192,6 @@ export class Workbench {
   private footerRight = "";
   private ambient: string[] = [];
   private state: PresenceState = "idle";
-  private pulseIntensity = 0.12;
   private started = false;
   private previousRows: string[] = [];
   private lastInterruptEscapeAt = 0;
@@ -236,11 +241,11 @@ export class Workbench {
     this.requestRender();
   }
 
-  /// Drives the mark in the header and the pulse hairline. `intensity` is
-  /// 0..1 and should track real throughput so the line quickens under load.
-  setPresence(state: PresenceState, intensity = this.pulseIntensity): void {
+  /// Drives the animated marks. Motion is confined to the active turn so
+  /// settled scrollback stays still.
+  setPresence(state: PresenceState): void {
+    if (this.state === state) return;
     this.state = state;
-    this.pulseIntensity = Math.max(0, Math.min(1, intensity));
     this.requestRender();
   }
 
@@ -333,11 +338,16 @@ export class Workbench {
       detail: toolDetail(input.name, parsed),
       state: "running",
       startedAt: Date.now(),
+      phase: classifyTurnPhase(input.name, parsed, this.hasChanges()),
       ...(input.name === "edit_file" && typeof parsed.oldText === "string" && typeof parsed.newText === "string"
         ? { diff: { oldText: parsed.oldText, newText: parsed.newText } }
         : {}),
     });
     this.requestRender();
+  }
+
+  private hasChanges(): boolean {
+    return this.entries.some((entry) => entry.type === "tool" && entry.phase === "change");
   }
 
   toolFinished(input: {
@@ -376,7 +386,13 @@ export class Workbench {
   finishTurn(status: "completed" | "stopped" | "failed", summary: string): void {
     this.closeReasoning();
     this.finishAssistant();
-    this.notice(summary, status === "completed" ? "success" : status === "failed" ? "error" : "info");
+    this.entries.push({
+      id: this.nextId++,
+      type: "notice",
+      text: summary,
+      tone: status === "completed" ? "success" : status === "failed" ? "error" : "info",
+      closesTurn: true,
+    });
     this.requestRender();
   }
 
@@ -580,17 +596,17 @@ export class Workbench {
 
   private inputLineCount(): number {
     if (this.mode === "approval") {
-      return Math.max(5, 4 + (this.approval?.previewRows?.length ?? 0) + 2);
+      return Math.max(6, 5 + (this.approval?.previewRows?.length ?? 0) + 2);
     }
     if (this.mode === "dialog") {
-      return 3 + Math.min(this.dialogItems.length, 10);
+      return 4 + Math.min(this.dialogItems.length, 10);
     }
     const width = Math.max(10, (process.stdout.columns ?? 80) - HARNESS.content);
     const valueLines = computePromptVisualLines(this.editor.value, this.editor.cursor, width).lines.length;
     const commands = this.matchingCommands().length;
     const menuLines = commands > 0 ? Math.min(commands, 10) + (commands >= 6 ? 3 : 0) : 0;
-    // One hairline above the prompt, then the prompt and any menu.
-    return Math.max(1, valueLines + menuLines);
+    // One rule above the prompt, then the prompt and any menu.
+    return 1 + Math.max(1, valueLines + menuLines);
   }
 
   private rebuildConversation(): void {
@@ -604,12 +620,14 @@ export class Workbench {
 
   private renderEntry(entry: WorkbenchEntry, width: number): string[] {
     const paint = this.options.paint;
+    const rail = turnRail(paint);
+    const bar = paint.text("│", "rule");
     const proseWidth = Math.max(16, width - HARNESS.content);
     switch (entry.type) {
       case "user": {
         const body = wrapDisplayText(sanitizeTerminalLine(entry.text), proseWidth)
           .map((line) => `${" ".repeat(HARNESS.content)}${paint.bold(line, "paper")}`);
-        return [formatTurnOpener("you", entry.at, width, paint), ...body, ""];
+        return [formatTurnOpener("you", entry.at, width, paint), ...body];
       }
       case "assistant": {
         const body = entry.raw ? this.renderedMarkdown(entry, proseWidth) : [];
@@ -617,15 +635,13 @@ export class Workbench {
           ? renderPresence("writing", Date.now(), paint)
           : paint.text("◆", "citron");
         const caret = entry.streaming ? streamingCaret(paint) : "";
-        const head = `${" ".repeat(HARNESS.mark)}${mark} `;
         if (body.length === 0) {
-          return [`${head}${paint.dim("…")}`];
+          return [`${" ".repeat(HARNESS.rail)}${bar} ${mark} ${paint.dim("…")}`];
         }
-        const indent = " ".repeat(HARNESS.content);
         return [
-          `${head}${body[0]}${body.length === 1 ? caret : ""}`,
+          `${" ".repeat(HARNESS.rail)}${bar} ${mark} ${body[0]}${body.length === 1 ? caret : ""}`,
           ...body.slice(1).map((line, index) =>
-            `${indent}${line}${body.length - 2 === index ? caret : ""}`),
+            `${rail}${line}${body.length - 2 === index ? caret : ""}`),
           "",
         ];
       }
@@ -634,16 +650,16 @@ export class Workbench {
         if (entry.streaming) {
           const mark = renderPresence("reasoning", Date.now(), paint);
           return [
-            `${" ".repeat(HARNESS.mark)}${mark} ${paint.dim("thinking")}`,
-            ...body.slice(-2).map((line) => `${" ".repeat(HARNESS.content)}${paint.dim(line)}`),
+            `${" ".repeat(HARNESS.rail)}${bar} ${mark} ${paint.dim("thinking")}`,
+            ...body.slice(-2).map((line) => `${rail}${paint.dim(line)}`),
           ];
         }
         const duration = ((entry.durationMs ?? 0) / 1_000).toFixed(1);
         const expanded = this.expandedReasoning.has(entry.id);
-        const trace = `${" ".repeat(HARNESS.content)}${paint.text("⋯", "rule")} `
+        const trace = `${rail}${paint.text("⋯", "rule")} `
           + paint.dim(`thought ${duration}s${expanded ? "" : " · ctrl+x"}`);
         return expanded
-          ? [trace, ...body.map((line) => `${" ".repeat(HARNESS.content)}  ${paint.dim(line)}`)]
+          ? [trace, ...body.map((line) => `${rail}  ${paint.dim(line)}`)]
           : [trace];
       }
       case "tool": {
@@ -658,17 +674,19 @@ export class Workbench {
         return [row, ...diffLines, ...message];
       }
       case "notice": {
-        const color: PaletteColor = entry.tone === "success" ? "citron" : entry.tone === "error" ? "signal" : "secondary";
         const glyph = entry.tone === "success" ? "✓" : entry.tone === "error" ? "×" : "·";
+        if (entry.closesTurn) {
+          return [formatTurnCloser(entry.text, width, paint, glyph), ""];
+        }
+        const color: PaletteColor = entry.tone === "success" ? "citron" : entry.tone === "error" ? "signal" : "secondary";
         return [
-          `${" ".repeat(HARNESS.content)}${paint.text(glyph, color)} `
+          `${rail}${paint.text(glyph, color)} `
             + paint.dim(truncateText(sanitizeTerminalLine(entry.text), Math.max(8, proseWidth - 2))),
-          "",
         ];
       }
       case "block":
         return [
-          ...entry.lines.map((line) => `${" ".repeat(HARNESS.content)}${line}`),
+          ...entry.lines.map((line) => `${rail}${line}`),
           "",
         ];
     }
@@ -699,7 +717,10 @@ export class Workbench {
           : entry.state === "denied"
             ? "denied"
             : formatDuration(entry.durationMs, entry.exitCode);
-    return formatToolRow(state, verb, entry.detail, meta, width, paint, mark);
+    return formatToolRow(state, verb, entry.detail, meta, width, paint, {
+      phase: entry.phase,
+      ...(mark ? { mark } : {}),
+    });
   }
 
   private renderedMarkdown(entry: AssistantEntry, width: number): string[] {
@@ -723,24 +744,19 @@ export class Workbench {
 
     const chrome = this.composeHeader(layout.width);
     rows[layout.header.row] = chrome.mark;
-    // The pulse lives on the second row when there is room; the layout reserves
-    // a single header row, so the hairline is drawn at the top of the
-    // conversation area instead of stealing a row.
+    // A static rule below the header frames the transcript. The previous
+    // animated pulse read as an endless moving line during inference and
+    // carried no information, so structure replaces motion here.
     const conversation = this.viewport.visible(Math.max(1, layout.conversation.height - 1));
     const sidebar = layout.sidebar ? this.sidebarLines() : null;
-    const pulse = formatPulseLine(
-      layout.conversation.width,
-      pulseProgress(this.state),
-      this.pulseIntensity,
-      paint,
-    );
+    const rule = paint.text("─".repeat(layout.conversation.width), "rule");
     for (let index = 0; index < layout.conversation.height; index += 1) {
       const row = layout.conversation.row + index;
-      const conversationLine = index === layout.conversation.height - 1
-        ? pulse
-        : truncateText(conversation[index] ?? "", layout.conversation.width);
+      const conversationLine = index === 0
+        ? rule
+        : truncateText(conversation[index - 1] ?? "", layout.conversation.width);
       if (layout.sidebar && layout.dividerColumn !== null && sidebar) {
-        const sidebarLine = sidebar[index] ?? "";
+        const sidebarLine = index === 0 ? "" : sidebar[index - 1] ?? "";
         rows[row] = `${pad(conversationLine, layout.conversation.width)}${paint.text("│", "rule")}${pad(sidebarLine, layout.sidebar.width)}`;
       } else {
         rows[row] = conversationLine;
@@ -758,15 +774,21 @@ export class Workbench {
     };
   }
 
+  /// The header carries identity: brand, session, workspace, branch. The model
+  /// lives in the footer with live runtime state, so it is never shown twice.
   private composeHeader(width: number): { mark: string } {
     const paint = this.options.paint;
-    const model = this.options.contextRail.modelId;
     const branch = this.options.contextRail.workspaceBranch;
     const left = `${" ".repeat(HARNESS.margin)}${paint.text("◈", "electric")} `
       + paint.bold("demesne", "paper")
       + paint.dim(` · ${truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(6, Math.floor(width / 4)))}`);
+    const root = this.options.workspaceRoot;
+    const workspace = root ? shortenPath(root) : null;
     const right = paint.dim(
-      `${truncateText(sanitizeTerminalLine(model), 28)}${branch ? ` · ${sanitizeTerminalLine(branch)}` : ""}`,
+      [
+        workspace ? truncateText(sanitizeTerminalLine(workspace), 30) : null,
+        branch ? sanitizeTerminalLine(branch) : null,
+      ].filter((part): part is string => part !== null).join(" · "),
     );
     const padding = Math.max(1, width - visibleLength(left) - visibleLength(right));
     return { mark: truncateText(`${left}${" ".repeat(padding)}${right}`, width) };
@@ -784,11 +806,20 @@ export class Workbench {
       .map((line) => ` ${truncateText(line, width - 2)}`);
   }
 
-  /// The pulse hairline at the bottom of the transcript is the only separator
-  /// between conversation and composer; a second rule here read as noise.
+  /// A static rule above the composer separates transcript from input. With
+  /// the rule under the header, the screen reads as three bands: identity,
+  /// conversation, control.
   private composeInput(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
+    const paint = this.options.paint;
+    const rule = paint.text(
+      `${" ".repeat(HARNESS.margin)}${"─".repeat(Math.max(4, width - HARNESS.margin - HARNESS.gutter))}`,
+      "rule",
+    );
     const content = this.composeInputContent(width);
-    return { lines: content.lines, cursor: content.cursor };
+    return {
+      lines: [rule, ...content.lines],
+      cursor: content.cursor ? { row: content.cursor.row + 1, column: content.cursor.column } : null,
+    };
   }
 
   private composeInputContent(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
@@ -848,15 +879,12 @@ export class Workbench {
   }
 }
 
-/// The pulse travels faster while the agent is actively producing output and
-/// drifts slowly when idle, so the hairline reads as a heartbeat rather than
-/// as decoration.
-function pulseProgress(state: PresenceState): number {
-  const now = Date.now();
-  const active = state === "writing" || state === "working" || state === "verifying";
-  const thinking = state === "thinking" || state === "reasoning";
-  const period = active ? 1_100 : thinking ? 2_600 : 7_000;
-  return (now % period) / period;
+/// Shows the workspace as its last two path segments so the header stays short
+/// without hiding which project the session is bound to.
+function shortenPath(root: string): string {
+  const parts = root.split("/").filter(Boolean);
+  if (parts.length <= 2) return root;
+  return `…/${parts.slice(-2).join("/")}`;
 }
 
 function formatDuration(durationMs: number | undefined, exitCode: number | undefined): string | undefined {

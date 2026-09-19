@@ -1,20 +1,23 @@
 #!/usr/bin/env bun
 /// Renders the harness design live in your terminal.
 ///
-/// Run `bun run ui:preview`. It cycles the agent through considering, writing,
-/// and waiting-for-approval so you can judge the motion and the grid on your
+/// Run `bun run ui:preview`. It cycles the agent through writing, waiting for
+/// approval, and done so you can judge the structure, color, and motion on your
 /// own screen, then exits cleanly.
 
 import {
   createPainter,
-  formatPulseLine,
   formatToolRow,
+  formatTurnCloser,
   formatTurnOpener,
   HARNESS,
   renderPresence,
   streamingCaret,
+  toolPhaseColor,
+  turnRail,
   visibleLength,
   type PresenceState,
+  type ToolPhaseName,
 } from "../packages/brand/src/index.ts";
 
 const paint = createPainter(true, "dark");
@@ -23,121 +26,132 @@ const ESC = "\x1b";
 const out = process.stdout;
 
 const SESSION = "parser hardening";
-const MODEL = "qwen3.8-27b · llama.cpp";
+const WORKSPACE = "…/projects/demesne-cli";
+const BRANCH = "main";
+const MODEL = "qwen3.8-27b";
 
-interface Scene {
-  state: PresenceState;
-  intensity: number;
-  footer: string;
-  rows: (frame: number) => string[];
-}
-
-const head = (label: string) => `${" ".repeat(HARNESS.mark)}${label} `;
+const rail = turnRail(paint);
+const bar = paint.text("│", "rule");
+const rule = paint.text(`${" ".repeat(HARNESS.margin)}${"─".repeat(Math.max(4, width - HARNESS.margin - HARNESS.gutter))}`, "rule");
 const indent = " ".repeat(HARNESS.content);
 
-/// The transcript up to the current scene, so each scene reads as a live
-/// continuation of the same turn.
-const baseRows = (frame: number, state: PresenceState): string[] => [
-  formatTurnOpener("you", "21:03", width, paint),
-  `${indent}${paint.bold("fix the parser", "paper")}`,
-  "",
-  `${indent}${paint.text("⋯", "rule")} ${paint.dim("thought 4.2s · ctrl+x")}`,
-  formatToolRow("done", "read", "src/lexer.ts", "12ms", width, paint),
-  "",
-  `${head(renderPresence(state === "waiting" ? "writing" : state, Date.now(), paint))}`
-    + `I read the guard. It rejects everything above 127, so I will narrow it`,
-  `${indent}to a proper unicode check and add a regression test.`,
-  "",
-];
-
-const scenes: Scene[] = [
-  {
-    state: "writing",
-    intensity: 0.85,
-    footer: "writing · 0:06 · 18.2 tok/s",
-    rows: (frame) => [
-      ...baseRows(frame, "writing"),
-      formatToolRow("running", "edit", "src/lexer.ts", undefined, width, paint, renderPresence("writing", Date.now(), paint)),
-      "",
-      `${head(renderPresence("writing", Date.now(), paint))}${paint.dim("so the fix is")}${streamingCaret(paint)}`,
-    ],
-  },
-  {
-    state: "waiting",
-    intensity: 0.3,
-    footer: "needs your go-ahead · 0:19",
-    rows: (frame) => [
-      ...baseRows(frame, "waiting"),
-      formatToolRow("waiting", "edit", "src/lexer.ts", "needs you", width, paint, renderPresence("waiting", Date.now(), paint)),
-      `${indent}${paint.text("- if (c > 127) throw new Error(\"bad byte\")", "signal")}`,
-      `${indent}${paint.text("+ if (c > 0x7f) continue", "citron")}`,
-      "",
-      `${indent}${paint.dim("allow once  ·  always here  ·  always (save)  ·  deny")}`,
-    ],
-  },
-  {
-    state: "idle",
-    intensity: 0.12,
-    footer: "ready",
-    rows: (frame) => [
-      ...baseRows(frame, "idle"),
-      formatToolRow("done", "edit", "src/lexer.ts", "8ms", width, paint),
-      `${indent}${paint.text("- if (c > 127) throw new Error(\"bad byte\")", "signal")}`,
-      `${indent}${paint.text("+ if (c > 0x7f) continue", "citron")}`,
-      formatToolRow("done", "run", "$ bun test", "1.2s", width, paint),
-      `${indent}${paint.dim("610 pass · 0 fail")}`,
-      "",
-      `${head(paint.text("◆", "citron"))}I changed the guard and the tests pass.`,
-      "",
-      `${indent}${paint.text("✓", "citron")} ${paint.dim("I’m done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s")}`,
-    ],
-  },
-];
-
+/// The header carries identity; the footer carries live state. The model
+/// appears once, in the footer.
 function header(): string {
   const left = `${" ".repeat(HARNESS.margin)}${paint.text("◈", "electric")} ${paint.bold("demesne", "paper")}`
     + paint.dim(` · ${SESSION}`);
-  const right = paint.dim(MODEL);
+  const right = paint.dim(`${WORKSPACE} · ${BRANCH}`);
   const padding = Math.max(1, width - visibleLength(left) - visibleLength(right));
   return `${left}${" ".repeat(padding)}${right}`;
 }
 
-function composer(scene: Scene): string[] {
+function toolRow(
+  state: "done" | "failed" | "running" | "waiting",
+  phase: ToolPhaseName,
+  verb: string,
+  target: string,
+  meta: string | undefined,
+  mark?: string,
+): string {
+  return formatToolRow(state, verb, target, meta, width, paint, { phase, ...(mark ? { mark } : {}) });
+}
+
+/// Transcript shared by every scene, so each scene reads as the same turn
+/// progressing rather than as a different example.
+const transcript = (state: PresenceState): string[] => [
+  formatTurnOpener("you", "21:03", width, paint),
+  `${indent}${paint.bold("fix the parser", "paper")}`,
+  `${rail}${paint.text("⋯", "rule")} ${paint.dim("thought 4.2s · ctrl+x")}`,
+  toolRow("done", "inspect", "read", "src/lexer.ts", "12ms"),
+  "",
+  `${" ".repeat(HARNESS.rail)}${bar} ${state === "done" ? paint.text("◆", "citron") : renderPresence("writing", Date.now(), paint)} `
+    + `I read the guard. It rejects everything above 127, so I will`,
+  `${rail}narrow it to a proper unicode check and add a regression test.`,
+  "",
+];
+
+interface Scene {
+  state: PresenceState;
+  status: string;
+  rows: () => string[];
+}
+
+const scenes: Scene[] = [
+  {
+    state: "writing",
+    status: "writing · 0:06 · 18.2 tok/s",
+    rows: () => [
+      ...transcript("writing"),
+      toolRow("running", "change", "edit", "src/lexer.ts", undefined, renderPresence("writing", Date.now(), paint)),
+      `${indent}${paint.text("- if (c > 127) throw new Error(\"bad byte\")", "signal")}`,
+      `${indent}${paint.text("+ if (c > 0x7f) continue", "citron")}`,
+      "",
+      `${" ".repeat(HARNESS.rail)}${bar} ${renderPresence("writing", Date.now(), paint)} ${paint.dim("so the fix is")}${streamingCaret(paint)}`,
+    ],
+  },
+  {
+    state: "waiting",
+    status: "needs your go-ahead · 0:19",
+    rows: () => [
+      ...transcript("waiting"),
+      toolRow("waiting", "change", "edit", "src/lexer.ts", "needs you", renderPresence("waiting", Date.now(), paint)),
+      `${indent}${paint.text("- if (c > 127) throw new Error(\"bad byte\")", "signal")}`,
+      `${indent}${paint.text("+ if (c > 0x7f) continue", "citron")}`,
+      "",
+      `${rail}${paint.dim("allow once  ·  always here  ·  always (save)  ·  deny")}`,
+    ],
+  },
+  {
+    state: "idle",
+    status: "ready",
+    rows: () => [
+      ...transcript("idle"),
+      toolRow("done", "change", "edit", "src/lexer.ts", "8ms"),
+      `${indent}${paint.text("- if (c > 127) throw new Error(\"bad byte\")", "signal")}`,
+      `${indent}${paint.text("+ if (c > 0x7f) continue", "citron")}`,
+      toolRow("done", "verify", "run", "$ bun test", "1.2s"),
+      `${rail}${paint.dim("610 pass · 0 fail")}`,
+      "",
+      `${" ".repeat(HARNESS.rail)}${bar} ${paint.text("◆", "citron")} I changed the guard and the tests pass.`,
+      "",
+      formatTurnCloser("I’m done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s", width, paint),
+    ],
+  },
+];
+
+const ROWS = 22;
+
+function composer(scene: Scene): string {
   const mark = renderPresence(scene.state === "waiting" ? "waiting" : "listening", Date.now(), paint);
   const prompt = scene.state === "waiting"
     ? paint.dim("waiting for you")
     : paint.dim("ask anything · / for commands");
-  return [`${" ".repeat(HARNESS.mark)}${mark} ${prompt}`];
+  const hint = paint.dim("⏎ send · ^O editor");
+  const left = `${" ".repeat(HARNESS.rail)}${mark} ${prompt}`;
+  const padding = Math.max(1, width - visibleLength(left) - visibleLength(hint) - HARNESS.gutter);
+  return `${left}${" ".repeat(padding)}${hint}`;
 }
 
 function footer(scene: Scene): string {
-  const left = `  ${renderPresence(scene.state, Date.now(), paint)} ${paint.bold(scene.footer.split(" ·")[0]!, "paper")} `
-    + paint.dim(`· ${scene.footer.split(" · ").slice(1).join(" · ")}`);
-  const right = paint.dim(`${MODEL.split(" ·")[0]} · main · ▰▰▱▱▱ 4% · swap 7.1G`);
+  const label = scene.status.split(" ·")[0]!;
+  const rest = scene.status.split(" · ").slice(1).join(" · ");
+  const left = `  ${renderPresence(scene.state, Date.now(), paint)} ${paint.bold(label, "paper")}`
+    + (rest ? paint.dim(` · ${rest}`) : "");
+  const right = `${paint.text("✓", "citron")} ${paint.dim(`ngram-mod · ${MODEL} · ▰▰▱▱▱ 4%`)}`;
   const padding = Math.max(1, width - visibleLength(left) - visibleLength(right));
   return `${left}${" ".repeat(padding)}${right}`;
 }
 
 function render(frame: number): void {
   const scene = scenes[Math.floor(frame / 14) % scenes.length]!;
-  const rows = scene.rows(frame);
-  const body = rows.slice(0, Math.max(0, 22));
+  const body = scene.rows();
   out.write(`${ESC}[2J${ESC}[H`);
   out.write(`${header()}\n`);
-  for (const line of body) out.write(`${line}\n`);
-  // Fill to the composer so the pulse always sits directly above it.
-  for (let i = body.length; i < 22; i++) out.write("\n");
-  out.write(`${formatPulseLine(width, pulseProgress(scene.state), scene.intensity, paint)}\n`);
-  for (const line of composer(scene)) out.write(`${line}\n`);
+  out.write(`${rule}\n`);
+  for (let i = 0; i < ROWS; i++) out.write(`${body[i] ?? ""}\n`);
+  out.write(`${rule}\n`);
+  out.write(`${composer(scene)}\n`);
   out.write(`${footer(scene)}\n`);
-}
-
-function pulseProgress(state: PresenceState): number {
-  const now = Date.now();
-  const active = state === "writing" || state === "working" || state === "verifying";
-  const thinking = state === "thinking" || state === "reasoning";
-  const period = active ? 1_100 : thinking ? 2_600 : 7_000;
-  return (now % period) / period;
 }
 
 out.write(`${ESC}[?1049h${ESC}[?25l`);

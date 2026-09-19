@@ -97,8 +97,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Assistant prose now closes per model round and the pacer drains before tool
   and permission events, fixing a split-sentence defect where paced text
   flushed after the block had closed.
-- Motion is bound to meaning: only the active turn animates, the pulse hairline
-  speed tracks real token throughput, and the sidebar is hidden by default.
+- Motion is bound to meaning: only the active turn animates, and the sidebar is
+  hidden by default.
+- Added harness structure and color: a turn rail binds each turn between a
+  `┌ you ───` opener and a `└─ ✓` closer, static rules frame the transcript
+  between header and composer, and tool verbs are colored by phase (inspect,
+  change, verify).
+- Removed the animated pulse hairline, which read as an endless moving line
+  during inference and carried no information; static structure replaces it.
+- The model name no longer appears twice: the header shows workspace and
+  branch, and the footer alone carries the model with runtime state.
 
 ## [0.1.0] - 2026-09-18
 

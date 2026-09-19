@@ -29,33 +29,31 @@ explicitly. `demesne doctor --json` emits machine-readable checks for scripts.
 
 This launches the interactive streaming CLI directly in your terminal. A compact masthead shows the active model, workspace, and approval policy. While output is silent, a phase-aware beacon occupies the fixed footer; it is cleared before permanent reasoning, tool, or response output is written. Interactive TTY responses pass through an ANSI- and grapheme-safe jitter buffer that turns speculative decoding bursts into a smooth typing cadence. The cadence adapts to visible text arrival and catches up within a bounded 1.5-second backlog; tools, errors, cancellation, and completion always drain or flush it before rendering. Scripted `prompt` output, pipes, event JSON, and persisted response text remain immediate and byte-for-byte unchanged.
 
-Interactive terminals open the Demesne harness: one clean column on a strict alignment grid, with a header, the transcript, a pulse hairline, the composer, and the fixed footer. `Ctrl+T` toggles the telemetry sidebar, `PgUp`/`PgDn` scroll, `Ctrl+G` returns to the bottom, `Ctrl+X` expands the last thought, and double-Escape or Ctrl+C interrupts. Non-interactive use, `--no-tui`, and `DEMESNE_NO_TUI=1` keep the streaming scrollback output byte-for-byte, so pipes and scripts are unaffected.
+Interactive terminals open the Demesne harness: one clean column on a strict alignment grid, with a header, a rule, the transcript, the composer, and the fixed footer. `Ctrl+T` toggles the telemetry sidebar, `PgUp`/`PgDn` scroll, `Ctrl+G` returns to the bottom, `Ctrl+X` expands the last thought, and double-Escape or Ctrl+C interrupts. Non-interactive use, `--no-tui`, and `DEMESNE_NO_TUI=1` keep the streaming scrollback output byte-for-byte, so pipes and scripts are unaffected.
 
-The harness follows four rules. **One grid**: marks, verbs, targets, and durations sit on fixed columns, so order comes from alignment rather than boxes. **One accent**: text is monochrome and color is reserved for the agent's mark and for status that always means the same thing (`✓` done, `×` failed, `!` denied, `◆` needs you). **Motion means something**: only the active turn animates — its mark, the pulse hairline whose speed tracks real token throughput, and the streaming caret — so settled scrollback never flickers. **The agent speaks**: turns close in its own voice, a pending action reports `needs you`, reasoning collapses to `⋯ thought 4.2s`, and a resumed session says how long it has been away.
+The harness follows four rules. **One grid**: a turn rail at column 2 binds every line of a turn, and marks, verbs, targets, and durations sit on fixed columns, so order comes from alignment rather than boxes. **Color means something**: tool verbs are colored by phase (inspection is quiet, changes take the accent, verification is bright), status glyphs are citron for done and signal for failed, denied, or waiting, and prose stays monochrome. **Motion is confined**: only the active turn animates — its mark and the streaming caret — so settled scrollback never flickers and nothing travels across the screen. **The agent speaks**: turns close in its own voice, a pending action reports `needs you`, reasoning collapses to `⋯ thought 4.2s`, and a resumed session says how long it has been away.
+
+Identity and state are separated so nothing repeats: the header carries the brand, session, workspace, and branch; the footer carries the model, runtime verification, and context meter.
 
 ```text
-  ◈ demesne · parser hardening                    qwen3.8-27b · llama.cpp
-  ┌ you ──────────────────────────────────────────────────────── 21:03
-    fix the parser
-
-    ⋯ thought 4.2s · ctrl+x
-    ✓ read     src/lexer.ts                                      12ms
-
-  ◍ I read the guard. It rejects everything above 127, so I will
-    narrow it to a proper unicode check.
-
-    ✓ edit     src/lexer.ts                                       8ms
-               - if (c > 127) throw new Error("bad byte")
-               + if (c > 0x7f) continue
-    ✓ run      $ bun test                                        1.2s
-               610 pass · 0 fail
-
-  ◆ I changed the guard and the tests pass.
-
-    ✓ I'm done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s
-──────────────────────────────────────────────────────────────────────
-  ◇ ask anything · / for commands
-  ◍ writing · 0:06 · 18.2 tok/s      qwen3.8-27b · main · ▰▰▱▱▱ 4%
+  ◈ demesne · parser hardening                     …/projects/demesne-cli · main
+──────────────────────────────────────────────────────────────────────────────
+  ┌ you ────────────────────────────────────────────────────────────── 21:03
+      fix the parser
+  │ ⋯ thought 4.2s · ctrl+x
+  │ ✓ read    src/lexer.ts                                            12ms
+  │ ◆ I read the guard. It rejects everything above 127, so I will
+  │   narrow it to a proper unicode check.
+  │ ✓ edit    src/lexer.ts                                             8ms
+              - if (c > 127) throw new Error("bad byte")
+              + if (c > 0x7f) continue
+  │ ✓ run     $ bun test                                              1.2s
+              610 pass · 0 fail
+  │ ◆ I changed the guard and the tests pass.
+  └─ ✓ I'm done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s
+──────────────────────────────────────────────────────────────────────────────
+  ◇ ask anything · / for commands                       ⏎ send · ^O editor
+  ◍ writing · 0:06 · 18.2 tok/s          ✓ ngram-mod · qwen3.8-27b · ▰▰▱▱▱ 4%
 ```
 
 Run `bun run ui:preview` to watch this design animate through its states. Reduced motion and `NO_COLOR` keep every glyph static and byte-stable.

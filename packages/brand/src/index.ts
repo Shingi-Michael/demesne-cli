@@ -302,19 +302,33 @@ export function truncateText(str: string, maxLen: number): string {
 export const HARNESS = {
   /// Left margin before any mark.
   margin: 2,
-  /// Column where the agent's mark sits.
-  mark: 2,
+  /// Column of the turn rail that binds a turn's lines together.
+  rail: 2,
+  /// Column where a mark (agent core, tool status) sits.
+  mark: 4,
   /// Column where the agent's prose starts.
-  content: 4,
+  content: 6,
   /// Column where a tool row's status glyph sits.
   toolMark: 4,
   /// Column where a tool row's target starts.
-  toolTarget: 15,
+  toolTarget: 14,
   /// Width reserved for the tool verb.
   toolVerb: 8,
   /// Right margin for aligned durations.
   gutter: 2,
 } as const;
+
+/// Tool phases, colored so a turn's shape is readable at a glance: inspection
+/// is quiet, changes are the accent, verification is the success color.
+export type ToolPhaseName = "inspect" | "change" | "verify";
+
+export function toolPhaseColor(phase: ToolPhaseName): PaletteColor {
+  switch (phase) {
+    case "inspect": return "secondary";
+    case "change": return "electric";
+    case "verify": return "electricBright";
+  }
+}
 
 export type ToolRowState = "running" | "done" | "failed" | "denied" | "waiting";
 
@@ -329,22 +343,23 @@ export function formatToolRow(
   meta: string | undefined,
   width: number,
   painter: Painter,
-  mark?: string,
+  options: { mark?: string; phase?: ToolPhaseName; rail?: boolean } = {},
 ): string {
   const safeWidth = Math.max(HARNESS.toolTarget + 12, width);
-  const glyph = mark ?? defaultToolGlyph(state, painter);
-  const color: PaletteColor = state === "done" ? "citron" : state === "running" ? "secondary" : "signal";
+  const glyph = options.mark ?? defaultToolGlyph(state, painter);
+  const verbColor = toolPhaseColor(options.phase ?? "inspect");
   const label = truncateText(sanitizeTerminalLine(verb), HARNESS.toolVerb);
-  // mark + gap + verb field + gap == HARNESS.toolTarget, so every target
-  // starts on the same column regardless of verb or state length.
-  const prefix = `${" ".repeat(HARNESS.toolMark)}${glyph} ${painter.text(label.padEnd(HARNESS.toolVerb), color)} `;
+  const rail = options.rail === false ? "  " : `${painter.text("│", "rule")} `;
+  // margin + rail + mark + gap + verb field == HARNESS.toolTarget, so every
+  // target starts on the same column regardless of verb or state length.
+  const prefix = `${" ".repeat(HARNESS.toolMark - 2)}${rail}${glyph} ${painter.text(label.padEnd(HARNESS.toolVerb), verbColor)}`;
   const metaText = meta === undefined ? "" : painter.dim(sanitizeTerminalLine(meta));
   const metaWidth = visibleLength(metaText);
   const available = Math.max(6, safeWidth - HARNESS.gutter - visibleLength(prefix));
   const targetWidth = Math.max(4, available - metaWidth - (metaWidth > 0 ? 1 : 0));
   const targetText = target === undefined
     ? ""
-    : painter.text(truncateText(sanitizeTerminalLine(target), targetWidth), state === "done" ? "paper" : color);
+    : painter.text(truncateText(sanitizeTerminalLine(target), targetWidth), state === "done" ? "paper" : verbColor);
   const gap = Math.max(metaWidth > 0 ? 1 : 0, available - visibleLength(targetText) - metaWidth);
   return `${prefix}${targetText}${" ".repeat(gap)}${metaText}${" ".repeat(HARNESS.gutter)}`;
 }
@@ -376,33 +391,23 @@ export function formatTurnOpener(
   return `${head} ${rule}${timeWidth > 0 ? ` ${time}` : ""}`;
 }
 
-/// The harness's single ambient element: a hairline carrying a traveling
-/// light. `progress` is the light's position (0..1) and `intensity` how bright
-/// and wide it is, so the line visibly quickens while the model streams and
-/// settles to a faint drift when idle. Quantized to palette roles so it works
-/// without truecolor and stays byte-stable when color is disabled.
-export function formatPulseLine(
+/// The turn rail: a quiet vertical that binds one turn's lines together so a
+/// transcript of many turns still reads as discrete units.
+export function turnRail(painter: Painter): string {
+  return `${" ".repeat(HARNESS.rail)}${painter.text("│", "rule")} `;
+}
+
+/// Closes a turn: the rail bends into the summary so the unit is bounded.
+export function formatTurnCloser(
+  summary: string,
   width: number,
-  progress: number,
-  intensity: number,
   painter: Painter,
+  glyph = "✓",
 ): string {
-  const safeWidth = Math.max(8, Math.floor(width));
-  const center = Math.max(0, Math.min(1, progress)) * (safeWidth - 1);
-  const spread = 2 + Math.max(0, Math.min(1, intensity)) * 7;
-  const levels: Array<{ color: PaletteColor; threshold: number }> = [
-    { color: "electricBright", threshold: 0.78 },
-    { color: "electric", threshold: 0.45 },
-    { color: "secondary", threshold: 0.16 },
-  ];
-  let line = "";
-  for (let index = 0; index < safeWidth; index += 1) {
-    const distance = Math.abs(index - center);
-    const falloff = Math.max(0, 1 - distance / spread) * Math.max(0, Math.min(1, intensity));
-    const level = levels.find((candidate) => falloff >= candidate.threshold);
-    line += level ? painter.text("─", level.color) : painter.text("─", "rule");
-  }
-  return line;
+  const safeWidth = Math.max(24, width);
+  const head = `${" ".repeat(HARNESS.rail)}${painter.text("└─", "rule")} `
+    + `${painter.text(glyph, "citron")} ${painter.dim(sanitizeTerminalLine(summary))}`;
+  return truncateText(head, safeWidth);
 }
 
 /// A block caret shown at the end of streaming prose.

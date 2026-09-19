@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createPainter, formatPulseLine, formatToolRow, formatTurnOpener, HARNESS, visibleLength } from "../src/index.ts";
+import { createPainter, formatToolRow, formatTurnCloser, formatTurnOpener, HARNESS, toolPhaseColor, turnRail, visibleLength } from "../src/index.ts";
 
 const painter = createPainter(false, "dark");
 const color = createPainter(true, "dark");
@@ -23,9 +23,28 @@ describe("formatToolRow", () => {
   });
 
   test("uses the caller's mark so running rows can animate", () => {
-    const row = formatToolRow("running", "read", "src/a.ts", undefined, 60, painter, "@");
-    expect(row).toStartWith(`${" ".repeat(HARNESS.toolMark)}@ read`);
+    const row = formatToolRow("running", "read", "src/a.ts", undefined, 60, painter, { mark: "@" });
+    expect(row).toStartWith(`${" ".repeat(HARNESS.rail)}│ @ read`);
     expect(row.indexOf("src/a.ts")).toBe(HARNESS.toolTarget);
+  });
+
+  test("drops the rail without shifting the target column", () => {
+    const withRail = formatToolRow("done", "read", "src/a.ts", "1ms", 60, painter);
+    const without = formatToolRow("done", "read", "src/a.ts", "1ms", 60, painter, { rail: false });
+    expect(withRail.indexOf("src/a.ts")).toBe(HARNESS.toolTarget);
+    expect(without.indexOf("src/a.ts")).toBe(HARNESS.toolTarget);
+    expect(without).not.toContain("│");
+  });
+
+  test("colors the verb by phase so a turn's shape is readable", () => {
+    const inspect = formatToolRow("done", "read", "src/a.ts", "1ms", 60, color, { phase: "inspect" });
+    const change = formatToolRow("done", "edit", "src/a.ts", "1ms", 60, color, { phase: "change" });
+    const verify = formatToolRow("done", "run", "bun test", "1ms", 60, color, { phase: "verify" });
+    expect(inspect).not.toBe(change);
+    expect(change).not.toBe(verify);
+    expect(toolPhaseColor("inspect")).toBe("secondary");
+    expect(toolPhaseColor("change")).toBe("electric");
+    expect(toolPhaseColor("verify")).toBe("electricBright");
   });
 
   test("truncates long targets and stays inside the width", () => {
@@ -37,6 +56,26 @@ describe("formatToolRow", () => {
   test("renders without decoration when color is disabled", () => {
     expect(formatToolRow("done", "run", "bun test", "1.2s", 60, painter)).not.toContain("\x1b");
     expect(formatToolRow("done", "run", "bun test", "1.2s", 60, color)).toContain("\x1b");
+  });
+});
+
+describe("turn structure", () => {
+  test("the rail binds a turn's lines at a fixed column", () => {
+    expect(turnRail(painter)).toBe(`${" ".repeat(HARNESS.rail)}│ `);
+    expect(visibleLength(turnRail(painter))).toBe(HARNESS.content - 2);
+  });
+
+  test("the closer bends the rail into the summary", () => {
+    const closer = formatTurnCloser("I’m done — 7.4s · 3 tools", 80, painter);
+    expect(closer).toStartWith(`${" ".repeat(HARNESS.rail)}└─ ✓ I’m done`);
+    expect(visibleLength(closer)).toBeLessThanOrEqual(80);
+  });
+
+  test("opener and closer share the rail column so a turn reads as one unit", () => {
+    const opener = formatTurnOpener("you", "21:03", 80, painter);
+    const closer = formatTurnCloser("done", 80, painter);
+    expect(opener.indexOf("┌")).toBe(HARNESS.rail);
+    expect(closer.indexOf("└")).toBe(HARNESS.rail);
   });
 });
 
@@ -52,34 +91,5 @@ describe("formatTurnOpener", () => {
     const opener = formatTurnOpener("you", undefined, 40, painter);
     expect(visibleLength(opener)).toBe(40);
     expect(opener).not.toContain("undefined");
-  });
-});
-
-describe("formatPulseLine", () => {
-  test("is exactly the requested width", () => {
-    for (const width of [40, 80, 120]) {
-      expect(visibleLength(formatPulseLine(width, 0.5, 0.6, painter))).toBe(width);
-    }
-  });
-
-  test("moves the light with progress", () => {
-    const brightAt = (progress: number) => {
-      const line = formatPulseLine(60, progress, 1, color);
-      // The brightest cell is the one carrying electricBright.
-      const index = line.indexOf("132;147;208");
-      expect(index).toBeGreaterThan(0);
-      return line.slice(0, index).split("─").length;
-    };
-    expect(brightAt(0.1)).toBeLessThan(brightAt(0.9));
-  });
-
-  test("dims toward a flat hairline at zero intensity", () => {
-    const flat = formatPulseLine(40, 0.5, 0, color);
-    expect(flat).not.toContain("132;147;208");
-    expect(visibleLength(flat)).toBe(40);
-  });
-
-  test("stays plain without color", () => {
-    expect(formatPulseLine(30, 0.5, 1, painter)).toBe("─".repeat(30));
   });
 });

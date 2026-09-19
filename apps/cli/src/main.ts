@@ -814,6 +814,7 @@ async function runChat(command: string[]): Promise<void> {
         contextRail,
         sessionTitle: initialState.session.title,
         version: VERSION,
+        workspaceRoot: currentWorkspace,
         onExit: () => leaveChat(),
         onInterrupt: () => chatState.interrupt?.(),
         queue: {
@@ -911,7 +912,7 @@ async function runChat(command: string[]): Promise<void> {
         workbench.finishTurn("failed", `Turn failed · ${sanitizeTerminalText(message)}`);
       } finally {
         chatState.streamActive = false;
-        workbench.setPresence("idle", 0.1);
+        workbench.setPresence("idle");
         workbench.setFooter(`  ${renderPresence("idle", Date.now(), paint)} ${paint.dim("ready")}`, statusLineText());
       }
       return;
@@ -1433,21 +1434,6 @@ async function runWorkbenchTurn(options: {
     sink: (text) => options.workbench.assistantDelta(text),
   });
 
-  /// Pulse intensity tracks real throughput so the hairline quickens under
-  /// load instead of animating at a fixed decorative rate.
-  const pulseIntensityFor = (state: PresenceState, speed: number | null): number => {
-    if (speed !== null) return Math.max(0.2, Math.min(1, speed / 25));
-    switch (state) {
-      case "writing": return 0.55;
-      case "working":
-      case "verifying": return 0.4;
-      case "thinking":
-      case "reasoning": return 0.3;
-      case "waiting": return 0.2;
-      default: return 0.12;
-    }
-  };
-
   const updateFooter = () => {
     const elapsed = ((Date.now() - startedAt) / 1_000).toFixed(1);
     const speed = throughput.snapshot().tokensPerSecond;
@@ -1456,7 +1442,7 @@ async function runWorkbenchTurn(options: {
       + `${options.paint.bold(presenceLabel(presence), "paper")} ${options.paint.dim(
         `· ${elapsed}s${speed === null ? "" : ` · ${speed.toFixed(0)} tok/s`}${queued ? ` · noted ${queued}` : ""}`,
       )}`;
-    options.workbench.setPresence(presence, pulseIntensityFor(presence, speed));
+    options.workbench.setPresence(presence);
     options.workbench.setFooter(left, options.contextRail.statusLine(getTerminalWidth(process.stdout), options.paint));
   };
   const footerTimer = setInterval(updateFooter, 120);

@@ -474,7 +474,7 @@ export class Workbench {
 
   private readonly onKeypress = (
     text: string,
-    key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean },
+    key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; sequence?: string },
   ): void => {
     if (this.mode === "streaming") {
       const nextQueue = reduceQueuedInput(this.options.queue.get(), key, text ?? "");

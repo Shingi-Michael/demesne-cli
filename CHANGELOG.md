@@ -109,6 +109,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   survives: `✓ ngram-mod · qwen3.8-q4_0-100k-b256 · ▰▰▱▱▱ 3%`.
 - The footer no longer repeats the workspace branch, which the header already
   carries beside the workspace.
+- Esc Esc now interrupts. A terminal delivers two quick presses as one
+  keypress event with `meta: true` and a two-byte escape sequence, and the
+  reducer discarded anything carrying `meta`, so the second press was invisible
+  and the turn ran to completion. Escape presses are now counted from the
+  sequence bytes, which handles both coalesced and separate delivery.
+- The animated marks pulse between two palette colors instead of holding one
+  flat tone, and `working` no longer uses filled half-circles (`◐ ◓ ◑ ◒`),
+  whose weight clashed with every other state.
+- The stopped-turn closer no longer said `I kept N findings`, and the local
+  copy of `sentence` is gone in favour of the voice module's.
 - The model's reply carries no mark. It was a `◆`, and while the model streamed
   it was the same animated glyph the footer showed, so one glyph appeared twice
   on screen at once. Prose is now plain text on the content column, which also

@@ -14,6 +14,7 @@
 ///   fail   a turn whose command fails, to check the failure row
 ///   sweep  six reads in one round, then an edit and a run — tests collapsing
 ///   wrap   a reply long enough to wrap — tests prose alignment
+///   slow   a reply streamed in small chunks over ~20s — tests interrupting
 ///
 /// Point the CLI at it with a config that names this URL:
 ///   [provider]
@@ -24,7 +25,7 @@
 /// Steps are derived from the conversation rather than a call counter, so a
 /// retried request replays the same step instead of skipping ahead.
 
-const SCENARIOS = ["edit", "trace", "fail", "sweep", "wrap"] as const;
+const SCENARIOS = ["edit", "trace", "fail", "sweep", "wrap", "slow"] as const;
 type Scenario = (typeof SCENARIOS)[number];
 
 const scenario = (process.argv[2] ?? "edit") as Scenario;
@@ -105,6 +106,11 @@ function stepsFor(s: Scenario): Step[] {
         { content: "I narrowed the guard; the suite passes." },
       ];
     }
+    case "slow": {
+      // Streamed slowly so there is time to interrupt mid-generation.
+      const words = Array.from({ length: 60 }, (_, index) => `chunk${index} `);
+      return [{ content: words.join("") }];
+    }
     case "wrap":
       // A reply that must wrap several times, so the continuation lines can be
       // checked against the first line's column.
@@ -183,7 +189,13 @@ function roundStream(step: Step): ReadableStream<Uint8Array> {
         await Bun.sleep(140);
       }
       if (step.content) {
-        push(delta({ content: step.content }));
+        const pieces = scenario === "slow"
+          ? (step.content.match(/.{1,12}/g) ?? [step.content])
+          : [step.content];
+        for (const piece of pieces) {
+          push(delta({ content: piece }));
+          await Bun.sleep(scenario === "slow" ? 300 : 0);
+        }
         await Bun.sleep(120);
       }
       if (step.tools) {

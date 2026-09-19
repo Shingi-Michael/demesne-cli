@@ -102,7 +102,7 @@ import {
 import { formatDoctorReport, runDoctor } from "./doctor.ts";
 import { runSetup } from "./setup.ts";
 import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus, renderHarnessWelcome } from "./harness-panels.ts";
-import { narrateTurnEnd } from "./voice.ts";
+import { narrateTurnEnd, sentence } from "./voice.ts";
 import { updateUserConfig } from "@demesne/config";
 import { createInterface } from "node:readline/promises";
 
@@ -212,7 +212,7 @@ function watchForDoubleEscapeInterrupt(): () => void {
   input.setRawMode(true);
   input.resume();
 
-  const onKeypress = (_text: string, key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean }): void => {
+  const onKeypress = (_text: string, key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; sequence?: string }): void => {
     if (chatState.permissionActive) {
       // The approval selector handles Ctrl+C itself; other keys still reach
       // the double-Escape interrupt path.
@@ -1643,20 +1643,16 @@ async function runWorkbenchTurn(options: {
   const duration = ((Date.now() - startedAt) / 1_000).toFixed(1);
   const measured = throughput.snapshot();
   const speed = measured.decodeTokensPerSecond ?? measured.tokensPerSecond;
-  const findings = `${evidence.tools} finding${evidence.tools === 1 ? "" : "s"}`;
+  const counts = `${evidence.rounds} round${evidence.rounds === 1 ? "" : "s"}`
+    + ` · ${evidence.tools} tool${evidence.tools === 1 ? "" : "s"}`;
   const details = status === "completed"
-    ? `${duration}s · ${evidence.rounds} round${evidence.rounds === 1 ? "" : "s"} · ${evidence.tools} tool${evidence.tools === 1 ? "" : "s"}`
+    ? `${duration}s · ${counts}`
       + (measured.outputTokens ? ` · ${measured.outputTokens} tok` : "")
       + (speed ? ` · ${speed.toFixed(1)} tok/s` : "")
     : status === "stopped"
-      ? `after ${duration}s I kept ${findings}`
+      ? `${duration}s · ${counts}`
       : failure ? sentence(failure) : "";
   options.workbench.finishTurn(status, narrateTurnEnd(status, details));
-}
-
-function sentence(value: string): string {
-  const text = value.replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim();
-  return (text.length > 200 ? `${text.slice(0, 199)}…` : text).replace(/[.!?]+$/, "");
 }
 
 /// Best-effort command extraction for presence purposes; the activity ledger

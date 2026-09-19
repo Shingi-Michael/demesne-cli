@@ -3,6 +3,10 @@ import { createPainter } from "../src/index.ts";
 import { presenceForTool, presenceLabel, renderPresence } from "../src/presence.ts";
 
 const painter = createPainter(true, "dark");
+const STATES = [
+  "idle", "listening", "thinking", "reasoning", "working",
+  "writing", "verifying", "waiting", "done", "stopped", "error",
+] as const;
 const plain = createPainter(false, "dark");
 
 function stripAnsi(value: string): string {
@@ -31,16 +35,41 @@ describe("renderPresence", () => {
     expect(renderPresence("thinking", 0, plain)).not.toContain("\x1b");
   });
 
+  test("never uses the filled half-circles that clashed with the light states", () => {
+    // `working` was ◐ ◓ ◑ ◒: heavy filled half-circles, the only state drawn
+    // that way. Their weight was the complaint.
+    const filledHalves = /[\u25D0-\u25D3]/;
+    for (const state of STATES) {
+      for (let step = 0; step < 24; step += 1) {
+        expect(stripAnsi(renderPresence(state, step * 60, painter))).not.toMatch(filledHalves);
+      }
+    }
+  });
+
+  test("pulses between two palette colors instead of holding one flat tone", () => {
+    // The first half of the cycle is the state's color, the second half its
+    // accent, so the mark moves through the brand's colors as it moves.
+    const colors = (state: (typeof STATES)[number]) => {
+      const seen = new Set<string>();
+      for (let step = 0; step < 400; step += 10) {
+        // Match the color code before stripping it.
+        seen.add(renderPresence(state, step * 10, painter).match(/38;2;[\d;]+/)?.[0] ?? "default");
+      }
+      return seen;
+    };
+    for (const state of ["thinking", "working", "writing", "verifying", "waiting"] as const) {
+      expect(colors(state).size).toBeGreaterThan(1);
+    }
+    // Terminal states hold one color.
+    expect(colors("done").size).toBe(1);
+  });
+
   test("uses one light glyph family per state, never quadrant blocks", () => {
     // Quadrant blocks (▖ ▛ ▜ and friends) are heavy and asymmetric, so a frame
     // built from them jumps in weight against every other state. `writing` used
     // them and read as noise, so the whole family is off limits.
     const quadrantBlocks = /[\u2596-\u259f]/;
-    const states = [
-      "idle", "listening", "thinking", "reasoning", "working",
-      "writing", "verifying", "waiting", "done", "stopped", "error",
-    ] as const;
-    for (const state of states) {
+    for (const state of STATES) {
       const frames = new Set<string>();
       for (let step = 0; step < 24; step += 1) {
         const glyph = stripAnsi(renderPresence(state, step * 60, painter));
@@ -73,11 +102,7 @@ describe("presenceLabel", () => {
   });
 
   test("never speaks in the first person", () => {
-    const states = [
-      "idle", "listening", "thinking", "reasoning", "working",
-      "writing", "verifying", "waiting", "done", "stopped", "error",
-    ] as const;
-    for (const state of states) {
+    for (const state of STATES) {
       const label = presenceLabel(state);
       expect(label).not.toMatch(/\bI\b|I’m|I'm|I’ll|I'll/);
       expect(label).not.toMatch(/your|our|my/i);

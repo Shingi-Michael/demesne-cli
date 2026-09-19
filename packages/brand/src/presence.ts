@@ -25,21 +25,29 @@ interface PresenceSpec {
   frames: readonly string[];
   periodMs: number;
   color: PaletteColor;
+  /// A second palette color, alternated frame by frame, so a moving mark also
+  /// moves through the brand's colors instead of holding one flat tone.
+  accent?: PaletteColor;
 }
 
-/// The animated states, each in one glyph family so no frame jumps in weight
-/// or shape. `writing` is a left-bar pulse: it reads as a cursor advancing, and
-/// it deliberately avoids the quadrant blocks (`▛`, `▜`, `▖`), whose heavy
-/// asymmetric shapes clashed with every other state's light geometry.
+/// The animated states, each in one light glyph family so no frame jumps in
+/// weight or shape, and each pulsing between two palette colors so the motion
+/// carries the brand rather than a flat tone.
+///
+/// The palette pairs are deliberate: the blue states breathe between `electric`
+/// and `electricBright`, `working` shifts blue to `citron` as work completes,
+/// `verifying` shifts back, and `waiting` flashes `signal` because it is asking
+/// for the user. Nothing uses a filled half-circle (`◐ ◓ ◑ ◒`): their weight
+/// clashed with every other state's light geometry.
 const PRESENCE: Record<PresenceState, PresenceSpec> = {
-  idle: { frames: ["◇", "◆", "◆", "◇"], periodMs: 2600, color: "secondary" },
-  listening: { frames: ["◆", "◇", "◆", "◇"], periodMs: 1500, color: "electric" },
-  thinking: { frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], periodMs: 900, color: "electric" },
-  reasoning: { frames: ["◌", "○", "◍", "●", "◍", "○"], periodMs: 1300, color: "electricBright" },
-  working: { frames: ["◐", "◓", "◑", "◒"], periodMs: 760, color: "electric" },
-  writing: { frames: ["▏", "▎", "▍", "▌", "▍", "▎"], periodMs: 620, color: "electric" },
-  verifying: { frames: ["·", "•", "●", "•"], periodMs: 680, color: "citron" },
-  waiting: { frames: ["◆", "◇", "◇", "◆"], periodMs: 1100, color: "signal" },
+  idle: { frames: ["◇", "◆", "◆", "◇"], periodMs: 2600, color: "secondary", accent: "paper" },
+  listening: { frames: ["◆", "◇", "◆", "◇"], periodMs: 1500, color: "electric", accent: "electricBright" },
+  thinking: { frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], periodMs: 900, color: "electric", accent: "electricBright" },
+  reasoning: { frames: ["◌", "○", "◍", "●", "◍", "○"], periodMs: 1300, color: "electricBright", accent: "electric" },
+  working: { frames: ["◜", "◝", "◞", "◟"], periodMs: 760, color: "electric", accent: "citron" },
+  writing: { frames: ["▏", "▎", "▍", "▌", "▍", "▎"], periodMs: 620, color: "electric", accent: "electricBright" },
+  verifying: { frames: ["·", "•", "●", "•"], periodMs: 680, color: "citron", accent: "electricBright" },
+  waiting: { frames: ["◆", "◇", "◇", "◆"], periodMs: 1100, color: "signal", accent: "electricBright" },
   done: { frames: ["✓"], periodMs: 0, color: "citron" },
   stopped: { frames: ["×"], periodMs: 0, color: "secondary" },
   error: { frames: ["×"], periodMs: 0, color: "signal" },
@@ -54,7 +62,12 @@ export function renderPresence(state: PresenceState, nowMs: number, painter: Pai
   }
   const frameMs = spec.periodMs / spec.frames.length;
   const index = Math.floor(nowMs / frameMs) % spec.frames.length;
-  return painter.text(spec.frames[index]!, spec.color);
+  // The accent covers the second half of the cycle rather than alternating
+  // every frame: at a 90-190ms frame rate, per-frame alternation reads as a
+  // flicker instead of a pulse.
+  const half = Math.ceil(spec.frames.length / 2);
+  const color = index < half || !spec.accent ? spec.color : spec.accent;
+  return painter.text(spec.frames[index]!, color);
 }
 
 /// The state's name in the footer. These are the conventional words for what a

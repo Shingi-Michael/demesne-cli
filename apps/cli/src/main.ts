@@ -80,6 +80,7 @@ import { applyFooterScrollRegion, resetFooterScrollRegion } from "./terminal-con
 import { reduceInterruptKey } from "./interrupt-key.ts";
 import { playTensorIntro } from "./tensor-intro.ts";
 import { formatProcessView } from "./process-view.ts";
+import { formatAmbientMemory, readAmbientMemory } from "./ambient.ts";
 import { Workbench } from "./workbench/controller.ts";
 import { checkForUpdate } from "./update-check.ts";
 import { PromptHistory } from "./prompt-history.ts";
@@ -843,7 +844,9 @@ async function runChat(command: string[]): Promise<void> {
     console.log(card);
     fixedFooter.update("", statusLineText());
   };
+  let ambientTimer: ReturnType<typeof setInterval> | undefined;
   restoreTerminalState = () => {
+    if (ambientTimer) clearInterval(ambientTimer);
     workbench?.stop();
     fixedFooter.disable();
     process.stdout.removeListener("resize", onTerminalResize);
@@ -858,6 +861,12 @@ async function runChat(command: string[]): Promise<void> {
   process.stdout.on("resize", onTerminalResize);
   if (workbench) {
     workbench.start();
+    const refreshAmbient = async (): Promise<void> => {
+      const used = await readAmbientMemory();
+      if (workbench && used !== null) workbench.setAmbient(formatAmbientMemory(used, paint));
+    };
+    void refreshAmbient();
+    ambientTimer = setInterval(() => void refreshAmbient(), 10_000);
     const turns = initialState.session.turns.length;
     if (turns > 0) {
       workbench.notice(
@@ -1416,6 +1425,7 @@ async function runWorkbenchTurn(options: {
   let presence: PresenceState = "thinking";
   let status: "completed" | "stopped" | "failed" = "completed";
   let failure: string | undefined;
+  let softLimitWarned = false;
   const reduceMotion = reducedMotionEnabled();
   const pacer = reduceMotion ? null : new TerminalTextPacer({
     sink: (text) => options.workbench.assistantDelta(text),
@@ -1443,6 +1453,11 @@ async function runWorkbenchTurn(options: {
 
       if (event.type === "model.request_started") {
         presence = "thinking";
+        const plan = event.payload.contextPlan;
+        if (!softLimitWarned && isRecord(plan) && plan.budgetStatus === "over_soft_limit") {
+          softLimitWarned = true;
+          options.workbench.notice("context is past the soft limit · keeping the prefix, compacting only if needed", "info");
+        }
       } else if (event.type === "reasoning.delta" && typeof event.payload.delta === "string") {
         presence = "reasoning";
         options.workbench.reasoningDelta(event.payload.delta);
@@ -1487,9 +1502,11 @@ async function runWorkbenchTurn(options: {
         const summary = typeof event.payload.summary === "string" ? event.payload.summary : "operation";
         const rawArgs = event.payload.arguments;
         const rule = derivePersistedRule(toolName, rawArgs);
+        const toolCallId = typeof event.payload.toolCallId === "string" ? event.payload.toolCallId : null;
         let decision: PermissionDecision = "deny";
         if (permissionId) {
           presence = "waiting";
+          if (toolCallId) options.workbench.toolWaiting(toolCallId, true);
           updateFooter();
           decision = await options.workbench.askApproval({
             summary,
@@ -1497,6 +1514,7 @@ async function runWorkbenchTurn(options: {
             previewRows: permissionPreviewRows(toolName, rawArgs, options.paint),
             allowPersist: rule !== null,
           });
+          if (toolCallId) options.workbench.toolWaiting(toolCallId, false);
           presence = "working";
           if (decision === "allow_always" && rule) {
             try {

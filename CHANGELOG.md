@@ -69,6 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a shimmering assistant rail, self-typing output, a collapsible thought
   stream, ghost tools that solidify, and a resume greeting. `demesne
   --session <id>` now starts chat directly.
+- Workbench chrome: a raised header bar, a boxed composer, right-aligned user
+  turns, turn rules, approval-pending ghosts, a soft-limit heads-up, and live
+  swap pressure in the sidebar. The sidebar now appears from 84 columns (72 in
+  wide mode).
 
 ## [0.1.0] - 2026-09-18
 

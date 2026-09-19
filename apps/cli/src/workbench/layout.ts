@@ -44,7 +44,7 @@ export function computeWorkbenchLayout(
   const input: Rect = { row: h - 1 - inputHeight, column: 0, height: inputHeight, width: w };
   const header: Rect = { row: 0, column: 0, height: 1, width: w };
 
-  const showSidebar = sidebarMode !== "hidden" && w >= (sidebarMode === "wide" ? 80 : 100);
+  const showSidebar = sidebarMode !== "hidden" && w >= (sidebarMode === "wide" ? 72 : 84);
   const sidebarWidth = showSidebar ? Math.max(24, Math.min(38, Math.floor(w / 3))) : 0;
   const bodyTop = header.height;
   const bodyHeight = Math.max(1, h - header.height - inputHeight - 1);

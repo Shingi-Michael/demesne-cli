@@ -1,10 +1,12 @@
 import {
   computePromptVisualLines,
+  createPainter,
   formatDiffPreview,
   formatFooterLine,
   formatMentionMenu,
   formatPermissionCard,
   formatSlashCommandMenu,
+  padVisibleEnd,
   presenceForTool,
   presenceLabel,
   renderPresence,
@@ -86,6 +88,7 @@ interface ToolEntry {
   message?: string;
   diff?: { oldText: string; newText: string };
   startedAt: number;
+  waiting?: boolean;
 }
 
 interface NoticeEntry {
@@ -95,13 +98,18 @@ interface NoticeEntry {
   tone: "info" | "success" | "error";
 }
 
+interface RuleEntry {
+  id: number;
+  type: "rule";
+}
+
 interface BlockEntry {
   id: number;
   type: "block";
   lines: string[];
 }
 
-type WorkbenchEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry | BlockEntry;
+type WorkbenchEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry | RuleEntry | BlockEntry;
 
 export interface ApprovalRequest {
   summary: string;
@@ -129,8 +137,11 @@ export interface WorkbenchOptions {
   };
 }
 
-const TOOL_VERBS: Record<string, string> = {
-  list_files: "list",
+/// Plain painter used for bar chrome where nested colors would reset the
+/// background; the animated glyph shape still carries state.
+const PLAIN_PAINTER = createPainter(false, "dark");
+
+const TOOL_VERBS: Record<string, string> = {  list_files: "list",
   read_file: "read",
   read_files: "read",
   search_files: "search",
@@ -165,6 +176,7 @@ export class Workbench {
   private dialogTitle = "";
   private footerLeft = "";
   private footerRight = "";
+  private ambient: string[] = [];
   private started = false;
   private previousRows: string[] = [];
   private lastInterruptEscapeAt = 0;
@@ -225,6 +237,12 @@ export class Workbench {
 
   showBlock(lines: readonly string[]): void {
     this.entries.push({ id: this.nextId++, type: "block", lines: [...lines] });
+    this.requestRender();
+  }
+
+  /// Ambient machine state (memory pressure) rendered at the sidebar's end.
+  setAmbient(lines: readonly string[]): void {
+    this.ambient = [...lines];
     this.requestRender();
   }
 
@@ -307,8 +325,20 @@ export class Workbench {
     );
     if (!entry) return;
     entry.state = input.state;
+    entry.waiting = false;
     entry.durationMs = input.durationMs ?? Math.max(0, Date.now() - entry.startedAt);
     if (input.message) entry.message = input.message;
+    this.requestRender();
+  }
+
+  /// Marks a tool call as blocked on user approval, so it renders as an
+  /// anticipatory ghost instead of a running action.
+  toolWaiting(toolCallId: string, waiting: boolean): void {
+    const entry = this.entries.findLast(
+      (candidate): candidate is ToolEntry => candidate.type === "tool" && candidate.toolCallId === toolCallId,
+    );
+    if (!entry) return;
+    entry.waiting = waiting;
     this.requestRender();
   }
 
@@ -316,6 +346,7 @@ export class Workbench {
     this.closeReasoning();
     this.finishAssistant();
     this.notice(summary, status === "completed" ? "success" : status === "failed" ? "error" : "info");
+    this.entries.push({ id: this.nextId++, type: "rule" });
     this.requestRender();
   }
 
@@ -520,16 +551,16 @@ export class Workbench {
 
   private inputLineCount(): number {
     if (this.mode === "approval") {
-      return Math.max(3, 2 + (this.approval?.previewRows?.length ?? 0) + 2);
+      return Math.max(5, 4 + (this.approval?.previewRows?.length ?? 0) + 2);
     }
     if (this.mode === "dialog") {
-      return 2 + Math.min(this.dialogItems.length, 10);
+      return 4 + Math.min(this.dialogItems.length, 10);
     }
     const width = Math.max(10, (process.stdout.columns ?? 80) - 4);
     const valueLines = computePromptVisualLines(this.editor.value, this.editor.cursor, width).lines.length;
     const commands = this.matchingCommands().length;
     const menuLines = commands > 0 ? Math.min(commands, 10) + (commands >= 6 ? 3 : 0) : 0;
-    return Math.max(2, valueLines + menuLines + 1);
+    return Math.max(3, valueLines + menuLines + 1) + 2;
   }
 
   private rebuildConversation(): void {
@@ -545,8 +576,17 @@ export class Workbench {
     const paint = this.options.paint;
     switch (entry.type) {
       case "user": {
-        const text = paint.bold(truncateText(sanitizeTerminalLine(entry.text), Math.max(8, width - 16)), "paper");
-        return [`  ${paint.text("›", "electric")} ${text}  ${paint.dim(entry.at)}`, ""];
+        const lines = wrapDisplayText(sanitizeTerminalLine(entry.text), Math.max(20, Math.floor(width * 0.6)));
+        const time = paint.dim(entry.at);
+        return [
+          ...lines.map((line, index) => {
+            const styled = paint.bold(line, "paper");
+            const suffix = index === lines.length - 1 ? `  ${time}` : "";
+            const padding = Math.max(2, width - visibleLength(styled) - visibleLength(suffix) - 2);
+            return `${" ".repeat(padding)}${styled}${suffix}`;
+          }),
+          "",
+        ];
       }
       case "assistant": {
         const header = `  ${renderPresence(entry.streaming ? "writing" : "done", Date.now(), paint)} ${paint.dim("demesne")}`;
@@ -578,15 +618,18 @@ export class Workbench {
       case "tool": {
         const verb = toolVerb(entry.name);
         const running = entry.state === "running";
-        const glyph = running
-          ? renderPresence(presenceForTool(entry.name, isValidationCommand(entry.detail ?? "")), Date.now(), paint)
-          : entry.state === "done"
-            ? paint.text("✓", "citron")
-            : paint.text("×", "signal");
+        const glyph = entry.waiting
+          ? renderPresence("waiting", Date.now(), paint)
+          : running
+            ? renderPresence(presenceForTool(entry.name, isValidationCommand(entry.detail ?? "")), Date.now(), paint)
+            : entry.state === "done"
+              ? paint.text("✓", "citron")
+              : paint.text("×", "signal");
         const detail = entry.detail
-          ? ` ${paint.text(truncateText(sanitizeTerminalLine(entry.detail), Math.max(8, width - verb.length - 16)), running ? "rule" : "secondary")}`
+          ? ` ${paint.text(truncateText(sanitizeTerminalLine(entry.detail), Math.max(8, width - verb.length - 30)), running ? "rule" : "secondary")}`
           : "";
         const verbStyled = running ? paint.dim(verb) : paint.text(verb, "paper");
+        const waiting = entry.waiting ? ` ${paint.text("· waiting for your go-ahead", "signal")}` : "";
         const duration = running || entry.durationMs === undefined ? "" : paint.dim(` ${entry.durationMs}ms`);
         const message = entry.state === "failed" && entry.message
           ? [`    ${paint.text(truncateText(sanitizeTerminalLine(entry.message), Math.max(8, width - 6)), "signal")}`]
@@ -594,13 +637,15 @@ export class Workbench {
         const diffLines = entry.state === "done" && entry.diff
           ? formatDiffPreview(entry.diff.oldText, entry.diff.newText, 12, paint).map((line) => `    ${line}`)
           : [];
-        return [`  ${glyph} ${verbStyled}${detail}${duration}`, ...message, ...diffLines];
+        return [`  ${glyph} ${verbStyled}${detail}${waiting}${duration}`, ...message, ...diffLines];
       }
       case "notice": {
         const color: PaletteColor = entry.tone === "success" ? "citron" : entry.tone === "error" ? "signal" : "secondary";
         const glyph = entry.tone === "success" ? "✓" : entry.tone === "error" ? "×" : "·";
         return [`  ${paint.text(glyph, color)} ${paint.dim(truncateText(sanitizeTerminalLine(entry.text), Math.max(8, width - 4)))}`, ""];
       }
+      case "rule":
+        return [`  ${paint.text("─".repeat(Math.max(4, width - 4)), "rule")}`, ""];
       case "block":
         return [...entry.lines.map((line) => `  ${line}`), ""];
     }
@@ -653,24 +698,49 @@ export class Workbench {
   private composeHeader(width: number): string {
     const paint = this.options.paint;
     const model = this.options.contextRail.modelId;
-    const left = `  ${renderPresence("idle", Date.now(), paint)} ${paint.bold("DEMESNE", "paper")} ${paint.dim(this.options.version)} `
-      + `${paint.text("·", "rule")} ${paint.bold(truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(8, Math.floor(width / 3))), "paper")}`;
-    const right = paint.dim(`${truncateText(sanitizeTerminalLine(model), 24)} · ctrl+t sidebar · pgup/pgdn scroll`);
+    const glyph = renderPresence("idle", Date.now(), PLAIN_PAINTER);
+    const left = ` ${glyph} DEMESNE ${this.options.version}  ·  ${truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(8, Math.floor(width / 3)))}`;
+    const right = `${truncateText(sanitizeTerminalLine(model), 24)} · ctrl+t `;
     const padding = Math.max(1, width - visibleLength(left) - visibleLength(right));
-    return truncateText(`${left}${" ".repeat(padding)}${right}`, width);
+    const content = truncateText(`${left}${" ".repeat(padding)}${right}`, width);
+    // A raised background bar reads as application chrome rather than another
+    // line of output; the fixed footer below stays plain.
+    return paint.onBackground(paint.bold(content, "paper"), "raised");
   }
 
   private sidebarLines(): string[] {
     if (!this.layout.sidebar) return [];
+    const height = this.layout.sidebar.height;
     const width = this.layout.sidebar.width;
-    return this.options.contextRail.lines(
-      Math.max(16, width - 2),
-      this.layout.sidebar.height,
-      this.options.paint,
-    ).map((line) => ` ${truncateText(line, width - 2)}`);
+    const ambient = this.ambient.length > 0 ? ["", ...this.ambient] : [];
+    const railHeight = Math.max(4, height - ambient.length);
+    const rail = this.options.contextRail
+      .lines(Math.max(16, width - 2), railHeight, this.options.paint)
+      .map((line) => ` ${truncateText(line, width - 2)}`);
+    const memory = ambient.map((line) => ` ${truncateText(line, width - 2)}`);
+    return [...rail, ...memory].slice(0, height);
   }
 
+  /// Draws the input region as a boxed composer; the fixed footer below it is
+  /// intentionally left plain.
   private composeInput(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
+    const paint = this.options.paint;
+    const inner = Math.max(12, width - 6);
+    const content = this.composeInputContent(inner);
+    const border = (text: string) => paint.text(text, "rule");
+    const horizontal = "─".repeat(inner + 2);
+    const lines = [`  ${border(`╭${horizontal}╮`)}`];
+    for (const line of content.lines) {
+      lines.push(`  ${border("│")} ${padVisibleEnd(line, inner)} ${border("│")}`);
+    }
+    lines.push(`  ${border(`╰${horizontal}╯`)}`);
+    const cursor = content.cursor
+      ? { row: content.cursor.row + 1, column: content.cursor.column + 4 }
+      : null;
+    return { lines, cursor };
+  }
+
+  private composeInputContent(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
     const paint = this.options.paint;
     const lines: string[] = [];
     let cursor: { row: number; column: number } | null = null;

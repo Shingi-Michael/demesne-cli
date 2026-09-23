@@ -77,7 +77,7 @@ An optimization will not become a default merely because it sounds theoretically
 
 Negative results are valid research results. For example, discovering that a draft model makes speculative decoding slower is useful because it prevents an ineffective design from becoming part of the product.
 
-## Project Mission
+## Project Goal
 
 Demesne will maximize the useful coding capability of local models on memory-constrained hardware. It will optimize the complete agent loop: model inference, request scheduling, context construction, cache stability, tool execution, persistence, and task completion.
 

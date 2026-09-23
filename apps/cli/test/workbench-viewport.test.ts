@@ -39,4 +39,16 @@ describe("ConversationViewport", () => {
     viewport.scrollUp(5);
     expect(viewport.atBottom).toBe(true);
   });
+
+  test("keeps the reading position when output is appended while scrolled up", () => {
+    const viewport = new ConversationViewport();
+    const lines = Array.from({ length: 30 }, (_, index) => `line ${index}`);
+    viewport.setLines(lines);
+    viewport.scrollUp(10);
+    const before = viewport.visible(5);
+    viewport.setLines([...lines, "new output", "more output"]);
+    expect(viewport.visible(5)).toEqual(before);
+    viewport.toBottom();
+    expect(viewport.visible(2)).toEqual(["new output", "more output"]);
+  });
 });

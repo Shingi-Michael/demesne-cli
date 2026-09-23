@@ -58,4 +58,13 @@ describe("approval selection persistence", () => {
       expect(visibleLength(line)).toBeLessThanOrEqual(width);
     }
   });
+
+  test("draws the selected decision as a filled surface in its own color", () => {
+    // Selected "deny" (index 1 with two options) is a filled surface, not
+    // merely colored text.
+    const line = formatApprovalSelection(1, false, 120, createPainter(true));
+    expect(line).toContain("\x1b[48;2;");
+    expect(line).toContain("› Deny");
+    expect(line).toContain("\x1b[38;2;");
+  });
 });

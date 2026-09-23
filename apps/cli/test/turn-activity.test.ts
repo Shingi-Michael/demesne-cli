@@ -77,6 +77,25 @@ describe("TurnActivityLedger", () => {
     expect(ledger.snapshot().validations[0]).toMatchObject({ state: "failed", exitCode: 1 });
   });
 
+  test("approval, denial and interrupted execution retain distinct receipt states", () => {
+    const ledger = new TurnActivityLedger();
+    ledger.apply(event(1, "tool.call_requested", { toolCallId: "check", name: "run_command", arguments: { argv: ["bun", "test"] } }));
+    ledger.apply(event(2, "permission.requested", { toolCallId: "check" }));
+    expect(ledger.activity("check")?.state).toBe("waiting");
+    ledger.apply(event(3, "permission.resolved", { toolCallId: "check", decision: "allow_once" }));
+    expect(ledger.activity("check")?.state).toBe("queued");
+    ledger.apply(event(4, "tool.call_started", { toolCallId: "check" }));
+    ledger.apply(event(5, "tool.call_interrupted", { toolCallId: "check", exitCode: 130 }));
+    expect(ledger.snapshot().validations[0]).toMatchObject({ state: "stopped", exitCode: 130 });
+    expect(ledger.pendingCount("verify")).toBe(0);
+    ledger.apply(event(6, "tool.call_requested", { toolCallId: "deny", name: "run_command", arguments: { argv: ["bun", "test"] } }));
+    ledger.apply(event(7, "permission.resolved", { toolCallId: "deny", decision: "deny" }));
+    ledger.apply(event(8, "tool.call_requested", { toolCallId: "pending", name: "run_command", arguments: { argv: ["bun", "test"] } }));
+    ledger.apply(event(9, "turn.cancelled", {}));
+    expect(ledger.activity("deny")?.state).toBe("denied");
+    expect(ledger.activity("pending")?.state).toBe("stopped");
+  });
+
   test("classifies repository checks after a change as verification", () => {
     expect(classifyTurnPhase("git_diff", {}, true)).toBe("verify");
     expect(classifyTurnPhase("git_diff", {}, false)).toBe("inspect");

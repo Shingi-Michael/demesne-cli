@@ -27,36 +27,96 @@ bun run demesne doctor  # verifies config, daemon, provider, runtime profile, wo
 `auto_start = "always"`; `demesne daemon start|stop|status|logs` manages it
 explicitly. `demesne doctor --json` emits machine-readable checks for scripts.
 
-This launches the interactive streaming CLI directly in your terminal. A compact masthead shows the active model, workspace, and approval policy. While output is silent, a phase-aware beacon occupies the fixed footer; it is cleared before permanent reasoning, tool, or response output is written. Interactive TTY responses pass through an ANSI- and grapheme-safe jitter buffer that turns speculative decoding bursts into a smooth typing cadence. The cadence adapts to visible text arrival and catches up within a bounded 1.5-second backlog; tools, errors, cancellation, and completion always drain or flush it before rendering. Scripted `prompt` output, pipes, event JSON, and persisted response text remain immediate and byte-for-byte unchanged.
+This launches the interactive streaming CLI directly in your terminal. Interactive TTY responses pass through an ANSI- and grapheme-safe jitter buffer that turns speculative decoding bursts into a smooth typing cadence. The cadence adapts to visible text arrival and catches up within a bounded 1.5-second backlog; tools, errors, cancellation, and completion always drain or flush it before rendering. Scripted `prompt` output, pipes, event JSON, and persisted response text remain immediate and byte-for-byte unchanged.
 
-Interactive terminals open the Demesne harness: one clean column on a strict alignment grid, with a header, a rule, the transcript, the composer, and the fixed footer. `Ctrl+T` toggles the telemetry sidebar, `PgUp`/`PgDn` scroll, `Ctrl+G` returns to the bottom, `Ctrl+X` expands the last thought, and double-Escape or Ctrl+C interrupts. Non-interactive use, `--no-tui`, and `DEMESNE_NO_TUI=1` keep the streaming scrollback output byte-for-byte, so pipes and scripts are unaffected.
+### Terminal workspace
 
-The harness follows five rules. **One grid**: a turn rail at column 2 binds every line of a turn, and marks, verbs, targets, and durations sit on fixed columns, so order comes from alignment rather than boxes. **Color means something**: tool verbs are colored by phase (inspection is quiet, changes take the accent, verification is bright), status glyphs are citron for done and signal for failed, denied, or waiting, and prose stays monochrome. **Inspection collapses**: three or more contiguous reads or searches in one round become `✓ read src/lexer.ts +5`, because six files is one act of homework rather than six lines; changes and verification are never collapsed, since they are the evidence of what happened. The run must be contiguous — narration between two calls ends it, so the agent never appears to have said less than it did. **Motion is confined**: only the footer animates, and only while a turn is live, so settled scrollback never flickers and nothing travels across the screen. The model's reply carries no mark at all — it is plain text on the content column, and the footer is the single place the turn's state is shown. **Status, not narration**: the harness's own text names the state and nothing more — the footer reads `thinking`, `writing`, `checking`, `needs approval`, `done`, a pending action reports `needs approval: <tool>`, and a turn closes with `└─ ✓ done — 7.4s · 3 tools`. Nothing in the interface speaks in the first person; the only voice in the transcript is the model's own prose.
+Demesne's **Session** view implements **Version 14** of the official **Futuristic Terminal Harness Design**, with the subsequent footer and scrolling refinements. A fixed `// demesne` header groups the session title and live clock on the left, with the project path and History on the right. Cyan request bands lead into rectangular assistant cards marked by a single `[`—amber while live, cyan on completion, and red with a subdued red border on failure. The source palette uses `#050a0e` for the canvas, `#090f14` for surfaces, and `#0d1720` for raised details, with cyan actions, amber Thinking, green results, and blue-grey text. A matching light theme preserves the hierarchy. A compact `⊞` action rail expands into the inspection panel. See [the terminal design contract](docs/terminal-design.md).
 
-Identity and state are separated so nothing repeats: the header carries the brand, session, workspace, branch, model, and runtime verification, dropping whole items as it narrows (runtime, then branch, then model, with the workspace anchoring the row); the footer carries live state only — the turn's status on the left and the context window on the right.
+Empty sessions open on the **Version 9 start screen**: a centered three-row composer with animated cyan brackets, the active model and context watermark, shortcuts, and four colored **EXPLORE / DEBUG / BUILD / LEARN** operation cards. Clicking a card fills and focuses an editable draft; **Enter / Send** submits it. **Ctrl+T** focuses the cards and recent sessions, arrows or Tab browse, and Enter activates the selection; Escape returns to the draft. Card fills can be undone with Ctrl+_. The bottom **Recent** strip uses saved session titles, last-updated times, and recorded context counts; clicking a saved session resumes it, while **History / Alt+H** opens the session picker. Drafts survive settings and session navigation. Narrow layouts use two columns, and short terminals condense operations to a row of actions. The first submitted turn opens the conversation layout.
 
-```text
-  ◆ demesne · parser hardening    …/projects/demesne-cli · main · qwen3.8-27b
-──────────────────────────────────────────────────────────────────────────────
-  ┌ you ────────────────────────────────────────────────────────────── 21:03
-      fix the parser
-  │ ⋯ thought 4.2s · ctrl+x
-  │ ✓ read    src/lexer.ts                                            12ms
-  │   I read the guard. It rejects everything above 127, so I will
-  │   narrow it to a proper unicode check.
-  │ ✓ edit    src/lexer.ts                                             8ms
-              - if (c > 127) throw new Error("bad byte")
-              + if (c > 0x7f) continue
-  │ ✓ run     $ bun test                                              1.2s
-              610 pass · 0 fail
-  │   I changed the guard and the tests pass.
-  └─ ✓ done — 7.4s · 4 rounds · 3 tools · 384 tok · 18.2 tok/s
-──────────────────────────────────────────────────────────────────────────────
-  ❯ ask anything · / for commands                       ⏎ send · ^O editor
-  ◍ writing · 0:06 · 18.2 tok/s                                    ▰▰▱▱▱ 4%
+Each settled run has a ruled footer: **Mode · Model · elapsed time · speed · context**, an inline hairline context meter and percentage, then **[ COMPLETE ]**, **[ FAILED ]**, or **[ STOPPED ]** at the right edge. These are the run's original mode, model, turn duration, and measured throughput across its provider rounds, including failures and interruptions without a final answer. They stay attached through later turns, model changes, History, and session replay. Elapsed time uses seconds to one decimal place, matching the reference. Narrow terminals wrap whole fields. Missing measurements display `—`.
+
+Amber pulsing dots sit beside **THINKING in the conversation**, including while waiting for a model round's first text, and use the same renderer as the running Send control. The fixed bottom status strip shows context usage/capacity, scrollback and **RESPONSE ↑ / Ctrl+G LIVE ↓** navigation, and settled or approval status. It omits RUNNING/THINKING labels, pulsing dots, elapsed time, and token speed. Click the project path or press **Alt+P** for the full path and branch; click **ctx** or press **Alt+C** for the detailed budget in the action panel. `~` marks estimated input and `—` means a measurement is unavailable. Settled runs retain their recorded context counts in both the response footer and status strip; meters shift from green to amber above 50% and red above 80%. Response receipts retain measured throughput using reported output tokens and generation time, excluding first-token latency when available.
+
+Requests use a cyan `▶` on a tinted band whose left edge brightens on hover. Click a request to expand its full text and original time/model details. Scroll upward to read earlier turns, or use **History** (Alt+H) to select a particular turn. A pinned turn is labeled separately from the live session's telemetry.
+
+The main content area follows the work:
+
+- **Thinking** has an amber heading and a tinted, expandable trace inside the assistant card. Active reasoning uses pulsing dots and a blinking cursor; its heading stays visible at the top of a long trace's viewport. Finished reasoning folds into a duration-labelled disclosure as text or tools arrive, preserving manually opened traces and paused reading. Click it or use **Ctrl+X** to toggle the latest reasoning. Every model round remains in its original position alongside the response, at every terminal width. Reduced motion keeps the dots and cursor steady.
+- **Tool activity** uses single-line rows: a status glyph, cyan tool name, secondary-colored target, dim recorded timing, and `▸/▾` disclosure. Green marks confirmed success and red marks failures or approval requests. Consecutive confirmed reads/searches fold into an inspection summary; edits retain their paths and commands retain their outcomes. Expand a tool to read its output, recorded diff, or arguments. **Awaiting approval**, **running**, **denied**, **stopped**, and **failed** remain distinct through replay, and stopped commands never inflate failure counts. Errors use a red-tinted block with a single red left rule. A command with missing exit status remains individually visible as **unknown**.
+- **Response** is the main reading surface, with cyan headings, readable lists and code. A single **demesne** label and right-aligned timestamp sit above the entire response stream, including tool-only failures. The timestamp belongs to the first recorded activity; old summary-only records use their saved completion time when available. Footer values remain readable, with quiet field labels; lowercase **copy** fades in immediately before the status badge on the active card, briefly changing to **copied** when activated by mouse, Ctrl+Y, or keyboard selection. Changes and verification actions appear after settlement. Code uses a language label and a quiet left edge. Streaming prose starts near the top of the reading area, fills the available space, then advances only by newly overflowing rows with room below the newest line. **RESPONSE ↑** in the status strip, or **Alt+R**, jumps to the beginning of the completed answer and pauses following. Your reading position stays anchored through incoming output, completed tool batches, and queued turns; scrolling back to the bottom or pressing **Ctrl+G** resumes live following. Conversation and inspection panes have no visible scrollbars. Wheel momentum at either edge leaves the conversation still, and horizontal trackpad events are ignored rather than being interpreted as vertical scrolling.
+- **Evidence links** connect the response to recorded changes and verification. **N files changed** opens recorded diffs in the action panel; **Review attempts** identifies operations that did not succeed. Clicking verification opens recorded command output and exit status, preferring failed checks. Arrow controls navigate multiple records; **×** or Escape closes the panel. Historical evidence stays attached to its original turn while the active session continues. Failed operations expose their error before the proposed diff.
+- **Execution log** (Ctrl+B, or **⊞** in the action rail) provides the complete ordered record: requests, reasoning, progress, tools, results, and notices. It opens in the right panel. Arguments expand with **Alt+A** or a click; **Tab / Shift+Tab** moves between records while inspecting details.
+
+The full **Review** (Alt+→) and execution log use a record navigator in the action panel. Enter opens the selected record, and Escape returns to the list. Each turn retains its disclosures, selections, and reading positions while newer work streams.
+
+The bottom **Prompt** starts with two draft rows, grows with multiline input, and scrolls within a bounded area. A cyan top rule tracks input and terminal focus; bottom-aligned **▶** is dim when unfocused, cyan when focused, and becomes amber **◎** during execution. **SEND ↵** uses a subdued cyan wash when text is ready to send. **~N tok** appears below the button while you edit, paste, or queue text and disappears when empty. A quiet hint strip lists send, newline, commands, and file references, with cyan `/` and `@` glyphs. The draft estimate uses UTF-8 bytes / 3, excludes referenced file contents and request overhead, and is not a tokenizer measurement. Open **Settings** with Tab or Ctrl+K to select Build/Plan and the active model. During execution the prompt shows **Agent is running...** and the send control becomes **[  ···  ]**; clicking it or pressing Esc Esc / Ctrl+C interrupts. The editor accepts an editable **Queued follow-up** with Clear queue. Nonempty queued input is labeled **Queued · sends after this turn**, including on compact terminals. Typing resumes your draft at its cursor; bracketed multiline paste inserts text without submitting. Content focus displays contextual navigation hints and hides the draft caret. Approvals and searchable settings use the same alignment and surfaces.
+
+At **40×10**, optional spacing contracts and ordinary drafts retain at least three reading rows. Response footers wrap and omit their divider and field labels to leave more room, retaining the recorded values. Completions and approvals prioritize their selected control. At **100 columns and wider**, the action panel docks beside the conversation and scrolls independently. On smaller terminals it opens over the conversation while keeping the composer accessible. Resize preserves selections, drafts, and the reading anchor, clamping only when necessary.
+
+Resuming or switching sessions restores recorded answers, original model attribution, diffs, exit codes, and bounded stdout/stderr. Session commands such as `/context`, `/status`, and `/diff` open temporary output; Escape returns to the previous inspection. Dismissed utility output stays available in the execution log. Command feedback appears immediately above the prompt.
+
+| Control | Action |
+| --- | --- |
+| Alt+↑/↓ | Previous/next run |
+| Alt+H / History | Open turn history; ↑/↓ selects, Enter opens |
+| Alt+R / Response ↑ | Jump to the beginning of the completed response |
+| Alt+←/→ | Switch response and review |
+| Ctrl+T | Switch focus between content and prompt |
+| ←/→, with content focus | Switch conversation and review (when the turn has changes or checks) |
+| Tab / Shift+Tab, with conversation focus | Select the next/previous inline control |
+| ↑/↓, Enter, with content focus | Scroll/browse; expand the selected disclosure or open a record |
+| Escape / Backspace, with content focus | Return from a record to its origin, then the response and prompt |
+| PgUp/PgDn; mouse wheel | Scroll the view; scroll the region under the pointer |
+| Ctrl+G | Follow the conversation at its live edge |
+| Tab / Ctrl+K with an empty draft | Settings (Tab completes commands/mentions first) |
+| Ctrl+Y with an empty draft | Copy selected run's answer, or available assistant text, via OSC 52 |
+| Ctrl+B | Open the execution log |
+| Ctrl+X | Expand/collapse the latest thinking inline |
+| Ctrl+L | Cycle Session → Activity → Transcript |
+| Esc Esc / Ctrl+C while working | Interrupt the run |
+
+The optional **Activity** view groups each turn into Updates, Changes, Verification, and Response, with collapsible sections. **Transcript** retains chronological event order. Missing final answers are explicitly identified; earlier progress is not relabeled as a completed response.
+
+Preview the **production renderer** with demonstration data, without a model or daemon:
+
+```sh
+bun run ui:session
+bun run ui:session --state=start
+bun run ui:session --state=working
+bun run ui:session --state=tools
+bun run ui:session --state=thinking
+bun run ui:session --state=thinking-answer --trace
+bun run ui:session --state=waiting
+bun run ui:session --state=long --long-draft
+bun run ui:session --state=approval
+bun run ui:session --state=failed-change --view=review
+bun run ui:session --state=round-limit
+bun run ui:session --state=verify-only
+bun run ui:session --inspect=changes
+bun run ui:session --inspect=verification
+bun run ui:session --view=review
 ```
 
-Run `bun run ui:preview` to watch this design animate through its states. Reduced motion and `NO_COLOR` keep every glyph static and byte-stable.
+Reproducible compact/expanded screens are available for every state:
+
+```sh
+bun run ui:session --snapshot=80x24 --state=working --plain
+bun run ui:session --snapshot=120x36 --view=review
+bun run ui:session --snapshot=160x40 --view=log
+DEMESNE_THEME=demesne-light bun run ui:session
+```
+
+`ui:workbench` forwards to the session preview. `scripts/activity-preview.ts` exercises the grouped Activity view; `ui:preview` exercises scrollback rendering. Non-interactive use, `--no-tui`, and `DEMESNE_NO_TUI=1` retain streaming scrollback output.
+
+### Planned artifact previews
+
+The next panel feature is **artifact previews, starting with images**. Its
+[structure and product plan](docs/artifact-preview-plan.md) defines preview states,
+pinning, history, and persistence; the [implementation document](docs/artifact-preview-implementation.md)
+details the daemon-to-terminal pipeline, module structure, milestones, and verification.
+This feature is planned and not yet implemented; the arcade companion is deferred.
 
 ### Themes
 
@@ -73,15 +133,15 @@ Shipped: `demesne`, `demesne-light`, `dracula`, `tokyo-night`, `tokyo-night-stor
 
 `/theme` switches live — the painter is shared, so one call re-themes the interface on the next frame — and prints the value to set for it to persist.
 
-The inference spinner is deliberately uncolored: it is the mark on screen the longest, and an accent there competes with the turn's real status. Color is reserved for states that mean something, so `waiting` is `signal` and `verifying`/`done` are `citron`.
+The inference spinner is deliberately uncolored: it is the mark on screen the longest, and an accent there competes with the turn's real status. Color is reserved for states that mean something: `waiting` is `signal`, `verifying` is `execute`, and `done` is `citron`.
 
 To exercise a real turn without a model, run `bun run fake:provider [edit|trace|fail|sweep]` and point a `[provider]` block at `http://127.0.0.1:11437/v1`. The scenarios cover a single edit, a narrated read-heavy turn, a failing command, and six reads issued in parallel so the inspection collapsing is visible.
 
-The footer's left side reports the active phase and elapsed time while its right side prioritizes runtime verification, model identity, the workspace git branch, and a five-cell context meter with an estimated percentage. The footer preserves the cursor during resize, degrades to inline status on very short terminals, and avoids rewriting unchanged content.
+The session line keeps the title and project identity together. Original model attribution lives with each completed response and in History; narrow layouts retain it in History and the execution log. Detailed timing and context usage are available through `/context`, and `/help` lists keyboard controls. Scrollback mode uses a fixed footer for phase, timing, and context. Rendering avoids rewriting unchanged rows.
 
 Completion receipts separate prompt latency from generation: `ttft` is the summed time to first token across model rounds, and `tok/s decode` excludes that prefill interval. If a provider omits TTFT, the CLI falls back to the broader effective rate rather than inventing decode speed. Receipts also list paths changed and validation commands run using only recorded tool evidence. `/context` explicitly separates the pre-request **estimated context plan** from the last provider-reported token usage, cached input, and request timing; it does not present last-call usage as remaining conversation capacity.
 
-Tool activity is transient in the beacon while running and permanent once in scrollback under `INSPECT`, `CHANGE`, and `VERIFY` phase headers. Each completed call has a compact `✓`, `×`, or `!` result line that remains meaningful under `NO_COLOR`. Host `run_command` approval defaults to **Deny** when Enter is pressed because execution is not sandboxed; file edits retain the faster Allow once default. Cards, prompts, approvals, CJK text, code, lists, headings, quotes, and prose are cell-width aware and tested at 40, 80, and 120 columns. The palette preserves Demesne's electric/signal/citron roles and automatically chooses higher-contrast accents when `COLORFGBG` indicates a light terminal; set `DEMESNE_THEME=dark` or `DEMESNE_THEME=light` to override detection. Set `NO_COLOR=1` for plain output or `DEMESNE_REDUCED_MOTION=1` to disable continuous beacon animation and response pacing.
+Tool activity is transient in the beacon while running and permanent once in scrollback under `INSPECT`, `CHANGE`, and `VERIFY` phase headers. Each completed call has a compact `✓`, `×`, or `!` result line that remains meaningful under `NO_COLOR`. Host `run_command` approval defaults to **Deny** when Enter is pressed because execution is not sandboxed; file edits retain the faster Allow once default. Cards, prompts, approvals, CJK text, code, lists, headings, quotes, and prose are cell-width aware and tested at 40, 80, and 120 columns. The palette preserves Demesne's electric/signal/citron roles and automatically chooses higher-contrast accents when `COLORFGBG` indicates a light terminal; set `DEMESNE_THEME=dark` or `DEMESNE_THEME=light` to override detection. Set `NO_COLOR=1` for plain output or `DEMESNE_REDUCED_MOTION=1` to disable continuous beacon animation, start-screen reveals, hover fades, Thinking dot/cursor animation, and response pacing. The clock continues ticking in reduced-motion mode.
 
 ### Interactive Commands
 

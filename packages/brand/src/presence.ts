@@ -33,8 +33,8 @@ interface PresenceSpec {
 /// The inference spinner (`thinking`) is deliberately uncolored: it is the mark
 /// on screen the longest, and a color there competes with the turn's real
 /// status. Color is reserved for states that mean something — `waiting` in
-/// `signal` because it is asking for the user, `verifying` and `done` in
-/// `citron`. Nothing uses a filled half-circle (`◐ ◓ ◑ ◒`): their weight
+/// `signal` because it is asking for the user, `verifying` in `execute`, and
+/// `done` in `citron`. Nothing uses a filled half-circle (`◐ ◓ ◑ ◒`): their weight
 /// clashed with every other state's light geometry.
 const PRESENCE: Record<PresenceState, PresenceSpec> = {
   idle: { frames: ["◇", "◆", "◆", "◇"], periodMs: 2600, color: "secondary" },
@@ -43,7 +43,7 @@ const PRESENCE: Record<PresenceState, PresenceSpec> = {
   reasoning: { frames: ["◌", "○", "◍", "●", "◍", "○"], periodMs: 1300, color: "electricBright" },
   working: { frames: ["◜", "◝", "◞", "◟"], periodMs: 760, color: "electric" },
   writing: { frames: ["▏", "▎", "▍", "▌", "▍", "▎"], periodMs: 620, color: "electric" },
-  verifying: { frames: ["·", "•", "●", "•"], periodMs: 680, color: "citron" },
+  verifying: { frames: ["·", "•", "●", "•"], periodMs: 680, color: "execute" },
   waiting: { frames: ["◆", "◇", "◇", "◆"], periodMs: 1100, color: "signal" },
   done: { frames: ["✓"], periodMs: 0, color: "citron" },
   stopped: { frames: ["×"], periodMs: 0, color: "secondary" },
@@ -118,5 +118,4 @@ export function presenceForTool(name: string, isValidation: boolean): PresenceSt
   if (isValidation) return "verifying";
   return "working";
 }
-
 

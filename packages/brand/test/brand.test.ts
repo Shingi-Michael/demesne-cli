@@ -46,28 +46,28 @@ import {
 } from "../src/index.ts";
 
 describe("Demesne Brand & Mathematical Alignment", () => {
-  test("palette contains the 10 canonical Demesne colors", () => {
-    expect(palette.ink).toBe("#111014");
-    expect(palette.paper).toBe("#F7F3EA");
-    expect(palette.electric).toBe("#3857EB");
-    expect(palette.electricBright).toBe("#8CA3FF");
-    expect(palette.signal).toBe("#D63D1F");
-    expect(palette.citron).toBe("#B8DB47");
+  test("palette contains the official terminal design colors", () => {
+    expect(palette.ink).toBe("#050A0E");
+    expect(palette.paper).toBe("#C8DAE8");
+    expect(palette.electric).toBe("#00D4FF");
+    expect(palette.electricBright).toBe("#00D4FF");
+    expect(palette.signal).toBe("#FF4C4C");
+    expect(palette.citron).toBe("#00E676");
   });
 
-  test("terminal rendering keeps neutral text native and tones down accents", () => {
+  test("terminal rendering keeps neutral text native and uses the Demesne cyan accent", () => {
     const painter = createPainter(true);
 
-    expect(terminalPalette.electric).not.toBe(palette.electric);
+    expect(terminalPalette.electric).toBe("#00D4FF");
     expect(painter.text("body", "paper")).toBe("body");
-    expect(painter.text("accent", "electric")).toContain("38;2;102;120;200");
+    expect(painter.text("accent", "electric")).toContain("38;2;0;212;255");
   });
 
   test("selects a higher-contrast palette for light terminals", () => {
     expect(detectAppearance("15;0")).toBe("dark");
     expect(detectAppearance("0;15")).toBe("light");
     expect(resolveTheme("dark", "0;15").appearance).toBe("dark");
-    expect(createPainter(true, "light").text("accent", "electric")).toContain("38;2;64;87;181");
+    expect(createPainter(true, "light").text("accent", "electric")).toContain("38;2;0;123;155");
   });
 
   test("truncates colored text without splitting terminal escapes", () => {
@@ -189,6 +189,8 @@ describe("Demesne Brand & Mathematical Alignment", () => {
       .toContain("└ × [EXEC] $ bun test · 20ms");
     expect(formatToolResultLine("denied", "run_command", "$ rm file", undefined, true, 80, painter))
       .toContain("└ ! [EXEC] $ rm file");
+    expect(formatToolResultLine("stopped", "run_command", "$ bun test", 20, true, 80, painter))
+      .toContain("└ ■ [EXEC] $ bun test · stopped · 20ms");
     const injected = formatToolResultLine("done", "read_file", "safe.ts\nspoof\tcolumn", 1, true, 40, painter);
     expect(injected).not.toContain("\n");
     expect(injected).not.toContain("\t");
@@ -230,6 +232,15 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(safeReceipt).toContain("safe.ts spoof");
     expect(safeReceipt).not.toContain("safe.ts\nspoof");
     expect(safeReceipt).not.toContain("\t");
+    expect(safeReceipt).toContain("· bun test spoof · unknown");
+    expect(safeReceipt).not.toContain("✓ bun test");
+    const stopped = formatTurnReceipt({ durationSeconds: 1, rounds: 1, tools: 2, painter, width: 40,
+      changes: [{ operation: "M", path: "src/main.ts", state: "stopped" }],
+      validations: [{ command: "bun test", state: "stopped", exitCode: 130 }] });
+    expect(stopped).toContain("■ M src/main.ts · stopped");
+    expect(stopped).toContain("■ bun test · stopped · exit 130");
+    expect(stopped).not.toContain("×");
+    expect(Math.max(...stopped.split("\n").map(visibleLength))).toBeLessThanOrEqual(40);
   });
 
   test("buildCard guarantees identical visual length across all rows and borders", () => {

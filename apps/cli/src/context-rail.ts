@@ -7,6 +7,7 @@ import type {
   TokenUsage,
 } from "@demesne/protocol";
 import {
+  formatSparkline,
   formatTokenCount,
   sanitizeTerminalLine,
   toolKindBadge,
@@ -27,11 +28,21 @@ interface TrackedTool {
 interface RailResult {
   id: string;
   label: string;
-  state: "queued" | "running" | "passed" | "failed";
+  state: "queued" | "waiting" | "running" | "passed" | "failed" | "denied" | "stopped" | "unknown";
   created?: boolean;
   operation?: "A" | "M" | "R" | "D";
   exitCode?: number;
 }
+
+/// One provider round's two halves, paired by call id: the usage event carries
+/// the output token count, the metrics event the duration. When both have
+/// arrived, the round's rate joins the sidebar sparkline.
+interface RailRound {
+  outputTokens: number | null;
+  durationMs: number | null;
+}
+
+const THROUGHPUT_HISTORY = 12;
 
 export class CliContextRail {
   private model: ModelDescriptor;
@@ -50,6 +61,9 @@ export class CliContextRail {
   private activity: string[] = [];
   private runtime: RuntimeProfileStatus | null = null;
   private branch: string | null = null;
+  private rounds = new Map<string, RailRound>();
+  /// Recent provider rounds' effective rates, oldest first, for the sparkline.
+  private throughput: number[] = [];
 
   constructor(model: ModelDescriptor, private workspace: string) {
     this.model = model;
@@ -67,6 +81,8 @@ export class CliContextRail {
     this.changes = [];
     this.validations = [];
     this.activity = [];
+    // Unpaired rounds from a previous turn would otherwise linger forever.
+    this.rounds.clear();
   }
 
   reset(thinkingEnabled: boolean | undefined): void {
@@ -83,6 +99,8 @@ export class CliContextRail {
     this.changes = [];
     this.validations = [];
     this.activity = [];
+    this.rounds.clear();
+    this.throughput = [];
   }
 
   hydrate(snapshot: ProviderCallSnapshot | null, thinkingEnabled: boolean | undefined, workspace: string): void {
@@ -141,39 +159,42 @@ export class CliContextRail {
         totalTokens: numericToken(event.payload.totalTokens),
         ...(cachedInputTokens !== null ? { cachedInputTokens } : {}),
       };
+      this.trackThroughput(event, "usage");
     }
     if (event.type === "model.metrics") {
       this.requestDurationMs = numericDuration(event.payload.durationMs);
       this.queueDurationMs = numericDuration(event.payload.queueDurationMs);
       this.timeToFirstTokenMs = numericDuration(event.payload.timeToFirstTokenMs);
+      this.trackThroughput(event, "metrics");
     }
     if (event.type === "model.context_trimmed") {
       const dropped = Array.isArray(event.payload.droppedTurnIds) ? event.payload.droppedTurnIds.length : 0;
       this.activity = [...this.activity, `dropped ${dropped} older context turn${dropped === 1 ? "" : "s"}`].slice(-4);
     }
     if (event.type === "tool.call_requested") this.trackTool(event);
+    if (event.type === "permission.requested") this.settleTool(event, "waiting");
+    if (event.type === "permission.resolved") this.settleTool(event, event.payload.decision === "deny" ? "denied" : "queued");
     if (event.type === "tool.call_started") this.settleTool(event, "running");
     if (event.type === "tool.call_completed") {
-      this.settleTool(event, toolSucceeded(event) ? "passed" : "failed");
+      const tool = this.tools.get(stringValue(event.payload.toolCallId) ?? "");
+      this.settleTool(event, !toolSucceeded(event) ? "failed" : tool?.validation && typeof event.payload.exitCode !== "number" ? "unknown" : "passed");
     }
-    if (event.type === "tool.call_failed" || event.type === "tool.call_denied" ||
-      event.type === "tool.call_cancelled" || event.type === "tool.call_interrupted") {
-      this.settleTool(event, "failed");
-    }
+    if (event.type === "tool.call_failed") this.settleTool(event, "failed");
+    if (event.type === "tool.call_denied") this.settleTool(event, "denied");
+    if (event.type === "tool.call_cancelled" || event.type === "tool.call_interrupted") this.settleTool(event, "stopped");
     if (event.type === "turn.completed") {
       this.status = "Complete";
       this.finish();
     }
-    if (event.type === "turn.cancelled") {
-      this.status = "Cancelled";
+    if (event.type === "turn.cancelled" || event.type === "turn.interrupted") {
+      this.status = "Stopped";
+      for (const result of [...this.changes, ...this.validations]) {
+        if (["queued", "waiting", "running"].includes(result.state)) result.state = "stopped";
+      }
       this.finish();
     }
     if (event.type === "turn.failed") {
       this.status = "Failed";
-      this.finish();
-    }
-    if (event.type === "turn.interrupted") {
-      this.status = "Interrupted";
       this.finish();
     }
   }
@@ -246,6 +267,13 @@ export class CliContextRail {
       const ttft = this.timeToFirstTokenMs === null ? "" : `TTFT ${formatMetricDuration(this.timeToFirstTokenMs)} · `;
       lines.push(painter.dim(`${queue}${ttft}request ${formatMetricDuration(this.requestDurationMs)}`));
     }
+    // One glanceable line for recent rounds' effective throughput. The bar shows
+    // the shape; the label carries the newest rate, which is the number worth
+    // knowing.
+    if (!compact && this.throughput.length > 0) {
+      const latest = this.throughput.at(-1)!;
+      lines.push(`${formatSparkline(this.throughput, painter)} ${painter.dim(`${latest.toFixed(1)} tok/s · ${this.throughput.length} round${this.throughput.length === 1 ? "" : "s"}`)}`);
+    }
 
     addHeading("TURN");
     const elapsedMs = this.startedAt === null ? this.durationMs : Date.now() - this.startedAt;
@@ -274,6 +302,37 @@ export class CliContextRail {
 
   get workspaceBranch(): string | null {
     return this.branch;
+  }
+
+  get workspacePath(): string { return this.workspace; }
+
+  /// Last measured provider round, excluding first-token latency when available.
+  /// Stream chunks are not tokens; wait for reported counts and timing.
+  get tokensPerSecond(): number | null {
+    const tokens = this.usage?.outputTokens;
+    const duration = this.requestDurationMs;
+    if (tokens == null || tokens <= 0 || duration === null || duration <= 0) return null;
+    const firstToken = this.timeToFirstTokenMs;
+    const decodeDuration = firstToken !== null && firstToken >= 0 && firstToken < duration
+      ? duration - firstToken : duration;
+    return tokens / (decodeDuration / 1_000);
+  }
+
+  /// Keep counts and capacity visible even when there is no room for a meter.
+  get contextSnapshot(): { used: number | null; capacity: number | null; estimated: boolean } {
+    return { used: this.plan?.estimatedInputTokens ?? exactUsageTotal(this.usage),
+      capacity: this.plan?.capacityTokens ?? this.model.contextWindow ?? null, estimated: this.plan?.estimatedInputTokens != null };
+  }
+
+  contextSummary(painter: Painter, compact = false): string {
+    const capacity = this.plan?.capacityTokens ?? this.model.contextWindow ?? null;
+    const estimated = this.plan?.estimatedInputTokens ?? null;
+    const reported = exactUsageTotal(this.usage);
+    const used = estimated ?? reported;
+    const percentage = used !== null && capacity ? Math.round(used / capacity * 100) : null;
+    const usage = estimated !== null ? `~${formatTokenCount(estimated)}` : reported !== null ? `last ${formatTokenCount(reported)}` : "—";
+    return painter.text(`Context ${usage}/${capacity ? formatTokenCount(capacity) : "?"}${!compact && percentage !== null ? ` · ${percentage}%` : ""}`,
+      percentage !== null && percentage >= 90 ? "signal" : "secondary");
   }
 
   /// The runtime verification, as the short label the header renders. The footer
@@ -324,6 +383,29 @@ export class CliContextRail {
     return truncateText(candidates[candidates.length - 1]!, budget);
   }
 
+  private trackThroughput(event: EventEnvelope, part: "usage" | "metrics"): void {
+    const providerCallId = typeof event.payload.providerCallId === "string" ? event.payload.providerCallId : null;
+    if (!providerCallId) return;
+    const round = this.rounds.get(providerCallId) ?? { outputTokens: null, durationMs: null };
+    if (part === "usage") {
+      if (round.outputTokens !== null) return;
+      round.outputTokens = numericToken(event.payload.outputTokens);
+    } else {
+      if (round.durationMs !== null) return;
+      round.durationMs = numericDuration(event.payload.durationMs);
+    }
+    if (round.outputTokens === null || round.durationMs === null) {
+      this.rounds.set(providerCallId, round);
+      return;
+    }
+    this.rounds.delete(providerCallId);
+    const seconds = round.durationMs / 1_000;
+    if (round.outputTokens > 0 && seconds > 0) {
+      const rate = round.outputTokens / seconds;
+      this.throughput = [...this.throughput, rate].slice(-THROUGHPUT_HISTORY);
+    }
+  }
+
   private trackTool(event: EventEnvelope): void {
     const id = stringValue(event.payload.toolCallId);
     const name = stringValue(event.payload.name) ?? "tool";
@@ -352,7 +434,7 @@ export class CliContextRail {
     if (!id) return;
     const tool = this.tools.get(id);
     if (!tool) return;
-    this.status = state === "running" ? toolKindBadge(tool.name).title : this.thinkingEnabled === false ? "Working" : "Thinking";
+    this.status = state === "waiting" ? "Awaiting approval" : state === "running" ? toolKindBadge(tool.name).title : this.thinkingEnabled === false ? "Working" : "Thinking";
     if (tool.change && tool.detail) {
       const created = typeof event.payload.created === "boolean" ? event.payload.created : undefined;
       this.changes = upsert(this.changes, {
@@ -443,11 +525,13 @@ function budgetColor(
 }
 
 function formatResult(result: RailResult, kind: "change" | "validation", width: number, painter: Painter): string {
-  const glyph = result.state === "passed" ? "✓" : result.state === "failed" ? "×" : result.state === "running" ? "◆" : "·";
-  const color = result.state === "passed" ? "citron" : result.state === "failed" ? "signal" : result.state === "running" ? "electricBright" : "secondary";
+  const attention = result.state === "failed" || result.state === "denied" || result.state === "waiting";
+  const glyph = result.state === "passed" ? "✓" : result.state === "stopped" ? "■" : result.state === "failed" ? "×" : attention ? "!" : result.state === "running" ? "◆" : "·";
+  const color = result.state === "passed" ? "citron" : attention ? "signal" : result.state === "running" ? "execute" : "secondary";
   const prefix = kind === "change" && result.state === "passed" ? `${result.operation ?? (result.created ? "A" : "M")} ` : "";
-  const suffix = kind === "validation" && result.exitCode !== undefined ? ` (${result.exitCode})` : "";
-  return painter.text(`${glyph} ${prefix}${truncateText(sanitizeTerminalLine(result.label), Math.max(8, width - prefix.length - suffix.length - 2))}${suffix}`, color);
+  const outcome = ["waiting", "stopped", "denied", "unknown"].includes(result.state) ? ` · ${result.state === "waiting" ? "awaiting approval" : result.state}` : "";
+  const suffix = outcome + (kind === "validation" && result.exitCode !== undefined ? ` (${result.exitCode})` : "");
+  return painter.text(`${glyph} ${prefix}${truncateText(sanitizeTerminalLine(result.label), Math.max(0, width - prefix.length - suffix.length - 2))}${suffix}`, color);
 }
 
 function parseArguments(value: unknown): Record<string, unknown> {

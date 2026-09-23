@@ -4,6 +4,34 @@ import type { EventEnvelope, EventType } from "@demesne/protocol";
 import { CliContextRail } from "../src/context-rail.ts";
 
 describe("CLI context rail", () => {
+  test("generation speed waits for provider measurements and excludes first-token latency", () => {
+    const rail = new CliContextRail({ id: "model", provider: "local" }, "/project");
+    expect(rail.tokensPerSecond).toBeNull();
+    rail.apply(event("message.delta", { delta: "a stream chunk is not a token" }));
+    expect(rail.tokensPerSecond).toBeNull();
+    rail.apply(event("model.usage", { outputTokens: 120 }));
+    expect(rail.tokensPerSecond).toBeNull();
+    rail.apply(event("model.metrics", { durationMs: 10_000, timeToFirstTokenMs: 2_000 }));
+    expect(rail.tokensPerSecond).toBe(15);
+    rail.apply(event("turn.completed", {}));
+    expect(rail.tokensPerSecond).toBe(15);
+    rail.begin(true);
+    expect(rail.tokensPerSecond).toBeNull();
+    rail.apply(event("model.request_started", {}));
+    rail.apply(event("model.metrics", { durationMs: 2_000 }));
+    expect(rail.tokensPerSecond).toBeNull();
+    rail.apply(event("model.usage", { outputTokens: 40 }));
+    expect(rail.tokensPerSecond).toBe(20);
+  });
+  test("compact context counts distinguish unknown usage from last reported usage", () => {
+    const rail = new CliContextRail({ id: "model", provider: "local", contextWindow: 100_000 }, "/project");
+    const paint = createPainter(false);
+    expect(rail.contextSummary(paint)).toBe("Context —/100k");
+    rail.apply(event("model.usage", { inputTokens: 3_900, outputTokens: 100, totalTokens: 4_000 }));
+    expect(rail.contextSummary(paint)).toBe("Context last 4k/100k · 4%");
+    rail.apply(event("model.request_started", { model: "model" }));
+    expect(rail.contextSummary(paint)).toBe("Context —/100k");
+  });
   test("shows reported context usage and thinking mode", () => {
     const rail = new CliContextRail({ id: "qwen3:14b", provider: "ollama", contextWindow: 32_768 }, "/tmp/project");
     rail.begin(false);
@@ -56,6 +84,26 @@ describe("CLI context rail", () => {
     const output = rail.lines(40, 30, createPainter(false)).join("\n");
     expect(output).toContain("6.5k cached input");
     expect(output).toContain("queue 350ms · TTFT 240ms · request 1.3s");
+  });
+
+  test("pairs usage and metrics into a throughput sparkline", () => {
+    const rail = new CliContextRail({ id: "qwen3:14b", provider: "ollama", contextWindow: 32_768 }, "/tmp/project");
+    rail.begin(false);
+    rail.apply(event("model.usage", { inputTokens: 1_000, outputTokens: 300, totalTokens: 1_300, providerCallId: "call-a" }));
+    rail.apply(event("model.metrics", { durationMs: 1_000, timeToFirstTokenMs: 200, providerCallId: "call-a" }));
+    rail.apply(event("model.usage", { inputTokens: 1_000, outputTokens: 600, totalTokens: 1_600, providerCallId: "call-b" }));
+    rail.apply(event("model.metrics", { durationMs: 2_000, timeToFirstTokenMs: 200, providerCallId: "call-b" }));
+
+    const output = rail.lines(48, 30, createPainter(false)).join("\n");
+    expect(output).toContain("tok/s");
+    expect(output).toContain("2 rounds");
+    // The newest rate wins the label: 600 tokens over 2s.
+    expect(output).toContain("300.0 tok/s");
+
+    // A round without its counterpart never contributes a rate.
+    rail.apply(event("model.usage", { inputTokens: 1, outputTokens: 10, totalTokens: 11, providerCallId: "call-c" }));
+    const pending = rail.lines(48, 30, createPainter(false)).join("\n");
+    expect(pending).toContain("2 rounds");
   });
 
   test("does not infer remaining capacity from last-call usage", () => {
@@ -202,6 +250,7 @@ describe("CLI context rail", () => {
     expect(output).toContain("1 context reduction · saved ~2k");
     expect(output).toContain("10.2k total");
     expect(rail.statusLine(80, createPainter(false))).toBe("est ~10k/32.8k · ▰▰▱▱▱ 31%");
+    expect(rail.contextSummary(createPainter(false))).toBe("Context ~10k/32.8k · 31%");
   });
 
   test("tracks changed files and validation outcomes", () => {
@@ -232,6 +281,29 @@ describe("CLI context rail", () => {
     const output = rail.lines(32, 30, createPainter(false)).join("\n");
     expect(output).toContain("✓ M src/main.ts");
     expect(output).toContain("✓ bun test (0)");
+  });
+
+  test("Context distinguishes approval, stopped commands, denial and unknown exits", () => {
+    const rail = new CliContextRail({ id: "model", provider: "local" }, "/project");
+    const output = () => rail.lines(80, 40, createPainter(false)).join("\n");
+    rail.begin(true);
+    rail.apply(event("tool.call_requested", { toolCallId: "check", name: "run_command", arguments: { argv: ["bun", "test"] } }));
+    rail.apply(event("permission.requested", { toolCallId: "check" }));
+    expect(output()).toContain("bun test · awaiting approval");
+    rail.apply(event("permission.resolved", { toolCallId: "check", decision: "allow_once" }));
+    rail.apply(event("tool.call_started", { toolCallId: "check" }));
+    expect(output()).not.toContain("bun test · awaiting approval");
+    rail.apply(event("tool.call_cancelled", { toolCallId: "check", exitCode: 130 }));
+    rail.apply(event("turn.cancelled", {}));
+    expect(output()).toContain("■ bun test · stopped (130)");
+    expect(output()).not.toContain("failed");
+    rail.apply(event("tool.call_requested", { toolCallId: "deny", name: "run_command", arguments: { argv: ["bun", "run", "lint"] } }));
+    rail.apply(event("tool.call_denied", { toolCallId: "deny" }));
+    expect(output()).toContain("bun run lint · denied");
+    rail.apply(event("tool.call_requested", { toolCallId: "unknown", name: "run_command", arguments: { argv: ["bun", "run", "typecheck"] } }));
+    rail.apply(event("tool.call_completed", { toolCallId: "unknown" }));
+    expect(output()).toContain("· bun run typecheck · unknown");
+    expect(output()).not.toContain("✓ bun run typecheck");
   });
 
   test("bounds untrusted model, workspace, and activity labels", () => {

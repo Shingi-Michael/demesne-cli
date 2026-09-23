@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Session } from "@demesne/protocol";
-import { reduceSessionPicker, sessionListItem } from "../src/session-picker.ts";
+import { filterDialogIndices, reduceDialogPicker, reduceSessionPicker, sessionListItem } from "../src/session-picker.ts";
 
 describe("session picker", () => {
   test("navigates, wraps, and accepts direct numeric selection", () => {
@@ -32,5 +32,58 @@ describe("session picker", () => {
       status: "completed",
       root: "/tmp/project",
     });
+  });
+});
+
+describe("dialog picker filter", () => {
+  const items = ["parser hardening", "parser: unicode guards", "runtime tuning", "unrelated work"];
+
+  test("filters by case-insensitive subsequence and ranks whole substrings first", () => {
+    expect(filterDialogIndices(items, "")).toEqual([0, 1, 2, 3]);
+    expect(filterDialogIndices(items, "parse")).toEqual([0, 1]);
+    expect(filterDialogIndices(items, "prs")).toEqual([0, 1]);
+    expect(filterDialogIndices(items, "runtime")).toEqual([2]);
+    expect(filterDialogIndices(items, "zzz")).toEqual([]);
+  });
+
+  test("typing appends to the query and resets the selection", () => {
+    let state = { index: 2, query: "" };
+    state = reduceDialogPicker(state, items.length, {}, "p").state;
+    expect(state.query).toBe("p");
+    expect(state.index).toBe(0);
+  });
+
+  test("backspace edits the query one grapheme at a time", () => {
+    let state = { index: 0, query: "parse" };
+    state = reduceDialogPicker(state, items.length, { name: "backspace" }, "").state;
+    expect(state.query).toBe("pars");
+    state = reduceDialogPicker(state, items.length, { name: "backspace" }, "").state;
+    expect(state.query).toBe("par");
+  });
+
+  test("navigation stays inside the filtered list and selects in it", () => {
+    let state = { index: 0, query: "" };
+    state = reduceDialogPicker(state, 2, { name: "down" }, "").state;
+    expect(state.index).toBe(1);
+    state = reduceDialogPicker(state, 2, { name: "down" }, "").state;
+    expect(state.index).toBe(0);
+    const decision = reduceDialogPicker({ index: 1, query: "" }, 2, { name: "enter" }, "");
+    expect(decision.decision).toBe("select");
+    const cancelled = reduceDialogPicker({ index: 1, query: "" }, 2, { name: "escape" }, "");
+    expect(cancelled.decision).toBe("cancel");
+  });
+
+  test("digits jump to a row only while the filter is empty", () => {
+    const jump = reduceDialogPicker({ index: 0, query: "" }, items.length, {}, "3");
+    expect(jump.decision).toBe("continue");
+    expect(jump.state.index).toBe(2);
+    const typed = reduceDialogPicker({ index: 0, query: "ru" }, items.length, {}, "3");
+    expect(typed.decision).toBe("continue");
+    expect(typed.state.query).toBe("ru3");
+  });
+
+  test("j and k are searchable letters", () => {
+    expect(reduceDialogPicker({ index: 0, query: "" }, items.length, {}, "k").state.query).toBe("k");
+    expect(reduceDialogPicker({ index: 0, query: "rt" }, items.length, {}, "k").state.query).toBe("rtk");
   });
 });

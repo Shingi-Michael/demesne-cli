@@ -1,0 +1,245 @@
+import { formatFooterLine, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, wrapDisplayText, type Painter, type PaletteColor } from "@demesne/brand";
+import { sliceAnsi } from "bun";
+import type { RecentSession } from "../recent-sessions.ts";
+import type { ContextReceipt } from "./entries.ts";
+import type { Rect } from "./layout.ts";
+import { Canvas } from "./canvas.ts";
+import { clockLabel, InteractionTransitions, tint } from "./interaction.ts";
+import { contextLabel } from "./session-chrome.ts";
+
+export const START_OPERATIONS = [
+  { tag: "EXPLORE", title: "Trace a call flow", description: "Follow execution from entry point through the full stack", tone: "electric",
+    prompt: "Trace the call flow from the main entry point and map out how requests move through the system." },
+  { tag: "DEBUG", title: "Find and fix a bug", description: "Diagnose an error or unexpected behavior and patch it", tone: "signal",
+    prompt: "Help me diagnose and fix a bug. Ask me about the error or unexpected behavior, then investigate and verify the fix." },
+  { tag: "BUILD", title: "Write a new feature", description: "Implement something new end-to-end with tests", tone: "citron",
+    prompt: "Help me implement a new feature end-to-end. Ask what I want to build, then inspect the project and add the appropriate verification." },
+  { tag: "LEARN", title: "Explain this codebase", description: "Get a map of the architecture and key entry points", tone: "thinking",
+    prompt: "Explain this codebase: map the architecture, key entry points, and how its main components work together." },
+] as const;
+
+export type StartAction = { kind: "operation"; index: number } | { kind: "session"; id: string }
+  | { kind: "history" | "settings" | "workspace" | "context" | "model" | "commands" | "files" | "live" | "panel" };
+export interface StartZone extends Rect { key: string; action: StartAction }
+export interface StartLayout {
+  input: Rect; label: number; metadata: number; shortcuts: number | null;
+  operations: Rect; columns: number; cardHeight: number; cardOffset: number; recent: Rect; feedback: number | null;
+}
+
+export function startScreenLayout(width: number, height: number, requestedHeight: number, feedback: boolean): StartLayout {
+  const inset = width >= 65 ? 2 : 1;
+  const contentWidth = Math.min(96, width - inset * 2);
+  const column = Math.floor((width - contentWidth) / 2);
+  const header = height >= 14 ? 2 : 1;
+  const recentHeight = height >= 18 ? 3 : 1;
+  const recent = { row: height - recentHeight, column: 0, width, height: recentHeight };
+  const available = recent.row - header - Number(feedback);
+  const inputHeight = Math.min(Math.max(height >= 18 ? 5 : 3, requestedHeight), Math.max(3, available - 3));
+  const columns = contentWidth >= 92 ? 4 : 2;
+  const cardWidth = Math.floor((contentWidth - columns + 1) / columns);
+  const titleLines = Math.max(...START_OPERATIONS.map((operation) => wrapDisplayText(operation.title, cardWidth - 4).length));
+  const remaining = available - inputHeight - 3;
+  const minimumCards = (titleLines + 4) * (4 / columns);
+  const cardOffset = remaining >= minimumCards + 2 ? 2 : remaining >= minimumCards + 1 ? 1 : 0;
+  const fittedHeight = Math.min(10, Math.floor((remaining - cardOffset) / (4 / columns)));
+  const cardHeight = fittedHeight >= titleLines + 4 ? fittedHeight : 0;
+  const operationHeight = cardHeight ? cardOffset + cardHeight * (4 / columns) : remaining >= 1 ? 1 : 0;
+  const groupHeight = inputHeight + 3 + operationHeight;
+  const top = header + Math.max(0, Math.floor((available - groupHeight) / 2));
+  const input = { row: top + 1, column, width: contentWidth, height: inputHeight };
+  return { input, label: top, metadata: input.row + input.height, shortcuts: input.row + input.height + 1,
+    operations: { row: input.row + input.height + 2, column, width: contentWidth, height: operationHeight }, columns, cardHeight, cardOffset, recent,
+    feedback: feedback ? recent.row - 1 : null };
+}
+
+const actionKey = (action: StartAction): string => action.kind === "operation" ? `operation:${action.index}` : action.kind === "session" ? `session:${action.id}` : action.kind;
+const safe = sanitizeTerminalLine;
+
+/// Start-screen navigation and hover use the same editor and command routing as
+/// the conversation. Only its geometry and empty-session actions are different.
+export class StartScreen {
+  private zones: StartZone[] = [];
+  private controls: StartZone[] = [];
+  private selected: string | null = null;
+  private hovered: string | null = null;
+  private pointer: { row: number; column: number } | null = null;
+  private enteredAt: number | null = null;
+  private reflow = false;
+  private readonly transitions = new InteractionTransitions();
+
+  reset(): void { this.zones = []; this.controls = []; this.selected = null; this.hovered = null; this.pointer = null; this.enteredAt = null; this.transitions.clear(); this.reflow = false; }
+  reveal(stage: number, now: number, animate: boolean): number {
+    if (!animate) return 1;
+    this.enteredAt ??= now;
+    const t = Math.max(0, Math.min(1, (now - this.enteredAt - stage * 80) / 240));
+    return 1 - (1 - t) ** 3;
+  }
+  animating(now: number, animate: boolean): boolean {
+    return this.reflow || animate && (this.enteredAt !== null && now < this.enteredAt + 640 || this.transitions.active(now));
+  }
+  hover(row: number, column: number, now = Date.now()): boolean {
+    this.pointer = row < 0 ? null : { row, column };
+    const key = this.zones.find((zone) => row >= zone.row && row < zone.row + zone.height && column >= zone.column && column < zone.column + zone.width)?.key ?? null;
+    if (key === this.hovered) return false;
+    if (this.hovered) this.transitions.set(this.hovered, 0, 1, now);
+    if (key) this.transitions.set(key, 1, 0, now);
+    this.hovered = key;
+    return true;
+  }
+  move(step: number): void {
+    const current = this.controls.findIndex((control) => control.key === this.selected);
+    const next = current < 0 ? 0 : (current + step + this.controls.length) % this.controls.length;
+    this.selected = this.controls[next]?.key ?? null;
+  }
+  get action(): StartAction | undefined { return (this.controls.find((control) => control.key === this.selected) ?? this.controls[0])?.action; }
+
+  render(options: {
+    width: number; height: number; layout: StartLayout; paint: Painter; now: number; animate: boolean; focused: boolean;
+    path: string; model: string; context: ContextReceipt; currentId?: string; recent: readonly RecentSession[];
+    recentState: "loading" | "ready" | "unavailable"; feedback?: { text: string; tone: string } | null; input: string[];
+  }): { rows: string[]; zones: StartZone[] } {
+    const { width, height, paint, layout, now, animate } = options;
+    const canvas = new Canvas(width, height, paint);
+    this.zones = []; this.reflow = false;
+    const zone = (rect: Rect, action: StartAction) => {
+      if (rect.width > 0 && rect.height > 0) this.zones.push({ ...rect, key: actionKey(action), action });
+    };
+    const emphasis = (key: string) => options.focused && (this.selected ?? this.controls[0]?.key) === key ? 1
+      : this.transitions.value(key, this.hovered === key ? 1 : 0, now, !animate);
+    const put = canvas.put.bind(canvas);
+    const inset = width >= 65 ? 2 : 1;
+    const inner = width - inset * 2;
+    const compact = width < 55;
+    const identity = paint.bold("// demesne", "electric");
+    const left = identity + " " + paint.text(clockLabel(now), "muted");
+    const ready = paint.text(compact ? "READY" : "▪ READY", "citron");
+    const path = truncateText(safe(options.path), Math.max(0, inner - visibleLength(left) - visibleLength(ready) - (compact ? 2 : 5)));
+    put(0, inset, formatFooterLine(left, `${ready}${path ? ` ${paint.text(path, "muted")}` : ""}`, inner), inner);
+    if (path) zone({ row: 0, column: width - inset - visibleLength(path), width: visibleLength(path), height: 1 }, { kind: "workspace" });
+    if (height >= 14) put(1, 0, paint.text("─".repeat(width), "rule"), width);
+
+    const { input } = layout;
+    const navigation = options.focused ? "←/→ select · Enter fill · Esc draft" : "Ctrl+T operations · Alt+H history";
+    put(layout.label, input.column, formatFooterLine(paint.text("WHAT WOULD YOU LIKE TO WORK ON?", "secondary"),
+      input.width >= 68 ? paint.text(navigation, "muted") : "", input.width), input.width);
+    options.input.forEach((line, index) => put(input.row + index, input.column, line, input.width, "surface"));
+    const context = `ctx ${contextLabel(options.context)}`;
+    const hint = input.width >= 80 ? "↵ send · ⇧↵ newline" : "";
+    const modelWidth = Math.max(1, input.width - context.length - (hint ? hint.length + 5 : 3));
+    const model = truncateText(`model ${safe(options.model)}`, modelWidth);
+    const metadata = `${paint.text(model, "secondary")} · ${paint.text(context, "thinking")}`;
+    const modelColumn = input.column + input.width - visibleLength(metadata);
+    put(layout.metadata, input.column, formatFooterLine(hint ? paint.text(hint, "muted") : "", metadata, input.width), input.width);
+    zone({ row: layout.metadata, column: modelColumn, width: visibleLength(model), height: 1 }, { kind: "model" });
+    zone({ row: layout.metadata, column: input.column + input.width - context.length, width: context.length, height: 1 }, { kind: "context" });
+    if (layout.shortcuts !== null) {
+      let column = input.column;
+      const shortcuts: { label: string; action: StartAction }[] = [
+        { label: input.width < 60 ? "/ cmds" : "/ commands", action: { kind: "commands" } },
+        { label: "@ files", action: { kind: "files" } }, { label: input.width < 40 ? "Tab menu" : "Tab settings", action: { kind: "settings" } },
+        { label: input.width < 60 ? "^G live" : "Ctrl+G live", action: { kind: "live" } },
+      ];
+      for (const item of shortcuts) {
+        if (column + item.label.length > input.column + input.width) break;
+        put(layout.shortcuts, column, paint.text(item.label, "secondary"), item.label.length);
+        zone({ row: layout.shortcuts, column, width: item.label.length, height: 1 }, item.action);
+        column += item.label.length + 2;
+      }
+    }
+
+    const ops = layout.operations;
+    if (layout.cardHeight) {
+      if (layout.cardOffset) {
+        const leftRule = Math.floor((ops.width - 12) / 2);
+        put(ops.row, ops.column, paint.text(`${"─".repeat(leftRule)} OPERATIONS ${"─".repeat(ops.width - leftRule - 12)}`, "muted"), ops.width);
+      }
+      const gap = 1;
+      const cardWidth = Math.floor((ops.width - (layout.columns - 1) * gap) / layout.columns);
+      const titleLines = Math.max(...START_OPERATIONS.map((operation) => wrapDisplayText(operation.title, cardWidth - 4).length));
+      START_OPERATIONS.forEach((operation, index) => {
+        const row = ops.row + layout.cardOffset + Math.floor(index / layout.columns) * layout.cardHeight;
+        const column = ops.column + (index % layout.columns) * (cardWidth + gap);
+        const active = emphasis(`operation:${index}`);
+        const tone = operation.tone as PaletteColor;
+        const background = active >= 0.5 ? "raised" : "surface";
+        const size = cardWidth - 4;
+        for (let y = row + 1; y < row + layout.cardHeight - 1; y++) {
+          put(y, column, tint(paint, "│", "rule", tone, active), 1, background);
+          put(y, column + 1, "", cardWidth - 2, background);
+          put(y, column + cardWidth - 1, tint(paint, "│", "rule", tone, active), 1, background);
+        }
+        put(row, column, tint(paint, `┌${"─".repeat(cardWidth - 2)}┐`, "rule", tone, 0.4 + active * 0.6), cardWidth, background);
+        put(row + 1, column + 2, formatFooterLine(tint(paint, `${options.focused && this.selected === `operation:${index}` ? "›" : "0"}${index + 1}`, "muted", tone, active), paint.text(operation.tag, tone), size), size, background);
+        const title = wrapDisplayText(operation.title, size);
+        title.forEach((text, line) => put(row + 2 + line, column + 2, paint.text(text, "paper"), size, background));
+        const descriptionLines = layout.cardHeight - titleLines - 4;
+        wrapDisplayText(operation.description, size).slice(0, descriptionLines).forEach((text, line) => put(row + 2 + titleLines + line, column + 2, paint.text(text, "muted"), size, background));
+        const footer = active > 0 ? "↑ FILL PROMPT" : "RUN ↵";
+        put(row + layout.cardHeight - 2, column + 1, tint(paint, truncateText(footer, cardWidth - 3).padStart(cardWidth - 3), "muted", tone, active), cardWidth - 2, background);
+        put(row + layout.cardHeight - 1, column, tint(paint, `└${"─".repeat(cardWidth - 2)}┘`, "rule", tone, active), cardWidth, background);
+        zone({ row, column, width: cardWidth, height: layout.cardHeight }, { kind: "operation", index });
+      });
+    } else if (ops.height) {
+      let column = ops.column;
+      for (const [index, operation] of START_OPERATIONS.entries()) {
+        const selected = options.focused && this.selected === `operation:${index}`;
+        const label = `${selected ? "›" : ""}${operation.tag}`;
+        const width = operation.tag.length + 2;
+        put(ops.row, column, tint(paint, label, "secondary", operation.tone, 0.4 + emphasis(`operation:${index}`) * 0.6), width);
+        zone({ row: ops.row, column, width, height: 1 }, { kind: "operation", index });
+        column += width;
+      }
+    }
+    if (layout.feedback !== null && options.feedback) put(layout.feedback, input.column, paint.text(safe(options.feedback.text), options.feedback.tone === "error" ? "signal" : "secondary"), input.width);
+
+    const recent = layout.recent;
+    const history = recent.height > 1 ? "HISTORY ↓" : "History ↓";
+    const titleRow = recent.row + (recent.height > 1 ? 1 : 0);
+    for (let row = recent.row; row < height; row++) put(row, 0, "", width, "surface");
+    if (recent.height > 1) put(recent.row, 0, paint.text("─".repeat(width), "rule"), width, "surface");
+    put(titleRow, inset, paint.text("RECENT", "muted"), 6, "surface");
+    put(titleRow, width - inset - history.length, tint(paint, `${options.focused && this.selected === "history" ? "›" : ""}${history}`, "secondary", "electric", emphasis("history")), history.length + 1, "surface");
+    zone({ row: titleRow, column: width - inset - history.length, width: history.length, height: 1 }, { kind: "history" });
+    const room = width - inset * 2 - 8 - history.length - 1;
+    const count = recent.height > 1 ? Math.min(options.recent.length, Math.max(1, Math.floor(room / 18))) : Math.min(1, options.recent.length);
+    if (count) {
+      const size = Math.floor(room / count);
+      options.recent.slice(0, count).forEach((session, index) => {
+        const column = inset + 8 + index * size;
+        const current = session.id === options.currentId;
+        const key = `session:${session.id}`;
+        const text = `${options.focused && this.selected === key ? "›" : current ? "▪" : " "} ${safe(session.title)}`;
+        put(titleRow, column, tint(paint, truncateText(text, size - 1), "secondary", current ? "citron" : "electric", current ? Math.max(0.25, emphasis(key)) : emphasis(key)), size - 1, "surface");
+        if (recent.height > 1) {
+          const date = new Date(session.updatedAt);
+          const sameDay = Number.isFinite(date.getTime()) && date.toDateString() === new Date(now).toDateString();
+          const time = !Number.isFinite(date.getTime()) ? "—" : sameDay ? clockLabel(session.updatedAt).slice(0, 5) : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+          const used = session.context?.used;
+          put(titleRow + 1, column + 2, paint.text(`${time} · ctx ${session.context?.estimated ? "~" : ""}${used == null ? "—" : formatTokenCount(used)}`, "muted"), size - 3, "surface");
+        }
+        for (let row = titleRow; row < height; row++) put(row, column - 1, paint.text("│", "rule"), 1, "surface");
+        zone({ row: titleRow, column, width: size - 1, height: height - titleRow }, { kind: "session", id: session.id });
+      });
+    } else put(titleRow, inset + 8, paint.text(options.recentState === "loading" ? "Loading…" : options.recentState === "unavailable" ? "Unavailable" : "No sessions", "muted"), Math.max(0, room), "surface");
+    this.controls = this.zones.filter((zone) => zone.action.kind === "operation" || zone.action.kind === "session" || zone.action.kind === "history");
+    this.controls.sort((a, b) => (a.action.kind === "operation" ? 0 : a.action.kind === "session" ? 1 : 2) - (b.action.kind === "operation" ? 0 : b.action.kind === "session" ? 1 : 2));
+    if (this.selected && !this.controls.some((zone) => zone.key === this.selected)) { this.selected = this.controls[0]?.key ?? null; this.reflow = true; }
+    if (this.pointer) this.reflow = this.hover(this.pointer.row, this.pointer.column, now) || this.reflow;
+
+    const fade = (rect: Rect, stage: number) => {
+      const amount = this.reveal(stage, now, animate);
+      if (!paint.enabled || amount >= 1) return;
+      const base = [1, 3, 5].map((offset) => parseInt(paint.colors.ink.slice(offset, offset + 2), 16));
+      for (let row = rect.row; row < rect.row + rect.height; row++) {
+        const text = sliceAnsi(canvas.rows[row] ?? "", rect.column, rect.column + rect.width).replace(/\x1b\[(38|48);2;(\d+);(\d+);(\d+)m/g, (_, type, r, g, b) =>
+          `\x1b[${type};2;${[r, g, b].map((value, index) => Math.round(base[index]! + (Number(value) - base[index]!) * amount)).join(";")}m`);
+        put(row, rect.column, text, rect.width);
+      }
+    };
+    fade({ row: layout.label, column: input.column, width: input.width, height: 1 }, 0);
+    fade(input, 1);
+    fade({ row: layout.metadata, column: input.column, width: input.width, height: 2 }, 2);
+    fade(ops, 3); fade(recent, 4);
+    return { rows: canvas.rows, zones: this.zones };
+  }
+}

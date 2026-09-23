@@ -1,7 +1,7 @@
 import type { EventEnvelope } from "@demesne/protocol";
 
 export type TurnPhase = "inspect" | "change" | "verify";
-export type TurnActivityState = "queued" | "running" | "done" | "failed" | "denied";
+export type TurnActivityState = "queued" | "waiting" | "running" | "done" | "failed" | "denied" | "stopped";
 
 export interface TurnActivity {
   id: string;
@@ -53,6 +53,17 @@ export class TurnActivityLedger {
       this.rounds += 1;
       return;
     }
+    if (event.type === "turn.cancelled" || event.type === "turn.interrupted") {
+      for (const activity of this.activities.values()) {
+        if (["queued", "waiting", "running"].includes(activity.state)) activity.state = "stopped";
+      }
+      return;
+    }
+    if (event.type === "permission.requested" || event.type === "permission.resolved") {
+      const activity = this.activities.get(stringValue(event.payload.toolCallId) ?? "");
+      if (activity) activity.state = event.type === "permission.requested" ? "waiting" : event.payload.decision === "deny" ? "denied" : "queued";
+      return;
+    }
     if (!event.type.startsWith("tool.call_")) return;
 
     const id = stringValue(event.payload.toolCallId);
@@ -91,6 +102,7 @@ export class TurnActivityLedger {
 
     const state: TurnActivityState = event.type === "tool.call_denied"
       ? "denied"
+      : event.type === "tool.call_cancelled" || event.type === "tool.call_interrupted" ? "stopped"
       : event.type === "tool.call_completed" && toolSucceeded(event)
         ? "done"
         : "failed";
@@ -111,7 +123,7 @@ export class TurnActivityLedger {
 
   pendingCount(phase: TurnPhase): number {
     return [...this.activities.values()].filter((activity) =>
-      activity.phase === phase && (activity.state === "queued" || activity.state === "running")
+      activity.phase === phase && (activity.state === "queued" || activity.state === "waiting" || activity.state === "running")
     ).length;
   }
 

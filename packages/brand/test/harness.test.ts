@@ -43,9 +43,9 @@ describe("formatToolRow", () => {
     const verify = formatToolRow("done", "run", "bun test", "1ms", 60, color, { phase: "verify" });
     expect(inspect).not.toBe(change);
     expect(change).not.toBe(verify);
-    expect(toolPhaseColor("inspect")).toBe("secondary");
+    expect(toolPhaseColor("inspect")).toBe("inspect");
     expect(toolPhaseColor("change")).toBe("electric");
-    expect(toolPhaseColor("verify")).toBe("electricBright");
+    expect(toolPhaseColor("verify")).toBe("execute");
   });
 
   test("truncates long targets and stays inside the width", () => {

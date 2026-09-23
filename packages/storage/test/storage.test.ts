@@ -474,6 +474,9 @@ describe("DemesneStore", () => {
     store.resolveToolPermission(writePermissionId, "allow_once");
     store.startToolCall(writeCallId);
     store.settleToolCall(writeCallId, "completed", JSON.stringify({ path: "created.txt", created: true, bytes: 3 }));
+    const { toolCallId: commandId } = store.recordToolCall(turn.id, providerCallId, "provider-command", "run_command", "{}");
+    store.startToolCall(commandId);
+    store.settleToolCall(commandId, "completed", JSON.stringify({ exitCode: 1, stdout: "x".repeat(20_000), stderr: "test failed" }));
 
     const snapshot = store.getSession(session.id);
     const events = store.eventsAfter(session.id, 0, 100);
@@ -496,6 +499,9 @@ describe("DemesneStore", () => {
       path: "created.txt",
       created: true,
       bytes: 3,
+    });
+    expect(events.find((event) => event.type === "tool.call_completed" && event.payload.name === "run_command")?.payload).toMatchObject({
+      exitCode: 1, stdout: "x".repeat(16_000), stderr: "test failed", outputTruncated: true,
     });
     store.close();
   });

@@ -1,0 +1,153 @@
+import { computePromptVisualLines, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, type Painter, type SlashCommand } from "@demesne/brand";
+import { mentionMatches, mentionTokenAt, reverseSearchMatches, type PromptEditorState } from "../prompt-editor.ts";
+import { Canvas } from "./canvas.ts";
+import type { ContextReceipt } from "./entries.ts";
+import { thinkingDots, tint } from "./interaction.ts";
+
+type ComposerAction = { kind: "submit" | "stop" | "clear" }
+  | { kind: "command" | "mention"; index: number }
+  | { kind: "remove"; start: number; length: number }
+  | { kind: "caret"; start: number; text: string };
+export interface ComposerZone { row: number; column: number; width: number; action: ComposerAction }
+interface ComposerOptions {
+  width: number; editor: PromptEditorState; commands: readonly SlashCommand[];
+  mentions: readonly string[]; history: readonly string[]; streaming: boolean; context?: ContextReceipt; hero?: boolean;
+}
+function completions(options: ComposerOptions) {
+  if (options.streaming || options.editor.search) return [];
+  const token = mentionTokenAt(options.editor.value, options.editor.cursor);
+  const mentions = token ? mentionMatches(options.mentions, token.query) : [];
+  return mentions.length ? mentions.map((label, index) => ({ label: `@${label}`, description: "", index, kind: "mention" as const }))
+    : options.commands.map((command, index) => ({ label: command.name, description: command.description, index, kind: "command" as const }));
+}
+export function composerHeight(options: ComposerOptions): number {
+  if (options.editor.search) return 4;
+  const lines = computePromptVisualLines(options.editor.value, options.editor.cursor, Math.max(8, options.width - (options.width >= 65 ? 18 : 16))).lines.length;
+  return 2 + Math.max(options.hero ? 1 : 2, Math.min(6, lines)) + Math.min(5, completions(options).length) + (/\B@\S+/.test(options.editor.value) ? 1 : 0)
+    + (options.streaming && options.editor.value.trim() ? 1 : 0);
+}
+
+/// Draft text uses the context planner's conservative UTF-8 / 3 estimate.
+/// File contents, system instructions and tool definitions are not draft text.
+export function draftTokens(value: string): number { return Math.ceil(Buffer.byteLength(value, "utf8") / 3); }
+
+/// The V11 conversation composer has a focus rule, two draft rows, a control
+/// column and a quiet hint strip. The start screen retains its hero brackets.
+/// A bounded editor keeps its cursor and selected completion visible.
+export function composeDraft(options: ComposerOptions & { height: number; paint: Painter; focused?: boolean; reveal?: number; now?: number; reducedMotion?: boolean }): {
+  lines: string[]; zones: ComposerZone[]; cursor: { row: number; column: number };
+} {
+  const { width, height, paint, editor } = options;
+  const canvas = new Canvas(width, height, paint);
+  const inset = width >= 65 ? 2 : 1;
+  const textColumn = inset + 2;
+  const buttonColumn = width - inset - 10;
+  const textWidth = Math.max(8, buttonColumn - textColumn - 2);
+  const zones: ComposerZone[] = [];
+  const accent = options.focused === false ? "rule" : "electric";
+  const outline = (text: string) => options.hero ? tint(paint, text, "rule", "electric", options.focused === false ? 0 : 0.45) : paint.text(text, accent);
+  for (let row = 0; row < height; row++) canvas.put(row, 0, "", width, "surface");
+  canvas.put(0, 0, outline(options.hero ? `┌${"─".repeat(Math.max(0, width - 2))}┐` : "─".repeat(width)), width, "surface");
+  if (options.hero) {
+    canvas.put(height - 1, 0, outline(`└${"─".repeat(Math.max(0, width - 2))}┘`), width, "surface");
+    for (let row = 1; row < height - 1; row++) {
+      canvas.put(row, 0, outline("│"), 1, "surface");
+      canvas.put(row, width - 1, outline("│"), 1, "surface");
+    }
+    const length = Math.max(1, Math.ceil(3 * (options.reveal ?? 1)));
+    for (const row of [0, height - 1]) {
+      canvas.put(row, 0, paint.text((row === 0 ? "┌" : "└") + "─".repeat(length), accent), length + 1, "surface");
+      canvas.put(row, width - length - 1, paint.text("─".repeat(length) + (row === 0 ? "┐" : "┘"), accent), length + 1, "surface");
+    }
+  }
+  const tokens = draftTokens(editor.value);
+  const budget = options.context?.capacity;
+  const estimate = `Draft ~${formatTokenCount(tokens)} tok`;
+  const remaining = budget && options.context?.used != null ? Math.max(0, budget - options.context.used - tokens) : null;
+  const label = width >= 60 && remaining !== null ? `${estimate} · ~${formatTokenCount(remaining)} ctx left` : estimate;
+  const counter = ` ${label} `;
+  if (options.hero) canvas.put(height - 1, Math.max(2, width - counter.length - 2), paint.text(counter, "muted"), counter.length, "surface");
+  const put = (row: number, text: string) => canvas.put(row, textColumn, text, textWidth, "surface");
+  const control = (row: number, column: number, label: string, action?: ComposerAction) => {
+    canvas.put(row, column, label, visibleLength(label), "surface");
+    if (action) zones.push({ row, column, width: visibleLength(label), action });
+  };
+  const queued = options.streaming && Boolean(editor.value.trim());
+  const headerRows = queued && height >= 4 ? 1 : 0;
+  if (headerRows) {
+    canvas.put(1, textColumn, paint.text("Queued · sends after this turn", "thinking"), width - textColumn - inset, "surface");
+    if (width >= 60) control(1, width - inset - 13, paint.text("Clear queue ×", "muted"), { kind: "clear" });
+  }
+  const firstRow = 1 + headerRows;
+  if (!options.hero) {
+    const counterRow = firstRow + 1 < height - 1 ? firstRow + 1 : height - 1;
+    const tokenLabel = editor.value ? `~${formatTokenCount(tokens)} tok` : "";
+    if (tokenLabel) canvas.put(counterRow, width - inset - tokenLabel.length, paint.text(tokenLabel, "muted"), tokenLabel.length, "surface");
+    const hintWidth = width - inset * 2 - (counterRow === height - 1 && tokenLabel ? tokenLabel.length + 2 : 0);
+    const hints = options.streaming ? ["Type to queue a follow-up · Esc Esc / Ctrl+C stop", "Type to queue · Esc Esc stop", "Type to queue · ^C stop"]
+      : ["↵ send · ⇧↵ newline · / commands · @ files", "↵ send · ⇧↵ newline · / cmds · @ files", "↵ send · ⇧↵ line · / @"];
+    const hint = hints.find((hint) => visibleLength(hint) <= hintWidth) ?? hints.at(-1)!;
+    const styledHint = truncateText(hint, hintWidth).split(/([/@])/).map((part) => paint.text(part, part === "/" || part === "@" ? "electric" : "muted")).join("");
+    canvas.put(height - 1, inset, styledHint, hintWidth, "surface");
+  }
+  const room = Math.max(1, height - 2 - headerRows);
+  const menu = completions(options);
+  const menuCapacity = Math.min(5, menu.length, Math.max(0, room - 1));
+  const attachments = [...editor.value.matchAll(/(?:^|\s)(@[^\s]+)/g)];
+  const showAttachments = attachments.length > 0 && room - menuCapacity > 1;
+  const promptCapacity = Math.max(1, room - menuCapacity - (showAttachments ? 1 : 0));
+  const visual = computePromptVisualLines(editor.value, editor.cursor, textWidth);
+  const start = Math.max(0, visual.cursorLine - promptCapacity + 1);
+  let cursor = { row: firstRow + visual.cursorLine - start, column: Math.min(textColumn + textWidth - 1, textColumn + visual.cursorCol) };
+  for (let index = 0; index < Math.min(promptCapacity, visual.lines.length); index++) {
+    const info = visual.lineInfos[start + index]!;
+    const placeholder = options.streaming ? "Agent is running..." : options.hero ? "Describe what you want to build, fix, or explore..." : "Continue the conversation...";
+    const row = firstRow + index;
+    if (options.hero) canvas.put(row, inset, paint.text(index === 0 ? start ? "↑" : "▶" : "·", index === 0 ? options.focused === false ? "muted" : "electric" : "rule"), 1, "surface");
+    put(row, info.text || (editor.value ? "" : paint.text(placeholder, "muted")));
+    zones.push({ row, column: textColumn, width: textWidth, action: { kind: "caret", start: info.start, text: info.text } });
+  }
+  const glyphRow = firstRow + Math.min(promptCapacity, Math.max(2, visual.lines.length)) - 1;
+  if (!options.hero) canvas.put(glyphRow, inset, paint.text(options.streaming ? "◎" : "▶", options.streaming ? "thinking" : options.focused === false ? "muted" : "electric"), 1, "surface");
+  let row = firstRow + Math.min(promptCapacity, visual.lines.length);
+  if (showAttachments) {
+    let text = "";
+    for (const match of attachments) {
+      const label = ` ${match[1]} × `;
+      if (visibleLength(text) + visibleLength(label) > textWidth) break;
+      zones.push({ row, column: textColumn + visibleLength(text), width: visibleLength(label), action: { kind: "remove", start: match.index! + match[0].indexOf(match[1]!), length: match[1]!.length } });
+      text += paint.dim(label);
+    }
+    put(row++, text);
+  }
+  const selected = menu[0]?.kind === "mention" ? editor.mentionSelected : editor.menuSelected;
+  const menuStart = Math.max(0, selected - menuCapacity + 1);
+  for (const item of menu.slice(menuStart, menuStart + menuCapacity)) {
+    const label = truncateText(`${item.label}${width >= 65 ? `  ${item.description}` : ""}`, textWidth - 2);
+    put(row, item.index === selected ? paint.wash(`› ${label}`.padEnd(textWidth), "electric") : paint.dim(`  ${label}`));
+    zones.push({ row, column: textColumn, width: textWidth, action: { kind: item.kind, index: item.index } });
+    row++;
+  }
+  if (editor.search) {
+    const matches = reverseSearchMatches(options.history, editor.search.query);
+    const selected = matches[Math.min(editor.search.index, Math.max(0, matches.length - 1))];
+    zones.length = 0;
+    const queryRow = 1;
+    for (let y = 1; y < height - 1; y++) put(y, "");
+    put(queryRow, `⌕ ${sanitizeTerminalLine(editor.search.query)}`);
+    put(queryRow + 1, paint.dim(truncateText(selected ?? "No matching history", textWidth)));
+    cursor = { row: queryRow, column: Math.min(textColumn + textWidth - 1, textColumn + 2 + visibleLength(editor.search.query)) };
+    canvas.put(0, textColumn, paint.text(" Enter use · Esc cancel ", "secondary"), Math.min(width - textColumn, 24), "surface");
+  } else {
+    const sending = !options.streaming && Boolean(editor.value.trim());
+    const buttonRow = options.hero ? height - 2 : editor.value ? firstRow : glyphRow;
+    if (options.streaming) {
+      // The running glyphs occupy the same control as Send. Its native action
+      // remains interruption, alongside the explicit keyboard hint below.
+      const dots = thinkingDots(paint, options.now ?? 0, options.reducedMotion);
+      control(buttonRow, buttonColumn, paint.text(" [  ", "muted") + dots + paint.text("  ]", "muted"), { kind: "stop" });
+      if (queued && width < 60) control(0, width - 15, paint.text(" Clear queue × ", "secondary"), { kind: "clear" });
+    } else control(buttonRow, buttonColumn, sending ? paint.wash("[ SEND ↵ ]", "accentSurface", "electric") : paint.text("[ SEND ↵ ]", "muted"), sending ? { kind: "submit" } : undefined);
+  }
+  return { lines: canvas.rows, zones, cursor };
+}

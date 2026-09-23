@@ -6,6 +6,7 @@
 /// local state, paper on ink is the canvas pair.
 
 import { sliceAnsi, stringWidth } from "bun";
+import { stripVTControlCharacters } from "node:util";
 import { highlightCode as highlightCodeWithLanguage, type CodeHighlightState } from "./highlight.ts";
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -73,6 +74,10 @@ export interface Painter {
   underline(value: string, color?: PaletteColor): string;
   onBackground(value: string, color: PaletteColor): string;
   chip(label: string, color: PaletteColor): string;
+  /// A filled background span with contrasting text: the surface color the
+  /// canvas uses, which reads against every accent in both appearances. This
+  /// is how selection is drawn — as a surface, not as a glyph.
+  wash(value: string, background: PaletteColor, foreground?: PaletteColor): string;
 }
 
 /// Resolves a name, or an already-resolved theme, to a theme. `dark` and
@@ -114,6 +119,7 @@ function buildPainter(enabled: boolean, initial: Theme): Painter {
       underline: (value) => value,
       onBackground: (value) => value,
       chip: (label) => `[${label}]`,
+      wash: (value) => value,
     };
   }
   return {
@@ -129,6 +135,16 @@ function buildPainter(enabled: boolean, initial: Theme): Painter {
     underline: (value, color) => (color && color !== "paper" ? `${UNDERLINE}${fg[color]}${value}${RESET}` : `${UNDERLINE}${value}${RESET}`),
     onBackground: (value, color) => `${bg[color]}${value}${RESET}`,
     chip: (label, color) => `${bg[color]}${fg.ink}${BOLD} ${label} ${RESET}`,
+    wash: (value, background, foreground) => {
+      const hex = active.colors[background];
+      const channels = [1, 3, 5].map((offset) => {
+        const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      const luminance = channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722;
+      const contrast = luminance > 0.179 ? "\x1b[38;2;0;0;0m" : "\x1b[38;2;255;255;255m";
+      return `${BOLD}${bg[background]}${foreground ? fg[foreground] : contrast}${value}${RESET}`;
+    },
   };
 }
 
@@ -218,6 +234,24 @@ export function slashCommandValidationError(invocation: SlashCommandInvocation):
   return null;
 }
 
+/// The per-line map behind the slash menu: which line is a command row and
+/// which command it holds. The menu formatter and the workbench's mouse hit
+/// targets both derive from this, so clicks land where the eye looks.
+export function slashMenuLineCommands(commands: readonly SlashCommand[]): Array<number | null> {
+  const showSections = commands.length >= 6;
+  const map: Array<number | null> = [];
+  let currentSection: SlashCommandSection | null = null;
+  commands.forEach((command, index) => {
+    if (showSections && command.section !== currentSection) {
+      currentSection = command.section;
+      if (map.length > 0) map.push(null);
+      map.push(null);
+    }
+    map.push(index);
+  });
+  return map;
+}
+
 export function formatSlashCommandMenu(
   commands: readonly SlashCommand[],
   selectedIndex: number,
@@ -227,22 +261,23 @@ export function formatSlashCommandMenu(
   const available = Math.max(18, width - 4);
   const usages = commands.map(slashCommandUsage);
   const labelWidth = Math.min(18, Math.max(...usages.map((usage) => usage.length), 0));
-  const showSections = commands.length >= 6;
   const lines: string[] = [];
   let currentSection: SlashCommandSection | null = null;
   commands.forEach((command, index) => {
-    if (showSections && command.section !== currentSection) {
+    if (commands.length >= 6 && command.section !== currentSection) {
       currentSection = command.section;
       if (lines.length > 0) lines.push("");
       lines.push(`    ${painter.bold(command.section.toUpperCase(), "secondary")}`);
     }
-    const marker = index === selectedIndex ? painter.bold("›", "electric") : " ";
     const usage = usages[index]!;
-    const label = index === selectedIndex
-      ? painter.bold(usage.padEnd(labelWidth), "paper")
-      : painter.text(usage.padEnd(labelWidth), "secondary");
     const description = painter.dim(truncateText(command.description, available - labelWidth - 3));
-    lines.push(`  ${marker} ${label} ${description}`);
+    if (index === selectedIndex) {
+      // The selected row is a filled surface spanning marker and usage, so the
+      // eye finds the cursor without hunting for a glyph.
+      lines.push(`  ${painter.wash(`› ${usage.padEnd(labelWidth)}`, "electric")} ${description}`);
+      return;
+    }
+    lines.push(`    ${painter.text(usage.padEnd(labelWidth), "secondary")} ${description}`);
   });
   return lines.join("\n");
 }
@@ -257,12 +292,11 @@ export function formatMentionMenu(
 ): string {
   const available = Math.max(18, width - 6);
   return files.map((file, index) => {
-    const marker = index === selectedIndex ? painter.bold("›", "electric") : " ";
     const label = truncateText(sanitizeTerminalLine(file), available);
-    const styled = index === selectedIndex
-      ? painter.bold(label, "paper")
-      : painter.text(label, "secondary");
-    return `  ${marker} ${styled}`;
+    if (index === selectedIndex) {
+      return `  ${painter.wash(`› ${label}`, "electric")}`;
+    }
+    return `    ${painter.text(label, "secondary")}`;
   }).join("\n");
 }
 
@@ -317,19 +351,19 @@ export const HARNESS = {
   gutter: 2,
 } as const;
 
-/// Tool phases, colored so a turn's shape is readable at a glance: inspection
-/// is quiet, changes are the accent, verification is the success color.
+/// Operation colors identify what a tool does. Outcome colors are separate:
+/// verification uses `execute` while it runs; only confirmed results use citron.
 export type ToolPhaseName = "inspect" | "change" | "verify";
 
 export function toolPhaseColor(phase: ToolPhaseName): PaletteColor {
   switch (phase) {
-    case "inspect": return "secondary";
+    case "inspect": return "inspect";
     case "change": return "electric";
-    case "verify": return "electricBright";
+    case "verify": return "execute";
   }
 }
 
-export type ToolRowState = "running" | "done" | "failed" | "denied" | "waiting";
+export type ToolRowState = "running" | "done" | "failed" | "denied" | "waiting" | "stopped";
 
 /// One aligned tool row: `    ✓ read    src/lexer.ts              12ms`.
 ///
@@ -371,6 +405,7 @@ function defaultToolGlyph(state: ToolRowState, painter: Painter): string {
     case "done": return painter.text("✓", "citron");
     case "failed": return painter.text("×", "signal");
     case "denied": return painter.text("⊘", "signal");
+    case "stopped": return painter.text("■", "secondary");
     case "waiting": return painter.text("!", "signal");
     case "running": return painter.text("▸", "secondary");
   }
@@ -500,6 +535,28 @@ export function formatCommandOpener(label: string, width: number, painter: Paint
   return formatTurnOpener(label, undefined, width, painter);
 }
 
+
+/// A one-row throughput history: `▂▅▇▆▃` with the newest sample last.
+///
+/// Values are normalized against the series maximum, so the newest sample's
+/// height is relative to the recent peak; a flat history draws as a full bar.
+export function formatSparkline(
+  values: readonly number[],
+  painter: Painter = createPainter(true),
+  maxCells = 24,
+): string {
+  const samples = values.filter((value) => Number.isFinite(value) && value >= 0);
+  if (samples.length === 0) return "";
+  const cells = Math.max(1, Math.min(maxCells, samples.length));
+  const window = samples.slice(-cells);
+  const peak = Math.max(...window);
+  const levels = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"] as const;
+  const bar = window.map((value) => {
+    const ratio = peak > 0 ? Math.max(0, Math.min(1, value / peak)) : 0;
+    return levels[Math.round(ratio * (levels.length - 1))]!;
+  }).join("");
+  return painter.text(bar, "electric");
+}
 
 export function formatFooterLine(left: string, right: string, width: number): string {
   const safeWidth = Math.max(0, Math.floor(width));
@@ -1161,7 +1218,7 @@ export function formatToolPhaseHeader(
 }
 
 export function formatToolResultLine(
-  state: "done" | "failed" | "denied",
+  state: "done" | "failed" | "denied" | "stopped",
   name: string,
   detail: string | undefined,
   durationMs: number | undefined,
@@ -1171,16 +1228,16 @@ export function formatToolResultLine(
   options: { linkPath?: (styledDisplay: string, path: string) => string } = {},
 ): string {
   const badge = toolKindBadge(sanitizeTerminalLine(name));
-  const color: PaletteColor = state === "done" ? "citron" : "signal";
-  const glyph = state === "done" ? "✓" : state === "denied" ? "!" : "×";
+  const color: PaletteColor = state === "done" ? "citron" : state === "stopped" ? "secondary" : "signal";
+  const glyph = state === "done" ? "✓" : state === "stopped" ? "■" : state === "denied" ? "!" : "×";
   const branch = last ? "└" : "├";
   const prefix = `  ${painter.text(branch, color)} ${painter.text(glyph, color)} ${painter.bold(`[${badge.chip}]`, badge.color)} `;
-  const duration = durationMs === undefined ? "" : ` · ${durationMs}ms`;
+  const duration = (state === "stopped" ? " · stopped" : "") + (durationMs === undefined ? "" : ` · ${durationMs}ms`);
   const fallback = badge.title;
   const available = Math.max(8, width - visibleLength(prefix) - visibleLength(duration));
   const sanitized = sanitizeTerminalLine(detail ?? fallback);
   const description = truncateText(sanitized, available);
-  const styled = painter.text(description, state === "done" ? "paper" : "signal");
+  const styled = painter.text(description, state === "done" ? "paper" : color);
   const linked = state === "done" && options.linkPath && looksLikePath(sanitized)
     ? options.linkPath(styled, sanitized)
     : styled;
@@ -1263,12 +1320,12 @@ export function formatTurnSummary(
 export interface TurnReceiptChange {
   operation: "A" | "M" | "R" | "D";
   path: string;
-  state: "queued" | "running" | "done" | "failed" | "denied";
+  state: "queued" | "waiting" | "running" | "done" | "failed" | "denied" | "stopped";
 }
 
 export interface TurnReceiptValidation {
   command: string;
-  state: "queued" | "running" | "done" | "failed" | "denied";
+  state: "queued" | "waiting" | "running" | "done" | "failed" | "denied" | "stopped";
   exitCode?: number;
 }
 
@@ -1305,10 +1362,12 @@ export function formatTurnReceipt(options: {
     lines.push(`  ${painter.bold("CHANGES", "secondary")} ${painter.dim(String(changes.length))}`);
     for (const change of changes) {
       const passed = change.state === "done";
-      const glyph = passed ? "✓" : change.state === "denied" ? "!" : "×";
-      const color: PaletteColor = passed ? "citron" : "signal";
+      const failed = change.state === "failed" || change.state === "denied";
+      const glyph = passed ? "✓" : change.state === "stopped" ? "■" : change.state === "denied" ? "!" : failed ? "×" : "·";
+      const color: PaletteColor = passed ? "citron" : failed ? "signal" : "secondary";
       const prefix = `  ${painter.text(glyph, color)} ${painter.bold(change.operation, color)} `;
-      lines.push(`${prefix}${painter.text(truncateText(sanitizeTerminalLine(change.path), safeWidth - visibleLength(prefix)), passed ? "paper" : "signal")}`);
+      const status = passed ? "" : ` · ${change.state === "waiting" ? "awaiting approval" : change.state}`;
+      lines.push(`${prefix}${painter.text(truncateText(sanitizeTerminalLine(change.path), Math.max(0, safeWidth - visibleLength(prefix) - status.length)), passed ? "paper" : color)}${painter.dim(status)}`);
     }
   }
 
@@ -1316,13 +1375,15 @@ export function formatTurnReceipt(options: {
     if (lines.length > 0) lines.push("");
     lines.push(`  ${painter.bold("VERIFY", "secondary")} ${painter.dim(String(validations.length))}`);
     for (const validation of validations) {
-      const passed = validation.state === "done";
-      const glyph = passed ? "✓" : validation.state === "denied" ? "!" : "×";
-      const color: PaletteColor = passed ? "citron" : "signal";
-      const exit = validation.exitCode === undefined ? "" : ` · exit ${validation.exitCode}`;
+      const passed = validation.state === "done" && validation.exitCode === 0;
+      const failed = validation.state === "failed" || validation.state === "denied" || validation.state === "done" && Boolean(validation.exitCode);
+      const glyph = passed ? "✓" : validation.state === "stopped" ? "■" : validation.state === "denied" ? "!" : failed ? "×" : "·";
+      const color: PaletteColor = passed ? "citron" : failed ? "signal" : "secondary";
+      const status = validation.state === "waiting" ? "awaiting approval" : validation.state === "done" ? validation.exitCode === undefined ? "unknown" : "" : validation.state;
+      const exit = (status ? ` · ${status}` : "") + (validation.exitCode === undefined ? "" : ` · exit ${validation.exitCode}`);
       const prefix = `  ${painter.text(glyph, color)} `;
       const available = safeWidth - visibleLength(prefix) - visibleLength(exit);
-      lines.push(`${prefix}${painter.text(truncateText(sanitizeTerminalLine(validation.command), available), passed ? "paper" : "signal")}${painter.dim(exit)}`);
+      lines.push(`${prefix}${painter.text(truncateText(sanitizeTerminalLine(validation.command), available), passed ? "paper" : color)}${painter.dim(exit)}`);
     }
   }
 
@@ -1758,7 +1819,7 @@ export class TerminalMarkdownStream {
   private width: number;
   private prefix: string;
 
-  constructor(painter: Painter, width = 80, leftPadding = 0) {
+  constructor(painter: Painter, width = 80, leftPadding = 0, private readonly renderUnstyled = false, private readonly codeStyle: "framed" | "gutter" = "framed") {
     this.painter = painter;
     this.width = Math.max(16, width);
     this.prefix = " ".repeat(Math.max(0, leftPadding));
@@ -1917,12 +1978,16 @@ export class TerminalMarkdownStream {
       this.highlightState = { inBlockComment: false };
       if (this.inCodeBlock) {
         this.codeBlockLang = trimmed.slice(3).trim();
+        if (this.codeStyle === "gutter") {
+          const label = truncateText(this.codeBlockLang || "code", Math.max(1, this.width - visibleLength(this.prefix) - 2));
+          return `\n${this.painter.text(`${this.prefix}╭ ${label}`, "secondary")}`;
+        }
         const rawHeader = this.codeBlockLang ? ` [${this.codeBlockLang}] ` : " ";
         const header = truncateText(rawHeader, Math.max(1, this.width - visibleLength(this.prefix) - 3));
         const ruleLen = Math.max(0, this.width - visibleLength(this.prefix) - visibleLength(header) - 3);
         return `\n${this.painter.text(`${this.prefix}┌──${header}${"─".repeat(ruleLen)}`, "rule")}`;
       }
-      return `${this.painter.text(`${this.prefix}└──${"─".repeat(Math.max(0, this.width - visibleLength(this.prefix) - 3))}`, "rule")}\n`;
+      return this.codeStyle === "gutter" ? this.prefix : `${this.painter.text(`${this.prefix}└──${"─".repeat(Math.max(0, this.width - visibleLength(this.prefix) - 3))}`, "rule")}\n`;
     }
 
     // Inside a code block: format with clean indentation and subtle rule border (preserve code as-is)
@@ -1941,24 +2006,24 @@ export class TerminalMarkdownStream {
     }
     const line = stripped;
 
-    if (!this.painter.enabled && !this.prefix) return line;
+    if (!this.painter.enabled && !this.prefix && !this.renderUnstyled) return line;
 
     // Headings
     if (line.startsWith("### ")) {
-      return `\n${this.wrapStyledLine(line.slice(4), this.prefix, this.prefix, (row) => this.painter.bold(row, "paper"))}`;
+      return `\n${this.wrapStyledLine(line.slice(4), this.prefix, this.prefix, (row) => this.painter.bold(row, this.codeStyle === "gutter" ? "electric" : "paper"))}`;
     }
     if (line.startsWith("## ")) {
-      return `\n${this.wrapStyledLine(line.slice(3), this.prefix, this.prefix, (row) => this.painter.bold(row, "paper"))}`;
+      return `\n${this.wrapStyledLine(line.slice(3), this.prefix, this.prefix, (row) => this.painter.bold(row, this.codeStyle === "gutter" ? "electric" : "paper"))}`;
     }
     if (line.startsWith("# ")) {
-      return `\n${this.wrapStyledLine(line.slice(2), this.prefix, this.prefix, (row) => this.painter.bold(row, "paper"))}`;
+      return `\n${this.wrapStyledLine(line.slice(2), this.prefix, this.prefix, (row) => this.painter.bold(row, this.codeStyle === "gutter" ? "electric" : "paper"))}`;
     }
 
     // Unordered lists
-    if (/^\s*[-*]\s+/.test(line)) {
+    if (/^\s*[-*·•]\s+/.test(line)) {
       const indent = line.match(/^\s*/)?.[0] ?? "";
-      const content = line.replace(/^\s*[-*]\s+/, "");
-      const bullet = this.painter.text("•", "electric");
+      const content = line.replace(/^\s*[-*·•]\s+/, "");
+      const bullet = this.painter.text(this.codeStyle === "gutter" ? "·" : "•", this.codeStyle === "gutter" ? "muted" : "electric");
       const firstPrefix = `${this.prefix}${indent}${bullet} `;
       const continuationPrefix = `${this.prefix}${indent}  `;
       return this.wrapStyledLine(content, firstPrefix, continuationPrefix, (row) => this.formatInline(row));
@@ -1988,6 +2053,9 @@ export class TerminalMarkdownStream {
       return this.painter.text(`${this.prefix}${"─".repeat(Math.max(0, this.width - visibleLength(this.prefix)))}`, "rule");
     }
 
+    if (this.codeStyle === "gutter" && /^\*\*[^*]+\*\*$/.test(trimmed)) {
+      return this.wrapStyledLine(trimmed.slice(2, -2), this.prefix, this.prefix, (row) => this.painter.bold(row, "electric"));
+    }
     // Regular line with inline formatting
     return this.wrapRegularLine(line);
   }
@@ -2010,30 +2078,24 @@ export class TerminalMarkdownStream {
       visibleLength(safeFirstPrefix),
       visibleLength(safeContinuationPrefix),
     ));
-    return wrapDisplayText(content, contentWidth).map((row, index) =>
-      `${index === 0 ? safeFirstPrefix : safeContinuationPrefix}${format(row)}`
-    ).join("\n");
+    // Style first, then wrap by visible cells. Delimiters that span a wrap
+    // boundary must not leak into the output or consume the reading width.
+    const styled = format(content.trim());
+    const plain = stripVTControlCharacters(styled);
+    return wrapPromptParagraph(plain, 0, contentWidth).map((line, index) => {
+      const start = visibleLength(plain.slice(0, line.start));
+      const end = start + visibleLength(line.text);
+      return `${index === 0 ? safeFirstPrefix : safeContinuationPrefix}${sliceAnsi(styled, start, end)}`;
+    }).join("\n");
   }
 
   private formatInline(text: string): string {
-    if (!this.painter.enabled) return text;
+    if (!this.painter.enabled && !this.renderUnstyled) return text;
 
-    // Inline code `code`
-    let result = text.replace(/`([^`]+)`/g, (_, code) => {
-      return this.painter.text(code, "electric");
-    });
-
-    // Bold **text** or __text__
-    result = result.replace(/\*\*([^*]+)\*\*/g, (_, boldText) => {
-      return this.painter.bold(boldText, "paper");
-    });
-
-    // Italic *text* or _text_
-    result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, italicText) => {
-      return this.painter.italic(italicText, "secondary");
-    });
-
-    return result;
+    return text.replace(/`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|(?<!\*)\*([^*]+)\*(?!\*)|(?<!\w)_([^_]+)_(?!\w)/g,
+      (_, code, bold, strong, italic, emphasis) => code !== undefined ? this.painter.text(code, "electricBright")
+        : bold !== undefined || strong !== undefined ? this.painter.bold(bold ?? strong, "paper")
+        : this.painter.italic(italic ?? emphasis, "secondary"));
   }
 
   private highlightCode(code: string): string {

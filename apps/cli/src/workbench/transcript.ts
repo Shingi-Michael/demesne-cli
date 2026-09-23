@@ -54,7 +54,7 @@ export const MIN_COLLAPSED_INSPECTIONS = 3;
 /// read, rarely worth six lines. Changes and verification are the evidence of
 /// what happened, so they are never collapsed.
 function collapsible(entry: PlannedEntry): boolean {
-  return entry.type === "tool" && entry.phase === "inspect" && entry.waiting !== true;
+  return entry.type === "tool" && entry.phase === "inspect" && entry.waiting !== true && entry.state !== "stopped" && entry.state !== "denied";
 }
 
 function asPlannedTool(entry: PlannedEntry): PlannedTool {

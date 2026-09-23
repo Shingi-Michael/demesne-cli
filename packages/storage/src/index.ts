@@ -1587,9 +1587,15 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
     };
   }
   if (name === "run_command") {
+    const limit = 16_000;
     return {
       ...(typeof value.exitCode === "number" ? { exitCode: value.exitCode } : {}),
       ...(typeof value.timedOut === "boolean" ? { timedOut: value.timedOut } : {}),
+      ...(typeof value.stdout === "string" ? { stdout: value.stdout.slice(0, limit) } : {}),
+      ...(typeof value.stderr === "string" ? { stderr: value.stderr.slice(0, limit) } : {}),
+      outputTruncated: value.stdoutTruncated === true || value.stderrTruncated === true
+        || (typeof value.stdout === "string" && value.stdout.length > limit)
+        || (typeof value.stderr === "string" && value.stderr.length > limit),
     };
   }
   return {};

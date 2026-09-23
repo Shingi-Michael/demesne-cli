@@ -1,6 +1,7 @@
 import type { Session } from "@demesne/protocol";
 import {
   formatSessionPickerLine,
+  previousGraphemeBoundary,
   type Painter,
   type SessionListItem,
 } from "@demesne/brand";
@@ -14,6 +15,92 @@ export interface SessionPickerKey {
 export interface SessionPickerState {
   index: number;
   decision: "continue" | "select" | "cancel";
+}
+
+/// The dialog picker used inside the workbench (`/theme`, `/model`,
+/// `/sessions`): navigation plus a type-to-filter query. `index` addresses the
+/// filtered list; the caller maps it back to the original items.
+export interface DialogPickerState {
+  index: number;
+  query: string;
+}
+
+export interface DialogPickerKey {
+  name?: string;
+  ctrl?: boolean;
+  meta?: boolean;
+}
+
+export interface DialogPickerResult {
+  state: DialogPickerState;
+  decision: "continue" | "select" | "cancel";
+}
+
+/// Case-insensitive filter over dialog items. Every query character must
+/// appear in order (a subsequence); whole-substring matches rank ahead of
+/// subsequence matches, both preserving their original order. An empty query
+/// keeps everything.
+export function filterDialogIndices(items: readonly string[], query: string): number[] {
+  const needle = query.toLowerCase();
+  if (!needle) return items.map((_, index) => index);
+  return items
+    .map((item, index) => {
+      const lowered = item.toLowerCase();
+      return { index, substring: lowered.includes(needle) ? 1 : 0, subsequence: isSubsequence(lowered, needle) ? 1 : 0 };
+    })
+    .filter((entry) => entry.substring || entry.subsequence)
+    .sort((a, b) => (b.substring - a.substring) || (a.index - b.index))
+    .map((entry) => entry.index);
+}
+
+function isSubsequence(haystack: string, needle: string): boolean {
+  let cursor = 0;
+  for (const char of haystack) {
+    if (char === needle[cursor]) cursor += 1;
+    if (cursor >= needle.length) return true;
+  }
+  return needle.length === 0;
+}
+
+export function reduceDialogPicker(
+  state: DialogPickerState,
+  count: number,
+  key: DialogPickerKey,
+  text: string,
+): DialogPickerResult {
+  const bounded = Math.max(1, count);
+  const navigate = (index: number): DialogPickerState => ({
+    ...state,
+    index: ((index % bounded) + bounded) % bounded,
+  });
+  if (key.ctrl && key.name === "c") return { state, decision: "cancel" };
+  if (key.name === "escape") return { state, decision: "cancel" };
+  if (key.name === "return" || key.name === "enter") return { state, decision: count ? "select" : "continue" };
+  if (key.name === "backspace") {
+    if (!state.query) return { state, decision: "continue" };
+    return {
+      state: { index: 0, query: state.query.slice(0, previousGraphemeBoundary(state.query, state.query.length)) },
+      decision: "continue",
+    };
+  }
+  if (key.name === "up") {
+    return { state: navigate(state.index - 1), decision: "continue" };
+  }
+  if (key.name === "down" || key.name === "tab") {
+    return { state: navigate(state.index + 1), decision: "continue" };
+  }
+  if (key.name === "home") return { state: { ...state, index: 0 }, decision: "continue" };
+  if (key.name === "end") return { state: { ...state, index: bounded - 1 }, decision: "continue" };
+  // Digits jump straight to a row while the filter is empty; once typing has
+  // begun they are ordinary characters of the query.
+  if (state.query === "" && /^[1-9]$/.test(text)) {
+    const selected = Number(text) - 1;
+    return { state: { ...state, index: selected < count ? selected : state.index }, decision: "continue" };
+  }
+  if (!key.ctrl && !key.meta && text && !/[\x00-\x1f\x7f]/.test(text)) {
+    return { state: { index: 0, query: state.query + text }, decision: "continue" };
+  }
+  return { state, decision: "continue" };
 }
 
 export function reduceSessionPicker(

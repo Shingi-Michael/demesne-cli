@@ -9,6 +9,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Artifact-preview structure and implementation documents covering image-first
+  panel behavior, pinning/history, durable artifact storage, MCP image outputs,
+  Kitty graphics, replay, delivery milestones, and acceptance checks. Arcade
+  work is deferred; the preview feature is planned rather than implemented.
+- Quieter bottom status strip without running/thinking indicators, elapsed time,
+  or token speed. Conversation and inspection scrollbars are hidden; streaming
+  advances only by newly overflowing rows rather than viewport-sized blocks.
+- Fixed trackpad bottom-edge jitter: horizontal wheel events are decoded as
+  left/right and ignored by vertical panes, rather than being mistaken for
+  up/down. Regression coverage exercises split raw mixed-axis input on a
+  completed transcript.
+- Version 14 Thinking consistency: one shared amber pulsing-dot renderer for
+  live Thinking, RUNNING status, and the running Send control; live cards use
+  an amber `[` with the same agent label and timestamp layout as settled cards.
+- Version 13 Figma fidelity pass: exact dark canvas/surface/raised tokens, a
+  single `[` card marker, red failed-card borders, one agent/timestamp header
+  above the complete response stream, compact cyan tool rows, and `▸/▾` Thinking
+  disclosures with dim timing. Error output uses a tinted left-rule block.
+  Footers keep a bracket-free hairline context meter inline, elapsed seconds,
+  lowercase hover-only `copy`, and the status badge at the right edge. The
+  composer matches the reference's bottom-aligned glyph, subdued cyan Send,
+  running dots, and shortcut accents; the rail uses its compact panel glyph.
+  The reference and terminal-cell mapping are documented in `docs/terminal-design.md`.
+- Version 11 inference cards and conversation composer: green COMPLETE/red
+  FAILED/neutral STOPPED badges, context meters with green/amber/red thresholds,
+  and run-local receipts for failures and interruptions without final answers.
+  Thinking uses pulsing dots and a live cursor, folding as each round finishes;
+  failed tools and turn errors use red-bordered output blocks. The status strip
+  follows READY/RUNNING/FAILED and the latest run's recorded context. The composer
+  starts with two rows, a cyan focus rule, stateful prompt glyph, filled Send,
+  inline token estimate, and a compact shortcut strip, with editable queues and
+  Stop/Clear controls. Reduced motion settles all pulses and cursor animation.
+  `ui:session --state=round-limit` previews a failed multi-round run.
+- Version 9 empty-session start screen: centered input-first composer, animated
+  cyan brackets, active model/context, and responsive Explore/Debug/Build/Learn
+  cards that fill an undoable draft without sending it. Recent sessions show
+  real saved titles, update times, and recorded context; resume and History use
+  the existing session commands while preserving drafts. Keyboard navigation,
+  hover/focus treatment, reduced motion, and `ui:session --state=start` preview.
+- Official Futuristic Terminal Harness Design implemented in the terminal:
+  fixed `// demesne` session/project header, cyan request bands, bordered assistant
+  cards with cyan corners, amber Thinking, and a ruled composer with Send/Stop.
+  Blue-black/cyan/amber/green design tokens, a matching light theme,
+  cyan Markdown headings, and a fixed execution/context/navigation strip.
+  The collapsed action rail expands into real diffs, tool output, and Context;
+  it docks on wide terminals and overlays the conversation on compact screens.
+  Session, Activity, Transcript, Settings, and Theme replace
+  the older interface terminology throughout the CLI, code, and previews.
+- Cyan input-focus outline, live draft-token estimates, a ticking session clock,
+  and immutable assistant timestamps restored from recorded events. Copy fades
+  in on hover or keyboard selection; response metadata and request edges brighten
+  on hover. Thinking uses rotating cell chevrons. A labelled PANEL rail, closer
+  request/reply pairing, and more distinct assistant surfaces refine the layout.
+  Reduced motion settles transitions immediately while keeping the clock live.
+- Thinking, tools, and responses share one chronological reading surface at every
+  width. Consecutive confirmed inspections fold into one summary; changes keep
+  their paths and commands keep their outcomes. Pending work, approvals,
+  failures, and unknown command results stay visible. Thinking, output, diffs,
+  and arguments expand in place. Reading anchors survive streaming and queued
+  turns. Thinking's live indicator lives beside its inline heading, including before
+  the first model text, and stays visible when a long trace fills the viewport.
+  Quiet prompt-side timing, measured tok/s, context budget,
+  project path, and original response model attribution.
+  Execution state remains visible in the fixed bottom strip.
+- A footer after each completed model response with labelled elapsed, speed, and
+  context measurements, retaining its original mode/model, turn duration, and measured throughput across
+  provider rounds. Historical responses restore their own recorded metrics;
+  narrow terminals wrap the footer and missing measurements stay explicit.
+- Response-start navigation via **Response ↑** or Alt+R, tighter compact footer
+  spacing, explicit queued-input handoff labels, contextual focus hints, and
+  temporary Copy feedback for mouse, shortcut, and keyboard-selection actions.
+- Stable scroll boundaries and response-follow windows: incoming prose grows
+  with room below it and advances in overlapping blocks. Scrolling back to the
+  bottom resumes following. Input bursts coalesce into synchronized, padded
+  terminal frames, avoiding blank-row flashes and idle cursor rewrites.
+- Distinct awaiting-approval, running, denied, stopped, and failed tool states
+  across live views and replay; interrupted commands no longer count as failed
+  checks, and resolved approvals no longer remain marked as waiting in history.
+- Changes and Verification open the right action panel with record navigation,
+  including historical evidence while the active session continues. Dismissed utility
+  output stays in the execution log. Full Changes/Verification review with recorded diffs, command output,
+  exit status, and expandable arguments. Verification and failure actions open
+  the relevant record directly; missing exit status cannot claim a passing check.
+  The full execution log opens on demand with Ctrl+B.
+- Tool activity has its own cool-toned surface and a brighter active band. Cyan
+  file operations and amber commands/checks distinguish operations
+  in the default themes; green success and red attention distinguish outcomes.
+  Inline evidence, Review, and the execution log share these semantic roles,
+  with matching dark/light palettes and explicit labels when color is disabled.
+- Turn-local history, selection, independent scrolling, and live follow, with
+  restored evidence on session resume. Keyboard/mouse navigation preserves drafts;
+  the prompt supports multiline paste, caret editing, completions, file references,
+  queued follow-ups, approvals, Send/Stop, and searchable settings.
+- Responsive layouts from 40×10, with at least three reading rows during ordinary
+  editing. Markdown wraps visible text without leaking formatting delimiters.
+- `bun run ui:session` previews the production renderer without a model. States
+  include thinking, working, tools, approval, completion, failures, and long content;
+  `--inspect=changes|verification|failure`, `--view=review|log`, `--trace`,
+  `--long-draft`, and `--snapshot=80x24` exercise
+  inspection and responsive layouts. `ui:workbench` forwards to this preview.
+- Optional grouped Activity and chronological Transcript views; the Activity
+  preview is `bun run scripts/activity-preview.ts`.
+
 - MIT license, security policy, and contribution guide.
 - Continuous integration and multi-architecture release workflows.
 - Install script for macOS release artifacts.
@@ -81,6 +184,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gradient-bordered composer that turns amber on approval, and a glowing core
   avatar whose color tracks the agent's state. Only the workbench uses it —
   scripted output keeps the canonical palette.
+- Mouse support in the workbench: SGR wheel scrolling for the transcript and
+  click targets on dialog rows, approval choices, and slash/mention menu
+  entries. Raw chunks are decoded before the keypress emitter, which splits
+  mouse sequences, and the affected keypresses are suppressed.
+- Selection surfaces: menus, dialogs, and approval choices draw the selected
+  row as a filled background span (`Painter.wash`) in the row's own semantic
+  color instead of colored text alone, with a theme-safe foreground.
+- Type-to-filter in workbench dialogs (`/theme`, `/model`, `/sessions`):
+  printing characters narrow the list by subsequence with substring matches
+  ranked first, backspace edits the query, and digits jump rows only while
+  the query is empty.
+- Throughput sparkline in the telemetry sidebar: provider rounds pair their
+  usage and metrics events by call id and the last twelve effective rates render
+  as a one-row bar with the newest rate labeled.
 
 ### Changed
 

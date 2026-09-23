@@ -72,6 +72,7 @@ import { CliContextRail } from "./context-rail.ts";
 import { TurnThroughputTracker } from "./turn-throughput.ts";
 import { TurnActivityLedger, isValidationCommand, type TurnPhase } from "./turn-activity.ts";
 import { TerminalTextPacer } from "./terminal-text-pacer.ts";
+import { loadRecentSessions, recentSession } from "./recent-sessions.ts";
 import { selectSessionInteractive, sessionListItem } from "./session-picker.ts";
 import { matchModel, selectModelInteractive } from "./model-picker.ts";
 import { reducedMotionEnabled } from "./motion.ts";
@@ -103,7 +104,9 @@ import {
 } from "./daemon-control.ts";
 import { formatDoctorReport, runDoctor } from "./doctor.ts";
 import { runSetup } from "./setup.ts";
-import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus, renderHarnessWelcome } from "./harness-panels.ts";
+import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus } from "./harness-panels.ts";
+import { replaySession } from "./workbench/history.ts";
+import { toolCompletion } from "./workbench/tool-result.ts";
 import { narrateTurnEnd, sentence } from "./voice.ts";
 import { updateUserConfig } from "@demesne/config";
 import { createInterface } from "node:readline/promises";
@@ -840,6 +843,27 @@ async function runChat(command: string[]): Promise<void> {
         },
       })
     : null;
+  const restoreWorkbench = async (state: SessionStateResponse): Promise<void> => {
+    if (!workbench) return;
+    try {
+      const events = await replaySession(state, (id, after, signal) => client.streamEvents(id, after, signal));
+      workbench.restoreSession(state, events);
+    } catch {
+      workbench.restoreSession(state);
+      workbench.notice("Saved answers loaded; detailed event history could not be replayed.", "error");
+    }
+    if (state.session.turns.length === 0) {
+      workbench.setRecentSessions([recentSession(state)], "loading");
+      void loadRecentSessions(state, {
+        list: () => request<{ sessions: Session[] }>("/v1/sessions").then((result) => result.sessions),
+        state: (id) => request<SessionStateResponse>(`/v1/sessions/${id}`),
+      }).then((sessions) => {
+        if (sessionId === state.session.id) workbench.setRecentSessions(sessions);
+      }).catch(() => {
+        if (sessionId === state.session.id) workbench.setRecentSessions([recentSession(state)], "unavailable");
+      });
+    }
+  };
   if (!workbench) {
     chatState.footer = fixedFooter;
     fixedFooter.enable();
@@ -876,6 +900,7 @@ async function runChat(command: string[]): Promise<void> {
   };
   process.stdout.on("resize", onTerminalResize);
   if (workbench) {
+    await restoreWorkbench(initialState);
     workbench.start();
     const refreshAmbient = async (): Promise<void> => {
       const used = await readAmbientMemory();
@@ -883,27 +908,6 @@ async function runChat(command: string[]): Promise<void> {
     };
     void refreshAmbient();
     ambientTimer = setInterval(() => void refreshAmbient(), 10_000);
-    const turns = initialState.session.turns.length;
-    if (turns > 0) {
-      workbench.notice(
-        `resumed · last active ${formatRelativeAge(initialState.session.updatedAt)} · `
-          + `${turns} turn${turns === 1 ? "" : "s"} · ${sanitizeTerminalLine(initialState.session.title)}`,
-      );
-    } else {
-      // A new session would otherwise open to an empty screen with no model,
-      // workspace, or policy context.
-      workbench.showPanel(renderHarnessWelcome({
-        model: activeModel.id,
-        provider: activeModel.provider,
-        contextWindow: activeModel.contextWindow,
-        workspace: currentWorkspace,
-        branch: initialState.session.workspace?.gitBranch ?? null,
-        permissionMode,
-        runtime: runtimeStatus,
-        width: getTerminalWidth(process.stdout),
-        paint,
-      }));
-    }
   } else renderWelcome();
 
   /// Command output helper: the workbench appends blocks to the conversation,
@@ -940,6 +944,7 @@ async function runChat(command: string[]): Promise<void> {
       chatState.queuedInput = undefined;
       contextRail.setModel(activeModel);
       workbench.setSessionTitle(sessionTitle);
+      contextRail.begin(thinkingEnabled);
       workbench.beginTurn({ userText: text, at: timeLabel(), planOnly });
       try {
         await runWorkbenchTurn({
@@ -1014,6 +1019,7 @@ async function runChat(command: string[]): Promise<void> {
       contextRail.setBranch(result.session.workspace?.gitBranch ?? null);
       mentionFiles = await fetchMentionFiles(sessionId);
       refreshCustomCommands(currentWorkspace);
+      await restoreWorkbench(result);
       const preferred = result.session.preferredModel;
       if (preferred && preferred !== activeModel.id) {
         emit(paint.dim(
@@ -1046,7 +1052,7 @@ async function runChat(command: string[]): Promise<void> {
       }
     },
     plan: async (argument) => {
-      const text = sanitizeTerminalLine(argument).trim();
+      const text = sanitizeTerminalText(argument).trim();
       if (!text) {
         say("Usage: /plan <prompt>", "error");
         return;
@@ -1089,7 +1095,7 @@ async function runChat(command: string[]): Promise<void> {
       }
     },
     clear: async () => {
-      if (workbench) workbench.notice("view refreshed");
+      if (workbench) workbench.refresh();
       else renderWelcome();
     },
     help: async () => {
@@ -1114,6 +1120,7 @@ async function runChat(command: string[]): Promise<void> {
       contextRail.setBranch(created.session.workspace?.gitBranch ?? null);
       mentionFiles = await fetchMentionFiles(sessionId);
       refreshCustomCommands(currentWorkspace);
+      await restoreWorkbench({ session: created.session, lastEventId: created.eventId, pendingPermissions: [], latestProviderCall: null });
       say(`Started new session ${title} (${sessionId.slice(0, 8)})`, "success");
     },
     theme: async (argument) => {
@@ -1348,12 +1355,12 @@ async function runChat(command: string[]): Promise<void> {
     if (input.startsWith("/")) {
       const invocation = resolveSlashCommand(input, allCommands);
       if (!invocation) {
-        console.log(`  ${paint.text(`Unknown command: ${input.split(/\s/, 1)[0]}. Type /help for available commands.`, "signal")}\n`);
+        say(`Unknown command: ${input.split(/\s/, 1)[0]}. Type /help for available commands.`, "error");
         continue;
       }
       const validationError = slashCommandValidationError(invocation);
       if (validationError) {
-        console.log(`  ${paint.text(validationError, "signal")}\n`);
+        say(validationError, "error");
         continue;
       }
       try {
@@ -1363,14 +1370,14 @@ async function runChat(command: string[]): Promise<void> {
         } else {
           const custom = customCommands.find((entry) => entry.command.id === invocation.command.id);
           if (!custom) {
-            console.log(`  ${paint.text(`Unknown command: ${invocation.matchedName}`, "signal")}\n`);
+            say(`Unknown command: ${invocation.matchedName}`, "error");
             continue;
           }
           await executePrompt(expandCustomCommand(custom, invocation.argument));
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : `${invocation.command.name} failed`;
-        console.log(`  ${paint.text(sanitizeTerminalText(message), "signal")}\n`);
+        say(sanitizeTerminalText(message), "error");
       }
       continue;
     }
@@ -1523,7 +1530,12 @@ async function runWorkbenchTurn(options: {
   });
 
   const controller = new AbortController();
+  let interrupted = false;
+  let cancelFallback: ReturnType<typeof setTimeout> | undefined;
   chatState.interrupt = () => {
+    if (interrupted) return;
+    interrupted = true;
+    cancelFallback = setTimeout(() => controller.abort(), 3_000);
     void request(`/v1/turns/${submitted.turn.id}/cancel`, { method: "POST", body: JSON.stringify({}) })
       .catch(() => controller.abort());
   };
@@ -1531,13 +1543,15 @@ async function runWorkbenchTurn(options: {
   const activity = new TurnActivityLedger();
   const throughput = new TurnThroughputTracker();
   const startedAt = Date.now();
+  let completedAt: number | undefined;
   let presence: PresenceState = "thinking";
-  let status: "completed" | "stopped" | "failed" = "completed";
-  let failure: string | undefined;
+  let status: "completed" | "stopped" | "failed" = "failed";
+  let failure: string | undefined = "The event stream ended before the run completed.";
   let softLimitWarned = false;
   const reduceMotion = reducedMotionEnabled();
+  let responseAt: string | undefined;
   const pacer = reduceMotion ? null : new TerminalTextPacer({
-    sink: (text) => options.workbench.assistantDelta(text),
+    sink: (text) => options.workbench.assistantDelta(text, responseAt),
   });
 
   const updateFooter = () => {
@@ -1561,12 +1575,14 @@ async function runWorkbenchTurn(options: {
       options.contextRail.apply(event);
       activity.apply(event);
       throughput.apply(event);
+      if (/^turn\.(completed|cancelled|failed|interrupted)$/.test(event.type)) completedAt = Date.parse(event.occurredAt);
 
       if (event.type === "model.request_started") {
         // Flush paced text first so the previous round's prose is complete
         // before the new round opens a fresh paragraph.
         if (pacer) await pacer.drain();
         options.workbench.beginRound();
+        responseAt = undefined;
         presence = "thinking";
         const plan = event.payload.contextPlan;
         if (!softLimitWarned && isRecord(plan) && plan.budgetStatus === "over_soft_limit") {
@@ -1578,11 +1594,12 @@ async function runWorkbenchTurn(options: {
         options.workbench.reasoningDelta(event.payload.delta);
       } else if (event.type === "message.delta" && typeof event.payload.delta === "string") {
         presence = "writing";
+        if (event.payload.delta) responseAt ??= event.occurredAt;
         if (pacer) {
           pacer.observe(event.payload.delta);
           pacer.write(event.payload.delta);
         } else {
-          options.workbench.assistantDelta(event.payload.delta);
+          options.workbench.assistantDelta(event.payload.delta, responseAt);
         }
       } else if (event.type === "tool.call_requested") {
         // Drain first: the tool row must appear after the prose that announced
@@ -1599,17 +1616,7 @@ async function runWorkbenchTurn(options: {
         const name = String(event.payload.name ?? "tool");
         presence = presenceForTool(name, false);
       } else if (["tool.call_completed", "tool.call_failed", "tool.call_denied", "tool.call_cancelled", "tool.call_interrupted"].includes(event.type)) {
-        const state = event.type === "tool.call_completed" && event.payload.timedOut !== true
-          && (typeof event.payload.exitCode !== "number" || event.payload.exitCode === 0)
-          ? "done"
-          : event.type === "tool.call_denied" ? "denied" : "failed";
-        options.workbench.toolFinished({
-          toolCallId: String(event.payload.toolCallId ?? ""),
-          name: String(event.payload.name ?? "tool"),
-          state,
-          ...(typeof event.payload.durationMs === "number" ? { durationMs: event.payload.durationMs } : {}),
-          ...(state === "failed" && typeof event.payload.message === "string" ? { message: event.payload.message } : {}),
-        });
+        options.workbench.toolFinished(toolCompletion(event));
         presence = "thinking";
       } else if (event.type === "model.context_trimmed") {
         const count = Array.isArray(event.payload.droppedTurnIds) ? event.payload.droppedTurnIds.length : 0;
@@ -1646,10 +1653,12 @@ async function runWorkbenchTurn(options: {
               decision = "allow_session";
             }
           }
-          await request(`/v1/permissions/${permissionId}`, {
-            method: "POST",
-            body: JSON.stringify({ decision }),
-          }).catch(() => undefined);
+          try {
+            await request(`/v1/permissions/${permissionId}`, { method: "POST", body: JSON.stringify({ decision }) });
+          } catch (error) {
+            void request(`/v1/turns/${submitted.turn.id}/cancel`, { method: "POST", body: JSON.stringify({}) }).catch(() => undefined);
+            throw new Error(`Could not deliver the approval decision: ${error instanceof Error ? error.message : "request failed"}`);
+          }
         }
       } else if (event.type === "turn.completed") {
         status = "completed";
@@ -1665,22 +1674,29 @@ async function runWorkbenchTurn(options: {
         failure = typeof event.payload.message === "string" ? event.payload.message : "Turn failed";
         break;
       } else if (event.type === "turn.interrupted") {
-        status = "failed";
-        presence = "error";
+        status = "stopped";
+        presence = "stopped";
         failure = typeof event.payload.message === "string" ? event.payload.message : "Turn interrupted";
         break;
       }
       updateFooter();
     }
   } finally {
+    if (cancelFallback) clearTimeout(cancelFallback);
     clearInterval(footerTimer);
     if (pacer) await pacer.drain();
     chatState.interrupt = undefined;
     controller.abort();
   }
 
+  if (interrupted && status !== "completed") status = "stopped";
+
   const evidence = activity.snapshot();
-  const duration = ((Date.now() - startedAt) / 1_000).toFixed(1);
+  // Use the journal's clock so the response footer is identical after replay;
+  // terminal pacing and client scheduling must not extend the recorded turn.
+  const recordedDuration = completedAt === undefined ? NaN : completedAt - Date.parse(submitted.turn.createdAt);
+  const durationMs = Number.isFinite(recordedDuration) && recordedDuration >= 0 ? recordedDuration : Math.max(0, Date.now() - startedAt);
+  const duration = (durationMs / 1_000).toFixed(1);
   const measured = throughput.snapshot();
   const speed = measured.decodeTokensPerSecond ?? measured.tokensPerSecond;
   const counts = `${evidence.rounds} round${evidence.rounds === 1 ? "" : "s"}`
@@ -1690,9 +1706,9 @@ async function runWorkbenchTurn(options: {
       + (measured.outputTokens ? ` · ${measured.outputTokens} tok` : "")
       + (speed ? ` · ${speed.toFixed(1)} tok/s` : "")
     : status === "stopped"
-      ? `${duration}s · ${counts}`
+      ? `${duration}s · ${counts}${failure ? ` · ${sentence(failure)}` : ""}`
       : failure ? sentence(failure) : "";
-  options.workbench.finishTurn(status, narrateTurnEnd(status, details));
+  options.workbench.finishTurn(status, narrateTurnEnd(status, details), { durationMs, tokensPerSecond: speed });
 }
 
 /// Best-effort command extraction for presence purposes; the activity ledger
@@ -1879,12 +1895,12 @@ async function renderTurn(
 
   startBeacon(waitingActivity, waitingLabel);
 
-  const reportStopped = () => {
+  const reportStopped = (message = "Turn stopped.") => {
     textPacer?.flushNow();
     closeReasoning();
     stopBeacon();
     if (interactive) {
-      console.log(`\n  ${paint.text("×", "signal")} ${paint.dim("Turn stopped.")}\n`);
+      console.log(`\n  ${paint.text("■", "secondary")} ${paint.dim(sanitizeTerminalLine(message))}\n`);
     }
   };
 
@@ -2005,7 +2021,7 @@ async function renderTurn(
         const callId = String(event.payload.toolCallId ?? toolName);
         const activity = activityLedger.activity(callId);
         const phase = activity?.phase ?? "inspect";
-        const state = activity?.state === "done" ? "done" : activity?.state === "denied" ? "denied" : "failed";
+        const state = activity?.state === "done" ? "done" : activity?.state === "denied" ? "denied" : activity?.state === "stopped" ? "stopped" : "failed";
 
         stopBeacon();
         if (interactive) {
@@ -2034,7 +2050,7 @@ async function renderTurn(
           }
         }
         const pending = activityLedger.snapshot().activities.find((candidate) =>
-          candidate.state === "queued" || candidate.state === "running"
+          candidate.state === "queued" || candidate.state === "waiting" || candidate.state === "running"
         );
         if (pending) {
           const pendingBadge = toolKindBadge(pending.name);
@@ -2111,11 +2127,9 @@ async function renderTurn(
       }
 
       if (event.type === "turn.interrupted") {
-        textPacer?.flushNow();
-        closeReasoning();
-        stopBeacon();
         const message = typeof event.payload.message === "string" ? event.payload.message : "Turn interrupted";
-        throw new Error(message);
+        reportStopped(message);
+        return "stopped";
       }
     }
     stopBeacon();

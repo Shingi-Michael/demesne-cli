@@ -36,12 +36,12 @@ describe("theme registry", () => {
     expect(themeLabel("tokyo-night")).toBe("Tokyo Night");
   });
 
-  test("no theme repeats a color across the roles that must stay distinct", () => {
-    // electric, citron, and signal carry meaning, so a theme that maps two of
-    // them to one color would erase the distinction the interface draws with.
+  test("operation, success, and failure roles remain distinct", () => {
+    // Operation types and outcomes have different meanings. Themes must not
+    // present a running check in the same color as a confirmed result.
     for (const [name, theme] of Object.entries(THEMES)) {
-      const meanings = [theme.colors.electric, theme.colors.citron, theme.colors.signal];
-      expect(new Set(meanings).size, `${name} reuses a meaning color`).toBe(3);
+      const meanings = [theme.colors.inspect, theme.colors.execute, theme.colors.citron, theme.colors.signal];
+      expect(new Set(meanings).size, `${name} reuses a meaning color`).toBe(4);
     }
   });
 

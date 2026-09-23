@@ -22,7 +22,9 @@ describe("renderHarnessHelp", () => {
     const joined = renderHarnessHelp(SLASH_COMMANDS, 100, painter).join("\n");
     expect(joined).toContain("KEYS");
     expect(joined).toContain("ctrl+t");
-    expect(joined).toContain("toggle telemetry");
+    expect(joined).toContain("focus content / prompt");
+    expect(joined).toContain("session / activity / transcript");
+    expect(joined).toContain("select turn");
     expect(joined).toContain("esc esc");
     expect(joined).toContain("compose in $EDITOR");
   });

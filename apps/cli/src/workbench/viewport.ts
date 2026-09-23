@@ -10,6 +10,8 @@ export class ConversationViewport {
   private offset = 0;
 
   setLines(lines: readonly string[]): void {
+    // Streaming appends must not drag a reader who has scrolled into history.
+    if (this.offset > 0) this.offset = Math.max(0, this.offset + lines.length - this.lines.length);
     this.lines = [...lines];
     this.clamp();
   }
@@ -42,6 +44,10 @@ export class ConversationViewport {
   toTop(): void {
     this.offset = this.lines.length;
     this.clamp();
+  }
+
+  revealLine(line: number, height: number): void {
+    this.offset = Math.max(0, this.lines.length - Math.max(1, height) - Math.max(0, line));
   }
 
   /// Returns exactly `height` lines, padding the top with blanks when the

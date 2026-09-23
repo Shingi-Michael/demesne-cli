@@ -6,28 +6,48 @@ import {
   formatApprovalAsk,
   formatSlashCommandMenu,
   formatToolRow,
-  formatTurnCloser,
-  formatTurnOpener,
   HARNESS,
+  presenceForTool,
   sanitizeTerminalLine,
+  sanitizeTerminalText,
   shortenPath,
   slashCommandMatches,
+  slashMenuLineCommands,
   TerminalMarkdownStream,
+  textIndexAtVisualColumn,
   truncateText,
-  turnRail,
   visibleLength,
   wrapDisplayText,
   type Painter,
   type PaletteColor,
   type PresenceState,
   type SlashCommand,
-  type ToolPhaseName,
   type ToolRowState,
 } from "@demesne/brand";
-import type { EventEnvelope, PermissionDecision } from "@demesne/protocol";
+import type { EventEnvelope, PermissionDecision, SessionStateResponse } from "@demesne/protocol";
 import { emitKeypressEvents } from "node:readline";
-import { computeWorkbenchLayout, type SidebarMode, type WorkbenchLayout } from "./layout.ts";
+import { PassThrough } from "node:stream";
+import { sliceAnsi } from "bun";
+import { StringDecoder } from "node:string_decoder";
+import { stripVTControlCharacters } from "node:util";
+import { surface } from "./surface.ts";
+import { Canvas, workspaceInset } from "./canvas.ts";
+import { TerminalInputDecoder, PASTE_ENABLE, PASTE_DISABLE, FOCUS_ENABLE, FOCUS_DISABLE, type TerminalInput } from "./terminal-input.ts";
+import { restoreSessionEntries } from "./history.ts";
+import { composeDraft, composerHeight } from "./composer.ts";
+import { SessionView } from "./session.ts";
+import { toolFailed } from "./evidence.ts";
+import { sessionStatus } from "./session-chrome.ts";
+import { StartScreen, startScreenLayout, START_OPERATIONS, type StartAction, type StartLayout } from "./start-screen.ts";
+import type { RecentSession } from "../recent-sessions.ts";
+import type { WorkbenchEntry, AssistantEntry, ReasoningEntry, ToolEntry, NoticeEntry, ToolState, ResponseReceipt } from "./entries.ts";
+export type { ToolState } from "./entries.ts";
+import { responseCard, userCard } from "./conversation.ts";
+import { inspectorPanel, INSPECTOR_TABS, type InspectorTab } from "./inspector.ts";
+import { groupActivity, changeSummary, evidenceCounts } from "./activity.ts";
+import { computeWorkbenchLayout, conversationInset, sessionPanelLayout, type WorkbenchLayout } from "./layout.ts";
 import { ConversationViewport } from "./viewport.ts";
+import { MOUSE_DISABLE, MOUSE_ENABLE, type MouseEvent } from "../mouse.ts";
 import {
   createPromptEditorState,
   mentionMatches,
@@ -35,98 +55,23 @@ import {
   reducePromptEditor,
   setPromptValue,
   type PromptEditorKey,
+  type PromptEditorResult,
   type PromptEditorState,
 } from "../prompt-editor.ts";
-import { reduceQueuedInput } from "../input-queue.ts";
 import { reduceInterruptKey } from "../interrupt-key.ts";
-import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } from "../approval-selection.ts";
-import { reduceSessionPicker, type SessionPickerKey } from "../session-picker.ts";
+import { reducedMotionEnabled } from "../motion.ts";
+import { approvalOptions, reduceApprovalSelection } from "../approval-selection.ts";
+import { filterDialogIndices, reduceDialogPicker } from "../session-picker.ts";
 import { planTranscript, type PlannedTool } from "./transcript.ts";
 import { classifyTurnPhase } from "../turn-activity.ts";
 import { composeInEditor } from "../external-editor.ts";
 import { narrateWaiting } from "../voice.ts";
 import type { CliContextRail } from "../context-rail.ts";
 
-/// The Demesne harness.
-///
-/// Design rules, in order of importance:
-///
-/// 1. One grid. Every line sits on `HARNESS` columns so marks, verbs, targets,
-///    and durations align. Order comes from alignment, not from boxes.
-/// 2. One accent. Text is monochrome; color is reserved for the agent's mark
-///    and for status that always means the same thing.
-/// 3. Motion means something. Only the active turn animates: its mark, the
-///    pulse hairline, and the streaming caret. Settled turns are static, so
-///    scrollback never flickers and diffs of output stay stable.
-/// 4. The agent speaks. Tool activity is narrated in the first person, so the
-///    transcript reads as a presence describing its work.
+/// Terminal lifecycle and input orchestration. SessionView owns run selection,
+/// navigation and inspection; activity/transcript remain alternate views.
 
 export type WorkbenchMode = "input" | "streaming" | "approval" | "dialog";
-export type ToolState = "running" | "done" | "failed" | "denied";
-
-interface UserEntry {
-  id: number;
-  type: "user";
-  text: string;
-  at: string;
-}
-
-interface AssistantEntry {
-  id: number;
-  type: "assistant";
-  raw: string;
-  streaming: boolean;
-  revision: number;
-}
-
-interface ReasoningEntry {
-  id: number;
-  type: "reasoning";
-  raw: string;
-  streaming: boolean;
-  startedAt: number;
-  durationMs: number | null;
-}
-
-interface ToolEntry {
-  id: number;
-  type: "tool";
-  toolCallId: string;
-  name: string;
-  input: Record<string, unknown>;
-  detail?: string;
-  state: ToolState;
-  durationMs?: number;
-  message?: string;
-  exitCode?: number;
-  created?: boolean;
-  diff?: { oldText: string; newText: string };
-  startedAt: number;
-  waiting?: boolean;
-  phase: ToolPhaseName;
-}
-
-interface NoticeEntry {
-  id: number;
-  type: "notice";
-  text: string;
-  tone: "info" | "success" | "error";
-  closesTurn?: boolean;
-}
-
-interface BlockEntry {
-  id: number;
-  type: "block";
-  lines: string[];
-}
-
-interface PanelEntry {
-  id: number;
-  type: "panel";
-  lines: string[];
-}
-
-type WorkbenchEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry | BlockEntry | PanelEntry;
 
 export interface ApprovalRequest {
   summary: string;
@@ -174,17 +119,33 @@ const TOOL_VERBS: Record<string, string> = {
   command_stop: "stop",
 };
 
+/// A click target within the composer area, addressed by content row (zero is
+/// the first line under the composing rule).
+export interface InputZone {
+  row: number;
+  column?: number;
+  width?: number;
+  run: (column?: number) => void;
+}
+
 export class Workbench {
+  private sessionLayout = true;
+  private readonly sessionView = new SessionView((text) => this.copyResponse(text));
+  private readonly startScreen = new StartScreen();
+  private startLayout: StartLayout | null = null;
+  private sessionId: string | undefined;
+  private recentSessions: RecentSession[] = [];
+  private recentState: "loading" | "ready" | "unavailable" = "ready";
+  private copyTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly viewport = new ConversationViewport();
-  private readonly rendered = new Map<number, { revision: number; width: number; lines: string[] }>();
+  private readonly rendered = new Map<number, { revision: number; width: number; session: boolean; lines: string[] }>();
   private entries: WorkbenchEntry[] = [];
   private nextId = 1;
   private layout: WorkbenchLayout;
-  /// Hidden by default: the harness stays a single clean column until the
-  /// reader asks for telemetry.
-  private sidebarMode: SidebarMode = "hidden";
   private mode: WorkbenchMode = "input";
   private editor: PromptEditorState = createPromptEditorState();
+  private queuedEditor: PromptEditorState = createPromptEditorState();
+  private feedback: { text: string; tone: "info" | "success" | "error" } | null = null;
   private promptContext: PromptContext = { history: [], mentions: [], commands: [] };
   private promptResolver: ((value: string) => void) | null = null;
   private approvalResolver: ((decision: PermissionDecision) => void) | null = null;
@@ -194,19 +155,57 @@ export class Workbench {
   private dialogItems: string[] = [];
   private dialogSelected = 0;
   private dialogTitle = "";
+  /// Type-to-filter state for the dialog picker. `dialogFiltered` holds the
+  /// original indices still matching the query, in display order.
+  private dialogQuery = "";
+  private dialogFiltered: number[] = [];
+  /// Click targets for the current frame, by absolute terminal row. Rebuilt on
+  /// every render, so clicks land on what is actually on screen.
+  private mouseZones: InputZone[] = [];
+  private readonly keyboard = new PassThrough();
+  private readonly decoder = new StringDecoder("utf8");
+  private readonly terminalInput = new TerminalInputDecoder();
+  private escapeTimer: ReturnType<typeof setTimeout> | null = null;
+  private cachedTheme = "";
+  private planMode = false;
+  private savedDraft = "";
+  private transcriptView = false;
+  private collapsedSections = new Set<string>();
+  private sections: Array<{ key: string; row: number; run: () => void }> = [];
+  private sectionFocus: string | null = null;
+  private sheet: { kind: "index"; selected: number } | { kind: "detail"; entryId: number; offset: number } | null = null;
+  private chatView = true;
+  private selectedTurnId: number | null = null;
+  private inspectorTab: InspectorTab = "Overview";
+  private inspectorFocused = false;
+  private inspectorOffset = 0;
+  private inspectorRevealSelection = false;
+  private expandedResponses = new Set<number>();
+  private conversationZones: InputZone[] = [];
+  private expandedTools = new Set<number>();
+  private conversationActions = new Map<number, () => void>();
+  private showAllTools = false;
+  /// An incomplete mouse sequence waiting for the rest of its bytes.
+  private mouseCarry = "";
   private footerLeft = "";
   private footerRight = "";
   private ambient: string[] = [];
   private state: PresenceState = "idle";
+  private turnStartedAt: number | null = null;
+  private animationTimer: ReturnType<typeof setInterval> | null = null;
+  private renderTimer: ReturnType<typeof setTimeout> | null = null;
+  private terminalFocused = true;
+  private clockSecond = -1;
   private started = false;
   private previousRows: string[] = [];
+  private previousCursor: { row: number; column: number } | null = null;
   private lastInterruptEscapeAt = 0;
   private sessionTitle: string;
   private readonly expandedReasoning = new Set<number>();
 
   constructor(private readonly options: WorkbenchOptions) {
     this.sessionTitle = options.sessionTitle;
-    this.layout = computeWorkbenchLayout(process.stdout.columns ?? 80, process.stdout.rows ?? 24);
+    this.layout = computeWorkbenchLayout(process.stdout.columns ?? 80, process.stdout.rows ?? 24, { sidebar: "hidden" });
   }
 
   isActive(): boolean {
@@ -216,28 +215,87 @@ export class Workbench {
   start(): void {
     if (this.started || !process.stdout.isTTY) return;
     this.started = true;
-    process.stdout.write("\x1b[?1049h\x1b[?25l\x1b[2J");
+    this.terminalFocused = true;
+    this.clockSecond = Math.floor(Date.now() / 1000);
+    this.previousRows = []; this.previousCursor = null;
+    process.stdout.write(`\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J${MOUSE_ENABLE}${PASTE_ENABLE}${FOCUS_ENABLE}`);
     const input = process.stdin;
-    emitKeypressEvents(input);
+    // Only non-mouse bytes reach our isolated keypress stream.
+    input.on("data", this.onData);
+    emitKeypressEvents(this.keyboard);
     input.setRawMode(true);
     input.resume();
-    input.on("keypress", this.onKeypress);
+    this.keyboard.on("keypress", this.onKeypress);
     process.stdout.on("resize", this.onResize);
+    this.animationTimer = setInterval(() => {
+      const second = Math.floor(Date.now() / 1000);
+      if (second !== this.clockSecond || this.mode === "streaming" && !reducedMotionEnabled()) this.requestRender();
+      this.clockSecond = second;
+    }, 120);
+    this.animationTimer.unref();
     this.render();
   }
 
   stop(): void {
+    if (this.renderTimer) clearTimeout(this.renderTimer);
+    this.renderTimer = null;
+    if (this.copyTimer) clearTimeout(this.copyTimer);
+    this.copyTimer = null;
     if (!this.started) return;
     this.started = false;
+    if (this.animationTimer) clearInterval(this.animationTimer);
+    this.animationTimer = null;
     const input = process.stdin;
-    input.removeListener("keypress", this.onKeypress);
+    this.keyboard.removeListener("keypress", this.onKeypress);
+    this.mouseCarry = "";
+    this.terminalInput.reset();
+    if (this.escapeTimer) clearTimeout(this.escapeTimer);
+    input.removeListener("data", this.onData);
     process.stdout.removeListener("resize", this.onResize);
     input.setRawMode(false);
-    process.stdout.write("\x1b[?25h\x1b[?1049l");
+    this.sessionView.hover(-1, -1);
+    this.startScreen.hover(-1, -1);
+    process.stdout.write(`\x1b[?2026l\x1b[?7h\x1b[?25h${MOUSE_DISABLE}${PASTE_DISABLE}${FOCUS_DISABLE}\x1b[?1049l`);
   }
 
   setSessionTitle(title: string): void {
     this.sessionTitle = title;
+    this.recentSessions = this.recentSessions.map((session) => session.id === this.sessionId ? { ...session, title } : session);
+    this.requestRender();
+  }
+
+  setRecentSessions(sessions: readonly RecentSession[], state: "loading" | "ready" | "unavailable" = "ready"): void {
+    this.recentSessions = [...sessions]; this.recentState = state; this.requestRender();
+  }
+
+  private get showingStart(): boolean {
+    return this.sessionLayout && this.mode === "input" && !this.sessionView.panelOpen
+      && !this.entries.some((entry) => entry.type === "user" || entry.type === "assistant" || entry.type === "reasoning" || entry.type === "tool");
+  }
+
+  restoreSession(state: SessionStateResponse, events: readonly EventEnvelope[] = []): void {
+    if (this.copyTimer) clearTimeout(this.copyTimer);
+    this.copyTimer = null;
+    this.turnStartedAt = null;
+    const latest = [...state.session.turns].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).at(-1);
+    if (latest?.status === "running" || latest?.status === "queued") {
+      const start = Date.parse(latest.createdAt);
+      if (Number.isFinite(start)) this.turnStartedAt = start;
+    }
+    this.state = "idle";
+    this.entries = restoreSessionEntries(state, events);
+    this.nextId = (this.entries.at(-1)?.id ?? 0) + 1;
+    this.sessionTitle = state.session.title;
+    this.sessionId = state.session.id;
+    this.startScreen.reset(); this.startLayout = null;
+    this.options.workspaceRoot = state.session.workspace?.root;
+    this.sessionView.reset();
+    this.sheet = null; this.inspectorFocused = false; this.selectedTurnId = null;
+    this.inspectorOffset = 0; this.sectionFocus = null;
+    this.rendered.clear(); this.collapsedSections.clear(); this.expandedTools.clear(); this.expandedResponses.clear(); this.expandedReasoning.clear();
+    this.viewport.setLines([]); this.viewport.toBottom();
+    this.options.queue.set(""); this.queuedEditor = createPromptEditorState();
+    this.feedback = null;
     this.requestRender();
   }
 
@@ -264,33 +322,49 @@ export class Workbench {
     this.requestRender();
   }
 
+  refresh(): void {
+    this.previousRows = [];
+    this.requestRender();
+  }
+
   notice(text: string, tone: "info" | "success" | "error" = "info"): void {
     this.entries.push({ id: this.nextId++, type: "notice", text, tone });
+    this.feedback = { text, tone };
     this.requestRender();
   }
 
   /// Command output that already draws its own opener and grid. Rendered
   /// verbatim: adding the turn rail here double-indented the panel and forced
   /// its opener to truncate.
-  showPanel(lines: readonly string[]): void {
+  showPanel(lines: readonly string[], options: { open?: boolean } = {}): void {
     if (lines.length === 0) return;
-    this.entries.push({ id: this.nextId++, type: "panel", lines: [...lines] });
+    const id = this.nextId++;
+    this.entries.push({ id, type: "panel", lines: [...lines] });
+    if (this.sessionLayout && options.open !== false) this.sessionView.presentOutput(id);
     this.requestRender();
   }
 
   showBlock(lines: readonly string[]): void {
     if (lines.length === 0) return;
-    this.entries.push({ id: this.nextId++, type: "block", lines: [...lines] });
+    const id = this.nextId++;
+    this.entries.push({ id, type: "block", lines: [...lines] });
+    if (this.sessionLayout) this.sessionView.presentOutput(id);
     this.requestRender();
   }
 
   beginTurn(options: { userText: string; at: string; planOnly?: boolean }): void {
-    this.entries.push({ id: this.nextId++, type: "user", text: options.userText, at: options.at });
+    this.mode = "streaming";
+    this.state = "thinking";
+    this.turnStartedAt = Date.now();
+    this.feedback = null;
+    this.sessionView.dismissOutput();
+    this.entries.push({ id: this.nextId++, type: "user", text: options.userText, at: options.at, startedAt: this.turnStartedAt, model: this.options.contextRail.modelId, planOnly: options.planOnly ?? false });
     if (options.planOnly) this.notice("plan · read-only tools · proposals before changes");
     this.requestRender();
   }
 
   reasoningDelta(delta: string): void {
+    this.state = "reasoning";
     let entry = this.entries.findLast(
       (candidate): candidate is ReasoningEntry => candidate.type === "reasoning" && candidate.streaming,
     );
@@ -312,7 +386,9 @@ export class Workbench {
     this.requestRender();
   }
 
-  assistantDelta(delta: string): void {
+  assistantDelta(delta: string, at?: string): void {
+    if (!delta) return;
+    this.state = "writing";
     // The entry belongs to the current model round; only `beginRound` and
     // `finishTurn` close it. Closing on tool events split a single sentence
     // whenever the pacer flushed after the tool call arrived.
@@ -320,7 +396,7 @@ export class Workbench {
       (candidate): candidate is AssistantEntry => candidate.type === "assistant" && candidate.streaming,
     );
     if (!entry) {
-      entry = { id: this.nextId++, type: "assistant", raw: "", streaming: true, revision: 0 };
+      entry = { id: this.nextId++, type: "assistant", raw: "", streaming: true, revision: 0, at: at ?? new Date(Date.now()).toISOString() };
       this.entries.push(entry);
     }
     this.closeReasoning();
@@ -332,6 +408,8 @@ export class Workbench {
   /// Closes the previous round's prose so the next round starts a new
   /// paragraph. Called on `model.request_started`.
   beginRound(): void {
+    this.state = "thinking";
+    this.closeReasoning();
     this.finishAssistant();
   }
 
@@ -346,8 +424,10 @@ export class Workbench {
     // The caller drains the pacer before this, so the round's prose is
     // complete: stop its caret and animation. The entry stays open as the same
     // paragraph, and `beginRound` separates it from the next round's prose.
+    this.closeReasoning();
     this.finishAssistant();
     const parsed = parseArguments(input.arguments);
+    this.state = presenceForTool(input.name, classifyTurnPhase(input.name, parsed, this.hasChanges()) === "verify");
     this.entries.push({
       id: this.nextId++,
       type: "tool",
@@ -366,7 +446,7 @@ export class Workbench {
   }
 
   private hasChanges(): boolean {
-    return this.entries.some((entry) => entry.type === "tool" && entry.phase === "change");
+    return this.currentEntries().some((entry) => entry.type === "tool" && entry.phase === "change");
   }
 
   toolFinished(input: {
@@ -402,15 +482,39 @@ export class Workbench {
     this.requestRender();
   }
 
-  finishTurn(status: "completed" | "stopped" | "failed", summary: string): void {
+  finishTurn(status: "completed" | "stopped" | "failed", summary: string, measured: Partial<Pick<ResponseReceipt, "durationMs" | "tokensPerSecond">> = {}): void {
+    const durationMs = this.turnStartedAt === null ? null : Math.max(0, Date.now() - this.turnStartedAt);
+    this.turnStartedAt = null;
+    this.state = status === "completed" ? "done" : status === "stopped" ? "stopped" : "error";
     this.closeReasoning();
     this.finishAssistant();
+    const entries = this.currentEntries();
+    const request = entries.find((entry) => entry.type === "user");
+    const answer = entries.findLast((entry) => entry.type === "assistant");
+    const lastTool = entries.findLast((entry) => entry.type === "tool");
+    const receipt: ResponseReceipt = {
+      mode: request?.planOnly ? "Plan" : "Build", model: this.options.contextRail.modelId,
+      durationMs: measured.durationMs === undefined ? durationMs : measured.durationMs,
+      tokensPerSecond: measured.tokensPerSecond === undefined ? this.options.contextRail.tokensPerSecond : measured.tokensPerSecond,
+      context: this.options.contextRail.contextSnapshot,
+    };
+    if (answer && !answer.receipt && answer.id > (lastTool?.id ?? -1)) answer.receipt = receipt;
+    for (const entry of entries) {
+      if (entry.type === "tool" && entry.state === "running") {
+        entry.state = status === "stopped" ? "stopped" : "failed";
+        entry.waiting = false;
+        entry.durationMs = Math.max(0, Date.now() - entry.startedAt);
+        entry.message = status === "stopped" ? "Stopped before a result was recorded." : "The run ended before a result was recorded.";
+      }
+    }
+    if (this.mode === "streaming") this.mode = "input";
     this.entries.push({
       id: this.nextId++,
       type: "notice",
       text: summary,
       tone: status === "completed" ? "success" : status === "failed" ? "error" : "info",
       closesTurn: true,
+      receipt,
     });
     this.requestRender();
   }
@@ -423,7 +527,12 @@ export class Workbench {
   readPrompt(context: PromptContext): Promise<string> {
     this.promptContext = context;
     this.mode = "input";
+    if (this.showingStart) this.sessionView.focusInput();
     this.editor = createPromptEditorState();
+    if (this.savedDraft) {
+      this.editor = setPromptValue(this.editor, this.savedDraft);
+      this.savedDraft = "";
+    }
     this.requestRender();
     return new Promise((resolve) => {
       this.promptResolver = resolve;
@@ -456,8 +565,10 @@ export class Workbench {
 
   choose(title: string, items: readonly string[], selectedIndex = 0): Promise<number | null> {
     this.dialogTitle = title;
-    this.dialogItems = [...items];
-    this.dialogSelected = Math.max(0, Math.min(selectedIndex, Math.max(0, items.length - 1)));
+    this.dialogItems = items.map(stripVTControlCharacters);
+    this.dialogQuery = "";
+    this.dialogFiltered = filterDialogIndices(this.dialogItems, "");
+    this.dialogSelected = Math.max(0, Math.min(selectedIndex, Math.max(0, this.dialogFiltered.length - 1)));
     this.mode = "dialog";
     this.requestRender();
     return new Promise((resolve) => {
@@ -474,9 +585,127 @@ export class Workbench {
     text: string,
     key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; sequence?: string },
   ): void => {
+    // Readline emits the terminal's Ctrl+_ / Ctrl+/ byte without a key name.
+    if (text === "\x1f") key = { ...key, name: "_", ctrl: true };
+    if (this.handleModalKey(text, key)) return;
+    if (this.mode === "input" && this.editor.search) {
+      this.sessionView.focusInput();
+      this.applyEditorResult(reducePromptEditor(this.editor, { key, text, commands: [], history: this.promptContext.history }));
+      return;
+    }
+    // Inspection never consumes ordinary typing. Editing resumes in the draft
+    // at its existing cursor, while the selected evidence stays open.
+    if (this.sessionLayout && !key.ctrl && !key.meta && text && /^[^\x00-\x1f\x7f]+$/u.test(text)) this.sessionView.focusInput();
+    if (this.sessionLayout && (key.ctrl && ["a", "e", "r", "u", "k", "w", "o", "j", "_", "underscore", "/"].includes(key.name ?? "") || key.shift && (key.name === "return" || key.name === "enter"))) this.sessionView.focusInput();
+    if (this.sessionLayout && (this.mode === "input" || this.mode === "streaming")) {
+      this.sessionView.sync(this.entries);
+      if (this.mode === "streaming") {
+        const interrupt = reduceInterruptKey(this.lastInterruptEscapeAt, key, Date.now());
+        this.lastInterruptEscapeAt = interrupt.lastEscapeAt;
+        if (interrupt.interrupt) { this.options.onInterrupt(); return; }
+        if (key.name === "escape") { this.sessionView.key(key); this.requestRender(); return; }
+      }
+      if (key.meta && key.name === "c") { this.showContext(); return; }
+      if (key.meta && key.name === "p") { this.showWorkspace(); return; }
+      if (key.ctrl && key.name === "l") {
+        this.sessionLayout = false; this.chatView = false; this.transcriptView = false;
+        this.requestRender(); return;
+      }
+      if (key.ctrl && key.name === "y" && !this.editor.value) {
+        this.sessionView.act({ kind: "copy" });
+        return;
+      }
+      if (key.ctrl && key.name === "b") { this.sessionView.act({ kind: "log" }); this.requestRender(); return; }
+      if (this.showingStart && this.handleStartKey(key)) return;
+      if (this.sessionView.key(key)) { this.requestRender(); return; }
+    }
+    if ((this.mode === "input" || this.mode === "streaming") && this.sheet && (this.inspectorFocused || !this.layout.sidebar)) {
+      if (key.name === "escape" || (key.ctrl && key.name === "t")) { if (!this.layout.sidebar) this.sheet = null; this.inspectorFocused = false; this.requestRender(); return; }
+      if (key.name === "tab" || key.name === "left" || key.name === "right") {
+        const step = key.name === "left" || key.shift ? 2 : 1;
+        this.inspectorTab = INSPECTOR_TABS[(INSPECTOR_TABS.indexOf(this.inspectorTab) + step) % 3]!;
+        this.sheet = { kind: "index", selected: 0 }; this.inspectorOffset = 0; this.requestRender(); return;
+      }
+      if (this.sheet.kind === "index") {
+        const items = this.indexEntries();
+        if (key.name === "up") this.sheet.selected = Math.max(0, this.sheet.selected - 1);
+        if (key.name === "down") this.sheet.selected = Math.min(Math.max(0, items.length - 1), this.sheet.selected + 1);
+        if (key.name === "down" || key.name === "up") this.inspectorRevealSelection = true;
+        if (key.name === "return" && items[this.sheet.selected]) this.inspectEntry(items[this.sheet.selected]!.id);
+      } else {
+        if (key.name === "up" || key.name === "pageup") this.sheet.offset = Math.max(0, this.sheet.offset - (key.name === "pageup" ? 10 : 1));
+        if (key.name === "down" || key.name === "pagedown") this.sheet.offset += key.name === "pagedown" ? 10 : 1;
+        if (key.name === "backspace") this.sheet = { kind: "index", selected: 0 };
+      }
+      if (key.ctrl && key.name === "c") { if (this.mode === "streaming") this.options.onInterrupt(); else this.options.onExit(); }
+      this.requestRender();
+      return;
+    }
+    if ((this.mode === "input" || this.mode === "streaming") && key.ctrl && key.name === "l") {
+      if (this.chatView) { this.chatView = false; this.transcriptView = false; }
+      else if (!this.transcriptView) this.transcriptView = true;
+      else { this.sessionLayout = true; this.chatView = true; this.transcriptView = false; }
+      this.sheet = null;
+      this.inspectorFocused = false;
+      this.sectionFocus = null;
+      this.viewport.toBottom();
+      this.requestRender();
+      return;
+    }
+    if ((this.mode === "input" || this.mode === "streaming") && key.meta && (key.name === "up" || key.name === "down")) {
+      const current = this.sections.findIndex((section) => section.key === this.sectionFocus);
+      const index = Math.max(0, Math.min(this.sections.length - 1, current + (key.name === "up" ? -1 : 1)));
+      const section = this.sections[index];
+      if (section) {
+        this.sectionFocus = section.key;
+        this.viewport.revealLine(section.row, this.layout.conversation.height - 1);
+      }
+      this.requestRender();
+      return;
+    }
+    if ((this.mode === "input" || this.mode === "streaming") && this.sectionFocus) {
+      if (key.name === "return") { this.sections.find((section) => section.key === this.sectionFocus)?.run(); return; }
+      this.sectionFocus = null;
+      if (key.name === "escape") { this.requestRender(); return; }
+    }
+    if (this.mode === "input" && !this.editor.value && key.ctrl && key.name === "k") {
+      this.openSettings();
+      return;
+    }
+    if (this.mode === "input" && key.name === "tab" && !this.matchingCommands().length && !mentionTokenAt(this.editor.value, this.editor.cursor)) {
+      this.openSettings();
+      return;
+    }
+    if (key.ctrl && key.name === "y" && !this.editor.value) {
+      const response = this.entries.findLast((entry): entry is AssistantEntry => entry.type === "assistant");
+      if (response) process.stdout.write(`\x1b]52;c;${Buffer.from(response.raw).toString("base64")}\x07`);
+      return;
+    }
+    if (key.ctrl && key.name === "b") {
+      this.showAllTools = !this.showAllTools;
+      this.requestRender();
+      return;
+    }
+    if (key.ctrl && key.name === "t") {
+      this.sheet = this.sheet && !this.layout.sidebar ? null : this.sheet ?? { kind: "index", selected: 0 };
+      this.inspectorFocused = Boolean(this.sheet);
+      this.requestRender();
+      return;
+    }
+    if (key.name === "pageup" || key.name === "pagedown") {
+      if (key.name === "pageup") this.viewport.scrollUp(10);
+      else this.viewport.scrollDown(10);
+      this.requestRender();
+      return;
+    }
     if (this.mode === "streaming") {
-      const nextQueue = reduceQueuedInput(this.options.queue.get(), key, text ?? "");
-      if (nextQueue !== this.options.queue.get()) this.options.queue.set(nextQueue);
+      if (key.name !== "return" && key.name !== "enter" || key.shift) {
+        this.syncQueuedEditor();
+        const next = reducePromptEditor(this.queuedEditor, { key, text: text ?? "", commands: [], history: [], mentions: [] });
+        this.queuedEditor = next.state;
+        if (next.action.type === "compose") void this.composeQueuedExternally();
+        this.options.queue.set(this.queuedEditor.value);
+      }
       const interrupt = reduceInterruptKey(this.lastInterruptEscapeAt, key, Date.now());
       this.lastInterruptEscapeAt = interrupt.lastEscapeAt;
       if (interrupt.interrupt) this.options.onInterrupt();
@@ -484,36 +713,6 @@ export class Workbench {
       return;
     }
 
-    if (this.mode === "approval") {
-      const allowSession = this.approval?.toolName !== "run_command";
-      const next = reduceApprovalSelection(this.approvalSelected, allowSession, key, this.approval?.allowPersist ?? false);
-      this.approvalSelected = next.selectedIndex;
-      if (next.decision) {
-        const resolve = this.approvalResolver;
-        this.approvalResolver = null;
-        this.approval = null;
-        this.mode = "streaming";
-        resolve?.(next.decision);
-      }
-      this.requestRender();
-      return;
-    }
-
-    if (this.mode === "dialog") {
-      const next = reduceSessionPicker(this.dialogSelected, this.dialogItems.length, text ?? "", key as SessionPickerKey);
-      this.dialogSelected = next.index;
-      if (next.decision === "select") this.finishDialog(this.dialogSelected);
-      else if (next.decision === "cancel") this.finishDialog(null);
-      else this.requestRender();
-      return;
-    }
-
-    if (key.ctrl && key.name === "t") {
-      this.sidebarMode = this.sidebarMode === "hidden" ? "auto" : "hidden";
-      this.previousRows = [];
-      this.requestRender();
-      return;
-    }
     if (key.ctrl && key.name === "x") {
       const last = this.entries.findLast((candidate): candidate is ReasoningEntry => candidate.type === "reasoning");
       if (last) {
@@ -521,16 +720,6 @@ export class Workbench {
         else this.expandedReasoning.add(last.id);
         this.requestRender();
       }
-      return;
-    }
-    if (key.name === "pageup") {
-      this.viewport.scrollUp(10);
-      this.requestRender();
-      return;
-    }
-    if (key.name === "pagedown") {
-      this.viewport.scrollDown(10);
-      this.requestRender();
       return;
     }
     if (key.ctrl && key.name === "g") {
@@ -546,12 +735,54 @@ export class Workbench {
       history: this.promptContext.history,
       mentions: this.promptContext.mentions,
     });
+    this.applyEditorResult(result);
+  };
+
+  private handleModalKey(text: string, key: PromptEditorKey): boolean {
+    if (this.mode === "approval") {
+      const next = reduceApprovalSelection(this.approvalSelected, this.approval?.toolName !== "run_command", key, this.approval?.allowPersist ?? false);
+      this.approvalSelected = next.selectedIndex;
+      if (next.decision) this.resolveApproval(next.decision);
+      else this.requestRender();
+      return true;
+    }
+    if (this.mode === "dialog") {
+      const next = reduceDialogPicker({ index: this.dialogSelected, query: this.dialogQuery }, this.dialogFiltered.length, key, text);
+      this.dialogQuery = next.state.query;
+      this.dialogFiltered = filterDialogIndices(this.dialogItems, this.dialogQuery);
+      this.dialogSelected = Math.min(next.state.index, Math.max(0, this.dialogFiltered.length - 1));
+      if (next.decision === "select") this.finishDialog(this.dialogFiltered[this.dialogSelected] ?? null);
+      else if (next.decision === "cancel") this.finishDialog(null);
+      else this.requestRender();
+      return true;
+    }
+    return false;
+  }
+
+  private syncQueuedEditor(): void {
+    if (this.queuedEditor.value !== this.options.queue.get()) this.queuedEditor = setPromptValue(this.queuedEditor, this.options.queue.get());
+  }
+
+  private async composeQueuedExternally(): Promise<void> {
+    try {
+      const edited = await this.suspend(() => composeInEditor(this.options.queue.get(), { env: process.env }));
+      this.queuedEditor = setPromptValue(this.queuedEditor, edited);
+      this.options.queue.set(edited);
+      this.requestRender();
+    } catch (error) { this.notice(error instanceof Error ? error.message : "Could not open the editor.", "error"); }
+  }
+
+  /// Shared disposition for editor results, whether the key came from the
+  /// keyboard or from a synthetic dispatch (a menu click).
+  private applyEditorResult(result: PromptEditorResult): void {
     this.editor = result.state;
     if (result.action.type === "cancel") {
       this.options.onExit();
       return;
     }
     if (result.action.type === "submit") {
+      if (!result.action.value.trim()) { this.requestRender(); return; }
+      this.feedback = null;
       const resolve = this.promptResolver;
       this.promptResolver = null;
       this.mode = "streaming";
@@ -560,7 +791,7 @@ export class Workbench {
       // following turn and is drawn in its place.
       this.editor = createPromptEditorState();
       this.requestRender();
-      resolve?.(result.action.value);
+      resolve?.(this.planMode && !result.action.value.startsWith("/") ? `/plan ${result.action.value}` : result.action.value);
       return;
     }
     if (result.action.type === "compose") {
@@ -568,21 +799,126 @@ export class Workbench {
       return;
     }
     this.requestRender();
-  };
+  }
+
+  /// Runs a synthetic key through the prompt editor, for mouse clicks that
+  /// accept the menu selection they just activated.
+  private dispatchEditorKey(key: PromptEditorKey): void {
+    this.applyEditorResult(reducePromptEditor(this.editor, {
+      key,
+      text: "",
+      commands: this.matchingCommands(),
+      history: this.promptContext.history,
+      mentions: this.promptContext.mentions,
+    }));
+  }
+
+  private resolveApproval(decision: PermissionDecision): void {
+    const resolve = this.approvalResolver;
+    this.approvalResolver = null;
+    this.approval = null;
+    this.mode = "streaming";
+    this.requestRender();
+    resolve?.(decision);
+  }
 
   private async composeExternally(): Promise<void> {
-    const edited = await this.suspend(() => composeInEditor(this.editor.value, { env: process.env }));
-    this.editor = setPromptValue(this.editor, edited);
-    this.requestRender();
+    try {
+      const edited = await this.suspend(() => composeInEditor(this.editor.value, { env: process.env }));
+      this.editor = setPromptValue(this.editor, edited);
+      this.requestRender();
+    } catch (error) { this.notice(error instanceof Error ? error.message : "Could not open the editor.", "error"); }
   }
 
   private finishDialog(index: number | null): void {
     const resolve = this.dialogResolver;
     this.dialogResolver = null;
     this.dialogItems = [];
+    this.dialogFiltered = [];
+    this.dialogQuery = "";
     this.mode = "input";
     this.requestRender();
     resolve?.(index);
+  }
+
+  /// Split SGR mouse sequences from ordinary input, preserving mixed chunks.
+  private readonly onData = (chunk: Buffer | string): void => {
+    if (this.escapeTimer) clearTimeout(this.escapeTimer);
+    this.dispatchTerminalInput(this.terminalInput.push(typeof chunk === "string" ? chunk : this.decoder.write(chunk)));
+    if (this.terminalInput.waitingForEscape) this.escapeTimer = setTimeout(() => this.dispatchTerminalInput(this.terminalInput.flushEscape()), 40);
+  };
+
+  private dispatchTerminalInput(events: TerminalInput[]): void {
+    for (const event of events) {
+      if (event.kind === "mouse") this.handleMouse(event.event);
+      else if (event.kind === "focus") {
+        this.terminalFocused = event.focused;
+        if (!event.focused) { this.sessionView.hover(-1, -1); this.startScreen.hover(-1, -1); }
+        this.requestRender();
+      }
+      else if (event.kind === "escape") this.onKeypress(event.sequence, { name: "escape", sequence: event.sequence });
+      else if (event.kind === "text") this.keyboard.write(event.text);
+      else if (this.mode !== "approval") {
+        this.lastInterruptEscapeAt = 0;
+        const text = sanitizeTerminalText(event.text.replace(/\r\n|\r/g, "\n"));
+        if (this.mode === "dialog") {
+          this.dialogQuery += text.replace(/\s+/g, " ");
+          this.dialogFiltered = filterDialogIndices(this.dialogItems, this.dialogQuery);
+          this.dialogSelected = 0;
+        } else {
+          this.sessionView.focusInput();
+          if (this.mode === "streaming") {
+            this.syncQueuedEditor();
+            this.queuedEditor = reducePromptEditor(this.queuedEditor, { key: {}, text, commands: [], history: [] }).state;
+            this.options.queue.set(this.queuedEditor.value);
+          } else this.applyEditorResult(reducePromptEditor(this.editor, { key: {}, text, commands: [], history: [] }));
+        }
+        this.requestRender();
+      }
+    }
+  }
+
+  private handleMouse(event: MouseEvent): void {
+    // These panes scroll vertically. Consume horizontal trackpad events
+    // without moving the viewport or dispatching an Up key to a dialog.
+    if (event.kind === "wheel" && event.direction !== "up" && event.direction !== "down") return;
+    if (event.kind === "move" || event.kind === "drag") {
+      if (this.sessionLayout && this.mode !== "dialog" && this.mode !== "approval" && this.terminalFocused
+        && (this.showingStart ? this.startScreen.hover(event.row, event.col) : this.sessionView.hover(event.row, event.col))) this.requestRender();
+      return;
+    }
+    // Double Escape means consecutive input. Inspecting another control with
+    // the mouse between Escapes must not turn closing a sheet into Stop.
+    this.lastInterruptEscapeAt = 0;
+    if ((this.mode === "dialog" || this.mode === "approval") && event.kind === "wheel") {
+      this.onKeypress("", { name: event.direction === "down" ? "down" : "up" });
+      return;
+    }
+    if (this.sessionLayout && event.kind === "wheel") {
+      if (this.showingStart) return;
+      if (this.sessionView.wheel(event.row, event.col, event.direction === "down" ? 3 : -3)) this.requestRender();
+      return;
+    }
+    if (event.kind === "wheel") {
+      const overInspector = this.layout.sidebar ? event.col >= this.layout.sidebar.column : Boolean(this.sheet);
+      if (overInspector) {
+        const amount = event.direction === "down" ? 3 : -3;
+        if (this.sheet?.kind === "detail") this.sheet.offset = Math.max(0, this.sheet.offset + amount);
+        else this.inspectorOffset = Math.max(0, this.inspectorOffset + amount);
+        this.requestRender();
+        return;
+      }
+      if (event.direction === "down") this.viewport.scrollDown(3);
+      else this.viewport.scrollUp(3);
+      this.requestRender();
+      return;
+    }
+    if (event.kind !== "press" || event.button !== 0) return;
+    const input = this.layout.input;
+    if (event.row >= input.row && event.row < input.row + input.height && event.col >= input.column && event.col < input.column + input.width) { this.inspectorFocused = false; this.sessionView.focusInput(); }
+    const zone = this.mouseZones.find((zone) => zone.row === event.row && event.col >= (zone.column ?? 0) && event.col < (zone.column ?? 0) + (zone.width ?? this.layout.width));
+    if (!zone) { this.requestRender(); return; }
+    zone.run(event.col);
   }
 
   private matchingCommands(): readonly SlashCommand[] {
@@ -591,63 +927,228 @@ export class Workbench {
   }
 
   private requestRender(): void {
-    if (this.started) this.render();
+    if (!this.started || this.renderTimer) return;
+    // Mouse momentum and one provider update can each cause several state
+    // changes. Paint the final frame once, rather than its intermediate states.
+    this.renderTimer = setTimeout(() => { this.renderTimer = null; this.render(); }, 16);
+    this.renderTimer.unref();
   }
 
   private render(): void {
     if (!this.started) return;
-    const { columns, rows } = process.stdout;
-    this.layout = computeWorkbenchLayout(columns ?? 80, rows ?? 24, {
-      sidebar: this.sidebarMode,
-      inputLines: this.inputLineCount(),
-    });
-    this.rebuildConversation();
-    const frame = this.composeFrame();
+    const frame = this.frame(process.stdout.columns ?? 80, process.stdout.rows ?? 24);
+    if (this.startLayout ? this.startScreen.animating(Date.now(), this.options.paint.enabled && !reducedMotionEnabled()) : this.sessionView.animating()) this.requestRender();
     const output: string[] = [];
     for (let row = 0; row < frame.rows.length; row += 1) {
       if (this.previousRows[row] === frame.rows[row]) continue;
-      output.push(`\x1b[${row + 1};1H\x1b[2K${frame.rows[row]}`);
+      // Every row is cell-padded. Clearing it first exposes a blank line on
+      // terminals that paint a large write incrementally.
+      output.push(`\x1b[${row + 1};1H${frame.rows[row]}`);
     }
     this.previousRows = frame.rows;
+    if (!output.length && frame.cursor?.row === this.previousCursor?.row && frame.cursor?.column === this.previousCursor?.column) return;
+    // Synchronized output makes a scroll one visible frame on supporting
+    // terminals; the single write and padded rows also work without it.
+    output.unshift("\x1b[?2026h\x1b[?25l");
     if (frame.cursor) {
-      output.push("\x1b[?25h");
-      output.push(`\x1b[${frame.cursor.row + 1};${frame.cursor.column + 1}H`);
-    } else {
-      output.push("\x1b[?25l");
+      output.push(`\x1b[${frame.cursor.row + 1};${frame.cursor.column + 1}H\x1b[?25h`);
     }
-    if (output.length > 0) process.stdout.write(output.join(""));
+    output.push("\x1b[?2026l");
+    this.previousCursor = frame.cursor;
+    process.stdout.write(output.join(""));
   }
 
-  private inputLineCount(): number {
+  /// Production frame composition, also used by deterministic terminal previews.
+  frame(width: number, height: number): { rows: string[]; cursor: { row: number; column: number } | null } {
+    if (this.cachedTheme !== this.options.paint.themeName) {
+      this.cachedTheme = this.options.paint.themeName;
+      this.rendered.clear();
+    }
+    if (this.sessionLayout) this.sessionView.sync(this.entries);
+    const panel = sessionPanelLayout(Math.max(40, width), this.sessionView.panelOpen && (this.mode === "input" || this.mode === "streaming"));
+    this.layout = computeWorkbenchLayout(width, height, {
+      sidebar: !this.sessionLayout && (this.chatView || this.transcriptView) ? "auto" : "hidden",
+      inputLines: this.inputLineCount(this.sessionLayout ? panel.conversationWidth : width),
+    });
+    this.startLayout = this.showingStart ? startScreenLayout(panel.conversationWidth, this.layout.height,
+      this.inputLineCount(Math.min(96, panel.conversationWidth - (panel.conversationWidth >= 65 ? 4 : 2))), Boolean(this.feedback)) : null;
+    if (this.startLayout) {
+      this.layout.input = this.startLayout.input;
+    } else if (this.sessionLayout && this.mode === "dialog") {
+      this.layout.input = { row: 3, column: 0, width: panel.conversationWidth, height: this.layout.height - 4 };
+    } else if (this.sessionLayout && (this.mode === "input" || this.mode === "streaming")) {
+      const editor = this.mode === "streaming" ? this.queuedEditor : this.editor;
+      const token = mentionTokenAt(editor.value, editor.cursor);
+      const selecting = Boolean(editor.search || this.matchingCommands().length || token && mentionMatches(this.promptContext.mentions, token.query).length);
+      const queued = this.mode === "streaming" && Boolean(editor.value.trim());
+      const inputHeight = Math.min(this.layout.input.height, Math.max(selecting || queued || this.layout.height >= 16 ? 4 : 3, Math.floor(this.layout.height / 3)));
+      this.layout.input = { row: this.layout.height - 1 - inputHeight, column: 0, width: panel.conversationWidth, height: inputHeight };
+    } else if (this.sessionLayout) this.layout.input.width = panel.conversationWidth;
+    this.rebuildConversation();
+    return this.composeFrame();
+  }
+
+  private inputLineCount(columns = process.stdout.columns ?? 80): number {
     if (this.mode === "approval") {
+      if (this.sessionLayout) return 3 + approvalOptions(this.approval?.toolName !== "run_command", this.approval?.allowPersist ?? false).options.length + Math.min(3, this.approval?.previewRows?.length ?? 0);
       // Voice line + permission card + preview rows + selection row.
       return Math.max(7, 6 + (this.approval?.previewRows?.length ?? 0) + 2);
     }
     if (this.mode === "dialog") {
-      return 4 + Math.min(this.dialogItems.length, 10);
+      return 4 + Math.min(this.dialogFiltered.length, 10) + (this.dialogQuery ? 1 : 0);
     }
-    const width = Math.max(10, (process.stdout.columns ?? 80) - HARNESS.content);
+    if (this.sessionLayout) {
+      this.syncQueuedEditor();
+      return composerHeight({ width: columns, editor: this.mode === "streaming" ? this.queuedEditor : this.editor,
+        hero: this.showingStart,
+        streaming: this.mode === "streaming", commands: this.matchingCommands(), mentions: this.promptContext.mentions, history: this.promptContext.history });
+    }
+    const width = Math.max(10, computeWorkbenchLayout(columns, process.stdout.rows ?? 24, { sidebar: this.sessionLayout ? "hidden" : "auto" }).input.width - HARNESS.content - 1);
     const streaming = this.mode === "streaming";
     const value = streaming ? this.options.queue.get() : this.editor.value;
-    const cursor = streaming ? value.length : this.editor.cursor;
+    this.syncQueuedEditor();
+    const cursor = streaming ? this.queuedEditor.cursor : this.editor.cursor;
     const valueLines = computePromptVisualLines(value, cursor, width).lines.length;
     const commands = streaming ? 0 : this.matchingCommands().length;
     const menuLines = commands > 0 ? Math.min(commands, 10) + (commands >= 6 ? 3 : 0) : 0;
     // One rule above the prompt, then the prompt and any menu.
-    return 1 + Math.max(1, valueLines + menuLines);
+    const mention = mentionTokenAt(value, cursor);
+    const mentions = !streaming && mention ? mentionMatches(this.promptContext.mentions, mention.query).length : 0;
+    return 4 + Math.max(1, valueLines) + (mentions || menuLines) + (/\B@\S+/.test(value) ? 1 : 0);
   }
 
   private rebuildConversation(): void {
+    if (this.sessionLayout) { this.sessionView.sync(this.entries); return; }
     const width = this.layout.conversation.width;
     const lines: string[] = [];
-    for (const item of planTranscript(this.entries)) {
+    this.conversationActions.clear();
+    this.conversationZones = [];
+    this.sections = [];
+    if (this.chatView) {
+      this.rebuildChat(lines, width);
+      this.viewport.setLines(lines);
+      return;
+    }
+    if (this.transcriptView) this.appendTranscript(this.entries, lines, width);
+    else for (const page of groupActivity(this.entries)) {
+      if (page.request) {
+        lines.push("", `  ${this.options.paint.bold(String(page.number).padStart(2, "0"), "electric")}   ${this.options.paint.bold("REQUEST", "secondary")}`, "");
+        lines.push(...this.renderEntry(page.request, width));
+      }
+      for (const section of page.sections) {
+        const key = `${page.id}:${section.name}`;
+        const collapsed = this.collapsedSections.has(key);
+        const tools = section.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
+        const failed = tools.filter((entry) => toolFailed(entry) || entry.state === "denied").length;
+        const checks = evidenceCounts(tools);
+        const count = section.name === "Verification"
+          ? `${checks.passed} passed${checks.failed ? ` · ${checks.failed} failed` : ""}${checks.pending ? ` · ${checks.pending} running` : ""}${checks.waiting ? ` · ${checks.waiting} awaiting approval` : ""}${checks.blocked ? ` · ${checks.blocked} denied` : ""}${checks.stopped ? ` · ${checks.stopped} stopped` : ""}${checks.unknown ? ` · ${checks.unknown} unknown` : ""}`
+          : tools.length ? `${tools.length} ${section.name === "Changes" ? (tools.length === 1 ? "action" : "actions") : (tools.length === 1 ? "record" : "records")}${failed ? ` · ${failed} unsuccessful` : ""}` : "";
+        lines.push("");
+        const row = lines.length;
+        const run = () => {
+          if (this.collapsedSections.has(key)) this.collapsedSections.delete(key);
+          else this.collapsedSections.add(key);
+          this.rebuildConversation();
+          const anchor = this.sections.find((section) => section.key === key);
+          if (anchor) this.viewport.revealLine(anchor.row, this.layout.conversation.height - 1);
+          this.requestRender();
+        };
+        this.sections.push({ key, row, run });
+        this.conversationActions.set(row, run);
+        const heading = `${collapsed ? "▸" : "▾"} ${section.name.toUpperCase()}`;
+        const paint = this.options.paint;
+        lines.push(`      ${this.sectionFocus === key ? paint.wash(heading, "electric") : paint.bold(heading, "electric")} ${paint.text(count, failed ? "signal" : "secondary")}`);
+        if (!collapsed) {
+          lines.push("");
+          this.appendTranscript(section.entries, lines, width);
+        }
+      }
+    }
+    this.viewport.setLines(lines);
+  }
+
+  private rebuildChat(lines: string[], width: number): void {
+    const paint = this.options.paint;
+    for (const page of groupActivity(this.entries)) {
+      const entries = page.sections.flatMap((section) => section.entries).sort((a, b) => a.id - b.id);
+      if (page.request?.type === "user") {
+        const body = page.request.text.split("\n").flatMap((line) => wrapDisplayText(sanitizeTerminalLine(line), width - 10));
+        lines.push(...userCard(body, width, paint, page.request.at));
+      }
+      const prose = entries.filter((entry): entry is AssistantEntry => entry.type === "assistant");
+      const tools = entries.filter((entry): entry is ToolEntry => entry.type === "tool");
+      const close = entries.findLast((entry): entry is NoticeEntry => entry.type === "notice" && Boolean(entry.closesTurn));
+      if (prose.length || tools.length || close) {
+        const expanded = this.expandedResponses.has(page.id) || this.showAllTools;
+        const final = prose.at(-1);
+        const answer = final && (!close || final.id > (tools.at(-1)?.id ?? -1)) ? final : undefined;
+        const body: string[] = [];
+        if (expanded) {
+          for (const entry of entries) {
+            if (entry.type === "assistant" && entry !== answer) body.push(...this.renderedMarkdown(entry, width - 10), "");
+            if (entry.type === "tool") body.push(paint.text(`${entry.waiting ? "!" : entry.state === "stopped" ? "■" : entry.state === "done" && !entry.exitCode ? "✓" : entry.state === "running" ? "·" : "×"} ${sanitizeTerminalLine(entry.detail ?? entry.name)}`, toolFailed(entry) || entry.state === "denied" ? "signal" : "secondary"));
+          }
+          body.push("");
+        }
+        if (answer) body.push(...this.renderedMarkdown(answer, width - 10));
+        else if (close) body.push(paint.dim("No final answer was recorded."));
+        const status = close ? close.tone === "success" ? "Complete" : close.tone === "error" ? "Failed" : "Interrupted" : tools.some((entry) => entry.waiting) ? "Needs your decision" : final?.streaming ? "Writing" : "Working";
+        const model = page.request?.type === "user" ? page.request.model ?? "Model not recorded" : this.options.contextRail.modelId;
+        const selected = this.selectedTurnId === page.id;
+        const card = responseCard({ width, paint, model, status, body, selected, expanded, canCopy: Boolean(answer),
+          activity: tools.length || prose.length > 1 ? `${tools.length} tool${tools.length === 1 ? "" : "s"}${prose.length > 1 ? ` · ${prose.length - 1} progress updates` : ""}` : "",
+          summary: changeSummary(tools) + (close ? ` · ${sanitizeTerminalLine(close.text)}` : ""),
+        });
+        const origin = lines.length;
+        const select = () => {
+          if (this.selectedTurnId !== page.id) { this.sheet = { kind: "index", selected: 0 }; this.inspectorOffset = 0; }
+          this.selectedTurnId = page.id;
+        };
+        for (const action of card.actions) this.conversationZones.push({ row: origin + action.row, column: action.column, width: action.width, run: () => {
+          if (action.action === "copy") { if (answer) process.stdout.write(`\x1b]52;c;${Buffer.from(answer.raw).toString("base64")}\x07`); }
+          else if (action.action === "activity") {
+            if (this.expandedResponses.has(page.id)) this.expandedResponses.delete(page.id); else this.expandedResponses.add(page.id);
+            select(); this.inspectorTab = "Activity";
+          } else { select(); this.inspectorFocused = true; this.sheet ??= { kind: "index", selected: 0 }; }
+          this.requestRender();
+        } });
+        body.forEach((line, index) => {
+          const tool = tools.find((entry) => entry.detail && stripVTControlCharacters(line).includes(entry.detail));
+          if (tool) this.conversationZones.push({ row: origin + card.bodyStart + index, column: 4, width: width - 8, run: () => { select(); this.inspectEntry(tool.id); } });
+        });
+        lines.push(...card.lines);
+      }
+      for (const entry of entries) if (entry.type === "panel" || entry.type === "block" || (entry.type === "notice" && !entry.closesTurn)) lines.push(...this.renderEntry(entry, width));
+    }
+  }
+
+  private appendTranscript(entries: WorkbenchEntry[], lines: string[], width: number): void {
+    for (const item of planTranscript(entries)) {
       if (item.kind === "group") {
+        const first = item.tools[0] as ToolEntry;
+        this.conversationActions.set(lines.length, () => {
+          if (this.expandedTools.has(first.id)) this.expandedTools.delete(first.id);
+          else this.expandedTools.add(first.id);
+          this.requestRender();
+        });
         lines.push(this.renderToolGroup(item.tools, width));
+        if (this.showAllTools || this.expandedTools.has(first.id)) {
+          for (const tool of item.tools) lines.push(...this.renderEntry(tool as ToolEntry, width));
+        }
         continue;
+      }
+      if (item.entry.type === "tool") {
+        const entry = item.entry as ToolEntry;
+        this.conversationActions.set(lines.length, () => {
+          if (!this.transcriptView && entry.phase !== "inspect") { this.inspectEntry(entry.id); return; }
+          if (this.expandedTools.has(entry.id)) this.expandedTools.delete(entry.id);
+          else this.expandedTools.add(entry.id);
+          this.requestRender();
+        });
       }
       lines.push(...this.renderEntry(item.entry, width));
     }
-    this.viewport.setLines(lines);
   }
 
   /// One row for a run of inspection calls: the first target names what was
@@ -661,13 +1162,15 @@ export class Workbench {
     const failed = entries.some((entry) => entry.state === "failed");
     const state: ToolRowState = running ? "running" : failed ? "failed" : "done";
     // No animated mark: the footer is the only place the turn's state animates.
-    const mark = undefined;
+    const expanded = this.showAllTools || this.expandedTools.has((first as ToolEntry).id);
+    const mark = paint.text(expanded ? "▾" : "▸", "electricBright");
     const total = entries.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0);
     const target = first.detail === undefined
       ? `${entries.length} files`
       : `${first.detail} +${entries.length - 1}`;
     const meta = running ? undefined : failed ? "failed" : formatDuration(total, undefined);
     return formatToolRow(state, toolVerb(first.name), target, meta, width, paint, {
+      rail: false,
       phase: first.phase,
       ...(mark ? { mark } : {}),
     });
@@ -675,14 +1178,13 @@ export class Workbench {
 
   private renderEntry(entry: WorkbenchEntry, width: number): string[] {
     const paint = this.options.paint;
-    const rail = turnRail(paint);
-    const bar = paint.text("│", "rule");
+    const rail = "    ";
+    const bar = " ";
     const proseWidth = Math.max(16, width - HARNESS.content);
     switch (entry.type) {
       case "user": {
-        const body = wrapDisplayText(sanitizeTerminalLine(entry.text), proseWidth)
-          .map((line) => `${" ".repeat(HARNESS.content)}${paint.bold(line, "paper")}`);
-        return [formatTurnOpener("you", entry.at, width, paint), ...body];
+        const body = entry.text.split("\n").flatMap((line) => wrapDisplayText(sanitizeTerminalLine(line), proseWidth - 2));
+        return [...(this.transcriptView ? [`      ${paint.dim(`Request · ${entry.at}`)}`] : []), ...body.map((line) => `      ${line}`), ""];
       }
       case "assistant": {
         const body = entry.raw ? this.renderedMarkdown(entry, proseWidth) : [];
@@ -693,6 +1195,7 @@ export class Workbench {
         // content column so a wrapped reply stays flush with its first line.
         const prefix = `${rail}  `;
         return [
+          ...(this.transcriptView ? [`      ${paint.dim("Response")}`] : []),
           ...body.map((line) => `${prefix}${line}`),
           "",
         ];
@@ -718,6 +1221,7 @@ export class Workbench {
       }
       case "tool": {
         const row = this.renderToolRow(entry, width);
+        const expanded = this.showAllTools || this.expandedTools.has(entry.id);
         const diffLines = entry.state === "done" && entry.diff
           ? formatDiffPreview(entry.diff.oldText, entry.diff.newText, 12, paint)
             .map((line) => `${" ".repeat(HARNESS.toolTarget)}${line}`)
@@ -725,12 +1229,13 @@ export class Workbench {
         const message = entry.state === "failed" && entry.message
           ? [`${" ".repeat(HARNESS.toolTarget)}${paint.text(truncateText(sanitizeTerminalLine(entry.message), Math.max(8, width - HARNESS.toolTarget - HARNESS.gutter)), "signal")}`]
           : [];
-        return [row, ...diffLines, ...message];
+        const detail = expanded ? JSON.stringify(entry.input, null, 2).split("\n").flatMap((line) => wrapDisplayText(sanitizeTerminalLine(line), width - 10)).map((line) => `      ${paint.dim(line)}`) : [];
+        return [row, ...(expanded ? diffLines : []), ...message, ...detail];
       }
       case "notice": {
         const glyph = entry.tone === "success" ? "✓" : entry.tone === "error" ? "×" : "·";
         if (entry.closesTurn) {
-          return [formatTurnCloser(entry.text, width, paint, glyph), ""];
+          return [`    ${paint.text(glyph, entry.tone === "error" ? "signal" : "citron")} ${paint.dim(entry.text)}`, ""];
         }
         const color: PaletteColor = entry.tone === "success" ? "citron" : entry.tone === "error" ? "signal" : "secondary";
         return [
@@ -761,7 +1266,7 @@ export class Workbench {
     const state: ToolRowState = entry.waiting ? "waiting" : entry.state;
     // Settled, running, and waiting rows all use the transcript's own static
     // glyphs; the footer is the only place the turn's state animates.
-    const mark = undefined;
+    const mark = entry.state === "running" ? undefined : paint.text(this.showAllTools || this.expandedTools.has(entry.id) ? "▾" : "▸", "electricBright");
     const meta = entry.waiting
       ? "needs you"
       : running
@@ -770,8 +1275,16 @@ export class Workbench {
           ? "failed"
           : entry.state === "denied"
             ? "denied"
-            : formatDuration(entry.durationMs, entry.exitCode);
+            : entry.state === "stopped" ? "stopped" : formatDuration(entry.durationMs, entry.exitCode);
+    if (!this.transcriptView) {
+      const failed = toolFailed(entry) || entry.state === "denied";
+      const glyph = entry.waiting ? "!" : entry.state === "stopped" ? "■" : failed ? "×" : entry.state === "done" ? "✓" : "·";
+      const color = failed ? "signal" : entry.state === "stopped" ? "secondary" : entry.state === "done" ? "citron" : "electric";
+      const target = truncateText(sanitizeTerminalLine(entry.detail ?? toolVerb(entry.name)), Math.max(8, width - 30));
+      return `      ${paint.text(glyph, color)} ${target}  ${paint.dim(meta ?? "working")}${paint.text("  ↗", "electric")}`;
+    }
     return formatToolRow(state, verb, entry.detail, meta, width, paint, {
+      rail: false,
       phase: entry.phase,
       ...(mark ? { mark } : {}),
     });
@@ -779,211 +1292,649 @@ export class Workbench {
 
   private renderedMarkdown(entry: AssistantEntry, width: number): string[] {
     const cached = this.rendered.get(entry.id);
-    if (cached && cached.revision === entry.revision && cached.width === width) return cached.lines;
-    const stream = new TerminalMarkdownStream(this.options.paint, Math.max(16, width), 0);
+    if (cached && cached.revision === entry.revision && cached.width === width && cached.session === this.sessionLayout) return cached.lines;
+    const stream = new TerminalMarkdownStream(this.options.paint, Math.max(16, width), 0, true, this.sessionLayout ? "gutter" : "framed");
     // A fresh stream per revision keeps the trailing partial line visible
     // while the model streams; flush() alone would only run at turn end.
     const rendered = `${stream.write(entry.raw)}${stream.flush()}`;
-    const lines = rendered.split("\n");
-    const result = lines.at(-1) === "" ? lines.slice(0, -1) : lines;
-    this.rendered.set(entry.id, { revision: entry.revision, width, lines: result });
+    // Markdown's own block separation and the formatter's block spacing must
+    // not accumulate into empty rows. Blank code lines retain their border.
+    const result = rendered.split("\n").filter((line, index, lines) => line.trim() || index > 0 && lines[index - 1]!.trim());
+    if (!result.at(-1)?.trim()) result.pop();
+    this.rendered.set(entry.id, { revision: entry.revision, width, session: this.sessionLayout, lines: result });
     return result;
   }
 
   private composeFrame(): { rows: string[]; cursor: { row: number; column: number } | null } {
+    if (this.sessionLayout) return this.composeSessionFrame();
     const paint = this.options.paint;
     const { layout } = this;
     const rows: string[] = Array.from({ length: layout.height }, () => "");
-    const pad = (line: string, width: number) => `${line}${" ".repeat(Math.max(0, width - visibleLength(line)))}`;
+    this.mouseZones = [];
 
     const chrome = this.composeHeader(layout.width);
-    rows[layout.header.row] = chrome.mark;
+    rows[layout.header.row] = surface(chrome.mark, layout.width, paint, "ink");
+    const pages = groupActivity(this.entries);
+    const currentPage = pages.at(-1);
+    const title = sanitizeTerminalLine(this.sessionTitle);
+    rows[layout.header.row + 1] = surface(`  ${paint.bold(String(currentPage?.number || 1).padStart(2, "0"), "electric")}   ${paint.bold(title, "paper")}`, layout.width, paint, "ink");
+    rows[layout.header.row + 2] = surface(`       ${paint.text(changeSummary(this.currentEntries()), "secondary")}  ${paint.text("↗ inspect", "electric")}`, layout.width, paint, "ink");
+    this.mouseZones.push({ row: layout.header.row + 2, column: 7, width: layout.width - 7, run: () => { this.sheet = { kind: "index", selected: 0 }; this.requestRender(); } });
     // A static rule below the header frames the transcript. The previous
     // animated pulse read as an endless moving line during inference and
     // carried no information, so structure replaces motion here.
     const conversation = this.viewport.visible(Math.max(1, layout.conversation.height - 1));
-    const sidebar = layout.sidebar ? this.sidebarLines() : null;
-    const rule = paint.text("─".repeat(layout.conversation.width), "rule");
+    if (!this.transcriptView && this.viewport.lineCount < conversation.length) {
+      const blanks = conversation.length - this.viewport.lineCount;
+      conversation.splice(0, blanks);
+      conversation.push(...Array<string>(blanks).fill(""));
+    }
+    if (this.entries.length === 0) {
+      const welcome = ["", `      ${paint.bold("New session", "electricBright")}`, "",
+        "      Begin with a question, a problem, or an idea.", "",
+        "      Updates, changes, verification, and responses appear here."];
+      conversation.splice(0, Math.min(welcome.length, conversation.length), ...welcome.slice(0, conversation.length));
+    }
+    const viewHeight = Math.max(1, layout.conversation.height - 1);
+    const end = this.viewport.lineCount - Math.min(this.viewport.scrollOffset, Math.max(0, this.viewport.lineCount - viewHeight));
+    const start = Math.max(0, end - viewHeight);
+    const padding = this.transcriptView ? Math.max(0, viewHeight - (end - start)) : 0;
+    for (const [line, run] of this.conversationActions) {
+      if (line >= start && line < end) this.mouseZones.push({ row: layout.conversation.row + 1 + padding + line - start, column: 0, width: layout.conversation.width, run });
+    }
+    for (const zone of this.conversationZones) {
+      if (zone.row >= start && zone.row < end) this.mouseZones.push({ ...zone, row: layout.conversation.row + 1 + padding + zone.row - start });
+    }
+    const rule = "";
     for (let index = 0; index < layout.conversation.height; index += 1) {
       const row = layout.conversation.row + index;
       const conversationLine = index === 0
         ? rule
         : truncateText(conversation[index - 1] ?? "", layout.conversation.width);
-      if (layout.sidebar && layout.dividerColumn !== null && sidebar) {
-        const sidebarLine = index === 0 ? "" : sidebar[index - 1] ?? "";
-        rows[row] = `${pad(conversationLine, layout.conversation.width)}${paint.text("│", "rule")}${pad(sidebarLine, layout.sidebar.width)}`;
-      } else {
-        rows[row] = conversationLine;
-      }
+      rows[row] = surface(conversationLine, layout.width, paint, "ink");
     }
 
     const input = this.composeInput(layout.input.width);
     for (let index = 0; index < layout.input.height; index += 1) {
       rows[layout.input.row + index] = input.lines[index] ?? "";
     }
-    rows[layout.footer.row] = formatFooterLine(this.footerLeft, this.footerRight, layout.width);
+    // Input content starts one row down from the composing rule.
+    for (const zone of input.zones ?? []) {
+      if (zone.row + 1 < layout.input.height) this.mouseZones.push({ ...zone, row: layout.input.row + 1 + zone.row });
+    }
+    if (!this.chatView && !this.transcriptView && this.sheet) this.composeSheet(rows);
+    else if (layout.sidebar || this.sheet) this.composeInspector(rows);
+    const navigation = this.inspectorFocused ? "Inspector · Esc return to chat" : this.transcriptView ? "Transcript · Ctrl+L session" : this.chatView ? "Chat · Ctrl+T inspect · Tab settings" : "Activity · Ctrl+L transcript";
+    rows[layout.footer.row] = surface(formatFooterLine(this.footerLeft, paint.dim(navigation), layout.width), layout.width, paint, "ink");
     return {
-      rows,
-      cursor: input.cursor ? { row: layout.input.row + input.cursor.row, column: input.cursor.column } : null,
+      rows: rows.map((row) => visibleLength(row) === layout.width ? row : surface(row, layout.width, paint, "ink")),
+      cursor: (!this.sheet || Boolean(layout.sidebar)) && !this.inspectorFocused && !this.sectionFocus && input.cursor && input.cursor.row < layout.input.height ? { row: layout.input.row + input.cursor.row, column: input.cursor.column } : null,
     };
   }
 
-  /// The header carries identity: brand, session, workspace, branch. The model
-  /// lives in the footer with live runtime state, so it is never shown twice.
-  /// The brand mark doubles as the agent's state mark, so the header breathes
-  /// with the turn instead of sitting static.
-  /// The header carries identity: brand, session, workspace, branch, model, and
-  /// the runtime verification. The footer is the only place the turn's state is
-  /// drawn, so the brand mark here is static rather than the animated state
-  /// glyph it briefly was. The right side drops whole items rather than being cut
-  /// mid-token: the runtime goes first, then the branch, then the model, and the
-  /// workspace anchors the row.
+  private handleStartKey(key: PromptEditorKey): boolean {
+    if (key.meta && key.name === "h") { this.runCommand("/sessions"); return true; }
+    if (key.ctrl && key.name === "t") {
+      this.sessionView.focused = !this.sessionView.focused;
+      if (this.sessionView.focused) this.startScreen.move(0);
+      this.requestRender(); return true;
+    }
+    if ((key.ctrl && key.name === "g") || (key.name === "escape" && !key.ctrl && !key.meta && this.sessionView.focused)) {
+      this.sessionView.focusInput(); this.requestRender(); return true;
+    }
+    if (this.sessionView.focused && !key.ctrl && !key.meta) {
+      if (["tab", "left", "right", "up", "down"].includes(key.name ?? "")) {
+        this.startScreen.move(key.shift || key.name === "left" || key.name === "up" ? -1 : 1);
+        this.requestRender(); return true;
+      }
+      if (key.name === "return" || key.name === "enter") {
+        const action = this.startScreen.action;
+        if (action) this.actStart(action);
+        return true;
+      }
+    }
+    return key.name === "pageup" || key.name === "pagedown";
+  }
+
+  private actStart(action: StartAction): void {
+    if (this.mode !== "input") return;
+    if (action.kind === "operation") {
+      const operation = START_OPERATIONS[action.index];
+      if (operation) this.editor = setPromptValue({ ...this.editor, search: null, searchDraft: "" }, operation.prompt);
+      this.sessionView.focusInput();
+    } else if (action.kind === "session") {
+      if (action.id !== this.sessionId) this.runCommand(`/resume ${action.id}`);
+      else this.sessionView.focusInput();
+    } else if (action.kind === "history") this.runCommand("/sessions");
+    else if (action.kind === "settings") this.openSettings();
+    else if (action.kind === "workspace") this.showWorkspace();
+    else if (action.kind === "context") this.showContext();
+    else if (action.kind === "model") this.runCommand("/model");
+    else if (action.kind === "panel") this.sessionView.act({ kind: "log" });
+    else {
+      if (action.kind === "commands") this.editor = setPromptValue({ ...this.editor, search: null, searchDraft: "" }, "/");
+      if (action.kind === "files") {
+        const { value, cursor } = this.editor;
+        const token = `${cursor > 0 && !/\s/.test(value[cursor - 1]!) ? " " : ""}@`;
+        this.editor = { ...setPromptValue({ ...this.editor, search: null, searchDraft: "" }, value.slice(0, cursor) + token + value.slice(cursor)), cursor: cursor + token.length };
+      }
+      this.sessionView.focusInput();
+    }
+    this.requestRender();
+  }
+
+  private composeStartFrame(): { rows: string[]; cursor: { row: number; column: number } | null } {
+    const layout = this.startLayout!;
+    const { paint, contextRail: rail } = this.options;
+    const geometry = sessionPanelLayout(this.layout.width, false);
+    const input = this.composeInput(layout.input.width);
+    const result = this.startScreen.render({ width: geometry.conversationWidth, height: this.layout.height, layout, paint,
+      now: Date.now(), animate: this.started && paint.enabled && !reducedMotionEnabled(), focused: this.sessionView.focused,
+      path: shortenPath(this.options.workspaceRoot ?? rail.workspacePath), model: rail.modelId, context: rail.contextSnapshot,
+      currentId: this.sessionId, recent: this.recentSessions, recentState: this.recentState, feedback: this.feedback, input: input.lines });
+    const canvas = new Canvas(this.layout.width, this.layout.height, paint);
+    result.rows.forEach((text, row) => canvas.put(row, 0, text, geometry.conversationWidth));
+    this.mouseZones = result.zones.flatMap((zone) => Array.from({ length: zone.height }, (_, index) => ({ row: zone.row + index,
+      column: zone.column, width: zone.width, run: () => this.actStart(zone.action) })));
+    for (const zone of input.zones) this.mouseZones.push({ row: layout.input.row + 1 + zone.row,
+      column: layout.input.column + (zone.column ?? 0), width: zone.width,
+      run: (column) => zone.run(column === undefined ? undefined : column - layout.input.column) });
+    const railColumn = geometry.conversationWidth;
+    const markColumn = railColumn + Math.floor((geometry.panelWidth + 1) / 2);
+    for (let row = 0; row < this.layout.height; row++) {
+      canvas.put(row, railColumn, "", geometry.panelWidth, "surface");
+      canvas.put(row, railColumn, paint.text("│", "rule"), 1, "surface");
+    }
+    canvas.put(1, markColumn, paint.text("│", "borderBright"), 1, "surface");
+    canvas.put(3, markColumn, paint.text("⊞", "muted"), 1, "surface");
+    this.mouseZones.push({ row: 3, column: railColumn + 1, width: geometry.panelWidth - 1, run: () => this.actStart({ kind: "panel" }) });
+    return { rows: canvas.rows, cursor: this.terminalFocused && !this.sessionView.focused && input.cursor
+      ? { row: layout.input.row + input.cursor.row, column: layout.input.column + input.cursor.column } : null };
+  }
+
+  private composeSessionFrame(): { rows: string[]; cursor: { row: number; column: number } | null } {
+    if (this.startLayout) return this.composeStartFrame();
+    const { layout } = this;
+    const paint = this.options.paint;
+    this.sessionView.sync(this.entries);
+    const rail = this.options.contextRail;
+    const feedback = this.feedback && this.mode !== "dialog" && this.mode !== "approval"
+      ? paint.text(sanitizeTerminalLine(this.feedback.text), this.feedback.tone === "error" ? "signal" : "secondary") : null;
+    const modal = this.mode === "approval" || this.mode === "dialog";
+    if (modal) this.sessionView.hover(-1, -1);
+    const panelOpen = this.sessionView.panelOpen && !modal;
+    const geometry = sessionPanelLayout(layout.width, panelOpen);
+    const width = geometry.conversationWidth;
+    const gap = feedback ? 1 : 0;
+    const sessionHeight = layout.input.row - gap;
+    const root = this.options.workspaceRoot ?? rail.workspacePath;
+    const renderOptions = { paint,
+      title: this.sessionTitle, path: shortenPath(root), now: Date.now(),
+      presence: this.mode === "approval" ? "waiting" as const : this.state,
+      markdown: (entry: AssistantEntry, width: number) => this.renderedMarkdown(entry, width),
+    };
+    const frame = this.sessionView.render({ ...renderOptions, width, height: sessionHeight });
+    const canvas = new Canvas(layout.width, layout.height, paint);
+    for (const [row, text] of frame.rows.entries()) canvas.put(row, 0, text, width);
+    const zones = panelOpen && geometry.overlay ? [] : frame.zones;
+    if (panelOpen) {
+      const panelWidth = geometry.overlay ? width : geometry.panelWidth - 1;
+      const column = geometry.overlay ? 0 : width + 1;
+      const panel = this.sessionView.render({ ...renderOptions, width: panelWidth, height: geometry.overlay ? sessionHeight : layout.height,
+        panel: true, column, replace: geometry.overlay, contextLines: rail.lines(Math.max(16, panelWidth - 4), 1000, paint) });
+      panel.rows.forEach((text, row) => canvas.put(row, column, text, panelWidth, "surface"));
+      zones.push(...panel.zones);
+    }
+    for (let row = 0; row < layout.height; row++) {
+      if (!panelOpen || geometry.overlay) canvas.put(row, width, "", geometry.panelWidth, "surface");
+      canvas.put(row, width, paint.text("│", "rule"), 1, "surface");
+    }
+    if (!panelOpen || geometry.overlay) {
+      const column = width + Math.floor((geometry.panelWidth + 1) / 2);
+      canvas.put(1, column, paint.text("│", "borderBright"), 1, "surface");
+      canvas.put(3, column, paint.text(panelOpen ? "×" : "⊞", "muted"), 1, "surface");
+      zones.push({ row: 3, column: width + 1, width: geometry.panelWidth - 1, action: { kind: "panel-toggle" } });
+    }
+    this.mouseZones = (modal ? [] : zones).map((zone) => ({ ...zone, run: () => {
+      if (zone.action.kind === "workspace") { this.showWorkspace(); this.requestRender(); return; }
+      if (zone.action.kind === "context") { this.showContext(); this.requestRender(); return; }
+      if (zone.action.kind === "settings") { this.openSettings(); return; }
+      this.sessionView.act(zone.action);
+      this.requestRender();
+    } }));
+    const input = this.composeInput(width);
+    const inset = width >= 65 ? 2 : 1;
+    const workspaceWidth = width - inset * 2;
+    if (gap) canvas.put(sessionHeight, inset + 2, feedback ?? "", width - inset - 2);
+    for (let row = 0; row < layout.input.height; row++) canvas.put(layout.input.row + row, 0, input.lines[row] ?? "", width, "surface");
+    for (const zone of input.zones) this.mouseZones.push({ ...zone, row: layout.input.row + 1 + zone.row });
+    const status = sessionStatus({ width: workspaceWidth, paint, state: this.mode === "approval" ? "APPROVAL" : this.sessionView.latest?.status ?? "READY",
+      context: this.sessionView.latest?.settled ? this.sessionView.latest.receipt?.context ?? rail.contextSnapshot : rail.contextSnapshot,
+      now: Date.now(), reducedMotion: reducedMotionEnabled(),
+      presence: this.state, elapsed: this.turnStartedAt === null ? undefined : Math.max(0, Date.now() - this.turnStartedAt),
+      tokensPerSecond: rail.tokensPerSecond, paused: this.sessionView.paused,
+      hasResponse: Boolean(this.sessionView.current?.settled && this.sessionView.current.answer) });
+    canvas.put(layout.height - 1, 0, "", width, "surface");
+    canvas.put(layout.height - 1, inset, status.text, workspaceWidth, "surface");
+    if (!modal) for (const zone of status.zones) this.mouseZones.push({ row: layout.height - 1,
+      column: inset + zone.column, width: zone.width, run: () => { this.sessionView.act({ kind: zone.action }); this.requestRender(); } });
+    return { rows: canvas.rows, cursor: this.terminalFocused && (!this.sessionView.focused || this.mode === "dialog") && input.cursor && input.cursor.row < layout.input.height
+      ? { row: layout.input.row + input.cursor.row, column: input.cursor.column } : null };
+  }
+
+  private showContext(): void {
+    if (this.sessionLayout) { this.sessionView.act({ kind: "context" }); this.requestRender(); return; }
+    this.showPanel([this.options.paint.bold("CONTEXT WINDOW · Alt+C", "electricBright"), "",
+      ...this.options.contextRail.lines(this.layout.width - 4, 200, this.options.paint)]);
+  }
+
+  private copyResponse(text: string): void {
+    process.stdout.write(`\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`);
+    if (this.copyTimer) clearTimeout(this.copyTimer);
+    this.copyTimer = setTimeout(() => { this.copyTimer = null; this.requestRender(); }, 1600);
+    this.copyTimer.unref();
+    this.requestRender();
+  }
+
+  private showWorkspace(): void {
+    this.showPanel([this.options.paint.bold("PROJECT FOLDER · Alt+P", "electricBright"), "",
+      sanitizeTerminalLine(this.options.workspaceRoot ?? this.options.contextRail.workspacePath),
+      ...(this.options.contextRail.workspaceBranch ? ["", `Branch: ${sanitizeTerminalLine(this.options.contextRail.workspaceBranch)}`] : [])]);
+  }
+
+  /// A quiet imprint and workspace attribution above the task title.
   private composeHeader(width: number): { mark: string } {
     const paint = this.options.paint;
     const rail = this.options.contextRail;
-    const left = `${" ".repeat(HARNESS.margin)}${paint.text("◈", "electric")} `
-      + paint.bold("demesne", "paper")
-      + paint.dim(` · ${truncateText(sanitizeTerminalLine(this.sessionTitle), Math.max(6, Math.floor(width / 4)))}`);
-    const separator = paint.dim(" · ");
+    const left = `  ${paint.text("D E M E S N E", "secondary")}`;
     const root = this.options.workspaceRoot;
     const workspace = root ? paint.dim(truncateText(sanitizeTerminalLine(shortenPath(root)), 34)) : "";
     const branch = rail.workspaceBranch ? paint.dim(sanitizeTerminalLine(rail.workspaceBranch)) : "";
-    const model = paint.dim(truncateText(sanitizeTerminalLine(rail.modelId), 30));
-    const runtimePart = rail.runtimeSummary;
-    const runtime = runtimePart
-      ? paint.text(
-        runtimePart.label,
-        runtimePart.state === "verified" ? "citron" : runtimePart.state === "mismatch" ? "signal" : "secondary",
-      )
-      : "";
-
-    const candidates: string[] = workspace
-      ? [
-        [workspace, branch, model, runtime].filter(Boolean).join(separator),
-        [workspace, branch, model].filter(Boolean).join(separator),
-        [workspace, model].filter(Boolean).join(separator),
-        workspace,
-      ]
-      : [
-        [branch, model, runtime].filter(Boolean).join(separator),
-        [model, runtime].filter(Boolean).join(separator),
-        model,
-      ];
-    const available = width - visibleLength(left) - HARNESS.gutter;
-    let right = "";
-    for (const candidate of candidates) {
-      if (visibleLength(candidate) <= available) {
-        right = candidate;
-        break;
-      }
-    }
-    if (!right && available >= 8) {
-      right = truncateText(candidates[candidates.length - 1]!, available);
-    }
-    if (!right) return { mark: truncateText(left, width) };
-    const padding = Math.max(1, width - visibleLength(left) - visibleLength(right));
-    return { mark: truncateText(`${left}${" ".repeat(padding)}${right}`, width) };
+    return { mark: formatFooterLine(left, [workspace, branch].filter(Boolean).join(" / "), width) };
   }
 
-  private sidebarLines(): string[] {
-    if (!this.layout.sidebar) return [];
-    const height = this.layout.sidebar.height;
-    const width = this.layout.sidebar.width;
-    const ambient = this.ambient.length > 0 ? ["", ...this.ambient] : [];
-    const railHeight = Math.max(4, height - ambient.length);
-    const rail = this.options.contextRail.lines(Math.max(16, width - 3), railHeight, this.options.paint);
-    return [...rail, ...ambient]
-      .slice(0, height)
-      .map((line) => ` ${truncateText(line, width - 2)}`);
-  }
-
-  /// A static rule above the composer separates transcript from input. With
-  /// the rule under the header, the screen reads as three bands: identity,
-  /// conversation, control.
-  private composeInput(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
+  /// A writing margin on the same canvas; selectors and decisions use a sheet.
+  private composeInput(width: number): {
+    lines: string[];
+    cursor: { row: number; column: number } | null;
+    zones: InputZone[];
+  } {
     const paint = this.options.paint;
-    const rule = paint.text(
-      `${" ".repeat(HARNESS.margin)}${"─".repeat(Math.max(4, width - HARNESS.margin - HARNESS.gutter))}`,
-      "rule",
-    );
-    const content = this.composeInputContent(width);
+    if (this.sessionLayout && (this.mode === "input" || this.mode === "streaming")) {
+      this.syncQueuedEditor();
+      const streaming = this.mode === "streaming";
+      const result = composeDraft({ width, height: this.layout.input.height, paint, focused: this.terminalFocused && !this.sessionView.focused, context: this.options.contextRail.contextSnapshot,
+        now: Date.now(), reducedMotion: reducedMotionEnabled(),
+        hero: Boolean(this.startLayout), reveal: this.startLayout ? this.startScreen.reveal(1, Date.now(), this.started && paint.enabled && !reducedMotionEnabled()) : 1,
+        editor: streaming ? this.queuedEditor : this.editor, streaming, commands: this.matchingCommands(), mentions: this.promptContext.mentions, history: this.promptContext.history });
+      return { lines: result.lines, cursor: result.cursor, zones: result.zones.map((zone) => ({ ...zone, row: zone.row - 1, run: (column?: number) => {
+        const action = zone.action;
+        if (action.kind === "submit") this.dispatchEditorKey({ name: "return" });
+        else if (action.kind === "stop") this.options.onInterrupt();
+        else if (action.kind === "clear") { this.options.queue.set(""); this.queuedEditor = createPromptEditorState(); }
+        else if (action.kind === "command") this.clickCommand(action.index);
+        else if (action.kind === "mention") this.clickMention(action.index);
+        else if (action.kind === "remove") {
+          const editor = streaming ? this.queuedEditor : this.editor;
+          const updated = setPromptValue(editor, editor.value.slice(0, action.start) + editor.value.slice(action.start + action.length));
+          if (streaming) { this.queuedEditor = updated; this.options.queue.set(updated.value); } else this.editor = updated;
+        } else if (action.kind === "caret") {
+          const cursor = action.start + textIndexAtVisualColumn(action.text, (column ?? zone.column) - zone.column);
+          if (streaming) this.queuedEditor = { ...this.queuedEditor, cursor };
+          else this.editor = { ...this.editor, cursor };
+        }
+        this.requestRender();
+      } })) };
+    }
+    const rule = this.sessionLayout ? this.mode === "approval" ? `    ${paint.bold("Approval required", "signal")}` : this.mode === "streaming" ? `    ${paint.dim("Follow-up · queued after this run")}` : ""
+      : paint.text(`╭${"─".repeat(Math.max(0, width - 2))}╮`, this.mode === "approval" ? "signal" : "electric");
+    const inset = this.sessionLayout ? workspaceInset(width) : 0;
+    const panelWidth = width - inset * 2;
+    const contentInset = this.sessionLayout ? conversationInset(panelWidth) - 3 : 0;
+    const content = this.composeInputContent(panelWidth - contentInset);
+    const compactDecision = this.sessionLayout && this.mode === "approval" && this.layout.input.height < 5;
+    const available = Math.max(1, this.layout.input.height - (compactDecision ? 1 : 2));
+    let offset = 0;
+    if (content.lines.length > available && content.cursor) {
+      offset = Math.max(0, content.cursor.row - available + 2);
+    }
+    if (this.mode === "approval" && content.lines.length > available && this.approval) {
+      const count = approvalOptions(this.approval.toolName !== "run_command", this.approval.allowPersist).options.length;
+      offset = Math.max(0, content.lines.length - count + this.approvalSelected - available + 1);
+    }
+    if (this.sessionLayout) {
+      const canvas = new Canvas(width, this.layout.input.height, paint);
+      for (let row = 0; row < this.layout.input.height; row++) {
+        canvas.put(row, inset, "", panelWidth, "surface");
+        canvas.put(row, inset, paint.text("▎", this.mode === "approval" ? "signal" : "electric"), 1, "surface");
+      }
+      canvas.put(0, inset + contentInset + 3, paint.bold(this.mode === "approval" ? "Approval required" : "Select", this.mode === "approval" ? "signal" : "electricBright"), panelWidth - contentInset - 6, "surface");
+      for (let y = 0; y < available; y++) canvas.put(y + 1, inset + contentInset + 1, content.lines[offset + y]?.replace(/^ {2}/, "") ?? "", panelWidth - contentInset - 2, "surface");
+      return {
+        lines: canvas.rows,
+        cursor: content.cursor ? { row: content.cursor.row - offset + 1, column: inset + contentInset + content.cursor.column - 1 } : null,
+        zones: content.zones.filter((zone) => zone.row >= offset && zone.row < offset + available)
+          .map((zone) => ({ ...zone, row: zone.row - offset, column: inset + contentInset + Math.max(1, (zone.column ?? 2) - 1), width: Math.min(zone.width ?? panelWidth - contentInset - 2, panelWidth - contentInset - 2) })),
+      };
+    }
     return {
-      lines: [rule, ...content.lines],
-      cursor: content.cursor ? { row: content.cursor.row + 1, column: content.cursor.column } : null,
+      lines: [surface(rule, width, paint, "raised"), ...content.lines.slice(offset, offset + available).map((line) => surface(line, width, paint, "raised")), ...(compactDecision ? [] : [this.sessionLayout ? surface("", width, paint, "raised") : paint.text(`╰${"─".repeat(Math.max(0, width - 2))}╯`, "rule")])],
+      cursor: content.cursor ? { row: content.cursor.row - offset + 1, column: content.cursor.column } : null,
+      zones: content.zones.filter((zone) => zone.row >= offset && zone.row < offset + available).map((zone) => ({ ...zone, row: zone.row - offset })),
     };
   }
 
-  private composeInputContent(width: number): { lines: string[]; cursor: { row: number; column: number } | null } {
+  private composeInputContent(width: number): {
+    lines: string[];
+    cursor: { row: number; column: number } | null;
+    zones: InputZone[];
+  } {
     const paint = this.options.paint;
     const lines: string[] = [];
+    const zones: InputZone[] = [];
 
     if (this.mode === "approval" && this.approval) {
       const allowSession = this.approval.toolName !== "run_command";
+      const choices = approvalOptions(allowSession, this.approval.allowPersist).options;
       // Rail-aligned and box-free so the request reads as part of the turn
       // rather than as a modal from a different interface.
-      lines.push(...formatApprovalAsk({
+      const askLines = formatApprovalAsk({
         ask: narrateWaiting(this.approval.summary),
         toolName: this.approval.toolName,
-        previewRows: this.approval.previewRows,
+        previewRows: this.approval.previewRows?.slice(0, Math.max(0, this.layout.input.height - choices.length - 2)),
         width,
         painter: paint,
         // The composer's own mark, in the signal color because it wants a
         // decision: the footer already shows the waiting glyph.
         waitingMark: paint.text("❯", "signal"),
-      }));
-      lines.push(formatApprovalSelection(this.approvalSelected, allowSession, width, paint, this.approval.allowPersist));
-      return { lines, cursor: null };
+      });
+      if (this.sessionLayout) {
+        lines.push(`    ${paint.bold(truncateText(sanitizeTerminalLine(this.approval.summary), width - 8), "paper")}`);
+        for (const line of (this.approval.previewRows ?? []).slice(0, Math.max(0, this.layout.input.height - choices.length - 3))) lines.push(`    ${sanitizeTerminalLine(line)}`);
+      } else lines.push(...askLines);
+      const labels = { allow_once: "Allow once", allow_session: "Allow for session", allow_always: "Always allow", deny: "Deny" };
+      choices.forEach((decision, index) => {
+        const label = ` ${index === this.approvalSelected ? "›" : " "} ${labels[decision]} `;
+        zones.push({ row: lines.length, column: 4, width: visibleLength(label), run: () => this.resolveApproval(decision) });
+        lines.push(`    ${index === this.approvalSelected ? paint.wash(label, decision === "deny" ? "signal" : "electric") : label}`);
+      });
+      return { lines, cursor: null, zones };
     }
 
     if (this.mode === "dialog") {
-      lines.push(`${" ".repeat(HARNESS.margin)}${paint.bold(this.dialogTitle, "paper")} ${paint.dim(`(${this.dialogSelected + 1}/${this.dialogItems.length})`)}`);
-      this.dialogItems.slice(0, 10).forEach((item, index) => {
-        const selected = index === this.dialogSelected;
-        const marker = selected ? paint.text("›", "electric") : " ";
-        const label = truncateText(sanitizeTerminalLine(item), Math.max(8, width - HARNESS.content - 2));
-        lines.push(`${" ".repeat(HARNESS.margin)} ${marker} ${selected ? paint.bold(label, "paper") : paint.text(label, "secondary")}`);
+      const count = Math.max(1, Math.min(10, this.layout.input.height - 5));
+      const start = Math.max(0, this.dialogSelected - count + 1);
+      const shown = this.dialogFiltered
+        .map((index) => ({ index, label: this.dialogItems[index] ?? "" }))
+        .slice(start, start + count);
+      const filtered = this.dialogQuery ? ` of ${this.dialogItems.length}` : "";
+      const at = shown.length === 0 ? 0 : this.dialogSelected + 1;
+      lines.push(
+        `${" ".repeat(HARNESS.margin)}${paint.bold(this.dialogTitle, "paper")} `
+          + paint.dim(`(${at}/${this.dialogFiltered.length}${filtered})`),
+      );
+      lines.push(`    ${paint.text("⌕", "electricBright")} ${sanitizeTerminalLine(this.dialogQuery) || paint.dim("Type to search…")}`);
+      if (!shown.length) lines.push("    No matches — backspace to edit");
+      shown.forEach((item, position) => {
+        position += start;
+        const selected = position === this.dialogSelected;
+        const label = truncateText(sanitizeTerminalLine(item.label), Math.max(8, width - HARNESS.content - 2));
+        lines.push(`   ${selected ? paint.wash(`› ${label}`.padEnd(width - 6), "electric") : paint.text(`  ${label}`, "secondary")}`);
+        zones.push({
+          row: lines.length - 1,
+          run: () => this.clickDialogItem(position),
+        });
       });
-      lines.push(`${" ".repeat(HARNESS.margin)}  ${paint.dim("↑/↓ move · enter select · esc cancel")}`);
-      return { lines, cursor: null };
+      lines.push(`${" ".repeat(HARNESS.margin)}  ${paint.dim("↑/↓ move · enter select · esc cancel · type to filter")}`);
+      return { lines, cursor: null, zones };
     }
 
     // While a turn runs, the composer shows what is being queued rather than
     // the prompt that was already submitted. The queue is what the next turn
     // will receive, so it belongs where the user is typing.
     const streaming = this.mode === "streaming";
+    const label = `    ${paint.text("▎", "electric")} ${paint.italic(streaming ? "Queued follow-up" : "Prompt", "electricBright")}${this.planMode ? paint.dim(" · plan") : ""}`;
+    lines.push(formatFooterLine(label, streaming ? "" : paint.text("Settings ↗  ", "secondary"), width));
+    if (!streaming) {
+      zones.push({ row: 0, column: Math.max(0, width - 12), width: 12, run: () => this.openSettings() });
+    }
     const value = streaming ? this.options.queue.get() : this.editor.value;
-    const valueCursor = streaming ? value.length : this.editor.cursor;
+    this.syncQueuedEditor();
+    const valueCursor = streaming ? this.queuedEditor.cursor : this.editor.cursor;
     const promptWidth = Math.max(10, width - HARNESS.content - 1);
     const layout = computePromptVisualLines(value, valueCursor, promptWidth);
     const commands = streaming ? [] : this.matchingCommands();
+    const queued = streaming && value.length > 0;
     const placeholder = value.length === 0 && commands.length === 0
       ? paint.dim(truncateText(
-        streaming ? "type to queue a message for when this turn ends" : "ask anything · / for commands",
+        streaming ? "Queue a follow-up…" : "Ask a question or describe a change…",
         promptWidth,
       ))
       : "";
     // The prompt mark is static and belongs to the composer alone. It used to be
     // the turn's state glyph, which put the same animated diamond in the footer
     // on the line directly below it.
-    const mark = paint.text("❯", streaming ? "secondary" : "electric");
     for (let index = 0; index < layout.lines.length; index += 1) {
-      const prefix = index === 0
-        ? `${" ".repeat(HARNESS.mark)}${mark} `
-        : " ".repeat(HARNESS.content);
-      lines.push(`${prefix}${layout.lines[index] || (index === 0 ? placeholder : "")}`);
+      const prefix = " ".repeat(HARNESS.content);
+      const body = layout.lines[index] || (index === 0 ? placeholder : "");
+      // Queued text reads as a waiting draft: a raised surface, not a prompt.
+      lines.push(`${prefix}${queued && body ? paint.italic(body, "secondary") : body}`);
     }
-    const cursor = { row: layout.cursorLine, column: HARNESS.content + layout.cursorCol };
+    const cursor = { row: layout.cursorLine + 1, column: HARNESS.content + layout.cursorCol };
+    const attachments = [...value.matchAll(/(?:^|\s)(@[^\s]+)/g)];
+    if (attachments.length) {
+      let chips = "    ";
+      for (const match of attachments) {
+        const token = match[1]!;
+        const label = ` ${token} × `;
+        const column = visibleLength(chips);
+        if (column + visibleLength(label) >= width - 2) break;
+        if (!streaming) zones.push({ row: lines.length, column, width: visibleLength(label), run: () => {
+          const start = match.index! + match[0].indexOf(token);
+          this.editor = setPromptValue(this.editor, value.slice(0, start) + value.slice(start + token.length));
+          this.requestRender();
+        } });
+        chips += paint.text(label, "electric") + " ";
+      }
+      lines.push(chips);
+    }
+    const menuStart = lines.length;
 
     const mention = mentionTokenAt(this.editor.value, this.editor.cursor);
     const mentionCandidates = mention && this.promptContext.mentions.length > 0
       ? mentionMatches(this.promptContext.mentions, mention.query)
       : [];
     if (mentionCandidates.length > 0) {
-      lines.push(...formatMentionMenu(mentionCandidates, this.editor.mentionSelected, width, paint).split("\n"));
+      const menuLines = formatMentionMenu(mentionCandidates, this.editor.mentionSelected, width, paint).split("\n");
+      menuLines.forEach((line, index) => lines.push(line));
+      for (let index = 0; index < mentionCandidates.length; index += 1) {
+        zones.push({ row: menuStart + index, run: () => this.clickMention(index) });
+      }
     } else if (commands.length > 0) {
-      lines.push(...formatSlashCommandMenu(commands, this.editor.menuSelected, width, paint).split("\n"));
+      const menuLines = formatSlashCommandMenu(commands, this.editor.menuSelected, width, paint).split("\n");
+      menuLines.forEach((line, index) => lines.push(line));
+      // The zone map and the renderer share `slashMenuLineCommands`, so a click
+      // target can never drift from the row that draws it.
+      slashMenuLineCommands(commands).forEach((commandIndex, lineIndex) => {
+        if (commandIndex === null) return;
+        zones.push({ row: menuStart + lineIndex, run: () => this.clickCommand(commandIndex) });
+      });
     }
-    return { lines, cursor };
+    const actionRow = lines.length;
+    if (streaming) {
+      lines.push(`    ${paint.text("Stop ■", "signal")}   ${value ? paint.text("Clear queue", "secondary") : ""}`);
+      zones.push({ row: actionRow, column: 4, width: 6, run: () => this.options.onInterrupt() });
+      if (value) zones.push({ row: actionRow, column: 13, width: 11, run: () => { this.options.queue.set(""); this.requestRender(); } });
+    } else {
+      const mode = this.planMode ? "Plan" : "Build";
+      lines.push(`    ${value.trim() ? paint.wash(" Send ↵ ", "electric") : paint.dim(" Send ↵ ")}   ${paint.text(`${mode} ▾`, "secondary")}   ${paint.text("Model ▾", "secondary")}`);
+      if (value.trim()) zones.push({ row: actionRow, column: 4, width: 8, run: () => this.dispatchEditorKey({ name: "return" }) });
+      zones.push(
+        { row: actionRow, column: 15, width: mode.length + 2, run: () => { this.planMode = !this.planMode; this.requestRender(); } },
+        { row: actionRow, column: 20 + mode.length, width: 7, run: () => this.runCommand("/model") });
+    }
+    return { lines, cursor, zones };
+  }
+
+  private runCommand(command: string): void {
+    if (this.mode !== "input") return;
+    this.savedDraft = this.editor.value;
+    this.applyEditorResult({ state: this.editor, action: { type: "submit", value: command } });
+  }
+
+  private currentEntries(): WorkbenchEntry[] {
+    const start = this.entries.findLastIndex((entry) => entry.type === "user");
+    return this.entries.slice(Math.max(0, start));
+  }
+
+  private indexEntries(): ToolEntry[] {
+    return this.inspectionEntries().filter((entry): entry is ToolEntry => entry.type === "tool" && (this.inspectorTab === "Activity" || (this.inspectorTab === "Changes" ? entry.phase === "change" : entry.phase !== "inspect")));
+  }
+
+  private inspectionEntries(): WorkbenchEntry[] {
+    if (this.selectedTurnId === null) return this.currentEntries();
+    const start = this.entries.findIndex((entry) => entry.id === this.selectedTurnId);
+    if (start < 0) return this.currentEntries();
+    const end = this.entries.findIndex((entry, index) => index > start && entry.type === "user");
+    return this.entries.slice(start, end < 0 ? undefined : end);
+  }
+
+  private inspectEntry(entryId: number): void {
+    const index = this.entries.findIndex((entry) => entry.id === entryId);
+    this.selectedTurnId = this.entries.slice(0, index + 1).findLast((entry) => entry.type === "user")?.id ?? null;
+    this.inspectorFocused = true;
+    this.sheet = { kind: "detail", entryId, offset: 0 };
+    this.requestRender();
+  }
+
+  private composeInspector(rows: string[]): void {
+    const paint = this.options.paint;
+    const rect = this.layout.sidebar ?? { ...this.layout.conversation, height: this.layout.footer.row - this.layout.conversation.row };
+    if (!this.layout.sidebar) this.mouseZones = this.mouseZones.filter((zone) => zone.row < rect.row);
+    const records = this.inspectionEntries().filter((entry): entry is ToolEntry => entry.type === "tool");
+    const panel = inspectorPanel({ width: rect.width, height: rect.height, paint, records, tab: this.inspectorTab,
+      selected: this.sheet?.kind === "index" ? this.sheet.selected : 0,
+      detailId: this.sheet?.kind === "detail" ? this.sheet.entryId : undefined,
+      offset: this.sheet?.kind === "detail" ? this.sheet.offset : this.inspectorOffset,
+      title: this.selectedTurnId === null ? "Live turn" : `Turn ${this.entries.filter((entry) => entry.type === "user").findIndex((entry) => entry.id === this.selectedTurnId) + 1} · pinned`,
+      context: this.options.contextRail.statusLine(rect.width * 2, paint),
+      revealSelected: this.inspectorRevealSelection,
+    });
+    this.inspectorRevealSelection = false;
+    if (this.sheet?.kind === "detail") this.sheet.offset = Math.min(this.sheet.offset, panel.maxOffset);
+    else this.inspectorOffset = panel.offset;
+    for (let row = 0; row < rect.height; row++) {
+      const prefix = this.layout.sidebar ? `${surface(sliceAnsi(rows[rect.row + row] ?? "", 0, rect.column - 1), rect.column - 1, paint, "ink")}${paint.text("│", "rule")}` : "";
+      rows[rect.row + row] = prefix + surface(panel.lines[row] ?? "", rect.width, paint);
+    }
+    for (const target of panel.targets) this.mouseZones.push({ row: rect.row + target.row, column: rect.column + target.column, width: target.width, run: () => {
+      this.inspectorFocused = true;
+      if (target.tab) { this.inspectorTab = target.tab; this.sheet = { kind: "index", selected: 0 }; this.inspectorOffset = 0; }
+      else if (target.entryId !== undefined) this.inspectEntry(target.entryId);
+      else if (target.back) { this.sheet = { kind: "index", selected: 0 }; this.inspectorOffset = 0; }
+      else if (target.follow) { this.selectedTurnId = null; this.sheet = { kind: "index", selected: 0 }; this.inspectorOffset = 0; }
+      this.requestRender();
+    } });
+  }
+
+  private composeSheet(rows: string[]): void {
+    if (!this.sheet) return;
+    const paint = this.options.paint;
+    const rect = this.layout.conversation;
+    const width = this.layout.width;
+    const height = rect.height;
+    this.mouseZones = this.mouseZones.filter((zone) => zone.row < rect.row);
+    const content: string[] = [];
+    const addZone = (row: number, run: () => void) => {
+      if (row < height) this.mouseZones.push({ row: rect.row + row, column: 4, width: width - 8, run });
+    };
+    if (this.sheet.kind === "index") {
+      content.push(`    ${paint.bold("REVISION INDEX", "electric")}`);
+      if (height > 4) content.push("");
+      const entries = this.indexEntries();
+      const count = Math.max(1, height - content.length - 1);
+      this.sheet.selected = Math.min(this.sheet.selected, Math.max(0, entries.length - 1));
+      const start = Math.max(0, this.sheet.selected - count + 1);
+      if (!entries.length) content.push("    No changes or checks recorded yet.");
+      entries.slice(start, start + count).forEach((entry, offset) => {
+        const label = `${entry.phase === "change" ? "revision" : "check"}  ${entry.detail ?? entry.name} · ${entry.waiting ? "awaiting approval" : toolFailed(entry) ? "failed" : entry.state}${entry.exitCode !== undefined ? ` · exit ${entry.exitCode}` : ""}`;
+        const selected = this.sheet?.kind === "index" && this.sheet.selected === start + offset;
+        addZone(content.length, () => this.inspectEntry(entry.id));
+        const failed = toolFailed(entry) || entry.state === "denied";
+        content.push(`    ${selected ? paint.bold("› ", "electric") : "  "}${paint.text(truncateText(sanitizeTerminalLine(label), width - 8), failed ? "signal" : selected ? "paper" : "secondary")}`);
+      });
+      content.push("", paint.dim("    Enter inspect · Esc close"));
+    } else {
+      const entryId = this.sheet.entryId;
+      const entry = this.entries.find((entry): entry is ToolEntry => entry.type === "tool" && entry.id === entryId);
+      const detail: string[] = [];
+      if (entry) {
+        detail.push(paint.bold(entry.phase === "verify" ? "EVIDENCE RECORD" : "REVISION RECORD", "electric"));
+        detail.push(sanitizeTerminalLine(entry.detail ?? entry.name));
+        detail.push(paint.text(`${entry.waiting ? "awaiting approval" : entry.state}${entry.exitCode !== undefined ? ` · exit ${entry.exitCode}` : ""}`, toolFailed(entry) || entry.state === "denied" ? "signal" : entry.state === "done" ? "citron" : "secondary"), "");
+        if (entry.diff) {
+          detail.push(paint.bold(entry.state === "done" ? "RECORDED EDIT" : "PROPOSED EDIT", "secondary"));
+          detail.push(...formatDiffPreview(entry.diff.oldText, entry.diff.newText, 10_000, paint), "");
+        }
+        if (entry.message) detail.push(...entry.message.split("\n").flatMap((line) => wrapDisplayText(sanitizeTerminalLine(line), width - 8)), "");
+        detail.push(paint.bold("ARGUMENTS", "secondary"), ...JSON.stringify(entry.input, null, 2).split("\n").flatMap((line) => wrapDisplayText(sanitizeTerminalLine(line), width - 8)));
+      } else detail.push("Record unavailable.");
+      const headingRows = height > 4 ? 2 : 1;
+      const available = Math.max(1, height - headingRows);
+      this.sheet.offset = Math.min(this.sheet.offset, Math.max(0, detail.length - available));
+      content.push(paint.dim("    ← Index · Backspace     Esc close"));
+      if (headingRows > 1) content.push("");
+      addZone(0, () => { this.sheet = { kind: "index", selected: 0 }; this.requestRender(); });
+      content.push(...detail.slice(this.sheet.offset, this.sheet.offset + available).map((line) => `    ${line}`));
+    }
+    for (let row = 0; row < height; row++) rows[rect.row + row] = surface(content[row] ?? "", width, paint, "ink");
+  }
+
+  private openSettings(): void {
+    if (this.mode !== "input") return;
+    const commands = this.promptContext.commands;
+    const items = [this.planMode ? "Mode: Plan → Build" : "Mode: Build → Plan", `Model: ${this.options.contextRail.modelId}`, "Theme", "Sessions", ...commands.map((command) => `${command.name}  ${command.description}`)];
+    void this.choose("Settings", items).then((index) => {
+      if (index === null) return;
+      if (index === 0) { this.planMode = !this.planMode; this.requestRender(); }
+      else if (index <= 3) this.runCommand(["", "/model", "/theme", "/sessions"][index]!);
+      else {
+        const command = commands[index - 4]!;
+        this.editor = setPromptValue(this.editor, command.name + (command.argument === "none" ? "" : " "));
+        this.requestRender();
+      }
+    });
+  }
+
+  /// A dialog row click selects it; clicking the selected row confirms.
+  private clickDialogItem(position: number): void {
+    if (this.mode !== "dialog") return;
+    if (position === this.dialogSelected) {
+      this.finishDialog(this.dialogFiltered[position] ?? null);
+      return;
+    }
+    this.dialogSelected = position;
+    this.requestRender();
+  }
+
+  private clickMention(index: number): void {
+    if (this.mode !== "input") return;
+    if (this.editor.mentionSelected === index) {
+      this.dispatchEditorKey({ name: "return" });
+      return;
+    }
+    this.editor = { ...this.editor, mentionSelected: index };
+    this.requestRender();
+  }
+
+  private clickCommand(index: number): void {
+    if (this.mode !== "input") return;
+    if (this.editor.menuSelected === index) {
+      this.dispatchEditorKey({ name: "return" });
+      return;
+    }
+    this.editor = { ...this.editor, menuSelected: index };
+    this.requestRender();
   }
 }
 

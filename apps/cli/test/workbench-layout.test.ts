@@ -11,7 +11,8 @@ describe("computeWorkbenchLayout", () => {
     expect(layout.conversation.row + layout.conversation.height).toBe(layout.input.row);
     expect(layout.sidebar).not.toBeNull();
     expect(layout.sidebar!.row).toBe(layout.conversation.row);
-    expect(layout.sidebar!.height).toBe(layout.conversation.height);
+    expect(layout.sidebar!.row + layout.sidebar!.height).toBe(layout.footer.row);
+    expect(layout.input.width).toBe(layout.conversation.width);
     expect(layout.dividerColumn).toBe(120 - layout.sidebar!.width - 1);
     expect(layout.conversation.width + layout.sidebar!.width + 1).toBe(120);
   });

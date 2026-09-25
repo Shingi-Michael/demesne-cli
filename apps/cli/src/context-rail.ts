@@ -6,6 +6,7 @@ import type {
   RuntimeProfileStatus,
   TokenUsage,
 } from "@demesne/protocol";
+import { isRecord } from "@demesne/protocol";
 import {
   formatSparkline,
   formatTokenCount,
@@ -135,6 +136,10 @@ export class CliContextRail {
   }
 
   apply(event: EventEnvelope): void {
+    if (event.type === "session.compacted" && isRecord(event.payload.checkpoint)) {
+      this.plan = contextPlanValue(event.payload.checkpoint.contextPlan);
+      this.activity = [...this.activity, "older context summarized · recent turns retained"].slice(-4);
+    }
     if (event.type === "model.request_started") {
       this.requestDurationMs = null;
       this.queueDurationMs = null;

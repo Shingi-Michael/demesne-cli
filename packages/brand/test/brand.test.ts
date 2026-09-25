@@ -310,6 +310,7 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(menu).toContain("› /status");
     expect(slashCommandMatches("ordinary prompt")).toEqual([]);
     expect(slashCommandMatches("/cont").map((command) => command.name)).toEqual(["/context"]);
+    expect(slashCommandMatches("/comp").map((command) => command.name)).toEqual(["/compact"]);
     expect(slashCommandMatches("/theme").map((command) => command.name)).toEqual(["/theme"]);
     expect(slashCommandMatches("/thinking")).toEqual([]);
   });

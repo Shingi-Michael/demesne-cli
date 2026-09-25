@@ -7,8 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Streaming responses now scroll through burst output one row per redraw instead
+  of jumping a screenful when several lines arrive together. Catch-up continues
+  through completion and stops immediately for manual reading; Live navigation,
+  resizing, and reduced-motion mode resolve directly to their target.
+- Model output-limit stops and reasoning-only/empty replies now fail explicitly
+  instead of silently completing. Provider finish reasons are retained in SQLite
+  and replayable events, including usage received after a finish reason. Truncated
+  tool calls are rejected before execution; partial answer text remains visible.
+  The thinking-Qwen configuration example now uses an 8192-token output budget.
+
 ### Added
 
+- Manual `/compact [instructions]` and `demesne compact <session-id>` commands:
+  model-generated, validated checkpoints with the latest two conversation turns
+  retained in full, estimated before/after context receipts, restart persistence,
+  and complete History. Compaction supports cancellation and rolling summaries;
+  failure leaves the prior context active, and undo invalidates stale summaries.
+- Figma Version 20 composer/footer: square-cornered rectangular Send control,
+  prompt and input aligned with its label, compact shortcuts and draft-count row,
+  and a separated status strip without standalone scrollback/navigation labels.
+- Figma Version 19 session header: cyan top accent, session date, live clock,
+  elapsed time since opening, subdued path prefix, and bracketed History hover.
+  Start and conversation screens share responsive header geometry.
+- Figma Version 17 expanded panels: compact Preview header, centered dark image
+  well, single metadata line and quiet inline actions; Files shows real sizes
+  and Git status; Diff presents colored hunks without tool-debug chrome.
+- Native macOS `capture_window` screenshots for terminal apps such as Demesne
+  inside Ghostty, including window selection and actionable Screen Recording
+  permission errors. The workbench sets/restores its terminal title for discovery.
+- Screenshot-to-Preview integration through image-returning browser MCP tools
+  and workspace `view_image` imports. Opt-in provider vision attaches the latest
+  two retained images to model requests, with artifact-ID persistence/replay,
+  bounded inputs, and text-only fallback. Added a local vision-server launcher.
+- First-class `generate_image` agent tool with a separately configured OpenAI
+  Images-compatible backend, session-scoped reference edits, cancellation,
+  bounded responses, and automatic delivery to the image artifact Preview.
+- Figma Version 16 closed sidebar: green/amber status pip, Files/Diff/Preview
+  controls with cyan angular hover treatment, centered vertical PANEL label,
+  and a bottom bracket marker. The same rail renders on start and conversation
+  screens; Files uses the workspace listing and Diff opens recorded changes.
+- Initial image-artifact pipeline and Preview panel: structured MCP image outputs,
+  persistent original/PNG preview content, authenticated retrieval, Alt+V preview,
+  pin/follow/history controls, expanded view, and external original-file opening.
+  Kitty graphics and geometry replies are decoded independently of typed input.
+  The compiled daemon now packages its native image codec runtime beside the
+  executable. Model-free image and PTY fixtures exercise the production path.
 - Artifact-preview structure and implementation documents covering image-first
   panel behavior, pinning/history, durable artifact storage, MCP image outputs,
   Kitty graphics, replay, delivery milestones, and acceptance checks. Arcade

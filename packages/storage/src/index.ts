@@ -2,8 +2,11 @@ import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import {
+  type ImageArtifact,
+  type ArtifactPage,
   PROTOCOL_VERSION,
   type ContextPlan,
+  type SessionCheckpoint,
   type EventEnvelope,
   type EventType,
   type ModelMessage,
@@ -62,6 +65,7 @@ interface TurnRow {
   permission_mode: PermissionMode;
   thinking_enabled: number | null;
   plan_only: number | null;
+  kind: string;
 }
 
 interface EventRow {
@@ -89,9 +93,11 @@ interface ProviderCallRow {
   duration_ms: number | null;
   time_to_first_token_ms: number | null;
   context_plan_json: string | null;
+  finish_reason: string | null;
 }
 
 interface ModelMessageRow {
+  image_artifact_ids_json: string | null;
   id: number;
   turn_id: string;
   role: "user" | "assistant" | "tool";
@@ -118,14 +124,16 @@ export class NotFoundError extends Error {}
 export class InvalidStateError extends Error {}
 
 export type EventSink = (event: EventEnvelope) => void;
-const STORAGE_SCHEMA_VERSION = 5;
+const STORAGE_SCHEMA_VERSION = 6;
 
 export class DemesneStore {
+  readonly filename: string;
   readonly database: Database;
   private eventSink: EventSink | undefined;
   private ftsEnabled = false;
 
   constructor(filename: string, eventSink?: EventSink) {
+    this.filename = filename;
     if (filename !== ":memory:") {
       mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
     }
@@ -144,12 +152,55 @@ export class DemesneStore {
       }
     }
     this.migrate();
+    this.database.run(`CREATE TABLE IF NOT EXISTS image_artifacts (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE,
+      session_id TEXT NOT NULL REFERENCES sessions(id),
+      turn_id TEXT NOT NULL REFERENCES turns(id),
+      source_key TEXT NOT NULL UNIQUE,
+      descriptor TEXT NOT NULL
+    ); CREATE INDEX IF NOT EXISTS image_artifacts_session ON image_artifacts(session_id, sequence);`);
     if (schemaVersion < STORAGE_SCHEMA_VERSION) this.database.run(`PRAGMA user_version = ${STORAGE_SCHEMA_VERSION}`);
     this.recoverInterruptedTurns();
   }
 
   setEventSink(eventSink: EventSink): void {
     this.eventSink = eventSink;
+  }
+
+  recordImageArtifact(artifact: ImageArtifact, sourceKey: string): ImageArtifact {
+    const result = this.database.transaction(() => {
+      const existing = this.database.query("SELECT descriptor FROM image_artifacts WHERE source_key = ?").get(sourceKey) as { descriptor: string } | null;
+      if (existing) {
+        const saved = JSON.parse(existing.descriptor) as ImageArtifact;
+        if (saved.sessionId !== artifact.sessionId || saved.turnId !== artifact.turnId) throw new InvalidStateError("Artifact source identity mismatch");
+        return { artifact: saved, event: null };
+      }
+      if (this.getTurnOrThrow(artifact.turnId).sessionId !== artifact.sessionId) throw new InvalidStateError("Artifact session mismatch");
+      this.database.query("INSERT INTO image_artifacts(id,session_id,turn_id,source_key,descriptor) VALUES (?,?,?,?,?)")
+        .run(artifact.id, artifact.sessionId, artifact.turnId, sourceKey, JSON.stringify(artifact));
+      const event = this.insertEvent("artifact.created", artifact.sessionId, artifact.turnId, { artifact }, artifact.createdAt);
+      return { artifact, event };
+    })();
+    if (result.event) this.eventSink?.(result.event);
+    return result.artifact;
+  }
+
+  getImageArtifact(sessionId: string, id: string): ImageArtifact | null {
+    const row = this.database.query("SELECT descriptor FROM image_artifacts WHERE session_id = ? AND id = ?").get(sessionId, id) as { descriptor: string } | null;
+    return row ? JSON.parse(row.descriptor) : null;
+  }
+
+  listImageArtifacts(sessionId: string, after = 0, limit = 50): ArtifactPage {
+    this.getSessionOrThrow(sessionId);
+    return this.database.transaction(() => {
+      const rows = this.database.query("SELECT sequence, descriptor FROM image_artifacts WHERE session_id = ? AND sequence > ? ORDER BY sequence LIMIT ?")
+        .all(sessionId, after, Math.min(100, Math.max(1, limit)) + 1) as { sequence: number; descriptor: string }[];
+      const more = rows.length > Math.min(100, Math.max(1, limit));
+      if (more) rows.pop();
+      const watermark = (this.database.query("SELECT COALESCE(MAX(id),0) AS id FROM events WHERE session_id = ?").get(sessionId) as { id: number }).id;
+      return { artifacts: rows.map((row) => JSON.parse(row.descriptor) as ImageArtifact), nextCursor: more ? rows.at(-1)!.sequence : null, watermark };
+    })();
   }
 
   close(): void {
@@ -399,6 +450,7 @@ export class DemesneStore {
     lastEventId: number;
     pendingPermissions: PendingPermissionSnapshot[];
     latestProviderCall: ProviderCallSnapshot | null;
+    checkpoint: SessionCheckpoint | null;
   } | null {
     return this.database.transaction(() => {
       const session = this.getSession(id);
@@ -428,10 +480,14 @@ export class DemesneStore {
         ORDER BY provider_calls.rowid DESC
         LIMIT 1
       `).get(id) as ProviderCallRow | null;
+      const checkpoint = this.getSessionCheckpoint(id);
+      const snapshot = latestProviderCall ? mapProviderCallSnapshot(latestProviderCall) : null;
+      if (snapshot && checkpoint && checkpoint.turnId === latestProviderCall?.turn_id) snapshot.contextPlan = checkpoint.contextPlan;
       return {
         session,
         lastEventId: latest.id,
-        latestProviderCall: latestProviderCall ? mapProviderCallSnapshot(latestProviderCall) : null,
+        latestProviderCall: snapshot,
+        checkpoint,
         pendingPermissions: rows.map((row) => ({
           id: row.permission_id,
           turnId: row.turn_id,
@@ -455,8 +511,8 @@ export class DemesneStore {
       ? JSON.stringify(message.toolCalls)
       : null;
     const result = this.database.query(`
-      INSERT INTO model_messages (session_id, turn_id, role, content, tool_call_id, tool_calls_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO model_messages (session_id, turn_id, role, content, tool_call_id, tool_calls_json, created_at, image_artifact_ids_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       turn.sessionId,
       turnId,
@@ -465,6 +521,7 @@ export class DemesneStore {
       toolCallId,
       toolCallsJson,
       new Date().toISOString(),
+      message.role === "tool" && message.imageArtifactIds?.length ? JSON.stringify(message.imageArtifactIds) : null,
     );
     return { id: Number(result.lastInsertRowid), turnId, message };
   }
@@ -473,16 +530,25 @@ export class DemesneStore {
     this.getSessionOrThrow(sessionId);
     const rows = this.database.query(`
       SELECT model_messages.id, model_messages.turn_id, model_messages.role, model_messages.content,
-             model_messages.tool_call_id, model_messages.tool_calls_json
+              model_messages.tool_call_id, model_messages.tool_calls_json, model_messages.image_artifact_ids_json
       FROM model_messages
       JOIN turns ON turns.id = model_messages.turn_id
       JOIN sessions ON sessions.id = model_messages.session_id
       WHERE model_messages.session_id = ?
         AND turns.status = 'completed'
+        AND turns.kind = 'chat'
         AND (sessions.context_start_message_id IS NULL OR model_messages.id >= sessions.context_start_message_id)
       ORDER BY model_messages.id
     `).all(sessionId) as ModelMessageRow[];
-    return rows.map(mapModelMessage);
+    const reverted = this.database.query("SELECT turn_id, file_path FROM turn_snapshots WHERE session_id = ? AND reverted_at IS NOT NULL")
+      .all(sessionId) as { turn_id: string; file_path: string }[];
+    return rows.flatMap((row, index): StoredModelMessage[] => {
+      const message = mapModelMessage(row);
+      if (rows[index + 1]?.turn_id === row.turn_id) return [message];
+      const paths = reverted.filter((file) => file.turn_id === row.turn_id).map((file) => file.file_path);
+      return paths.length ? [message, { id: row.id, turnId: row.turn_id, message: { role: "assistant",
+        content: `Recorded user undo: changes to ${JSON.stringify(paths)} from this turn were later reverted. Historical tool results describe the state before undo; inspect current files before further changes.` } }] : [message];
+    });
   }
 
   recordSnapshot(turnId: string, files: SnapshotFile[]): void {
@@ -573,6 +639,9 @@ export class DemesneStore {
           "UPDATE turns SET reverted_at = ? WHERE id = ? AND session_id = ? AND status = 'completed'",
         ).run(now, turnId, sessionId);
       }
+      // Undo can invalidate facts in a summary. Restore full context rather than
+      // continue with a checkpoint that claims reverted changes still exist.
+      this.database.query("UPDATE sessions SET checkpoint_id = NULL, context_start_message_id = NULL WHERE id = ? AND checkpoint_id IS NOT NULL").run(sessionId);
       const event = this.insertEvent("turn.reverted", sessionId, turnId, { files, complete }, now);
       return { event, complete };
     })();
@@ -580,7 +649,8 @@ export class DemesneStore {
     return result;
   }
 
-  trimModelContext(turnId: string, firstRetainedMessageId: number, droppedTurnIds: string[]): EventEnvelope {    const event = this.database.transaction(() => {
+  trimModelContext(turnId: string, firstRetainedMessageId: number, droppedTurnIds: string[]): EventEnvelope {
+    const event = this.database.transaction(() => {
       const turn = this.getTurnOrThrow(turnId);
       if (turn.status !== "running") throw new InvalidStateError(`Turn cannot trim model context from ${turn.status}`);
       const retained = this.database.query("SELECT session_id FROM model_messages WHERE id = ?")
@@ -597,12 +667,52 @@ export class DemesneStore {
     return event;
   }
 
+  getSessionCheckpoint(sessionId: string): SessionCheckpoint | null {
+    const row = this.database.query(`SELECT c.descriptor FROM session_checkpoints c
+      JOIN sessions s ON s.checkpoint_id = c.id WHERE s.id = ?`).get(sessionId) as { descriptor: string } | null;
+    return row ? JSON.parse(row.descriptor) as SessionCheckpoint : null;
+  }
+
+  modelContextVersion(sessionId: string): number {
+    return (this.database.query(`SELECT COALESCE(MAX(id), 0) AS version FROM events WHERE session_id = ?
+      AND type IN ('session.compacted', 'model.context_trimmed', 'turn.reverted')`).get(sessionId) as { version: number }).version;
+  }
+
+  completeCompaction(turnId: string, checkpoint: SessionCheckpoint, response: string, expectedVersion: number): void {
+    const events = this.database.transaction(() => {
+      const turn = this.getTurnOrThrow(turnId);
+      if (turn.kind !== "compaction" || turn.status !== "running" || turn.sessionId !== checkpoint.sessionId || checkpoint.turnId !== turnId) {
+        throw new InvalidStateError("Compaction is no longer active");
+      }
+      if (this.modelContextVersion(turn.sessionId) !== expectedVersion) throw new InvalidStateError("Session context changed during compaction; retry /compact");
+      const retained = this.database.query(`SELECT m.session_id FROM model_messages m JOIN turns t ON t.id = m.turn_id
+        WHERE m.id = ? AND t.status = 'completed' AND t.kind = 'chat' AND m.role = 'user'`).get(checkpoint.firstRetainedMessageId) as { session_id: string } | null;
+      if (retained?.session_id !== turn.sessionId) throw new InvalidStateError("Compaction boundary is outside the session");
+      this.database.query("INSERT INTO session_checkpoints(id, session_id, turn_id, descriptor) VALUES (?, ?, ?, ?)")
+        .run(checkpoint.id, turn.sessionId, turnId, JSON.stringify(checkpoint));
+      this.database.query("UPDATE sessions SET checkpoint_id = ?, context_start_message_id = ?, updated_at = ? WHERE id = ?")
+        .run(checkpoint.id, checkpoint.firstRetainedMessageId, checkpoint.createdAt, turn.sessionId);
+      this.appendModelMessage(turnId, { role: "user", content: turn.content });
+      this.appendModelMessage(turnId, { role: "assistant", content: response });
+      this.database.query("UPDATE turns SET response_text = ?, status = 'completed', completed_at = ? WHERE id = ?")
+        .run(response, checkpoint.createdAt, turnId);
+      return [
+        this.insertEvent("message.delta", turn.sessionId, turnId, { delta: response }, checkpoint.createdAt),
+        this.insertEvent("session.compacted", turn.sessionId, turnId, { checkpoint }, checkpoint.createdAt),
+        this.insertEvent("message.completed", turn.sessionId, turnId, {}, checkpoint.createdAt),
+        this.insertEvent("turn.completed", turn.sessionId, turnId, {}, checkpoint.createdAt),
+      ];
+    })();
+    events.forEach((event) => this.eventSink?.(event));
+  }
+
   createTurn(
     sessionId: string,
     content: string,
     permissionMode: PermissionMode = "deny",
     thinkingEnabled?: boolean,
     planOnly = false,
+    kind: "chat" | "compaction" = "chat",
   ): { turn: Turn; event: EventEnvelope } {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -614,7 +724,7 @@ export class DemesneStore {
       if (active.count > 0) throw new InvalidStateError("Session already has an active turn");
       this.database
         .query(
-          "INSERT INTO turns (id, session_id, content, response_text, status, created_at, permission_mode, thinking_enabled, plan_only) VALUES (?, ?, ?, '', 'queued', ?, ?, ?, ?)",
+          "INSERT INTO turns (id, session_id, content, response_text, status, created_at, permission_mode, thinking_enabled, plan_only, kind) VALUES (?, ?, ?, '', 'queued', ?, ?, ?, ?, ?)",
         )
         .run(
           id,
@@ -624,12 +734,14 @@ export class DemesneStore {
           permissionMode,
           thinkingEnabled === undefined ? null : thinkingEnabled ? 1 : 0,
           planOnly ? 1 : 0,
+          kind,
         );
       this.database.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now, sessionId);
       const event = this.insertEvent("turn.created", sessionId, id, {
         content,
         ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),
         ...(planOnly ? { planOnly: true } : {}),
+        ...(kind === "compaction" ? { kind } : {}),
       }, now);
       return { turn: this.getTurnOrThrow(id), event };
     })();
@@ -836,6 +948,7 @@ export class DemesneStore {
     providerCallId: string,
     outcome: "completed" | "cancelled" | "failed",
     message?: string,
+    finishReason?: string,
   ): EventEnvelope {
     const event = this.database.transaction(() => {
       const call = this.getProviderCallOrThrow(providerCallId);
@@ -845,8 +958,8 @@ export class DemesneStore {
       const turn = this.getTurnOrThrow(call.turn_id);
       const now = new Date().toISOString();
       this.database
-        .query("UPDATE provider_calls SET status = ?, completed_at = ?, error_message = ? WHERE id = ?")
-        .run(outcome, now, message ?? null, providerCallId);
+        .query("UPDATE provider_calls SET status = ?, completed_at = ?, error_message = ?, finish_reason = ? WHERE id = ?")
+        .run(outcome, now, message ?? null, finishReason ?? null, providerCallId);
       const type = outcome === "completed"
         ? "model.request_completed"
         : outcome === "cancelled"
@@ -856,7 +969,7 @@ export class DemesneStore {
         type,
         turn.sessionId,
         turn.id,
-        { providerCallId, ...(message ? { message } : {}) },
+        { providerCallId, ...(message ? { message } : {}), ...(finishReason !== undefined ? { finishReason } : {}) },
         now,
       );
     })();
@@ -1135,6 +1248,14 @@ export class DemesneStore {
     if (!this.hasColumn("turns", "plan_only")) {
       this.database.run("ALTER TABLE turns ADD COLUMN plan_only INTEGER NOT NULL DEFAULT 0");
     }
+    if (!this.hasColumn("turns", "kind")) this.database.run("ALTER TABLE turns ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
+    if (!this.hasColumn("sessions", "checkpoint_id")) this.database.run("ALTER TABLE sessions ADD COLUMN checkpoint_id TEXT");
+    this.database.run(`CREATE TABLE IF NOT EXISTS session_checkpoints (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      turn_id TEXT NOT NULL UNIQUE REFERENCES turns(id) ON DELETE CASCADE,
+      descriptor TEXT NOT NULL
+    ); CREATE INDEX IF NOT EXISTS session_checkpoints_session ON session_checkpoints(session_id);`);
     this.database.run(`
       CREATE TABLE IF NOT EXISTS provider_calls (
         id TEXT PRIMARY KEY,
@@ -1197,6 +1318,9 @@ export class DemesneStore {
       CREATE INDEX IF NOT EXISTS tool_calls_turn ON tool_calls(turn_id, created_at);
       CREATE INDEX IF NOT EXISTS model_messages_session ON model_messages(session_id, id);
     `);
+    if (!this.hasColumn("model_messages", "image_artifact_ids_json")) {
+      this.database.run("ALTER TABLE model_messages ADD COLUMN image_artifact_ids_json TEXT");
+    }
     if (!this.hasColumn("provider_calls", "cached_input_tokens")) {
       this.database.run("ALTER TABLE provider_calls ADD COLUMN cached_input_tokens INTEGER");
     }
@@ -1211,6 +1335,9 @@ export class DemesneStore {
     }
     if (!this.hasColumn("provider_calls", "context_plan_json")) {
       this.database.run("ALTER TABLE provider_calls ADD COLUMN context_plan_json TEXT");
+    }
+    if (!this.hasColumn("provider_calls", "finish_reason")) {
+      this.database.run("ALTER TABLE provider_calls ADD COLUMN finish_reason TEXT");
     }
     if (!this.hasColumn("turn_snapshots", "post_kind")) {
       this.database.run("ALTER TABLE turn_snapshots ADD COLUMN post_kind TEXT CHECK (post_kind IN ('file', 'absent'))");
@@ -1275,6 +1402,7 @@ export class DemesneStore {
              turns.created_at, turns.completed_at
       FROM turns
       WHERE turns.status = 'completed'
+        AND turns.kind = 'chat'
         AND NOT EXISTS (SELECT 1 FROM model_messages WHERE model_messages.turn_id = turns.id)
       ORDER BY turns.rowid
     `).all() as Array<{
@@ -1475,6 +1603,7 @@ function mapTurn(row: TurnRow): Turn {
     permissionMode: row.permission_mode,
     thinkingEnabled: row.thinking_enabled === null ? null : row.thinking_enabled !== 0,
     ...(row.plan_only ? { planOnly: true } : {}),
+    ...(row.kind === "compaction" ? { kind: "compaction" as const } : {}),
   };
 }
 
@@ -1514,7 +1643,8 @@ function mapModelMessage(row: ModelMessageRow): StoredModelMessage {
     return {
       id: row.id,
       turnId: row.turn_id,
-      message: { role: "tool", toolCallId: row.tool_call_id, content: row.content },
+      message: { role: "tool", toolCallId: row.tool_call_id, content: row.content,
+        ...(row.image_artifact_ids_json ? { imageArtifactIds: JSON.parse(row.image_artifact_ids_json) as string[] } : {}) },
     };
   }
   let toolCalls: Array<{ id: string; name: string; arguments: string }> | undefined;

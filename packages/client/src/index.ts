@@ -1,9 +1,12 @@
 import {
+  type ImageArtifact,
+  type ArtifactPage,
   EventStreamHttpError,
   isRecord,
   readServerSentEvents,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
+  type CompactSessionRequest,
   type CreateSessionRequest,
   type CreateSessionResponse,
   type DaemonStatusResponse,
@@ -132,6 +135,36 @@ export class DemesneClient {
     return this.request<SessionStateResponse>(`/v1/sessions/${sessionId}`);
   }
 
+  async listArtifacts(sessionId: string, after = 0): Promise<ArtifactPage> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/artifacts?after=${after}&limit=100`);
+  }
+
+  async getArtifact(sessionId: string, id: string): Promise<ImageArtifact> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(id)}`);
+  }
+
+  async artifactContent(artifact: ImageArtifact, variant: "preview" | "original" = "preview", signal?: AbortSignal): Promise<Uint8Array> {
+    const response = await this.fetchImpl(new URL(`/v1/sessions/${encodeURIComponent(artifact.sessionId)}/artifacts/${encodeURIComponent(artifact.id)}/content?variant=${variant}`, this.server), { headers: this.authHeaders(), signal });
+    if (!response.ok) throw new ApiRequestError("Image content unavailable", response.status, null);
+    const limit = 20 * 1024 * 1024;
+    if (Number(response.headers.get("content-length")) > limit) { await response.body?.cancel(); throw new Error("Image exceeds preview budget"); }
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("Image content is empty");
+    const chunks: Uint8Array[] = []; let size = 0;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > limit) { await reader.cancel(); throw new Error("Image exceeds preview budget"); }
+        chunks.push(value);
+      }
+    } finally { reader.releaseLock(); }
+    const bytes = new Uint8Array(size); let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return bytes;
+  }
+
   async updateSession(sessionId: string, request: UpdateSessionRequest): Promise<UpdateSessionResponse> {
     return this.request<UpdateSessionResponse>(`/v1/sessions/${sessionId}`, {
       method: "PATCH",
@@ -145,6 +178,11 @@ export class DemesneClient {
 
   async listWorkspaceFiles(sessionId: string): Promise<string[]> {
     return (await this.request<{ files: string[] }>(`/v1/sessions/${sessionId}/files`)).files;
+  }
+
+  async listWorkspaceFileInfo(sessionId: string): Promise<import("@demesne/protocol").WorkspaceFileInfo[]> {
+    const response = await this.request<{ entries?: import("@demesne/protocol").WorkspaceFileInfo[]; files?: string[] }>(`/v1/sessions/${sessionId}/files?details=1`);
+    return response.entries ?? (response.files ?? []).map((path) => ({ path, byteLength: null, status: null }));
   }
 
   async exportSession(sessionId: string, format: "md" | "json" = "md"): Promise<string> {
@@ -175,6 +213,10 @@ export class DemesneClient {
       method: "POST",
       body: JSON.stringify({}),
     });
+  }
+
+  async compactSession(sessionId: string, request: CompactSessionRequest = {}): Promise<SubmitTurnResponse> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/compact`, { method: "POST", body: JSON.stringify(request) });
   }
 
   async resolvePermission(permissionId: string, decision: PermissionDecision): Promise<void> {

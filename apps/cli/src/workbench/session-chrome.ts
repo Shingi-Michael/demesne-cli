@@ -70,15 +70,14 @@ export function sessionStatus(options: {
   const phase = !working && options.hasResponse && width < 45 && visibleLength(fullPhase + context) + 15 > width ? mark : fullPhase;
   let left = phase;
   const links: { text: string; action: "context" | "response-start" | "follow" }[] = [{ text: context, action: "context" }];
-  if (options.hasResponse && visibleLength(left + context) + 15 <= width) links.push({ text: paint.text("RESPONSE ↑", "secondary"), action: "response-start" });
   const live = width >= 55 ? "Ctrl+G LIVE ↓" : "Live ↓";
   if (visibleLength(left + links.map((link) => link.text).join(separator)) + live.length + 5 <= width) links.push({ text: paint.text(live, "muted"), action: "follow" });
   if (percentage !== null && visibleLength(left + links.map((link) => link.text).join(separator)) + 8 <= width) links[0]!.text += paint.text(` · ${percentage}%`, "muted");
   const right = links.map((link) => link.text).join(separator);
   const room = width - visibleLength(right) - 2;
-  if (options.paused && visibleLength(left) + 15 <= room) left += (left ? separator : "") + paint.text("↑ SCROLLBACK", "muted");
   left = truncateText(left, Math.max(0, room));
   let column = width - visibleLength(right);
   const zones = links.map((link) => { const zone = { column, width: visibleLength(link.text), action: link.action }; column += zone.width + 3; return zone; });
+  if (options.hasResponse && visibleLength(left)) zones.push({ column: 0, width: visibleLength(left), action: "response-start" });
   return { text: formatFooterLine(left, right, width), zones };
 }

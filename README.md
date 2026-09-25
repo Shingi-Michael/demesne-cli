@@ -110,13 +110,121 @@ DEMESNE_THEME=demesne-light bun run ui:session
 
 `ui:workbench` forwards to the session preview. `scripts/activity-preview.ts` exercises the grouped Activity view; `ui:preview` exercises scrollback rendering. Non-interactive use, `--no-tui`, and `DEMESNE_NO_TUI=1` retain streaming scrollback output.
 
-### Planned artifact previews
+### Image artifact previews
 
-The next panel feature is **artifact previews, starting with images**. Its
-[structure and product plan](docs/artifact-preview-plan.md) defines preview states,
-pinning, history, and persistence; the [implementation document](docs/artifact-preview-implementation.md)
-details the daemon-to-terminal pipeline, module structure, milestones, and verification.
-This feature is planned and not yet implemented; the arcade companion is deferred.
+The expanded side panels follow Figma Version 17: a compact header, a centered
+dark image well, a single metadata row, and inline **Pin / Expand / Open original**
+actions. Multiple images expose quiet history/navigation controls; while Preview
+is focused, **←/→** changes images, **H** toggles history, and **F** follows latest.
+Files shows sizes and Git status (when available); Diff opens colored hunks directly.
+
+#### Browser screenshots and visual inspection
+
+**Demesne itself is a terminal UI, not a website.** On macOS, the agent can use
+`capture_window({ application: "Ghostty", title: "demesne" })` to capture its
+visible terminal window. The workbench sets its window title to `demesne` while
+running and restores the previous title on exit. If multiple windows match, the
+tool returns their IDs for explicit selection. It does not fall back to a whole
+desktop capture or an unrelated browser app. Native capture requires macOS Screen
+Recording access and Swift command-line tools, and uses the normal tool approval
+flow. Its screenshots enter the same Preview and vision pipeline.
+
+Image-returning MCP tools automatically save screenshots to Preview. For tools
+that save files instead, the agent can call `view_image({ path: "screen.png" })`
+to import a workspace PNG/JPEG/WebP. File imports are bounded and workspace-scoped.
+Pinning, history, and explicit panel dismissal apply to screenshots as well.
+
+For browser capture, configure the user config, for example:
+
+```toml
+[mcp.servers.browser]
+command = "npx"
+args = ["-y", "@playwright/mcp@0.0.82", "--headless", "--isolated", "--browser", "chrome", "--image-responses", "allow"]
+timeout_ms = 60000
+```
+
+This requires Chrome installed locally. Browser tools use the existing MCP
+permission flow. Ask the model to navigate to a page and take a screenshot.
+
+To let the conversational model **see the pixels**, enable `vision = true` in
+the existing `[provider]` section (or `DEMESNE_PROVIDER_VISION=true`) and restart
+the daemon. Only enable this with a vision-capable model and serving backend.
+For the local Qwen setup, `bun run model:llama:vision` loads the vision projector
+alongside the model; pair it with `bun run daemon:llama:vision`. The vision
+launcher uses an experimental runtime profile because the measured text-only
+100K profile explicitly excludes a projector. A text-only server can still capture/display screenshots
+and inspect browser DOM/text, but cannot inspect pixels.
+
+Vision requests attach the latest two retained images as OpenAI-compatible
+`image_url` user content after all tool results, at low detail. Context planning
+reserves an additional 4096 tokens for visual input. Durable transcripts store
+artifact IDs; image bytes are resolved only for provider requests, including
+after restart. Missing image files fall back to the saved text metadata.
+
+#### Generate images in a conversation
+
+Configure an OpenAI Images-compatible backend in `~/.demesne/config.toml`:
+
+```toml
+[images]
+url = "https://api.openai.com/v1"
+model = "gpt-image-1"
+request_timeout_ms = 300000
+```
+
+Supply its credential with `DEMESNE_IMAGE_API_KEY` in the daemon's environment
+(or `api_key` in the `[images]` section), then restart the daemon. URL, model,
+and timeout also accept `DEMESNE_IMAGE_URL`, `DEMESNE_IMAGE_MODEL`, and
+`DEMESNE_IMAGE_REQUEST_TIMEOUT_MS`. The daemon uses user configuration; project
+configuration cannot change its image backend. Use an image model your provider
+account can access.
+
+Your conversational model stays selected. It now receives a `generate_image`
+tool: ask **“Generate a logo for this project”** and the resulting image is saved
+and delivered to Preview automatically. Ask **“Make the background darker”**
+and the model can pass the prior artifact ID to the same tool for an edit.
+References are restricted to the current session; originals remain immutable.
+
+Both `url` and `model` must be configured to enable the tool. This adapter uses
+`/images/generations` and multipart `/images/edits`, requesting one image per
+call. The backend must return `data[0].b64_json` (as GPT Image models do);
+URL-only responses are unsupported. Requests support cancellation and a
+five-minute default timeout; returned images use the existing 20 MiB / 40 MP
+artifact limits. Only artifact metadata reaches the conversational model.
+
+The image backend is separate from the chat endpoint and credentials: selecting
+a tool-capable conversational model alone does not configure an image service.
+
+**Alt+V** opens the image Preview panel. Image-returning MCP tools now save PNG,
+JPEG, and WebP outputs as session artifacts with immutable originals and PNG
+previews. On wide terminals, an available image opens automatically when another
+inspection is not active; explicit dismissal keeps the panel closed.
+
+Use **Pin**, **Follow latest**, **Previous/Next**, **Image history**, **Expand**, and
+**Open original** in the panel. Tab selects controls, Enter activates them, and
+Escape returns from history/expanded view or closes Preview. Pinning and selection
+survive session resume. Supported terminals negotiate Kitty graphics and cell size;
+otherwise the panel retains metadata and Open original. No graphics are emitted
+in plain snapshots. The bottom status strip remains free of image telemetry.
+
+Try the production renderer without an image model:
+
+```sh
+bun run ui:image
+bun run ui:image --snapshot=120x36 --plain
+python3 scripts/check-image-pty.py
+```
+
+For daemon integration testing, `scripts/fake-image-mcp.ts` is a local MCP fixture
+that returns real PNG bytes. Configure it in the user configuration with command
+`bun` and an absolute script path in `args`, then restart the daemon. Actual image
+generation requires an image-producing MCP server; previewing does not give a
+text-only model image-generation capability. Generic tools expose images when
+their results arrive, without fabricated generation progress.
+
+The [product plan](docs/artifact-preview-plan.md) and
+[implementation document](docs/artifact-preview-implementation.md) track the
+remaining roadmap and visual acceptance checks. Arcade work remains deferred.
 
 ### Themes
 
@@ -161,9 +269,51 @@ Type `/` in the CLI to open the `SESSION`, `INSPECT`, and `CONTROL` command pale
 | `/plan <prompt>` | Draft a read-only plan with inspection tools before changing anything |
 | `/diff` | Review the last turn's changes with plain diffs |
 | `/undo [path]` | Revert conflict-free changes from the last undoable turn, or one file |
+| `/compact [instructions]` | Summarize older context while keeping the latest two conversation turns |
 | `/clear` | Clear terminal and reprint masthead |
 | `/help` | Show the command reference |
 | `/exit` | Exit the CLI |
+
+### Manual context compaction
+
+Use `/compact` to create a durable checkpoint with the currently selected model.
+Optional instructions tell the summarizer what to prioritize:
+
+```text
+/compact
+/compact preserve the tooling redesign decisions and unfinished work
+```
+
+The summary preserves the goal, current state, constraints, decisions, relevant
+files, validation results, and pending work. The latest **two completed conversation
+turns** retain their full text and tool-call/result pairs. Future requests receive
+the checkpoint followed by those recent turns; repeated compaction merges the
+previous checkpoint with newly older turns. Long source histories are summarized
+in bounded chunks.
+
+The resulting **Compact** response shows the summary and estimated before/after
+context tokens. `/context` includes the last compaction receipt and preserves the
+provider's actual summary-request usage separately. Original requests, responses,
+and tool records remain available in History; images remain in Preview history.
+Transcript export still includes the original requests and responses. Checkpoints
+survive daemon restarts and session resume.
+
+Compaction uses the normal inference queue and can be stopped with **Esc Esc** or
+**Ctrl+C**. An incomplete or invalid summary leaves the prior context active. Short
+histories, and summaries that would increase context, produce a no-change receipt.
+Undo invalidates the active checkpoint and restores full context with recorded
+undo annotations; run `/compact` again to summarize that updated history.
+
+From a shell:
+
+```sh
+bun run demesne compact <session-id> "Preserve the remaining parser work"
+```
+
+The typed client exposes `compactSession(sessionId, { instructions })`. The
+authenticated `POST /v1/sessions/:id/compact` route returns a turn and event cursor
+with HTTP 202. Progress, cancellation, failures, and completion use the regular
+session event stream; `session.compacted` records a committed checkpoint.
 
 ### Prompt Editing
 
@@ -469,6 +619,39 @@ machine-wide, so a workspace cannot reconfigure the shared runtime. The CLI
 merges the project file for workspace-specific defaults. `DEMESNE_CONFIG_FILE`
 points the loader at a different user config for testing or nonstandard homes.
 
+Additional model endpoints can be registered in the user configuration. The
+primary `[provider]` remains the startup default; `/model` can switch between
+models returned by the primary and additional providers. Each model ID must
+be unique across endpoints. A temporarily unavailable endpoint does not hide
+models from the other reachable endpoints, and queued turns retain their
+original provider and limits after a selection change.
+
+```toml
+[additional_providers.home-qwen]
+id = "Qwen on PC"
+url = "http://100.115.125.89:8081/v1"
+allow_http_endpoint = "http://100.115.125.89:8081/v1"
+model = "qwen3.8-27b"
+allowed_models = ["qwen3.8-27b"]
+context_window = 262144
+max_output_tokens = 8192
+```
+
+`max_output_tokens` is the per-request generation budget, shared by thinking,
+tool-call arguments, and the visible answer. Thinking models may need a larger
+budget than text-only replies; 8192 is a starting point for this Qwen endpoint.
+The budget must remain below the model's context window. Token-limit stops and
+reasoning-only/empty replies fail explicitly instead of being marked completed.
+Partial text and usage remain available, and the provider's `finish_reason` is
+saved with its call and completion/failure event for diagnosis and replay.
+
+Remote providers normally require HTTPS. `allow_http_endpoint` opts in to
+one exact HTTP endpoint whose IPv4 address is in `100.64.0.0/10`; this is intended
+for an established Tailscale connection. It does not establish or verify that
+connection itself. Redirects remain disabled. Restart the daemon after changing
+provider configuration. The daemon-wide instruction, vision, scheduling and
+timeout policies continue to come from the primary configuration.
+
 Interactive terminals emit a desktop notification (OSC 9) when a turn finishes
 after at least `minimum_duration_ms` or when an approval is waiting.
 `DEMESNE_NO_NOTIFICATIONS=1` disables them, and terminals without OSC 9 support
@@ -530,6 +713,15 @@ bun run build
 ```
 
 The local build command targets the current machine. Public macOS distribution additionally requires explicit arm64 and x86_64 artifacts, Developer ID signing, notarization, and published checksums; the repository does not yet automate those release steps.
+
+The compiled daemon's native image codecs are packaged in `dist/node_modules`.
+Keep that directory beside `demesned` when relocating the build. The CLI binary
+itself does not load the image decoder. To verify the packaged codec path:
+
+```sh
+bun build scripts/check-image-runtime.ts --compile --outfile dist/check-image-runtime
+./dist/check-image-runtime
+```
 
 ## Development
 

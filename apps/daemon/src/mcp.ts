@@ -1,6 +1,7 @@
 import type { ProviderToolDefinition } from "@demesne/providers";
 import type { McpServerConfig } from "@demesne/config";
 import type { AgentTool, ToolRegistry } from "./tools.ts";
+import type { StructuredToolResult, ImageOutput } from "./artifacts.ts";
 
 /// Model Context Protocol client for stdio servers.
 ///
@@ -13,6 +14,7 @@ export const MCP_PROTOCOL_VERSION = "2025-06-18";
 export const MCP_REQUEST_TIMEOUT_MS = 30_000;
 const MCP_OUTPUT_LIMIT_BYTES = 256 * 1024;
 const MCP_RESULT_LIMIT_BYTES = 256 * 1024;
+const MCP_IMAGE_FRAME_LIMIT = 32 * 1024 * 1024;
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -101,6 +103,19 @@ export class McpStdioClient {
     return flattenToolResult(this.name, result);
   }
 
+  async callToolWithImages(tool: string, args: unknown): Promise<string | StructuredToolResult> {
+    const result = await this.request("tools/call", { name: tool, arguments: args ?? {} });
+    const text = flattenToolResult(this.name, result);
+    const images: ImageOutput[] = [];
+    if (isRecord(result) && Array.isArray(result.content)) for (const block of result.content) {
+      if (!isRecord(block) || block.type !== "image") continue;
+      if (typeof block.data !== "string" || typeof block.mimeType !== "string" || block.data.length > 28 * 1024 * 1024
+        || !/^[A-Za-z0-9+/]*={0,2}$/.test(block.data)) throw new Error("Invalid MCP image payload");
+      images.push({ data: Buffer.from(block.data, "base64"), mimeType: block.mimeType });
+    }
+    return images.length ? { text, images } : text;
+  }
+
   stop(): void {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
@@ -159,10 +174,11 @@ export class McpStdioClient {
         let index: number;
         while ((index = this.buffer.indexOf("\n")) >= 0) {
           const line = this.buffer.slice(0, index).trim();
+          if (Buffer.byteLength(line) > MCP_IMAGE_FRAME_LIMIT) { this.stop(); return; }
           this.buffer = this.buffer.slice(index + 1);
           if (line) this.handleLine(line);
         }
-        if (this.buffer.length > MCP_OUTPUT_LIMIT_BYTES) {
+        if (Buffer.byteLength(this.buffer) > MCP_IMAGE_FRAME_LIMIT) {
           this.log(`MCP server ${this.name} exceeded the output limit`);
           this.stop();
           return;
@@ -275,6 +291,10 @@ function buildAgentTool(client: McpStdioClient, definition: ProviderToolDefiniti
     execute: async (input) => {
       await client.ensureStarted();
       return client.callTool(definition.name, input);
+    },
+    executeWithArtifacts: async (input) => {
+      await client.ensureStarted();
+      return client.callToolWithImages(definition.name, input);
     },
   };
 }

@@ -1,7 +1,47 @@
 # Artifact preview panel: implementation document
 
-Status: proposed implementation; no artifact-preview feature code is delivered
-by this document. Checkboxes represent remaining work.
+Status: initial image-preview pipeline and production panel implemented.
+The complete roadmap below also includes follow-up producer-state and release
+validation work; unchecked items are not claims of delivered functionality.
+
+### Implementation progress
+
+- Added `apps/cli/src/terminal-graphics.ts`: capability-query commands,
+  pixel-aware aspect-fit geometry, bounded Kitty transfer chunks, placement
+  reuse on resize, and cleanup restricted to the owned image ID.
+- Added fragmented graphics/cell-size reply decoding in `TerminalInputDecoder`.
+  The workbench consumes these separately from typing and paste.
+- Added regression tests for every reply split boundary, split terminators,
+  placement reuse, no-op redraws, and cleanup.
+- Connected capability negotiation and graphics placement to the production
+  workbench. `bun run ui:image` exercises the image panel without a model.
+- Added Sharp-backed static PNG/JPEG/WebP ingestion, immutable original files,
+  PNG derivatives, SQLite artifact descriptors, idempotent creation events,
+  authenticated metadata/content routes, and typed binary client retrieval.
+- MCP tools preserve structured image content through the optional
+  `executeWithArtifacts` method; existing string-only `execute` callers retain
+  their contract. Binary content stays out of stored model messages and event payloads.
+- Added first-class image generation and browser screenshot inspection. Opt-in
+  provider vision resolves persisted artifact IDs into image inputs only at the
+  provider boundary, retaining the latest two images with a visual token reserve.
+  `view_image` imports workspace screenshots returned as file paths.
+- Live acceptance: OpenAI generated a 1024×1024 image through the agent tool loop.
+  Playwright captured a 1280×720 browser screenshot; local Qwen with its projector
+  correctly identified a purple circle and green rectangle from its pixels.
+  Screenshot artifacts were saved with the browser tool as their source.
+- Added Preview (Alt+V), automatic wide-screen opening, manual/pinned/follow
+  selection, history, expand, original-file opening, and client-local preferences.
+- The compiled daemon ships with `dist/node_modules` for native image codecs.
+  `scripts/check-image-runtime.ts` verifies decode/persist/retrieve from a compiled
+  executable outside the repository working directory.
+- `scripts/check-image-pty.py` verifies protocol negotiation, placements,
+  mixed-axis momentum, closing/reopening, and terminal cleanup. This is a PTY
+  protocol check, not a claim of visual validation in Ghostty.
+- Remaining roadmap work: explicit producer-operation lifecycle events and their
+  generating/failure UI, response-local image links, reverted-turn filtering,
+  on-demand history pagination, orphan-file retention cleanup, and an
+  actual Ghostty visual acceptance run. Generic image-returning
+  tools currently expose artifacts on completion, without invented progress.
 
 Product requirements: [structure and product plan](artifact-preview-plan.md).
 

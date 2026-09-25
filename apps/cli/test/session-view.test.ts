@@ -163,7 +163,7 @@ test("the prompt retains drafts and queued instructions when focus changes", asy
   // The queued draft labels its automatic handoff even while editing it.
   expect(screen()).toContain("Next step");
   expect(screen()).toContain("Queued · sends after this turn");
-  expect(screen()).toContain("[  ···  ]");
+  expect(screen()).toContain("│  ···   │");
   key("t", { ctrl: true });
   key("c", { ctrl: true });
   expect(interrupts()).toBe(1);
@@ -293,9 +293,9 @@ test("queued follow-ups support caret editing and keep the running control visib
   key("return");
   expect(queue()).toBe("abc");
   state.onKeypress("\n" + "a long follow-up\n".repeat(20), {});
-  expect(screen(40, 10)).toContain("[  ···  ]");
+  expect(screen(40, 10)).toContain("│  ···   │");
   expect(screen(40, 10)).toContain("Clear queue");
-  expect(screen(40, 10)).toContain("Queued · sends after this turn");
+  expect(screen(40, 10)).toContain("Type to queue");
 });
 
 test("model picker keeps the selected result visible on a ten-row terminal", async () => {
@@ -385,8 +385,8 @@ test("Response navigation reveals the answer start, preserves draft and historic
     state.onKeypress("ac", {}); key("left");
     const rows = screen(width, height).split("\n");
     expect(rows.join("\n")).not.toContain("ANSWER_START");
-    const row = rows.findIndex((line) => line.includes("RESPONSE ↑"));
-    state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("RESPONSE ↑") });
+    const row = rows.length - 1;
+    state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("✓") });
     expect(screen(width, height)).toContain("ANSWER_START");
     expect(view.focused).toBe(true);
     expect(view.memory.followFlow).toBe(false);
@@ -534,12 +534,13 @@ test("message timestamps keep their first-event time while the header clock adva
     ui.finishTurn("completed", "Done");
     const before = screen(120, 36).split("\n");
     expect(view.current?.answer?.at).toBe(at);
-    expect(before.find((row, index) => index > 0 && row.includes("demesne"))).toContain(new Date(at).toTimeString().slice(0, 8));
+    expect(before.find((row, index) => index > 1 && row.includes("demesne"))).toContain(new Date(at).toTimeString().slice(0, 8));
     clock.mockReturnValue(start + 2000);
     const after = screen(120, 36).split("\n");
-    expect(after[0]).toContain(new Date(start + 2000).toTimeString().slice(0, 8));
-    expect(after[0]).not.toBe(before[0]);
-    expect(after.slice(1)).toEqual(before.slice(1));
+    expect(after[1]).toContain(new Date(start + 2000).toTimeString().slice(0, 8));
+    expect(after[1]).toContain("+00:02");
+    expect(after[1]).not.toBe(before[1]);
+    expect(after.slice(2)).toEqual(before.slice(2));
   } finally {
     clock.mockRestore();
     if (motion === undefined) delete process.env.DEMESNE_REDUCED_MOTION; else process.env.DEMESNE_REDUCED_MOTION = motion;
@@ -562,7 +563,7 @@ test("one card header precedes the full multi-round stream and keeps its origina
     ui.toolFinished({ toolCallId: "second", name: "read_file", state: "failed", message: "Unable to read engine.ts" });
     ui.finishTurn("failed", "Run ended");
     const rows = screen(120, 36).split("\n");
-    const headers = rows.flatMap((line, index) => index > 0 && line.includes("demesne") ? [index] : []);
+    const headers = rows.flatMap((line, index) => index > 1 && line.includes("demesne") ? [index] : []);
     expect(headers).toHaveLength(1);
     const header = headers[0]!;
     expect(rows[header]).toContain(new Date(start).toTimeString().slice(0, 8));
@@ -916,8 +917,8 @@ test("context capacity and project path stay visible in narrow frames and open d
   expect(state.editor.value).toBe("preserve this draft");
   key("escape");
   // The session-line path and prompt-side context remain live mouse targets.
-  const heading = screen().split("\n")[0]!;
-  state.handleMouse({ kind: "press", button: 0, row: 0, col: heading.indexOf("/project") });
+  const heading = screen().split("\n")[1]!;
+  state.handleMouse({ kind: "press", button: 0, row: 1, col: heading.indexOf("/project") });
   expect(screen()).toContain("PROJECT FOLDER");
   expect(screen()).toContain("/project");
   key("escape");
@@ -1148,9 +1149,120 @@ test("folding completed reasoning leaves breathing room without a visible scroll
   const region = (view as any).regions.find((region: { target: string }) => region.target === "flow");
   expect(view.memory.flowOffset).toBe(0);
   expect((view as any).flowRows.length).toBeLessThan(region.height);
-  expect(rows[0]).toContain("HISTORY ↓");
+  expect(rows[1]).toContain("HISTORY ↓");
   expect(rows.join("\n")).toContain("SHORT_RESPONSE");
   expect(rows.join("\n")).not.toContain("╎");
+});
+
+test("streaming bursts advance one row per frame and drain through settlement without skipping prose", () => {
+  for (const [width, height] of [[40, 10], [80, 24], [120, 36]]) {
+    const { ui, state, view, screen } = fixture();
+    let now = 1_000;
+    const clock = spyOn(Date, "now").mockImplementation(() => now);
+    state.started = true;
+    try {
+      ui.beginTurn({ userText: "Explain", at: "now" });
+      screen(width, height);
+      ui.assistantDelta("Introduction\n");
+      now += 16; screen(width, height);
+      const before = view.memory.flowOffset;
+      ui.assistantDelta(Array.from({ length: 45 }, (_, index) => `BURST_${String(index).padStart(2, "0")}\n`).join(""));
+      now += 16;
+      const seen = new Set<string>();
+      const observe = () => {
+        const text = screen(width, height);
+        for (const match of text.matchAll(/BURST_\d+/g)) seen.add(match[0]);
+        return text;
+      };
+      expect(observe()).not.toContain("BURST_44");
+      expect(view.memory.flowOffset - before).toBe(1);
+      expect(view.animating(now)).toBe(true);
+      const offset = view.memory.flowOffset;
+      observe(); // Multiple paints at one instant must not accelerate scrolling.
+      expect(view.memory.flowOffset).toBe(offset);
+      now += 1000; observe(); // A delayed frame must not jump to catch up.
+      expect(view.memory.flowOffset).toBe(offset + 1);
+      ui.finishTurn("completed", "Done");
+      let previous = view.memory.flowOffset;
+      let frame = "";
+      for (let tick = 0; tick < 150; tick++) {
+        now += 16; frame = observe();
+        expect(view.memory.flowOffset - previous).toBeGreaterThanOrEqual(0);
+        expect(view.memory.flowOffset - previous).toBeLessThanOrEqual(1);
+        previous = view.memory.flowOffset;
+        if (!view.animating(now)) break;
+      }
+      expect(view.animating(now)).toBe(false);
+      expect(seen.size).toBe(45);
+      expect(frame).toContain("COMPLETE");
+      expect(observe()).toBe(frame);
+    } finally { state.started = false; ui.stop(); clock.mockRestore(); }
+  }
+});
+
+test("scrolling up stops catch-up immediately and Live jumps directly to the latest text", () => {
+  const { ui, state, view, screen, key } = fixture();
+  let now = 1000;
+  const clock = spyOn(Date, "now").mockImplementation(() => now);
+  state.started = true;
+  try {
+    ui.beginTurn({ userText: "Explain", at: "now" }); screen();
+    ui.assistantDelta("Start\n" + "A line\n".repeat(60));
+    for (let tick = 0; tick < 20; tick++) { now += 16; screen(); }
+    expect(view.animating(now)).toBe(true);
+    key("pageup"); screen();
+    const offset = view.memory.flowOffset;
+    const anchor = view.memory.anchor;
+    ui.assistantDelta("\nLAST_OUTPUT");
+    now += 1000;
+    expect(screen()).not.toContain("LAST_OUTPUT");
+    expect(view.memory.flowOffset).toBe(offset);
+    expect(view.memory.anchor).toEqual(anchor);
+    expect(view.animating(now)).toBe(false);
+    key("g", { ctrl: true });
+    expect(screen()).toContain("LAST_OUTPUT");
+    expect(view.animating(now)).toBe(false);
+  } finally { state.started = false; ui.stop(); clock.mockRestore(); }
+});
+
+test("resize and reduced motion resolve pending scroll without a stale animation", () => {
+  const { ui, state, view, screen } = fixture();
+  const reduced = process.env.DEMESNE_REDUCED_MOTION;
+  delete process.env.DEMESNE_REDUCED_MOTION;
+  state.started = true;
+  try {
+    ui.beginTurn({ userText: "Explain", at: "now" }); screen();
+    ui.assistantDelta("A line\n".repeat(60) + "BEFORE_RESIZE"); screen();
+    expect(view.animating()).toBe(true);
+    expect(screen(120, 36)).toContain("BEFORE_RESIZE");
+    expect(view.animating()).toBe(false);
+    ui.assistantDelta("\n" + "Another line\n".repeat(60) + "AFTER_BURST"); screen(120, 36);
+    expect(view.animating()).toBe(true);
+    process.env.DEMESNE_REDUCED_MOTION = "1";
+    expect(screen(120, 36)).toContain("AFTER_BURST");
+    expect(view.animating()).toBe(false);
+  } finally {
+    state.started = false; ui.stop();
+    if (reduced === undefined) delete process.env.DEMESNE_REDUCED_MOTION;
+    else process.env.DEMESNE_REDUCED_MOTION = reduced;
+  }
+});
+
+test("production painting continues scroll catch-up after the last provider delta", async () => {
+  const { ui, state, view } = fixture();
+  const write = spyOn(process.stdout, "write").mockImplementation(() => true);
+  state.started = true;
+  try {
+    ui.beginTurn({ userText: "Explain", at: "now" }); state.render();
+    ui.assistantDelta("Line\n".repeat(24)); state.render();
+    ui.finishTurn("completed", "Done");
+    const before = view.memory.flowOffset;
+    await Bun.sleep(100);
+    expect(view.memory.flowOffset).toBeGreaterThan(before);
+    for (let tick = 0; tick < 40 && view.animating(); tick++) await Bun.sleep(25);
+    expect(view.animating()).toBe(false);
+    expect(state.renderTimer).toBeNull();
+  } finally { state.started = false; ui.stop(); write.mockRestore(); }
 });
 
 test("terminal painting coalesces input bursts, writes atomic padded frames, and emits nothing for an unchanged frame", async () => {
@@ -1347,9 +1459,10 @@ test("opening evidence near the viewport edge reveals the record beside its resp
   const row = rows.findIndex((line) => line.includes("1 file changed"));
   state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("1 file changed") });
   const expanded = screen(100, 36);
-  expect(expanded).toContain("RECORDED CHANGE");
+  expect(expanded).toContain("▪ DIFF");
+  expect(expanded).toContain("@@");
   expect(expanded).toContain("return /[a-zA-Z_]/.test(cha");
-  expect(expanded).toContain("Arguments ▸");
+  expect(expanded).not.toContain("Arguments ▸");
   expect(expanded).toContain("Unicode identifiers are accepted");
   expect(expanded).toContain("Keep this draft");
 });
@@ -1465,7 +1578,7 @@ test("inline command output preserves indentation and CJK at odd cell boundaries
   for (const row of ui.frame(41, 36).rows) expect(visibleLength(row)).toBe(41);
 });
 
-test("the action rail opens a real log and docked evidence scrolls independently at both boundaries", () => {
+test("the log shortcut opens a real log and docked evidence scrolls independently at both boundaries", () => {
   const { ui, view, state, screen, key } = fixture();
   ui.beginTurn({ userText: "Run a detailed check", at: "now" });
   ui.toolRequested({ toolCallId: "check", name: "run_command", arguments: { argv: ["check"] } });
@@ -1473,7 +1586,7 @@ test("the action rail opens a real log and docked evidence scrolls independently
     message: Array.from({ length: 70 }, (_, index) => `OUTPUT_${index}`).join("\n") });
   ui.beginRound(); ui.assistantDelta("CHECK_RESPONSE"); ui.finishTurn("completed", "Complete");
   const rows = screen(120, 36).split("\n");
-  state.handleMouse({ kind: "press", button: 0, row: 3, col: rows[3]!.lastIndexOf("⊞") });
+  key("b", { ctrl: true });
   expect(screen(120, 36)).toContain("EXECUTION LOG");
   expect(view.panelOpen).toBe(true);
   const selection = view.memory.logSelection;

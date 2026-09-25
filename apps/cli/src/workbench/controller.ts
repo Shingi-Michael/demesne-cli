@@ -38,6 +38,10 @@ import { composeDraft, composerHeight } from "./composer.ts";
 import { SessionView } from "./session.ts";
 import { toolFailed } from "./evidence.ts";
 import { sessionStatus } from "./session-chrome.ts";
+import { sidebarRail, type RailAction } from "./sidebar-rail.ts";
+import { ArtifactPreview, type PreviewServices } from "./preview-panel.ts";
+import { graphicsProbe, TerminalGraphics, type TerminalImage } from "../terminal-graphics.ts";
+import type { ImageArtifact } from "@demesne/protocol";
 import { StartScreen, startScreenLayout, START_OPERATIONS, type StartAction, type StartLayout } from "./start-screen.ts";
 import type { RecentSession } from "../recent-sessions.ts";
 import type { WorkbenchEntry, AssistantEntry, ReasoningEntry, ToolEntry, NoticeEntry, ToolState, ResponseReceipt } from "./entries.ts";
@@ -87,6 +91,9 @@ export interface PromptContext {
 }
 
 export interface WorkbenchOptions {
+  files?: () => Promise<string[]>;
+  fileInfo?: () => Promise<import("@demesne/protocol").WorkspaceFileInfo[]>;
+  preview?: PreviewServices;
   paint: Painter;
   contextRail: CliContextRail;
   sessionTitle: string;
@@ -129,6 +136,14 @@ export interface InputZone {
 }
 
 export class Workbench {
+  private railHovered: RailAction | null = null;
+  private railZones: { row: number; height: number; column: number; width: number; action: RailAction }[] = [];
+  private preview: ArtifactPreview | null = null;
+  private readonly graphics = new TerminalGraphics(Math.floor(Math.random() * 0x7fffffff) + 1);
+  private graphicsReady = false;
+  private cellSize: { width: number; height: number } | null = null;
+  private imageIntent: TerminalImage | null = null;
+  private probeUntil = 0;
   private sessionLayout = true;
   private readonly sessionView = new SessionView((text) => this.copyResponse(text));
   private readonly startScreen = new StartScreen();
@@ -201,9 +216,12 @@ export class Workbench {
   private previousCursor: { row: number; column: number } | null = null;
   private lastInterruptEscapeAt = 0;
   private sessionTitle: string;
+  private sessionOpenedAt = Date.now();
+  private sessionCreatedAt = this.sessionOpenedAt;
   private readonly expandedReasoning = new Set<number>();
 
   constructor(private readonly options: WorkbenchOptions) {
+    if (options.preview) this.preview = new ArtifactPreview(options.preview, () => this.requestRender());
     this.sessionTitle = options.sessionTitle;
     this.layout = computeWorkbenchLayout(process.stdout.columns ?? 80, process.stdout.rows ?? 24, { sidebar: "hidden" });
   }
@@ -218,7 +236,7 @@ export class Workbench {
     this.terminalFocused = true;
     this.clockSecond = Math.floor(Date.now() / 1000);
     this.previousRows = []; this.previousCursor = null;
-    process.stdout.write(`\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J${MOUSE_ENABLE}${PASTE_ENABLE}${FOCUS_ENABLE}`);
+    process.stdout.write(`\x1b[22;0t\x1b]2;demesne\x07\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J${MOUSE_ENABLE}${PASTE_ENABLE}${FOCUS_ENABLE}`);
     const input = process.stdin;
     // Only non-mouse bytes reach our isolated keypress stream.
     input.on("data", this.onData);
@@ -226,6 +244,10 @@ export class Workbench {
     input.setRawMode(true);
     input.resume();
     this.keyboard.on("keypress", this.onKeypress);
+    if (this.preview && this.options.paint.enabled) {
+      this.graphicsReady = false; this.cellSize = null; this.probeUntil = Date.now() + 1500;
+      process.stdout.write(graphicsProbe(this.graphics.imageId));
+    }
     process.stdout.on("resize", this.onResize);
     this.animationTimer = setInterval(() => {
       const second = Math.floor(Date.now() / 1000);
@@ -255,7 +277,8 @@ export class Workbench {
     input.setRawMode(false);
     this.sessionView.hover(-1, -1);
     this.startScreen.hover(-1, -1);
-    process.stdout.write(`\x1b[?2026l\x1b[?7h\x1b[?25h${MOUSE_DISABLE}${PASTE_DISABLE}${FOCUS_DISABLE}\x1b[?1049l`);
+    this.preview?.cancel();
+    process.stdout.write(this.graphics.clear() + `\x1b[?2026l\x1b[?7h\x1b[?25h${MOUSE_DISABLE}${PASTE_DISABLE}${FOCUS_DISABLE}\x1b[?1049l\x1b[23;0t`);
   }
 
   setSessionTitle(title: string): void {
@@ -264,12 +287,18 @@ export class Workbench {
     this.requestRender();
   }
 
+  addArtifact(artifact: ImageArtifact): void {
+    this.preview?.add(artifact, !this.sessionView.panelOpen && (process.stdout.columns ?? 80) >= 100);
+  }
+
+  setArtifactSession(sessionId: string): void { this.preview?.reset(sessionId); }
+
   setRecentSessions(sessions: readonly RecentSession[], state: "loading" | "ready" | "unavailable" = "ready"): void {
     this.recentSessions = [...sessions]; this.recentState = state; this.requestRender();
   }
 
   private get showingStart(): boolean {
-    return this.sessionLayout && this.mode === "input" && !this.sessionView.panelOpen
+    return this.sessionLayout && this.mode === "input" && !this.sessionView.panelOpen && !this.preview?.open
       && !this.entries.some((entry) => entry.type === "user" || entry.type === "assistant" || entry.type === "reasoning" || entry.type === "tool");
   }
 
@@ -286,7 +315,10 @@ export class Workbench {
     this.entries = restoreSessionEntries(state, events);
     this.nextId = (this.entries.at(-1)?.id ?? 0) + 1;
     this.sessionTitle = state.session.title;
+    if (this.sessionId !== state.session.id) this.sessionOpenedAt = Date.now();
+    this.sessionCreatedAt = Date.parse(state.session.createdAt) || this.sessionOpenedAt;
     this.sessionId = state.session.id;
+    this.preview?.reset(state.session.id);
     this.startScreen.reset(); this.startLayout = null;
     this.options.workspaceRoot = state.session.workspace?.root;
     this.sessionView.reset();
@@ -336,10 +368,10 @@ export class Workbench {
   /// Command output that already draws its own opener and grid. Rendered
   /// verbatim: adding the turn rail here double-indented the panel and forced
   /// its opener to truncate.
-  showPanel(lines: readonly string[], options: { open?: boolean } = {}): void {
+  showPanel(lines: readonly string[], options: { open?: boolean; title?: string; files?: import("@demesne/protocol").WorkspaceFileInfo[] } = {}): void {
     if (lines.length === 0) return;
     const id = this.nextId++;
-    this.entries.push({ id, type: "panel", lines: [...lines] });
+    this.entries.push({ id, type: "panel", lines: [...lines], title: options.title, files: options.files });
     if (this.sessionLayout && options.open !== false) this.sessionView.presentOutput(id);
     this.requestRender();
   }
@@ -352,14 +384,15 @@ export class Workbench {
     this.requestRender();
   }
 
-  beginTurn(options: { userText: string; at: string; planOnly?: boolean }): void {
+  beginTurn(options: { userText: string; at: string; planOnly?: boolean; compaction?: boolean }): void {
     this.mode = "streaming";
     this.state = "thinking";
     this.turnStartedAt = Date.now();
     this.feedback = null;
     this.sessionView.dismissOutput();
-    this.entries.push({ id: this.nextId++, type: "user", text: options.userText, at: options.at, startedAt: this.turnStartedAt, model: this.options.contextRail.modelId, planOnly: options.planOnly ?? false });
+    this.entries.push({ id: this.nextId++, type: "user", text: options.userText, at: options.at, startedAt: this.turnStartedAt, model: this.options.contextRail.modelId, planOnly: options.planOnly ?? false, compaction: options.compaction });
     if (options.planOnly) this.notice("plan · read-only tools · proposals before changes");
+    if (options.compaction) this.feedback = { text: "Compacting older context · keeping the latest two turns · Esc Esc / Ctrl+C stops", tone: "info" };
     this.requestRender();
   }
 
@@ -490,10 +523,11 @@ export class Workbench {
     this.finishAssistant();
     const entries = this.currentEntries();
     const request = entries.find((entry) => entry.type === "user");
+    if (request?.compaction) this.feedback = null;
     const answer = entries.findLast((entry) => entry.type === "assistant");
     const lastTool = entries.findLast((entry) => entry.type === "tool");
     const receipt: ResponseReceipt = {
-      mode: request?.planOnly ? "Plan" : "Build", model: this.options.contextRail.modelId,
+      mode: request?.compaction ? "Compact" : request?.planOnly ? "Plan" : "Build", model: this.options.contextRail.modelId,
       durationMs: measured.durationMs === undefined ? durationMs : measured.durationMs,
       tokensPerSecond: measured.tokensPerSecond === undefined ? this.options.contextRail.tokensPerSecond : measured.tokensPerSecond,
       context: this.options.contextRail.contextSnapshot,
@@ -588,6 +622,12 @@ export class Workbench {
     // Readline emits the terminal's Ctrl+_ / Ctrl+/ byte without a key name.
     if (text === "\x1f") key = { ...key, name: "_", ctrl: true };
     if (this.handleModalKey(text, key)) return;
+    if (key.meta && key.name === "v" && this.preview) {
+      if (this.sessionView.panelOpen) this.preview.open = false;
+      this.sessionView.act({ kind: "panel-close" }); this.preview.toggle(); this.requestRender(); return;
+    }
+    if (this.preview?.key(key.name ?? "", key.shift)) return;
+    if (text && !key.ctrl && !key.meta && this.preview) this.preview.focused = false;
     if (this.mode === "input" && this.editor.search) {
       this.sessionView.focusInput();
       this.applyEditorResult(reducePromptEditor(this.editor, { key, text, commands: [], history: this.promptContext.history }));
@@ -851,6 +891,15 @@ export class Workbench {
   private dispatchTerminalInput(events: TerminalInput[]): void {
     for (const event of events) {
       if (event.kind === "mouse") this.handleMouse(event.event);
+      else if (event.kind === "graphics-reply") {
+        if (Date.now() <= this.probeUntil && event.header.split(",").includes(`i=${this.graphics.imageId}`)) {
+          this.graphicsReady = event.message === "OK"; this.requestRender();
+        }
+      } else if (event.kind === "cell-size") {
+        if (Date.now() <= this.probeUntil && event.width > 0 && event.height > 0 && event.width < 1000 && event.height < 1000) {
+          this.cellSize = { width: event.width, height: event.height }; this.requestRender();
+        }
+      }
       else if (event.kind === "focus") {
         this.terminalFocused = event.focused;
         if (!event.focused) { this.sessionView.hover(-1, -1); this.startScreen.hover(-1, -1); }
@@ -858,7 +907,7 @@ export class Workbench {
       }
       else if (event.kind === "escape") this.onKeypress(event.sequence, { name: "escape", sequence: event.sequence });
       else if (event.kind === "text") this.keyboard.write(event.text);
-      else if (this.mode !== "approval") {
+      else if (event.kind === "paste" && this.mode !== "approval") {
         this.lastInterruptEscapeAt = 0;
         const text = sanitizeTerminalText(event.text.replace(/\r\n|\r/g, "\n"));
         if (this.mode === "dialog") {
@@ -879,6 +928,11 @@ export class Workbench {
   }
 
   private handleMouse(event: MouseEvent): void {
+    if (event.kind === "move" || event.kind === "drag") {
+      const hovered = this.railZones.find((zone) => event.row >= zone.row && event.row < zone.row + zone.height && event.col >= zone.column && event.col < zone.column + zone.width)?.action ?? null;
+      if (hovered !== this.railHovered) { this.railHovered = hovered; this.requestRender(); }
+    }
+    if (event.kind === "press" && this.preview && event.row >= this.layout.input.row) this.preview.focused = false;
     // These panes scroll vertically. Consume horizontal trackpad events
     // without moving the viewport or dispatching an Up key to a dialog.
     if (event.kind === "wheel" && event.direction !== "up" && event.direction !== "down") return;
@@ -896,6 +950,10 @@ export class Workbench {
     }
     if (this.sessionLayout && event.kind === "wheel") {
       if (this.showingStart) return;
+      if (this.preview?.open && !this.sessionView.panelOpen) {
+        const geometry = sessionPanelLayout(this.layout.width, !this.preview.expanded);
+        if (this.preview.expanded || geometry.overlay || event.col >= geometry.conversationWidth) return;
+      }
       if (this.sessionView.wheel(event.row, event.col, event.direction === "down" ? 3 : -3)) this.requestRender();
       return;
     }
@@ -936,6 +994,7 @@ export class Workbench {
 
   private render(): void {
     if (!this.started) return;
+    this.imageIntent = null;
     const frame = this.frame(process.stdout.columns ?? 80, process.stdout.rows ?? 24);
     if (this.startLayout ? this.startScreen.animating(Date.now(), this.options.paint.enabled && !reducedMotionEnabled()) : this.sessionView.animating()) this.requestRender();
     const output: string[] = [];
@@ -946,10 +1005,12 @@ export class Workbench {
       output.push(`\x1b[${row + 1};1H${frame.rows[row]}`);
     }
     this.previousRows = frame.rows;
-    if (!output.length && frame.cursor?.row === this.previousCursor?.row && frame.cursor?.column === this.previousCursor?.column) return;
+    const graphics = this.graphics.update(this.imageIntent);
+    if (!output.length && !graphics && frame.cursor?.row === this.previousCursor?.row && frame.cursor?.column === this.previousCursor?.column) return;
     // Synchronized output makes a scroll one visible frame on supporting
     // terminals; the single write and padded rows also work without it.
     output.unshift("\x1b[?2026h\x1b[?25l");
+    if (graphics) output.push(graphics);
     if (frame.cursor) {
       output.push(`\x1b[${frame.cursor.row + 1};${frame.cursor.column + 1}H\x1b[?25h`);
     }
@@ -965,7 +1026,7 @@ export class Workbench {
       this.rendered.clear();
     }
     if (this.sessionLayout) this.sessionView.sync(this.entries);
-    const panel = sessionPanelLayout(Math.max(40, width), this.sessionView.panelOpen && (this.mode === "input" || this.mode === "streaming"));
+    const panel = sessionPanelLayout(Math.max(40, width), (this.sessionView.panelOpen || Boolean(this.preview?.open && !this.preview.expanded)) && (this.mode === "input" || this.mode === "streaming"));
     this.layout = computeWorkbenchLayout(width, height, {
       sidebar: !this.sessionLayout && (this.chatView || this.transcriptView) ? "auto" : "hidden",
       inputLines: this.inputLineCount(this.sessionLayout ? panel.conversationWidth : width),
@@ -1429,7 +1490,7 @@ export class Workbench {
     const geometry = sessionPanelLayout(this.layout.width, false);
     const input = this.composeInput(layout.input.width);
     const result = this.startScreen.render({ width: geometry.conversationWidth, height: this.layout.height, layout, paint,
-      now: Date.now(), animate: this.started && paint.enabled && !reducedMotionEnabled(), focused: this.sessionView.focused,
+      now: Date.now(), openedAt: this.sessionOpenedAt, createdAt: this.sessionCreatedAt, animate: this.started && paint.enabled && !reducedMotionEnabled(), focused: this.sessionView.focused,
       path: shortenPath(this.options.workspaceRoot ?? rail.workspacePath), model: rail.modelId, context: rail.contextSnapshot,
       currentId: this.sessionId, recent: this.recentSessions, recentState: this.recentState, feedback: this.feedback, input: input.lines });
     const canvas = new Canvas(this.layout.width, this.layout.height, paint);
@@ -1445,9 +1506,7 @@ export class Workbench {
       canvas.put(row, railColumn, "", geometry.panelWidth, "surface");
       canvas.put(row, railColumn, paint.text("│", "rule"), 1, "surface");
     }
-    canvas.put(1, markColumn, paint.text("│", "borderBright"), 1, "surface");
-    canvas.put(3, markColumn, paint.text("⊞", "muted"), 1, "surface");
-    this.mouseZones.push({ row: 3, column: railColumn + 1, width: geometry.panelWidth - 1, run: () => this.actStart({ kind: "panel" }) });
+    this.drawSidebarRail(canvas, railColumn, geometry.panelWidth);
     return { rows: canvas.rows, cursor: this.terminalFocused && !this.sessionView.focused && input.cursor
       ? { row: layout.input.row + input.cursor.row, column: layout.input.column + input.cursor.column } : null };
   }
@@ -1462,14 +1521,16 @@ export class Workbench {
       ? paint.text(sanitizeTerminalLine(this.feedback.text), this.feedback.tone === "error" ? "signal" : "secondary") : null;
     const modal = this.mode === "approval" || this.mode === "dialog";
     if (modal) this.sessionView.hover(-1, -1);
-    const panelOpen = this.sessionView.panelOpen && !modal;
+    const previewOpen = Boolean(this.preview?.open && !this.sessionView.panelOpen && !modal);
+    const panelOpen = (this.sessionView.panelOpen || previewOpen && !this.preview?.expanded) && !modal;
     const geometry = sessionPanelLayout(layout.width, panelOpen);
     const width = geometry.conversationWidth;
     const gap = feedback ? 1 : 0;
     const sessionHeight = layout.input.row - gap;
     const root = this.options.workspaceRoot ?? rail.workspacePath;
     const renderOptions = { paint,
-      title: this.sessionTitle, path: shortenPath(root), now: Date.now(),
+      animateScroll: this.started,
+      title: this.sessionTitle, path: shortenPath(root), now: Date.now(), openedAt: this.sessionOpenedAt, createdAt: this.sessionCreatedAt,
       presence: this.mode === "approval" ? "waiting" as const : this.state,
       markdown: (entry: AssistantEntry, width: number) => this.renderedMarkdown(entry, width),
     };
@@ -1477,7 +1538,7 @@ export class Workbench {
     const canvas = new Canvas(layout.width, layout.height, paint);
     for (const [row, text] of frame.rows.entries()) canvas.put(row, 0, text, width);
     const zones = panelOpen && geometry.overlay ? [] : frame.zones;
-    if (panelOpen) {
+    if (panelOpen && !previewOpen) {
       const panelWidth = geometry.overlay ? width : geometry.panelWidth - 1;
       const column = geometry.overlay ? 0 : width + 1;
       const panel = this.sessionView.render({ ...renderOptions, width: panelWidth, height: geometry.overlay ? sessionHeight : layout.height,
@@ -1502,6 +1563,18 @@ export class Workbench {
       this.sessionView.act(zone.action);
       this.requestRender();
     } }));
+    if (previewOpen && this.preview) {
+      const overlay = geometry.overlay || this.preview.expanded;
+      const column = overlay ? 0 : width + 1;
+      const panelWidth = overlay ? width : geometry.panelWidth - 1;
+      const preview = this.preview.render(panelWidth, sessionHeight, column, paint, this.graphicsReady ? this.cellSize : null);
+      preview.rows.forEach((text, row) => canvas.put(row, column, text, panelWidth, "surface"));
+      if (overlay) this.mouseZones = [];
+      this.mouseZones.push(...preview.zones);
+      this.imageIntent = preview.image;
+    }
+    this.railZones = [];
+    if (!panelOpen && !previewOpen && !modal) this.drawSidebarRail(canvas, width, geometry.panelWidth);
     const input = this.composeInput(width);
     const inset = width >= 65 ? 2 : 1;
     const workspaceWidth = width - inset * 2;
@@ -1526,6 +1599,47 @@ export class Workbench {
     if (this.sessionLayout) { this.sessionView.act({ kind: "context" }); this.requestRender(); return; }
     this.showPanel([this.options.paint.bold("CONTEXT WINDOW · Alt+C", "electricBright"), "",
       ...this.options.contextRail.lines(this.layout.width - 4, 200, this.options.paint)]);
+  }
+
+  private drawSidebarRail(canvas: Canvas, column: number, width: number): void {
+    const rail = sidebarRail(width, this.layout.height, this.options.paint, this.mode === "streaming", this.railHovered);
+    rail.rows.forEach((text, row) => canvas.put(row, column, text, width, "surface"));
+    this.railZones = rail.zones.map((zone) => ({ ...zone, column: column + zone.column }));
+    const hovered = this.railZones.find((zone) => zone.action === this.railHovered);
+    if (hovered) {
+      const label = ` ${hovered.action === "files" ? "Files" : hovered.action === "diff" ? "Diff" : "Preview"} `;
+      canvas.put(hovered.row + 1, Math.max(0, column - label.length - 1), this.options.paint.text(label, "electric"), label.length, "raised");
+    }
+    // Replace the former single-toggle hit target with the three real actions.
+    this.mouseZones = this.mouseZones.filter((zone) => (zone.column ?? 0) < column);
+    for (const zone of this.railZones) for (let row = zone.row; row < zone.row + zone.height; row++) {
+      this.mouseZones.push({ row, column: zone.column, width: zone.width, run: () => this.openRailAction(zone.action) });
+    }
+  }
+
+  private openRailAction(action: RailAction): void {
+    this.railHovered = null;
+    if (action === "preview") {
+      this.sessionView.act({ kind: "panel-close" });
+      if (this.preview) { if (!this.preview.open) this.preview.toggle(); }
+      else this.showPanel(["PREVIEW", "No image artifacts are available in this session."]);
+    } else {
+      if (this.preview) { this.preview.open = false; this.preview.focused = false; }
+      if (action === "diff") {
+        const run = this.sessionView.current;
+        if (run) this.sessionView.act({ kind: "artifact", target: "changes", runId: run.id });
+        if (!this.sessionView.panelOpen) this.showPanel(["No recorded changes in this session."], { title: "DIFF" });
+      } else {
+        const sessionId = this.sessionId;
+        this.showPanel(["Loading workspace files…"], { title: "FILES" });
+        const outputId = this.entries.at(-1)!.id;
+        void (this.options.fileInfo?.() ?? (this.options.files?.() ?? Promise.resolve([...this.promptContext.mentions])).then((files) => files.map((path) => ({ path, byteLength: null, status: null })))).then((files) => {
+          if (sessionId !== this.sessionId || !this.sessionView.showingOutput(outputId)) return;
+          this.showPanel(files.length ? [""] : ["No workspace files available."], { title: "FILES", files });
+        }).catch(() => { if (sessionId === this.sessionId && this.sessionView.showingOutput(outputId)) this.showPanel(["Workspace files could not be loaded."], { title: "FILES" }); });
+      }
+    }
+    this.requestRender();
   }
 
   private copyResponse(text: string): void {

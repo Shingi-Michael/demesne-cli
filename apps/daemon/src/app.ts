@@ -1,7 +1,9 @@
+import { readArtifact } from "./artifacts.ts";
 import {
   encodeServerSentEvent,
   isRecord,
   parseCreateSessionRequest,
+  parseCompactSessionRequest,
   parseResolvePermissionRequest,
   parseSubmitTurnRequest,
   parseUndoSessionRequest,
@@ -23,15 +25,20 @@ import {
 import { DemesneStore, InvalidStateError, NotFoundError } from "@demesne/storage";
 import { PlaceholderTurnProcessor, snapshotTurnInference, type TurnInference, type TurnProcessor } from "./processor.ts";
 import { AgentEngine } from "./engine.ts";
+import { SessionCompactor } from "./session-compaction.ts";
 import type { ContextPlanner } from "./context-planner.ts";
 import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
 import { ConfigAllowlist } from "./allowlist.ts";
-import { canonicalWorkspace, listWorkspaceFiles, resolveWorkspacePath, ToolRegistry } from "./tools.ts";
+import { canonicalWorkspace, listWorkspaceFiles, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
 import { detectGitBranch } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
+import { imageGenerationTool } from "./image-generation.ts";
+import { captureWindowTool } from "./window-capture.ts";
+import { workspaceFileInfo } from "./workspace-file-info.ts";
+import type { ImageGenerationConfig } from "@demesne/config";
 import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, type InferenceBoundaryHook } from "./inference-scheduler.ts";
@@ -77,12 +84,16 @@ export function createDaemonApp(options: {
   inferenceSlots?: number;
   allowlistPath?: string;
   mcpServers?: Record<string, McpServerConfig>;
+  images?: ImageGenerationConfig;
   inferenceBoundaryHook?: InferenceBoundaryHook;
   contextPlanner?: ContextPlanner;
   providerFirstEventTimeoutMs?: number;
   providerRequestTimeoutMs?: number;
   providerEventLimit?: number;
+  providerVision?: boolean;
 }): DaemonApp {
+  if (options.images && Object.values(options.images).some((value) => value !== undefined)
+    && (!options.images.url || !options.images.model)) throw new Error("Image generation requires both images.url and images.model");
   const hub = new EventHub();
   const store = new DemesneStore(options.databasePath, (event) => hub.publish(event));
   const processor: TurnProcessor = options.processor ?? new PlaceholderTurnProcessor();
@@ -100,6 +111,11 @@ export function createDaemonApp(options: {
   }
   const scheduler = new InferenceScheduler(inferenceSlots, undefined, options.inferenceBoundaryHook);
   const tools = new ToolRegistry();
+  if (options.providerVision || options.images?.model || Object.keys(options.mcpServers ?? {}).length) {
+    tools.register(viewImageTool());
+    if (process.platform === "darwin") tools.register(captureWindowTool());
+  }
+  if (options.images?.url && options.images.model) tools.register(imageGenerationTool(options.images, store));
   const mcp = new McpManager({
     servers: options.mcpServers ?? {},
     log: (message) => console.warn(message),
@@ -120,9 +136,11 @@ export function createDaemonApp(options: {
       providerFirstEventTimeoutMs: options.providerFirstEventTimeoutMs,
       providerRequestTimeoutMs: options.providerRequestTimeoutMs,
       providerEventLimit: options.providerEventLimit,
+      providerVision: options.providerVision,
     },
   );
   const activeTurns = new Set<Promise<void>>();
+  const compactor = new SessionCompactor(store, scheduler, tools, options);
   const activeControllers = new Map<string, AbortController>();
   const activeStreamClosers = new Set<() => void>();
   const requestDrainWaiters = new Set<() => void>();
@@ -142,10 +160,12 @@ export function createDaemonApp(options: {
 
   async function runTurn(turn: Turn, inference: TurnInference, signal: AbortSignal): Promise<void> {
     try {
-      await engine.run(turn.id, inference, signal);
+      if (turn.kind === "compaction") await compactor.run(turn.id, inference, signal);
+      else await engine.run(turn.id, inference, signal);
     } catch (error) {
       if (signal.aborted) return;
-      const message = error instanceof Error ? error.message : "Unknown turn failure";
+      const detail = error instanceof Error ? error.message : "Unknown turn failure";
+      const message = turn.kind === "compaction" ? `Compaction failed: ${detail}. Previous context remains active.` : detail;
       try {
         store.failTurn(turn.id, message);
       } catch (persistenceError) {
@@ -356,10 +376,34 @@ export function createDaemonApp(options: {
         });
       }
 
+      if (request.method === "GET" && path[0] === "v1" && path[1] === "sessions" && path[3] === "artifacts") {
+        const sessionId = path[2]!;
+        if (!store.getSession(sessionId)) return apiError("not_found", "Session not found", 404);
+        if (path.length === 4) {
+          const after = Number(url.searchParams.get("after") ?? 0);
+          const limit = Number(url.searchParams.get("limit") ?? 50);
+          if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) return apiError("invalid_request", "Invalid artifact cursor or limit", 400);
+          return json(store.listImageArtifacts(sessionId, after, limit));
+        }
+        const artifact = store.getImageArtifact(sessionId, path[4]!);
+        if (!artifact) return apiError("not_found", "Artifact not found", 404);
+        if (path.length === 5) return json(artifact);
+        if (path.length === 6 && path[5] === "content") {
+          const variant = url.searchParams.get("variant") ?? "preview";
+          if (variant !== "preview" && variant !== "original") return apiError("invalid_request", "Invalid image variant", 400);
+          try {
+            const bytes = await readArtifact(store, artifact, variant === "preview");
+            return new Response(new Uint8Array(bytes), { headers: { "Content-Type": variant === "preview" ? "image/png" : artifact.mimeType,
+              "Content-Length": String(bytes.byteLength), "ETag": `"${artifact.sha256}-${variant}"` } });
+          } catch { return apiError("not_found", "Image content unavailable", 404); }
+        }
+      }
+
       if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "files") {
         const session = store.getSession(path[2]!);
         if (!session) return apiError("not_found", "Session not found", 404);
         if (!session.workspace) return apiError("invalid_state", "Session has no workspace", 409);
+        if (url.searchParams.get("details") === "1") return json({ entries: workspaceFileInfo(session.workspace.root) });
         return json({ files: listWorkspaceFiles(session.workspace.root) });
       }
 
@@ -371,6 +415,14 @@ export function createDaemonApp(options: {
           ? { ...state.session, workspace: { ...state.session.workspace, gitBranch: branch } }
           : state.session;
         return json({ ...state, session, sessionGrants: permissions.listGrants(path[2]!) });
+      }
+
+      if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "compact") {
+        const body = parseCompactSessionRequest(await readJson(request));
+        const inference = snapshotTurnInference(processor, false);
+        const { turn, event } = store.createTurn(path[2]!, `/compact${body.instructions ? ` ${body.instructions}` : ""}`, "deny", false, false, "compaction");
+        queueTurn(turn, inference);
+        return json({ turn, eventId: event.eventId } satisfies SubmitTurnResponse, 202);
       }
 
       if (
@@ -650,8 +702,8 @@ function eventStream(
 }
 
 async function readOptionalJson(request: Request): Promise<unknown> {
-  const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  if (!request.body || (Number.isFinite(declaredLength) && declaredLength === 0)) return {};
+  const declaredLength = request.headers.get("content-length");
+  if (!request.body || (declaredLength !== null && Number(declaredLength) === 0)) return {};
   return readJson(request);
 }
 

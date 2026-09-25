@@ -1,6 +1,8 @@
 # Artifact preview panel: structure and product plan
 
-Status: planned; implementation has not started.
+Status: initial image-preview pipeline and production panel implemented.
+See the implementation progress notes for delivered functionality and remaining
+roadmap/visual-validation items.
 
 Decision date: 2026-09-23.
 

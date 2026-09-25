@@ -434,6 +434,7 @@ async function measureCondition(
       const next = await nextWithAbort(iterator, signal);
       if (next.done) break;
       const event = next.value;
+      if (event.type === "finish") continue;
       if (event.type !== "usage") firstOutputAt ??= now();
       if (event.type === "text_delta") {
         firstTextAt ??= now();

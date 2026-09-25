@@ -65,7 +65,7 @@ import {
   type SlashCommand,
   type SlashCommandId,
 } from "@demesne/brand";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { CliContextRail } from "./context-rail.ts";
@@ -646,6 +646,14 @@ async function run(command: string[]): Promise<void> {
     return;
   }
 
+  if (command[0] === "compact") {
+    if (!command[1]) throw new Error("Usage: demesne compact <session-id> [instructions]");
+    await ensureDaemonOrExit();
+    const submitted = await client.compactSession(command[1], { instructions: command.slice(2).join(" ") });
+    await renderTurn(command[1], submitted.turn.id, submitted.eventId, { onInterrupt: "exit", interactive: false, thinkingEnabled: false });
+    return;
+  }
+
   if (command[0] === "prompt") {
     const permissionMode = takeOption(command, "--permission") ?? (process.stdin.isTTY && process.stdout.isTTY ? "ask" : "deny");
     if (permissionMode !== "ask" && permissionMode !== "deny") throw new Error("--permission must be ask or deny");
@@ -712,8 +720,10 @@ async function submitAndRender(
   contextRail?: CliContextRail,
   workspaceRoot?: string,
   planOnly = false,
+  compactInstructions?: string,
 ): Promise<"completed" | "stopped"> {
-  const submitted = await request<SubmitTurnResponse>(`/v1/sessions/${sessionId}/turns`, {
+  const submitted = compactInstructions !== undefined ? await client.compactSession(sessionId, { instructions: compactInstructions })
+    : await request<SubmitTurnResponse>(`/v1/sessions/${sessionId}/turns`, {
     method: "POST",
     body: JSON.stringify({
       content,
@@ -832,6 +842,22 @@ async function runChat(command: string[]): Promise<void> {
         sessionTitle: initialState.session.title,
         version: VERSION,
         workspaceRoot: currentWorkspace,
+        files: () => sessionId ? client.listWorkspaceFiles(sessionId) : Promise.resolve([]),
+        fileInfo: () => sessionId ? client.listWorkspaceFileInfo(sessionId) : Promise.resolve([]),
+        preview: {
+          preferences: join(settings.dataDirectory, `preview-${Buffer.from(client.server).toString("base64url")}.json`),
+          content: (artifact, variant, signal) => client.artifactContent(artifact, variant, signal),
+          open: async (artifact) => {
+            const bytes = await client.artifactContent(artifact, "original");
+            const root = join(settings.dataDirectory, "preview-cache");
+            mkdirSync(root, { recursive: true, mode: 0o700 });
+            const extension = artifact.mimeType === "image/jpeg" ? "jpg" : artifact.mimeType === "image/webp" ? "webp" : "png";
+            const path = join(root, `${artifact.sha256}.${extension}`);
+            await Bun.write(path, bytes, { mode: 0o600 });
+            const process = Bun.spawn([globalThis.process.platform === "darwin" ? "open" : "xdg-open", path], { stdout: "ignore", stderr: "ignore" });
+            if (await process.exited !== 0) throw new Error("Could not open original image");
+          },
+        },
         onExit: () => leaveChat(),
         onInterrupt: () => chatState.interrupt?.(),
         queue: {
@@ -863,6 +889,16 @@ async function runChat(command: string[]): Promise<void> {
         if (sessionId === state.session.id) workbench.setRecentSessions([recentSession(state)], "unavailable");
       });
     }
+    try {
+      let after = 0;
+      do {
+        const page = await client.listArtifacts(state.session.id, after);
+        if (sessionId !== state.session.id) break;
+        page.artifacts.forEach((artifact) => workbench.addArtifact(artifact));
+        if (page.nextCursor === null) break;
+        after = page.nextCursor;
+      } while (true);
+    } catch { /* Older daemons and sessions without artifact support still load. */ }
   };
   if (!workbench) {
     chatState.footer = fixedFooter;
@@ -938,20 +974,21 @@ async function runChat(command: string[]): Promise<void> {
     else leaveChat();
   });
 
-  const executePrompt = async (text: string, planOnly = false): Promise<void> => {
+  const executePrompt = async (text: string, planOnly = false, compactInstructions?: string): Promise<void> => {
     if (workbench) {
       chatState.streamActive = true;
       chatState.queuedInput = undefined;
       contextRail.setModel(activeModel);
       workbench.setSessionTitle(sessionTitle);
-      contextRail.begin(thinkingEnabled);
-      workbench.beginTurn({ userText: text, at: timeLabel(), planOnly });
+      contextRail.begin(compactInstructions !== undefined ? false : thinkingEnabled);
+      workbench.beginTurn({ userText: text, at: timeLabel(), planOnly, compaction: compactInstructions !== undefined });
       try {
         await runWorkbenchTurn({
           sessionId: sessionId!,
           content: text,
           permissionMode,
           planOnly,
+          compactInstructions,
           workbench,
           contextRail,
           paint,
@@ -988,6 +1025,7 @@ async function runChat(command: string[]): Promise<void> {
         contextRail,
         currentWorkspace,
         planOnly,
+        compactInstructions,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Turn failed";
@@ -1035,6 +1073,7 @@ async function runChat(command: string[]): Promise<void> {
 
   const slashHandlers: Partial<Record<SlashCommandId, (argument: string) => Promise<void>>> = {
     exit: async () => leaveChat(),
+    compact: async (instructions) => executePrompt(`/compact${instructions ? ` ${instructions}` : ""}`, false, instructions),
     undo: async (argument) => {
       try {
         const path = argument.trim();
@@ -1196,6 +1235,12 @@ async function runChat(command: string[]): Promise<void> {
       const contextWidth = Math.max(1, Math.min(72, getTerminalWidth(process.stdout) - 4));
       const detail = contextRail.lines(contextWidth, 100, paint);
       const grants = state?.sessionGrants ?? [];
+      if (state?.checkpoint) {
+        const checkpoint = state.checkpoint;
+        detail.push(paint.bold("LAST COMPACTION", "secondary"));
+        detail.push(paint.dim(`~${formatTokenCount(checkpoint.beforeTokens)} → ~${formatTokenCount(checkpoint.afterTokens)} estimated tokens · ${checkpoint.retainedTurns} recent turns kept`));
+        if (checkpoint.instructions) detail.push(...sanitizeTerminalText(checkpoint.instructions).split("\n").map((line) => truncateText(line, contextWidth)));
+      }
       if (grants.length > 0) {
         detail.push(paint.bold("SESSION GRANTS", "secondary"));
         for (const grant of grants) {
@@ -1516,11 +1561,13 @@ async function runWorkbenchTurn(options: {
   content: string;
   permissionMode: "ask" | "deny";
   planOnly: boolean;
+  compactInstructions?: string;
   workbench: Workbench;
   contextRail: CliContextRail;
   paint: Painter;
 }): Promise<void> {
-  const submitted = await request<SubmitTurnResponse>(`/v1/sessions/${options.sessionId}/turns`, {
+  const submitted = options.compactInstructions !== undefined ? await client.compactSession(options.sessionId, { instructions: options.compactInstructions })
+    : await request<SubmitTurnResponse>(`/v1/sessions/${options.sessionId}/turns`, {
     method: "POST",
     body: JSON.stringify({
       content: options.content,
@@ -1573,6 +1620,12 @@ async function runWorkbenchTurn(options: {
     for await (const event of client.streamEvents(options.sessionId, submitted.eventId, controller.signal)) {
       if (event.turnId !== submitted.turn.id) continue;
       options.contextRail.apply(event);
+      if (event.type === "artifact.created" && isRecord(event.payload.artifact) && typeof event.payload.artifact.id === "string") {
+        try {
+          const artifact = await client.getArtifact(options.sessionId, event.payload.artifact.id);
+          options.workbench.addArtifact(artifact);
+        } catch { options.workbench.notice("Image saved; preview metadata could not be loaded.", "error"); }
+      }
       activity.apply(event);
       throughput.apply(event);
       if (/^turn\.(completed|cancelled|failed|interrupted)$/.test(event.type)) completedAt = Date.parse(event.occurredAt);
@@ -2350,6 +2403,7 @@ function printUsage(): void {
   demesne daemon start|stop|status|logs
   demesne ps [--watch] [--json]
   demesne prompt [--session <session-id>] [--permission ask|deny] [--output text|json|stream-json] [--plan] <text>
+  demesne compact <session-id> [instructions]
   demesne session list
   demesne session create [--workspace <path>] [title]
   demesne session show <session-id>

@@ -144,6 +144,7 @@ export async function runProviderBenchmark(
     let outputCharacters = 0;
     let usage: TokenUsage | null = null;
     for await (const event of provider.stream(request, signal)) {
+      if (event.type === "finish") continue;
       if (event.type === "usage") {
         usage = event.usage;
         continue;

@@ -30,7 +30,7 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
   for (const turn of [...state.session.turns].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
     const recorded = journal.filter((event) => event.turnId === turn.id);
     const model = recorded.find((event) => event.type === "model.request_started" && typeof event.payload.model === "string")?.payload.model;
-    const request = { id: id++, type: "user" as const, text: turn.content, at: new Date(turn.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), startedAt: Date.parse(turn.createdAt), model: typeof model === "string" ? model : "Model not recorded", planOnly: turn.planOnly ?? false };
+    const request = { id: id++, type: "user" as const, text: turn.content, at: new Date(turn.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), startedAt: Date.parse(turn.createdAt), model: typeof model === "string" ? model : "Model not recorded", planOnly: turn.planOnly ?? false, compaction: turn.kind === "compaction" };
     entries.push(request);
     const throughput = new TurnThroughputTracker();
     const tools = new Map<string, ToolEntry>();
@@ -55,6 +55,11 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
       if (event.type === "model.usage" && context && !context.estimated) {
         context.used = typeof payload.totalTokens === "number" ? payload.totalTokens
           : typeof payload.inputTokens === "number" && typeof payload.outputTokens === "number" ? payload.inputTokens + payload.outputTokens : null;
+      }
+      if (event.type === "session.compacted") {
+        const checkpoint = payload.checkpoint as { afterTokens?: number; contextPlan?: { capacityTokens?: number } } | undefined;
+        if (typeof checkpoint?.afterTokens === "number") context = { used: checkpoint.afterTokens,
+          capacity: checkpoint.contextPlan?.capacityTokens ?? null, estimated: true };
       }
       if (event.type === "message.delta" && typeof payload.delta === "string" && payload.delta) {
         if (!assistant) { assistant = { id: id++, type: "assistant", raw: "", streaming: false, revision: 0, at: event.occurredAt }; entries.push(assistant); }
@@ -102,7 +107,7 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
       const endedAt = Date.parse(turn.completedAt ?? close?.occurredAt ?? "");
       const measured = throughput.snapshot();
       const responseModel = recorded.findLast((event) => event.type === "model.request_started" && typeof event.payload.model === "string")?.payload.model;
-      const receipt: ResponseReceipt = { mode: turn.planOnly ? "Plan" : "Build", model: typeof responseModel === "string" ? responseModel : request.model,
+      const receipt: ResponseReceipt = { mode: turn.kind === "compaction" ? "Compact" : turn.planOnly ? "Plan" : "Build", model: typeof responseModel === "string" ? responseModel : request.model,
         durationMs: Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt >= startedAt ? endedAt - startedAt : null,
         tokensPerSecond: measured.decodeTokensPerSecond ?? measured.tokensPerSecond, ...(context ? { context } : {}) };
       if (answer && answer.id > ([...tools.values()].at(-1)?.id ?? request.id)) answer.receipt = receipt;

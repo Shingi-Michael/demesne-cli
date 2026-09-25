@@ -12,15 +12,18 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import { open } from "node:fs/promises";
 import { isAbsolute, join, dirname, relative, resolve, sep } from "node:path";
 import type { ProviderToolDefinition } from "@demesne/providers";
 import { isRecord } from "@demesne/protocol";
 import { applyEdits, EditApplyError, type EditHunk } from "./edit-engine.ts";
 import { backgroundProcesses } from "./background.ts";
+import type { StructuredToolResult } from "./artifacts.ts";
 
 const LIST_FILES_PATH_BUDGET_BYTES = 28 * 1024;
 
 export interface ToolContext {
+  sessionId?: string;
   workspaceRoot: string;
   signal: AbortSignal;
 }
@@ -34,6 +37,7 @@ export interface AgentTool {
   definition: ProviderToolDefinition;
   permission(input: unknown): ToolPermission | null;
   execute(input: unknown, context: ToolContext): Promise<string>;
+  executeWithArtifacts?(input: unknown, context: ToolContext): Promise<string | StructuredToolResult>;
 }
 
 /// Local-first error taxonomy: stable bracketed codes with a recovery hint,
@@ -83,6 +87,38 @@ function builtInTools(): AgentTool[] {
     commandLogsTool(),
     commandStopTool(),
   ];
+}
+
+export function viewImageTool(): AgentTool {
+  return {
+    definition: { name: "view_image", description: "Import a screenshot or image file from the workspace into Preview. Use after a browser or command saves a screenshot to a file. Vision-enabled providers also receive the image for inspection on the next step.",
+      inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } },
+    permission: () => null,
+    execute: async () => { throw new Error("view_image requires artifact-aware execution"); },
+    executeWithArtifacts: async (input, context) => {
+      if (!isRecord(input) || typeof input.path !== "string" || !input.path.trim() || Object.keys(input).some((key) => key !== "path")) throw new Error("view_image requires a workspace image path");
+      context.signal.throwIfAborted();
+      const path = resolveWorkspacePath(context.workspaceRoot, input.path, true, true);
+      const file = await open(path, "r");
+      try {
+        const stat = await file.stat();
+        if (!stat.isFile() || stat.size > 20 * 1024 * 1024) throw new Error("Image must be a regular file of at most 20 MiB");
+        const data = Buffer.alloc(Math.min(stat.size + 1, 20 * 1024 * 1024 + 1));
+        let length = 0;
+        while (length < data.length) {
+          context.signal.throwIfAborted();
+          const { bytesRead } = await file.read(data, length, data.length - length, null);
+          if (!bytesRead) break;
+          length += bytesRead;
+        }
+        if (length > stat.size) throw new Error("Image changed while reading; try again");
+        const bytes = data.subarray(0, length);
+        const mimeType = bytes[0] === 0xff && bytes[1] === 0xd8 ? "image/jpeg"
+          : bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP" ? "image/webp" : "image/png";
+        return { text: `Image imported from ${input.path}`, images: [{ data: bytes, mimeType, filename: path.split(sep).at(-1) }] };
+      } finally { await file.close(); }
+    },
+  };
 }
 
 function listFilesTool(): AgentTool {

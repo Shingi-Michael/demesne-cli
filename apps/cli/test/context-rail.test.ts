@@ -4,6 +4,20 @@ import type { EventEnvelope, EventType } from "@demesne/protocol";
 import { CliContextRail } from "../src/context-rail.ts";
 
 describe("CLI context rail", () => {
+  test("compaction switches the estimate while keeping the actual summarizer usage separate", () => {
+    const rail = new CliContextRail({ id: "model", provider: "local", contextWindow: 100000 }, "/project");
+    const paint = createPainter(false);
+    rail.apply(event("model.usage", { inputTokens: 15000, outputTokens: 500, totalTokens: 15500 }));
+    rail.apply(event("session.compacted", { checkpoint: { contextPlan: {
+      schemaVersion: 3, estimator: { method: "openai-json-utf8-bytes-divisor-3", version: 2, safetyFactor: 1.2 },
+      capacityTokens: 100000, reserves: { outputTokens: 8192, toolResultTokens: 768, safetyTokens: 512, totalTokens: 9472 },
+      maximumPlannedInputTokens: 90528, hardInputLimitTokens: 91808, originalEstimatedInputTokens: 2000,
+      estimatedInputTokens: 2000, estimatedMessageTokens: 1500, estimatedToolDefinitionTokens: 500, budgetStatus: "within_soft_limit", actions: [],
+    } } }));
+    expect(rail.contextSnapshot).toEqual({ used: 2000, capacity: 100000, estimated: true });
+    expect(rail.contextSummary(paint)).toBe("Context ~2k/100k · 2%");
+    expect(rail.lines(80, 60, paint).join("\n")).toContain("15k in · 500 out");
+  });
   test("generation speed waits for provider measurements and excludes first-token latency", () => {
     const rail = new CliContextRail({ id: "model", provider: "local" }, "/project");
     expect(rail.tokensPerSecond).toBeNull();

@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { ConfigError, loadConfig, userConfigPath } from "@demesne/config";
+import { ConfigError, loadConfig, userConfigPath, type ProviderConfig } from "@demesne/config";
+import { MultiProviderProcessor } from "./multi-provider-processor.ts";
 import { OpenAICompatibleProvider } from "@demesne/providers";
 import { createDaemonApp } from "./app.ts";
 import {
@@ -68,6 +69,8 @@ try {
     inferenceSlots,
     allowlistPath: process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(),
     mcpServers: config.mcp.servers,
+    images: config.images,
+    providerVision: config.provider.vision,
     providerFirstEventTimeoutMs,
     providerRequestTimeoutMs,
   });
@@ -111,18 +114,26 @@ function parseHost(value: string): string {
   return value;
 }
 
-function createProcessor(): ProviderTurnProcessor | undefined {
-  const model = config.provider.model;
-  const runtimeProfile = config.provider.runtimeProfile;
+function createProcessor(): ProviderTurnProcessor | MultiProviderProcessor | undefined {
+  const configs = [config.provider, ...Object.values(config.additionalProviders ?? {})];
+  const processors = configs.map(createSingleProcessor);
+  if (processors.length === 1) return processors[0];
+  if (processors.some((processor) => !processor)) throw new Error("Each configured provider requires a default model");
+  return new MultiProviderProcessor(processors as ProviderTurnProcessor[], configs.map((item) => item.allowedModels ?? []));
+}
+
+function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor | undefined {
+  const model = settings.model;
+  const runtimeProfile = settings.runtimeProfile;
   if (!model && runtimeProfile) {
     throw new Error("provider.runtime_profile is set but provider.model is not: DEMESNE_RUNTIME_PROFILE requires DEMESNE_MODEL");
   }
   if (!model) return undefined;
-  const baseUrl = config.provider.url ?? "http://127.0.0.1:1234/v1";
-  const providerId = config.provider.id ?? "openai-compatible";
-  const configuredContextCapacity = config.provider.contextWindow;
-  const allowedModelIds = config.provider.allowedModels;
-  const maxOutputTokens = config.provider.maxOutputTokens
+  const baseUrl = settings.url ?? "http://127.0.0.1:1234/v1";
+  const providerId = settings.id ?? "openai-compatible";
+  const configuredContextCapacity = settings.contextWindow;
+  const allowedModelIds = settings.allowedModels;
+  const maxOutputTokens = settings.maxOutputTokens
     ?? runtimeProfileDefaultMaxOutputTokens(runtimeProfile);
   if (!configuredContextCapacity && !runtimeProfile) {
     throw new Error("provider.context_window is not set: DEMESNE_CONTEXT_WINDOW is required when provider.model is configured without a runtime profile");
@@ -135,17 +146,18 @@ function createProcessor(): ProviderTurnProcessor | undefined {
   }
   const provider = new OpenAICompatibleProvider({
     baseUrl,
-    apiKey: config.provider.apiKey,
+    allowHttpEndpoint: settings.allowHttpEndpoint,
+    apiKey: settings.apiKey,
     providerId,
-    includeUsage: config.provider.includeUsage ?? true,
-    reasoningEffort: config.provider.reasoningEffort,
+    includeUsage: settings.includeUsage ?? true,
+    reasoningEffort: settings.reasoningEffort,
     contextWindow: configuredContextCapacity,
   });
   const verifier = createRuntimeProfileVerifier({
     profile: runtimeProfile,
     providerId,
     baseUrl,
-    apiKey: config.provider.apiKey,
+    apiKey: settings.apiKey,
   });
   return new ProviderTurnProcessor(
     provider,

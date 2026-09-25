@@ -434,7 +434,7 @@ async function callModel(
       reasoningCharacters += event.delta.length;
     } else if (event.type === "tool_call_delta") {
       toolCallObserved = true;
-    } else {
+    } else if (event.type === "usage") {
       if (usage) throw new Error("Summary checkpoint benchmark received duplicate usage");
       usage = event.usage;
     }

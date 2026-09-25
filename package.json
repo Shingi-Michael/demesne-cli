@@ -15,6 +15,7 @@
   "scripts": {
     "daemon": "bun run apps/daemon/src/main.ts",
     "model:llama": "bun run model:llama:100k",
+    "model:llama:vision": "/opt/homebrew/opt/llama.cpp/bin/llama-server -m \"$HOME/.demesne/models/qwen3.8-27b-q4_0.gguf\" -mm \"$HOME/.demesne/models/qwen3.8-mmproj.gguf\" -c 100096 -b 256 -ub 256 -ngl all -fa on -ctk f16 -ctv f16 -np 1 --fit off --load-mode mmap --no-repack --cache-ram 2048 --ctx-checkpoints 4 --jinja --reasoning on --spec-type ngram-mod --host 127.0.0.1 --port 11436 --alias qwen3.8-q4_0-100k-b256 --cors-origins localhost --no-webui",
     "model:llama:32k": "/opt/homebrew/opt/llama.cpp/bin/llama-server -m \"$HOME/.demesne/models/qwen3.8-27b-q4_0.gguf\" -mm \"$HOME/.demesne/models/qwen3.8-mmproj.gguf\" -c 32768 -b 256 -ub 256 -ngl all -fa on -ctk f16 -ctv f16 -np 1 --fit off --load-mode none --no-repack --cache-ram 2048 --ctx-checkpoints 4 --jinja --reasoning off --spec-type ngram-mod --host 127.0.0.1 --port 11436 --alias qwen3.8-q4_0-32k-b256 --cors-origins localhost --no-webui",
     "model:llama:32k:think": "/opt/homebrew/opt/llama.cpp/bin/llama-server -m \"$HOME/.demesne/models/qwen3.8-27b-q4_0.gguf\" -mm \"$HOME/.demesne/models/qwen3.8-mmproj.gguf\" -c 32768 -b 256 -ub 256 -ngl all -fa on -ctk f16 -ctv f16 -np 1 --fit off --load-mode none --no-repack --cache-ram 2048 --ctx-checkpoints 4 --jinja --reasoning on --spec-type ngram-mod --host 127.0.0.1 --port 11436 --alias qwen3.8-q4_0-32k-b256 --cors-origins localhost --no-webui",
     "model:llama:baseline": "/opt/homebrew/opt/llama.cpp/bin/llama-server -m \"$HOME/.demesne/models/qwen3.8-27b-q4_0.gguf\" -mm \"$HOME/.demesne/models/qwen3.8-mmproj.gguf\" -c 32768 -b 256 -ub 256 -ngl all -fa on -ctk f16 -ctv f16 -np 1 --fit off --load-mode none --no-repack --cache-ram 2048 --ctx-checkpoints 4 --jinja --reasoning off --spec-type none --host 127.0.0.1 --port 11436 --alias qwen3.8-q4_0-32k-b256 --cors-origins localhost --no-webui",
@@ -26,6 +27,7 @@
     "model:llama:110k:cache1g": "/opt/homebrew/opt/llama.cpp/bin/llama-server -m \"$HOME/.demesne/models/qwen3.8-27b-q4_0.gguf\" -c 110080 -b 256 -ub 256 -ngl all -fa on -ctk f16 -ctv f16 -np 1 --fit off --load-mode mmap --no-repack --cache-ram 1024 --ctx-checkpoints 4 --jinja --reasoning off --spec-type ngram-mod --host 127.0.0.1 --port 11436 --alias qwen3.8-q4_0-110k-cache1g-b256 --cors-origins localhost --no-webui",
     "model:llama:110k:cache1g-cp1": "/opt/homebrew/opt/llama.cpp/bin/llama-server -m \"$HOME/.demesne/models/qwen3.8-27b-q4_0.gguf\" -c 110080 -b 256 -ub 256 -ngl all -fa on -ctk f16 -ctv f16 -np 1 --fit off --load-mode mmap --no-repack --cache-ram 1024 --ctx-checkpoints 1 --jinja --reasoning off --spec-type ngram-mod --host 127.0.0.1 --port 11436 --alias qwen3.8-q4_0-110k-cache1g-cp1-b256 --cors-origins localhost --no-webui",
     "daemon:llama": "bun run daemon:llama:100k",
+    "daemon:llama:vision": "DEMESNE_MODEL=qwen3.8-q4_0-100k-b256 DEMESNE_ALLOWED_MODELS=qwen3.8-q4_0-100k-b256 DEMESNE_PROVIDER_URL=http://127.0.0.1:11436/v1 DEMESNE_PROVIDER_ID=llama.cpp DEMESNE_RUNTIME_PROFILE=experimental-llama-vision-ngram-mod-f16-kv-100k-b256-32gb DEMESNE_PROVIDER_VISION=true DEMESNE_CONTEXT_WINDOW=100000 DEMESNE_MAX_OUTPUT_TOKENS=1536 bun run daemon",
     "daemon:llama:32k": "DEMESNE_MODEL=qwen3.8-q4_0-32k-b256 DEMESNE_ALLOWED_MODELS=qwen3.8-q4_0-32k-b256 DEMESNE_PROVIDER_URL=http://127.0.0.1:11436/v1 DEMESNE_PROVIDER_ID=llama.cpp DEMESNE_RUNTIME_PROFILE=llama-ngram-mod-f16-kv-32k-b256-32gb DEMESNE_REASONING_EFFORT=none DEMESNE_CONTEXT_WINDOW=32768 DEMESNE_MAX_OUTPUT_TOKENS=1536 bun run daemon",
     "daemon:llama:32k:think": "DEMESNE_MODEL=qwen3.8-q4_0-32k-b256 DEMESNE_ALLOWED_MODELS=qwen3.8-q4_0-32k-b256 DEMESNE_PROVIDER_URL=http://127.0.0.1:11436/v1 DEMESNE_PROVIDER_ID=llama.cpp DEMESNE_RUNTIME_PROFILE=llama-ngram-mod-f16-kv-32k-b256-32gb DEMESNE_CONTEXT_WINDOW=32768 DEMESNE_MAX_OUTPUT_TOKENS=1536 bun run daemon",
     "daemon:llama:baseline": "DEMESNE_MODEL=qwen3.8-q4_0-32k-b256 DEMESNE_ALLOWED_MODELS=qwen3.8-q4_0-32k-b256 DEMESNE_PROVIDER_URL=http://127.0.0.1:11436/v1 DEMESNE_PROVIDER_ID=llama.cpp DEMESNE_RUNTIME_PROFILE=llama-f16-kv-32k-b256-32gb DEMESNE_REASONING_EFFORT=none DEMESNE_CONTEXT_WINDOW=32768 DEMESNE_MAX_OUTPUT_TOKENS=1536 bun run daemon",
@@ -55,17 +57,19 @@
     "demesne": "bun run apps/cli/src/main.ts",
     "build": "bun run build:cli && bun run build:daemon",
     "build:cli": "bun build apps/cli/src/main.ts --compile --outfile dist/demesne && rm -f .*.bun-build",
-    "build:daemon": "bun build apps/daemon/src/main.ts --compile --outfile dist/demesned && rm -f .*.bun-build",
+    "build:daemon": "bun run scripts/build-daemon.ts",
     "clean": "rm -rf dist && rm -f .*.bun-build",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "fake:provider": "bun run scripts/fake-provider.ts",
     "ui:preview": "bun run scripts/ui-preview.ts",
     "ui:workbench": "bun run scripts/workbench-preview.ts",
-    "ui:session": "bun run scripts/session-preview.ts"
+    "ui:session": "bun run scripts/session-preview.ts",
+    "ui:image": "bun run scripts/image-preview.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",
+    "sharp": "^0.35.4",
     "typescript": "7.0.2"
   }
 }

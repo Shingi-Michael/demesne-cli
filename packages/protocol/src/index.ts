@@ -1,9 +1,11 @@
 export const PROTOCOL_VERSION = 1 as const;
 
 export type EventType =
+  | "artifact.created"
   | "session.created"
   | "session.renamed"
   | "session.archived"
+  | "session.compacted"
   | "turn.created"
   | "agent.started"
   | "model.request_started"
@@ -33,6 +35,29 @@ export type EventType =
   | "turn.failed";
 
 export type TurnStatus = "queued" | "running" | "completed" | "cancelled" | "interrupted" | "failed";
+
+export interface ImageArtifact {
+  id: string;
+  kind: "image";
+  sessionId: string;
+  turnId: string;
+  toolCallId: string;
+  createdAt: string;
+  filename: string;
+  mimeType: string;
+  width: number;
+  height: number;
+  byteLength: number;
+  sha256: string;
+  source: { kind: "mcp" | "tool"; name: string; modelId: string | null };
+  revisionOf: string | null;
+}
+
+export interface ArtifactPage {
+  artifacts: ImageArtifact[];
+  nextCursor: number | null;
+  watermark: number;
+}
 
 export interface ModelDescriptor {
   id: string;
@@ -95,10 +120,12 @@ export interface ModelToolCall {
   arguments: string;
 }
 
+export interface WorkspaceFileInfo { path: string; byteLength: number | null; status: string | null }
+
 export type ModelMessage =
   | { role: "system" | "user"; content: string }
   | { role: "assistant"; content: string | null; toolCalls?: ModelToolCall[] }
-  | { role: "tool"; toolCallId: string; content: string };
+  | { role: "tool"; toolCallId: string; content: string; imageArtifactIds?: string[] };
 
 export interface StoredModelMessage {
   id: number;
@@ -215,6 +242,26 @@ export interface Turn {
   thinkingEnabled: boolean | null;
   /// Read-only planning turn: write and execution tools are not offered.
   planOnly?: boolean;
+  kind?: "compaction";
+}
+
+export interface SessionCheckpoint {
+  id: string;
+  sessionId: string;
+  turnId: string;
+  createdAt: string;
+  summary: string;
+  instructions: string;
+  firstRetainedMessageId: number;
+  summarizedTurns: number;
+  retainedTurns: number;
+  beforeTokens: number;
+  afterTokens: number;
+  contextPlan: ContextPlan;
+}
+
+export interface CompactSessionRequest {
+  instructions?: string;
 }
 
 export type PermissionMode = "ask" | "deny";
@@ -285,6 +332,7 @@ export interface SessionStateResponse {
   pendingPermissions: PendingPermissionSnapshot[];
   latestProviderCall: ProviderCallSnapshot | null;
   sessionGrants?: Array<{ tool: string; pathPrefix: string }>;
+  checkpoint?: SessionCheckpoint | null;
 }
 
 export interface WorkspaceFilesResponse {
@@ -448,6 +496,15 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
     throw new ProtocolValidationError("title or preferredModel is required");
   }
   return update;
+}
+
+export function parseCompactSessionRequest(value: unknown): CompactSessionRequest {
+  if (!isRecord(value)) throw new ProtocolValidationError("Request body must be a JSON object");
+  if (Object.keys(value).some((key) => key !== "instructions")) throw new ProtocolValidationError("Only compaction instructions may be provided");
+  if (value.instructions !== undefined && typeof value.instructions !== "string") throw new ProtocolValidationError("instructions must be a string");
+  const instructions = typeof value.instructions === "string" ? value.instructions.trim() : "";
+  if (instructions.length > 4000) throw new ProtocolValidationError("instructions must be at most 4000 characters");
+  return instructions ? { instructions } : {};
 }
 
 export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {

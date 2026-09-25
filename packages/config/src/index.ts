@@ -17,6 +17,8 @@ export type AutoStartPolicy = "prompt" | "always" | "never";
 export type ConfigSource = "env" | "user" | "project";
 
 export interface ProviderConfig {
+  allowHttpEndpoint?: string;
+  vision?: boolean;
   url?: string;
   id?: string;
   model?: string;
@@ -29,6 +31,13 @@ export interface ProviderConfig {
   includeUsage?: boolean;
   systemPrompt?: string;
   firstEventTimeoutMs?: number;
+  requestTimeoutMs?: number;
+}
+
+export interface ImageGenerationConfig {
+  url?: string;
+  model?: string;
+  apiKey?: string;
   requestTimeoutMs?: number;
 }
 
@@ -61,6 +70,8 @@ export interface DemesneConfig {
   theme?: ThemePreference;
   inferenceSlots?: number;
   provider: ProviderConfig;
+  additionalProviders?: Record<string, ProviderConfig>;
+  images?: ImageGenerationConfig;
   daemon: DaemonConfig;
   permissions: { allow: string[] };
   notifications: NotificationConfig;
@@ -199,7 +210,7 @@ function applyDocument(
   const path = source === "user" ? "user config" : "project config";
   assertKnownKeys(document, [
     "server", "data_dir", "theme", "inference_slots",
-    "provider", "daemon", "permissions", "notifications", "ui", "mcp",
+    "provider", "additional_providers", "images", "daemon", "permissions", "notifications", "ui", "mcp",
   ], path);
 
   assign(config, "server", document.server, source, sources, (value, key) => {
@@ -214,16 +225,18 @@ function applyDocument(
   if (document.provider !== undefined) {
     const provider = objectValue(document.provider, "provider");
     assertKnownKeys(provider, [
-      "url", "id", "model", "allowed_models", "api_key", "context_window",
+      "url", "id", "model", "allowed_models", "api_key", "context_window", "allow_http_endpoint",
       "max_output_tokens", "runtime_profile", "reasoning_effort",
-      "include_usage", "system_prompt", "first_event_timeout_ms", "request_timeout_ms",
+      "include_usage", "system_prompt", "first_event_timeout_ms", "request_timeout_ms", "vision",
     ], `${path}.provider`);
+    assignInto(config.provider, "allowHttpEndpoint", provider.allow_http_endpoint, source, sources, "provider.allowHttpEndpoint", optionalString);
     assignInto(config.provider, "url", provider.url, source, sources, "provider.url", (value, key) => {
       const text = stringValue(value, key);
-      assertProviderUrl(text, key);
+      assertProviderUrl(text, key, config.provider.allowHttpEndpoint);
       return text;
     });
     assignInto(config.provider, "id", provider.id, source, sources, "provider.id", optionalString);
+    assignInto(config.provider, "vision", provider.vision, source, sources, "provider.vision", optionalBoolean);
     assignInto(config.provider, "model", provider.model, source, sources, "provider.model", optionalString);
     assignInto(config.provider, "allowedModels", provider.allowed_models, source, sources, "provider.allowedModels", stringArray);
     assignInto(config.provider, "apiKey", provider.api_key, source, sources, "provider.apiKey", optionalString);
@@ -236,6 +249,38 @@ function applyDocument(
     assignInto(config.provider, "systemPrompt", provider.system_prompt, source, sources, "provider.systemPrompt", optionalString);
     assignInto(config.provider, "firstEventTimeoutMs", provider.first_event_timeout_ms, source, sources, "provider.firstEventTimeoutMs", optionalPositiveInteger);
     assignInto(config.provider, "requestTimeoutMs", provider.request_timeout_ms, source, sources, "provider.requestTimeoutMs", optionalPositiveInteger);
+  }
+
+  if (document.additional_providers !== undefined) {
+    const entries = objectValue(document.additional_providers, "additional_providers");
+    config.additionalProviders ??= {};
+    for (const [id, entry] of Object.entries(entries)) {
+      const child = defaultConfig();
+      child.provider = { ...config.additionalProviders[id] };
+      const childSources: Record<string, ConfigSource> = {};
+      applyDocument(child, { provider: entry }, source, childSources);
+      child.provider.id ??= id;
+      if (!child.provider.url || !child.provider.model || !child.provider.contextWindow || !child.provider.maxOutputTokens) {
+        throw new ConfigError(`additional_providers.${id} requires url, model, context_window and max_output_tokens`);
+      }
+      if (child.provider.maxOutputTokens >= child.provider.contextWindow) {
+        throw new ConfigError(`additional_providers.${id}.max_output_tokens must be smaller than context_window`);
+      }
+      config.additionalProviders[id] = child.provider;
+      for (const [key, value] of Object.entries(childSources)) sources[`additionalProviders.${id}.${key.slice(9)}`] = value;
+    }
+  }
+
+  if (document.images !== undefined) {
+    const images = objectValue(document.images, "images");
+    assertKnownKeys(images, ["url", "model", "api_key", "request_timeout_ms"], `${path}.images`);
+    const target = config.images ??= {};
+    assignInto(target, "url", images.url, source, sources, "images.url", (value, key) => {
+      const text = stringValue(value, key); assertProviderUrl(text, key); return text;
+    });
+    assignInto(target, "model", images.model, source, sources, "images.model", optionalString);
+    assignInto(target, "apiKey", images.api_key, source, sources, "images.apiKey", optionalString);
+    assignInto(target, "requestTimeoutMs", images.request_timeout_ms, source, sources, "images.requestTimeoutMs", optionalPositiveInteger);
   }
 
   if (document.daemon !== undefined) {
@@ -310,6 +355,7 @@ export const ENV_VARIABLE_NAMES: Record<string, string> = {
   theme: "DEMESNE_THEME",
   inferenceSlots: "DEMESNE_INFERENCE_SLOTS",
   "provider.url": "DEMESNE_PROVIDER_URL",
+  "provider.vision": "DEMESNE_PROVIDER_VISION",
   "provider.id": "DEMESNE_PROVIDER_ID",
   "provider.model": "DEMESNE_MODEL",
   "provider.allowedModels": "DEMESNE_ALLOWED_MODELS",
@@ -323,6 +369,10 @@ export const ENV_VARIABLE_NAMES: Record<string, string> = {
   "provider.firstEventTimeoutMs": "DEMESNE_PROVIDER_FIRST_EVENT_TIMEOUT_MS",
   "provider.requestTimeoutMs": "DEMESNE_PROVIDER_REQUEST_TIMEOUT_MS",
   "daemon.host": "DEMESNE_HOST",
+  "images.url": "DEMESNE_IMAGE_URL",
+  "images.model": "DEMESNE_IMAGE_MODEL",
+  "images.apiKey": "DEMESNE_IMAGE_API_KEY",
+  "images.requestTimeoutMs": "DEMESNE_IMAGE_REQUEST_TIMEOUT_MS",
   "daemon.port": "DEMESNE_PORT",
 };
 
@@ -340,10 +390,11 @@ function applyEnvironment(
   setFromEnv(config, "inferenceSlots", env.DEMESNE_INFERENCE_SLOTS, "inferenceSlots", sources, optionalPositiveInteger);
 
   setFromEnv(config.provider, "url", env.DEMESNE_PROVIDER_URL, "provider.url", sources, (value, key) => {
-    assertProviderUrl(value, key);
+    assertProviderUrl(value, key, config.provider.allowHttpEndpoint);
     return value;
   });
   setFromEnv(config.provider, "id", env.DEMESNE_PROVIDER_ID, "provider.id", sources, optionalString);
+  setFromEnv(config.provider, "vision", env.DEMESNE_PROVIDER_VISION, "provider.vision", sources, optionalBoolean);
   setFromEnv(config.provider, "model", env.DEMESNE_MODEL, "provider.model", sources, optionalString);
   setFromEnv(config.provider, "allowedModels", env.DEMESNE_ALLOWED_MODELS, "provider.allowedModels", sources, stringArray);
   setFromEnv(config.provider, "apiKey", env.DEMESNE_API_KEY, "provider.apiKey", sources, optionalString);
@@ -357,6 +408,13 @@ function applyEnvironment(
   setFromEnv(config.provider, "firstEventTimeoutMs", env.DEMESNE_PROVIDER_FIRST_EVENT_TIMEOUT_MS, "provider.firstEventTimeoutMs", sources, optionalPositiveInteger);
   setFromEnv(config.provider, "requestTimeoutMs", env.DEMESNE_PROVIDER_REQUEST_TIMEOUT_MS, "provider.requestTimeoutMs", sources, optionalPositiveInteger);
 
+  if (Object.keys(env).some((key) => key.startsWith("DEMESNE_IMAGE_") && env[key])) {
+    const images = config.images ??= {};
+    setFromEnv(images, "url", env.DEMESNE_IMAGE_URL, "images.url", sources, (value, key) => { assertProviderUrl(value, key); return value; });
+    setFromEnv(images, "model", env.DEMESNE_IMAGE_MODEL, "images.model", sources, optionalString);
+    setFromEnv(images, "apiKey", env.DEMESNE_IMAGE_API_KEY, "images.apiKey", sources, optionalString);
+    setFromEnv(images, "requestTimeoutMs", env.DEMESNE_IMAGE_REQUEST_TIMEOUT_MS, "images.requestTimeoutMs", sources, optionalPositiveInteger);
+  }
   setFromEnv(config.daemon, "host", env.DEMESNE_HOST, "daemon.host", sources, optionalString);
   setFromEnv(config.daemon, "port", env.DEMESNE_PORT, "daemon.port", sources, (value, key) => {
     const port = optionalPositiveInteger(value, key);
@@ -400,7 +458,9 @@ export function renderUserConfig(settings: {
 
   const provider = settings.provider ?? {};
   const providerEntries: Array<[string, string]> = [];
+  if (provider.vision !== undefined) providerEntries.push(["vision", String(provider.vision)]);
   if (provider.url) providerEntries.push(["url", tomlString(provider.url)]);
+  if (provider.allowHttpEndpoint) providerEntries.push(["allow_http_endpoint", tomlString(provider.allowHttpEndpoint)]);
   if (provider.id) providerEntries.push(["id", tomlString(provider.id)]);
   if (provider.model) providerEntries.push(["model", tomlString(provider.model)]);
   if (provider.allowedModels?.length) {
@@ -541,11 +601,14 @@ export function assertServerUrl(value: string, key = "server"): void {
   if (url.username || url.password) throw new ConfigError(`${key} must not contain credentials`);
 }
 
-export function assertProviderUrl(value: string, key = "provider.url"): void {
+export function assertProviderUrl(value: string, key = "provider.url", allowHttpEndpoint?: string): void {
   assertServerUrl(value, key);
   const url = new URL(value);
   const loopback = ["127.0.0.1", "::1", "localhost"].includes(url.hostname);
-  if (url.protocol === "http:" && !loopback) {
+  const octets = url.hostname.split(".").map(Number);
+  const tailnet = octets.length === 4 && octets[0] === 100 && octets[1]! >= 64 && octets[1]! <= 127;
+  const explicitlyAllowed = tailnet && value === allowHttpEndpoint;
+  if (url.protocol === "http:" && !loopback && !explicitlyAllowed) {
     throw new ConfigError(`${key} must use HTTPS unless it targets a loopback address`);
   }
 }

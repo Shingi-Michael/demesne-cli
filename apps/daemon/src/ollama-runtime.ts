@@ -104,6 +104,7 @@ const RUNTIME_PROFILES: Record<string, RuntimeProfileDefinition> = {
   "experimental-llama-ngram-mod-f16-kv-64k-b256-32gb": llamaProfile(LLAMA_F16_KV_64K_B256_32GB, "ngram-mod"),
   "experimental-llama-ngram-mod-f16-kv-100k-b256-32gb": llamaProfile(LLAMA_F16_KV_100K_B256_32GB, "ngram-mod"),
   "llama-ngram-mod-f16-kv-100k-b256-32gb": llamaProfile(LLAMA_F16_KV_100K_B256_32GB, "ngram-mod"),
+  "experimental-llama-vision-ngram-mod-f16-kv-100k-b256-32gb": llamaProfile({ ...LLAMA_F16_KV_100K_B256_32GB, visionEnabled: true }, "ngram-mod"),
   "experimental-llama-f16-kv-32k-b512-32gb": llamaProfile(LLAMA_F16_KV_32K_B512_32GB),
   "experimental-llama-ngram-simple-32gb": llamaProfile(LLAMA_F16_KV_32K_B256_32GB, "ngram-simple"),
   "experimental-llama-ngram-map-k-32gb": llamaProfile(LLAMA_F16_KV_32K_B256_32GB, "ngram-map-k"),

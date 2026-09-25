@@ -19,6 +19,7 @@ describe("OpenAICompatibleProvider", () => {
             `data: ${JSON.stringify({ choices: [{ delta: { reasoning: "brief thought" } }] })}\n\n`,
             `data: ${JSON.stringify({ choices: [{ delta: { content: "hé" } }] })}\r\n\r\n`,
             `data: ${JSON.stringify({ choices: [{ delta: { content: "llo" } }] })}\n\n`,
+            `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`,
             `data: ${JSON.stringify({ choices: [], usage: {
               prompt_tokens: 4,
               completion_tokens: 2,
@@ -72,6 +73,7 @@ describe("OpenAICompatibleProvider", () => {
         { type: "reasoning_delta", delta: "brief thought" },
         { type: "text_delta", delta: "hé" },
         { type: "text_delta", delta: "llo" },
+        { type: "finish", reason: "stop" },
         { type: "usage", usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6, cachedInputTokens: 3 } },
       ]);
       expect(String(authorization)).toBe("Bearer secret");
@@ -175,6 +177,24 @@ describe("OpenAICompatibleProvider", () => {
     await expect(consume()).rejects.toThrow("completion marker");
   });
 
+  test("preserves a length stop and the trailing usage instead of treating DONE as normal completion", async () => {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "http://localhost:1234/v1",
+      fetch: (async () => new Response([
+        { choices: [{ delta: { reasoning_content: "Working through the problem" }, finish_reason: null }] },
+        { choices: [{ delta: {}, finish_reason: "length" }] },
+        { choices: [], usage: { prompt_tokens: 76664, completion_tokens: 1536, total_tokens: 78200 } },
+      ].map((value) => `data: ${JSON.stringify(value)}\n\n`).join("") + "data: [DONE]\n\n")) as unknown as typeof fetch,
+    });
+    const events = [];
+    for await (const event of provider.stream({ model: "qwen", messages: [{ role: "user", content: "Continue" }], maxOutputTokens: 1536 }, AbortSignal.timeout(2000))) events.push(event);
+    expect(events).toEqual([
+      { type: "reasoning_delta", delta: "Working through the problem" },
+      { type: "finish", reason: "length" },
+      { type: "usage", usage: { inputTokens: 76664, outputTokens: 1536, totalTokens: 78200 } },
+    ]);
+  });
+
   test("allows a turn to disable configured thinking", async () => {
     let body: Record<string, unknown> | undefined;
     const provider = new OpenAICompatibleProvider({
@@ -257,6 +277,7 @@ describe("OpenAICompatibleProvider", () => {
         const stream = [
           `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call-", function: { name: "read_", arguments: "{\"path\":" } }] } }] })}\n\n`,
           `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "1", function: { name: "file", arguments: "\"a.txt\"}" } }] } }] })}\n\n`,
+          `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })}\n\n`,
           "data: [DONE]\n\n",
         ].join("");
         return new Response(stream);
@@ -276,6 +297,7 @@ describe("OpenAICompatibleProvider", () => {
     expect(events).toEqual([
       { type: "tool_call_delta", index: 0, idDelta: "call-", nameDelta: "read_", argumentsDelta: "{\"path\":" },
       { type: "tool_call_delta", index: 0, idDelta: "1", nameDelta: "file", argumentsDelta: "\"a.txt\"}" },
+      { type: "finish", reason: "tool_calls" },
     ]);
     expect(body?.tools).toEqual([{
       type: "function",

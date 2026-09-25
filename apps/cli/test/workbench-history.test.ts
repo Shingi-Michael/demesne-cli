@@ -30,6 +30,22 @@ test("session replay restores ordered runs, original model and command evidence"
   expect(run.tools[0]).toMatchObject({ state: "done", exitCode: 0, message: "42 passed", detail: "$ bun test" });
 });
 
+test("compaction replay keeps original conversation entries and the compacted estimate on its receipt", () => {
+  const compact = { ...state.session.turns[0]!, id: "compact", content: "/compact preserve parser work", kind: "compaction" as const,
+    responseText: "Context compacted", createdAt: "2026-09-21T12:01:00Z", completedAt: "2026-09-21T12:01:05Z" };
+  const recorded = [
+    event(8, "model.request_started", { model: "summary-model", contextPlan: { estimatedInputTokens: 15000, capacityTokens: 100000 } }),
+    event(9, "message.delta", { delta: "Context compacted" }),
+    event(10, "session.compacted", { checkpoint: { afterTokens: 2000, contextPlan: { capacityTokens: 100000 } } }),
+    event(11, "turn.completed"),
+  ].map((entry) => ({ ...entry, turnId: "compact" }));
+  const runs = planRuns(restoreSessionEntries({ ...state, lastEventId: 11, session: { ...state.session, turns: [...state.session.turns, compact] } }, [...events, ...recorded]));
+  expect(runs).toHaveLength(2);
+  expect(runs[0]?.answer?.raw).toBe("Done");
+  expect(runs[1]?.request?.compaction).toBe(true);
+  expect(runs[1]?.answer?.receipt).toMatchObject({ mode: "Compact", model: "summary-model", context: { used: 2000, capacity: 100000, estimated: true } });
+});
+
 test("replay retains each response's first nonempty event time and uses recorded fallback times only", () => {
   const first = "2026-09-21T12:00:03.000Z";
   const second = "2026-09-21T12:00:10.000Z";

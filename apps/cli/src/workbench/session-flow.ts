@@ -285,7 +285,7 @@ export function renderSessionFlow(options: {
     }
     if (run.settled) {
       // A terminal receipt belongs to the run even if no final answer arrived.
-      const receipt = run.receipt ?? { mode: run.request?.planOnly ? "Plan" as const : "Build" as const, model: run.request?.model ?? "Model not recorded", durationMs: null, tokensPerSecond: null };
+      const receipt = run.receipt ?? { mode: run.request?.compaction ? "Compact" as const : run.request?.planOnly ? "Plan" as const : "Build" as const, model: run.request?.model ?? "Model not recorded", durationMs: null, tokensPerSecond: null };
       const parts = responseMetadata(receipt, paint, options.compact, inner);
       const lines: string[] = [];
       for (const part of parts) {

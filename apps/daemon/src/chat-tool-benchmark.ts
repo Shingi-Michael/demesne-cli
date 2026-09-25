@@ -261,6 +261,7 @@ async function runRound(
   let outputCharacters = 0;
   const assembled = new Map<number, ProviderToolCall>();
   for await (const event of provider.stream(request, signal)) {
+    if (event.type === "finish") continue;
     if (event.type === "usage") {
       usage = event.usage;
       continue;

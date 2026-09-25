@@ -150,7 +150,7 @@ function buildPainter(enabled: boolean, initial: Theme): Painter {
 
 export type SlashCommandId =
   | "new" | "sessions" | "resume" | "rename" | "delete" | "model" | "export" | "plan"
-  | "status" | "context" | "diff" | "undo" | "clear" | "help" | "theme" | "exit"
+  | "status" | "context" | "diff" | "undo" | "compact" | "clear" | "help" | "theme" | "exit"
   | `custom:${string}`;
 export type SlashCommandArgument = "none" | "optional" | "required";
 export type SlashCommandSection = "session" | "inspect" | "control";
@@ -185,6 +185,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: "diff", name: "/diff", aliases: [], argument: "none", description: "Review the last turn's changes", section: "inspect" },
   { id: "plan", name: "/plan", aliases: [], argument: "required", argumentLabel: "prompt", description: "Draft a read-only plan before changing anything", section: "control" },
   { id: "undo", name: "/undo", aliases: [], argument: "optional", argumentLabel: "path", description: "Revert last turn's changes", section: "control" },
+  { id: "compact", name: "/compact", aliases: [], argument: "optional", argumentLabel: "instructions", description: "Summarize older context, keeping recent turns", section: "control" },
   { id: "clear", name: "/clear", aliases: [], argument: "none", description: "Refresh the current view", section: "control" },
   { id: "help", name: "/help", aliases: [], argument: "none", description: "Show command help", section: "control" },
   { id: "exit", name: "/exit", aliases: ["/quit", "/leave"], argument: "none", description: "Exit Demesne", section: "control" },
@@ -1045,6 +1046,7 @@ export function formatDiffPreview(
 }
 
 export interface UnifiedDiffOptions {
+  hunkHeader?: boolean;
   context?: number;
   maxLines?: number;
   compact?: boolean;
@@ -1099,7 +1101,11 @@ export function formatUnifiedDiff(
   const contextAfter = oldLines.slice(oldLines.length - suffix, oldLines.length - suffix + Math.min(context, suffix));
 
   const rows: UnifiedDiffRow[] = [];
-  if (!compact) {
+  if (compact && options.hunkHeader) {
+    const oldCount = contextBefore.length + removed.length + contextAfter.length;
+    const newCount = contextBefore.length + added.length + contextAfter.length;
+    rows.push({ kind: "header", line: `@@ -${oldCount ? contextBeforeStart + 1 : contextBeforeStart},${oldCount} +${newCount ? contextBeforeStart + 1 : contextBeforeStart},${newCount} @@` });
+  } else if (!compact) {
     rows.push({ kind: "header", line: `@@ -${prefix + 1},${removed.length} +${prefix + 1},${added.length} @@` });
   }
   contextBefore.forEach((line, offset) => {

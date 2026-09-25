@@ -4,8 +4,10 @@ import { projectRunEvidence, toolFailed, verificationOutcome, type RunEvidence }
 import { computeSessionLayout, conversationInset } from "./layout.ts";
 import { Canvas, foldCells } from "./canvas.ts";
 import { artifactRecords, entryKey, renderSessionFlow, type FlowAction, type FlowExpansion, type FlowRow, type FlowArtifact } from "./session-flow.ts";
-import { clockLabel, InteractionTransitions } from "./interaction.ts";
+import { InteractionTransitions } from "./interaction.ts";
 import { reducedMotionEnabled } from "../motion.ts";
+import { diffPanelLines, filePanelLines } from "./panel-content.ts";
+import { sessionHeader } from "./session-header.ts";
 
 /// The three run surfaces. `response` is the default; `review` (recorded changes
 /// plus their verification) and `log` (the execution log) open on demand.
@@ -47,7 +49,7 @@ interface RunMemory {
   anchor: { key: string; line: number } | null;
   /// Follow prose in a stable reading window, with room below incoming text.
   /// Relative to the response so folding earlier thinking cannot move it.
-  responseWindow: { key: string; line: number } | null;
+  responseWindow: { key: string; line: number; scrolledAt?: number } | null;
   expansion: Map<string, boolean>;
   flowFocus: string | null;
   reviewSelection: number;
@@ -99,6 +101,9 @@ export class SessionView {
   private hoverRegions: { row: number; column: number; width: number; key: string }[] = [];
   private readonly transitions = new InteractionTransitions();
   private hoverReflow = false;
+  private scrollPending = false;
+  private snapScroll = false;
+  private flowGeometry: { width: number; height: number } | null = null;
 
   constructor(private readonly onCopy?: (text: string) => void) {}
 
@@ -112,6 +117,7 @@ export class SessionView {
     this.artifact = null;
     this.copied = null;
     this.pointer = null; this.hovered = null; this.hoverRegions = []; this.transitions.clear(); this.hoverReflow = false;
+    this.scrollPending = false; this.snapScroll = false; this.flowGeometry = null;
   }
   focusInput(): void { this.focused = false; this.historyOpen = false; }
 
@@ -124,7 +130,10 @@ export class SessionView {
     this.hovered = key;
     return true;
   }
-  animating(now = Date.now()): boolean { return this.hoverReflow || !reducedMotionEnabled() && this.transitions.active(now); }
+  animating(now = Date.now()): boolean {
+    return this.hoverReflow || !reducedMotionEnabled() && (this.transitions.active(now)
+      || this.scrollPending && !this.paused && !this.panelOpen);
+  }
 
   sync(entries: readonly WorkbenchEntry[]): void {
     const previous = this.current;
@@ -140,6 +149,7 @@ export class SessionView {
   }
   presentOutput(id: number): void { this.pauseFlow(); this.contextOpen = false; this.historyOpen = false; this.outputId = id; this.outputOffset = 0; this.focused = true; }
   dismissOutput(): void { this.outputId = null; }
+  showingOutput(id: number): boolean { return this.outputId === id; }
   get current(): SessionRun | undefined { return this.runs.find((run) => run.id === this.selectedId) ?? this.runs.at(-1); }
   get latest(): SessionRun | undefined { return this.runs.at(-1); }
   get panelOpen(): boolean { return !this.historyOpen && (this.contextOpen || this.outputId !== null || this.artifact !== null || this.memory.surface !== "response"); }
@@ -433,6 +443,7 @@ export class SessionView {
     return before !== this.selection;
   }
   private follow(): void {
+    this.snapScroll = true;
     this.historyOpen = false; this.dismissOutput(); this.selectedId = null;
     this.inspectionOrigin = null;
     this.artifact = null;
@@ -442,6 +453,7 @@ export class SessionView {
     memory.anchor = null; memory.flowFocus = null; this.reveal = null; this.focused = false;
   }
   private pauseFlow(): void {
+    this.scrollPending = false;
     const memory = this.memory;
     if (memory.followFlow) {
       // Freeze automatic disclosures too: finishing a turn must not remove
@@ -485,6 +497,7 @@ export class SessionView {
       this.pauseFlow();
     }
     memory.flowOffset = next;
+    this.snapScroll = true;
     memory.anchor = null; memory.flowFocus = null; this.reveal = null;
     return true;
   }
@@ -512,50 +525,38 @@ export class SessionView {
   }
 
   render(options: { width: number; height: number; paint: Painter; title: string; path: string; now?: number; presence?: PresenceState;
-    panel?: boolean; column?: number; replace?: boolean; contextLines?: string[];
+    animateScroll?: boolean;
+    panel?: boolean; column?: number; replace?: boolean; contextLines?: string[]; openedAt?: number; createdAt?: number;
     markdown: (entry: AssistantEntry, width: number) => string[] }): { rows: string[]; zones: SessionZone[] } {
     const { width, height, paint } = options;
     const run = this.current;
     const memory = this.memory;
     const zones: SessionZone[] = [];
-    if (!options.panel || options.replace) { this.regions = []; this.hoverRegions = []; this.hoverReflow = false; }
+    if (!options.panel || options.replace) { this.regions = []; this.hoverRegions = []; this.hoverReflow = false; this.scrollPending = false; }
     if (options.replace && this.pointer) this.hover(this.pointer.row, this.pointer.column);
     const canvas = new Canvas(width, height, paint);
+    const output = this.runs.flatMap((run) => run.entries).find((entry) => entry.id === this.outputId);
     const rows = canvas.rows;
     const put = canvas.put.bind(canvas);
     const zone = (row: number, column: number, size: number, action: Action) => {
       if (row >= 0 && row < height && column >= 0 && column < width && size > 0) zones.push({ row, column: column + (options.column ?? 0), width: Math.min(size, width - column), action });
     };
     const region = (value: ScrollRegion) => this.regions.push({ ...value, column: value.column + (options.column ?? 0) });
-    // Session and workspace share one orientation line. The narrow layout keeps
-    // the mark, title, path, and History rather than adding another header row.
+    // The cyan accent and identity row share the existing header allocation.
+    // Compact layouts drop optional timestamps before losing path and History.
     const inset = width >= 65 ? 2 : 1;
     const workspaceWidth = width - inset * 2;
-    const identity = paint.bold("// demesne", "electric");
-    const identityWidth = visibleLength(identity);
-    const history = width >= 55 ? "[ HISTORY ↓ ]" : "[H↓]";
     const now = options.now ?? Date.now();
-    const clock = clockLabel(now);
-    const headerGap = width < 55 ? 1 : 2;
-    const pathBudget = workspaceWidth - history.length - clock.length - identityWidth - headerGap * 3;
-    const path = truncateText(safe(options.path), Math.max(0, Math.min(32, Math.floor(workspaceWidth * 0.32), pathBudget)));
-    const pathColumn = workspaceWidth - history.length - visibleLength(path) - headerGap;
-    const titleWidth = Math.max(0, Math.min(28, pathColumn - identityWidth - clock.length - headerGap * 3));
-    const title = truncateText(options.title === "Session" ? options.title : `Session ${safe(options.title)}`, titleWidth);
-    const clockColumn = identityWidth + headerGap + (titleWidth ? visibleLength(title) + headerGap : 0);
     if (!options.panel) {
-      put(0, 0, "", width, "surface");
-      put(0, inset, identity, identityWidth, "surface");
-      put(0, inset + identityWidth + headerGap, paint.text(title, "muted"), titleWidth, "surface");
-      put(0, inset + pathColumn, paint.text(path, "secondary"), visibleLength(path), "surface");
-      zone(0, inset + pathColumn, visibleLength(path), { kind: "workspace" });
-      put(0, inset + clockColumn, paint.text(clock, "secondary"), clock.length, "surface");
-      put(0, inset + workspaceWidth - history.length, paint.text(history, "secondary"), history.length, "surface");
-      zone(0, inset + workspaceWidth - history.length, history.length, { kind: "history" });
-      if (height >= 10) put(1, 0, paint.text("─".repeat(width), "rule"), width, "surface");
+      const header = sessionHeader({ width, paint, path: options.path, now, openedAt: options.openedAt ?? now,
+        createdAt: options.createdAt, accent: height >= 10, pointer: this.pointer, historyActive: this.historyOpen });
+      header.rows.forEach((text, row) => put(row, 0, text, width, "surface"));
+      zone(header.row, header.path.column, header.path.width, { kind: "workspace" });
+      zone(header.row, header.history.column, header.history.width, { kind: "history" });
+      this.hoverRegions.push({ row: header.row, column: header.history.column, width: header.history.width, key: "header-history" });
     } else {
       for (let y = 0; y < height; y++) put(y, 0, "", width, "surface");
-      const title = this.contextOpen ? "CONTEXT" : this.outputId !== null ? "SESSION OUTPUT" : this.artifact?.kind === "changes" ? "CHANGES"
+      const title = this.contextOpen ? "CONTEXT" : this.outputId !== null ? output?.type === "panel" && output.title ? output.title : "SESSION OUTPUT" : this.artifact?.kind === "changes" ? "DIFF"
         : this.artifact?.kind === "verification" ? "VERIFICATION" : this.artifact ? "FAILED / DENIED" : memory.surface === "review" ? "CHANGES" : "EXECUTION LOG";
       put(0, 1, paint.text(`▪ ${title}`, "electric"), width - 5, "surface");
       put(0, width - 3, paint.text("×", "muted"), 2, "surface");
@@ -568,7 +569,9 @@ export class SessionView {
     const paused = !memory.followFlow || this.selectedId !== null;
     // Keep the reading region the same height when follow/focus changes. The
     // quiet gap above the prompt becomes the scrollback control when needed.
-    const layout = options.panel ? { actionsRow: 2, body: { row: 3, column: 1, width: width - 2, height: Math.max(1, height - 4) }, footerRow: height - 1 }
+    const cleanPanel = options.panel && (output?.type === "panel" && output.title || this.artifact?.kind === "changes");
+    const panelTop = cleanPanel && !(this.artifact?.kind === "changes") ? 2 : 3;
+    const layout = options.panel ? { actionsRow: 2, body: { row: panelTop, column: 1, width: width - 2, height: Math.max(1, height - panelTop) }, footerRow: height - 1 }
       : computeSessionLayout(width, height, { inspection, footer: true });
     const { actionsRow } = layout;
     const top = layout.body.row;
@@ -608,11 +611,12 @@ export class SessionView {
       region({ row: top, column: x, width: stageWidth, height: bodyHeight, target: "history" });
       return { rows, zones };
     }
-    const output = this.runs.flatMap((run) => run.entries).find((entry) => entry.id === this.outputId);
     if (options.panel && (output?.type === "panel" || output?.type === "block")) {
       // Session commands are global, even when the reader has pinned an old run.
       // Their temporary panel preserves that run's surface and reading position.
-      this.outputOffset = pane(output.lines.flatMap((line) => foldCells(line, stageWidth - 2)), x + 1, stageWidth - 1, this.outputOffset, "output");
+      const lines = output.type === "panel" && output.files?.length ? filePanelLines(output.files, stageWidth - 1, paint)
+        : output.lines.flatMap((line) => foldCells(line, stageWidth - 1));
+      this.outputOffset = pane(lines, x, stageWidth, this.outputOffset, "output");
       return { rows, zones };
     }
     if (options.panel && this.contextOpen) {
@@ -627,14 +631,14 @@ export class SessionView {
         const index = records.indexOf(selected);
         const back = index > 0 ? "‹ " : "  ";
         const next = index + 1 < records.length ? " ›" : "  ";
-        put(2, x, paint.text(`${back}${index + 1}/${records.length}${next}`, "secondary"), stageWidth, "surface");
+        if (records.length > 1) put(2, x, paint.text(`${back}${index + 1}/${records.length}${next}`, "secondary"), stageWidth, "surface");
         if (index > 0) zone(2, x, 2, { kind: "artifact-step", step: -1 });
         if (index + 1 < records.length) zone(2, x + `${back}${index + 1}/${records.length}`.length, 2, { kind: "artifact-step", step: 1 });
-        const lines = this.detailLines(selected, stageWidth - 1, paint, options.markdown);
+        const lines = this.artifact.kind === "changes" ? diffPanelLines(selected, stageWidth - 1, paint) : this.detailLines(selected, stageWidth - 1, paint, options.markdown);
         const offset = pane(lines, x, stageWidth, memory.detailOffsets.get(selected.id) ?? 0, "body");
         memory.detailOffsets.set(selected.id, offset);
         this.regions.at(-1)!.recordId = selected.id;
-        if (offset === 0) zone(top, x, 14, { kind: "arguments", id: selected.id });
+        if (offset === 0 && this.artifact.kind !== "changes") zone(top, x, 14, { kind: "arguments", id: selected.id });
       }
       return { rows, zones };
     }
@@ -649,6 +653,13 @@ export class SessionView {
         emphasis: (key) => focusedKey === key ? 1 : this.transitions.value(`hover:${key}`, this.hovered === key ? 1 : 0, now, reduced),
         expansion: (id) => this.memoryFor(id).expansion, argumentsOpen: this.argumentsOpen, markdown: options.markdown });
       const initialFlow = this.flowRows.length === 0;
+      // Snapshots, navigation and geometry changes resolve immediately. Only
+      // automatic prose following is paced, relative to the response so folded
+      // reasoning cannot drag the reader back into an older part of the turn.
+      const smoothScroll = options.animateScroll && !reduced && !initialFlow && !this.snapScroll
+        && this.flowGeometry?.width === stageWidth && this.flowGeometry.height === bodyHeight;
+      this.flowGeometry = { width: stageWidth, height: bodyHeight };
+      this.snapScroll = false;
       this.flowRows = flow.rows;
       this.flowExpansions = flow.expansions;
       this.flowControls = flow.rows.flatMap((row, index) => row.controls.map((control, ordinal) => ({ key: `${row.key}:${row.line}:${ordinal}`, row: index, action: control.action })));
@@ -674,13 +685,22 @@ export class SessionView {
         windowOffset = Math.max(0, start + window.line);
         if (following) {
           if (response?.streaming && !run?.settled && entryKey(response.id) === window.key) {
-            // Follow only the newly overflowing rows. Jumping by a fraction
-            // of the viewport makes continuous output visibly lurch.
+            // Calculate the live target with breathing room below the text.
             const threshold = Math.max(1, bodyHeight - Math.max(1, Math.floor(bodyHeight / 5)));
             const overflow = end - windowOffset - threshold + 1;
-            if (overflow > 0) windowOffset += overflow;
-            offset = windowOffset;
+            offset = windowOffset + Math.max(0, overflow);
           } else offset = Math.max(tail, windowOffset);
+          // A provider burst or Markdown reflow can add many rows at once.
+          // Show every intervening row instead of replacing a screenful in one
+          // paint. Keep draining after settlement, even without more deltas.
+          if (smoothScroll && offset > windowOffset) {
+            const step = window.scrolledAt === undefined || now - window.scrolledAt >= 16 ? 1 : 0;
+            const next = Math.min(offset, windowOffset + step);
+            this.scrollPending = next < offset;
+            if (next > windowOffset) window.scrolledAt = now;
+            offset = next;
+          } else window.scrolledAt = now;
+          windowOffset = offset;
           window.line = offset - start;
         }
       }

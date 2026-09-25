@@ -6,6 +6,7 @@ import type { Rect } from "./layout.ts";
 import { Canvas } from "./canvas.ts";
 import { clockLabel, InteractionTransitions, tint } from "./interaction.ts";
 import { contextLabel } from "./session-chrome.ts";
+import { sessionHeader } from "./session-header.ts";
 
 export const START_OPERATIONS = [
   { tag: "EXPLORE", title: "Trace a call flow", description: "Follow execution from entry point through the full stack", tone: "electric",
@@ -97,6 +98,7 @@ export class StartScreen {
     width: number; height: number; layout: StartLayout; paint: Painter; now: number; animate: boolean; focused: boolean;
     path: string; model: string; context: ContextReceipt; currentId?: string; recent: readonly RecentSession[];
     recentState: "loading" | "ready" | "unavailable"; feedback?: { text: string; tone: string } | null; input: string[];
+    openedAt?: number; createdAt?: number;
   }): { rows: string[]; zones: StartZone[] } {
     const { width, height, paint, layout, now, animate } = options;
     const canvas = new Canvas(width, height, paint);
@@ -110,13 +112,11 @@ export class StartScreen {
     const inset = width >= 65 ? 2 : 1;
     const inner = width - inset * 2;
     const compact = width < 55;
-    const identity = paint.bold("// demesne", "electric");
-    const left = identity + " " + paint.text(clockLabel(now), "muted");
-    const ready = paint.text(compact ? "READY" : "▪ READY", "citron");
-    const path = truncateText(safe(options.path), Math.max(0, inner - visibleLength(left) - visibleLength(ready) - (compact ? 2 : 5)));
-    put(0, inset, formatFooterLine(left, `${ready}${path ? ` ${paint.text(path, "muted")}` : ""}`, inner), inner);
-    if (path) zone({ row: 0, column: width - inset - visibleLength(path), width: visibleLength(path), height: 1 }, { kind: "workspace" });
-    if (height >= 14) put(1, 0, paint.text("─".repeat(width), "rule"), width);
+    const header = sessionHeader({ width, paint, path: options.path, now, openedAt: options.openedAt ?? now,
+      createdAt: options.createdAt, accent: height >= 14, historyActive: emphasis("history") > 0 });
+    header.rows.forEach((text, row) => put(row, 0, text, width, "surface"));
+    zone({ row: header.row, column: header.path.column, width: header.path.width, height: 1 }, { kind: "workspace" });
+    zone({ row: header.row, column: header.history.column, width: header.history.width, height: 1 }, { kind: "history" });
 
     const { input } = layout;
     const navigation = options.focused ? "←/→ select · Enter fill · Esc draft" : "Ctrl+T operations · Alt+H history";

@@ -127,8 +127,9 @@ test("settings, context and the rail return to the hero without losing the draft
   expect(screen()).toContain("CONTEXT PLAN");
   key("escape");
   expect(screen()).toContain("WHAT WOULD YOU LIKE");
-  screen(); click("⊞");
-  expect(screen()).toContain("EXECUTION LOG");
+  screen(); click("≡");
+  await Promise.resolve();
+  expect(screen()).toContain("FILES");
   key("escape");
   screen();
   expect(state.editor.value).toBe("Retain me");

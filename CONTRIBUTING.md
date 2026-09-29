@@ -44,9 +44,6 @@ packages/brand/    Palette, slash-command grammar, terminal text formatting
   directory.
 - No new runtime dependencies without a strong reason. `brand`, `protocol`,
   and `config` are intentionally dependency-free.
-- The research plan in `RESEARCH_AND_IMPLEMENTATION_PLAN.md` governs
-  performance and memory work. Label claims as fact, assumption, prediction,
-  measurement, interpretation, or decision, and preserve negative results.
 
 ## Pull Requests
 

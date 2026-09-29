@@ -1,15 +1,46 @@
 import { expect, test } from "bun:test";
-import type { TurnProcessor } from "../src/processor.ts";
-import {
-  runSummaryCheckpointBenchmark,
-  SUMMARY_CHECKPOINT_GOLD,
-  SUMMARY_CHECKPOINT_RECALL_GOLD,
-} from "../src/summary-checkpoint-benchmark.ts";
 import {
   buildSummaryCheckpointPrompt,
   parseSummaryCheckpoint,
   renderSummaryCheckpoint,
 } from "../src/summary-checkpoint.ts";
+
+const SUMMARY_CHECKPOINT_GOLD = parseSummaryCheckpoint(JSON.stringify({
+  schemaVersion: 1,
+  goal: "Update cache key behavior without changing the database schema.",
+  currentState: "The focused cache-key test passes; Windows path normalization remains unresolved.",
+  constraints: [
+    { id: "REQ-01", text: "Edit only src/cache-key.ts." },
+    { id: "REQ-02", text: "Do not change the database schema." },
+    { id: "REQ-03", text: "Keep the public function name buildCacheKey." },
+  ],
+  decisions: [
+    { id: "DEC-01", status: "superseded", text: "Use port 3000.", supersedes: [] },
+    { id: "DEC-02", status: "active", text: "Use port 7337.", supersedes: ["DEC-01"] },
+    { id: "DEC-03", status: "rejected", text: "Add Redis for cache-key storage.", supersedes: [] },
+  ],
+  files: [{
+    path: "src/cache-key.ts",
+    facts: ["Exports buildCacheKey."],
+    changes: ["Normalize the cache namespace before joining key components."],
+  }],
+  validation: [
+    {
+      id: "VAL-01",
+      command: ["bun", "test", "test/cache-key.test.ts"],
+      outcome: "failed",
+      fact: "Failed before the fix with expected 7337 but received 3000.",
+    },
+    {
+      id: "VAL-02",
+      command: ["bun", "test", "test/cache-key.test.ts"],
+      outcome: "passed",
+      fact: "Passed after the cache-key fix.",
+    },
+  ],
+  unresolved: [{ id: "OPEN-01", text: "Windows path normalization remains unresolved." }],
+}));
+
 
 test("summary checkpoints parse and render as deterministic canonical JSON", () => {
   const shuffled = structuredClone(SUMMARY_CHECKPOINT_GOLD);
@@ -54,102 +85,3 @@ test("summary prompt treats source messages as data without mutating them", () =
   expect(prompt[0]?.content).toContain("untrusted historical data");
   expect(prompt[1]?.content).toContain(JSON.stringify(source));
 });
-
-test("measurement harness distinguishes raw, dropped, and checkpoint recall", async () => {
-  const processor = summaryBenchmarkProcessor(true);
-
-  const report = await runSummaryCheckpointBenchmark({
-    model: "test-model",
-    warmupRuns: 0,
-    measuredRuns: 6,
-    timeoutMs: 10_000,
-    maxOutputTokens: 1_536,
-    temperature: 0,
-    seed: 42,
-    contextWindow: 8_192,
-  }, { processor });
-
-  expect(report.observations.map((observation) => observation.conditionOrder)).toEqual([
-    ["raw", "drop", "checkpoint"],
-    ["raw", "checkpoint", "drop"],
-    ["drop", "raw", "checkpoint"],
-    ["drop", "checkpoint", "raw"],
-    ["checkpoint", "raw", "drop"],
-    ["checkpoint", "drop", "raw"],
-  ]);
-  expect(report.observations.every((observation) => observation.summaryScore.exact)).toBe(true);
-  expect(report.summary).toMatchObject({
-    measuredRuns: 6,
-    exactSummaryRate: 1,
-    rawRecallRate: 1,
-    dropRecallRate: 0,
-    checkpointRecallRate: 1,
-    fidelityEligible: true,
-    productionEligible: false,
-  });
-});
-
-test("measurement harness rejects incomplete provider usage", async () => {
-  const report = await runSummaryCheckpointBenchmark(summaryBenchmarkConfig(), {
-    processor: summaryBenchmarkProcessor(false),
-  });
-
-  expect(report.summary).toMatchObject({
-    usageComplete: false,
-    fidelityEligible: false,
-    productionEligible: false,
-  });
-});
-
-function summaryBenchmarkConfig() {
-  return {
-    model: "test-model",
-    warmupRuns: 0,
-    measuredRuns: 6,
-    timeoutMs: 10_000,
-    maxOutputTokens: 1_536,
-    temperature: 0,
-    seed: 42,
-    contextWindow: 8_192,
-  };
-}
-
-function summaryBenchmarkProcessor(completeUsage: boolean): TurnProcessor {
-  return {
-    providerId: "test-provider",
-    modelId: "test-model",
-    contextCapacity: 8_192,
-    maxOutputTokens: 1_536,
-    temperature: 0,
-    seed: 42,
-    async listModels() {
-      return [{ id: this.modelId, provider: this.providerId, contextWindow: this.contextCapacity }];
-    },
-    async *stream(messages) {
-      const combined = messages.map((message) => message.content ?? "").join("\n");
-      const output = combined.includes("You create immutable coding-session checkpoints")
-        ? SUMMARY_CHECKPOINT_GOLD
-        : combined.includes("GOAL:") || combined.includes("Historical conversation checkpoint")
-          ? SUMMARY_CHECKPOINT_RECALL_GOLD
-          : {
-              schemaVersion: 1,
-              goal: "",
-              constraintIds: [],
-              activeDecisionIds: [],
-              supersededDecisionIds: [],
-              rejectedDecisionIds: [],
-              filePaths: [],
-              validation: [],
-              unresolvedIds: [],
-            };
-      const text = JSON.stringify(output);
-      yield { type: "text_delta" as const, delta: text };
-      yield {
-        type: "usage" as const,
-        usage: completeUsage
-          ? { inputTokens: combined.length, outputTokens: text.length, totalTokens: combined.length + text.length }
-          : { inputTokens: null, outputTokens: null, totalTokens: null },
-      };
-    },
-  };
-}

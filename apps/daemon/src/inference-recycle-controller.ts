@@ -1,5 +1,13 @@
 import type { InferenceBoundaryHook, InferenceBoundarySnapshot } from "./inference-scheduler.ts";
-import type { HostMemorySnapshot } from "./provider-benchmark.ts";
+
+export interface HostMemorySnapshot {
+  observedAt: string;
+  availablePercent: number | null;
+  swapUsedBytes: number | null;
+  pageSizeBytes: number | null;
+  pageOuts: number | null;
+  swapOuts: number | null;
+}
 
 export interface InferenceRecycleDecision {
   observedAt: string;

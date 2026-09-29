@@ -163,7 +163,7 @@ test("the prompt retains drafts and queued instructions when focus changes", asy
   // The queued draft labels its automatic handoff even while editing it.
   expect(screen()).toContain("Next step");
   expect(screen()).toContain("Queued · sends after this turn");
-  expect(screen()).toContain("│  ···   │");
+  expect(screen()).toContain("··· stop");
   key("t", { ctrl: true });
   key("c", { ctrl: true });
   expect(interrupts()).toBe(1);
@@ -172,7 +172,7 @@ test("the prompt retains drafts and queued instructions when focus changes", asy
 test("approval controls remain visible and correctly clickable on a ten-row terminal", async () => {
   const { ui, screen, state } = fixture("approval");
   const approval = ui.askApproval({ summary: "Run test suite", toolName: "run_command", allowPersist: false });
-  expect(screen(40, 10)).toContain("Approval required");
+  expect(screen(40, 10)).toContain("Allow this command?");
   expect(screen(40, 10)).toContain("Deny");
   expect(screen(40, 10)).toContain("Run test suite");
   const deny = state.mouseZones.at(-1);
@@ -304,7 +304,7 @@ test("queued follow-ups support caret editing and keep the running control visib
   key("return");
   expect(queue()).toBe("abc");
   state.onKeypress("\n" + "a long follow-up\n".repeat(20), {});
-  expect(screen(40, 10)).toContain("│  ···   │");
+  expect(screen(40, 10)).toContain("··· stop");
   expect(screen(40, 10)).toContain("Clear queue");
   expect(screen(40, 10)).toContain("Type to queue");
 });

@@ -1379,7 +1379,8 @@ export class Workbench {
 
   private inputLineCount(columns = process.stdout.columns ?? 80): number {
     if (this.mode === "approval") {
-      if (this.sessionLayout) return 3 + approvalOptions(this.approval?.toolName !== "run_command", this.approval?.allowPersist ?? false).options.length + Math.min(3, this.approval?.previewRows?.length ?? 0);
+      // Title, summary, previews, the sandbox note and one row of choices.
+      if (this.sessionLayout) return 5 + (this.approval?.toolName === "run_command" ? 1 : 0) + Math.min(3, this.approval?.previewRows?.length ?? 0);
       // Voice line + permission card + preview rows + selection row.
       return Math.max(7, 6 + (this.approval?.previewRows?.length ?? 0) + 2);
     }
@@ -2074,16 +2075,17 @@ export class Workbench {
       offset = Math.max(0, content.cursor.row - available + 2);
     }
     if (this.mode === "approval" && content.lines.length > available && this.approval) {
-      const count = approvalOptions(this.approval.toolName !== "run_command", this.approval.allowPersist).options.length;
-      offset = Math.max(0, content.lines.length - count + this.approvalSelected - available + 1);
+      // Keep the choice row in view; it is the last line.
+      offset = Math.max(0, content.lines.length - available);
     }
     if (this.sessionLayout) {
       const canvas = new Canvas(width, this.layout.input.height, paint);
       for (let row = 0; row < this.layout.input.height; row++) {
         canvas.put(row, inset, "", panelWidth, "surface");
-        canvas.put(row, inset, paint.text("▎", this.mode === "approval" ? "signal" : "electric"), 1, "surface");
+        canvas.put(row, inset, paint.text("▎", this.mode === "approval" ? "thinking" : "electric"), 1, "surface");
       }
-      canvas.put(0, inset + contentInset + 3, paint.bold(this.mode === "approval" ? "Approval required" : "Select", this.mode === "approval" ? "signal" : "electricBright"), panelWidth - contentInset - 6, "surface");
+      const approvalTitle = paint.text("! ", "thinking") + paint.bold(this.approval?.toolName === "run_command" ? "Allow this command?" : "Allow this action?", "paper");
+      canvas.put(0, inset + contentInset + 3, this.mode === "approval" ? approvalTitle : paint.bold("Select", "electricBright"), panelWidth - contentInset - 6, "surface");
       for (let y = 0; y < available; y++) canvas.put(y + 1, inset + contentInset + 1, content.lines[offset + y]?.replace(/^ {2}/, "") ?? "", panelWidth - contentInset - 2, "surface");
       return {
         lines: canvas.rows,
@@ -2123,11 +2125,34 @@ export class Workbench {
         // decision: the footer already shows the waiting glyph.
         waitingMark: paint.text("❯", "signal"),
       });
-      if (this.sessionLayout) {
-        lines.push(`    ${paint.bold(truncateText(sanitizeTerminalLine(this.approval.summary), width - 8), "paper")}`);
-        for (const line of (this.approval.previewRows ?? []).slice(0, Math.max(0, this.layout.input.height - choices.length - 3))) lines.push(`    ${sanitizeTerminalLine(line)}`);
-      } else lines.push(...askLines);
       const labels = { allow_once: "Allow once", allow_session: "Allow for session", allow_always: "Always allow", deny: "Deny" };
+      if (this.sessionLayout) {
+        // Two visible choices, as the redesign asks; the session and always
+        // options stay one key away as quiet hints. Every option remains
+        // selectable with the arrows, and Deny keeps its fail-safe default.
+        lines.push(`    ${paint.text(truncateText(sanitizeTerminalLine(this.approval.summary), width - 8), "secondary")}`);
+        const unsandboxed = this.approval.toolName === "run_command";
+        for (const line of (this.approval.previewRows ?? []).slice(0, Math.max(0, this.layout.input.height - (unsandboxed ? 5 : 4)))) lines.push(`    ${sanitizeTerminalLine(line)}`);
+        if (unsandboxed) lines.push(`    ${paint.text("runs on your machine · not sandboxed", "thinking")}`);
+        const keys: Record<PermissionDecision, string> = { allow_once: "y", allow_session: "a", allow_always: "s", deny: "n" };
+        let row = "    ";
+        const buttonRow = lines.length;
+        for (const decision of choices.filter((choice) => choice === "allow_once" || choice === "deny")) {
+          const selected = choices[this.approvalSelected] === decision;
+          const label = ` ${keys[decision]}  ${labels[decision]} `;
+          zones.push({ row: buttonRow, column: visibleLength(row), width: label.length, run: () => this.resolveApproval(decision) });
+          row += (selected ? paint.wash(label, decision === "deny" ? "errorSurface" : "diffAddedSurface", decision === "deny" ? "signal" : "citron") : paint.wash(label, "raised", "paper")) + "  ";
+        }
+        const quiet = choices.filter((choice) => choice === "allow_session" || choice === "allow_always");
+        const hints = quiet.map((decision) => {
+          const text = `${keys[decision]} ${decision === "allow_session" ? "this session" : "always"}`;
+          return choices[this.approvalSelected] === decision ? paint.wash(` ${text} `, "menuSelection", "electric") : paint.text(keys[decision], "secondary") + paint.text(text.slice(1), "muted");
+        }).join(paint.text(" · ", "borderBright"));
+        lines.push(hints && visibleLength(row + hints) <= width - 2 ? row + " " + hints : row);
+        if (hints && visibleLength(row + hints) > width - 2) lines.push(`    ${hints}`);
+        return { lines, cursor: null, zones };
+      }
+      lines.push(...askLines);
       choices.forEach((decision, index) => {
         const label = ` ${index === this.approvalSelected ? "›" : " "} ${labels[decision]} `;
         zones.push({ row: lines.length, column: 4, width: visibleLength(label), run: () => this.resolveApproval(decision) });

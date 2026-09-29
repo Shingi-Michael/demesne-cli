@@ -672,7 +672,8 @@ export class SessionView {
       for (let y = 0; y < height; y++) put(y, 0, "", width, "surface");
       const title = this.drivePanelOpen ? "AGENT DRIVE" : this.contextOpen ? "CONTEXT" : this.outputId !== null ? output?.type === "panel" && output.title ? output.title : "SESSION OUTPUT" : this.artifact?.kind === "changes" ? "DIFF"
         : this.artifact?.kind === "verification" ? "VERIFICATION" : this.artifact ? "FAILED / DENIED" : memory.surface === "review" ? "CHANGES" : "EXECUTION LOG";
-      put(0, 1, paint.text(`▪ ${title}`, "electric"), width - 5, "surface");
+      // Panels are titled quietly, as in the redesign: a dim uppercase label.
+      put(0, 1, paint.text(title, "secondary"), width - 5, "surface");
       put(0, width - 3, paint.text("×", "muted"), 2, "surface");
       zone(0, width - 4, 4, { kind: "panel-close" });
       put(1, 0, paint.text("─".repeat(width), "rule"), width, "surface");

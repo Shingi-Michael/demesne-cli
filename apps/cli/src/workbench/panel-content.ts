@@ -8,7 +8,10 @@ export function filePanelLines(files: WorkspaceFileInfo[], width: number, paint:
     const size = file.byteLength === null ? "" : file.byteLength < 1000 ? `${file.byteLength}b`
       : file.byteLength < 1_000_000 ? `${(file.byteLength / 1000).toFixed(1)}k` : `${(file.byteLength / 1_000_000).toFixed(1)}m`;
     const name = truncateText(sanitizeTerminalLine(file.path), Math.max(1, width - size.length - 4));
-    return paint.text(file.status ?? " ", file.status === "M" ? "thinking" : "muted") + " "
+    // Git status letters keep their meaning: modified amber, added green,
+    // deleted red; anything else stays quiet.
+    const tone = file.status === "M" ? "thinking" : file.status === "A" || file.status === "??" ? "citron" : file.status === "D" ? "signal" : "muted";
+    return paint.text(file.status ?? " ", tone) + " "
       + paint.text(name, "secondary") + " ".repeat(Math.max(1, width - visibleLength(name) - size.length - 2)) + paint.text(size, "muted");
   });
 }

@@ -937,7 +937,7 @@ test("context capacity and project path stay visible in narrow frames and open d
   key("escape");
   const context = state.mouseZones.find((zone: { row: number }) => zone.row === state.layout.height - 1);
   state.handleMouse({ kind: "press", button: 0, row: context.row, col: context.column });
-  expect(screen()).toContain("▪ CONTEXT");
+  expect(screen()).toMatch(/CONTEXT\s+×/);
   key("escape");
   key("return");
   expect(await prompt).toBe("preserve this draft");
@@ -946,7 +946,7 @@ test("context capacity and project path stay visible in narrow frames and open d
 test("closing context and project details during inference does not count as double Escape", () => {
   const { key, screen, state, interrupts } = fixture("thinking");
   key("c", { meta: true });
-  expect(screen()).toContain("▪ CONTEXT");
+  expect(screen()).toMatch(/CONTEXT\s+×/);
   key("escape");
   key("p", { meta: true });
   expect(screen()).toContain("PROJECT FOLDER");
@@ -956,7 +956,7 @@ test("closing context and project details during inference does not count as dou
     const rows = screen().split("\n");
     const row = rows.findLastIndex((line) => line.includes(target));
     state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf(target) });
-    expect(screen()).toContain(target === "ctx" ? "▪ CONTEXT" : "PROJECT FOLDER");
+    expect(screen()).toMatch(target === "ctx" ? /CONTEXT\s+×/ : /PROJECT FOLDER/);
     key("escape");
     expect(interrupts()).toBe(0);
   }
@@ -1561,7 +1561,7 @@ test("opening evidence near the viewport edge reveals the record beside its resp
   const row = rows.findIndex((line) => line.includes("1 file changed"));
   state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("1 file changed") });
   const expanded = screen(100, 36);
-  expect(expanded).toContain("▪ DIFF");
+  expect(expanded).toMatch(/DIFF\s+×/);
   expect(expanded).toContain("@@");
   expect(expanded).toMatch(/2\s+−\s+return \/\[a-zA-Z_\]\//);
   expect(expanded).not.toContain("Arguments ▸");
@@ -1693,7 +1693,7 @@ test("the log shortcut opens a real log and docked evidence scrolls independentl
   expect(view.panelOpen).toBe(true);
   const selection = view.memory.logSelection;
   key("c", { meta: true });
-  expect(screen(80, 24)).toContain("▪ CONTEXT");
+  expect(screen(80, 24)).toMatch(/CONTEXT\s+×/);
   key("down"); key("return");
   expect(view.memory.logSelection).toBe(selection);
   expect(view.memory.detail).toBeNull();

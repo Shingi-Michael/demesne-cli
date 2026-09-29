@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { isolatedCliEnv } from "./isolated-env.ts";
 
 const cliPath = join(import.meta.dir, "../src/main.ts");
 
 describe("daemon server URL", () => {
   test("rejects cleartext non-loopback endpoints before sending a token", async () => {
     const child = Bun.spawn([process.execPath, cliPath, "--server", "http://example.com", "models"], {
-      env: { ...process.env, DEMESNE_DAEMON_TOKEN: "secret" },
+      env: isolatedCliEnv({ DEMESNE_DAEMON_TOKEN: "secret" }),
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -19,6 +20,7 @@ describe("daemon server URL", () => {
     const server = Bun.serve({ port: 0, fetch: () => Response.json({ models: [] }) });
     try {
       const child = Bun.spawn([process.execPath, cliPath, "--server", server.url.href, "models"], {
+        env: isolatedCliEnv(),
         stdout: "pipe",
         stderr: "pipe",
       });

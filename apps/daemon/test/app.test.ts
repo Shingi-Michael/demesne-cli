@@ -23,6 +23,7 @@ import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.
 import { createInferenceRecycleController } from "../src/inference-recycle-controller.ts";
 import type { InferenceBoundaryHook } from "../src/inference-scheduler.ts";
 import { ProviderTurnProcessor } from "../src/provider-processor.ts";
+import { isolatedCliEnv } from "../../cli/test/isolated-env.ts";
 
 const temporaryDirectories: string[] = [];
 const servers: Bun.Server<unknown>[] = [];
@@ -42,7 +43,7 @@ describe("Demesne daemon", () => {
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
       [process.execPath, cliPath, "--server", running.url.href, "prompt", "Exercise the full path"],
-      { stdout: "pipe", stderr: "pipe" },
+      { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
     );
 
     const [exitCode, stdout, stderr] = await Promise.all([
@@ -81,7 +82,7 @@ describe("Demesne daemon", () => {
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
       [process.execPath, cliPath, "--server", running.url.href, "prompt", "Wait for interrupt"],
-      { stdout: "pipe", stderr: "pipe" },
+      { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
     );
 
     await started;
@@ -2219,7 +2220,7 @@ process.stdin.on("data", (chunk) => {
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
       [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "json", "Say done"],
-      { stdout: "pipe", stderr: "pipe" },
+      { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
     );
     const [exitCode, stdout, stderr] = await Promise.all([
       child.exited,
@@ -2253,7 +2254,7 @@ process.stdin.on("data", (chunk) => {
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
       [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "stream-json", "Go"],
-      { stdout: "pipe", stderr: "pipe" },
+      { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
     );
     const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
     await new Response(child.stderr).text();
@@ -2272,7 +2273,7 @@ process.stdin.on("data", (chunk) => {
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
       [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "json"],
-      { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+      { env: isolatedCliEnv({ HOME: directory }), stdin: "pipe", stdout: "pipe", stderr: "pipe" },
     );
     child.stdin.write("Piped prompt");
     child.stdin.end();
@@ -2301,7 +2302,7 @@ process.stdin.on("data", (chunk) => {
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
       [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "json", "Fail"],
-      { stdout: "pipe", stderr: "pipe" },
+      { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
     );
     const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
     await new Response(child.stderr).text();

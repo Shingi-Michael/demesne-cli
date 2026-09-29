@@ -157,6 +157,12 @@ if (args.includes("--drive")) {
     evidence: [{ observationId: "demo-screen", quote: "42 pass · 0 fail" }], steps: [{ step: 8, action: '{"kind":"key","key":"alt+d"}', note: "Open the applied changes", result: "Pressed alt+d.", at: new Date().toISOString() }] };
   ui.setDrive(drivePreview); ui.showDrive();
 }
+if (args.includes("--context")) {
+  rail.apply({ schemaVersion: 1, eventId: 1, type: "model.request_started", occurredAt: new Date().toISOString(), workspaceId: null, sessionId: "demo", turnId: "demo", agentRunId: null,
+    payload: { contextPlan: { schemaVersion: 3, capacityTokens: 100000, estimatedInputTokens: 42000, estimatedMessageTokens: 36000, estimatedToolDefinitionTokens: 6000,
+      reserves: { outputTokens: 16000, toolResultTokens: 1500, safetyTokens: 500, totalTokens: 18000 }, maximumPlannedInputTokens: 82000, budgetStatus: "within_soft_limit", actions: [] } } });
+  ui.frame(110, 30); input.onKeypress("", { name: "c", meta: true });
+}
 if (snapshot) {
   const match = /^(\d+)x(\d+)$/.exec(snapshot);
   if (!match) throw new Error("Snapshot size must be WIDTHxHEIGHT, e.g. --snapshot=80x24.");

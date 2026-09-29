@@ -47,11 +47,16 @@ export const palette = {
   syntaxComment: "#5F7280",
   syntaxType: "#6FC2D6",
   syntaxFunction: "#5AA9E6",
+  contextMessages: "#5AA9E6",
+  contextTools: "#C49CE6",
+  contextReserved: "#E5A93C",
+  contextFree: "#6B7D8B",
 } as const;
 
 export type PaletteColor = keyof typeof palette;
 type SyntaxColor = "syntaxKeyword" | "syntaxString" | "syntaxNumber" | "syntaxComment" | "syntaxType" | "syntaxFunction";
-type CoreColors = Omit<Record<PaletteColor, string>, "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "menuSelection" | "userSurface" | "diffAddedSurface" | "diffRemovedSurface" | SyntaxColor>;
+type ContextColor = "contextMessages" | "contextTools" | "contextReserved" | "contextFree";
+type CoreColors = Omit<Record<PaletteColor, string>, "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "menuSelection" | "userSurface" | "diffAddedSurface" | "diffRemovedSurface" | SyntaxColor | ContextColor>;
 const menuSelection = (surface: string, accent: string): string => "#" + [1, 3, 5].map((offset) =>
   Math.round(parseInt(surface.slice(offset, offset + 2), 16) * 0.92 + parseInt(accent.slice(offset, offset + 2), 16) * 0.08).toString(16).padStart(2, "0")).join("");
 const complete = (colors: CoreColors): Record<PaletteColor, string> => ({ ...colors,
@@ -61,7 +66,8 @@ const complete = (colors: CoreColors): Record<PaletteColor, string> => ({ ...col
   // Syntax roles come from each project's own accents so code keeps the
   // theme's character: its purple/pink for keywords, green for strings.
   syntaxKeyword: colors.execute, syntaxString: colors.citron, syntaxNumber: colors.electricBright,
-  syntaxComment: colors.secondary, syntaxType: colors.inspect, syntaxFunction: colors.electric });
+  syntaxComment: colors.secondary, syntaxType: colors.inspect, syntaxFunction: colors.electric,
+  contextMessages: colors.electric, contextTools: colors.inspect, contextReserved: colors.execute, contextFree: colors.secondary });
 
 export type TerminalTheme = "dark" | "light";
 
@@ -113,6 +119,10 @@ const demesneLight: Record<PaletteColor, string> = {
   syntaxComment: "#5E7684",
   syntaxType: "#0B6A74",
   syntaxFunction: "#1F5FAD",
+  contextMessages: "#1F62A8",
+  contextTools: "#7A3E9D",
+  contextReserved: "#8A5700",
+  contextFree: "#55687A",
 };
 
 /// https://draculatheme.com — purple is the signature accent, pink its lighter

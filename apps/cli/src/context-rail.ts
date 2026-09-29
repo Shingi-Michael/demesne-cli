@@ -17,6 +17,7 @@ import {
   type Painter,
 } from "@demesne/brand";
 import { classifyTurnPhase, isValidationCommand } from "./turn-activity.ts";
+import { contextUsageStack } from "./context-usage.ts";
 
 interface TrackedTool {
   name: string;
@@ -228,7 +229,7 @@ export class CliContextRail {
     if (!this.plan) {
       lines.push(painter.dim("plan pending · calculated before request"));
     } else {
-      if (!compact && contextWindow) lines.push(formatContextMeter(plannedTokens ?? 0, contextWindow, width, painter));
+      if (!compact) lines.push(...contextUsageStack(this.plan, width, painter));
       lines.push(painter.text(
         `~${formatTokenCount(this.plan.estimatedInputTokens)} input${percentage !== null ? ` · ${percentage}% of capacity` : ""}`,
         budgetColor(this.plan, percentage),
@@ -487,19 +488,6 @@ function contextPlanValue(value: unknown): ContextPlan | null {
     typeof candidate.reserves !== "object" || candidate.reserves === null ||
     !Array.isArray(candidate.actions)) return null;
   return value as ContextPlan;
-}
-
-function formatContextMeter(
-  tokens: number,
-  capacity: number,
-  width: number,
-  painter: Painter,
-): string {
-  const meterWidth = Math.max(4, Math.min(24, width - 2));
-  const ratio = capacity > 0 ? Math.max(0, Math.min(1, tokens / capacity)) : 0;
-  const filled = Math.round(ratio * meterWidth);
-  const color = ratio >= 0.9 ? "signal" : ratio >= 0.7 ? "citron" : "electric";
-  return painter.text(`[${"■".repeat(filled)}${"·".repeat(meterWidth - filled)}]`, color);
 }
 
 /// A five-cell meter for the single-line footer, where the full meter would

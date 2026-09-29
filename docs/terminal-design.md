@@ -54,6 +54,18 @@ Translucent cyan, amber, and red surfaces are composited into theme tokens for t
 
 ## Data and motion
 
+### Context usage stack
+
+The Context panel uses a capacity-scaled stacked bar for **Messages**, **Tool
+definitions**, **Reserved** (output + tool results + safety), and **Available**.
+These are the components actually present in the recorded context plan; no
+system/history split is invented. Counts and the bar remain explicitly estimated,
+separate from provider-reported last-request usage below. Unknown capacity or
+incomplete reserves show an unavailable stack, not implied free space. Overflow
+saturates the bar and reports the amount over capacity. In plain terminals the
+segments use M/T/R/· with the same labels. Colors are semantic `context*` roles in
+the theme; renderers contain no color values. Preview with `--context`.
+
 ### Setup browser sign-in
 
 The redesign's Provider step now offers **OpenRouter** alongside local servers

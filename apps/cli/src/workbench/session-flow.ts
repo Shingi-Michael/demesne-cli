@@ -122,15 +122,27 @@ export function renderSessionFlow(options: {
     const mark = tool.waiting ? "!" : stopped ? "■" : failed(tool) ? "×" : running ? renderPresence("thinking", options.now, paint) : unknown ? "·" : "✓";
     const detail = safe(tool.detail ?? "").replace(/^\$\s*/, "");
     const verb = tool.name === "run_command" ? tool.phase === "verify" ? "Check" : "Run" : safe(toolName(tool));
-    const label = `${verb}${detail && detail !== tool.name ? ` ${detail}` : ""}`;
-    const styledLabel = paint.bold(verb, failed(tool) ? "signal" : operation) + (detail && detail !== tool.name ? ` ${paint.text(detail, "secondary")}` : "");
-    const meta = tool.phase === "change" ? [changeState(tool).toLowerCase(), changeTotals(tool)].filter(Boolean).join(" · ") : tool.waiting ? "awaiting approval" : stopped ? "stopped" : tool.state === "denied" ? "denied"
-      : tool.exitCode !== undefined ? `${tool.exitCode === 0 && !failed(tool) ? "passed" : "failed"} · exit ${tool.exitCode}` : unknown ? "exit unknown" : "";
+    const target = detail && detail !== tool.name ? detail : "";
+    const label = `${verb}${target ? ` ${target}` : ""}`;
+    // Figma rows: a verb column (Search, Read, Edit, Run) in blue, the target
+    // in the main text color, the outcome after it, and timing flush right.
+    // Rows inside an expanded Explored group trade the ✓ for a guide line.
+    const grouped = parents.some((parent) => parent.startsWith("tools:"));
+    const verbCell = verb.padEnd(Math.max(6, verb.length));
+    const styledLabel = paint.text(verbCell, failed(tool) ? "signal" : operation) + (target ? ` ${paint.text(target, failed(tool) ? "signal" : "paper")}` : "");
+    const state = tool.phase === "change" ? changeState(tool).toLowerCase() : "";
+    const stateTone: PaletteColor = state === "applied" ? "citron" : state === "failed" || state === "denied" || state === "approval" ? "signal" : state === "drafting" ? "thinking" : "muted";
+    const totals = tool.phase === "change" ? changeTotals(tool) : "";
+    const styledTotals = totals ? totals.split(" ").map((part) => paint.text(part, part.startsWith("+") ? "citron" : "signal")).join(" ") : "";
+    const meta = tool.phase === "change" ? [paint.text(state, stateTone), styledTotals].filter(Boolean).join(" ")
+      : paint.text(tool.waiting ? "awaiting approval" : stopped ? "stopped" : tool.state === "denied" ? "denied"
+        : tool.exitCode !== undefined ? `${tool.exitCode === 0 && !failed(tool) ? "passed" : "failed"} · exit ${tool.exitCode}` : unknown ? "exit unknown" : "", tool.waiting ? "signal" : "muted");
     const timing = tool.durationMs !== undefined && !failed(tool) ? duration(tool.durationMs) : "";
-    const fullSuffix = [meta, timing].filter(Boolean).join(" · ");
-    const suffix = visibleLength(label) + visibleLength(fullSuffix) + 5 > inner ? meta : fullSuffix;
-    const trailing = `${suffix ? ` · ${suffix}` : ""} ${open ? "▾" : "▸"}`;
-    const text = `${margin}${paint.text(mark, outcome)} ${truncateText(styledLabel, Math.max(4, inner - visibleLength(trailing) - 2))}${paint.text(trailing, tool.waiting ? "signal" : "muted")}`;
+    const right = paint.text(`${timing}${timing ? " " : ""}${open ? "▾" : "▸"}`, "muted");
+    const lead = grouped ? paint.text("│", "rule") : paint.text(mark, outcome);
+    const leftRoom = Math.max(4, inner - visibleLength(right) - 2);
+    const left = `${lead} ${styledLabel}${visibleLength(meta) ? `  ${meta}` : ""}`;
+    const text = margin + formatFooterLine(truncateText(left, leftRoom), right, inner);
     add(key, text, [{ column: indent, width: inner, action: tool.phase === "change" ? { kind: "diff-open", runId: run.id, recordId: tool.id } : { kind: "toggle", runId: run.id, key } }], [thinkingAnchors.get(tool.id)!], background);
     const detailRow = (key: string, line: string, color?: PaletteColor) => add(key,
       margin + surface(`${paint.text("│", "borderBright")} ${color ? paint.text(line, color) : line}`, inner, paint, "raised"));
@@ -143,7 +155,7 @@ export function renderSessionFlow(options: {
     if (!open) return;
     const lines: string[] = [];
     // Long targets must remain readable in the disclosure, not just the log.
-    if (visibleLength(label) + visibleLength(trailing) > inner) lines.push(...wrap(label));
+    if (visibleLength(label) + visibleLength(right) + 4 > inner) lines.push(...wrap(label));
     if (tool.diff) {
       lines.push(paint.text(tool.state === "done" ? "Recorded change" : "Proposed change", "secondary"),
         ...formatDiffPreview(tool.diff.oldText, tool.diff.newText, 10_000, paint));
@@ -307,52 +319,76 @@ export function renderSessionFlow(options: {
       if (run.status === "FAILED") errorBox(`run:${run.id}:unfinished`, text);
       else body(`run:${run.id}:unfinished`, wrap(text), "secondary");
     }
-    if (run.settled) {
-      // A terminal receipt belongs to the run even if no final answer arrived.
-      const receipt = run.receipt ?? { mode: run.request?.compaction ? "Compact" as const : run.request?.planOnly ? "Plan" as const : "Build" as const, model: run.request?.model ?? "Model not recorded", durationMs: null, tokensPerSecond: null };
-      const parts = responseMetadata(receipt, paint, options.compact, inner);
-      const lines: string[] = [];
-      for (const part of parts) {
-        const previous = lines.at(-1);
-        if (previous !== undefined && visibleLength(`${previous} · ${part}`) <= inner) lines[lines.length - 1] = previous + paint.text(" · ", "borderBright") + part;
-        else lines.push(...fold(part));
-      }
-      const hasText = run.entries.some((entry) => entry.type === "assistant" && entry.raw.trim());
-      // Success needs no badge; only failed and stopped turns are labelled.
-      const badge = run.status === "FAILED" ? "× failed" : run.status === "STOPPED" ? "■ stopped" : "";
-      const actionsWidth = badge.length + (hasText ? 7 : 0);
-      if (visibleLength(lines.at(-1) ?? "") + actionsWidth + 1 > inner) lines.push("");
-      if (!options.compact) add(`run:${run.id}:receipt-gap`, "   " + paint.text("─".repeat(width - 5), "rule"));
-      lines.forEach((line, index) => {
-        const last = index === lines.length - 1;
-        const actions = (hasText ? copyText(copyLabel.padEnd(6)) + " " : "") + paint.text(badge, run.status === "FAILED" ? "signal" : run.status === "STOPPED" ? "secondary" : "citron");
-        add(`run:${run.id}:receipt`, last ? formatFooterLine(margin + line, actions, width - 3) : margin + line,
-          last && hasText ? [{ column: width - 3 - actionsWidth, width: 6, action: { kind: "copy", runId: run.id }, hidden: copyEmphasis === 0 }] : []);
-      });
-    }
     const links: { text: string; tone: PaletteColor; action: FlowAction }[] = [];
     const files = new Set(evidence.changes.filter((change) => change.outcome === "done").map((change) => change.path)).size;
     if (run.settled) {
-      if (evidence.hasChanges) links.push({ text: files ? `${files} file${files === 1 ? "" : "s"}${options.compact ? "" : " changed"} ▸` : "Review attempts ▸", tone: "electricBright", action: { kind: "artifact", target: "changes", runId: run.id } });
+      if (evidence.hasChanges) links.push({ text: files ? `${files} file${files === 1 ? "" : "s"}${options.compact ? "" : " changed"} ▸` : "Review attempts ▸", tone: "secondary", action: { kind: "artifact", target: "changes", runId: run.id } });
       const outcome = evidence.verification;
       const trouble = outcome === "failed" || outcome === "denied";
-      if (evidence.verifications.length) links.push({ text: `${outcome === "passed" ? "✓" : outcome === "stopped" ? "■" : trouble ? "×" : "·"} Verification${options.compact ? "" : ":"} ${outcome === "waiting" ? "awaiting approval" : outcome} ▸`, tone: outcome === "passed" ? "citron" : trouble ? "signal" : "secondary", action: { kind: "artifact", target: "verification", runId: run.id } });
+      if (evidence.verifications.length) links.push({ text: `${outcome === "passed" ? "✓" : outcome === "stopped" ? "■" : trouble ? "×" : "·"} checks ${outcome === "waiting" ? "awaiting approval" : outcome} ▸`, tone: outcome === "passed" ? "citron" : trouble ? "signal" : "secondary", action: { kind: "artifact", target: "verification", runId: run.id } });
       else if (evidence.successfulChanges) links.push({ text: "Not verified", tone: "secondary", action: { kind: "artifact", target: "changes", runId: run.id } });
     }
-    if (links.length) {
-      if (!run.answer || !run.settled) add(`run:${run.id}:result-gap`);
-      let text = " ".repeat(indent);
-      let controls: FlowControl[] = [];
+    if (run.settled) {
+      // Figma 28:306: one receipt line under a hairline. Mode, model, time,
+      // speed and context on the left; evidence, copy and any failure badge on
+      // the right. Narrow cards move the right side to its own line.
+      const receipt = run.receipt ?? { mode: run.request?.compaction ? "Compact" as const : run.request?.planOnly ? "Plan" as const : "Build" as const, model: run.request?.model ?? "Model not recorded", durationMs: null, tokensPerSecond: null };
+      const parts = responseMetadata(receipt, paint, options.compact, inner);
+      const hasText = run.entries.some((entry) => entry.type === "assistant" && entry.raw.trim());
+      // Success needs no badge; only failed and stopped turns are labelled.
+      const badge = run.status === "FAILED" ? "× failed" : run.status === "STOPPED" ? "■ stopped" : "";
+      // Copy fades in on hover, so it sits before the links, which stay flush right.
+      const items: { text: string; width: number; action?: FlowAction; hidden?: boolean }[] = hasText
+        ? [{ text: copyText(copyLabel.padEnd(6)), width: 6, action: { kind: "copy", runId: run.id }, hidden: copyEmphasis === 0 }] : [];
       for (const link of links) {
-        if (visibleLength(text) + visibleLength(link.text) > width - 3 && controls.length) {
-          add(`run:${run.id}:result`, text, controls);
-          text = " ".repeat(indent); controls = [];
-        }
         const label = truncateText(link.text, inner);
-        controls.push({ column: visibleLength(text), width: visibleLength(label), action: link.action, hidden: link.action.kind === "copy" && copyEmphasis === 0 });
-        text += (link.action.kind === "copy" ? copyText(label) : paint.text(label, link.tone)) + "   ";
+        items.push({ text: paint.text(label, link.tone), width: visibleLength(label), action: link.action });
       }
-      add(`run:${run.id}:result`, text, controls);
+      if (badge) items.push({ text: paint.text(badge, run.status === "FAILED" ? "signal" : "secondary"), width: badge.length });
+      const rightWidth = items.reduce((sum, item) => sum + item.width, 0) + Math.max(0, items.length - 1) * 2;
+      const separator = paint.text(" · ", "borderBright");
+      const meta = parts.join(separator);
+      if (!options.compact) add(`run:${run.id}:receipt-gap`, "   " + paint.text("─".repeat(width - 5), "rule"));
+      const place = (key: string, start: number, lead: string, end?: number) => {
+        let text = "", column = start;
+        let controls: FlowControl[] = [];
+        for (const item of items) {
+          // Wrapped evidence starts a new line rather than clipping a control.
+          if (end === undefined && text && column + item.width > width - 3) {
+            add(key, lead + text, controls);
+            text = ""; column = start; controls = [];
+          }
+          if (item.action) controls.push({ column, width: item.width, action: item.action, hidden: item.hidden });
+          text += (text ? "  " : "") + item.text;
+          column += item.width + 2;
+        }
+        add(key, end === undefined ? lead + text : formatFooterLine(lead, text, end), controls);
+      };
+      if (visibleLength(meta) + rightWidth + 2 <= inner) place(`run:${run.id}:receipt`, width - 3 - rightWidth, margin + meta, width - 3);
+      else {
+        const lines: string[] = [];
+        for (const part of parts) {
+          const previous = lines.at(-1);
+          if (previous !== undefined && visibleLength(`${previous} · ${part}`) <= inner) lines[lines.length - 1] = previous + separator + part;
+          else lines.push(...fold(part));
+        }
+        lines.forEach((line) => add(`run:${run.id}:receipt`, margin + line));
+        // On its own line the evidence leads; the hover-only copy follows it.
+        if (hasText) items.push(items.shift()!);
+        if (items.length) place(`run:${run.id}:result`, indent, margin);
+      }
+    }
+    // Figma's live line: what the agent is doing right now, in amber, under
+    // the latest output. Approval waits name the command being asked about.
+    const liveTool = run.settled ? undefined : run.tools.findLast((tool) => tool.waiting || tool.state === "running");
+    if (liveTool) {
+      const target = safe(liveTool.detail ?? "").replace(/^\$\s*/, "");
+      const doing = liveTool.waiting ? "Waiting for your approval ·"
+        : liveTool.name === "run_command" ? liveTool.phase === "verify" ? "Checking" : "Running"
+        : liveTool.phase === "change" ? "Drafting" : /search|grep|find/.test(liveTool.name) ? "Searching"
+        : /list/.test(liveTool.name) ? "Listing" : /read/.test(liveTool.name) ? "Reading" : "Working on";
+      add(`run:${run.id}:live-gap`);
+      add(`run:${run.id}:live`, margin + paint.text(truncateText(`● ${doing} ${target}${liveTool.waiting ? "" : "…"}`, inner), "thinking"));
     }
     // A transient status while waiting for the first token of a model round.
     // Its successor inherits the anchor; no empty reasoning record is invented.

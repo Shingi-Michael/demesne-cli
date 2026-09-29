@@ -5,6 +5,7 @@ import { createPainter, visibleLength } from "@demesne/brand";
 import { Workbench } from "../src/workbench/controller.ts";
 import { CliContextRail } from "../src/context-rail.ts";
 import { SessionView, planRuns } from "../src/workbench/session.ts";
+import { sessionPanelLayout } from "../src/workbench/layout.ts";
 import { projectRunEvidence } from "../src/workbench/evidence.ts";
 import { contextMeter, contextTone, keycap, sessionStatus } from "../src/workbench/session-chrome.ts";
 import { seedSession, type PreviewState } from "../../../scripts/session-fixture.ts";
@@ -958,7 +959,7 @@ test("context capacity and project path stay visible in narrow frames and open d
   key("escape");
   const contextRows = screen().split("\n"), contextRow = contextRows.findIndex(line => line.includes("ctx —/100k"));
   state.handleMouse({ kind: "press", button: 0, row: contextRow, col: contextRows[contextRow]!.indexOf("ctx —/100k") });
-  expect(screen()).toMatch(/CONTEXT\s+×/);
+  expect(screen()).toMatch(/CONTEXT\s+original-model/);
   key("escape");
   key("return");
   expect(await prompt).toBe("preserve this draft");
@@ -967,7 +968,7 @@ test("context capacity and project path stay visible in narrow frames and open d
 test("closing context and project details during inference does not count as double Escape", () => {
   const { key, screen, state, interrupts } = fixture("thinking");
   key("c", { meta: true });
-  expect(screen()).toMatch(/CONTEXT\s+×/);
+  expect(screen()).toMatch(/CONTEXT\s+original-model/);
   key("escape");
   key("p", { meta: true });
   expect(screen()).toContain("PROJECT FOLDER");
@@ -977,7 +978,7 @@ test("closing context and project details during inference does not count as dou
     const rows = screen().split("\n");
     const row = rows.findLastIndex((line) => line.includes(target));
     state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf(target) });
-    expect(screen()).toMatch(target === "ctx" ? /CONTEXT\s+×/ : /PROJECT FOLDER/);
+    expect(screen()).toMatch(target === "ctx" ? /CONTEXT\s+original-model/ : /PROJECT FOLDER/);
     key("escape");
     expect(interrupts()).toBe(0);
   }
@@ -1582,7 +1583,7 @@ test("opening evidence near the viewport edge reveals the record beside its resp
   const row = rows.findIndex((line) => line.includes("1 file changed"));
   state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("1 file changed") });
   const expanded = screen(100, 36);
-  expect(expanded).toMatch(/DIFF\s+×/);
+  expect(expanded).toMatch(/DIFF\s+Turn \d+/);
   expect(expanded).toContain("@@");
   expect(expanded).toMatch(/2\s+−\s+return \/\[a-zA-Z_\]\//);
   expect(expanded).not.toContain("Arguments ▸");
@@ -1714,7 +1715,7 @@ test("the log shortcut opens a real log and docked evidence scrolls independentl
   expect(view.panelOpen).toBe(true);
   const selection = view.memory.logSelection;
   key("c", { meta: true });
-  expect(screen(80, 24)).toMatch(/CONTEXT\s+×/);
+  expect(screen(80, 24)).toMatch(/CONTEXT\s+original-model/);
   key("down"); key("return");
   expect(view.memory.logSelection).toBe(selection);
   expect(view.memory.detail).toBeNull();
@@ -1738,8 +1739,10 @@ test("the log shortcut opens a real log and docked evidence scrolls independentl
   expect(screen(80, 24)).toContain("VERIFICATION");
   expect(screen(80, 24)).not.toContain("CHECK_RESPONSE");
   expect(screen(120, 36)).toContain("CHECK_RESPONSE");
-  const close = screen(120, 36).split("\n")[0]!;
-  state.handleMouse({ kind: "press", button: 0, row: 0, col: close.lastIndexOf("×") });
+  // The panel frame's keycap footer carries the close control.
+  const frame = screen(120, 36).split("\n");
+  const footer = frame.findIndex((line) => line.includes("Esc close"));
+  state.handleMouse({ kind: "press", button: 0, row: footer, col: frame[footer]!.indexOf("Esc close") });
   expect(view.panelOpen).toBe(false);
   expect(screen(120, 36)).toContain("CHECK_RESPONSE");
 });
@@ -1823,4 +1826,20 @@ test("the status bar follows Figma: state, model, speed and usage bar left; log 
   expect(tiny).toContain("46%");
   // Unknown usage stays explicit instead of drawing an empty bar.
   expect(stripVTControlCharacters(sessionStatus({ ...base, width: 140, context: { used: null, capacity: 100_000, estimated: false } }).text)).toContain("ctx —/100k");
+});
+
+test("docked panels share the Figma frame: label and subject, a keycap footer, about 40% of the width", () => {
+  const { key, screen, view } = fixture("complete");
+  key("b", { ctrl: true });
+  const rows = screen(176, 30).split("\n");
+  const panelColumn = rows[0]!.indexOf("EXECUTION LOG");
+  expect(rows[0]!.slice(panelColumn)).toMatch(/^EXECUTION LOG {2}Turn \d+\s*$/);
+  const footer = rows.findIndex((line) => line.includes("Esc close"));
+  expect(rows[footer]!.slice(panelColumn)).toMatch(/^↑↓ select {2}Enter open {2}Esc close/);
+  // The docked panel takes 40% of a wide window instead of a fixed 43 columns.
+  expect(176 - panelColumn).toBeGreaterThanOrEqual(68);
+  expect(sessionPanelLayout(176, true).panelWidth).toBe(70);
+  expect(sessionPanelLayout(100, true).panelWidth).toBe(44);
+  expect(sessionPanelLayout(300, true).panelWidth).toBe(84);
+  expect(view.panelOpen).toBe(true);
 });

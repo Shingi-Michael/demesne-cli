@@ -1,8 +1,10 @@
-import type { Session, SessionStateResponse } from "@demesne/protocol";
+import type { Session, SessionStateResponse, TurnStatus } from "@demesne/protocol";
 import type { ContextReceipt } from "./workbench/entries.ts";
 
 export interface RecentSession {
   id: string; title: string; updatedAt: string; context?: ContextReceipt;
+  /// Known only when the session state was loaded; never guessed.
+  turns?: number; lastStatus?: TurnStatus;
 }
 
 export function recentSession(state: SessionStateResponse): RecentSession {
@@ -11,6 +13,7 @@ export function recentSession(state: SessionStateResponse): RecentSession {
   const usage = snapshot?.usage;
   const reported = usage?.totalTokens ?? (usage?.inputTokens != null && usage.outputTokens != null ? usage.inputTokens + usage.outputTokens : null);
   return { id: state.session.id, title: state.session.title, updatedAt: state.session.updatedAt,
+    turns: state.session.turns.length, lastStatus: state.session.turns.at(-1)?.status,
     context: { used: plan?.estimatedInputTokens ?? reported, capacity: plan?.capacityTokens ?? null, estimated: plan?.estimatedInputTokens != null } };
 }
 

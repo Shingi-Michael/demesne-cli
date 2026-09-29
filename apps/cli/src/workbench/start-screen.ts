@@ -32,7 +32,8 @@ export function startScreenLayout(width: number, height: number, requestedHeight
   const contentWidth = Math.min(96, width - inset * 2);
   const column = Math.floor((width - contentWidth) / 2);
   const header = height >= 14 ? 2 : 1;
-  const recentHeight = height >= 18 ? 3 : 1;
+  // Tall terminals list recent sessions; shorter ones keep a one-line strip.
+  const recentHeight = height >= 26 ? 5 : height >= 18 ? 3 : 1;
   const recent = { row: height - recentHeight, column: 0, width, height: recentHeight };
   const available = recent.row - header - Number(feedback);
   const inputHeight = Math.min(Math.max(height >= 18 ? 5 : 3, requestedHeight), Math.max(3, available - 3));
@@ -191,7 +192,38 @@ export class StartScreen {
     put(titleRow, width - inset - history.length, tint(paint, `${options.focused && this.selected === "history" ? "›" : ""}${history}`, "secondary", "electric", emphasis("history")), history.length + 1, "surface");
     zone({ row: titleRow, column: width - inset - history.length, width: history.length, height: 1 }, { kind: "history" });
     const room = width - inset * 2 - 8 - history.length - 1;
-    const count = recent.height > 1 ? Math.min(options.recent.length, Math.max(1, Math.floor(room / 18))) : Math.min(1, options.recent.length);
+    const sessionTime = (session: RecentSession) => {
+      const date = new Date(session.updatedAt);
+      const sameDay = Number.isFinite(date.getTime()) && date.toDateString() === new Date(now).toDateString();
+      return !Number.isFinite(date.getTime()) ? "—" : sameDay ? clockLabel(session.updatedAt).slice(0, 5) : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    };
+    const listed = recent.height >= 5 ? options.recent.slice(0, recent.height - 2) : [];
+    if (recent.height >= 5 && listed.length) {
+      // The redesign's Recent list: status, title, turns and context, time.
+      const status = (session: RecentSession): [string, PaletteColor] => session.lastStatus === "completed" ? ["✓", "citron"]
+        : session.lastStatus === "failed" ? ["×", "signal"] : session.lastStatus === "cancelled" || session.lastStatus === "interrupted" ? ["■", "secondary"]
+        : session.lastStatus === "running" || session.lastStatus === "queued" ? ["◎", "thinking"] : ["·", "muted"];
+      listed.forEach((session, index) => {
+        const row = titleRow + 1 + index;
+        const key = `session:${session.id}`;
+        const active = emphasis(key);
+        const current = session.id === options.currentId;
+        const background = active >= 0.5 ? "raised" : "surface";
+        const [glyph, tone] = status(session);
+        const time = sessionTime(session);
+        const used = session.context?.used;
+        const meta = [session.turns === undefined ? "" : `${session.turns} turn${session.turns === 1 ? "" : "s"}`,
+          `ctx ${session.context?.estimated ? "~" : ""}${used == null ? "—" : formatTokenCount(used)}`, current ? "current" : ""].filter(Boolean).join(" · ");
+        const left = `${options.focused && this.selected === key ? paint.text("›", "electric") : " "} ${paint.text(glyph, tone)}  `;
+        const titleRoom = Math.max(8, Math.min(40, inner - 12 - meta.length - time.length));
+        const text = left + paint.text(truncateText(safe(session.title), titleRoom), current ? "paper" : "secondary") + "  " + paint.text(meta, "muted");
+        put(row, inset, "", inner, background);
+        put(row, inset, text, inner - time.length - 2, background);
+        put(row, inset + inner - time.length, paint.text(time, "muted"), time.length, background);
+        zone({ row, column: inset, width: inner, height: 1 }, { kind: "session", id: session.id });
+      });
+    }
+    const count = recent.height >= 5 ? 0 : recent.height > 1 ? Math.min(options.recent.length, Math.max(1, Math.floor(room / 18))) : Math.min(1, options.recent.length);
     if (count) {
       const size = Math.floor(room / count);
       options.recent.slice(0, count).forEach((session, index) => {
@@ -210,7 +242,7 @@ export class StartScreen {
         for (let row = titleRow; row < height; row++) put(row, column - 1, paint.text("│", "rule"), 1, "surface");
         zone({ row: titleRow, column, width: size - 1, height: height - titleRow }, { kind: "session", id: session.id });
       });
-    } else put(titleRow, inset + 8, paint.text(options.recentState === "loading" ? "Loading…" : options.recentState === "unavailable" ? "Unavailable" : "No sessions", "muted"), Math.max(0, room), "surface");
+    } else if (!listed.length) put(titleRow, inset + 8, paint.text(options.recentState === "loading" ? "Loading…" : options.recentState === "unavailable" ? "Unavailable" : "No sessions", "muted"), Math.max(0, room), "surface");
     this.controls = this.zones.filter((zone) => zone.action.kind === "operation" || zone.action.kind === "session" || zone.action.kind === "history");
     this.controls.sort((a, b) => (a.action.kind === "operation" ? 0 : a.action.kind === "session" ? 1 : 2) - (b.action.kind === "operation" ? 0 : b.action.kind === "session" ? 1 : 2));
     if (this.selected && !this.controls.some((zone) => zone.key === this.selected)) { this.selected = this.controls[0]?.key ?? null; this.reflow = true; }

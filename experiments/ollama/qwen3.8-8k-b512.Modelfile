@@ -1,5 +1,0 @@
-FROM qwen3.8:latest
-
-# Match the 32K runner's batch configuration while retaining an 8K context.
-PARAMETER num_ctx 8192
-PARAMETER num_batch 512

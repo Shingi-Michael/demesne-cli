@@ -7,6 +7,7 @@ import {
   daemonStatus,
   ensureDaemon,
   readDaemonLog,
+  resolveDaemonCommand,
   startDaemon,
   stopDaemon,
   type DaemonControlDependencies,
@@ -217,5 +218,28 @@ describe("readDaemonLog", () => {
     writeFileSync(join(directory, "daemon.log"), Array.from({ length: 50 }, (_, index) => `line ${index}`).join("\n"));
     const tail = readDaemonLog(state.deps, 3);
     expect(tail.split("\n")).toEqual(["line 47", "line 48", "line 49"]);
+  });
+});
+
+describe("resolveDaemonCommand", () => {
+  test("a compiled CLI finds demesned beside its own executable", () => {
+    const dir = mkdtempSync(join(tmpdir(), "demesne-bin-"));
+    try {
+      const daemon = join(dir, "demesned");
+      writeFileSync(daemon, "");
+      // Compiled binaries report Bun's virtual filesystem as their module dir.
+      const command = resolveDaemonCommand({}, { moduleDir: "/$bunfs/root", execPath: join(dir, "demesne") });
+      expect(command).toEqual([daemon]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an explicit DEMESNE_DAEMON_BIN still wins", () => {
+    const command = resolveDaemonCommand(
+      { DEMESNE_DAEMON_BIN: "/opt/demesned" },
+      { moduleDir: "/$bunfs/root", execPath: "/nowhere/demesne" },
+    );
+    expect(command).toEqual(["/opt/demesned"]);
   });
 });

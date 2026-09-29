@@ -58,7 +58,7 @@ test("operation cards fill and focus an undoable draft without submitting; expli
   expect(value).toBe(START_OPERATIONS[0].prompt);
   ui.beginTurn({ userText: value, at });
   ui.reasoningDelta("Investigating the entry point.");
-  expect(screen()).toContain("THINKING");
+  expect(screen()).toContain("◇ Thinking");
   expect(screen()).not.toContain("OPERATIONS");
   expect(state.startLayout).toBeNull();
   state.onData("\x1b[200~Keep this queued\x1b[201~");

@@ -17,11 +17,17 @@ export interface DriveInspection {
   pages: { observationId: string; surface: string; item?: string; rows: string[]; answer: boolean; latest: boolean; offset?: number; maximum?: number }[];
   truncated: boolean; actions: number; result: string;
 }
-/** Remove only an answer card's outer rails/padding. The result remains an
- * exact substring of the rendered row, so quotes retain their provenance. */
+/** Remove only an answer card's rail and padding: the redesign's left rail
+ * (`▎`, plus a trailing pane edge on full-width rows) or the earlier boxed
+ * card's `│ … │`. The result remains an exact
+ * substring of the rendered row, so quotes retain their provenance. */
 export function driveAnswerText(row: string): string {
   const trimmed = row.trim();
-  return trimmed.startsWith("│") && trimmed.endsWith("│") ? trimmed.slice(1, -1).trim() : trimmed;
+  if (trimmed.startsWith("│") && trimmed.endsWith("│")) return trimmed.slice(1, -1).trim();
+  if (!trimmed.startsWith("▎")) return trimmed;
+  // A full-width screen row also ends at the neighbouring pane's edge.
+  const inner = trimmed.slice(1).trim();
+  return inner.endsWith("│") ? inner.slice(0, -1).trim() : inner;
 }
 export interface DriveObservation {
   id: string; sessionId: string; workspace: string; title: string;

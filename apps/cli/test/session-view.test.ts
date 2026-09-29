@@ -31,12 +31,12 @@ test("live inference shares its dots across card and send while keeping activity
   expect(initial.match(/···/g)).toHaveLength(2);
   expect(initial.split("\n").at(-1)).not.toMatch(/RUNNING|THINKING|WORKING|···/);
   expect(initial).toContain("demesne");
-  expect(ui.frame(120, 36).rows.join("\n")).toContain(paint.text("[", "thinking"));
+  expect(ui.frame(120, 36).rows.join("\n")).toContain(paint.text("▎", "thinking"));
   ui.reasoningDelta("Inspecting the entry point.");
   expect(screen(120, 36).match(/···/g)).toHaveLength(2);
   ui.assistantDelta("The entry point is main.ts.");
   ui.finishTurn("completed", "Complete");
-  expect(ui.frame(120, 36).rows.join("\n")).toContain(paint.text("[", "electric"));
+  expect(ui.frame(120, 36).rows.join("\n")).toContain(paint.text("▎", "borderBright"));
   expect(screen(120, 36)).not.toContain("···");
 });
 
@@ -365,7 +365,7 @@ test("interruption settles unfinished tools so the stage cannot remain waiting",
 test("the status strip tracks execution and approval never claims a running verification", () => {
   const { ui, screen, view, key } = fixture();
   ui.beginTurn({ userText: "Check the parser", at: "now" });
-  expect(screen().match(/··· THINKING/g)).toHaveLength(1);
+  expect(screen().match(/◇ Thinking ···/g)).toHaveLength(1);
   ui.toolRequested({ toolCallId: "check", name: "run_command", arguments: { argv: ["bun", "test"] } });
   expect(screen()).not.toContain("Verification: running");
   expect(screen().split("\n").at(-1)).not.toMatch(/RUNNING|THINKING|···/);
@@ -438,7 +438,8 @@ test("Copy click, shortcut and Enter on a selected action copy the answer with t
         clock.mockReturnValue(1200);
         rows = screen().split("\n");
         const row = rows.findIndex((line) => line.includes("copy"));
-        expect(rows[row]!.indexOf("copy")).toBeLessThan(rows[row]!.indexOf("[ COMPLETE ]"));
+        // Success carries no badge, so copy is the receipt line's last action.
+        expect(rows[row]!.slice(rows[row]!.indexOf("copy") + 4)).not.toMatch(/[A-Za-z0-9]/);
         state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("copy") });
       } else if (method === "shortcut") key("y", { ctrl: true });
       else { key("t", { ctrl: true }); key("tab"); key("tab"); expect(screen()).toContain("copy"); key("return"); }
@@ -578,15 +579,16 @@ test("one card header precedes the full multi-round stream and keeps its origina
     expect(headers).toHaveLength(1);
     const header = headers[0]!;
     expect(rows[header]).toContain(new Date(start).toTimeString().slice(0, 8));
-    expect(header).toBeLessThan(rows.findIndex((line) => line.includes("THINKING")));
-    expect(rows[header - 1]).toContain("[");
+    expect(header).toBeLessThan(rows.findIndex((line) => line.includes("◇ Th")));
+    // No top edge: the header is the card's first row, on its rail.
+    expect(rows[header]).toContain("▎");
     expect(view.current!.answer).toBeUndefined();
     state.handleMouse({ kind: "move", row: header, col: 10 });
     clock.mockReturnValue(start + 9000);
     const after = screen(120, 36).split("\n");
     expect(after[header]).toBe(rows[header]);
     expect(after.join("\n")).toContain("copy");
-    expect(after.join("\n")).toContain("[ FAILED ]");
+    expect(after.join("\n")).toContain("× failed");
   } finally { clock.mockRestore(); }
 });
 
@@ -598,18 +600,18 @@ test("Thinking uses the reference's closed and open chevrons and preserves its d
     const { ui, screen, key, view } = fixture();
     ui.beginTurn({ userText: "Think", at: "now" });
     ui.reasoningDelta("TRACE"); ui.assistantDelta("ANSWER"); ui.finishTurn("completed", "Done");
-    expect(screen()).toMatch(/THINKING · .* ▸/);
+    expect(screen()).toMatch(/▸ ◇ Thought/);
     key("x", { ctrl: true });
     expect(screen()).toContain("TRACE");
     clock.mockReturnValue(1040);
     const opened = screen();
-    expect(opened).toMatch(/THINKING · .* ▾/);
+    expect(opened).toMatch(/▾ ◇ Thought/);
     clock.mockReturnValue(1200);
     const expanded = screen();
     expect(expanded).toBe(opened);
     process.env.DEMESNE_REDUCED_MOTION = "1";
     key("x", { ctrl: true });
-    expect(screen()).toMatch(/THINKING · .* ▸/);
+    expect(screen()).toMatch(/▸ ◇ Thought/);
     expect(screen()).not.toContain("TRACE");
     expect(view.animating()).toBe(false);
   } finally {
@@ -628,19 +630,19 @@ test("pulsing dots mark inline Thinking from the first-token wait through live r
     for (const [width, height] of [[40, 10], [80, 24], [120, 36]]) {
       clock.mockReturnValue(0);
       const rows = screen(width, height).split("\n");
-      const at = rows.findIndex((row) => row.includes("··· THINKING"));
+      const at = rows.findIndex((row) => row.includes("◇ Thinking ···"));
       expect(at).toBeGreaterThan(rows.findIndex((row) => row.includes("Consider this")));
       expect(at).toBeLessThan(height! - 3);
       expect(rows.slice(-3).join("\n")).not.toMatch(/[\u2800-\u28ff]/);
       const before = ui.frame(width!, height!).rows[at];
       clock.mockReturnValue(180);
-      expect(screen(width, height).split("\n")[at]).toContain("··· THINKING");
+      expect(screen(width, height).split("\n")[at]).toContain("◇ Thinking ···");
       expect(ui.frame(width!, height!).rows[at]).not.toBe(before);
     }
     expect(state.entries.filter((entry: { type: string }) => entry.type === "reasoning")).toHaveLength(0);
     ui.reasoningDelta("Inspecting the parser boundary.");
-    expect(screen()).toContain("··· THINKING");
-    expect(screen().match(/··· THINKING/g)).toHaveLength(1);
+    expect(screen()).toContain("◇ Thinking ···");
+    expect(screen().match(/◇ Thinking ···/g)).toHaveLength(1);
     expect(screen()).toContain("boundary.▌");
     process.env.DEMESNE_REDUCED_MOTION = "1";
     const reduced = ui.frame(80, 24).rows;
@@ -648,13 +650,13 @@ test("pulsing dots mark inline Thinking from the first-token wait through live r
     expect(ui.frame(80, 24).rows.slice(0, -1)).toEqual(reduced.slice(0, -1));
     process.env.DEMESNE_REDUCED_MOTION = "0";
     state.options.paint = createPainter(false);
-    expect(screen()).toContain("··· THINKING");
+    expect(screen()).toContain("◇ Thinking ···");
     ui.assistantDelta("The response.");
-    expect(screen()).not.toContain("··· THINKING");
+    expect(screen()).not.toContain("◇ Thinking ···");
     expect(screen()).not.toContain("boundary.▌");
     ui.finishTurn("completed", "Complete");
     expect(screen().split("\n").at(-1)).toContain("● ready");
-    expect(screen()).toContain("[ COMPLETE ]");
+    expect(screen()).toContain("tok/s");
     expect(screen()).not.toContain("···");
   } finally {
     clock.mockRestore();
@@ -670,18 +672,18 @@ test("a long live trace keeps its thinking heading visible and clickable inside 
   state.onKeypress("Keep this draft", {});
   for (const [width, height] of [[40, 10], [80, 24], [120, 36]]) {
     const rows = screen(width, height).split("\n");
-    const at = rows.findIndex((row) => row.includes("··· THINKING"));
+    const at = rows.findIndex((row) => row.includes("◇ Thinking ···"));
     expect(at).toBeGreaterThan(0);
     expect(at).toBeLessThan(height! - 3);
     expect(rows.join("\n")).toContain("Observation 39");
     expect(rows.slice(-3).join("\n")).not.toMatch(/[\u2800-\u28ff]/);
-    state.handleMouse({ kind: "press", button: 0, row: at, col: rows[at]!.indexOf("THINKING") });
-    expect(screen(width, height)).toContain("··· THINKING");
+    state.handleMouse({ kind: "press", button: 0, row: at, col: rows[at]!.indexOf("Thinking") });
+    expect(screen(width, height)).toContain("◇ Thinking ···");
     expect(screen(width, height)).not.toContain("Observation 39");
     const collapsed = screen(width, height).split("\n");
-    const header = collapsed.findIndex((row) => row.includes("··· THINKING"));
-    state.handleMouse({ kind: "press", button: 0, row: header, col: collapsed[header]!.indexOf("THINKING") });
-    expect(screen(width, height)).toContain("··· THINKING");
+    const header = collapsed.findIndex((row) => row.includes("◇ Thinking ···"));
+    state.handleMouse({ kind: "press", button: 0, row: header, col: collapsed[header]!.indexOf("Thinking") });
+    expect(screen(width, height)).toContain("◇ Thinking ···");
     expect(screen(width, height)).toContain("Keep this draft");
     state.sessionView.act({ kind: "follow" });
   }
@@ -692,22 +694,22 @@ test("thinking resumes after tools and stays scoped to the current run during hi
   screen();
   const original = view.current!.id;
   ui.beginTurn({ userText: "Read the parser", at: "now" });
-  expect(screen()).toContain("··· THINKING");
+  expect(screen()).toContain("◇ Thinking ···");
   view.act({ kind: "run", id: original });
   expect(screen()).not.toMatch(/[\u2800-\u28ff]/);
   view.act({ kind: "follow" });
   ui.toolRequested({ toolCallId: "read", name: "read_file", arguments: { path: "parser.ts" } });
   expect(screen()).toMatch(/[\u2800-\u28ff] Read/);
-  expect(screen()).not.toContain("··· THINKING");
+  expect(screen()).not.toContain("◇ Thinking ···");
   ui.toolWaiting("read", true);
   expect(screen()).not.toMatch(/[\u2800-\u28ff]/);
   ui.toolFinished({ toolCallId: "read", name: "read_file", state: "done" });
   ui.beginRound();
   const text = screen();
-  expect(text).toContain("··· THINKING");
-  expect(text.indexOf("THINKING", text.indexOf("Read parser.ts"))).toBeGreaterThan(text.indexOf("Read parser.ts"));
+  expect(text).toContain("◇ Thinking ···");
+  expect(text.indexOf("◇ Thinking", text.indexOf("Read parser.ts"))).toBeGreaterThan(text.indexOf("Read parser.ts"));
   ui.finishTurn("stopped", "Stopped");
-  expect(screen()).not.toContain("··· THINKING");
+  expect(screen()).not.toContain("◇ Thinking ···");
 });
 
 test("each completed response owns its mode, model, duration and speed above the prompt", () => {
@@ -787,7 +789,7 @@ test("failed cards without a final response retain their own measurements, conte
   expect(rows.join("\n")).toContain("No final response recorded");
   expect(rows.join("\n")).toContain("Plan · failed-model · elapsed 94.2s · speed 19.4 tok/s");
   expect(rows.join("\n")).toContain("63.9k/100k ───╴── 64%");
-  expect(rows.join("\n")).toContain("[ FAILED ]");
+  expect(rows.join("\n")).toContain("× failed");
   expect(rows.at(-1)).toContain("● failed");
   expect(view.current?.answer).toBeUndefined();
   const receipt = structuredClone(view.current!.receipt);
@@ -813,7 +815,7 @@ test("a shared tool and turn failure appears once with the missing-response expl
   const expanded = screen(120, 40);
   expect(expanded.match(/Turn exceeded the model round limit\./g)).toHaveLength(1);
   expect(expanded).toContain("Arguments");
-  expect(expanded).toContain("[ FAILED ]");
+  expect(expanded).toContain("× failed");
 });
 
 test("context meters preserve unknown measurements and distinguish safe, amber and red usage in both themes", () => {
@@ -835,12 +837,12 @@ test("live reasoning is visible by default and the full trace remains accessible
   const { ui, screen, key, view } = fixture();
   ui.beginTurn({ userText: "Investigate", at: "now" });
   ui.reasoningDelta("First observation.\nChecking the parser boundary.");
-  expect(screen()).toContain("··· THINKING");
+  expect(screen()).toContain("◇ Thinking ···");
   expect(screen()).toContain("Checking the parser boundary.");
   ui.reasoningDelta("\nA later observation.");
   expect(screen(40, 10)).toContain("A later observation.");
   key("x", { ctrl: true });
-  expect(screen()).toContain("··· THINKING");
+  expect(screen()).toContain("◇ Thinking ···");
   expect(screen()).not.toContain("Checking the parser boundary.");
   key("x", { ctrl: true });
   expect(screen()).toContain("Checking the parser boundary.");
@@ -848,7 +850,7 @@ test("live reasoning is visible by default and the full trace remains accessible
   ui.assistantDelta("The final answer.");
   ui.finishTurn("completed", "Finished");
   expect(screen()).toContain("The final answer.");
-  expect(screen()).toContain("THINKING");
+  expect(screen()).toContain("◇ Th");
   key("x", { ctrl: true });
   expect(screen()).not.toContain("Checking the parser boundary.");
   key("x", { ctrl: true });
@@ -908,7 +910,7 @@ test("settled reasoning expands inline without replacing the answer on narrow sc
   ui.finishTurn("completed", "Finished");
   key("x", { ctrl: true });
   const narrow = screen(60, 24);
-  expect(narrow).toMatch(/THINKING · [\d.]+s ▾/);
+  expect(narrow).toMatch(/▾ ◇ Thought [\d.]+s/);
   expect(narrow).toContain("First observation.");
   expect(narrow).toContain("The answer stays");
   key("x", { ctrl: true });
@@ -958,7 +960,7 @@ test("closing context and project details during inference does not count as dou
     key("escape");
     expect(interrupts()).toBe(0);
   }
-  expect(screen()).toContain("THINKING");
+  expect(screen()).toContain("◇ Th");
 });
 
 test("session command output opens above pinned evidence and returns to it on Escape", () => {
@@ -1213,7 +1215,7 @@ test("streaming bursts advance one row per frame and drain through settlement wi
       }
       expect(view.animating(now)).toBe(false);
       expect(seen.size).toBe(45);
-      expect(frame).toContain("COMPLETE");
+      expect(frame).toContain("tok/s");
       expect(observe()).toBe(frame);
     } finally { state.started = false; ui.stop(); clock.mockRestore(); }
   }

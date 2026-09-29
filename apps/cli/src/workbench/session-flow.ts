@@ -66,14 +66,17 @@ export function renderSessionFlow(options: {
   let card = false;
   let cardFailed = false;
   let cardLive = false;
-  const border = (text: string) => cardFailed ? tint(paint, text, "surface", "signal", 0.35) : paint.text(text, "rule");
+  // The redesign draws a response as a left rail rather than a box: amber
+  // while live, red when failed, a quiet rule once complete.
+  const railTone = (): PaletteColor => cardFailed ? "signal" : cardLive ? "thinking" : "borderBright";
+  const border = (text: string) => paint.text(text, railTone());
   let hoverKey: string | undefined;
   const add = (key: string, text = "", controls: FlowControl[] = [], anchors?: string[], background?: PaletteColor) => {
     const line = counts.get(key) ?? 0;
     counts.set(key, line + 1);
     if (card) {
-      const content = surface(sliceAnsi(text, 3, width - 2), width - 5, paint, background ?? "surface");
-      text = `  ${border("│")}${content}${border("│")} `;
+      const content = surface(sliceAnsi(text, 3, width - 2), width - 5, paint, background ?? "ink");
+      text = `  ${border("▎")}${content}  `;
       background = "ink";
     }
     const row: FlowRow = { key, line, text, controls, anchors, background, hoverKey, parents: parents.length ? [...parents] : undefined };
@@ -82,7 +85,7 @@ export function renderSessionFlow(options: {
   };
   const cardEdge = (key: string, bottom = false) => {
     card = false;
-    add(key, `  ${bottom ? border("└") : paint.text("[", cardFailed ? "signal" : cardLive ? "thinking" : "electric")}${border("─".repeat(Math.max(0, width - 5)) + (bottom ? "┘" : "┐"))} `);
+    if (bottom) add(key);
     card = !bottom;
   };
   const wrap = (text: string, size = inner) => text.split("\n").flatMap((line) => wrapDisplayText(safe(line), size));
@@ -98,7 +101,7 @@ export function renderSessionFlow(options: {
     lines.forEach((line, index) => add(key, margin + surface(paint.text(`▎ ${index === 0 ? mark : " "} ${line}`, tone), inner, paint, tone === "signal" ? "errorSurface" : "raised")));
   };
   const disclosure = (run: SessionRun, key: string, label: string, mark: string, anchors?: string[]) => {
-    const text = margin + mark + " " + truncateText(label, inner - visibleLength(mark) - 1);
+    const text = margin + (mark ? mark + " " : "") + truncateText(label, inner - (mark ? visibleLength(mark) + 1 : 0));
     return add(key, text, [{ column: indent, width: Math.min(inner, visibleLength(text) - indent), action: { kind: "toggle", runId: run.id, key } }], anchors);
   };
   const isOpen = (run: SessionRun, key: string, fallback = false): boolean => {
@@ -210,7 +213,7 @@ export function renderSessionFlow(options: {
       cardEdge(`run:${run.id}:card-top`);
       const first = activity[0];
       const at = first?.type === "assistant" ? first.at : first?.startedAt ?? run.request?.startedAt;
-      add(`run:${run.id}:timestamp`, formatFooterLine(margin + paint.text("demesne", "muted"), paint.text(clockLabel(at), "muted"), width - 3));
+      add(`run:${run.id}:timestamp`, formatFooterLine(margin + paint.bold("demesne", cardFailed ? "signal" : cardLive ? "thinking" : "electric"), paint.text(clockLabel(at), "muted"), width - 3));
     }
     let previous = "";
     for (let index = 0; index < run.entries.length; index++) {
@@ -221,9 +224,10 @@ export function renderSessionFlow(options: {
         const open = isOpen(run, key, entry.streaming && !run.settled);
         const timing = entry.durationMs !== null ? ` · ${(entry.durationMs / 1000).toFixed(1)}s` : "";
         const live = entry === liveReasoning;
-        const label = paint.bold("THINKING", "thinking") + paint.text(timing + (live ? "" : ` ${open ? "▾" : "▸"}`), "muted");
-        const header = disclosure(run, key, label,
-          live ? thinkingDots(paint, options.now, options.reducedMotion) : paint.text("●", "thinking"), [thinkingAnchors.get(entry.id)!]);
+        const label = live
+          ? paint.text("◇ Thinking", "thinking") + " " + thinkingDots(paint, options.now, options.reducedMotion) + paint.text(timing.replace(" · ", " "), "muted")
+          : paint.text("◇ ", "muted") + paint.text("Thought", "secondary") + paint.text(timing.replace(" · ", " "), "muted");
+        const header = disclosure(run, key, label, live ? "" : paint.text(open ? "▾" : "▸", "muted"), [thinkingAnchors.get(entry.id)!]);
         header.activeThinking = live;
         header.thinking = true;
         if (open) {
@@ -296,7 +300,8 @@ export function renderSessionFlow(options: {
         else lines.push(...fold(part));
       }
       const hasText = run.entries.some((entry) => entry.type === "assistant" && entry.raw.trim());
-      const badge = `[ ${run.status} ]`;
+      // Success needs no badge; only failed and stopped turns are labelled.
+      const badge = run.status === "FAILED" ? "× failed" : run.status === "STOPPED" ? "■ stopped" : "";
       const actionsWidth = badge.length + (hasText ? 7 : 0);
       if (visibleLength(lines.at(-1) ?? "") + actionsWidth + 1 > inner) lines.push("");
       if (!options.compact) add(`run:${run.id}:receipt-gap`, "   " + paint.text("─".repeat(width - 5), "rule"));
@@ -336,7 +341,7 @@ export function renderSessionFlow(options: {
     if (inferring && !liveReasoning) {
       const key = thinkingKey(run.id, after);
       if (activity.length || links.length) add(`${key}:gap`);
-      add(key, `${margin}${thinkingDots(paint, options.now, options.reducedMotion)} ${paint.text("THINKING", "thinking")} ${thinkingCursor(paint, options.now, options.reducedMotion)}`).activeThinking = true;
+      add(key, `${margin}${paint.text("◇ Thinking", "thinking")} ${thinkingDots(paint, options.now, options.reducedMotion)} ${thinkingCursor(paint, options.now, options.reducedMotion)}`).activeThinking = true;
     }
     if (hasCard) cardEdge(`run:${run.id}:card-bottom`, true);
     hoverKey = undefined;

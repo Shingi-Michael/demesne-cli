@@ -42,8 +42,8 @@ test("operation cards fill and focus an undoable draft without submitting; expli
   let submitted = false;
   void prompt.then(() => { submitted = true; });
   state.onKeypress("My existing draft", {});
-  for (const operation of START_OPERATIONS) {
-    screen(); click(operation.label);
+  for (const [index, operation] of START_OPERATIONS.entries()) {
+    screen(); click(`${index + 1} ${operation.label}`);
     await Promise.resolve();
     expect(submitted).toBe(false);
     expect(state.editor.value).toBe(operation.prompt);
@@ -53,7 +53,7 @@ test("operation cards fill and focus an undoable draft without submitting; expli
     expect(state.editor.value).toBe("My existing draft");
   }
   screen(); click("Explore");
-  screen(); click("SEND ↵");
+  screen(); click("↵ send");
   const value = await prompt;
   expect(value).toBe(START_OPERATIONS[0].prompt);
   ui.beginTurn({ userText: value, at });
@@ -67,6 +67,28 @@ test("operation cards fill and focus an undoable draft without submitting; expli
   ui.finishTurn("completed", "Complete");
   expect(screen()).toContain("The request enters through main.");
   expect(screen()).not.toContain("What are we working on?");
+});
+
+test("Figma 8:268 keeps status above the workspace and Recent in the same centered column as the hero", () => {
+  const { ui, state, screen, read, click } = fixture(); void read();
+  for (const [width, height] of [[110, 30], [144, 33], [232, 60]]) {
+    const rows = screen(width, height).split("\n"), layout = state.startLayout;
+    expect(rows[0]).toContain("● ready"); expect(rows[0]).toContain("Tab settings");
+    expect(rows[2]).toContain("demesne · /project"); expect(rows[2]).toContain("Alt+H history");
+    expect(layout.input.width).toBe(86);
+    expect(layout.input.column).toBe(Math.floor((width! - 86) / 2));
+    expect(layout.metadata).toBeLessThan(layout.input.row);
+    expect(layout.recent.column).toBe(layout.input.column); expect(layout.recent.width).toBe(layout.input.width);
+    expect(layout.recent.row).toBe(layout.operations.row + layout.operations.height + 1);
+    expect(state.railZones).toEqual([]);
+    expect(rows[layout.input.row + layout.input.height - 2]).toContain("@ files");
+    expect(rows[layout.input.row + layout.input.height - 2]).toContain("↵ send");
+    expect(ui.frame(width!, height!).rows[0]).not.toContain("\x1b[1m");
+  }
+  state.onKeypress("draft", {}); screen(); click("⇧↵ newline");
+  expect(state.editor.value).toBe("draft\n"); expect(state.mode).toBe("input");
+  screen(); click("/ commands"); expect(state.editor.value).toBe("/");
+  screen(); expect(state.commandMenuFrame).not.toBeNull();
 });
 
 test("start controls support keyboard browsing while caret edits, multiline input and completions retain their routing", async () => {
@@ -107,7 +129,7 @@ test("History and recent-session actions use the session commands and carry the 
   ui.restoreSession(saved("previous"));
   prompt = read();
   expect(state.editor.value).toBe("Unsent draft");
-  screen(); click("HISTORY");
+  screen(); click("Alt+H all sessions");
   expect(await prompt).toBe("/sessions");
   prompt = read();
   expect(state.editor.value).toBe("Unsent draft");
@@ -115,7 +137,7 @@ test("History and recent-session actions use the session commands and carry the 
   expect(await prompt).toBe("/sessions");
 });
 
-test("settings, context and the rail return to the hero without losing the draft, and search can be replaced by a card", async () => {
+test("settings, context and workspace return to the hero without losing the draft, and search can be replaced by a card", async () => {
   const { state, ui, screen, click, key, read } = fixture();
   const prompt = read();
   state.onKeypress("Retain me", {});
@@ -127,9 +149,9 @@ test("settings, context and the rail return to the hero without losing the draft
   expect(screen()).toContain("CONTEXT PLAN");
   key("escape");
   expect(screen()).toContain("What are we working on?");
-  screen(); click("≡");
+  screen(); click("/project");
   await Promise.resolve();
-  expect(screen()).toContain("FILES");
+  expect(screen()).toContain("PROJECT FOLDER");
   key("escape");
   screen();
   expect(state.editor.value).toBe("Retain me");
@@ -162,7 +184,8 @@ test("hero geometry bounds the caret and hit targets through resize, long paste,
           expect(frame.rows).toHaveLength(height!);
           for (const row of frame.rows) expect(visibleLength(row)).toBe(width!);
           const input = state.layout.input;
-          expect(stripVTControlCharacters(frame.rows[input.row + input.height - 1]!)).toContain("Draft ~");
+          if (!state.editor.search) expect(stripVTControlCharacters(frame.rows[input.row + input.height - 2]!)).toMatch(/~[\d.]+k? tok/);
+          expect(stripVTControlCharacters(frame.rows[input.row + input.height - 1]!)).toContain("╰─");
           expect(frame.cursor?.row).toBeGreaterThan(input.row);
           expect(frame.cursor?.row).toBeLessThan(input.row + input.height - 1);
           expect(frame.cursor?.column).toBeGreaterThan(input.column);
@@ -190,8 +213,10 @@ test("hover and focus change emphasis without moving hero controls; reduced moti
     const row = rows.findIndex((line) => line.includes("Explore"));
     const column = rows[row]!.indexOf("Explore");
     const input = { ...state.layout.input };
+    const before = ui.frame(120, 36).rows[row];
     state.handleMouse({ kind: "move", row, col: column });
-    expect(screen()).toContain("fill ↑");
+    expect(ui.frame(120, 36).rows[row]).not.toBe(before);
+    expect(screen().split("\n")[row]).toBe(rows[row]);
     expect(state.layout.input).toEqual(input);
     state.onData("\x1b[O");
     expect(ui.frame(120, 36).cursor).toBeNull();

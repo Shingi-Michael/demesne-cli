@@ -1,21 +1,20 @@
-import { formatFooterLine, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, wrapDisplayText, type Painter, type PaletteColor } from "@demesne/brand";
+import { formatFooterLine, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, type Painter, type PaletteColor } from "@demesne/brand";
 import { sliceAnsi } from "bun";
 import type { RecentSession } from "../recent-sessions.ts";
 import type { ContextReceipt } from "./entries.ts";
 import type { Rect } from "./layout.ts";
 import { Canvas } from "./canvas.ts";
-import { clockLabel, InteractionTransitions, tint } from "./interaction.ts";
-import { contextLabel } from "./session-chrome.ts";
-import { sessionHeader } from "./session-header.ts";
+import { InteractionTransitions, tint } from "./interaction.ts";
+import { contextLabel, contextMeter } from "./session-chrome.ts";
 
 export const START_OPERATIONS = [
-  { tag: "EXPLORE", label: "Explore", title: "Trace a call flow", description: "Follow execution from entry point through the full stack", tone: "electric",
+  { tag: "EXPLORE", label: "Explore", title: "Trace a call flow end to end", description: "Follow execution from entry point through the full stack", tone: "electric",
     prompt: "Trace the call flow from the main entry point and map out how requests move through the system." },
-  { tag: "DEBUG", label: "Debug", title: "Find and fix a bug", description: "Diagnose an error or unexpected behavior and patch it", tone: "signal",
+  { tag: "DEBUG", label: "Debug", title: "Find and fix a failing behavior", description: "Diagnose an error or unexpected behavior and patch it", tone: "electric",
     prompt: "Help me diagnose and fix a bug. Ask me about the error or unexpected behavior, then investigate and verify the fix." },
-  { tag: "BUILD", label: "Build", title: "Write a new feature", description: "Implement something new end-to-end with tests", tone: "citron",
+  { tag: "BUILD", label: "Build", title: "Implement a feature with tests", description: "Implement something new end-to-end with tests", tone: "electric",
     prompt: "Help me implement a new feature end-to-end. Ask what I want to build, then inspect the project and add the appropriate verification." },
-  { tag: "LEARN", label: "Learn", title: "Explain this codebase", description: "Get a map of the architecture and key entry points", tone: "thinking",
+  { tag: "LEARN", label: "Learn", title: "Map the architecture", description: "Get a map of the architecture and key entry points", tone: "electric",
     prompt: "Explain this codebase: map the architecture, key entry points, and how its main components work together." },
 ] as const;
 
@@ -23,34 +22,38 @@ export type StartAction = { kind: "operation"; index: number } | { kind: "sessio
   | { kind: "history" | "settings" | "workspace" | "context" | "model" | "commands" | "files" | "live" | "panel" };
 export interface StartZone extends Rect { key: string; action: StartAction }
 export interface StartLayout {
-  input: Rect; label: number; metadata: number; shortcuts: number | null;
+  input: Rect; label: number | null; metadata: number;
   operations: Rect; columns: number; cardHeight: number; cardOffset: number; recent: Rect; feedback: number | null;
 }
 
 export function startScreenLayout(width: number, height: number, requestedHeight: number, feedback: boolean): StartLayout {
   const inset = width >= 65 ? 2 : 1;
-  const contentWidth = Math.min(96, width - inset * 2);
+  // Figma 8:268: a 720px hero at 14px mono (~86 cells), centered as
+  // one group. Recent belongs to this column, never to the window footer.
+  const contentWidth = Math.min(86, width - inset * 2);
   const column = Math.floor((width - contentWidth) / 2);
-  const header = height >= 14 ? 2 : 1;
-  // Tall terminals list recent sessions; shorter ones keep a one-line strip.
-  const recentHeight = height >= 26 ? 5 : height >= 18 ? 3 : 1;
-  const recent = { row: height - recentHeight, column: 0, width, height: recentHeight };
-  const available = recent.row - header - Number(feedback);
-  const inputHeight = Math.min(Math.max(height >= 18 ? 5 : 3, requestedHeight), Math.max(3, available - 3));
-  // The redesign's "Start from" grid: one line per operation, two columns
-  // where they fit, with a small section label when there is room for it.
+  const header = height >= 18 ? 4 : 2;
+  const available = height - header - Number(feedback);
+  const inputHeight = Math.max(4, Math.min(Math.max(5, requestedHeight), available - 4));
   const columns = contentWidth >= 64 ? 2 : 1;
-  const operationRows = START_OPERATIONS.length / columns;
-  const remaining = available - inputHeight - 3;
-  const cardHeight = remaining >= operationRows ? 1 : 0;
-  const cardOffset = cardHeight && remaining >= operationRows + 2 ? 2 : cardHeight && remaining >= operationRows + 1 ? 1 : 0;
-  const operationHeight = cardHeight ? cardOffset + operationRows : remaining >= 1 ? 1 : 0;
-  const groupHeight = inputHeight + 3 + operationHeight;
+  const operationRows = Math.ceil(START_OPERATIONS.length / columns);
+  let cardHeight = 3, cardOffset = 1, recentHeight = 7, gap = 1, intro = 3;
+  const group = () => intro + inputHeight + gap * 2 + (cardHeight ? cardOffset + operationRows * cardHeight : 1) + recentHeight;
+  if (group() > available) cardHeight = 1;
+  if (group() > available) recentHeight = 4;
+  if (group() > available) gap = 0;
+  if (group() > available) intro = 2;
+  if (group() > available) recentHeight = 1;
+  if (group() > available) cardOffset = 0;
+  if (group() > available) cardHeight = 0;
+  if (group() > available) intro = 1;
+  const groupHeight = group();
   const top = header + Math.max(0, Math.floor((available - groupHeight) / 2));
-  const input = { row: top + 1, column, width: contentWidth, height: inputHeight };
-  return { input, label: top, metadata: input.row + input.height, shortcuts: input.row + input.height + 1,
-    operations: { row: input.row + input.height + 2, column, width: contentWidth, height: operationHeight }, columns, cardHeight, cardOffset, recent,
-    feedback: feedback ? recent.row - 1 : null };
+  const input = { row: top + intro, column, width: contentWidth, height: inputHeight };
+  const operations = { row: input.row + input.height + gap, column, width: contentWidth, height: cardHeight ? cardOffset + operationRows * cardHeight : 1 };
+  const recent = { row: operations.row + operations.height + gap, column, width: contentWidth, height: recentHeight };
+  return { input, label: intro > 1 ? top : null, metadata: top + (intro > 1 ? 1 : 0), operations, columns, cardHeight, cardOffset, recent,
+    feedback: feedback ? recent.row + recent.height : null };
 }
 
 const actionKey = (action: StartAction): string => action.kind === "operation" ? `operation:${action.index}` : action.kind === "session" ? `session:${action.id}` : action.kind;
@@ -96,7 +99,7 @@ export class StartScreen {
 
   render(options: {
     width: number; height: number; layout: StartLayout; paint: Painter; now: number; animate: boolean; focused: boolean;
-    path: string; model: string; context: ContextReceipt; currentId?: string; recent: readonly RecentSession[];
+    path: string; branch?: string | null; model: string; mode: string; context: ContextReceipt; currentId?: string; recent: readonly RecentSession[];
     recentState: "loading" | "ready" | "unavailable"; feedback?: { text: string; tone: string } | null; input: string[];
     openedAt?: number; createdAt?: number;
   }): { rows: string[]; zones: StartZone[] } {
@@ -111,64 +114,63 @@ export class StartScreen {
     const put = canvas.put.bind(canvas);
     const inset = width >= 65 ? 2 : 1;
     const inner = width - inset * 2;
-    const compact = width < 55;
-    const header = sessionHeader({ width, paint, path: options.path, now, openedAt: options.openedAt ?? now,
-      createdAt: options.createdAt, accent: height >= 14, historyActive: emphasis("history") > 0 });
-    header.rows.forEach((text, row) => put(row, 0, text, width, "surface"));
-    zone({ row: header.row, column: header.path.column, width: header.path.width, height: 1 }, { kind: "workspace" });
-    zone({ row: header.row, column: header.history.column, width: header.history.width, height: 1 }, { kind: "history" });
-
-    const { input } = layout;
-    const navigation = options.focused ? "←/→ select · Enter fill · Esc draft" : "Ctrl+T operations · Alt+H history";
-    put(layout.label, input.column, formatFooterLine(paint.bold("What are we working on?", "paper"),
-      input.width >= 68 ? paint.text(navigation, "muted") : "", input.width), input.width);
-    options.input.forEach((line, index) => put(input.row + index, input.column, line, input.width, "surface"));
+    // The start frame has its own top status strip and workspace header.
+    // It deliberately has no conversation action rail or wall-clock heading.
+    put(0, 0, "", width, "surface");
     const context = `ctx ${contextLabel(options.context)}`;
-    const hint = input.width >= 80 ? "↵ send · ⇧↵ newline" : "";
-    const modelWidth = Math.max(1, input.width - context.length - (hint ? hint.length + 5 : 3));
-    const model = truncateText(`model ${safe(options.model)}`, modelWidth);
-    const metadata = `${paint.text(model, "secondary")} · ${paint.text(context, "thinking")}`;
-    const modelColumn = input.column + input.width - visibleLength(metadata);
-    put(layout.metadata, input.column, formatFooterLine(hint ? paint.text(hint, "muted") : "", metadata, input.width), input.width);
-    zone({ row: layout.metadata, column: modelColumn, width: visibleLength(model), height: 1 }, { kind: "model" });
-    zone({ row: layout.metadata, column: input.column + input.width - context.length, width: context.length, height: 1 }, { kind: "context" });
-    if (layout.shortcuts !== null) {
-      let column = input.column;
-      const shortcuts: { label: string; action: StartAction }[] = [
-        { label: input.width < 60 ? "/ cmds" : "/ commands", action: { kind: "commands" } },
-        { label: "@ files", action: { kind: "files" } }, { label: input.width < 40 ? "Tab menu" : "Tab settings", action: { kind: "settings" } },
-        { label: input.width < 60 ? "^G live" : "Ctrl+G live", action: { kind: "live" } },
-      ];
-      for (const item of shortcuts) {
-        if (column + item.label.length > input.column + input.width) break;
-        put(layout.shortcuts, column, paint.text(item.label, "secondary"), item.label.length);
-        zone({ row: layout.shortcuts, column, width: item.label.length, height: 1 }, item.action);
-        column += item.label.length + 2;
-      }
-    }
+    const settings = width >= 90 ? "Tab settings  Ctrl+K commands" : width >= 60 ? "Tab settings" : "Tab";
+    const statusRoom = inner - settings.length - 2;
+    let status = paint.text("● ready", "citron");
+    const modelRoom = statusRoom - visibleLength(status) - context.length - 4;
+    if (modelRoom >= 8) status += "  " + paint.text(truncateText(safe(options.model), modelRoom), "muted");
+    const contextColumn = inset + visibleLength(status) + 2;
+    status += "  " + paint.text(context, "muted");
+    const meter = contextMeter(options.context, paint, 8);
+    if (meter && visibleLength(status) + visibleLength(meter) + 2 <= statusRoom) status += "  " + meter;
+    put(0, inset, formatFooterLine(status, paint.text(settings, "muted"), inner), inner, "surface");
+    zone({ row: 0, column: contextColumn, width: context.length, height: 1 }, { kind: "context" });
+    const settingsColumn = width - inset - settings.length;
+    zone({ row: 0, column: settingsColumn, width: settings.startsWith("Tab settings") ? 12 : 3, height: 1 }, { kind: "settings" });
+    if (width >= 90) zone({ row: 0, column: settingsColumn + 14, width: 15, height: 1 }, { kind: "commands" });
+    const headerRow = height >= 18 ? 2 : 1;
+    const history = width >= 60 ? "Alt+H history" : "history";
+    const branch = options.branch && width >= 70 ? `⎇ ${truncateText(safe(options.branch), 20)}  ` : "";
+    const heading = paint.text("demesne", "electric") + paint.text(` · ${safe(options.path)}`, "muted");
+    put(headerRow, inset, formatFooterLine(heading, paint.text(branch + history, "muted"), inner), inner);
+    zone({ row: headerRow, column: inset, width: Math.max(0, inner - branch.length - history.length - 2), height: 1 }, { kind: "workspace" });
+    zone({ row: headerRow, column: width - inset - history.length, width: history.length, height: 1 }, { kind: "history" });
+    if (height >= 18) put(3, inset, paint.text("─".repeat(inner), "rule"), inner);
+    const { input } = layout;
+    if (layout.label !== null) put(layout.label, input.column, paint.text("What are we working on?", "strong"), input.width);
+    const capacity = `ctx ${options.context.capacity ? formatTokenCount(options.context.capacity) : "?"}`;
+    const mode = `${options.mode} mode`;
+    const model = truncateText(safe(options.model), input.width - capacity.length - mode.length - 6);
+    put(layout.metadata, input.column, paint.text(`${model} · ${capacity} · ${mode}`, "muted"), input.width);
+    zone({ row: layout.metadata, column: input.column, width: model.length, height: 1 }, { kind: "model" });
+    zone({ row: layout.metadata, column: input.column + model.length + 3, width: capacity.length, height: 1 }, { kind: "context" });
+    zone({ row: layout.metadata, column: input.column + model.length + capacity.length + 6, width: mode.length, height: 1 }, { kind: "settings" });
+    options.input.forEach((line, index) => put(input.row + index, input.column, line, input.width, "surface"));
 
     const ops = layout.operations;
     if (layout.cardHeight) {
       if (layout.cardOffset) put(ops.row + layout.cardOffset - 1, ops.column, paint.text("START FROM", "muted"), ops.width);
-      const gap = 2;
+      const gap = 1;
       const cellWidth = Math.floor((ops.width - (layout.columns - 1) * gap) / layout.columns);
       START_OPERATIONS.forEach((operation, index) => {
-        const row = ops.row + layout.cardOffset + Math.floor(index / layout.columns);
+        const row = ops.row + layout.cardOffset + Math.floor(index / layout.columns) * layout.cardHeight;
         const column = ops.column + (index % layout.columns) * (cellWidth + gap);
         const active = emphasis(`operation:${index}`);
         const tone = operation.tone as PaletteColor;
         const selected = options.focused && this.selected === `operation:${index}`;
         const background = active >= 0.5 ? "raised" : "surface";
-        const number = tint(paint, `${selected ? "›" : " "}${index + 1}`, "muted", tone, active);
-        const name = active >= 0.5 ? paint.bold(operation.label, "paper") : paint.text(operation.label, "paper");
-        // Hover says what a click does: it fills the prompt, never sends.
-        const hint = active >= 0.5 && cellWidth >= 30 ? "fill ↑" : "";
-        const room = cellWidth - 4 - operation.label.length - 3 - (hint ? hint.length + 2 : 0);
-        const title = room >= 8 ? "  " + paint.text(truncateText(operation.title, room), "muted") : "";
-        put(row, column, "", cellWidth, background);
-        put(row, column + 1, `${number}  ${name}${title}`, cellWidth - 1, background);
-        if (hint) put(row, column + cellWidth - hint.length - 1, tint(paint, hint, "muted", tone, active), hint.length, background);
-        zone({ row, column, width: cellWidth, height: 1 }, { kind: "operation", index });
+        const number = tint(paint, selected ? "›" : `${index + 1}`, "muted", tone, active);
+        const name = paint.text(operation.label, "strong");
+        const room = cellWidth - 7 - operation.label.length;
+        const title = room >= 8 ? " " + paint.text(truncateText(operation.title, room), "muted") : "";
+        const textRow = row + (layout.cardHeight === 3 ? 1 : 0);
+        if (layout.cardHeight === 3) canvas.panel(row, column, cellWidth, 3, "", "", background);
+        put(textRow, column + 1, ` ${number} ${name}${title}`, cellWidth - 2, background);
+        zone({ row, column, width: cellWidth, height: layout.cardHeight }, { kind: "operation", index });
       });
     } else if (ops.height) {
       let column = ops.column;
@@ -184,27 +186,27 @@ export class StartScreen {
     if (layout.feedback !== null && options.feedback) put(layout.feedback, input.column, paint.text(safe(options.feedback.text), options.feedback.tone === "error" ? "signal" : "secondary"), input.width);
 
     const recent = layout.recent;
-    const history = recent.height > 1 ? "HISTORY ↓" : "History ↓";
-    const titleRow = recent.row + (recent.height > 1 ? 1 : 0);
-    for (let row = recent.row; row < height; row++) put(row, 0, "", width, "surface");
-    if (recent.height > 1) put(recent.row, 0, paint.text("─".repeat(width), "rule"), width, "surface");
-    put(titleRow, inset, paint.text("RECENT", "muted"), 6, "surface");
-    put(titleRow, width - inset - history.length, tint(paint, `${options.focused && this.selected === "history" ? "›" : ""}${history}`, "secondary", "electric", emphasis("history")), history.length + 1, "surface");
-    zone({ row: titleRow, column: width - inset - history.length, width: history.length, height: 1 }, { kind: "history" });
-    const room = width - inset * 2 - 8 - history.length - 1;
+    const listed = options.recent.slice(0, recent.height >= 7 ? 3 : 1);
+    const empty = options.recentState === "loading" ? "Loading…" : options.recentState === "unavailable" ? "Unavailable" : "No sessions";
+    const boxed = recent.height >= 7;
+    const listRow = recent.row + (boxed ? 2 : recent.height > 1 ? 1 : 0);
+    if (recent.height > 1) put(recent.row, recent.column, paint.text("RECENT", "muted"), recent.width);
+    if (boxed) canvas.panel(recent.row + 1, recent.column, recent.width, 5, "");
     const sessionTime = (session: RecentSession) => {
       const date = new Date(session.updatedAt);
-      const sameDay = Number.isFinite(date.getTime()) && date.toDateString() === new Date(now).toDateString();
-      return !Number.isFinite(date.getTime()) ? "—" : sameDay ? clockLabel(session.updatedAt).slice(0, 5) : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      if (!Number.isFinite(date.getTime())) return "—";
+      const age = Math.max(0, now - date.getTime());
+      if (age < 60_000) return "just now";
+      if (age < 3_600_000) return `${Math.floor(age / 60_000)}m ago`;
+      if (age < 86_400_000) return `${Math.floor(age / 3_600_000)}h ago`;
+      return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
     };
-    const listed = recent.height >= 5 ? options.recent.slice(0, recent.height - 2) : [];
-    if (recent.height >= 5 && listed.length) {
-      // The redesign's Recent list: status, title, turns and context, time.
+    if (listed.length) {
       const status = (session: RecentSession): [string, PaletteColor] => session.lastStatus === "completed" ? ["✓", "citron"]
         : session.lastStatus === "failed" ? ["×", "signal"] : session.lastStatus === "cancelled" || session.lastStatus === "interrupted" ? ["■", "secondary"]
         : session.lastStatus === "running" || session.lastStatus === "queued" ? ["◎", "thinking"] : ["·", "muted"];
       listed.forEach((session, index) => {
-        const row = titleRow + 1 + index;
+        const row = listRow + index;
         const key = `session:${session.id}`;
         const active = emphasis(key);
         const current = session.id === options.currentId;
@@ -214,36 +216,24 @@ export class StartScreen {
         const used = session.context?.used;
         const meta = [session.turns === undefined ? "" : `${session.turns} turn${session.turns === 1 ? "" : "s"}`,
           `ctx ${session.context?.estimated ? "~" : ""}${used == null ? "—" : formatTokenCount(used)}`, current ? "current" : ""].filter(Boolean).join(" · ");
-        const left = `${options.focused && this.selected === key ? paint.text("›", "electric") : " "} ${paint.text(glyph, tone)}  `;
-        const titleRoom = Math.max(8, Math.min(40, inner - 12 - meta.length - time.length));
+        const left = `${options.focused && this.selected === key ? paint.text("›", "electric") : " "}${paint.text(glyph, tone)} `;
+        const rowWidth = recent.width - 2;
+        const titleRoom = Math.max(8, Math.min(40, rowWidth - 7 - meta.length - time.length));
         const text = left + paint.text(truncateText(safe(session.title), titleRoom), current ? "paper" : "secondary") + "  " + paint.text(meta, "muted");
-        put(row, inset, "", inner, background);
-        put(row, inset, text, inner - time.length - 2, background);
-        put(row, inset + inner - time.length, paint.text(time, "muted"), time.length, background);
-        zone({ row, column: inset, width: inner, height: 1 }, { kind: "session", id: session.id });
+        put(row, recent.column + 1, "", rowWidth, background);
+        put(row, recent.column + 1, text, rowWidth - time.length - 2, background);
+        put(row, recent.column + 1 + rowWidth - time.length - 1, paint.text(time, "muted"), time.length, background);
+        zone({ row, column: recent.column + 1, width: rowWidth, height: 1 }, { kind: "session", id: session.id });
       });
     }
-    const count = recent.height >= 5 ? 0 : recent.height > 1 ? Math.min(options.recent.length, Math.max(1, Math.floor(room / 18))) : Math.min(1, options.recent.length);
-    if (count) {
-      const size = Math.floor(room / count);
-      options.recent.slice(0, count).forEach((session, index) => {
-        const column = inset + 8 + index * size;
-        const current = session.id === options.currentId;
-        const key = `session:${session.id}`;
-        const text = `${options.focused && this.selected === key ? "›" : current ? "▪" : " "} ${safe(session.title)}`;
-        put(titleRow, column, tint(paint, truncateText(text, size - 1), "secondary", current ? "citron" : "electric", current ? Math.max(0.25, emphasis(key)) : emphasis(key)), size - 1, "surface");
-        if (recent.height > 1) {
-          const date = new Date(session.updatedAt);
-          const sameDay = Number.isFinite(date.getTime()) && date.toDateString() === new Date(now).toDateString();
-          const time = !Number.isFinite(date.getTime()) ? "—" : sameDay ? clockLabel(session.updatedAt).slice(0, 5) : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-          const used = session.context?.used;
-          put(titleRow + 1, column + 2, paint.text(`${time} · ctx ${session.context?.estimated ? "~" : ""}${used == null ? "—" : formatTokenCount(used)}`, "muted"), size - 3, "surface");
-        }
-        for (let row = titleRow; row < height; row++) put(row, column - 1, paint.text("│", "rule"), 1, "surface");
-        zone({ row: titleRow, column, width: size - 1, height: height - titleRow }, { kind: "session", id: session.id });
-      });
-    } else if (!listed.length) put(titleRow, inset + 8, paint.text(options.recentState === "loading" ? "Loading…" : options.recentState === "unavailable" ? "Unavailable" : "No sessions", "muted"), Math.max(0, room), "surface");
-    this.controls = this.zones.filter((zone) => zone.action.kind === "operation" || zone.action.kind === "session" || zone.action.kind === "history");
+    if (!listed.length) put(listRow, recent.column + 2, paint.text(empty, "muted"), recent.width - 4, "surface");
+    if (recent.height > 1) {
+      const label = "Alt+H all sessions · /resume <name>";
+      put(recent.row + recent.height - 1, recent.column, tint(paint, label, "muted", "electric", emphasis("history")), recent.width);
+      zone({ row: recent.row + recent.height - 1, column: recent.column, width: Math.min(label.length, recent.width), height: 1 }, { kind: "history" });
+    }
+    this.controls = this.zones.filter((zone, index, zones) => (zone.action.kind === "operation" || zone.action.kind === "session" || zone.action.kind === "history")
+      && zones.findIndex(other => other.key === zone.key) === index);
     this.controls.sort((a, b) => (a.action.kind === "operation" ? 0 : a.action.kind === "session" ? 1 : 2) - (b.action.kind === "operation" ? 0 : b.action.kind === "session" ? 1 : 2));
     if (this.selected && !this.controls.some((zone) => zone.key === this.selected)) { this.selected = this.controls[0]?.key ?? null; this.reflow = true; }
     if (this.pointer) this.reflow = this.hover(this.pointer.row, this.pointer.column, now) || this.reflow;
@@ -258,9 +248,8 @@ export class StartScreen {
         put(row, rect.column, text, rect.width);
       }
     };
-    fade({ row: layout.label, column: input.column, width: input.width, height: 1 }, 0);
+    fade({ row: layout.label ?? layout.metadata, column: input.column, width: input.width, height: 2 }, 0);
     fade(input, 1);
-    fade({ row: layout.metadata, column: input.column, width: input.width, height: 2 }, 2);
     fade(ops, 3); fade(recent, 4);
     return { rows: canvas.rows, zones: this.zones };
   }

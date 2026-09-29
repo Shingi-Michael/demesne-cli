@@ -1,8 +1,14 @@
 # Terminal design contract
 
-The visual source of truth is **Version 14** of [Futuristic Terminal Harness Design](https://www.figma.com/make/szdinDI8QBdI1jBtvCDLei/Futuristic-Terminal-Harness-Design), inspected on 2026-09-23. Version 14 standardizes live Thinking indicators and the live assistant card. The native renderer expresses its geometry in terminal cells.
+The visual source of truth is [demesne UI redesign](https://www.figma.com/design/uR068XYXtxAz8gaNL2O9tr/demesne-UI-redesign): **00 · Surface inventory**, **01 · Components**, **02 · Foundations**, and **Explorations**. The older Figma Make versions are historical references, not the current visual specification.
 
-Later component references supersede their earlier geometry: **Version 19** for the header, **Version 20** for the composer/footer, and **Version 21** for the slash menu (inspected 2026-09-26).
+The start screen was directly inspected through Figma desktop on 2026-09-29:
+frame **8:268**, hero **8:281**, composer **8:285**, operation grid **8:305**,
+and Recent **8:322**. Its screenshot and variable definitions were retrieved,
+rather than inferred from previously merged code. The terminal adaptation uses
+an 86-cell maximum column (720px at 14px mono), single-cell strokes, and fewer
+card/list rows on small screens. Heading, composer, cards and Recent form one
+centered group. No action rail appears on this empty-session screen.
 
 Live Thinking and the running Send control use the same shared `thinkingDots` renderer, including spacing, amber color and pulse timing. Per the subsequent user refinement, the bottom footer omits running/thinking labels, pulsing dots, elapsed time and token speed, retaining context and navigation. Live cards use an amber `[` and the same agent-label/timestamp header and geometry as settled cards; successful settlement restores cyan and failure uses red.
 
@@ -10,19 +16,20 @@ Live Thinking and the running Send control use the same shared `thinkingDots` re
 
 | Reference token | Native role | Dark value |
 | --- | --- | --- |
-| `--bg` | `ink` | `#050A0E` |
-| `--bg-2` | `surface`, `toolSurface` | `#090F14` |
-| `--bg-3` | `raised`, `toolActive` | `#0D1720` |
-| `--border` | `rule` | `#1A2D3D` |
-| `--border-bright` | `borderBright` | `#1E3A4F` |
-| `--cyan` | `electric` | `#00D4FF` |
-| `--amber` | `thinking` | `#FFB700` |
-| `--green` | `citron` | `#00E676` |
-| `--red` | `signal` | `#FF4C4C` |
-| `--text-primary` | `paper` | `#C8DAE8` |
-| `--text-secondary` | `secondary` | `#7A9FB8` |
-| `--text-dim` | `muted` | `#536E82` |
-| 8% cyan over `--bg-2` | `menuSelection` | `#081F27` |
+| `--bg-app` | `ink` | `#0B1218` |
+| `--bg-chrome` | `surface`, `toolSurface` | `#0E161D` |
+| `--bg-tab-active` | `raised`, `toolActive` | `#182530` |
+| `--border-default` | `rule` | `#1E2C38` |
+| `--border-strong` | `borderBright` | `#2F4150` |
+| `--accent-blue` | `electric` | `#5AA9E6` |
+| `--accent-amber` | `thinking` | `#E5A93C` |
+| `--accent-green` | `citron` | `#4CC38A` |
+| `--accent-red` | `signal` | `#E5534B` |
+| `--text-primary` | `paper` | `#C5D2DC` |
+| `--text-strong` | `strong` | `#E6EEF4` |
+| `--text-secondary` | `secondary` | `#8FA1AF` |
+| `--text-dim` | `muted` | `#6B7D8B` |
+| accent wash over chrome | `menuSelection` | `#172835` |
 | `syntax/keyword` | `syntaxKeyword` | `#C49CE6` |
 | `syntax/string` | `syntaxString` | `#9CCF8D` |
 | `syntax/number` | `syntaxNumber` | `#E5A93C` |
@@ -39,7 +46,7 @@ Translucent cyan, amber, and red surfaces are composited into theme tokens for t
 
 ## Layout and components
 
-- **Start screen:** the centered input-first Version 9 composition, constrained hero composer, cyan brackets, model/context watermark, operation cards, and saved Recent strip. Operation cards fill an undoable draft; Enter sends it.
+- **Start screen (8:268):** top ready/model/context strip and settings/commands controls; workspace/branch/history header; one centered column with heading, model/context/mode, bordered composer, two-column Start From cards, and a bordered Recent list with all-sessions link. Composer hints, draft token count and inline `↵ send` sit inside its bottom row. Operation cards fill an undoable draft; Enter sends it. Recent shows recorded turns and context, since file-change/Drive summaries are not present in the lightweight session listing. Unknown usage remains explicit.
 - **Header (redesign):** `demesne` (bold accent) · session title · workspace path on the left; `⎇ branch`, a status pill, the clock with session elapsed time, and `history` on the right. The pill appears only while something needs attention: green `running`, amber `approval`, red `failed`, neutral `stopped`. Narrow terminals drop the branch, then the clock, then the title; the path (a click target for the project folder), brand, status and history stay.
 - **Status bar (redesign):** a colored `●` with a lowercase state (`ready`, `approval`, `failed`, `stopped`; no running label), then context usage with its hairline meter when it fits, and `Ctrl+G live`.
 - **Request:** cyan `▶`, cyan left edge, tinted band. Expanded requests expose original attribution.

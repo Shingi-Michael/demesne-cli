@@ -19,6 +19,7 @@
 export const palette = {
   ink: "#0B1218",
   paper: "#C5D2DC",
+  strong: "#E6EEF4",
   surface: "#0E161D",
   raised: "#182530",
   rule: "#1E2C38",
@@ -56,10 +57,11 @@ export const palette = {
 export type PaletteColor = keyof typeof palette;
 type SyntaxColor = "syntaxKeyword" | "syntaxString" | "syntaxNumber" | "syntaxComment" | "syntaxType" | "syntaxFunction";
 type ContextColor = "contextMessages" | "contextTools" | "contextReserved" | "contextFree";
-type CoreColors = Omit<Record<PaletteColor, string>, "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "menuSelection" | "userSurface" | "diffAddedSurface" | "diffRemovedSurface" | SyntaxColor | ContextColor>;
+type CoreColors = Omit<Record<PaletteColor, string>, "strong" | "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "menuSelection" | "userSurface" | "diffAddedSurface" | "diffRemovedSurface" | SyntaxColor | ContextColor>;
 const menuSelection = (surface: string, accent: string): string => "#" + [1, 3, 5].map((offset) =>
   Math.round(parseInt(surface.slice(offset, offset + 2), 16) * 0.92 + parseInt(accent.slice(offset, offset + 2), 16) * 0.08).toString(16).padStart(2, "0")).join("");
 const complete = (colors: CoreColors): Record<PaletteColor, string> => ({ ...colors,
+  strong: colors.paper,
   muted: colors.secondary, borderBright: colors.rule, thinking: colors.execute,
   thinkingSurface: colors.raised, errorSurface: colors.raised, accentSurface: colors.toolActive, menuSelection: menuSelection(colors.surface, colors.electric), userSurface: colors.toolSurface,
   diffAddedSurface: menuSelection(colors.surface, colors.citron), diffRemovedSurface: menuSelection(colors.surface, colors.signal),
@@ -91,6 +93,7 @@ const demesne: Record<PaletteColor, string> = { ...palette };
 const demesneLight: Record<PaletteColor, string> = {
   ink: "#F6F8FA",
   paper: "#1F2A33",
+  strong: "#1F2A33",
   surface: "#EEF2F5",
   raised: "#E2E8ED",
   rule: "#CBD5DD",

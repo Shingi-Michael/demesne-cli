@@ -113,7 +113,8 @@ export function composeDraft(options: ComposerOptions & { height: number; paint:
     if (tokenLabel) canvas.put(counterRow, hintEnd - tokenLabel.length, paint.text(tokenLabel, "muted"), tokenLabel.length, "surface");
     const hintWidth = Math.max(0, hintEnd - inset - (tokenLabel ? tokenLabel.length + 2 : 0));
     const hints = options.streaming ? ["Type to queue a follow-up · Esc Esc / Ctrl+C stop", "Type to queue · Esc Esc stop", "Type to queue · ^C stop"]
-      : ["↵ send · ⇧↵ newline · / commands · @ files", "↵ send · ⇧↵ newline · / cmds · @ files", "↵ send · ⇧↵ line · / @"];
+      : options.hero ? ["↵ send · ⇧↵ newline · / commands · @ files", "↵ send · ⇧↵ newline · / cmds · @ files", "↵ send · ⇧↵ line · / @"]
+        : ["⇧↵ newline · / commands · @ files", "⇧↵ newline · / cmds · @ files", "⇧↵ line · / @"];
     const hint = hints.find((hint) => visibleLength(hint) <= hintWidth) ?? hints.at(-1)!;
     const styledHint = truncateText(hint, hintWidth).split(/([/@])/).map((part) => paint.text(part, part === "/" || part === "@" ? "electric" : "muted")).join("");
     canvas.put(hintsRow, inset, styledHint, hintWidth, "surface");
@@ -185,14 +186,19 @@ export function composeDraft(options: ComposerOptions & { height: number; paint:
       control(buttonRow, buttonColumn, border("│") + label + border("│"), action);
       control(buttonRow + 1, buttonColumn, border("└────────┘"), action);
     };
+    // The session composer uses a flat, right-aligned label in the redesign;
+    // the start screen's hero keeps its boxed control. Both stay clickable.
+    const inline = (label: string, action?: ComposerAction) => control(buttonRow, width - inset - visibleLength(label), label, action);
     if (options.streaming) {
       // The running glyphs occupy the same control as Send. Its native action
       // remains interruption, alongside the explicit keyboard hint below.
       const dots = thinkingDots(paint, options.now ?? 0, options.reducedMotion);
-      rectangle("  " + dots + "   ", "muted", { kind: "stop" });
+      if (options.hero) rectangle("  " + dots + "   ", "muted", { kind: "stop" });
+      else inline(dots + paint.text(" stop", "muted"), { kind: "stop" });
       if (queued && width < 60) control(0, textColumn, paint.text(" Clear queue × ", "secondary"), { kind: "clear" });
     } else {
-      rectangle(sending ? paint.wash(" SEND ↵ ", "accentSurface", "electric") : paint.text(" SEND ↵ ", "muted"), sending ? "electric" : "muted", sending ? { kind: "submit" } : undefined);
+      if (options.hero) rectangle(sending ? paint.wash(" SEND ↵ ", "accentSurface", "electric") : paint.text(" SEND ↵ ", "muted"), sending ? "electric" : "muted", sending ? { kind: "submit" } : undefined);
+      else inline(sending ? paint.wash(" ↵ send ", "accentSurface", "electric") : paint.text(" ↵ send ", "muted"), sending ? { kind: "submit" } : undefined);
       if (restored && width < 60) control(0, textColumn, paint.text(" Clear × ", "secondary"), { kind: "clear" });
     }
   }

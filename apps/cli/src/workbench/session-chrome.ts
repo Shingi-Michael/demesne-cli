@@ -61,7 +61,8 @@ export function sessionStatus(options: {
   const working = state === "WORKING";
   const name = state === "COMPLETE" ? "READY" : state;
   const label = name.toLowerCase();
-  const tone = state === "FAILED" || state === "APPROVAL" ? "signal" : state === "STOPPED" ? "secondary" : working ? "thinking" : "citron";
+  // Approval needs the reader, not a repair: amber, like its header pill.
+  const tone = state === "FAILED" ? "signal" : state === "APPROVAL" ? "thinking" : state === "STOPPED" ? "secondary" : working ? "thinking" : "citron";
   // A colored dot carries the state; the label keeps it readable without color.
   const mark = paint.text("●", tone);
   const separator = paint.text(" · ", "borderBright");

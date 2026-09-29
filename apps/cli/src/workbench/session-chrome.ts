@@ -39,15 +39,15 @@ export function contextMeter(context: ContextReceipt | undefined, paint: Painter
   return `${paint.text("─".repeat(count) + (partial ? "╴" : ""), tone)}${paint.text("─".repeat(cells - count - partial), "rule")} ${paint.text(`${percentage}%`, percentage > 50 ? tone : "muted")}`;
 }
 
-/// The Figma footer keeps field values readable, with a quiet label/separator
-/// hierarchy. Context and its hairline meter wrap together as a single field.
-export function responseMetadata(receipt: ResponseReceipt, paint: Painter, compact = false, width = 80): string[] {
-  const label = (name: string, value: string, tone: PaletteColor = "secondary") => paint.text(compact ? "" : name, "muted") + paint.text(value, tone);
+/// Figma 28:306 receipt: `Build · model · 14.2s · 31.4 tok/s · ctx 46%`.
+/// Values need no labels; context reads as a percentage when both numbers
+/// are known and as `ctx used/capacity` otherwise, so gaps stay explicit.
+export function responseMetadata(receipt: ResponseReceipt, paint: Painter, _compact = false, _width = 80): string[] {
   const percentage = contextPercentage(receipt.context);
-  const meter = width >= 38 ? contextMeter(receipt.context, paint) : percentage === null ? "" : paint.text(`${percentage}%`, contextTone(receipt.context));
+  const context = percentage === null ? `ctx ${contextLabel(receipt.context)}` : `ctx ${percentage}%`;
   return [paint.text(receipt.mode, "muted"), paint.text(sanitizeTerminalLine(receipt.model), "secondary"),
-    label("elapsed ", elapsedLabel(receipt.durationMs)), label("speed ", `${throughput(receipt.tokensPerSecond)} tok/s`, "citron"),
-    paint.text("ctx ", "muted") + paint.text(contextLabel(receipt.context), contextTone(receipt.context)) + (meter ? ` ${meter}` : "")];
+    paint.text(elapsedLabel(receipt.durationMs), "secondary"), paint.text(`${throughput(receipt.tokensPerSecond)} tok/s`, "secondary"),
+    paint.text(context, contextTone(receipt.context))];
 }
 
 /// A key drawn as a keycap, as in the Figma hints: the key sits on the raised

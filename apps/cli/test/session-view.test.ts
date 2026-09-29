@@ -266,8 +266,8 @@ test("verification and failure links open the relevant recorded output directly"
   ui.toolFinished({ toolCallId: "check-failed", name: "run_command", state: "failed", exitCode: 2, message: "CHECK_OUTPUT_SENTINEL" });
   ui.beginRound(); ui.assistantDelta("The check failed."); ui.finishTurn("completed", "Done");
   let rows = screen().split("\n");
-  const row = rows.findIndex((line) => line.includes("Verification: failed"));
-  state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("Verification:") });
+  const row = rows.findIndex((line) => line.includes("checks failed"));
+  state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("checks failed") });
   expect(screen()).toContain("CHECK_OUTPUT_SENTINEL");
   expect(screen()).toContain("exit 2");
   view.act({ kind: "back" });
@@ -387,7 +387,7 @@ test("the status strip tracks execution and approval never claims a running veri
   ui.beginTurn({ userText: "Check the parser", at: "now" });
   expect(screen().match(/◇ Thinking ···/g)).toHaveLength(1);
   ui.toolRequested({ toolCallId: "check", name: "run_command", arguments: { argv: ["bun", "test"] } });
-  expect(screen()).not.toContain("Verification: running");
+  expect(screen()).not.toContain("checks running");
   expect(screen().split("\n").at(-1)).not.toMatch(/RUNNING|THINKING|···/);
   expect(screen().split("\n").at(-1)).not.toMatch(/tok\/s|\d+\.\d+s/);
   ui.toolWaiting("check", true);
@@ -729,7 +729,7 @@ test("thinking resumes after tools and stays scoped to the current run during hi
   ui.beginRound();
   const text = screen();
   expect(text).toContain("◇ Thinking ···");
-  expect(text.indexOf("◇ Thinking", text.indexOf("Read parser.ts"))).toBeGreaterThan(text.indexOf("Read parser.ts"));
+  expect(text.indexOf("◇ Thinking", text.indexOf("Read   parser.ts"))).toBeGreaterThan(text.indexOf("Read   parser.ts"));
   ui.finishTurn("stopped", "Stopped");
   expect(screen()).not.toContain("◇ Thinking ···");
 });
@@ -749,7 +749,7 @@ test("each completed response owns its mode, model, duration and speed above the
     rail.apply({ ...envelope, type: "model.metrics", payload: { durationMs: 12_000, timeToFirstTokenMs: 2_000 } });
     expect(screen().split("\n").at(-1)).not.toMatch(/tok\/s|\d+\.\d+s/);
     ui.finishTurn("completed", "Complete");
-    const receipt = "Build · original-model · elapsed 31.1s · speed 43.5 tok/s";
+    const receipt = "Build · original-model · 31.1s · 43.5 tok/s";
     const completed = screen();
     expect(completed.indexOf(receipt)).toBeGreaterThan(completed.indexOf("First model response."));
     expect(completed.indexOf(receipt)).toBeLessThan(completed.indexOf("Continue the conversation..."));
@@ -762,7 +762,7 @@ test("each completed response owns its mode, model, duration and speed above the
       const frame = screen(width, height);
       expect(frame).toContain("43.5 tok/s");
       expect(frame.match(/tok\/s/g)).toHaveLength(1);
-      expect(frame).toContain("/100k");
+      expect(frame).toContain("ctx 3%");
       for (const row of ui.frame(width!, height!).rows) expect(visibleLength(row)).toBe(width!);
     }
     clock.mockReturnValue(start + 60_000);
@@ -776,7 +776,7 @@ test("each completed response owns its mode, model, duration and speed above the
     ui.finishTurn("completed", "Complete", { tokensPerSecond: 31.2 });
     const both = screen(120, 36);
     expect(both).toContain(receipt);
-    expect(both).toContain("Plan · next-model · elapsed 458.0s · speed 31.2 tok/s");
+    expect(both).toContain("Plan · next-model · 458.0s · 31.2 tok/s");
     view.act({ kind: "run", id: firstRun });
     expect(screen()).toContain(receipt);
     expect(screen()).not.toContain("458.0s");
@@ -792,10 +792,10 @@ test("a restored response uses its own recorded timing and exposes missing measu
     createdAt: at, completedAt: "2026-09-22T10:00:31.100Z", permissionMode: "ask" as const, thinkingEnabled: null };
   const session = { id: "session", title: "Saved session", createdAt: at, updatedAt: at, workspace: null, turns: [turn] };
   ui.restoreSession({ session, lastEventId: 0, pendingPermissions: [], latestProviderCall: null });
-  expect(screen()).toContain("Build · Model not recorded · elapsed 31.1s · speed — tok/s");
+  expect(screen()).toContain("Build · Model not recorded · 31.1s · — tok/s");
   expect(screen().split("\n").slice(-3).join("\n")).not.toContain("31.1s");
   ui.restoreSession({ session: { ...session, turns: [{ ...turn, completedAt: null }] }, lastEventId: 0, pendingPermissions: [], latestProviderCall: null });
-  expect(screen()).toContain("Build · Model not recorded · elapsed —s · speed — tok/s");
+  expect(screen()).toContain("Build · Model not recorded · —s · — tok/s");
 });
 
 test("failed cards without a final response retain their own measurements, context meter and terminal badge", () => {
@@ -809,8 +809,8 @@ test("failed cards without a final response retain their own measurements, conte
   ui.finishTurn("failed", "Model round limit exceeded", { durationMs: 94200, tokensPerSecond: 19.4 });
   let rows = screen(120, 36).split("\n");
   expect(rows.join("\n")).toContain("No final response recorded");
-  expect(rows.join("\n")).toContain("Plan · failed-model · elapsed 94.2s · speed 19.4 tok/s");
-  expect(rows.join("\n")).toContain("63.9k/100k ───╴── 64%");
+  expect(rows.join("\n")).toContain("Plan · failed-model · 94.2s · 19.4 tok/s");
+  expect(rows.join("\n")).toContain("19.4 tok/s · ctx 64%");
   expect(rows.join("\n")).toContain("× failed");
   expect(rows.at(-1)).toContain("● failed");
   expect(view.current?.answer).toBeUndefined();
@@ -884,7 +884,7 @@ test("thinking, tool execution and subsequent model rounds stay in chronological
   ui.beginTurn({ userText: "Investigate", at: "now" });
   ui.reasoningDelta("First round reasoning.");
   ui.toolRequested({ toolCallId: "read", name: "read_file", arguments: { path: "parser.ts" } });
-  expect(screen()).toContain("Read parser.ts");
+  expect(screen()).toMatch(/Read +parser\.ts/);
   expect(screen()).toContain("parser.ts");
   expect(screen()).not.toContain("First round reasoning.");
   key("x", { ctrl: true });
@@ -899,8 +899,8 @@ test("thinking, tool execution and subsequent model rounds stay in chronological
   key("x", { ctrl: true });
   expect(screen()).toContain("Second round reasoning.");
   expect(screen()).toContain("First round reasoning.");
-  expect(screen().indexOf("First round reasoning.")).toBeLessThan(screen().indexOf("Read parser.ts"));
-  expect(screen().indexOf("Read parser.ts")).toBeLessThan(screen().indexOf("Second round reasoning."));
+  expect(screen().indexOf("First round reasoning.")).toBeLessThan(screen().indexOf("Read   parser.ts"));
+  expect(screen().indexOf("Read   parser.ts")).toBeLessThan(screen().indexOf("Second round reasoning."));
 });
 
 test("thinking detail keeps the reference's inset inside the response column at every width", () => {
@@ -1533,8 +1533,8 @@ test("historical verification opens recorded evidence inline without changing th
   ui.assistantDelta("Current response."); ui.finishTurn("completed", "Done");
   const rows = screen(100, 40).split("\n");
   const latest = view.current!.id;
-  const row = rows.findIndex((line) => line.includes("Verification: failed"));
-  state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("Verification:") });
+  const row = rows.findIndex((line) => line.includes("checks failed"));
+  state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("checks failed") });
   expect(view.current!.id).toBe(latest);
   expect(view.memory.surface).toBe("response");
   expect(screen(100, 40)).toContain("ORIGINAL_CHECK_FAILURE");
@@ -1557,7 +1557,7 @@ test("read batches compress while changes, checks, pending, denied and unknown r
   ui.toolFinished({ toolCallId: "edit", name: "edit_file", state: "done" });
   ui.toolRequested({ toolCallId: "pending", name: "run_command", arguments: { argv: ["check-pending"] } });
   expect(screen()).toContain("Explored · 2 reads");
-  expect(screen()).toContain("Edit parser.ts");
+  expect(screen()).toMatch(/Edit +parser\.ts/);
   expect(screen()).toContain("check-pending");
   ui.toolWaiting("pending", true);
   expect(screen()).toContain("awaiting approval");
@@ -1567,9 +1567,9 @@ test("read batches compress while changes, checks, pending, denied and unknown r
   expect(screen()).toContain("USER_DENIED");
   expect(screen()).toContain("exit unknown");
   key("t", { ctrl: true }); key("tab"); key("tab"); key("return");
-  expect(screen()).toContain("Read parser.ts");
+  expect(screen()).toMatch(/Read +parser\.ts/);
   const rows = screen().split("\n");
-  const row = rows.findIndex((line) => line.includes("Read parser.ts"));
+  const row = rows.findIndex((line) => line.includes("Read   parser.ts"));
   state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("Read") });
   expect(screen()).toContain("ORIGINAL_SOURCE");
   expect(view.memory.surface).toBe("response");
@@ -1670,8 +1670,8 @@ test("a completed command without recorded exit status stays unknown in the conv
   ui.finishTurn("completed", "Finished");
   const text = screen();
   expect(text).toContain("exit unknown");
-  expect(text).toContain("Verification: unknown");
-  expect(text).not.toContain("Verification: passed");
+  expect(text).toContain("checks unknown");
+  expect(text).not.toContain("checks passed");
   expect(text).not.toContain("✓ bun test");
 });
 
@@ -1681,7 +1681,7 @@ test("inline keyboard selection remains visible without color at forty columns",
   void ui.readPrompt({ history: [], mentions: [], commands: [] });
   screen(40, 10);
   key("t", { ctrl: true });
-  for (const label of ["copy", "1 file ▸", "✓ Verification passed"]) {
+  for (const label of ["1 file ▸", "✓ checks passed", "copy"]) {
     key("tab");
     expect(screen(40, 10)).toContain(`›${label}`);
   }
@@ -1842,4 +1842,24 @@ test("docked panels share the Figma frame: label and subject, a keycap footer, a
   expect(sessionPanelLayout(100, true).panelWidth).toBe(44);
   expect(sessionPanelLayout(300, true).panelWidth).toBe(84);
   expect(view.panelOpen).toBe(true);
+});
+
+test("turns follow Figma 28:306: verb-column tool rows, an amber live line, and a one-line receipt", () => {
+  const { ui, screen } = fixture();
+  ui.beginTurn({ userText: "Check the parser", at: "now" });
+  ui.toolRequested({ toolCallId: "read", name: "read_file", arguments: { path: "src/parser.ts" } });
+  let text = screen(100, 30);
+  // The live line names what is happening now, under the latest output.
+  expect(text).toContain("● Reading src/parser.ts…");
+  ui.toolFinished({ toolCallId: "read", name: "read_file", state: "done", durationMs: 14 });
+  text = screen(100, 30);
+  expect(text).not.toContain("● Reading");
+  // The verb sits in a padded column and timing is flush right, before ▸.
+  const row = text.split("\n").find((line) => line.includes("src/parser.ts"))!;
+  expect(row).toMatch(/✓ Read {3}src\/parser\.ts +14ms ▸/);
+  ui.assistantDelta("Done.");
+  ui.finishTurn("completed", "Done", { durationMs: 14_200, tokensPerSecond: 31.4 });
+  const receipt = screen(120, 30).split("\n").find((line) => line.includes("tok/s"))!;
+  expect(receipt).toMatch(/Build · original-model · 14\.2s · 31\.4 tok\/s · ctx /);
+  expect(receipt).not.toMatch(/elapsed|speed/);
 });

@@ -13,6 +13,18 @@ interface ComposerOptions {
   mentions: readonly string[]; history: readonly string[]; streaming: boolean; context?: ContextReceipt; hero?: boolean;
   /// The draft is a queue returned unsent because its turn stopped or failed.
   restored?: boolean;
+  stopArmed?: boolean;
+}
+type ComposeOptions = ComposerOptions & { height: number; paint: Painter; focused?: boolean; reveal?: number; now?: number; reducedMotion?: boolean };
+interface ComposerFrame { lines: string[]; zones: ComposerZone[]; cursor: { row: number; column: number } }
+
+function sessionComposerGeometry(options: ComposerOptions) {
+  const inset = options.width >= 65 ? 2 : 1;
+  const textColumn = inset + 4;
+  const right = options.width - inset - 2;
+  // Reserve stable control space even when the first Escape changes the hint.
+  const controls = options.width >= 65 ? 28 : 8;
+  return { inset, right, textColumn, textWidth: Math.max(8, right - textColumn - controls - 2) };
 }
 /// Queued and restored drafts each carry a one-row label above the prompt.
 function hasDraftLabel(options: ComposerOptions): boolean {
@@ -25,8 +37,9 @@ function attachments(editor: PromptEditorState): RegExpMatchArray[] {
 }
 export function composerHeight(options: ComposerOptions): number {
   if (options.editor.search) return 4;
-  const lines = computePromptVisualLines(options.editor.value, options.editor.cursor, Math.max(8, options.width - (options.hero ? 4 : options.width >= 65 ? 18 : 16))).lines.length;
-  return (options.hero ? 3 : 4) + Math.max(2, Math.min(6, lines)) + (attachments(options.editor).length ? 1 : 0)
+  const textWidth = options.hero ? options.width - 4 : sessionComposerGeometry(options).textWidth;
+  const lines = computePromptVisualLines(options.editor.value, options.editor.cursor, Math.max(8, textWidth)).lines.length;
+  return (options.hero ? 3 : 2) + Math.max(options.hero ? 2 : 1, Math.min(6, lines)) + (attachments(options.editor).length ? 1 : 0)
     + (hasDraftLabel(options) ? 1 : 0);
 }
 
@@ -37,9 +50,8 @@ export function draftTokens(value: string): number { return Math.ceil(Buffer.byt
 /// The hero follows Figma 8:285: full-width draft, then hints, token count and
 /// an inline send control inside one quiet border.
 /// A bounded editor keeps its cursor and selected completion visible.
-export function composeDraft(options: ComposerOptions & { height: number; paint: Painter; focused?: boolean; reveal?: number; now?: number; reducedMotion?: boolean }): {
-  lines: string[]; zones: ComposerZone[]; cursor: { row: number; column: number };
-} {
+export function composeDraft(options: ComposeOptions): ComposerFrame {
+  if (!options.hero) return composeSessionDraft(options);
   const { width, height, paint, editor } = options;
   const canvas = new Canvas(width, height, paint);
   const inset = width >= 65 ? 2 : 1;
@@ -156,4 +168,89 @@ export function composeDraft(options: ComposerOptions & { height: number; paint:
     }
   }
   return { lines: canvas.rows, zones, cursor };
+}
+
+/// Figma component 40:105: one compact, inset writing surface. Queue/restored
+/// labels add one row; long drafts scroll within the same bounded editor.
+function composeSessionDraft(options: ComposeOptions): ComposerFrame {
+  const { width, height, paint, editor } = options;
+  const { inset, right, textColumn, textWidth } = sessionComposerGeometry(options);
+  const canvas = new Canvas(width, height, paint), zones: ComposerZone[] = [];
+  const queued = options.streaming && Boolean(editor.value.trim());
+  const restored = !options.streaming && hasDraftLabel(options);
+  const tone = options.stopArmed ? "composerStoppedBorder" : queued ? "composerQueuedBorder" : restored ? "composerRestoredBorder" : options.focused === false ? "rule" : "borderBright";
+  const boxWidth = width - inset * 2;
+  const border = (text: string) => paint.text(text, tone);
+  canvas.put(0, inset, border(`╭${"─".repeat(boxWidth - 2)}╮`), boxWidth);
+  canvas.put(height - 1, inset, border(`╰${"─".repeat(boxWidth - 2)}╯`), boxWidth);
+  for (let row = 1; row < height - 1; row++) {
+    canvas.put(row, inset, border("│"), 1);
+    canvas.put(row, inset + 1, "", boxWidth - 2, "surface");
+    canvas.put(row, width - inset - 1, border("│"), 1);
+  }
+  const put = (row: number, text: string) => canvas.put(row, textColumn, text, textWidth, "surface");
+  const control = (row: number, column: number, label: string, action?: ComposerAction) => {
+    canvas.put(row, column, label, visibleLength(label), "surface");
+    if (action) zones.push({ row, column, width: visibleLength(label), action });
+  };
+  if (editor.search) {
+    const matches = reverseSearchMatches(options.history, editor.search.query);
+    const selected = matches[Math.min(editor.search.index, Math.max(0, matches.length - 1))];
+    canvas.put(0, inset + 2, paint.text(" Enter use · Esc cancel ", "secondary"), Math.min(boxWidth - 4, 24));
+    canvas.put(1, inset + 2, `⌕ ${sanitizeTerminalLine(editor.search.query)}`, boxWidth - 4, "surface");
+    canvas.put(2, inset + 2, paint.text(selected ?? "No matching history", "muted"), boxWidth - 4, "surface");
+    return { lines: canvas.rows, zones, cursor: { row: 1, column: Math.min(right - 1, inset + 4 + visibleLength(editor.search.query)) } };
+  }
+  const header = (queued || restored) && height >= 4;
+  if (header) {
+    const clear = queued ? "Clear queue ×" : "Clear ×";
+    const label = queued ? paint.text("Queued", "thinking") + paint.text(" · sends after this turn", "muted")
+      : paint.text("Restored · not sent", "electric") + paint.text(" · the turn did not finish", "muted");
+    canvas.put(1, inset + 2, label, right - inset - clear.length - 4, "surface");
+    control(1, right - clear.length, paint.text(clear, "muted"), { kind: "clear" });
+  }
+  const firstRow = header ? 2 : 1;
+  const room = Math.max(1, height - 1 - firstRow);
+  const attached = attachments(editor), showAttachments = attached.length > 0 && room > 1;
+  const capacity = room - Number(showAttachments);
+  const visual = computePromptVisualLines(editor.value, editor.cursor, textWidth);
+  const start = Math.max(0, visual.cursorLine - capacity + 1);
+  for (let index = 0; index < Math.min(capacity, visual.lines.length); index++) {
+    const info = visual.lineInfos[start + index]!;
+    put(firstRow + index, info.text || (editor.value ? "" : paint.text(options.streaming ? "Type to queue a follow-up..." : "Continue the conversation...", "muted")));
+    zones.push({ row: firstRow + index, column: textColumn, width: textWidth, action: { kind: "caret", start: info.start, text: info.text } });
+  }
+  canvas.put(firstRow, inset + 2, paint.text(options.streaming ? "◎" : "▶", options.stopArmed ? "signal" : options.streaming ? "thinking" : "electric"), 1, "surface");
+  const controlRow = firstRow;
+  if (options.streaming) {
+    const label = options.stopArmed ? paint.text(width >= 65 ? "Press Esc again to stop" : "Esc stop", "signal")
+      : thinkingDots(paint, options.now ?? 0, options.reducedMotion) + paint.text(" stop", "muted");
+    control(controlRow, right - visibleLength(label), label, { kind: "stop" });
+    if (!options.stopArmed && width >= 65) control(controlRow, right - visibleLength(label) - 10, paint.text("Esc Esc", "muted"), { kind: "stop" });
+  } else {
+    const items: [string, ComposerAction | undefined][] = [["↵ send", editor.value.trim() ? { kind: "submit" } : undefined]];
+    if (width >= 65) items.push(["/ commands", { kind: "commands" }], ["@ files", { kind: "files" }]);
+    const controlsWidth = items.reduce((sum, [label]) => sum + visibleLength(label), 0) + (items.length - 1) * 2;
+    let column = right - controlsWidth;
+    for (const [label, action] of items) {
+      control(controlRow, column, paint.text(label, action?.kind === "submit" ? "electric" : "muted"), action);
+      column += visibleLength(label) + 2;
+    }
+  }
+  if (showAttachments) {
+    const row = firstRow + Math.min(capacity, visual.lines.length);
+    let column = textColumn;
+    for (const match of attached) {
+      const label = ` ${match[1]} × `;
+      if (column + visibleLength(label) > textColumn + textWidth) break;
+      control(row, column, paint.text(label, "secondary"), { kind: "remove", start: match.index! + match[0].indexOf(match[1]!), length: match[1]!.length });
+      column += visibleLength(label);
+    }
+  }
+  if (editor.value) {
+    const counter = ` ~${formatTokenCount(draftTokens(editor.value))} tok `;
+    canvas.put(height - 1, right - counter.length, paint.text(counter, "muted"), counter.length);
+    if (width >= 65) canvas.put(height - 1, inset + 2, paint.text(" ⇧↵ newline ", "muted"), 12);
+  }
+  return { lines: canvas.rows, zones, cursor: { row: firstRow + visual.cursorLine - start, column: Math.min(textColumn + textWidth - 1, textColumn + visual.cursorCol) } };
 }

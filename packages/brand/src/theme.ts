@@ -52,14 +52,20 @@ export const palette = {
   contextTools: "#C49CE6",
   contextReserved: "#E5A93C",
   contextFree: "#6B7D8B",
+  // Figma Composer 40:105: 45% amber, 60% red, 40% blue over chrome.
+  composerQueuedBorder: "#6F582B",
+  composerStoppedBorder: "#8F3B39",
+  composerRestoredBorder: "#2C516D",
 } as const;
 
 export type PaletteColor = keyof typeof palette;
 type SyntaxColor = "syntaxKeyword" | "syntaxString" | "syntaxNumber" | "syntaxComment" | "syntaxType" | "syntaxFunction";
 type ContextColor = "contextMessages" | "contextTools" | "contextReserved" | "contextFree";
-type CoreColors = Omit<Record<PaletteColor, string>, "strong" | "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "menuSelection" | "userSurface" | "diffAddedSurface" | "diffRemovedSurface" | SyntaxColor | ContextColor>;
-const menuSelection = (surface: string, accent: string): string => "#" + [1, 3, 5].map((offset) =>
-  Math.round(parseInt(surface.slice(offset, offset + 2), 16) * 0.92 + parseInt(accent.slice(offset, offset + 2), 16) * 0.08).toString(16).padStart(2, "0")).join("");
+type ComposerColor = "composerQueuedBorder" | "composerStoppedBorder" | "composerRestoredBorder";
+type CoreColors = Omit<Record<PaletteColor, string>, "strong" | "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "menuSelection" | "userSurface" | "diffAddedSurface" | "diffRemovedSurface" | SyntaxColor | ContextColor | ComposerColor>;
+const composite = (surface: string, accent: string, alpha: number): string => "#" + [1, 3, 5].map((offset) =>
+  Math.round(parseInt(surface.slice(offset, offset + 2), 16) * (1 - alpha) + parseInt(accent.slice(offset, offset + 2), 16) * alpha).toString(16).padStart(2, "0")).join("");
+const menuSelection = (surface: string, accent: string): string => composite(surface, accent, 0.08);
 const complete = (colors: CoreColors): Record<PaletteColor, string> => ({ ...colors,
   strong: colors.paper,
   muted: colors.secondary, borderBright: colors.rule, thinking: colors.execute,
@@ -69,7 +75,9 @@ const complete = (colors: CoreColors): Record<PaletteColor, string> => ({ ...col
   // theme's character: its purple/pink for keywords, green for strings.
   syntaxKeyword: colors.execute, syntaxString: colors.citron, syntaxNumber: colors.electricBright,
   syntaxComment: colors.secondary, syntaxType: colors.inspect, syntaxFunction: colors.electric,
-  contextMessages: colors.electric, contextTools: colors.inspect, contextReserved: colors.execute, contextFree: colors.secondary });
+  contextMessages: colors.electric, contextTools: colors.inspect, contextReserved: colors.execute, contextFree: colors.secondary,
+  composerQueuedBorder: composite(colors.surface, colors.execute, 0.45), composerStoppedBorder: composite(colors.surface, colors.signal, 0.6),
+  composerRestoredBorder: composite(colors.surface, colors.electric, 0.4) });
 
 export type TerminalTheme = "dark" | "light";
 
@@ -126,6 +134,9 @@ const demesneLight: Record<PaletteColor, string> = {
   contextTools: "#7A3E9D",
   contextReserved: "#8A5700",
   contextFree: "#55687A",
+  composerQueuedBorder: composite("#EEF2F5", "#8A5700", 0.45),
+  composerStoppedBorder: composite("#EEF2F5", "#B3302A", 0.6),
+  composerRestoredBorder: composite("#EEF2F5", "#1F62A8", 0.4),
 };
 
 /// https://draculatheme.com — purple is the signature accent, pink its lighter

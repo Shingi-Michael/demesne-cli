@@ -28,8 +28,8 @@ test("slash overlay filters and dismisses without reflowing a pinned conversatio
   let rows = screen().split("\n");
   const menu = state.commandMenuFrame;
   expect(menu.rect.row + menu.rect.height).toBe(input.row);
-  expect(menu.rect.column).toBe(input.column);
-  expect(menu.rect.width).toBe(input.width);
+  expect(menu.rect.column).toBe(input.column + 2);
+  expect(menu.rect.width).toBe(input.width - 4);
   expect(rows.findIndex((line) => line.includes("Start a fresh session"))).toBeLessThan(input.row);
   expect(rows.findIndex((line) => line.includes("SESSION"))).toBeLessThan(rows.findIndex((line) => line.includes("/new")));
   expect(rows.find((line) => line.includes("/new"))!.indexOf("Start a fresh session"))
@@ -115,7 +115,7 @@ test("every custom command stays reachable and selected through resizing, themes
     if (!start) {
       state.sessionView.act({ kind: "log" });
       screen(160, 48);
-      expect(state.commandMenuFrame.rect.width).toBe(state.layout.input.width);
+      expect(state.commandMenuFrame.rect.width).toBe(state.layout.input.width - 4);
       expect(state.commandMenuFrame.rect.width).toBeLessThan(150);
     }
   }

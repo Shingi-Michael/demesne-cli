@@ -29,6 +29,10 @@ export function escapePresses(key: InterruptKey): number {
   return Math.max(1, count);
 }
 
+export function interruptArmed(lastEscapeAt: number, now: number): boolean {
+  return lastEscapeAt > 0 && now - lastEscapeAt <= 1_500;
+}
+
 export function reduceInterruptKey(
   lastEscapeAt: number,
   key: InterruptKey,
@@ -38,6 +42,6 @@ export function reduceInterruptKey(
   if (key.name !== "escape") return { lastEscapeAt: 0, interrupt: false };
   // Both escapes arrived in one read: interrupt immediately.
   if (escapePresses(key) >= 2) return { lastEscapeAt: 0, interrupt: true };
-  if (lastEscapeAt > 0 && now - lastEscapeAt <= 1_500) return { lastEscapeAt: 0, interrupt: true };
+  if (interruptArmed(lastEscapeAt, now)) return { lastEscapeAt: 0, interrupt: true };
   return { lastEscapeAt: now, interrupt: false };
 }

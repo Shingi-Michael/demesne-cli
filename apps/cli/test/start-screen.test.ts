@@ -84,7 +84,7 @@ test("start controls support keyboard browsing while caret edits, multiline inpu
   state.onKeypress("Explain", {});
   screen(); click("@ files");
   expect(state.editor.value).toBe("Explain @");
-  expect(screen()).toContain("@src/lexer.ts");
+  expect(screen()).toContain("lexer.ts  src/");
   key("return");
   expect(state.editor.value).toBe("Explain @src/lexer.ts ");
   expect(state.mode).toBe("input");

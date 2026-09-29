@@ -89,6 +89,11 @@ if (args.includes("--long-draft")) {
 }
 const commandQuery = args.find((arg) => arg.startsWith("--commands="))?.slice("--commands=".length);
 if (commandQuery !== undefined) input.onKeypress(commandQuery || "/", {});
+const mentionQuery = args.find((arg) => arg.startsWith("--mentions="))?.slice("--mentions=".length);
+if (mentionQuery !== undefined) {
+  ui.setMentionFiles(["src/lexer.ts", "src/parser.ts", "src/identifier.ts", "tests/parser.test.ts"]);
+  input.onKeypress(`@${mentionQuery}`, {});
+}
 if (args.includes("--trace")) {
   // Inspect the most recent reasoning in the conversation, through production
   // input routing. Live thinking is already expanded, so toggle twice there.

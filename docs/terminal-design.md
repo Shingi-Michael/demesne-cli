@@ -91,6 +91,15 @@ See [Agent Drive](agent-drive.md) for the visible UI loop and recovery behavior.
 
 ### Slash menu · Version 21
 
+The redesign's **@ file suggestions** use the same above-composer overlay: a quiet
+Files heading, accent left edge and selection wash, filename first and muted
+directory. It is capped at 12 rows and the available space; small screens omit
+the heading before hiding the selected item. Up/Down, Page Up/Down, hover, wheel,
+Enter/Tab and a single click select through the normal editor. Escape dismisses
+without clearing the draft; editing reopens it. Reverse search, approvals and
+running turns suppress the popup. The composer and held reading anchor remain
+fixed; accepted file chips still support removal. Preview with `--mentions=src/`.
+
 The menu overlays the transcript immediately above the composer, spanning its
 width and stopping before the action rail or docked panel. Its square top and
 side borders join the composer separator. Opening, filtering and dismissal keep

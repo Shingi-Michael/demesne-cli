@@ -36,6 +36,7 @@ export interface PromptEditorState {
   search: { query: string; index: number } | null;
   searchDraft: string;
   mentionSelected: number;
+  mentionDismissed: boolean;
 }
 
 export type PromptEditorAction =
@@ -72,6 +73,7 @@ export function createPromptEditorState(): PromptEditorState {
     search: null,
     searchDraft: "",
     mentionSelected: 0,
+    mentionDismissed: false,
   };
 }
 
@@ -86,6 +88,7 @@ export function setPromptValue(state: PromptEditorState, value: string): PromptE
     menuDismissed: false,
     historyIndex: null,
     mentionSelected: 0,
+    mentionDismissed: false,
     undoStack: pushUndo(state),
   };
 }
@@ -125,7 +128,12 @@ export function reducePromptEditor(state: PromptEditorState, input: PromptEditor
   const mentionCandidates = mention && (input.mentions?.length ?? 0) > 0
     ? mentionMatches(input.mentions!, mention.query)
     : [];
-  const mentionActive = mention !== null && mentionCandidates.length > 0;
+  const mentionActive = !state.mentionDismissed && mention !== null && mentionCandidates.length > 0;
+
+  if (mentionActive && key.name === "escape") return none({ ...state, mentionDismissed: true });
+  if (mentionActive && (key.name === "pageup" || key.name === "pagedown")) {
+    return none({ ...state, mentionSelected: Math.max(0, Math.min(mentionCandidates.length - 1, state.mentionSelected + (key.name === "pageup" ? -5 : 5))) });
+  }
 
   if (mentionActive && key.name === "up") {
     return none({
@@ -348,6 +356,7 @@ function mutate(state: PromptEditorState, value: string, cursor: number, options
     menuDismissed: options.dismissMenu ?? false,
     historyIndex: null,
     mentionSelected: 0,
+    mentionDismissed: false,
     undoStack: pushUndo(state),
   };
 }

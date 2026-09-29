@@ -41,6 +41,7 @@ import { restoreSessionEntries } from "./history.ts";
 import { applyToolDraft, proposedDiff } from "./tool-preview.ts";
 import { composeDraft, composerHeight } from "./composer.ts";
 import { CommandMenu, groupSlashCommands, type CommandMenuFrame } from "./command-menu.ts";
+import { MentionMenu } from "./mention-menu.ts";
 import { SessionView } from "./session.ts";
 import { toolFailed } from "./evidence.ts";
 import { sessionStatus } from "./session-chrome.ts";
@@ -205,6 +206,8 @@ export class Workbench {
   private mouseZones: InputZone[] = [];
   private commandMenu = new CommandMenu();
   private commandMenuFrame: CommandMenuFrame | null = null;
+  private mentionMenu = new MentionMenu();
+  private mentionMenuFrame: CommandMenuFrame | null = null;
   private readonly keyboard = new PassThrough();
   private readonly decoder = new StringDecoder("utf8");
   private readonly terminalInput = new TerminalInputDecoder();
@@ -901,7 +904,7 @@ export class Workbench {
       this.applyEditorResult(reducePromptEditor(this.editor, { key, text, commands: [], history: this.promptContext.history }));
       return;
     }
-    if (this.sessionLayout && this.mode === "input" && !key.ctrl && !key.meta && this.matchingCommands().length
+    if (this.sessionLayout && this.mode === "input" && !key.ctrl && !key.meta && (this.matchingCommands().length || this.matchingMentions().length)
       && ["up", "down", "pageup", "pagedown", "tab", "return", "enter", "escape"].includes(key.name ?? "")) {
       this.sessionView.focusInput();
       this.dispatchEditorKey(key);
@@ -1228,14 +1231,18 @@ export class Workbench {
       if (hovered !== this.railHovered) { this.railHovered = hovered; this.requestRender(); }
     }
     if (event.kind === "press" && this.preview && event.row >= this.layout.input.row) this.preview.focused = false;
-    const menu = this.commandMenuFrame;
-    if (menu && this.mode === "input" && this.matchingCommands().length && event.row >= menu.rect.row && event.row < menu.rect.row + menu.rect.height
+    const isMention = Boolean(this.mentionMenuFrame);
+    const menu = this.mentionMenuFrame ?? this.commandMenuFrame;
+    const matches = isMention ? this.matchingMentions() : this.matchingCommands();
+    if (menu && this.mode === "input" && matches.length && event.row >= menu.rect.row && event.row < menu.rect.row + menu.rect.height
       && event.col >= menu.rect.column && event.col < menu.rect.column + menu.rect.width) {
       const item = menu.zones.find((zone) => zone.row === event.row);
       if (event.kind === "wheel") {
-        this.editor = { ...this.editor, menuSelected: Math.max(0, Math.min(this.matchingCommands().length - 1, this.editor.menuSelected + (event.direction === "down" ? 3 : -3))) };
+        const selected = isMention ? this.editor.mentionSelected : this.editor.menuSelected;
+        const index = Math.max(0, Math.min(matches.length - 1, selected + (event.direction === "down" ? 3 : -3)));
+        this.editor = { ...this.editor, ...(isMention ? { mentionSelected: index } : { menuSelected: index }) };
       } else if (item && (event.kind === "move" || event.kind === "press" && event.button === 0)) {
-        this.editor = { ...this.editor, menuSelected: item.index };
+        this.editor = { ...this.editor, ...(isMention ? { mentionSelected: item.index } : { menuSelected: item.index }) };
         if (event.kind === "press") { this.sessionView.focusInput(); this.dispatchEditorKey({ name: "return" }); }
       }
       this.requestRender();
@@ -1293,6 +1300,12 @@ export class Workbench {
     if (this.editor.menuDismissed) return [];
     const commands = slashCommandMatches(this.editor.value, this.promptContext.commands);
     return this.sessionLayout ? groupSlashCommands(commands) : commands.slice(0, SLASH_MENU_LIMIT);
+  }
+
+  private matchingMentions(): readonly string[] {
+    if (this.editor.mentionDismissed || this.editor.search) return [];
+    const token = mentionTokenAt(this.editor.value, this.editor.cursor);
+    return token ? mentionMatches(this.promptContext.mentions, token.query) : [];
   }
 
   private requestRender(): void {
@@ -1353,8 +1366,7 @@ export class Workbench {
       this.layout.input = { row: 3, column: 0, width: panel.conversationWidth, height: this.layout.height - 4 };
     } else if (this.sessionLayout && (this.mode === "input" || this.mode === "streaming")) {
       const editor = this.mode === "streaming" ? this.queuedEditor : this.editor;
-      const token = mentionTokenAt(editor.value, editor.cursor);
-      const selecting = Boolean(editor.search || token && mentionMatches(this.promptContext.mentions, token.query).length);
+      const selecting = Boolean(editor.search);
       const queued = this.mode === "streaming" && Boolean(editor.value.trim());
       const inputHeight = Math.min(this.layout.input.height, Math.max(selecting || queued || this.layout.height >= 16 ? 4 : 3, Math.floor(this.layout.height / 3)));
       this.layout.input = { row: this.layout.height - 1 - inputHeight, column: 0, width: panel.conversationWidth, height: inputHeight };
@@ -1364,8 +1376,13 @@ export class Workbench {
     this.commandMenuFrame = this.sessionLayout && this.mode === "input" && !this.editor.search
       ? this.commandMenu.render({ commands: this.matchingCommands(), selected: this.editor.menuSelected, query: this.editor.value,
         input: this.layout.input, paint: this.options.paint, top: this.startLayout ? 0 : 2 }) : null;
-    if (!this.commandMenuFrame) { this.commandMenu.reset(); return this.withDriveFeedback(frame); }
-    const menu = this.commandMenuFrame;
+    this.mentionMenuFrame = this.sessionLayout && this.mode === "input" && !this.commandMenuFrame
+      ? this.mentionMenu.render({ files: this.matchingMentions(), selected: this.editor.mentionSelected,
+        query: mentionTokenAt(this.editor.value, this.editor.cursor)?.query ?? "", input: this.layout.input, paint: this.options.paint, top: this.startLayout ? 0 : 2 }) : null;
+    if (!this.commandMenuFrame) this.commandMenu.reset();
+    if (!this.mentionMenuFrame) this.mentionMenu.reset();
+    const menu = this.mentionMenuFrame ?? this.commandMenuFrame;
+    if (!menu) return this.withDriveFeedback(frame);
     const canvas = new Canvas(this.layout.width, this.layout.height, this.options.paint);
     frame.rows.forEach((text, row) => canvas.put(row, 0, text, this.layout.width));
     menu.lines.forEach((text, row) => canvas.put(menu.rect.row + row, menu.rect.column, text, menu.rect.width));
@@ -1373,7 +1390,13 @@ export class Workbench {
     this.mouseZones = this.mouseZones.filter((zone) => zone.row < menu.rect.row || zone.row >= menu.rect.row + menu.rect.height
       || (zone.column ?? 0) >= menu.rect.column + menu.rect.width || (zone.column ?? 0) + (zone.width ?? this.layout.width) <= menu.rect.column);
     for (const zone of menu.zones) this.mouseZones.push({ row: zone.row, column: menu.rect.column + 1, width: menu.rect.width - 2,
-      run: () => { this.editor = { ...this.editor, menuSelected: zone.index }; this.sessionView.focusInput(); this.dispatchEditorKey({ name: "return" }); } });
+      run: () => {
+        if (this.mentionMenuFrame) {
+          if (!this.matchingMentions()[zone.index]) return;
+          this.editor = { ...this.editor, mentionSelected: zone.index };
+        } else this.editor = { ...this.editor, menuSelected: zone.index };
+        this.sessionView.focusInput(); this.dispatchEditorKey({ name: "return" });
+      } });
     return this.withDriveFeedback({ ...frame, rows: canvas.rows });
   }
 
@@ -2049,7 +2072,6 @@ export class Workbench {
           if (streaming) { this.options.queue.set(""); this.queuedEditor = createPromptEditorState(); }
           else { this.editor = createPromptEditorState(); this.restoredDraft = false; }
         }
-        else if (action.kind === "mention") this.clickMention(action.index);
         else if (action.kind === "remove") {
           const editor = streaming ? this.queuedEditor : this.editor;
           const updated = setPromptValue(editor, editor.value.slice(0, action.start) + editor.value.slice(action.start + action.length));
@@ -2243,7 +2265,7 @@ export class Workbench {
     const menuStart = lines.length;
 
     const mention = mentionTokenAt(this.editor.value, this.editor.cursor);
-    const mentionCandidates = mention && this.promptContext.mentions.length > 0
+    const mentionCandidates = !this.editor.mentionDismissed && mention && this.promptContext.mentions.length > 0
       ? mentionMatches(this.promptContext.mentions, mention.query)
       : [];
     if (mentionCandidates.length > 0) {

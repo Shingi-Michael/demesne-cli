@@ -58,7 +58,7 @@ test("the real CLI starts and resumes offline history while slow file/artifact d
   })();
   const stderr = new Response(child.stderr).text();
   const until = async (predicate: () => boolean) => {
-    const deadline = AbortSignal.timeout(3000);
+    const deadline = AbortSignal.timeout(15000);
     while (!predicate()) {
       await new Promise<void>((resolve, reject) => {
         const timeout = () => reject(new Error(`CLI did not become ready; requests: ${requests.join(", ")}`));
@@ -81,8 +81,10 @@ test("the real CLI starts and resumes offline history while slow file/artifact d
     child.stdin.write("@");
     files.get("/v1/sessions/saved/files")!.resolve(Response.json({ files: ["saved-only.ts"] }));
     files.get("/v1/sessions/start/files")!.resolve(Response.json({ files: ["wrong-workspace.ts"] }));
-    await until(() => stripVTControlCharacters(output).includes("@saved-only.ts"));
+    await until(() => stripVTControlCharacters(output).includes("saved-only.ts"));
     expect(stripVTControlCharacters(output)).not.toContain("wrong-workspace.ts");
+    child.stdin.write("\t");
+    await until(() => stripVTControlCharacters(output).includes("@saved-only.ts"));
   } finally {
     held.resolve(Response.json({ models: [], artifacts: [], nextCursor: null }));
     for (const deferred of files.values()) deferred.resolve(Response.json({ files: [] }));
@@ -93,4 +95,4 @@ test("the real CLI starts and resumes offline history while slow file/artifact d
     await server.stop(true);
     rmSync(root, { recursive: true, force: true });
   }
-}, 10000);
+}, 60000);

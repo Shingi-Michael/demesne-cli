@@ -133,9 +133,9 @@ test("inspection replaces the compact stage, preserves the answer position and s
   view.act({ kind: "surface", surface: "review" });
   expect(screen()).toContain("src/lexer.ts");
   key("return");
-  expect(screen()).toContain("RECORDED CHANGE");
+  expect(screen()).toMatch(/(^|\s)CHANGE(\s|$)/m);
   const detail = view.memory.detail;
-  expect(screen(120, 40)).toContain("RECORDED CHANGE");
+  expect(screen(120, 40)).toMatch(/(^|\s)CHANGE(\s|$)/m);
   expect(view.memory.detail).toBe(detail);
   screen();
   key("escape");
@@ -1004,7 +1004,7 @@ test("session command output opens above pinned evidence and returns to it on Es
   expect(screen()).toContain("CONTEXT PLAN");
   expect(view.focused).toBe(true);
   key("escape");
-  expect(screen()).toContain("RECORDED CHANGE");
+  expect(screen()).toMatch(/(^|\s)CHANGE(\s|$)/m);
   expect(view.memory.detail).toBe(detail);
 });
 
@@ -1849,7 +1849,7 @@ test("docked panels share the Figma frame: label and subject, a keycap footer, a
   key("b", { ctrl: true });
   const rows = screen(176, 30).split("\n");
   const panelColumn = rows[0]!.indexOf("EXECUTION LOG");
-  expect(rows[0]!.slice(panelColumn)).toMatch(/^EXECUTION LOG {2}Turn \d+\s*$/);
+  expect(rows[0]!.slice(panelColumn)).toMatch(/^EXECUTION LOG {2}Turn \d+ +\d+ events · [\d.]+s\s*$/);
   const footer = rows.findIndex((line) => line.includes("Esc close"));
   expect(rows[footer]!.slice(panelColumn)).toMatch(/^↑↓ select {2}Enter open {2}Esc close/);
   // The docked panel takes 40% of a wide window instead of a fixed 43 columns.
@@ -1916,4 +1916,45 @@ test("finished turns before the newest fold to one row, except where that would 
   state.onKeypress("", { name: "pageup" });
   expect(view.memory.followFlow).toBe(false);
   expect(screen(120, 40)).toContain("▸ Turn 2");
+});
+
+test("the execution log follows Figma 25:154 and 26:174: one row per event, filter tabs, and a detail with outcome and output", () => {
+  const clock = spyOn(Date, "now").mockReturnValue(10_000);
+  try {
+    const { ui, key, state, screen, view } = fixture();
+    ui.beginTurn({ userText: "Add a regression test", at: "now" });
+    clock.mockReturnValue(16_600);
+    ui.toolRequested({ toolCallId: "search", name: "search_files", arguments: { query: "partial insertion" } });
+    ui.toolFinished({ toolCallId: "search", name: "search_files", state: "done", durationMs: 4 });
+    clock.mockReturnValue(21_000);
+    ui.toolRequested({ toolCallId: "test", name: "run_command", arguments: { argv: ["bun", "test", "app.test.ts"], cwd: "." } });
+    ui.toolFinished({ toolCallId: "test", name: "run_command", state: "failed", exitCode: 1, durationMs: 2100,
+      message: "app.test.ts:\n✓ serves the health route\n× rejects partial insertion\n1 pass\n1 fail" });
+    ui.finishTurn("failed", "Check failed");
+    key("b", { ctrl: true });
+    let rows = screen(176, 30).split("\n");
+    const panel = rows[0]!.indexOf("EXECUTION LOG");
+    const body = rows.map((row) => row.slice(panel));
+    // Filter tabs with counts sit under the header.
+    expect(body[2]).toMatch(/^All \d+ {3}Changes 0 {3}Checks 1 {3}Failed 1/);
+    // Each event is one row: offset, mark, verb, target, result and duration.
+    expect(body.join("\n")).toMatch(/\+6\.6s ✓ Search +.*\s+4ms/);
+    expect(body.join("\n")).toMatch(/\+11\.0s × Check +bun test app\.test\.ts +exit 1 +2\.1s/);
+    // Failed narrows the list to the failure.
+    const tabs = rows[2]!;
+    state.handleMouse({ kind: "press", button: 0, row: 2, col: tabs.indexOf("Failed") });
+    rows = screen(176, 30).split("\n");
+    expect(rows.map((row) => row.slice(panel)).join("\n")).not.toContain("Search");
+    expect(view.memory.logFilter).toBe("failed");
+    // Opening the failure shows the breadcrumb, an outcome pill and the output.
+    key("return");
+    const detail = screen(176, 30).split("\n").map((row) => row.slice(panel)).join("\n");
+    expect(detail).toContain("‹ Log  event 1 of 1");
+    expect(detail).toMatch(/× Check bun test app\.test\.ts/);
+    expect(detail).toMatch(/failed · exit 1 {3}2\.1s · started \+11\.0s/);
+    expect(detail).toMatch(/OUTPUT +5 lines/);
+    expect(detail).toContain("× rejects partial insertion");
+    expect(detail).toContain("▸ Arguments  argv, cwd");
+    expect(detail).toContain("Tab next event  Esc back");
+  } finally { clock.mockRestore(); }
 });

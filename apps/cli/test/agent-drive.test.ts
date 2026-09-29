@@ -477,7 +477,7 @@ test("Drive can jump directly to a long recorded tool result's tail and back to 
     message: `TEST OUTPUT START\n${"(pass) recorded check\n".repeat(3000)}999 pass\n0 fail\nRan 999 tests across 114 files.` });
   ui.finishTurn("completed", "Done"); void ui.readPrompt({ history: [], commands: SLASH_COMMANDS, mentions: [] }); ui.frame(140, 36);
   await ui.performDrive({ kind: "key", key: "ctrl+b" }, ui.observeDrive(), new AbortController().signal);
-  const log = ui.observeDrive(), tool = log.controls.find((control) => control.label.includes("$ bun test"))!;
+  const log = ui.observeDrive(), tool = log.controls.find((control) => /\+[\d.]+s ✓ Check +bun test/.test(control.label))!;
   await ui.performDrive({ kind: "click", target: tool.id }, log, new AbortController().signal);
   expect(ui.observeDrive().rows.join("\n")).not.toContain("999 pass");
   await ui.performDrive({ kind: "key", key: "end" }, ui.observeDrive(), new AbortController().signal);

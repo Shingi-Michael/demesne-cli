@@ -4,12 +4,12 @@ import type { AssistantEntry, ResponseReceipt, ToolEntry, UserEntry, WorkbenchEn
 import { projectRunEvidence, toolFailed, verificationOutcome, type RunEvidence } from "./evidence.ts";
 import { computeSessionLayout, conversationInset } from "./layout.ts";
 import { Canvas, foldCells } from "./canvas.ts";
-import { artifactRecords, entryKey, renderSessionFlow, type FlowAction, type FlowExpansion, type FlowRow, type FlowArtifact } from "./session-flow.ts";
+import { artifactRecords, entryKey, renderSessionFlow, toolVerb, type FlowAction, type FlowExpansion, type FlowRow, type FlowArtifact } from "./session-flow.ts";
 import { InteractionTransitions } from "./interaction.ts";
 import { reducedMotionEnabled } from "../motion.ts";
 import { diffPanelLines, filePanelLines } from "./panel-content.ts";
 import { sessionHeader } from "./session-header.ts";
-import { changeFiles, DiffPanel } from "./diff-panel.ts";
+import { changeFiles, changeState, changeTotals, DiffPanel } from "./diff-panel.ts";
 import { renderDrivePanel } from "./drive-panel.ts";
 import type { DriveInspectAction, DriveObservation, DriveState } from "@demesne/protocol";
 
@@ -58,6 +58,8 @@ interface RunMemory {
   flowFocus: string | null;
   reviewSelection: number;
   logSelection: number;
+  /// Which events the execution log lists: all, changes, checks or failures.
+  logFilter: LogFilter;
   detail: number | null;
   /// The surface a focused record was opened from; Escape returns there first.
   detailOrigin: Surface;
@@ -65,7 +67,56 @@ interface RunMemory {
 }
 type Action = FlowAction | { kind: "run"; id: number | null } | { kind: "surface"; surface: Surface }
   | { kind: "record"; id: number } | { kind: "back" | "history" | "log" | "thinking" | "request" | "follow" | "response-start" }
-  | { kind: "workspace" | "context" | "panel-close" | "panel-toggle" | "settings" };
+  | { kind: "workspace" | "context" | "panel-close" | "panel-toggle" | "settings" } | { kind: "log-filter"; filter: LogFilter };
+type LogFilter = "all" | "changes" | "checks" | "failed";
+const LOG_FILTERS: readonly [LogFilter, string][] = [["all", "All"], ["changes", "Changes"], ["checks", "Checks"], ["failed", "Failed"]];
+const failedRecord = (record: RecordEntry): boolean => record.type === "tool" && (toolFailed(record) || record.state === "denied" || record.state === "stopped")
+  || record.type === "notice" && record.tone === "error" && !record.closesTurn;
+const filterRecords = (records: RecordEntry[], filter: LogFilter): RecordEntry[] => filter === "all" ? records
+  : records.filter((record) => filter === "failed" ? failedRecord(record)
+    : record.type === "tool" && (filter === "changes" ? record.phase === "change" : record.phase === "verify" && record.name === "run_command"));
+
+const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
+const toolMark = (tool: ToolEntry): [string, PaletteColor] => tool.waiting ? ["!", "signal"] : tool.state === "denied" || toolFailed(tool) ? ["×", "signal"]
+  : tool.state === "stopped" ? ["■", "secondary"] : tool.state === "done" ? ["✓", "citron"] : ["◌", "thinking"];
+/// The tool's outcome as Figma shows it: `exit 0`, `+14 −2`, `drafting`.
+function toolResult(tool: ToolEntry, paint: Painter): string {
+  if (tool.phase === "change") {
+    const totals = changeTotals(tool);
+    if (totals) return totals.split(" ").map((part) => paint.text(part, part.startsWith("+") ? "citron" : "signal")).join(" ");
+    const state = changeState(tool).toLowerCase();
+    return paint.text(state, state === "drafting" || state === "pending" ? "thinking" : state === "applied" ? "citron" : "signal");
+  }
+  if (tool.waiting) return paint.text("approval", "signal");
+  if (tool.exitCode !== undefined) return paint.text(`exit ${tool.exitCode}`, tool.exitCode === 0 ? "muted" : "signal");
+  if (tool.state === "running") return paint.text("running", "thinking");
+  if (tool.state === "stopped" || tool.state === "denied") return paint.text(tool.state, "secondary");
+  return "";
+}
+/// Figma 25:154 row: `+6.6s ✓ Search   target   3 matches   0ms`.
+function logRow(record: RecordEntry, base: number | undefined, width: number, paint: Painter): string {
+  const started = record.type === "tool" || record.type === "reasoning" || record.type === "user" ? record.startedAt : undefined;
+  const time = base && started && started >= base ? `+${seconds(started - base)}` : "";
+  // Rows read as plain text: Markdown heading, list and emphasis marks drop.
+  const firstLine = (text: string) => sanitizeTerminalLine(text.trim().split("\n")[0] ?? "").replace(/^(#{1,6}|[-*+]|\d+\.)\s+/, "").replace(/[*_`]{1,3}([^*_`]+)[*_`]{1,3}/g, "$1");
+  let mark = "·", markTone: PaletteColor = "muted", verb = "", verbTone: PaletteColor = "secondary", target = "", result = "", duration = "";
+  if (record.type === "user") { mark = "▶"; markTone = "electric"; verb = "Request"; verbTone = "paper"; target = firstLine(record.text); }
+  else if (record.type === "reasoning") { mark = "◇"; markTone = "thinking"; verb = "Thinking"; verbTone = "thinking"; target = record.durationMs === null ? "…" : seconds(record.durationMs); }
+  else if (record.type === "assistant") { verb = "Response"; target = record.streaming ? "streaming…" : firstLine(record.raw); }
+  else if (record.type === "notice") { mark = record.tone === "error" ? "×" : "·"; markTone = record.tone === "error" ? "signal" : "muted"; verb = "Notice"; target = firstLine(record.text); }
+  else if (record.type === "panel" || record.type === "block") { verb = "Output"; target = firstLine(record.type === "panel" && record.title ? record.title : record.lines[0] ?? ""); }
+  else {
+    [mark, markTone] = toolMark(record);
+    verb = toolVerb(record); verbTone = toolFailed(record) || record.state === "denied" ? "signal" : "electric";
+    target = sanitizeTerminalLine(record.detail ?? record.name).replace(/^\$\s*/, "");
+    result = toolResult(record, paint);
+    duration = record.durationMs === undefined ? "" : record.durationMs >= 1000 ? seconds(record.durationMs) : `${record.durationMs}ms`;
+  }
+  const right = [result, duration ? paint.text(duration.padStart(6), "muted") : ""].filter(Boolean).join("  ");
+  const lead = `${paint.text(time.padStart(7), "muted")} ${paint.text(mark, markTone)} ${paint.text(verb.padEnd(8), verbTone)} `;
+  const room = Math.max(4, width - visibleLength(lead) - visibleLength(right) - 2);
+  return formatFooterLine(lead + paint.text(truncateText(target, room), "paper"), right, width);
+}
 export interface SessionZone { row: number; column: number; width: number; action: Action }
 interface ScrollRegion { row: number; column: number; width: number; height: number; target: "body" | "list" | "history" | "flow" | "output" | "context" | "diff" | "drive"; recordId?: number; maximum?: number }
 const stateLabel = (tool: ToolEntry): string => tool.waiting ? "! APPROVAL" : tool.state === "denied" ? "× DENIED"
@@ -236,7 +287,7 @@ export class SessionView {
     let memory = this.memories.get(id);
     if (!memory) {
       memory = { surface: "response", followFlow: true, flowOffset: 0, anchor: null, responseWindow: null, expansion: new Map(), flowFocus: null,
-        reviewSelection: 0, logSelection: 0, detail: null, detailOrigin: "response", detailOffsets: new Map() };
+        reviewSelection: 0, logSelection: 0, logFilter: "all", detail: null, detailOrigin: "response", detailOffsets: new Map() };
       this.memories.set(id, memory);
     }
     return memory;
@@ -248,7 +299,7 @@ export class SessionView {
   private records(): RecordEntry[] {
     const run = this.current;
     const entries = run?.request ? [run.request, ...run.entries] : run?.entries ?? [];
-    if (this.memory.surface === "log") return entries;
+    if (this.memory.surface === "log") return filterRecords(entries, this.memory.logFilter);
     if (this.memory.surface === "review") {
       const tools = entries.filter((entry): entry is ToolEntry => entry.type === "tool");
       return [...tools.filter((tool) => tool.phase === "change"), ...tools.filter((tool) => tool.phase === "verify" && tool.name === "run_command")];
@@ -260,6 +311,10 @@ export class SessionView {
 
   act(action: Action): string | undefined {
     if (action.kind === "drive-control") return; // routed by the workbench
+    if (action.kind === "log-filter") {
+      this.memory.logFilter = action.filter; this.memory.logSelection = 0; this.memory.detail = null;
+      return;
+    }
     if (action.kind === "drive-follow") { this.driveFollowing = true; this.driveJump = true; return; }
     if (action.kind === "drive-trace-toggle") {
       if (this.driveCollapsed.has(action.id)) this.driveCollapsed.delete(action.id); else this.driveCollapsed.add(action.id);
@@ -711,6 +766,12 @@ export class SessionView {
       const subject = this.drivePanelOpen || this.outputId !== null ? "" : this.contextOpen ? safe(options.model ?? "")
         : subjectRun ? `Turn ${subjectRun.number}` : "";
       put(0, 1, paint.text(title, "muted") + (subject ? "  " + paint.text(subject, "secondary") : ""), width - 5, "surface");
+      if (title === "EXECUTION LOG" && run && panelFooter) {
+        // `10 events · 13.4s` on the right of the log's header.
+        const events = (run.request ? 1 : 0) + run.entries.length;
+        const meta = `${events} event${events === 1 ? "" : "s"}${run.receipt?.durationMs != null ? ` · ${seconds(run.receipt.durationMs)}` : ""}`;
+        put(0, width - 1 - meta.length, paint.text(meta, "muted"), meta.length, "surface");
+      }
       if (!panelFooter) {
         put(0, width - 3, paint.text("×", "muted"), 2, "surface");
         zone(0, width - 4, 4, { kind: "panel-close" });
@@ -810,11 +871,12 @@ export class SessionView {
         if (records.length > 1) put(2, x, paint.text(`${back}${index + 1}/${records.length}${next}`, "secondary"), stageWidth, "surface");
         if (index > 0) zone(2, x, 2, { kind: "artifact-step", step: -1 });
         if (index + 1 < records.length) zone(2, x + `${back}${index + 1}/${records.length}`.length, 2, { kind: "artifact-step", step: 1 });
-        const lines = this.artifact.kind === "changes" ? diffPanelLines(selected, stageWidth - 1, paint) : this.detailLines(selected, stageWidth - 1, paint, options.markdown);
-        const offset = pane(lines, x, stageWidth, memory.detailOffsets.get(selected.id) ?? 0, "body");
+        const detailView = this.artifact.kind === "changes" ? { lines: diffPanelLines(selected, stageWidth - 1, paint), argumentsRow: -1 } : this.detailLines(selected, stageWidth - 1, paint, options.markdown);
+        const offset = pane(detailView.lines, x, stageWidth, memory.detailOffsets.get(selected.id) ?? 0, "body");
         memory.detailOffsets.set(selected.id, offset);
         this.regions.at(-1)!.recordId = selected.id;
-        if (offset === 0 && this.artifact.kind !== "changes") zone(top, x, 14, { kind: "arguments", id: selected.id });
+        const argumentsAt = detailView.argumentsRow - offset;
+        if (detailView.argumentsRow >= 0 && argumentsAt >= 0 && argumentsAt < bodyHeight) zone(top + argumentsAt, x, 14, { kind: "arguments", id: selected.id });
       }
       return finish(records.length > 1 ? [["←→", "records"], ["↑↓", "scroll"]] : [["↑↓", "scroll"]]);
     }
@@ -951,9 +1013,24 @@ export class SessionView {
       const detail = records.find((record) => record.id === memory.detail);
       if (options.panel) {
         if (detail) {
-          const label = "‹ Back";
-          put(2, 1, paint.text(label, "electric"), width - 2, "surface");
+          // Figma 26:174: `‹ Log  event 8 of 10`.
+          const label = `‹ ${isReview ? "Changes" : "Log"}`;
+          const position = records.findIndex((record) => record.id === detail.id);
+          put(2, 1, paint.text(label, "electric") + (position >= 0 ? paint.text(`  event ${position + 1} of ${records.length}`, "muted") : ""), width - 2, "surface");
           zone(2, 1, label.length, { kind: "back" });
+        } else if (!isReview) {
+          // Figma 25:154 filter tabs: `All 10  Changes 3  Checks 1  Failed 1`.
+          const all = run?.request ? [run.request, ...run.entries] : run?.entries ?? [];
+          let column = 1;
+          for (const [filter, name] of LOG_FILTERS) {
+            const count = filterRecords(all, filter).length;
+            const active = memory.logFilter === filter;
+            const label = `${name} ${count}`;
+            if (column + label.length > width - 2) break;
+            put(2, column, paint.text(name, active ? "paper" : "muted") + " " + paint.text(String(count), active ? "electric" : "muted"), label.length, active ? "raised" : "surface");
+            zone(2, column, label.length, { kind: "log-filter", filter });
+            column += label.length + 3;
+          }
         }
       }
       // A file navigator beside a spacious diff only when the stage is wide
@@ -1015,19 +1092,18 @@ export class SessionView {
             else put(height - 1, x + 1, paint.dim(` ${start + 1}–${end} / ${display.length} · PgUp/PgDn`), listWidth - 2);
           }
         } else {
-          const capacity = Math.max(1, Math.floor(bodyHeight / 2));
-          const start = Math.max(0, this.selection - capacity + 1);
-          records.slice(start, start + capacity).forEach((record, index) => {
-            const row = top + index * 2;
+          // One row per event: `+6.6s ✓ Search  target   result   0ms`.
+          const base = run?.request?.startedAt ?? records.find((record) => record.type === "tool" || record.type === "reasoning")?.startedAt;
+          const capacity = Math.max(1, bodyHeight);
+          const start = Math.max(0, Math.min(this.selection - capacity + 1, records.length - capacity));
+          records.slice(Math.max(0, start), Math.max(0, start) + capacity).forEach((record, index) => {
+            const row = top + index;
             const isSelected = record.id === selected?.id;
-            const label = ` ${number(start + index + 1)} ${recordLabel(record)}`;
-            const background = isSelected ? "raised" : recordSurface(record);
-            put(row, x + 1, isSelected || record.type === "tool" ? paint.bold(label, recordTone(record)) : paint.text(label, "secondary"), listWidth - 2, background);
-            if (isSelected || record.type === "tool") put(row, x + 1, paint.text(isSelected ? "▎" : "│", recordTone(record)), 1, background);
-            put(row + 1, x + 1, paint.text(recordSub(record), "secondary"), listWidth - 2, recordSurface(record));
-            if (record.type === "tool") put(row + 1, x + 1, paint.text("│", recordTone(record)), 1, recordSurface(record));
+            const background = isSelected ? "raised" : "surface";
+            put(row, x, "", listWidth, background);
+            if (isSelected) put(row, x, paint.text("▎", "electric"), 1, background);
+            put(row, x + 1, logRow(record, base, listWidth - 2, paint), listWidth - 2, background);
             zone(row, x + 1, listWidth - 2, { kind: "record", id: record.id });
-            zone(row + 1, x + 1, listWidth - 2, { kind: "record", id: record.id });
           });
         }
         region({ row: top, column: x, width: listWidth, height: bodyHeight, target: "list" });
@@ -1036,39 +1112,60 @@ export class SessionView {
       if (shown) {
         const detailX = split ? x + listWidth + 1 : x;
         const detailWidth = x + stageWidth - detailX;
-        const lines = this.detailLines(shown, detailWidth - 4, paint, options.markdown).map((line) => `  ${line}`);
-        const offset = pane(lines, detailX, detailWidth, memory.detailOffsets.get(shown.id) ?? 0, "body", shown.type === "tool" ? "toolSurface" : "ink");
+        const detailView = this.detailLines(shown, detailWidth - 4, paint, options.markdown);
+        const lines = detailView.lines.map((line) => `  ${line}`);
+        const offset = pane(lines, detailX, detailWidth, memory.detailOffsets.get(shown.id) ?? 0, "body", options.panel ? "surface" : shown.type === "tool" ? "toolSurface" : "ink");
         memory.detailOffsets.set(shown.id, offset);
         // On a wide stage, the highlighted record is already the inspected one.
         this.regions[this.regions.length - 1]!.recordId = shown.id;
-        // The return action lives on the action row; the arguments toggle
-        // leads the detail content, so it scrolls with it.
-        if (offset === 0 && shown.type === "tool") zone(top, detailX + 2, 14, { kind: "arguments", id: shown.id });
+        // The Arguments toggle scrolls with the content, wherever it lands.
+        const argumentsAt = detailView.argumentsRow - offset;
+        if (detailView.argumentsRow >= 0 && argumentsAt >= 0 && argumentsAt < bodyHeight) zone(top + argumentsAt, detailX + 2, 14, { kind: "arguments", id: shown.id });
       }
-      if (options.panel) return detail ? finish([["↑↓", "scroll"], ["Tab", "next"], ["Alt+A", "args"]], "", "back")
+      if (options.panel) return detail ? finish([["↑↓", "scroll"], ["Tab", "next event"]], "", "back")
         : finish([["↑↓", "select"], ["Enter", "open"]], pageNote);
     }
     return { rows, zones };
   }
 
-  private detailLines(entry: RecordEntry, width: number, paint: Painter, markdown: (entry: AssistantEntry, width: number) => string[]): string[] {
+  /// Figma 26:174 record detail. `argumentsRow` is the line holding the
+  /// Arguments toggle so the caller can make it clickable wherever it scrolls.
+  private detailLines(entry: RecordEntry, width: number, paint: Painter, markdown: (entry: AssistantEntry, width: number) => string[]): { lines: string[]; argumentsRow: number } {
     const wrap = (text: string) => text.split("\n").flatMap((line) => foldCells(safe(line), width));
-    if (entry.type === "user") return [paint.bold("REQUEST", "secondary"), ...wrap(`${entry.at} · ${entry.model ?? "Model not recorded"}`), "", ...wrap(entry.text)];
-    if (entry.type === "assistant") return [paint.bold("AGENT UPDATE", "electricBright"), paint.text(entry.at ? safe(entry.at) : "Time not recorded", "muted"), "", ...markdown(entry, width)];
-    if (entry.type === "reasoning") return [paint.bold("THINKING RECORD", "secondary"), "", ...wrap(entry.raw)];
-    if (entry.type === "notice") return wrap(entry.text);
-    if (entry.type === "panel" || entry.type === "block") return entry.lines;
-    const verifying = entry.name === "run_command" && entry.phase === "verify";
-    const lines = [paint.dim(`Arguments ${this.argumentsOpen.has(entry.id) ? "▾" : "▸"}`),
-      ...wrap(entry.detail ?? entry.name).map((line) => paint.bold(line, toolPhaseColor(entry.name === "run_command" ? "verify" : entry.phase))), paint.text(verifying ? checkLabel(entry) : stateLabel(entry), entry.state === "done" && !entry.exitCode && (entry.name !== "run_command" || entry.exitCode === 0) ? "citron" : entry.waiting || toolFailed(entry) || entry.state === "denied" ? "signal" : "secondary"),
-      paint.dim(`${entry.name}${entry.exitCode === undefined ? "" : ` / exit ${entry.exitCode}`}${entry.durationMs === undefined ? "" : ` / ${entry.durationMs}ms`}`), ""];
-    const failed = toolFailed(entry) || entry.state === "denied" || entry.state === "stopped";
-    if (entry.message && failed) lines.push(paint.bold("RESULT", "secondary"), ...wrap(entry.message), "");
-    if (entry.diff) lines.push(paint.bold(entry.state === "done" ? "RECORDED CHANGE" : "PROPOSED CHANGE", "secondary"),
+    const none = (lines: string[]) => ({ lines, argumentsRow: -1 });
+    if (entry.type === "user") return none([paint.text("▶ ", "electric") + paint.text("Request", "paper"), paint.text(`${safe(entry.at)} · ${safe(entry.model ?? "Model not recorded")}`, "muted"), "", ...wrap(entry.text)]);
+    if (entry.type === "assistant") return none([paint.text("Response", "paper") + (entry.at ? paint.text(`  ${safe(entry.at)}`, "muted") : ""), "", ...markdown(entry, width)]);
+    if (entry.type === "reasoning") return none([paint.text("◇ Thinking", "thinking") + (entry.durationMs === null ? "" : paint.text(`  ${seconds(entry.durationMs)}`, "muted")), "", ...wrap(entry.raw)]);
+    if (entry.type === "notice") return none(wrap(entry.text));
+    if (entry.type === "panel" || entry.type === "block") return none(entry.lines);
+    const [mark, tone] = toolMark(entry);
+    const failed = toolFailed(entry) || entry.state === "denied";
+    const target = safe(entry.detail ?? entry.name).replace(/^\$\s*/, "");
+    const lines = foldCells(`${paint.text(mark, tone)} ${paint.text(toolVerb(entry), failed ? "signal" : "electric")} ${paint.text(target, "paper")}`, width);
+    // The outcome pill, then timing: `failed · exit 1  2.1s · started +11.0s`.
+    const status = entry.waiting ? "awaiting approval" : entry.phase === "change" ? [changeState(entry).toLowerCase(), changeTotals(entry)].filter(Boolean).join(" ")
+      : entry.exitCode !== undefined ? `${entry.exitCode === 0 && !failed ? "passed" : "failed"} · exit ${entry.exitCode}` : entry.state === "done" && entry.name === "run_command" ? "exit unknown" : entry.state === "done" ? "done" : entry.state;
+    const surface: PaletteColor = tone === "signal" ? "errorSurface" : tone === "citron" ? "diffAddedSurface" : "raised";
+    const base = this.runs.find((run) => run.tools.some((tool) => tool.id === entry.id))?.request?.startedAt;
+    const timing = [entry.durationMs === undefined ? "" : entry.durationMs >= 1000 ? seconds(entry.durationMs) : `${entry.durationMs}ms`,
+      base && entry.startedAt >= base ? `started +${seconds(entry.startedAt - base)}` : ""].filter(Boolean).join(" · ");
+    lines.push(paint.wash(` ${status} `, surface, tone === "citron" ? "citron" : tone === "signal" ? "signal" : "secondary") + (timing ? paint.text(`  ${timing}`, "muted") : ""), "");
+    if (entry.diff) lines.push(paint.text(entry.state === "done" ? "CHANGE" : "PROPOSED CHANGE", "muted"),
       ...formatDiffPreview(entry.diff.oldText, entry.diff.newText, 10_000, paint).flatMap((line) => foldCells(line, width)), "");
-    if (entry.message && !failed) lines.push(paint.bold("RESULT", "secondary"), ...wrap(entry.message), "");
-    if (!entry.message && entry.name === "run_command" && entry.state !== "running") lines.push(paint.dim("No command output recorded."));
-    if (this.argumentsOpen.has(entry.id)) lines.push(paint.bold("ARGUMENTS", "secondary"), ...wrap(JSON.stringify(entry.input, null, 2)));
-    return lines;
+    if (entry.message) {
+      const output = entry.message.replace(/\n+$/, "").split("\n");
+      lines.push(formatFooterLine(paint.text("OUTPUT", "muted"), paint.text(`${output.length} line${output.length === 1 ? "" : "s"}`, "muted"), width));
+      for (const line of output) {
+        // Test runners' pass and fail lines keep their meaning in color.
+        const lineTone: PaletteColor = /^\s*(✓|\(pass\)|pass\b|\d+ pass)/i.test(line) ? "citron" : /^\s*(×|✗|\(fail\)|fail\b|\d+ fail|error)/i.test(line) ? "signal" : "secondary";
+        for (const part of foldCells(safe(line), Math.max(1, width - 2))) lines.push(paint.onBackground(" " + paint.text(part.padEnd(Math.max(0, width - 2)), lineTone) + " ", "raised"));
+      }
+      lines.push("");
+    } else if (entry.name === "run_command" && entry.state !== "running") lines.push(paint.text("No command output recorded.", "muted"), "");
+    const argumentsRow = lines.length;
+    const keys = Object.keys(entry.input ?? {});
+    lines.push(`${paint.text(this.argumentsOpen.has(entry.id) ? "▾" : "▸", "muted")} ${paint.text("Arguments", "secondary")}${keys.length ? paint.text(`  ${keys.join(", ")}`, "muted") : ""}`);
+    if (this.argumentsOpen.has(entry.id)) lines.push(...wrap(JSON.stringify(entry.input, null, 2)).map((line) => paint.text(line, "secondary")));
+    return { lines, argumentsRow };
   }
 }

@@ -28,11 +28,13 @@ export interface FlowExpansion { runId: number; open: boolean }
 export const entryKey = (id: number): string => `entry:${id}`;
 
 const safe = sanitizeTerminalLine;
+/// The verb a tool row leads with: Read, Search, Edit, Run, Check…
+export const toolVerb = (tool: ToolEntry): string => tool.name === "run_command" ? tool.phase === "verify" ? "Check" : "Run" : safe(toolName(tool));
 const duration = (ms: number): string => ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 const failed = (tool: ToolEntry): boolean => toolFailed(tool) || tool.state === "denied";
 export const artifactRecords = (run: SessionRun, kind: ArtifactKind): ToolEntry[] => run.tools.filter((tool) => kind === "changes" ? tool.phase === "change"
   : kind === "verification" ? tool.phase === "verify" && tool.name === "run_command" : failed(tool));
-const toolName = (tool: ToolEntry): string => ({ read_file: "Read", read_files: "Read", edit_file: "Edit", write_file: "Write",
+export const toolName = (tool: ToolEntry): string => ({ read_file: "Read", read_files: "Read", edit_file: "Edit", write_file: "Write",
   search_files: "Search", list_files: "List", git_status: "Git status", git_diff: "Git diff", move_path: "Move", delete_path: "Delete",
   web_search: "Web search", command_logs: "Command output", command_stop: "Stop command" })[tool.name] ?? tool.name.replaceAll("_", " ");
 

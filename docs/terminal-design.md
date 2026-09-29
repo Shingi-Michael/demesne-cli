@@ -20,6 +20,17 @@ Live Thinking and the running Send control use the same shared `thinkingDots` re
 | `--text-primary` | `paper` | `#C8DAE8` |
 | `--text-secondary` | `secondary` | `#7A9FB8` |
 | `--text-dim` | `muted` | `#536E82` |
+| `syntax/keyword` | `syntaxKeyword` | `#C49CE6` |
+| `syntax/string` | `syntaxString` | `#9CCF8D` |
+| `syntax/number` | `syntaxNumber` | `#E5A93C` |
+| `syntax/comment` | `syntaxComment` | `#5F7280` |
+| `syntax/type` | `syntaxType` | `#6FC2D6` |
+| `syntax/function` | `syntaxFunction` | `#5AA9E6` |
+
+Syntax roles come from the redesign's Foundations page. Demesne Light uses
+darker values with at least 4.5:1 contrast (comments excepted, which recede by
+design); named themes derive them from their own accents. Diff `+`/`−` markers
+keep `citron`/`signal`, since they mean added/removed rather than syntax.
 
 Translucent cyan, amber, and red surfaces are composited into theme tokens for terminal backgrounds. Failed card borders blend red at 35% over the card surface. Named and light themes use the same semantic roles. Status glyphs and labels carry meaning in plain output.
 

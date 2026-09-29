@@ -118,8 +118,8 @@ function highlightTokens(code: string, painter: Painter, spec: LanguageSpec, sta
 
     if (state?.inBlockComment) {
       const end = rest.indexOf("*/");
-      if (end === -1) return result + painter.dim(rest);
-      result += painter.dim(rest.slice(0, end + 2));
+      if (end === -1) return result + painter.text(rest, "syntaxComment");
+      result += painter.text(rest.slice(0, end + 2), "syntaxComment");
       index += end + 2;
       state.inBlockComment = false;
       continue;
@@ -129,21 +129,21 @@ function highlightTokens(code: string, painter: Painter, spec: LanguageSpec, sta
       const end = rest.indexOf("*/", 2);
       if (end === -1) {
         if (state) state.inBlockComment = true;
-        return result + painter.dim(rest);
+        return result + painter.text(rest, "syntaxComment");
       }
-      result += painter.dim(rest.slice(0, end + 2));
+      result += painter.text(rest.slice(0, end + 2), "syntaxComment");
       index += end + 2;
       continue;
     }
 
     if (spec.lineComment && rest.startsWith(spec.lineComment)) {
-      return result + painter.dim(rest);
+      return result + painter.text(rest, "syntaxComment");
     }
 
     const quote = rest[0];
     if (quote === '"' || quote === "'" || quote === "`") {
       const end = stringEnd(rest, quote);
-      result += painter.text(rest.slice(0, end), "citron");
+      result += painter.text(rest.slice(0, end), "syntaxString");
       index += end;
       continue;
     }
@@ -151,7 +151,7 @@ function highlightTokens(code: string, painter: Painter, spec: LanguageSpec, sta
     if (spec.variables && rest[0] === "$") {
       const variable = /^\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])/.exec(rest);
       if (variable) {
-        result += painter.text(variable[0], "electricBright");
+        result += painter.text(variable[0], "syntaxNumber");
         index += variable[0].length;
         continue;
       }
@@ -160,21 +160,21 @@ function highlightTokens(code: string, painter: Painter, spec: LanguageSpec, sta
     if (spec.decorators && rest[0] === "@") {
       const decorator = /^@[A-Za-z_][\w.]*/.exec(rest);
       if (decorator) {
-        result += painter.text(decorator[0], "electric");
+        result += painter.text(decorator[0], "syntaxKeyword");
         index += decorator[0].length;
         continue;
       }
     }
 
     if (spec.preprocessor && rest[0] === "#") {
-      result += painter.bold("#", "electric");
+      result += painter.text("#", "syntaxKeyword");
       index += 1;
       continue;
     }
 
     const number = /^\d[\d_]*(?:\.[\d_]+)?(?:[eE][+-]?\d+)?/.exec(rest);
     if (number && !/[\w$]/.test(rest[number[0].length] ?? "")) {
-      result += painter.text(number[0], "electricBright");
+      result += painter.text(number[0], "syntaxNumber");
       index += number[0].length;
       continue;
     }
@@ -184,11 +184,11 @@ function highlightTokens(code: string, painter: Painter, spec: LanguageSpec, sta
       const word = identifier[0];
       const after = rest.slice(word.length);
       if (spec.keywords.has(word)) {
-        result += painter.bold(word, "electric");
+        result += painter.text(word, "syntaxKeyword");
       } else if (spec.typesByCase && /^[A-Z]/.test(word) && word.length > 1) {
-        result += painter.text(word, "secondary");
+        result += painter.text(word, "syntaxType");
       } else if (/^\s*\(/.test(after)) {
-        result += painter.text(word, "paper");
+        result += painter.text(word, "syntaxFunction");
       } else {
         result += word;
       }
@@ -205,7 +205,7 @@ function highlightTokens(code: string, painter: Painter, spec: LanguageSpec, sta
 function highlightJson(code: string, painter: Painter): string {
   const key = /^(\s*)"((?:\\.|[^"\\])*)"(\s*:)/.exec(code);
   if (key) {
-    return `${key[1]}${painter.text(`"${key[2]}"`, "electric")}${key[3]}`
+    return `${key[1]}${painter.text(`"${key[2]}"`, "syntaxType")}${key[3]}`
       + highlightJson(code.slice(key[0].length), painter);
   }
   let result = "";
@@ -215,19 +215,19 @@ function highlightJson(code: string, painter: Painter): string {
     const quote = rest[0];
     if (quote === '"') {
       const end = stringEnd(rest, quote);
-      result += painter.text(rest.slice(0, end), "citron");
+      result += painter.text(rest.slice(0, end), "syntaxString");
       index += end;
       continue;
     }
     const number = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(rest);
     if (number) {
-      result += painter.text(number[0], "electricBright");
+      result += painter.text(number[0], "syntaxNumber");
       index += number[0].length;
       continue;
     }
     const literal = /^(true|false|null)\b/.exec(rest);
     if (literal) {
-      result += painter.bold(literal[0], "electric");
+      result += painter.text(literal[0], "syntaxKeyword");
       index += literal[0].length;
       continue;
     }
@@ -240,15 +240,15 @@ function highlightJson(code: string, painter: Painter): string {
 function highlightYaml(code: string, painter: Painter): string {
   const comment = code.indexOf("#");
   const body = comment === -1 ? code : code.slice(0, comment);
-  const trailing = comment === -1 ? "" : painter.dim(code.slice(comment));
+  const trailing = comment === -1 ? "" : painter.text(code.slice(comment), "syntaxComment");
   const key = /^(\s*(?:- )?)([\w.$-]+)(\s*:)(.*)$/.exec(body);
   if (key) {
     const value = key[4]!;
     const renderedValue = /^\s*["']/.test(value)
-      ? painter.text(value, "citron")
-      : value.replace(/\b(true|false|null|yes|no)\b/gi, (match) => painter.bold(match, "electric"))
-        .replace(/\b\d+(?:\.\d+)?\b/g, (match) => painter.text(match, "electricBright"));
-    return `${key[1]}${painter.text(key[2]!, "electric")}${key[3]}${renderedValue}${trailing}`;
+      ? painter.text(value, "syntaxString")
+      : value.replace(/\b(true|false|null|yes|no)\b/gi, (match) => painter.text(match, "syntaxKeyword"))
+        .replace(/\b\d+(?:\.\d+)?\b/g, (match) => painter.text(match, "syntaxNumber"));
+    return `${key[1]}${painter.text(key[2]!, "syntaxType")}${key[3]}${renderedValue}${trailing}`;
   }
   return body + trailing;
 }

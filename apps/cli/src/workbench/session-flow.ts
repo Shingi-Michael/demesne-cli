@@ -1,6 +1,6 @@
 import { formatDiffPreview, formatFooterLine, renderPresence, sanitizeTerminalLine, truncateText, visibleLength, wrapDisplayText, type Painter, type PaletteColor, type PresenceState } from "@demesne/brand";
 import { sliceAnsi } from "bun";
-import type { AssistantEntry, ToolEntry } from "./entries.ts";
+import type { AssistantEntry, ReasoningEntry, ToolEntry } from "./entries.ts";
 import { projectRunEvidence, toolFailed } from "./evidence.ts";
 import type { SessionRun } from "./session.ts";
 import { foldCells } from "./canvas.ts";
@@ -215,27 +215,31 @@ export function renderSessionFlow(options: {
       const at = first?.type === "assistant" ? first.at : first?.startedAt ?? run.request?.startedAt;
       add(`run:${run.id}:timestamp`, formatFooterLine(margin + paint.bold("demesne", cardFailed ? "signal" : cardLive ? "thinking" : "electric"), paint.text(clockLabel(at), "muted"), width - 3));
     }
+    const reasoningRows = (entry: ReasoningEntry) => {
+      const key = entryKey(entry.id);
+      const open = isOpen(run, key, entry.streaming && !run.settled);
+      const timing = entry.durationMs !== null ? ` ${(entry.durationMs / 1000).toFixed(1)}s` : "";
+      const live = entry === liveReasoning;
+      const label = live
+        ? paint.text("◇ Thinking", "thinking") + " " + thinkingDots(paint, options.now, options.reducedMotion) + paint.text(timing, "muted")
+        : paint.text("◇ ", "muted") + paint.text("Thought", "secondary") + paint.text(timing, "muted");
+      const header = disclosure(run, key, label, live ? "" : paint.text(open ? "▾" : "▸", "muted"), [thinkingAnchors.get(entry.id)!]);
+      header.activeThinking = live;
+      header.thinking = true;
+      if (open) {
+        parents.push(key);
+        const lines = wrap(entry.raw.trim(), inner - (live ? 3 : 2));
+        for (const [index, line] of lines.entries()) add(`${key}:body`, margin + surface(`${paint.text("▎", "thinking")} ${paint.text(line, "secondary")}${live && index === lines.length - 1 ? thinkingCursor(paint, options.now, options.reducedMotion) : ""}`, inner, paint, "thinkingSurface"));
+        parents.pop();
+      }
+    };
     let previous = "";
     for (let index = 0; index < run.entries.length; index++) {
       const entry = run.entries[index]!;
       const key = entryKey(entry.id);
       if (entry.type === "reasoning") {
         if (previous === "assistant") add(`${key}:gap`);
-        const open = isOpen(run, key, entry.streaming && !run.settled);
-        const timing = entry.durationMs !== null ? ` · ${(entry.durationMs / 1000).toFixed(1)}s` : "";
-        const live = entry === liveReasoning;
-        const label = live
-          ? paint.text("◇ Thinking", "thinking") + " " + thinkingDots(paint, options.now, options.reducedMotion) + paint.text(timing.replace(" · ", " "), "muted")
-          : paint.text("◇ ", "muted") + paint.text("Thought", "secondary") + paint.text(timing.replace(" · ", " "), "muted");
-        const header = disclosure(run, key, label, live ? "" : paint.text(open ? "▾" : "▸", "muted"), [thinkingAnchors.get(entry.id)!]);
-        header.activeThinking = live;
-        header.thinking = true;
-        if (open) {
-          parents.push(key);
-          const lines = wrap(entry.raw.trim(), inner - (live ? 3 : 2));
-          for (const [index, line] of lines.entries()) add(`${key}:body`, margin + surface(`${paint.text("▎", "thinking")} ${paint.text(line, "secondary")}${live && index === lines.length - 1 ? thinkingCursor(paint, options.now, options.reducedMotion) : ""}`, inner, paint, "thinkingSurface"));
-          parents.pop();
-        }
+        reasoningRows(entry);
       } else if (entry.type === "assistant") {
         if (previous === "assistant") add(`${key}:gap`);
         body(key, options.markdown(entry, inner), undefined, [thinkingAnchors.get(entry.id)!]);
@@ -243,28 +247,42 @@ export function renderSessionFlow(options: {
         if (previous === "assistant" || previous === "reasoning" && expansions.get(entryKey(run.entries[index - 1]!.id))?.open) add(`${key}:gap`);
         // Only routine, confirmed inspection collapses. Changes retain their
         // paths and commands retain their outcomes, even in a read-heavy run.
+        // Settled thinking between them joins the group ("Explored"), so a
+        // read-heavy run no longer alternates Thought and Read rows.
         const group: ToolEntry[] = [];
+        const thoughts: ReasoningEntry[] = [];
+        let pending: ReasoningEntry[] = [];
+        let span = 1;
         for (let cursor = index; cursor < run.entries.length; cursor++) {
           const candidate = run.entries[cursor]!;
+          if (candidate.type === "reasoning" && group.length && !candidate.streaming && candidate !== liveReasoning) { pending.push(candidate); continue; }
           if (candidate.type !== "tool" || candidate.state !== "done" || candidate.waiting || failed(candidate)
             || candidate.phase !== "inspect" || candidate.name === "run_command") break;
           group.push(candidate);
+          thoughts.push(...pending); pending = [];
+          span = cursor - index + 1;
         }
         if (group.length > 1) {
           const groupKey = `tools:${entry.id}`;
-          const open = isOpen(run, groupKey, group.some((tool) => options.expansion(run.id).get(entryKey(tool.id)) === true));
-          const files = new Set(group.filter((tool) => tool.name === "read_file").map((tool) => tool.detail ?? tool.id));
-          const label = files.size === group.length ? paint.bold("Read", "electric") + paint.text(` ${files.size} files`, "secondary")
-            : paint.bold("Inspect", "electric") + paint.text(` ${group.length} operations`, "secondary");
+          const members = run.entries.slice(index, index + span).filter((item): item is ToolEntry | ReasoningEntry => item.type === "tool" || item.type === "reasoning");
+          const open = isOpen(run, groupKey, members.some((item) => options.expansion(run.id).get(entryKey(item.id)) === true));
+          const kinds = new Map<string, number>();
+          for (const tool of group) {
+            const kind = /read/.test(tool.name) ? "read" : /search|grep|find/.test(tool.name) ? "search" : /list/.test(tool.name) ? "listing" : /git/.test(tool.name) ? "git check" : "inspection";
+            kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
+          }
+          const counts = [...kinds].map(([kind, count]) => `${count} ${kind}${count === 1 ? "" : kind === "search" ? "es" : "s"}`).join(", ");
           const totalTime = group.every((tool) => tool.durationMs !== undefined) ? group.reduce((sum, tool) => sum + tool.durationMs!, 0) : null;
-          const text = `${margin}${paint.text("✓", "citron")} ${label}${totalTime === null ? "" : paint.text(` · ${duration(totalTime)}`, "muted")} ${paint.text(open ? "▾" : "▸", "muted")}`;
-          add(groupKey, text, [{ column: indent, width: inner, action: { kind: "toggle", runId: run.id, key: groupKey } }], open ? undefined : group.flatMap((tool) => [entryKey(tool.id), thinkingAnchors.get(tool.id)!]));
+          const thought = thoughts.reduce((sum, item) => sum + (item.durationMs ?? 0), 0);
+          const meta = [counts, totalTime === null ? "" : duration(totalTime), thoughts.length ? `thought ${(thought / 1000).toFixed(1)}s` : ""].filter(Boolean).join(" · ");
+          const text = `${margin}${paint.text(open ? "▾" : "▸", "muted")} ${paint.text("Explored", "secondary")}${paint.text(` · ${meta}`, "muted")}`;
+          add(groupKey, truncateText(text, width - 3), [{ column: indent, width: inner, action: { kind: "toggle", runId: run.id, key: groupKey } }], open ? undefined : members.flatMap((item) => [entryKey(item.id), thinkingAnchors.get(item.id)!]));
           if (open) {
             parents.push(groupKey);
-            for (const tool of group) toolRows(run, tool);
+            for (const item of members) item.type === "tool" ? toolRows(run, item) : reasoningRows(item);
             parents.pop();
           }
-          index += group.length - 1;
+          index += span - 1;
         } else toolRows(run, entry);
       } else if (entry.type === "notice") {
         // Session feedback after settlement belongs to the composer, rather

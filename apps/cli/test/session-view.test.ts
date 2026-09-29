@@ -1479,7 +1479,7 @@ test("an inspected read stays expanded when a later read forms an activity group
   expect(screen()).toContain("FIRST_FILE_CONTENT");
   ui.toolRequested({ toolCallId: "two", name: "read_file", arguments: { path: "second.ts" } });
   ui.toolFinished({ toolCallId: "two", name: "read_file", state: "done", message: "SECOND_FILE_CONTENT" });
-  expect(screen()).toContain("Read 2 files");
+  expect(screen()).toContain("Explored · 2 reads");
   expect(screen()).toContain("FIRST_FILE_CONTENT");
   expect(view.memory.surface).toBe("response");
 });
@@ -1534,7 +1534,7 @@ test("read batches compress while changes, checks, pending, denied and unknown r
   ui.toolRequested({ toolCallId: "edit", name: "edit_file", arguments: { path: "parser.ts", oldText: "before", newText: "after" } });
   ui.toolFinished({ toolCallId: "edit", name: "edit_file", state: "done" });
   ui.toolRequested({ toolCallId: "pending", name: "run_command", arguments: { argv: ["check-pending"] } });
-  expect(screen()).toContain("Read 2 files");
+  expect(screen()).toContain("Explored · 2 reads");
   expect(screen()).toContain("Edit parser.ts");
   expect(screen()).toContain("check-pending");
   ui.toolWaiting("pending", true);
@@ -1623,7 +1623,7 @@ test("a reading anchor follows a running tool into a confirmed batch", () => {
   const bodyRow = (view as any).regions.find((region: { target: string }) => region.target === "flow").row;
   expect(screen().split("\n")[bodyRow]).toContain("file-1.ts");
   ui.toolFinished({ toolCallId: "read-1", name: "read_file", state: "done" });
-  expect(screen().split("\n")[bodyRow]).toContain("Read 2 files");
+  expect(screen().split("\n")[bodyRow]).toContain("Explored · 2 reads");
   expect(view.memory.followFlow).toBe(false);
 });
 
@@ -1756,4 +1756,27 @@ test("editing a restored draft away removes its label, and ordinary prompts neve
   void plain.readPrompt({ history: [], mentions: [], commands: [] });
   plainState.onKeypress("typed by hand", {});
   expect(plainScreen()).not.toContain("Restored");
+});
+
+test("thinking between routine reads folds into one Explored row that still expands to every thought", () => {
+  const { ui, state, screen } = fixture();
+  ui.beginTurn({ userText: "Map the entry points", at: "now" });
+  for (const [index, path] of ["README.md", "package.json", "src/main.ts"].entries()) {
+    ui.reasoningDelta(`Thought ${index}`);
+    ui.toolRequested({ toolCallId: `read-${index}`, name: "read_file", arguments: { path } });
+    ui.toolFinished({ toolCallId: `read-${index}`, name: "read_file", state: "done" });
+  }
+  ui.assistantDelta("Mapped.");
+  ui.finishTurn("completed", "Done");
+  const collapsed = screen(120, 36);
+  expect(collapsed.match(/Explored · 3 reads/g)).toHaveLength(1);
+  expect(collapsed).toContain("thought");
+  // Only the thinking before the first read stays outside the group.
+  expect(collapsed.match(/◇ Thought/g)).toHaveLength(1);
+  const rows = collapsed.split("\n");
+  const row = rows.findIndex((line) => line.includes("Explored"));
+  state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("Explored") });
+  const expanded = screen(120, 36);
+  expect(expanded.match(/◇ Thought/g)).toHaveLength(3);
+  for (const path of ["README.md", "package.json", "src/main.ts"]) expect(expanded).toContain(path);
 });

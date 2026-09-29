@@ -258,7 +258,7 @@ test("verification and failure links open the relevant recorded output directly"
 
 test("empty sessions show a starting prompt and session feedback", () => {
   const { ui, screen } = fixture();
-  expect(screen()).toContain("WHAT WOULD YOU LIKE TO WORK ON?");
+  expect(screen()).toContain("What are we working on?");
   ui.notice("Connection established");
   expect(screen()).toContain("Connection established");
 });

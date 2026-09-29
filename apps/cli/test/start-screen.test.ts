@@ -43,7 +43,7 @@ test("operation cards fill and focus an undoable draft without submitting; expli
   void prompt.then(() => { submitted = true; });
   state.onKeypress("My existing draft", {});
   for (const operation of START_OPERATIONS) {
-    screen(); click(operation.tag);
+    screen(); click(operation.label);
     await Promise.resolve();
     expect(submitted).toBe(false);
     expect(state.editor.value).toBe(operation.prompt);
@@ -52,7 +52,7 @@ test("operation cards fill and focus an undoable draft without submitting; expli
     state.onData("\x1f");
     expect(state.editor.value).toBe("My existing draft");
   }
-  screen(); click("EXPLORE");
+  screen(); click("Explore");
   screen(); click("SEND ↵");
   const value = await prompt;
   expect(value).toBe(START_OPERATIONS[0].prompt);
@@ -66,7 +66,7 @@ test("operation cards fill and focus an undoable draft without submitting; expli
   ui.assistantDelta("The request enters through main.");
   ui.finishTurn("completed", "Complete");
   expect(screen()).toContain("The request enters through main.");
-  expect(screen()).not.toContain("WHAT WOULD YOU LIKE");
+  expect(screen()).not.toContain("What are we working on?");
 });
 
 test("start controls support keyboard browsing while caret edits, multiline input and completions retain their routing", async () => {
@@ -122,11 +122,11 @@ test("settings, context and the rail return to the hero without losing the draft
   screen(); click("Tab settings");
   expect(screen()).toContain("Settings");
   key("escape"); await Promise.resolve();
-  expect(screen()).toContain("WHAT WOULD YOU LIKE");
+  expect(screen()).toContain("What are we working on?");
   click("ctx —/100k");
   expect(screen()).toContain("CONTEXT PLAN");
   key("escape");
-  expect(screen()).toContain("WHAT WOULD YOU LIKE");
+  expect(screen()).toContain("What are we working on?");
   screen(); click("≡");
   await Promise.resolve();
   expect(screen()).toContain("FILES");
@@ -134,7 +134,7 @@ test("settings, context and the rail return to the hero without losing the draft
   screen();
   expect(state.editor.value).toBe("Retain me");
   key("r", { ctrl: true });
-  screen(); click("EXPLORE");
+  screen(); click("Explore");
   expect(state.editor.search).toBeNull();
   expect(state.editor.value).toBe(START_OPERATIONS[0].prompt);
   key("return");
@@ -142,7 +142,7 @@ test("settings, context and the rail return to the hero without losing the draft
   ui.beginTurn({ userText: START_OPERATIONS[0].prompt, at });
   ui.finishTurn("failed", "Provider unavailable");
   void read();
-  expect(screen()).not.toContain("WHAT WOULD YOU LIKE");
+  expect(screen()).not.toContain("What are we working on?");
   expect(screen()).toContain("Provider unavailable");
 });
 
@@ -187,11 +187,11 @@ test("hover and focus change emphasis without moving hero controls; reduced moti
   process.env.DEMESNE_REDUCED_MOTION = "1";
   try {
     const rows = screen().split("\n");
-    const row = rows.findIndex((line) => line.includes("EXPLORE"));
-    const column = rows[row]!.indexOf("EXPLORE");
+    const row = rows.findIndex((line) => line.includes("Explore"));
+    const column = rows[row]!.indexOf("Explore");
     const input = { ...state.layout.input };
     state.handleMouse({ kind: "move", row, col: column });
-    expect(screen()).toContain("↑ FILL PROMPT");
+    expect(screen()).toContain("fill ↑");
     expect(state.layout.input).toEqual(input);
     state.onData("\x1b[O");
     expect(ui.frame(120, 36).cursor).toBeNull();

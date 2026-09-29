@@ -1,11 +1,10 @@
-import { computePromptVisualLines, formatTokenCount, layoutCommandMenu, sanitizeTerminalLine, truncateText, visibleLength, type Painter, type SlashCommandSection } from "@demesne/brand";
-import { mentionMatches, mentionTokenAt, reverseSearchMatches, type PromptEditorState } from "../prompt-editor.ts";
+import { computePromptVisualLines, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, type Painter } from "@demesne/brand";
+import { mentionTokenAt, reverseSearchMatches, type PromptEditorState } from "../prompt-editor.ts";
 import { Canvas } from "./canvas.ts";
 import type { ContextReceipt } from "./entries.ts";
 import { thinkingDots, tint } from "./interaction.ts";
 
 type ComposerAction = { kind: "submit" | "stop" | "clear" }
-  | { kind: "mention"; index: number }
   | { kind: "remove"; start: number; length: number }
   | { kind: "caret"; start: number; text: string };
 export interface ComposerZone { row: number; column: number; width: number; action: ComposerAction }
@@ -20,27 +19,14 @@ function hasDraftLabel(options: ComposerOptions): boolean {
   if (!options.editor.value.trim()) return false;
   return options.streaming || (Boolean(options.restored) && !options.hero);
 }
-/// Mention rows, sharing the brand layout so the prompt renderer and any line
-/// map can never disagree about what is on the screen.
-interface ComposerRow {
-  label: string;
-  index: number;
-  kind: "mention";
-  /// Mentions carry no section; the field satisfies the shared menu layout's
-  /// row constraint and stays undefined so no labels are drawn.
-  section?: SlashCommandSection;
-}
-function completions(options: ComposerOptions): ComposerRow[] {
-  if (options.streaming || options.editor.search) return [];
-  const token = mentionTokenAt(options.editor.value, options.editor.cursor);
-  const mentions = token ? mentionMatches(options.mentions, token.query) : [];
-  return mentions.map((label, index) => ({ label: `@${label}`, index, kind: "mention" as const }));
+function attachments(editor: PromptEditorState): RegExpMatchArray[] {
+  const active = mentionTokenAt(editor.value, editor.cursor);
+  return [...editor.value.matchAll(/(?:^|\s)(@[^\s]+)/g)].filter(match => match.index! + match[0].indexOf(match[1]!) !== active?.start);
 }
 export function composerHeight(options: ComposerOptions): number {
   if (options.editor.search) return 4;
   const lines = computePromptVisualLines(options.editor.value, options.editor.cursor, Math.max(8, options.width - (options.width >= 65 ? 18 : 16))).lines.length;
-  const rows = layoutCommandMenu(completions(options), Number.POSITIVE_INFINITY).length;
-  return (options.hero ? 2 : 4) + Math.max(options.hero ? 1 : 2, Math.min(6, lines)) + Math.min(5, rows) + (/\B@\S+/.test(options.editor.value) ? 1 : 0)
+  return (options.hero ? 2 : 4) + Math.max(options.hero ? 1 : 2, Math.min(6, lines)) + (attachments(options.editor).length ? 1 : 0)
     + (hasDraftLabel(options) ? 1 : 0);
 }
 
@@ -120,12 +106,9 @@ export function composeDraft(options: ComposerOptions & { height: number; paint:
     canvas.put(hintsRow, inset, styledHint, hintWidth, "surface");
   }
   const room = Math.max(1, (options.hero ? height - 1 : hintsRow) - firstRow);
-  const menu = completions(options);
-  const selected = editor.mentionSelected;
-  const rows = layoutCommandMenu(menu, Math.max(0, room - 1), selected);
-  const attachments = [...editor.value.matchAll(/(?:^|\s)(@[^\s]+)/g)];
-  const showAttachments = attachments.length > 0 && room - rows.length > 1;
-  const promptCapacity = Math.max(1, room - rows.length - (showAttachments ? 1 : 0));
+  const attached = attachments(editor);
+  const showAttachments = attached.length > 0 && room > 1;
+  const promptCapacity = Math.max(1, room - (showAttachments ? 1 : 0));
   const visual = computePromptVisualLines(editor.value, editor.cursor, textWidth);
   const start = Math.max(0, visual.cursorLine - promptCapacity + 1);
   let cursor = { row: firstRow + visual.cursorLine - start, column: Math.min(textColumn + textWidth - 1, textColumn + visual.cursorCol) };
@@ -142,7 +125,7 @@ export function composeDraft(options: ComposerOptions & { height: number; paint:
   let row = firstRow + Math.min(promptCapacity, visual.lines.length);
   if (showAttachments) {
     let text = "";
-    for (const match of attachments) {
+    for (const match of attached) {
       const label = ` ${match[1]} × `;
       if (visibleLength(text) + visibleLength(label) > textWidth) break;
       zones.push({ row, column: textColumn + visibleLength(text), width: visibleLength(label), action: { kind: "remove", start: match.index! + match[0].indexOf(match[1]!), length: match[1]!.length } });
@@ -150,27 +133,6 @@ export function composeDraft(options: ComposerOptions & { height: number; paint:
     }
     put(row++, text);
   }
-  // Mention rows: the label stays quiet, the selection is a surface not a
-  // glyph, and a `…` row marks mentions hidden outside the window.
-  let menuRow = row;
-  for (const entry of rows) {
-    if (entry.kind === "more") {
-      put(menuRow, paint.dim("  …"));
-    } else {
-      const item = menu[entry.index]!;
-      const label = truncateText(item.label, textWidth - 2);
-      // File name first, folder dimmed; the selection is a quiet wash with an
-      // accent edge, matching the slash menu and chooser.
-      const slash = label.lastIndexOf("/") + 1;
-      const styled = paint.text(label.slice(0, slash), "muted") + paint.text(label.slice(slash), entry.index === selected ? "electric" : "paper");
-      put(menuRow, entry.index === selected
-        ? paint.text("▎", "electric") + paint.wash(" ", "menuSelection") + paint.wash(styled + " ".repeat(Math.max(0, textWidth - 2 - visibleLength(label))), "menuSelection")
-        : `  ${styled}`);
-      zones.push({ row: menuRow, column: textColumn, width: textWidth, action: { kind: "mention", index: entry.index } });
-    }
-    menuRow += 1;
-  }
-  row = menuRow;
   if (editor.search) {
     const matches = reverseSearchMatches(options.history, editor.search.query);
     const selected = matches[Math.min(editor.search.index, Math.max(0, matches.length - 1))];

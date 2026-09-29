@@ -345,7 +345,7 @@ async function readCommandPrompt(
 
       const trailingContent: string[] = [];
       const mention = mentionTokenAt(state.value, state.cursor);
-      const mentionCandidates = mention && mentions.length > 0 ? mentionMatches(mentions, mention.query) : [];
+      const mentionCandidates = !state.mentionDismissed && mention && mentions.length > 0 ? mentionMatches(mentions, mention.query) : [];
       if (mentionCandidates.length > 0 && searchLine === null) {
         state.mentionSelected = Math.min(state.mentionSelected, mentionCandidates.length - 1);
         trailingContent.push(...formatMentionMenu(

@@ -230,3 +230,22 @@ test("recent sessions hydrate only two unarchived records in recency order and r
   newest.latestProviderCall.usage!.inputTokens = null;
   expect(recentSession(newest).context?.used).toBeNull();
 });
+
+test("tall terminals list recent sessions with status and turns, and leave unknown counts out", () => {
+  const { ui, screen } = fixture();
+  ui.setRecentSessions([
+    { ...recentSession(saved("current")), turns: 4, lastStatus: "completed" as const },
+    { id: "failed", title: "Failed work", updatedAt: at, turns: 1, lastStatus: "failed" as const },
+    { id: "unknown", title: "Listed only", updatedAt: at },
+  ]);
+  const rows = screen(120, 36).split("\n");
+  const current = rows.find((line) => line.includes("Saved current"))!;
+  expect(current).toContain("✓");
+  expect(current).toContain("4 turns");
+  expect(current).toContain("current");
+  expect(rows.find((line) => line.includes("Failed work"))).toContain("× ");
+  expect(rows.find((line) => line.includes("Failed work"))).toContain("1 turn ·");
+  expect(rows.find((line) => line.includes("Listed only"))).not.toContain("turn");
+  // A short terminal keeps the one-line strip.
+  expect(screen(120, 20).split("\n").filter((line) => line.includes("Saved current"))).toHaveLength(1);
+});

@@ -9,13 +9,13 @@ import { contextLabel } from "./session-chrome.ts";
 import { sessionHeader } from "./session-header.ts";
 
 export const START_OPERATIONS = [
-  { tag: "EXPLORE", title: "Trace a call flow", description: "Follow execution from entry point through the full stack", tone: "electric",
+  { tag: "EXPLORE", label: "Explore", title: "Trace a call flow", description: "Follow execution from entry point through the full stack", tone: "electric",
     prompt: "Trace the call flow from the main entry point and map out how requests move through the system." },
-  { tag: "DEBUG", title: "Find and fix a bug", description: "Diagnose an error or unexpected behavior and patch it", tone: "signal",
+  { tag: "DEBUG", label: "Debug", title: "Find and fix a bug", description: "Diagnose an error or unexpected behavior and patch it", tone: "signal",
     prompt: "Help me diagnose and fix a bug. Ask me about the error or unexpected behavior, then investigate and verify the fix." },
-  { tag: "BUILD", title: "Write a new feature", description: "Implement something new end-to-end with tests", tone: "citron",
+  { tag: "BUILD", label: "Build", title: "Write a new feature", description: "Implement something new end-to-end with tests", tone: "citron",
     prompt: "Help me implement a new feature end-to-end. Ask what I want to build, then inspect the project and add the appropriate verification." },
-  { tag: "LEARN", title: "Explain this codebase", description: "Get a map of the architecture and key entry points", tone: "thinking",
+  { tag: "LEARN", label: "Learn", title: "Explain this codebase", description: "Get a map of the architecture and key entry points", tone: "thinking",
     prompt: "Explain this codebase: map the architecture, key entry points, and how its main components work together." },
 ] as const;
 
@@ -36,15 +36,14 @@ export function startScreenLayout(width: number, height: number, requestedHeight
   const recent = { row: height - recentHeight, column: 0, width, height: recentHeight };
   const available = recent.row - header - Number(feedback);
   const inputHeight = Math.min(Math.max(height >= 18 ? 5 : 3, requestedHeight), Math.max(3, available - 3));
-  const columns = contentWidth >= 92 ? 4 : 2;
-  const cardWidth = Math.floor((contentWidth - columns + 1) / columns);
-  const titleLines = Math.max(...START_OPERATIONS.map((operation) => wrapDisplayText(operation.title, cardWidth - 4).length));
+  // The redesign's "Start from" grid: one line per operation, two columns
+  // where they fit, with a small section label when there is room for it.
+  const columns = contentWidth >= 64 ? 2 : 1;
+  const operationRows = START_OPERATIONS.length / columns;
   const remaining = available - inputHeight - 3;
-  const minimumCards = (titleLines + 4) * (4 / columns);
-  const cardOffset = remaining >= minimumCards + 2 ? 2 : remaining >= minimumCards + 1 ? 1 : 0;
-  const fittedHeight = Math.min(10, Math.floor((remaining - cardOffset) / (4 / columns)));
-  const cardHeight = fittedHeight >= titleLines + 4 ? fittedHeight : 0;
-  const operationHeight = cardHeight ? cardOffset + cardHeight * (4 / columns) : remaining >= 1 ? 1 : 0;
+  const cardHeight = remaining >= operationRows ? 1 : 0;
+  const cardOffset = cardHeight && remaining >= operationRows + 2 ? 2 : cardHeight && remaining >= operationRows + 1 ? 1 : 0;
+  const operationHeight = cardHeight ? cardOffset + operationRows : remaining >= 1 ? 1 : 0;
   const groupHeight = inputHeight + 3 + operationHeight;
   const top = header + Math.max(0, Math.floor((available - groupHeight) / 2));
   const input = { row: top + 1, column, width: contentWidth, height: inputHeight };
@@ -120,7 +119,7 @@ export class StartScreen {
 
     const { input } = layout;
     const navigation = options.focused ? "←/→ select · Enter fill · Esc draft" : "Ctrl+T operations · Alt+H history";
-    put(layout.label, input.column, formatFooterLine(paint.text("WHAT WOULD YOU LIKE TO WORK ON?", "secondary"),
+    put(layout.label, input.column, formatFooterLine(paint.bold("What are we working on?", "paper"),
       input.width >= 68 ? paint.text(navigation, "muted") : "", input.width), input.width);
     options.input.forEach((line, index) => put(input.row + index, input.column, line, input.width, "surface"));
     const context = `ctx ${contextLabel(options.context)}`;
@@ -149,42 +148,33 @@ export class StartScreen {
 
     const ops = layout.operations;
     if (layout.cardHeight) {
-      if (layout.cardOffset) {
-        const leftRule = Math.floor((ops.width - 12) / 2);
-        put(ops.row, ops.column, paint.text(`${"─".repeat(leftRule)} OPERATIONS ${"─".repeat(ops.width - leftRule - 12)}`, "muted"), ops.width);
-      }
-      const gap = 1;
-      const cardWidth = Math.floor((ops.width - (layout.columns - 1) * gap) / layout.columns);
-      const titleLines = Math.max(...START_OPERATIONS.map((operation) => wrapDisplayText(operation.title, cardWidth - 4).length));
+      if (layout.cardOffset) put(ops.row + layout.cardOffset - 1, ops.column, paint.text("START FROM", "muted"), ops.width);
+      const gap = 2;
+      const cellWidth = Math.floor((ops.width - (layout.columns - 1) * gap) / layout.columns);
       START_OPERATIONS.forEach((operation, index) => {
-        const row = ops.row + layout.cardOffset + Math.floor(index / layout.columns) * layout.cardHeight;
-        const column = ops.column + (index % layout.columns) * (cardWidth + gap);
+        const row = ops.row + layout.cardOffset + Math.floor(index / layout.columns);
+        const column = ops.column + (index % layout.columns) * (cellWidth + gap);
         const active = emphasis(`operation:${index}`);
         const tone = operation.tone as PaletteColor;
+        const selected = options.focused && this.selected === `operation:${index}`;
         const background = active >= 0.5 ? "raised" : "surface";
-        const size = cardWidth - 4;
-        for (let y = row + 1; y < row + layout.cardHeight - 1; y++) {
-          put(y, column, tint(paint, "│", "rule", tone, active), 1, background);
-          put(y, column + 1, "", cardWidth - 2, background);
-          put(y, column + cardWidth - 1, tint(paint, "│", "rule", tone, active), 1, background);
-        }
-        put(row, column, tint(paint, `┌${"─".repeat(cardWidth - 2)}┐`, "rule", tone, 0.4 + active * 0.6), cardWidth, background);
-        put(row + 1, column + 2, formatFooterLine(tint(paint, `${options.focused && this.selected === `operation:${index}` ? "›" : "0"}${index + 1}`, "muted", tone, active), paint.text(operation.tag, tone), size), size, background);
-        const title = wrapDisplayText(operation.title, size);
-        title.forEach((text, line) => put(row + 2 + line, column + 2, paint.text(text, "paper"), size, background));
-        const descriptionLines = layout.cardHeight - titleLines - 4;
-        wrapDisplayText(operation.description, size).slice(0, descriptionLines).forEach((text, line) => put(row + 2 + titleLines + line, column + 2, paint.text(text, "muted"), size, background));
-        const footer = active > 0 ? "↑ FILL PROMPT" : "RUN ↵";
-        put(row + layout.cardHeight - 2, column + 1, tint(paint, truncateText(footer, cardWidth - 3).padStart(cardWidth - 3), "muted", tone, active), cardWidth - 2, background);
-        put(row + layout.cardHeight - 1, column, tint(paint, `└${"─".repeat(cardWidth - 2)}┘`, "rule", tone, active), cardWidth, background);
-        zone({ row, column, width: cardWidth, height: layout.cardHeight }, { kind: "operation", index });
+        const number = tint(paint, `${selected ? "›" : " "}${index + 1}`, "muted", tone, active);
+        const name = active >= 0.5 ? paint.bold(operation.label, "paper") : paint.text(operation.label, "paper");
+        // Hover says what a click does: it fills the prompt, never sends.
+        const hint = active >= 0.5 && cellWidth >= 30 ? "fill ↑" : "";
+        const room = cellWidth - 4 - operation.label.length - 3 - (hint ? hint.length + 2 : 0);
+        const title = room >= 8 ? "  " + paint.text(truncateText(operation.title, room), "muted") : "";
+        put(row, column, "", cellWidth, background);
+        put(row, column + 1, `${number}  ${name}${title}`, cellWidth - 1, background);
+        if (hint) put(row, column + cellWidth - hint.length - 1, tint(paint, hint, "muted", tone, active), hint.length, background);
+        zone({ row, column, width: cellWidth, height: 1 }, { kind: "operation", index });
       });
     } else if (ops.height) {
       let column = ops.column;
       for (const [index, operation] of START_OPERATIONS.entries()) {
         const selected = options.focused && this.selected === `operation:${index}`;
-        const label = `${selected ? "›" : ""}${operation.tag}`;
-        const width = operation.tag.length + 2;
+        const label = `${selected ? "›" : ""}${operation.label}`;
+        const width = operation.label.length + 2;
         put(ops.row, column, tint(paint, label, "secondary", operation.tone, 0.4 + emphasis(`operation:${index}`) * 0.6), width);
         zone({ row: ops.row, column, width, height: 1 }, { kind: "operation", index });
         column += width;

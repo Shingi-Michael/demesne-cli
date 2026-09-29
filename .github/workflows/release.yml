@@ -29,6 +29,8 @@ jobs:
       # See ci.yml: the agent benchmark fixtures run `bun test` through
       # run_command, whose fixed PATH does not include ~/.bun/bin.
       - run: sudo mkdir -p /usr/local/bin && sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
+      # The tools tests exercise search_files with and without ripgrep.
+      - run: command -v rg || brew install ripgrep
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test

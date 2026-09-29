@@ -146,6 +146,9 @@ export class DemesneStore {
     this.eventSink = eventSink;
     this.database.run("PRAGMA journal_mode = WAL");
     this.database.run("PRAGMA foreign_keys = ON");
+    // SQLite's default, stated explicitly: some builds (macOS's system SQLite)
+    // enable legacy renames, which would hide platform differences in migrations.
+    this.database.run("PRAGMA legacy_alter_table = OFF");
     if (filename !== ":memory:") {
       for (const path of [filename, `${filename}-wal`, `${filename}-shm`]) {
         if (existsSync(path)) chmodSync(path, 0o600);
@@ -1532,6 +1535,10 @@ export class DemesneStore {
     const hasPermissionMode = this.hasColumn("turns", "permission_mode");
     const hasThinkingEnabled = this.hasColumn("turns", "thinking_enabled");
     this.database.run("PRAGMA foreign_keys = OFF");
+    // Renaming `turns` must not rewrite other tables' references to it:
+    // provider_calls and events keep pointing at "turns", which is rebuilt
+    // below, instead of following the rename to the dropped turns_legacy.
+    this.database.run("PRAGMA legacy_alter_table = ON");
     try {
       this.database.transaction(() => {
         this.database.run(`
@@ -1570,6 +1577,7 @@ export class DemesneStore {
         `);
       })();
     } finally {
+      this.database.run("PRAGMA legacy_alter_table = OFF");
       this.database.run("PRAGMA foreign_keys = ON");
     }
   }

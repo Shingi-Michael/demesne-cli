@@ -26,6 +26,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
+      # See ci.yml: the agent benchmark fixtures run `bun test` through
+      # run_command, whose fixed PATH does not include ~/.bun/bin.
+      - run: sudo mkdir -p /usr/local/bin && sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test

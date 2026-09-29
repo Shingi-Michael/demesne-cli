@@ -346,7 +346,8 @@ describe("built-in tools", () => {
   test("git_status and git_diff report repository state read-only", async () => {
     const root = workspace();
     const run = (args: string[]) => Bun.spawnSync(["git", ...args], { cwd: root, stdout: "pipe", stderr: "pipe" });
-    run(["init", "-q"]);
+    // Name the branch explicitly: a machine without init.defaultBranch uses "master".
+    run(["init", "-q", "-b", "main"]);
     run(["-c", "user.email=t@local", "-c", "user.name=t", "commit", "--allow-empty", "-q", "-m", "base"]);
     writeFileSync(join(root, "tracked.txt"), "hello\n");
     run(["add", "."]);
@@ -379,7 +380,8 @@ describe("built-in tools", () => {
   test("git tools disable repository-controlled executors", async () => {
     const root = workspace();
     const run = (args: string[]) => Bun.spawnSync(["git", ...args], { cwd: root, stdout: "pipe", stderr: "pipe" });
-    run(["init", "-q"]);
+    // Name the branch explicitly: a machine without init.defaultBranch uses "master".
+    run(["init", "-q", "-b", "main"]);
     run(["-c", "user.email=t@local", "-c", "user.name=t", "commit", "--allow-empty", "-q", "-m", "base"]);
     const marker = join(root, "executed");
     const helper = join(root, "helper.sh");

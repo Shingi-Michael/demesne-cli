@@ -401,13 +401,10 @@ function searchFilesTool(): AgentTool {
         }
       }
 
+      // One match beyond the limit is collected so `truncated` reports whether
+      // more matches exist, rather than whether the walk visited another file.
       const matches: string[] = [];
-      let truncated = false;
       walkFiles(start, context.workspaceRoot, context.signal, (absolute, relativePath) => {
-        if (matches.length >= limit) {
-          truncated = true;
-          return;
-        }
         if (pattern && !pattern.test(relativePath)) return;
         const stat = statSync(absolute);
         if (stat.size > 8 * 1024 * 1024) return;
@@ -422,11 +419,11 @@ function searchFilesTool(): AgentTool {
         for (const [index, line] of text.split("\n").entries()) {
           if (line.toLocaleLowerCase("en-US").includes(query.toLocaleLowerCase("en-US"))) {
             matches.push(`${relativePath}:${index + 1}:${line.slice(0, 2000)}`);
-            if (matches.length >= limit) return;
+            if (matches.length > limit) return;
           }
         }
-      }, limit * 4, () => matches.length >= limit);
-      return JSON.stringify({ matches, truncated });
+      }, limit * 4, () => matches.length > limit);
+      return JSON.stringify({ matches: matches.slice(0, limit), truncated: matches.length > limit });
     },
   };
 }

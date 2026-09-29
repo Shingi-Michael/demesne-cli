@@ -40,7 +40,8 @@ test("a 131072-token budget survives over 20000 stream events and a million reas
   expect(events.find((event) => event.type === "model.request_started")?.payload.contextPlan).toMatchObject({
     reserves: { outputTokens: 131072 },
   });
-}, 30000);
+  // ~1.3 s locally; a slow CI runner has taken 37 s, so allow generous room.
+}, 90_000);
 
 test.each([
   { output: 131072, timeout: undefined, status: "turn.completed" },

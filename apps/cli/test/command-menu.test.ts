@@ -83,6 +83,8 @@ test("wheel, keyboard and clicks address visible commands without reaching contr
   expect(await result).toBe("/help");
 });
 
+// Renders the menu across many sizes, themes and layouts: ~3 s locally,
+// past bun's 5 s default on slower CI runners.
 test("every custom command stays reachable and selected through resizing, themes, hero and panel layouts", () => {
   const commands: SlashCommand[] = [...SLASH_COMMANDS, ...Array.from({ length: 26 }, (_, i): SlashCommand => ({
     id: `custom:${i}`, name: `/custom-${i}`, section: "session", argument: "optional", aliases: [], description: `Inspect 界 ${i}`,
@@ -117,4 +119,4 @@ test("every custom command stays reachable and selected through resizing, themes
       expect(state.commandMenuFrame.rect.width).toBeLessThan(150);
     }
   }
-});
+}, 30_000);

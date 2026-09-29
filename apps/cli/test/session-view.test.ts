@@ -929,14 +929,14 @@ test("context capacity and project path stay visible in narrow frames and open d
   expect(screen()).toContain("100k token capacity");
   expect(state.editor.value).toBe("preserve this draft");
   key("escape");
-  // The session-line path and prompt-side context remain live mouse targets.
-  const heading = screen().split("\n")[1]!;
-  state.handleMouse({ kind: "press", button: 0, row: 1, col: heading.indexOf("/project") });
+  // The workspace header and top-strip context remain live mouse targets.
+  const headingRows = screen().split("\n"), headingRow = headingRows.findIndex(line => line.includes("/project"));
+  state.handleMouse({ kind: "press", button: 0, row: headingRow, col: headingRows[headingRow]!.indexOf("/project") });
   expect(screen()).toContain("PROJECT FOLDER");
   expect(screen()).toContain("/project");
   key("escape");
-  const context = state.mouseZones.find((zone: { row: number }) => zone.row === state.layout.height - 1);
-  state.handleMouse({ kind: "press", button: 0, row: context.row, col: context.column });
+  const contextRows = screen().split("\n"), contextRow = contextRows.findIndex(line => line.includes("ctx —/100k"));
+  state.handleMouse({ kind: "press", button: 0, row: contextRow, col: contextRows[contextRow]!.indexOf("ctx —/100k") });
   expect(screen()).toMatch(/CONTEXT\s+×/);
   key("escape");
   key("return");

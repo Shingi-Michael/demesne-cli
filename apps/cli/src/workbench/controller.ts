@@ -1358,8 +1358,8 @@ export class Workbench {
       sidebar: !this.sessionLayout && (this.chatView || this.transcriptView) ? "auto" : "hidden",
       inputLines: this.inputLineCount(this.sessionLayout ? panel.conversationWidth : width),
     });
-    this.startLayout = this.showingStart ? startScreenLayout(panel.conversationWidth, this.layout.height,
-      this.inputLineCount(Math.min(96, panel.conversationWidth - (panel.conversationWidth >= 65 ? 4 : 2))), Boolean(this.feedback)) : null;
+    this.startLayout = this.showingStart ? startScreenLayout(this.layout.width, this.layout.height,
+      this.inputLineCount(Math.min(86, this.layout.width - (this.layout.width >= 65 ? 4 : 2))), Boolean(this.feedback)) : null;
     if (this.startLayout) {
       this.layout.input = this.startLayout.input;
     } else if (this.sessionLayout && this.mode === "dialog") {
@@ -1375,10 +1375,10 @@ export class Workbench {
     const frame = this.composeFrame();
     this.commandMenuFrame = this.sessionLayout && this.mode === "input" && !this.editor.search
       ? this.commandMenu.render({ commands: this.matchingCommands(), selected: this.editor.menuSelected, query: this.editor.value,
-        input: this.layout.input, paint: this.options.paint, top: this.startLayout ? 0 : 2 }) : null;
+        input: this.layout.input, paint: this.options.paint, top: this.startLayout ? 1 : 2 }) : null;
     this.mentionMenuFrame = this.sessionLayout && this.mode === "input" && !this.commandMenuFrame
       ? this.mentionMenu.render({ files: this.matchingMentions(), selected: this.editor.mentionSelected,
-        query: mentionTokenAt(this.editor.value, this.editor.cursor)?.query ?? "", input: this.layout.input, paint: this.options.paint, top: this.startLayout ? 0 : 2 }) : null;
+        query: mentionTokenAt(this.editor.value, this.editor.cursor)?.query ?? "", input: this.layout.input, paint: this.options.paint, top: this.startLayout ? 1 : 2 }) : null;
     if (!this.commandMenuFrame) this.commandMenu.reset();
     if (!this.mentionMenuFrame) this.mentionMenu.reset();
     const menu = this.mentionMenuFrame ?? this.commandMenuFrame;
@@ -1841,26 +1841,19 @@ export class Workbench {
   private composeStartFrame(): { rows: string[]; cursor: { row: number; column: number } | null } {
     const layout = this.startLayout!;
     const { paint, contextRail: rail } = this.options;
-    const geometry = sessionPanelLayout(this.layout.width, false);
     const input = this.composeInput(layout.input.width);
-    const result = this.startScreen.render({ width: geometry.conversationWidth, height: this.layout.height, layout, paint,
+    const result = this.startScreen.render({ width: this.layout.width, height: this.layout.height, layout, paint,
       now: Date.now(), openedAt: this.sessionOpenedAt, createdAt: this.sessionCreatedAt, animate: this.started && paint.enabled && !reducedMotionEnabled(), focused: this.sessionView.focused,
-      path: shortenPath(this.options.workspaceRoot ?? rail.workspacePath), model: rail.modelId, context: rail.contextSnapshot,
+      path: shortenPath(this.options.workspaceRoot ?? rail.workspacePath), branch: rail.workspaceBranch, model: rail.modelId, mode: this.planMode ? "Plan" : "Build", context: rail.contextSnapshot,
       currentId: this.sessionId, recent: this.recentSessions, recentState: this.recentState, feedback: this.feedback, input: input.lines });
     const canvas = new Canvas(this.layout.width, this.layout.height, paint);
-    result.rows.forEach((text, row) => canvas.put(row, 0, text, geometry.conversationWidth));
+    result.rows.forEach((text, row) => canvas.put(row, 0, text, this.layout.width));
     this.mouseZones = result.zones.flatMap((zone) => Array.from({ length: zone.height }, (_, index) => ({ row: zone.row + index,
       column: zone.column, width: zone.width, run: () => this.actStart(zone.action) })));
     for (const zone of input.zones) this.mouseZones.push({ row: layout.input.row + 1 + zone.row,
       column: layout.input.column + (zone.column ?? 0), width: zone.width,
       run: (column) => zone.run(column === undefined ? undefined : column - layout.input.column) });
-    const railColumn = geometry.conversationWidth;
-    const markColumn = railColumn + Math.floor((geometry.panelWidth + 1) / 2);
-    for (let row = 0; row < this.layout.height; row++) {
-      canvas.put(row, railColumn, "", geometry.panelWidth, "surface");
-      canvas.put(row, railColumn, paint.text("│", "rule"), 1, "surface");
-    }
-    this.drawSidebarRail(canvas, railColumn, geometry.panelWidth);
+    this.railZones = [];
     return { rows: canvas.rows, cursor: this.terminalFocused && !this.sessionView.focused && input.cursor
       ? { row: layout.input.row + input.cursor.row, column: layout.input.column + input.cursor.column } : null };
   }
@@ -2067,6 +2060,8 @@ export class Workbench {
       return { lines: result.lines, cursor: result.cursor, zones: result.zones.map((zone) => ({ ...zone, row: zone.row - 1, run: (column?: number) => {
         const action = zone.action;
         if (action.kind === "submit") this.dispatchEditorKey({ name: "return" });
+        else if (action.kind === "newline") this.dispatchEditorKey({ name: "return", shift: true });
+        else if (action.kind === "commands" || action.kind === "files") this.actStart({ kind: action.kind });
         else if (action.kind === "stop") this.options.onInterrupt();
         else if (action.kind === "clear") {
           if (streaming) { this.options.queue.set(""); this.queuedEditor = createPromptEditorState(); }

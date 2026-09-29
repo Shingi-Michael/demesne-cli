@@ -32,6 +32,11 @@ const ui = new Workbench({ paint, contextRail: rail, sessionTitle: "Unicode iden
   }, queue: { get: () => queue, set: (value) => { queue = value; } },
 });
 seedSession(ui, state);
+if (state === "start") ui.setRecentSessions([
+  { id: "preview-completed", title: "Unicode identifiers", updatedAt: new Date(Date.now() - 2 * 3600_000).toISOString(), turns: 12, lastStatus: "completed" },
+  { id: "preview-stopped", title: "Durable compaction", updatedAt: new Date(Date.now() - 24 * 3600_000).toISOString(), turns: 31, lastStatus: "interrupted" },
+  { id: "preview-failed", title: "Image preview panel", updatedAt: "2026-09-26T12:00:00Z", turns: 8, lastStatus: "failed" },
+]);
 ui.setFooter(" DEMO / no model connected", "");
 // Preview navigation uses production input routing, including its focus rules.
 const input = ui as unknown as { onKeypress(text: string, key: { name?: string; meta?: boolean; ctrl?: boolean }): void };

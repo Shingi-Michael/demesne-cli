@@ -2295,7 +2295,7 @@ process.stdin.on("data", (chunk) => {
         return [{ id: this.modelId, provider: this.providerId }];
       },
       async *stream() {
-        yield { type: "text_delta" as const, textDelta: "ok" };
+        yield { type: "text_delta" as const, delta: "ok" };
         yield { type: "usage" as const, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
       },
     };

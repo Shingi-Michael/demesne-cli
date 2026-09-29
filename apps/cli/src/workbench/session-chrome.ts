@@ -60,9 +60,10 @@ export function sessionStatus(options: {
   const { width, paint, state } = options;
   const working = state === "WORKING";
   const name = state === "COMPLETE" ? "READY" : state;
-  const label = name.toUpperCase();
+  const label = name.toLowerCase();
   const tone = state === "FAILED" || state === "APPROVAL" ? "signal" : state === "STOPPED" ? "secondary" : working ? "thinking" : "citron";
-  const mark = paint.text(state === "FAILED" ? "×" : state === "APPROVAL" ? "!" : state === "STOPPED" ? "■" : "✓", tone);
+  // A colored dot carries the state; the label keeps it readable without color.
+  const mark = paint.text("●", tone);
   const separator = paint.text(" · ", "borderBright");
   const percentage = contextPercentage(options.context);
   const context = paint.text("ctx ", "muted") + paint.text(contextLabel(options.context), contextTone(options.context));
@@ -70,9 +71,11 @@ export function sessionStatus(options: {
   const phase = !working && options.hasResponse && width < 45 && visibleLength(fullPhase + context) + 15 > width ? mark : fullPhase;
   let left = phase;
   const links: { text: string; action: "context" | "response-start" | "follow" }[] = [{ text: context, action: "context" }];
-  const live = width >= 55 ? "Ctrl+G LIVE ↓" : "Live ↓";
+  const live = width >= 55 ? "Ctrl+G live" : "live ↓";
   if (visibleLength(left + links.map((link) => link.text).join(separator)) + live.length + 5 <= width) links.push({ text: paint.text(live, "muted"), action: "follow" });
-  if (percentage !== null && visibleLength(left + links.map((link) => link.text).join(separator)) + 8 <= width) links[0]!.text += paint.text(` · ${percentage}%`, "muted");
+  const meter = contextMeter(options.context, paint);
+  if (meter && visibleLength(left + links.map((link) => link.text).join(separator)) + visibleLength(meter) + 4 <= width) links[0]!.text += ` ${meter}`;
+  else if (percentage !== null && visibleLength(left + links.map((link) => link.text).join(separator)) + 8 <= width) links[0]!.text += paint.text(` · ${percentage}%`, "muted");
   const right = links.map((link) => link.text).join(separator);
   const room = width - visibleLength(right) - 2;
   left = truncateText(left, Math.max(0, room));

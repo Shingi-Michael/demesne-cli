@@ -16,16 +16,12 @@ export function sidebarRail(width: number, height: number, paint: Painter, worki
   const zones = actions.map((action, index) => {
     const row = 3 + index * 2;
     const icon = ["≡", "╪", "▣", "▷"][index]!;
+    // Hover lifts the cell and brightens the icon; active Drive work stays amber.
     const active = action === hovered;
-    const label = active && width >= 5 ? `[${icon}]` : icon;
-    canvas.put(row, active && width >= 5 ? center - 1 : center,
-      paint.text(label, active ? "electric" : action === "drive" && drive === "active" ? "thinking" : "muted"), label.length, active ? "accentSurface" : "surface");
+    if (active) canvas.put(row, 1, "", width - 1, "raised");
+    canvas.put(row, center, paint.text(icon, active ? "paper" : action === "drive" && drive === "active" ? "thinking" : "muted"), 1, active ? "raised" : "surface");
     return { row: row - 1, height: 2, column: 1, width: width - 1, action };
   });
-  if (height >= (drive ? 19 : 17)) {
-    const top = (drive ? 11 : 9) + Math.floor((height - (drive ? 13 : 11) - 5) / 2);
-    for (const [index, letter] of [..."PANEL"].entries()) canvas.put(top + index, center, tint(paint, letter, "surface", "muted", 0.6), 1, "surface");
-  }
   canvas.put(height - 1, Math.max(1, center - 1), tint(paint, width >= 5 ? "[ ]" : "[]", "surface", "borderBright", 0.5), width - 1, "surface");
   return { rows: canvas.rows, zones };
 }

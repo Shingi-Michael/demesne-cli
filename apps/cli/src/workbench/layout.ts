@@ -36,12 +36,13 @@ export function workspaceInset(width: number): number {
 /// One text alignment for requests, thinking, responses, evidence, and drafts.
 export function conversationInset(_width: number): number { return 3; }
 
-/// The official design's 48px rail and 340px action panel, expressed in cells.
+/// The rail, and a docked panel at about 40% of the window as in the Figma
+/// frames (620 of 1480px), never narrower than 44 cells or wider than 84.
 /// Short terminals keep their editor available beneath a full-width panel.
 export function sessionPanelLayout(width: number, open: boolean): { conversationWidth: number; panelWidth: number; overlay: boolean } {
   const rail = width >= 65 ? 6 : 3;
   const docked = open && width >= 100;
-  const panelWidth = docked ? Math.min(44, Math.floor(width * 0.35)) : rail;
+  const panelWidth = docked ? Math.max(Math.min(44, Math.floor(width * 0.44)), Math.min(84, Math.floor(width * 0.4))) : rail;
   return { conversationWidth: width - panelWidth, panelWidth, overlay: open && !docked };
 }
 

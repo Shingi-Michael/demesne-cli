@@ -1896,7 +1896,7 @@ export class Workbench {
       const panelWidth = geometry.overlay ? width : geometry.panelWidth - 1;
       const column = geometry.overlay ? 0 : width + 1;
       const panel = this.sessionView.render({ ...renderOptions, width: panelWidth, height: geometry.overlay ? sessionHeight : layout.height,
-        panel: true, column, replace: geometry.overlay, contextLines: rail.lines(Math.max(16, panelWidth - 4), 1000, paint) });
+        panel: true, column, replace: geometry.overlay, model: rail.modelId, contextLines: rail.lines(Math.max(16, panelWidth - 4), 1000, paint) });
       if (geometry.overlay) this.drivePanes = [];
       this.drivePanes.push({ surface: this.sessionView.driveSurface, row: 0, column, width: panelWidth, height: geometry.overlay ? sessionHeight : layout.height });
       if (this.sessionView.driveOpen) this.drivePanelBounds = { column, width: panelWidth, height: geometry.overlay ? sessionHeight : layout.height };

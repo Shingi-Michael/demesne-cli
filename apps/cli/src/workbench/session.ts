@@ -1,4 +1,5 @@
 import { formatDiffPreview, formatFooterLine, sanitizeTerminalLine, toolPhaseColor, truncateText, visibleLength, type Painter, type PaletteColor, type PresenceState } from "@demesne/brand";
+import { keyHints } from "./session-chrome.ts";
 import type { AssistantEntry, ResponseReceipt, ToolEntry, UserEntry, WorkbenchEntry } from "./entries.ts";
 import { projectRunEvidence, toolFailed, verificationOutcome, type RunEvidence } from "./evidence.ts";
 import { computeSessionLayout, conversationInset } from "./layout.ts";
@@ -639,7 +640,7 @@ export class SessionView {
   render(options: { width: number; height: number; paint: Painter; title: string; path: string; branch?: string | null; now?: number; presence?: PresenceState;
     drive?: DriveState | null;
     animateScroll?: boolean;
-    panel?: boolean; column?: number; replace?: boolean; contextLines?: string[]; openedAt?: number; createdAt?: number;
+    panel?: boolean; column?: number; replace?: boolean; contextLines?: string[]; openedAt?: number; createdAt?: number; model?: string;
     markdown: (entry: AssistantEntry, width: number) => string[] }): { rows: string[]; zones: SessionZone[] } {
     const { width, height, paint } = options;
     const run = this.current;
@@ -660,6 +661,23 @@ export class SessionView {
     const inset = width >= 65 ? 2 : 1;
     const workspaceWidth = width - inset * 2;
     const now = options.now ?? Date.now();
+    // Every docked panel except Agent Drive ends in the shared keycap footer.
+    const panelFooter = Boolean(options.panel) && !this.drivePanelOpen && height >= 12;
+    const finish = (hints: readonly (readonly [string, string])[] = [], note = "", escape: "close" | "back" = "close") => {
+      if (!panelFooter) return { rows, zones };
+      const close = keyHints(paint, [["Esc", escape]]);
+      // Hints give way from the end so Esc always shows; the note goes first.
+      let shown = [...hints];
+      const line = () => [keyHints(paint, shown), close].filter(Boolean).join("  ");
+      if (visibleLength(line()) + (note ? note.length + 2 : 0) > width - 2) note = "";
+      while (shown.length && visibleLength(line()) > width - 2) shown = shown.slice(0, -1);
+      const text = line();
+      put(height - 1, 0, "", width, "surface");
+      put(height - 1, 1, formatFooterLine(text, note ? paint.text(note, "muted") : "", width - 2), width - 2, "surface");
+      zone(height - 1, 1 + visibleLength(text) - visibleLength(close), visibleLength(close), escape === "back" ? { kind: "back" } : { kind: "panel-close" });
+      return { rows, zones };
+    };
+    let pageNote = "";
     if (!options.panel) {
       const header = sessionHeader({ width, paint, path: options.path, now, openedAt: options.openedAt ?? now,
         createdAt: options.createdAt, accent: height >= 10, pointer: this.pointer, historyActive: this.historyOpen,
@@ -672,10 +690,16 @@ export class SessionView {
       for (let y = 0; y < height; y++) put(y, 0, "", width, "surface");
       const title = this.drivePanelOpen ? "AGENT DRIVE" : this.contextOpen ? "CONTEXT" : this.outputId !== null ? output?.type === "panel" && output.title ? output.title : "SESSION OUTPUT" : this.artifact?.kind === "changes" ? "DIFF"
         : this.artifact?.kind === "verification" ? "VERIFICATION" : this.artifact ? "FAILED / DENIED" : memory.surface === "review" ? "CHANGES" : "EXECUTION LOG";
-      // Panels are titled quietly, as in the redesign: a dim uppercase label.
-      put(0, 1, paint.text(title, "secondary"), width - 5, "surface");
-      put(0, width - 3, paint.text("×", "muted"), 2, "surface");
-      zone(0, width - 4, 4, { kind: "panel-close" });
+      // Figma panel frame: a quiet uppercase label, then what it shows. The
+      // keycap footer carries Esc close; × stays for narrow panels without one.
+      const subjectRun = this.artifact ? this.runs.find((item) => item.id === this.artifact!.runId) ?? run : run;
+      const subject = this.drivePanelOpen || this.outputId !== null ? "" : this.contextOpen ? safe(options.model ?? "")
+        : subjectRun ? `Turn ${subjectRun.number}` : "";
+      put(0, 1, paint.text(title, "muted") + (subject ? "  " + paint.text(subject, "secondary") : ""), width - 5, "surface");
+      if (!panelFooter) {
+        put(0, width - 3, paint.text("×", "muted"), 2, "surface");
+        zone(0, width - 4, 4, { kind: "panel-close" });
+      }
       put(1, 0, paint.text("─".repeat(width), "rule"), width, "surface");
     }
     if (height <= 2) return { rows, zones };
@@ -701,7 +725,7 @@ export class SessionView {
     // quiet gap above the prompt becomes the scrollback control when needed.
     const cleanPanel = options.panel && (output?.type === "panel" && output.title || this.artifact?.kind === "changes");
     const panelTop = cleanPanel && !(this.artifact?.kind === "changes") ? 2 : 3;
-    const layout = options.panel ? { actionsRow: 2, body: { row: panelTop, column: 1, width: width - 2, height: Math.max(1, height - panelTop) }, footerRow: height - 1 }
+    const layout = options.panel ? { actionsRow: 2, body: { row: panelTop, column: 1, width: width - 2, height: Math.max(1, height - panelTop - Number(panelFooter)) }, footerRow: height - 1 }
       : computeSessionLayout(width, height, { inspection, footer: true });
     const { actionsRow } = layout;
     const top = layout.body.row;
@@ -747,18 +771,18 @@ export class SessionView {
       const lines = output.type === "panel" && output.files?.length ? filePanelLines(output.files, stageWidth - 1, paint)
         : output.lines.flatMap((line) => foldCells(line, stageWidth - 1));
       this.outputOffset = pane(lines, x, stageWidth, this.outputOffset, "output");
-      return { rows, zones };
+      return finish([["↑↓", "scroll"]]);
     }
     if (options.panel && this.contextOpen) {
       this.contextOffset = pane((options.contextLines ?? []).flatMap((line) => foldCells(line, stageWidth - 1)), x, stageWidth, this.contextOffset, "context");
-      return { rows, zones };
+      return finish([["↑↓", "scroll"]], "/compact to free space");
     }
     if (options.panel && this.diffOpen) {
       const panel = this.diffPanel.render(width, height, paint);
       panel.rows.slice(2).forEach((text, index) => put(index + 2, 0, text, width, "surface"));
       for (const control of panel.zones) zone(control.row, control.column, control.width, control.action);
-      region({ row: 2, column: 0, width, height: height - 2, target: "diff" });
-      return { rows, zones };
+      region({ row: 2, column: 0, width, height: height - 2 - Number(panelFooter), target: "diff" });
+      return finish([["←→", "files"], ["↑↓", "scroll"], ["Ctrl+G", "live"]]);
     }
     if (options.panel && this.artifact) {
       const source = this.runs.find((run) => run.id === this.artifact!.runId);
@@ -777,7 +801,7 @@ export class SessionView {
         this.regions.at(-1)!.recordId = selected.id;
         if (offset === 0 && this.artifact.kind !== "changes") zone(top, x, 14, { kind: "arguments", id: selected.id });
       }
-      return { rows, zones };
+      return finish(records.length > 1 ? [["←→", "records"], ["↑↓", "scroll"]] : [["↑↓", "scroll"]]);
     }
     if (!options.panel) {
       const reduced = reducedMotionEnabled();
@@ -905,10 +929,11 @@ export class SessionView {
       const selected = records[this.selection];
       const detail = records.find((record) => record.id === memory.detail);
       if (options.panel) {
-        const label = detail ? "‹ Back / Esc" : "↑↓ select · Enter open";
-        put(2, 1, paint.text(label, "muted"), width - 2, "surface");
-        if (detail) zone(2, 1, label.length, { kind: "back" });
-        put(height - 1, 1, paint.text(detail ? "↑↓ scroll · Tab next · Alt+A args" : "Esc close", "muted"), width - 2, "surface");
+        if (detail) {
+          const label = "‹ Back";
+          put(2, 1, paint.text(label, "electric"), width - 2, "surface");
+          zone(2, 1, label.length, { kind: "back" });
+        }
       }
       // A file navigator beside a spacious diff only when the stage is wide
       // enough for both; narrow stages drill into the selected detail.
@@ -964,7 +989,10 @@ export class SessionView {
             put(row, x + 1, paint.text(item.kind === "label" && isSelected ? "▎" : "│", recordTone(item.record!)), 1, background);
             zone(row, x + 1, listWidth - 2, { kind: "record", id: item.record!.id });
           }
-          if (display.length > capacity && bodyHeight > 3) put(height - 1, x + 1, paint.dim(` ${start + 1}–${end} / ${display.length} · PgUp/PgDn`), listWidth - 2);
+          if (display.length > capacity && bodyHeight > 3) {
+            if (panelFooter) pageNote = `${start + 1}–${end} of ${display.length}`;
+            else put(height - 1, x + 1, paint.dim(` ${start + 1}–${end} / ${display.length} · PgUp/PgDn`), listWidth - 2);
+          }
         } else {
           const capacity = Math.max(1, Math.floor(bodyHeight / 2));
           const start = Math.max(0, this.selection - capacity + 1);
@@ -996,6 +1024,8 @@ export class SessionView {
         // leads the detail content, so it scrolls with it.
         if (offset === 0 && shown.type === "tool") zone(top, detailX + 2, 14, { kind: "arguments", id: shown.id });
       }
+      if (options.panel) return detail ? finish([["↑↓", "scroll"], ["Tab", "next"], ["Alt+A", "args"]], "", "back")
+        : finish([["↑↓", "select"], ["Enter", "open"]], pageNote);
     }
     return { rows, zones };
   }

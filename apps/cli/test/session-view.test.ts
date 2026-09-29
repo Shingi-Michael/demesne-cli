@@ -1078,6 +1078,8 @@ test("completed transcript stays at the bottom through raw diagonal trackpad whe
   }
 });
 
+// About 1,350 full frames (3 sizes × 50 deltas × 9 renders) at a steady
+// ~1.5 ms each: under 2 s locally, but past bun's 5 s default on slow runners.
 test("downward wheel momentum during streaming never snaps back to an older response window", () => {
   for (const [width, height] of [[40, 10], [80, 24], [120, 36]]) {
     const { ui, view, screen } = fixture();
@@ -1094,7 +1096,7 @@ test("downward wheel momentum during streaming never snaps back to an older resp
       }
     }
   }
-});
+}, 20_000);
 
 test("streaming prose follows only overflowing rows and respects manual reading", () => {
   for (const [width, height] of [[40, 10], [80, 24], [120, 36]]) {

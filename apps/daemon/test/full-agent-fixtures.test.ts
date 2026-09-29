@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import { PAIRED_FULL_AGENT_FIXTURE_IDS, runAgentBenchmark } from "../src/agent-benchmark.ts";
 import type { TurnProcessor } from "../src/processor.ts";
 
+// Each fixture spawns real `bun test` processes in a temporary workspace, so
+// runtime tracks the machine: ~1 s locally, past bun's 5 s default in CI.
+// Each run already has its own 30 s benchmark timeout.
 test("paired full-agent fixtures validate real tools and discriminate compaction timing", async () => {
   const processor = scriptedProcessor();
   for (const fixtureId of PAIRED_FULL_AGENT_FIXTURE_IDS) {
@@ -47,7 +50,7 @@ test("paired full-agent fixtures validate real tools and discriminate compaction
       })).toBe(true);
     }
   }
-});
+}, 60_000);
 
 function scriptedProcessor(): TurnProcessor {
   let callId = 0;

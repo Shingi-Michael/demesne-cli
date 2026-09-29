@@ -67,7 +67,7 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(detectAppearance("15;0")).toBe("dark");
     expect(detectAppearance("0;15")).toBe("light");
     expect(resolveTheme("dark", "0;15").appearance).toBe("dark");
-    expect(createPainter(true, "light").text("accent", "electric")).toContain("38;2;0;123;155");
+    expect(createPainter(true, "light").text("accent", "electric")).toContain("38;2;31;98;168");
   });
 
   test("truncates colored text without splitting terminal escapes", () => {

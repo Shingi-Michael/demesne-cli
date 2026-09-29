@@ -53,6 +53,24 @@ describe("theme registry", () => {
     }
   });
 
+  test("Demesne Light keeps readable text on its main surfaces", () => {
+    const luminance = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255)
+        .map((value) => value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+    };
+    const contrast = (a: string, b: string) => {
+      const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (light! + 0.05) / (dark! + 0.05);
+    };
+    const colors = THEMES[DEFAULT_LIGHT_THEME]!.colors;
+    for (const text of ["paper", "secondary", "electric", "signal", "citron", "thinking"] as const) {
+      for (const surface of ["ink", "surface", "raised", "menuSelection", "diffAddedSurface", "diffRemovedSurface"] as const) {
+        expect(contrast(colors[text], colors[surface]), `${text} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
   test("dark and light defaults keep their back-compat aliases", () => {
     expect(terminalPalette).toBe(THEMES[DEFAULT_DARK_THEME]!.colors);
     expect(lightTerminalPalette).toBe(THEMES[DEFAULT_LIGHT_THEME]!.colors);

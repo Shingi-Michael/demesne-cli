@@ -39,6 +39,15 @@ const toolName = (tool: ToolEntry): string => ({ read_file: "Read", read_files: 
 /// The official design's chronological request bands and assistant cards.
 /// Thinking and tool disclosures share its scroll position; evidence links
 /// open the reserved action panel without changing the selected run.
+/// `19m 28s`, `42s`, `1h 03m`: turn length at a glance for folded rows.
+function foldDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
 export function renderSessionFlow(options: {
   runs: readonly SessionRun[]; width: number; compact: boolean; paint: Painter; now: number;
   activity?: { runId: number; presence: PresenceState };
@@ -47,6 +56,8 @@ export function renderSessionFlow(options: {
   emphasis?: (key: string) => number;
   expansion: (runId: number) => ReadonlyMap<string, boolean>;
   argumentsOpen: ReadonlySet<number>;
+  /// Runs that must stay open even when finished; `null` disables folding.
+  keepOpen?: ReadonlySet<number> | null;
   markdown: (entry: AssistantEntry, width: number) => string[];
 }): { rows: FlowRow[]; expansions: Map<string, FlowExpansion> } {
   const { width, paint } = options;
@@ -194,11 +205,39 @@ export function renderSessionFlow(options: {
       && !run.tools.some((tool) => tool.state === "running" || tool.waiting);
     const lastActivity = activity.at(-1);
     const liveReasoning = inferring && lastActivity?.type === "reasoning" && lastActivity.streaming ? lastActivity : undefined;
+    // Finished turns before the newest fold into one summary row, as in Figma
+    // 1:44: `▸ Turn 12 · request · cancelled at 23:32 · 19m 28s · no diff`.
+    // Clicking or Enter opens the full turn; opening it again folds it.
+    const foldKey = `run:${run.id}:fold`;
+    // A reader's own choice sticks. Otherwise a finished turn folds once it is
+    // safe to (see `keepOpen`), and the caller remembers that decision.
+    const eligible = Boolean(run.request && run.settled && runIndex < options.runs.length - 1);
+    const chosen = options.expansion(run.id).get(foldKey);
+    const turnOpen = chosen ?? !(options.keepOpen !== null && !options.keepOpen?.has(run.id));
+    if (eligible) expansions.set(foldKey, { runId: run.id, open: turnOpen });
+    if (eligible && run.request && !turnOpen) {
+      hoverKey = foldKey;
+      if (runIndex > 0) add(`run:${run.id}:gap`);
+      const status = run.status === "COMPLETE" ? "completed" : run.status === "FAILED" ? "failed" : run.status === "STOPPED" ? "stopped" : run.status.toLowerCase();
+      const tone: PaletteColor = run.status === "FAILED" ? "signal" : run.status === "STOPPED" ? "thinking" : "secondary";
+      const files = new Set(evidence.changes.filter((change) => change.outcome === "done").map((change) => change.path)).size;
+      const time = run.receipt?.durationMs != null ? foldDuration(run.receipt.durationMs) : "";
+      const request = truncateText(safe(run.request.text.split("\n")[0] ?? ""), Math.max(12, Math.floor(inner / 2)));
+      const parts = [paint.text(status, tone) + paint.text(` at ${safe(run.request.at)}`, "muted"), time && paint.text(time, "muted"),
+        paint.text(files ? `${files} file${files === 1 ? "" : "s"} changed` : "no diff", "muted"), paint.text("Ctrl+B log", "muted")].filter(Boolean);
+      const text = `${paint.text("▸", "muted")} ${paint.text(`Turn ${run.number}`, "secondary")}${paint.text(" · ", "borderBright")}${paint.text(request, "paper")}${paint.text(" · ", "borderBright")}${parts.join(paint.text(" · ", "borderBright"))}`;
+      add(foldKey, "  " + truncateText(text, width - 3), [{ column: 0, width, action: { kind: "toggle", runId: run.id, key: foldKey } }],
+        run.entries.map((entry) => entryKey(entry.id)).concat(entryKey(run.request.id)));
+      hoverKey = undefined;
+      continue;
+    }
+    const unfolded = eligible;
     if (run.request) {
       hoverKey = undefined;
       if (runIndex > 0) {
         add(`run:${run.id}:gap`);
       }
+
       const key = entryKey(run.request.id);
       hoverKey = key;
       const lines = wrap(run.request.text, width - 5);
@@ -207,10 +246,17 @@ export function renderSessionFlow(options: {
       const clipped = lines.length > capacity;
       const toggle: FlowControl[] = [{ column: 0, width, action: { kind: "toggle", runId: run.id, key } }];
       const requestEmphasis = options.emphasis?.(key) ?? 0;
+      // An opened earlier turn can fold again from the end of its request row,
+      // so opening or folding never adds rows above the reader.
+      const foldLabel = unfolded ? `Turn ${run.number} ▴` : "";
       for (const [index, line] of lines.slice(0, capacity).entries()) {
         const tail = clipped && index === capacity - 1 ? " … ▸" : "";
         const prefix = tint(paint, "▎", "secondary", "electric", 0.65 + 0.35 * requestEmphasis) + (index === 0 ? paint.text(" ▶ ", "electric") : "   ");
-        add(key, `${prefix}${paint.text(truncateText(line, width - 5 - visibleLength(tail)), "paper")}${paint.text(tail, "secondary")}`, toggle, undefined, "userSurface");
+        const room = width - 5 - visibleLength(tail) - (index === 0 && foldLabel ? foldLabel.length + 2 : 0);
+        const text = `${prefix}${paint.text(truncateText(line, room), "paper")}${paint.text(tail, "secondary")}`;
+        if (index === 0 && foldLabel) {
+          add(key, formatFooterLine(text, paint.text(foldLabel, "muted"), width - 2), [{ column: width - 2 - foldLabel.length, width: foldLabel.length, action: { kind: "toggle", runId: run.id, key: foldKey } }, ...toggle], undefined, "userSurface");
+        } else add(key, text, toggle, undefined, "userSurface");
       }
       if (expanded) {
         for (const line of wrap(`${safe(run.request.at)} · ${safe(run.request.model ?? "Model not recorded")}`)) add(`${key}:details`, margin + paint.text(line, "muted"), [], undefined, "userSurface");

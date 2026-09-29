@@ -17,15 +17,19 @@ export function recentSession(state: SessionStateResponse): RecentSession {
     context: { used: plan?.estimatedInputTokens ?? reported, capacity: plan?.capacityTokens ?? null, estimated: plan?.estimatedInputTokens != null } };
 }
 
-/// The active session and two recent, unarchived sessions. Missing measurements
-/// stay unknown; opening the start screen never replays whole event journals.
+/// Up to three recent, unarchived sessions that have at least one turn. The
+/// start screen only opens on an empty session, so the current one and other
+/// untouched launches would just fill the list with "0 turns" rows. Missing
+/// measurements stay unknown; opening the start screen never replays whole
+/// event journals.
 export async function loadRecentSessions(current: SessionStateResponse, source: {
   list(): Promise<Session[]>; state(id: string): Promise<SessionStateResponse>;
 }): Promise<RecentSession[]> {
-  const sessions = (await source.list()).filter((session) => !session.archivedAt && session.id !== current.session.id)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 2);
-  return [recentSession(current), ...await Promise.all(sessions.map(async (session) => {
+  const sessions = (await source.list())
+    .filter((session) => !session.archivedAt && session.id !== current.session.id && session.turns.length > 0)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 3);
+  return Promise.all(sessions.map(async (session) => {
     try { return recentSession(await source.state(session.id)); }
-    catch { return { id: session.id, title: session.title, updatedAt: session.updatedAt }; }
-  }))];
+    catch { return { id: session.id, title: session.title, updatedAt: session.updatedAt, turns: session.turns.length }; }
+  }));
 }

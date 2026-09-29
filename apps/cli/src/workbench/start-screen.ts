@@ -10,7 +10,7 @@ import { contextLabel, contextMeter } from "./session-chrome.ts";
 export const START_OPERATIONS = [
   { tag: "EXPLORE", label: "Explore", title: "Trace a call flow end to end", description: "Follow execution from entry point through the full stack", tone: "electric",
     prompt: "Trace the call flow from the main entry point and map out how requests move through the system." },
-  { tag: "DEBUG", label: "Debug", title: "Find and fix a failing behavior", description: "Diagnose an error or unexpected behavior and patch it", tone: "electric",
+  { tag: "DEBUG", label: "Debug", title: "Find and fix a bug", description: "Diagnose an error or unexpected behavior and patch it", tone: "electric",
     prompt: "Help me diagnose and fix a bug. Ask me about the error or unexpected behavior, then investigate and verify the fix." },
   { tag: "BUILD", label: "Build", title: "Implement a feature with tests", description: "Implement something new end-to-end with tests", tone: "electric",
     prompt: "Help me implement a new feature end-to-end. Ask what I want to build, then inspect the project and add the appropriate verification." },
@@ -26,6 +26,12 @@ export interface StartLayout {
   operations: Rect; columns: number; cardHeight: number; cardOffset: number; recent: Rect; feedback: number | null;
 }
 
+/// Cells left for an operation's title after " n Label " inside a bordered card.
+export function operationTitleRoom(width: number, columns: number, label: string): number {
+  const cellWidth = Math.floor((width - (columns - 1)) / columns);
+  return cellWidth - 7 - label.length;
+}
+
 export function startScreenLayout(width: number, height: number, requestedHeight: number, feedback: boolean): StartLayout {
   const inset = width >= 65 ? 2 : 1;
   // Figma 8:268: a 720px hero at 14px mono (~86 cells), centered as
@@ -35,7 +41,9 @@ export function startScreenLayout(width: number, height: number, requestedHeight
   const header = height >= 18 ? 4 : 2;
   const available = height - header - Number(feedback);
   const inputHeight = Math.max(4, Math.min(Math.max(5, requestedHeight), available - 4));
-  const columns = contentWidth >= 64 ? 2 : 1;
+  // Two columns only when every card's title fits whole; a clipped
+  // "Find and fix a failing b…" reads worse than a taller single column.
+  const columns = START_OPERATIONS.every((operation) => operationTitleRoom(contentWidth, 2, operation.label) >= operation.title.length) ? 2 : 1;
   const operationRows = Math.ceil(START_OPERATIONS.length / columns);
   let cardHeight = 3, cardOffset = 1, recentHeight = 7, gap = 1, intro = 3;
   const group = () => intro + inputHeight + gap * 2 + (cardHeight ? cardOffset + operationRows * cardHeight : 1) + recentHeight;
@@ -165,7 +173,7 @@ export class StartScreen {
         const background = active >= 0.5 ? "raised" : "surface";
         const number = tint(paint, selected ? "›" : `${index + 1}`, "muted", tone, active);
         const name = paint.text(operation.label, "strong");
-        const room = cellWidth - 7 - operation.label.length;
+        const room = operationTitleRoom(ops.width, layout.columns, operation.label);
         const title = room >= 8 ? " " + paint.text(truncateText(operation.title, room), "muted") : "";
         const textRow = row + (layout.cardHeight === 3 ? 1 : 0);
         if (layout.cardHeight === 3) canvas.panel(row, column, cellWidth, 3, "", "", background);

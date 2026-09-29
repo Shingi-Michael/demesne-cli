@@ -73,7 +73,7 @@ import { CliContextRail } from "./context-rail.ts";
 import { TurnThroughputTracker } from "./turn-throughput.ts";
 import { TurnActivityLedger, isValidationCommand, type TurnPhase } from "./turn-activity.ts";
 import { TerminalTextPacer } from "./terminal-text-pacer.ts";
-import { loadRecentSessions, recentSession } from "./recent-sessions.ts";
+import { loadRecentSessions } from "./recent-sessions.ts";
 import { selectSessionInteractive, sessionListItem } from "./session-picker.ts";
 import { matchModel, selectModelInteractive } from "./model-picker.ts";
 import { reducedMotionEnabled } from "./motion.ts";
@@ -959,14 +959,14 @@ async function runChat(command: string[]): Promise<void> {
       workbench.notice("Saved answers loaded; detailed event history could not be replayed.", "error");
     }
     if (state.session.turns.length === 0) {
-      workbench.setRecentSessions([recentSession(state)], "loading");
+      workbench.setRecentSessions([], "loading");
       void loadRecentSessions(state, {
         list: () => request<{ sessions: Session[] }>("/v1/sessions").then((result) => result.sessions),
         state: (id) => request<SessionStateResponse>(`/v1/sessions/${id}`),
       }).then((sessions) => {
         if (sessionId === state.session.id) workbench.setRecentSessions(sessions);
       }).catch(() => {
-        if (sessionId === state.session.id) workbench.setRecentSessions([recentSession(state)], "unavailable");
+        if (sessionId === state.session.id) workbench.setRecentSessions([], "unavailable");
       });
     }
     // Artifact metadata and workspace completion lists hydrate independently;

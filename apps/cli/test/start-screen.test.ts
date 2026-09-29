@@ -5,7 +5,7 @@ import { createPainter, SLASH_COMMANDS, visibleLength } from "@demesne/brand";
 import type { SessionStateResponse } from "@demesne/protocol";
 import { CliContextRail } from "../src/context-rail.ts";
 import { Workbench } from "../src/workbench/controller.ts";
-import { START_OPERATIONS, StartScreen } from "../src/workbench/start-screen.ts";
+import { operationTitleRoom, START_OPERATIONS, StartScreen, startScreenLayout } from "../src/workbench/start-screen.ts";
 import { loadRecentSessions, recentSession } from "../src/recent-sessions.ts";
 
 const at = "2026-09-22T12:00:00Z";
@@ -234,26 +234,50 @@ test("hover and focus change emphasis without moving hero controls; reduced moti
   }
 });
 
-test("recent sessions hydrate only two unarchived records in recency order and retain missing context honestly", async () => {
+test("recent sessions hydrate up to three unarchived records with turns in recency order and retain missing context honestly", async () => {
+  const withTurns = (state: SessionStateResponse, count = 1) => {
+    state.session.turns = Array.from({ length: count }, (_, index) => ({ id: `${state.session.id}-${index}`, status: "completed" }) as any);
+    return state;
+  };
   const current = saved("current");
-  const newest = saved("newest", "2026-09-22T11:00:00Z");
+  const newest = withTurns(saved("newest", "2026-09-22T11:00:00Z"), 2);
   newest.latestProviderCall = { model: "old-model", provider: "local", contextPlan: null, metrics: null,
     usage: { inputTokens: 1000, outputTokens: 20, totalTokens: null } };
-  const older = saved("older", "2026-09-22T10:00:00Z");
-  const oldest = saved("oldest", "2026-09-21T10:00:00Z");
-  const archived = saved("archived"); archived.session.archivedAt = at;
+  const empty = saved("empty", "2026-09-22T11:30:00Z");
+  const older = withTurns(saved("older", "2026-09-22T10:00:00Z"));
+  const old = withTurns(saved("old", "2026-09-21T12:00:00Z"));
+  const oldest = withTurns(saved("oldest", "2026-09-21T10:00:00Z"));
+  const archived = withTurns(saved("archived")); archived.session.archivedAt = at;
   const calls: string[] = [];
   const recent = await loadRecentSessions(current, {
-    list: async () => [oldest.session, archived.session, older.session, current.session, newest.session],
+    list: async () => [oldest.session, archived.session, empty.session, older.session, current.session, old.session, newest.session],
     state: async (id) => { calls.push(id); if (id === "newest") return newest; throw new Error("unavailable"); },
   });
-  expect(calls).toEqual(["newest", "older"]);
-  expect(recent.map((session) => session.id)).toEqual(["current", "newest", "older"]);
-  expect(recent[0]?.context?.used).toBeNull();
-  expect(recent[1]?.context).toEqual({ used: 1020, capacity: null, estimated: false });
-  expect(recent[2]?.context).toBeUndefined();
+  // The current session is always empty here, and untouched launches are
+  // just noise, so neither takes a Recent row.
+  expect(calls).toEqual(["newest", "older", "old"]);
+  expect(recent.map((session) => session.id)).toEqual(["newest", "older", "old"]);
+  expect(recent[0]?.context).toEqual({ used: 1020, capacity: null, estimated: false });
+  expect(recent[0]?.turns).toBe(2);
+  expect(recent[1]?.context).toBeUndefined();
+  expect(recent[1]?.turns).toBe(1);
   newest.latestProviderCall.usage!.inputTokens = null;
   expect(recentSession(newest).context?.used).toBeNull();
+});
+
+test("the Start from grid never clips a title: two columns when every title fits, otherwise one", () => {
+  for (const width of [72, 80, 88, 89, 100, 120, 160]) {
+    const layout = startScreenLayout(width, 40, 5, false);
+    for (const operation of START_OPERATIONS) {
+      expect(operationTitleRoom(layout.operations.width, layout.columns, operation.label)).toBeGreaterThanOrEqual(operation.title.length);
+    }
+  }
+  expect(startScreenLayout(80, 40, 5, false).columns).toBe(1);
+  expect(startScreenLayout(120, 40, 5, false).columns).toBe(2);
+  const { screen } = fixture(false);
+  const narrow = screen(80, 40);
+  for (const operation of START_OPERATIONS) expect(narrow).toContain(`${operation.label} ${operation.title}`);
+  expect(narrow).not.toContain("…");
 });
 
 test("tall terminals list recent sessions with status and turns, and leave unknown counts out", () => {

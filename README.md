@@ -1,370 +1,128 @@
 # Demesne CLI
 
-Demesne CLI is a durable, provider-neutral coding agent. A local daemon owns model requests, workspace tools, approvals, SQLite state, and resumable event streams; the command-line client can disconnect and reconnect without losing a turn.
+Demesne is a terminal coding agent that works with the model you choose, local or hosted. A small background daemon owns model requests, workspace tools, approvals and session history. The CLI can close and reopen without losing a turn.
 
-## Run
+## Install
+
+Demesne needs [Bun](https://bun.sh) 1.4. [ripgrep](https://github.com/BurntSushi/ripgrep) is optional; code search uses it when it is installed.
 
 ```sh
+git clone https://github.com/Shingi-Michael/demesne-cli
+cd demesne-cli
 bun install --frozen-lockfile
-bun run daemon
+bun run build
 ```
 
-In another terminal:
+This builds two executables into `dist/`: `demesne` (the CLI) and `demesned` (the daemon). Keep them in the same folder. `dist/node_modules` holds the daemon's image codecs, so keep that beside them too. To run `demesne` from anywhere, link both onto your PATH:
 
 ```sh
-bun run demesne
+ln -sf "$PWD/dist/demesne" "$PWD/dist/demesned" /usr/local/bin/
 ```
 
-On a fresh machine, run the setup wizard first instead of hand-writing environment variables:
+You can also run from source without building: `bun run demesne`.
+
+## Quick start
 
 ```sh
-bun run demesne setup   # probes Ollama, LM Studio, and llama.cpp; writes ~/.demesne/config.toml
-bun run demesne doctor  # verifies config, daemon, provider, runtime profile, workspace, and memory
+demesne setup    # connect a model
+demesne          # open the workbench in the current folder
 ```
 
-`demesne` and `demesne prompt` start the daemon automatically. With the default
-`auto_start = "prompt"` policy the CLI asks once and remembers a yes as
-`auto_start = "always"`; `demesne daemon start|stop|status|logs` manages it
-explicitly. `demesne doctor --json` emits machine-readable checks for scripts.
+`demesne setup` looks for local model servers (Ollama, LM Studio and llama.cpp), lets you pick a model, and writes `~/.demesne/config.toml`. To use a hosted model instead, sign in to OpenRouter:
 
-This launches the interactive streaming CLI directly in your terminal. Interactive TTY responses pass through an ANSI- and grapheme-safe jitter buffer that turns speculative decoding bursts into a smooth typing cadence. The cadence adapts to visible text arrival and catches up within a bounded 1.5-second backlog; tools, errors, cancellation, and completion always drain or flush it before rendering. Scripted `prompt` output, pipes, event JSON, and persisted response text remain immediate and byte-for-byte unchanged.
+```sh
+demesne auth login openrouter
+```
 
-### Terminal workspace
+`demesne doctor` checks the config, daemon, provider, workspace and memory, and says what to fix.
 
-Demesne's **Session** view implements **Version 14** of the official **Futuristic Terminal Harness Design**, with the subsequent footer and scrolling refinements. A fixed `// demesne` header groups the session title and live clock on the left, with the project path and History on the right. Cyan request bands lead into rectangular assistant cards marked by a single `[`—amber while live, cyan on completion, and red with a subdued red border on failure. The source palette uses `#050a0e` for the canvas, `#090f14` for surfaces, and `#0d1720` for raised details, with cyan actions, amber Thinking, green results, and blue-grey text. A matching light theme preserves the hierarchy. A compact `⊞` action rail expands into the inspection panel. See [the terminal design contract](docs/terminal-design.md).
+`demesne` starts the daemon when it needs one. The first time, it asks; answer yes once and it will start the daemon automatically from then on. Manage the daemon directly with `demesne daemon start | stop | status | logs`.
 
-Empty sessions open on the **Version 9 start screen**: a centered three-row composer with animated cyan brackets, the active model and context watermark, shortcuts, and four colored **EXPLORE / DEBUG / BUILD / LEARN** operation cards. Clicking a card fills and focuses an editable draft; **Enter / Send** submits it. **Ctrl+T** focuses the cards and recent sessions, arrows or Tab browse, and Enter activates the selection; Escape returns to the draft. Card fills can be undone with Ctrl+_. The bottom **Recent** strip uses saved session titles, last-updated times, and recorded context counts; clicking a saved session resumes it, while **History / Alt+H** opens the session picker. Drafts survive settings and session navigation. Narrow layouts use two columns, and short terminals condense operations to a row of actions. The first submitted turn opens the conversation layout.
+Demesne works in the folder you start it from. Each session is bound to that workspace, and the agent's tools cannot reach outside it.
 
-Each settled run has a ruled footer: **Mode · Model · elapsed time · speed · context**, an inline hairline context meter and percentage, then **[ COMPLETE ]**, **[ FAILED ]**, or **[ STOPPED ]** at the right edge. These are the run's original mode, model, turn duration, and measured throughput across its provider rounds, including failures and interruptions without a final answer. They stay attached through later turns, model changes, History, and session replay. Elapsed time uses seconds to one decimal place, matching the reference. Narrow terminals wrap whole fields. Missing measurements display `—`.
+## The workbench
 
-Amber pulsing dots sit beside **THINKING in the conversation**, including while waiting for a model round's first text, and use the same renderer as the running Send control. The fixed bottom status strip shows context usage/capacity, scrollback and **RESPONSE ↑ / Ctrl+G LIVE ↓** navigation, and settled or approval status. It omits RUNNING/THINKING labels, pulsing dots, elapsed time, and token speed. Click the project path or press **Alt+P** for the full path and branch; click **ctx** or press **Alt+C** for the detailed budget in the action panel. `~` marks estimated input and `—` means a measurement is unavailable. Settled runs retain their recorded context counts in both the response footer and status strip; meters shift from green to amber above 50% and red above 80%. Response receipts retain measured throughput using reported output tokens and generation time, excluding first-token latency when available.
+**Start screen.** A new session opens on "What are we working on?", with the composer, your model and context size, and **Start from** cards: Explore, Debug, Build and Learn. Clicking a card fills in an editable prompt; Enter sends it. **Recent** lists your last three sessions that have turns; click one to resume it.
 
-Requests use a cyan `▶` on a tinted band whose left edge brightens on hover. Click a request to expand its full text and original time/model details. Scroll upward to read earlier turns, or use **History** (Alt+H) to select a particular turn. A pinned turn is labeled separately from the live session's telemetry.
+**Header and status bar.** The header shows the session title and workspace path on the left. On the right are the git branch, the session status, the clock, and **history**. The status bar at the bottom shows the session state (`● ready`, `● approval`, `● failed` or `● stopped`; it stays quiet while a turn is working), the model, and a context meter that turns amber above 50% and red above 80%.
 
-The main content area follows the work:
+**Conversation.** Your request sits above the assistant's reply. The reply has a left rail colored by state: amber while working, blue when done, red on failure.
+- **Thinking** streams live as `◇ Thinking ···`. It folds into `▸ ◇ Thought 1.2s` once text or tools arrive; click it or press Ctrl+X to reopen it.
+- **Tools** are one line each, with a status mark, name, target and timing. Consecutive reads and searches group into `▸ Explored · N reads`.
+- **Receipts** under a finished turn show the files changed and the checks that ran, and link to the diff and command output. A failed or stopped turn is marked `× failed` or `■ stopped`.
 
-- **Thinking** has an amber heading and a tinted, expandable trace inside the assistant card. Active reasoning uses pulsing dots and a blinking cursor; its heading stays visible at the top of a long trace's viewport. Finished reasoning folds into a duration-labelled disclosure as text or tools arrive, preserving manually opened traces and paused reading. Click it or use **Ctrl+X** to toggle the latest reasoning. Every model round remains in its original position alongside the response, at every terminal width. Reduced motion keeps the dots and cursor steady.
-- **Tool activity** uses single-line rows: a status glyph, cyan tool name, secondary-colored target, dim recorded timing, and `▸/▾` disclosure. Green marks confirmed success and red marks failures or approval requests. Consecutive confirmed reads/searches fold into an inspection summary; edits retain their paths and commands retain their outcomes. Expand a tool to read its output, recorded diff, or arguments. **Awaiting approval**, **running**, **denied**, **stopped**, and **failed** remain distinct through replay, and stopped commands never inflate failure counts. Errors use a red-tinted block with a single red left rule. A command with missing exit status remains individually visible as **unknown**.
-- **Response** is the main reading surface, with cyan headings, readable lists and code. A single **demesne** label and right-aligned timestamp sit above the entire response stream, including tool-only failures. The timestamp belongs to the first recorded activity; old summary-only records use their saved completion time when available. Footer values remain readable, with quiet field labels; lowercase **copy** fades in immediately before the status badge on the active card, briefly changing to **copied** when activated by mouse, Ctrl+Y, or keyboard selection. Changes and verification actions appear after settlement. Code uses a language label and a quiet left edge. Streaming prose starts near the top of the reading area, fills the available space, then advances only by newly overflowing rows with room below the newest line. **RESPONSE ↑** in the status strip, or **Alt+R**, jumps to the beginning of the completed answer and pauses following. Your reading position stays anchored through incoming output, completed tool batches, and queued turns; scrolling back to the bottom or pressing **Ctrl+G** resumes live following. Conversation and inspection panes have no visible scrollbars. Wheel momentum at either edge leaves the conversation still, and horizontal trackpad events are ignored rather than being interpreted as vertical scrolling.
-- **Evidence links** connect the response to recorded changes and verification. **N files changed** opens recorded diffs in the action panel; **Review attempts** identifies operations that did not succeed. Clicking verification opens recorded command output and exit status, preferring failed checks. Arrow controls navigate multiple records; **×** or Escape closes the panel. Historical evidence stays attached to its original turn while the active session continues. Failed operations expose their error before the proposed diff.
-- **Live Diff** (the Diff rail action or **Alt+D**) shows code as native file-edit arguments stream, with a file list, line numbers, context and colored additions/removals. Edit rows in chat open their recorded revision and retain compact applied `+added −removed` receipts. **Drafting / Pending / Approval** are proposals; successful writes become **Applied**, while failed, denied and stopped attempts remain explicit. Contiguous edits accumulate per file using immutable before/after evidence. **Follow edits** tracks the latest file; selecting a file or scrolling holds a labelled snapshot. **Live / Ctrl+G** resumes following. **Expand / Restore** or **Alt+Enter** gives the code more room while preserving your prompt. Older sessions show labelled argument fragments when full file evidence was not recorded.
-- **Execution log** (Ctrl+B, or **⊞** in the action rail) provides the complete ordered record: requests, reasoning, progress, tools, results, and notices. It opens in the right panel. Arguments expand with **Alt+A** or a click; **Tab / Shift+Tab** moves between records while inspecting details.
+**Approvals.** File edits and commands ask first:
 
-The full **Review** (Alt+→) and execution log use a record navigator in the action panel. Enter opens the selected record, and Escape returns to the list. Each turn retains its disclosures, selections, and reading positions while newer work streams.
+```
+! Allow this command?
+  bun test
+  runs on your machine · not sandboxed
+  [ y  Allow once ]  [ n  Deny ]   a this session · s always
+```
 
-Diff code is syntax-highlighted by filename, including TypeScript/JavaScript,
-Python, Rust, Go, JSON, YAML and shell files. Green/red gutter markers and subtle
-row backgrounds identify changes while keywords, strings, numbers and comments
-keep their syntax colors. Wrapped lines stay aligned and show `↪` in the gutter.
+`y` allows once, `n` denies, `a` allows for the rest of the session, and `s` saves a rule to your config so it is never asked again. Commands default to Deny.
 
-The bottom **Prompt** starts with two draft rows, grows with multiline input, and scrolls within a bounded area. A cyan top rule tracks input and terminal focus; bottom-aligned **▶** is dim when unfocused, cyan when focused, and becomes amber **◎** during execution. **SEND ↵** uses a subdued cyan wash when text is ready to send. **~N tok** appears below the button while you edit, paste, or queue text and disappears when empty. A quiet hint strip lists send, newline, commands, and file references, with cyan `/` and `@` glyphs. The draft estimate uses UTF-8 bytes / 3, excludes referenced file contents and request overhead, and is not a tokenizer measurement. Open **Settings** with Tab or Ctrl+K to select Build/Plan and the active model. During execution the prompt shows **Agent is running...** and the send control becomes **[  ···  ]**; clicking it or pressing Esc Esc / Ctrl+C interrupts. The editor accepts an editable **Queued follow-up** with Clear queue. Nonempty queued input is labeled **Queued · sends after this turn**, including on compact terminals. Typing resumes your draft at its cursor; bracketed multiline paste inserts text without submitting. Content focus displays contextual navigation hints and hides the draft caret. Approvals and searchable settings use the same alignment and surfaces.
+**Composer.** Enter sends; Shift+Enter adds a line. Type `/` for commands or `@` to mention a file. While a turn is running you can keep typing: the text is queued and sent when the turn finishes. If the turn fails or you stop it, the queued text comes back to the composer unsent, marked **Restored**, so you can edit or clear it. Esc Esc or Ctrl+C stops a running turn.
 
-At **40×10**, optional spacing contracts and ordinary drafts retain at least three reading rows. Response footers wrap and omit their divider and field labels to leave more room, retaining the recorded values. Completions and approvals prioritize their selected control. At **100 columns and wider**, the action panel docks beside the conversation and scrolls independently. On smaller terminals it opens over the conversation while keeping the composer accessible. Resize preserves selections, drafts, and the reading anchor, clamping only when necessary.
+**Following.** The view follows new output. Scroll up to read and it stays put; press Ctrl+G, or scroll back to the bottom, to follow live again.
 
-Resuming or switching sessions restores recorded answers, original model attribution, diffs, exit codes, and bounded stdout/stderr. Session commands such as `/context`, `/status`, and `/diff` open temporary output; Escape returns to the previous inspection. Dismissed utility output stays available in the execution log. Command feedback appears immediately above the prompt.
+**Panels.** On terminals 100 columns or wider, panels dock beside the conversation. On narrower ones they open over it.
 
-| Control | Action |
+| Panel | Open with | Shows |
+| --- | --- | --- |
+| Diff | Alt+D | Edits as they stream, per file, with syntax highlighting |
+| Execution log | Ctrl+B | Every request, thought, tool call and result, in order |
+| Context | Alt+C, or click `ctx` | Context budget, token usage and timing |
+| Workspace | Alt+P, or click the path | Full path and branch |
+| Preview | Alt+V | Screenshots and generated images |
+| Agent Drive | Alt+J | Progress of a `/drive` mission |
+| History | Alt+H | Sessions and earlier turns |
+
+### Keyboard
+
+| Keys | Action |
 | --- | --- |
-| Alt+↑/↓ | Previous/next run |
-| Alt+H / History | Open turn history; ↑/↓ selects, Enter opens |
-| Alt+R / Response ↑ | Jump to the beginning of the completed response |
-| Alt+←/→ | Switch response and review |
-| Ctrl+T | Switch focus between content and prompt |
-| ←/→, with content focus | Switch conversation and review (when the turn has changes or checks) |
-| Tab / Shift+Tab, with conversation focus | Select the next/previous inline control |
-| ↑/↓, Enter, with content focus | Scroll/browse; expand the selected disclosure or open a record |
-| Escape / Backspace, with content focus | Return from a record to its origin, then the response and prompt |
-| PgUp/PgDn; mouse wheel | Scroll the view; scroll the region under the pointer |
-| Ctrl+G | Follow the conversation, or resume live edits while Diff is open |
-| Alt+D | Open/close the live Diff panel |
-| Alt+J | Open/close Agent Drive |
-| Alt+Enter, with Diff open | Expand/restore the Diff panel |
-| ←/→, with Diff focused | Select previous/next file |
-| Tab / Ctrl+K with an empty draft | Settings (Tab completes commands/mentions first) |
-| Ctrl+Y with an empty draft | Copy selected run's answer, or available assistant text, via OSC 52 |
-| Ctrl+B | Open the execution log |
-| Ctrl+X | Expand/collapse the latest thinking inline |
-| Ctrl+L | Cycle Session → Activity → Transcript |
-| Esc Esc / Ctrl+C while working | Interrupt the run |
+| Enter / Shift+Enter | Send / new line |
+| Esc Esc, Ctrl+C | Stop the running turn |
+| Tab or Ctrl+K (empty prompt) | Settings: Build/Plan mode and model |
+| Ctrl+T | Move focus between the conversation and the prompt |
+| Tab / Shift+Tab (conversation focused) | Next/previous control |
+| ↑/↓, PgUp/PgDn, mouse wheel | Scroll |
+| Ctrl+G | Follow live output again |
+| Ctrl+X | Open/close the latest thinking |
+| Alt+↑/↓ | Previous/next turn |
+| Alt+R | Jump to the start of the answer |
+| Alt+←/→ | Switch between the answer and its review |
+| Ctrl+Y (empty prompt) | Copy the answer |
+| Ctrl+L | Cycle Session → Activity → Transcript views |
+| Alt+Enter (Diff open) | Expand/restore the Diff panel |
 
-The optional **Activity** view groups each turn into Updates, Changes, Verification, and Response, with collapsible sections. **Transcript** retains chronological event order. Missing final answers are explicitly identified; earlier progress is not relabeled as a completed response.
-
-Preview the **production renderer** with demonstration data, without a model or daemon:
-
-```sh
-bun run ui:session
-bun run ui:session --state=start
-bun run ui:session --live-diff
-bun run ui:session --live-diff --expand-diff
-bun run ui:session --state=working
-bun run ui:session --state=tools
-bun run ui:session --state=thinking
-bun run ui:session --state=thinking-answer --trace
-bun run ui:session --state=waiting
-bun run ui:session --state=long --long-draft
-bun run ui:session --state=approval
-bun run ui:session --state=failed-change --view=review
-bun run ui:session --state=round-limit
-bun run ui:session --state=verify-only
-bun run ui:session --inspect=changes
-bun run ui:session --inspect=verification
-bun run ui:session --view=review
-```
-
-Reproducible compact/expanded screens are available for every state:
-
-```sh
-bun run ui:session --snapshot=80x24 --state=working --plain
-bun run ui:session --snapshot=120x36 --view=review
-bun run ui:session --snapshot=160x40 --view=log
-DEMESNE_THEME=demesne-light bun run ui:session
-```
-
-`ui:workbench` forwards to the session preview. `scripts/activity-preview.ts` exercises the grouped Activity view; `ui:preview` exercises scrollback rendering. Non-interactive use, `--no-tui`, and `DEMESNE_NO_TUI=1` retain streaming scrollback output.
-
-### Image artifact previews
-
-The expanded side panels follow Figma Version 17: a compact header, a centered
-dark image well, a single metadata row, and inline **Pin / Expand / Open original**
-actions. Multiple images expose quiet history/navigation controls; while Preview
-is focused, **←/→** changes images, **H** toggles history, and **F** follows latest.
-Files shows sizes and Git status (when available); Diff opens colored hunks directly.
-
-#### Browser screenshots and visual inspection
-
-**Demesne itself is a terminal UI, not a website.** On macOS, the agent can use
-`capture_window({ application: "Ghostty", title: "demesne" })` to capture its
-visible terminal window. The workbench sets its window title to `demesne` while
-running and restores the previous title on exit. If multiple windows match, the
-tool returns their IDs for explicit selection. It does not fall back to a whole
-desktop capture or an unrelated browser app. Native capture requires macOS Screen
-Recording access and Swift command-line tools, and uses the normal tool approval
-flow. Its screenshots enter the same Preview and vision pipeline.
-
-Image-returning MCP tools automatically save screenshots to Preview. For tools
-that save files instead, the agent can call `view_image({ path: "screen.png" })`
-to import a workspace PNG/JPEG/WebP. File imports are bounded and workspace-scoped.
-Pinning, history, and explicit panel dismissal apply to screenshots as well.
-
-For browser capture, configure the user config, for example:
-
-```toml
-[mcp.servers.browser]
-command = "npx"
-args = ["-y", "@playwright/mcp@0.0.82", "--headless", "--isolated", "--browser", "chrome", "--image-responses", "allow"]
-timeout_ms = 60000
-```
-
-This requires Chrome installed locally. Browser tools use the existing MCP
-permission flow. Ask the model to navigate to a page and take a screenshot.
-
-To let the conversational model **see the pixels**, enable `vision = true` in
-the existing `[provider]` section (or `DEMESNE_PROVIDER_VISION=true`) and restart
-the daemon. Only enable this with a vision-capable model and serving backend.
-For the local Qwen setup, `bun run model:llama:vision` loads the vision projector
-alongside the model; pair it with `bun run daemon:llama:vision`. The vision
-launcher uses an experimental runtime profile because the measured text-only
-100K profile explicitly excludes a projector. A text-only server can still capture/display screenshots
-and inspect browser DOM/text, but cannot inspect pixels.
-
-Vision requests attach the latest two retained images as OpenAI-compatible
-`image_url` user content after all tool results, at low detail. Context planning
-reserves an additional 4096 tokens for visual input. Durable transcripts store
-artifact IDs; image bytes are resolved only for provider requests, including
-after restart. Missing image files fall back to the saved text metadata.
-
-#### Generate images in a conversation
-
-Configure an OpenAI Images-compatible backend in `~/.demesne/config.toml`:
-
-```toml
-[images]
-url = "https://api.openai.com/v1"
-model = "gpt-image-1"
-request_timeout_ms = 300000
-```
-
-Supply its credential with `DEMESNE_IMAGE_API_KEY` in the daemon's environment
-(or `api_key` in the `[images]` section), then restart the daemon. URL, model,
-and timeout also accept `DEMESNE_IMAGE_URL`, `DEMESNE_IMAGE_MODEL`, and
-`DEMESNE_IMAGE_REQUEST_TIMEOUT_MS`. The daemon uses user configuration; project
-configuration cannot change its image backend. Use an image model your provider
-account can access.
-
-Your conversational model stays selected. It now receives a `generate_image`
-tool: ask **“Generate a logo for this project”** and the resulting image is saved
-and delivered to Preview automatically. Ask **“Make the background darker”**
-and the model can pass the prior artifact ID to the same tool for an edit.
-References are restricted to the current session; originals remain immutable.
-
-Both `url` and `model` must be configured to enable the tool. This adapter uses
-`/images/generations` and multipart `/images/edits`, requesting one image per
-call. The backend must return `data[0].b64_json` (as GPT Image models do);
-URL-only responses are unsupported. Requests support cancellation and a
-five-minute default timeout; returned images use the existing 20 MiB / 40 MP
-artifact limits. Only artifact metadata reaches the conversational model.
-
-The image backend is separate from the chat endpoint and credentials: selecting
-a tool-capable conversational model alone does not configure an image service.
-
-**Alt+V** opens the image Preview panel. Image-returning MCP tools now save PNG,
-JPEG, and WebP outputs as session artifacts with immutable originals and PNG
-previews. On wide terminals, an available image opens automatically when another
-inspection is not active; explicit dismissal keeps the panel closed.
-
-Use **Pin**, **Follow latest**, **Previous/Next**, **Image history**, **Expand**, and
-**Open original** in the panel. Tab selects controls, Enter activates them, and
-Escape returns from history/expanded view or closes Preview. Pinning and selection
-survive session resume. Supported terminals negotiate Kitty graphics and cell size;
-otherwise the panel retains metadata and Open original. No graphics are emitted
-in plain snapshots. The bottom status strip remains free of image telemetry.
-
-Try the production renderer without an image model:
-
-```sh
-bun run ui:image
-bun run ui:image --snapshot=120x36 --plain
-python3 scripts/check-image-pty.py
-```
-
-For daemon integration testing, `scripts/fake-image-mcp.ts` is a local MCP fixture
-that returns real PNG bytes. Configure it in the user configuration with command
-`bun` and an absolute script path in `args`, then restart the daemon. Actual image
-generation requires an image-producing MCP server; previewing does not give a
-text-only model image-generation capability. Generic tools expose images when
-their results arrive, without fabricated generation progress.
-
-The [product plan](docs/artifact-preview-plan.md) and
-[implementation document](docs/artifact-preview-implementation.md) track the
-remaining roadmap and visual acceptance checks. Arcade work remains deferred.
-
-### Themes
-
-Every drawing call names a semantic role — `electric` for authorship and primary actions, `citron` for verified and local state, `signal` for boundaries and errors, `paper`/`secondary` for text, `rule` for structure — and never a color. A theme maps those roles onto concrete colors, so a swap re-themes the whole interface, including the intro art, without touching a renderer.
-
-```toml
-# ~/.demesne/config.toml
-theme = "tokyo-night"
-```
-
-`DEMESNE_THEME` overrides the file. `auto` follows the terminal background via `COLORFGBG`; `dark` and `light` still work for configurations written before named themes existed, and an unknown name falls back to the default rather than failing startup.
-
-Shipped: `demesne`, `demesne-light`, `dracula`, `tokyo-night`, `tokyo-night-storm`, `nord`, `gruvbox-dark`, `catppuccin-mocha`, `catppuccin-latte`, `github-light`.
-
-`/theme` switches live — the painter is shared, so one call re-themes the interface on the next frame — and prints the value to set for it to persist.
-
-The inference spinner is deliberately uncolored: it is the mark on screen the longest, and an accent there competes with the turn's real status. Color is reserved for states that mean something: `waiting` is `signal`, `verifying` is `execute`, and `done` is `citron`.
-
-To exercise a real turn without a model, run `bun run fake:provider [edit|trace|fail|sweep]` and point a `[provider]` block at `http://127.0.0.1:11437/v1`. The scenarios cover a single edit, a narrated read-heavy turn, a failing command, and six reads issued in parallel so the inspection collapsing is visible.
-
-The session line keeps the title and project identity together. Original model attribution lives with each completed response and in History; narrow layouts retain it in History and the execution log. Detailed timing and context usage are available through `/context`, and `/help` lists keyboard controls. Scrollback mode uses a fixed footer for phase, timing, and context. Rendering avoids rewriting unchanged rows.
-
-Completion receipts separate prompt latency from generation: `ttft` is the summed time to first token across model rounds, and `tok/s decode` excludes that prefill interval. If a provider omits TTFT, the CLI falls back to the broader effective rate rather than inventing decode speed. Receipts also list paths changed and validation commands run using only recorded tool evidence. `/context` explicitly separates the pre-request **estimated context plan** from the last provider-reported token usage, cached input, and request timing; it does not present last-call usage as remaining conversation capacity.
-
-Tool activity is transient in the beacon while running and permanent once in scrollback under `INSPECT`, `CHANGE`, and `VERIFY` phase headers. Each completed call has a compact `✓`, `×`, or `!` result line that remains meaningful under `NO_COLOR`. Host `run_command` approval defaults to **Deny** when Enter is pressed because execution is not sandboxed; file edits retain the faster Allow once default. Cards, prompts, approvals, CJK text, code, lists, headings, quotes, and prose are cell-width aware and tested at 40, 80, and 120 columns. The palette preserves Demesne's electric/signal/citron roles and automatically chooses higher-contrast accents when `COLORFGBG` indicates a light terminal; set `DEMESNE_THEME=dark` or `DEMESNE_THEME=light` to override detection. Set `NO_COLOR=1` for plain output or `DEMESNE_REDUCED_MOTION=1` to disable continuous beacon animation, start-screen reveals, hover fades, Thinking dot/cursor animation, and response pacing. The clock continues ticking in reduced-motion mode.
-
-### Interactive Commands
-
-Type `/` in the CLI to open the `SESSION`, `INSPECT`, and `CONTROL` command palette. Continue typing to filter it, use the up and down arrow keys to select an option, and press Enter to run it. One shared command grammar drives matching, completion, help, aliases, argument validation, and execution. Commands that need a title or session ID keep the selected command in the input so you can finish its argument.
+## Commands
 
 | Command | Action |
 | --- | --- |
-| `/new [title]` | Start a fresh session |
-| `/sessions [filter]` | Browse recent sessions, or search titles and transcripts |
-| `/resume <id>` | Switch to an existing session |
-| `/rename <title>` | Rename the current session |
-| `/delete` | Archive the current session after confirmation |
-| `/model [id]` | Switch the active model with a picker or an exact id/prefix |
-| `/export [md\|json]` | Write the visible transcript to the current directory |
-| `/status` | Show the active session, model, context window, and workspace |
-| `/context` | Show the estimated context plan, provider-reported usage, and run evidence |
-| `/plan <prompt>` | Draft a read-only plan with inspection tools before changing anything |
-| `/diff` | Review the last turn's changes with plain diffs |
-| `/undo [path]` | Revert conflict-free changes from the last undoable turn, or one file |
-| `/compact [instructions]` | Summarize older context while keeping the latest two conversation turns |
-| `/drive [mission\|pause\|resume\|stop]` | Start a UI-driven mission or open/control Agent Drive |
-| `/clear` | Clear terminal and reprint masthead |
-| `/help` | Show the command reference |
-| `/exit` | Exit the CLI |
+| `/new [title]` | Start a new session |
+| `/sessions [filter]` | Browse or search sessions |
+| `/resume <id>` | Switch to a session |
+| `/rename <title>` | Rename this session |
+| `/delete` | Archive this session |
+| `/model [id]` | Switch model |
+| `/plan <prompt>` | Plan with read-only tools before changing anything |
+| `/diff` | Review the last turn's changes |
+| `/undo [path]` | Revert the last turn's changes, or one file |
+| `/compact [instructions]` | Summarize older context to free space |
+| `/context` | Context plan and token usage |
+| `/status` | Session, model and workspace |
+| `/drive [mission\|pause\|resume\|stop]` | Run or control Agent Drive |
+| `/theme [name]` | Switch theme |
+| `/export [md\|json]` | Save the transcript to the current folder |
+| `/clear` | Clear the screen |
+| `/help` | Command and key reference |
+| `/exit` | Quit |
 
-### Agent Drive
+### Custom commands
 
-Agent Drive can recover context from earlier conversations, direct coding work
-through the visible composer, and review Diff, tool results, and Preview.
-After reviewing a task, it asks the coding agent about useful next improvements,
-assesses the answer against your goals, selects a concrete task, and continues.
-Its local controller collects bounded answer, Diff, and verification views without
-a model call for each navigation step. The model receives compact, quoted evidence
-and remains responsible for goals, task selection, and review conclusions.
-Periodic check-ins can leave aligned coding work alone or stop and guide a
-clearly off-track turn. Persistent mission budgets and cross-task loop detection
-stop runaway navigation, repeated goals, and interruption/restart cycles.
-Transient planning failures recover automatically from a fresh observation.
-Start with `/drive <mission>`; **Alt+J** opens its progress panel with Pause,
-Resume, and Stop. See [Agent Drive](docs/agent-drive.md) for operation and saved
-mission recovery.
-
-### Manual context compaction
-
-Use `/compact` to create a durable checkpoint with the currently selected model.
-Optional instructions tell the summarizer what to prioritize:
-
-```text
-/compact
-/compact preserve the tooling redesign decisions and unfinished work
-```
-
-The summary preserves the goal, current state, constraints, decisions, relevant
-files, validation results, and pending work. The latest **two completed conversation
-turns** retain their full text and tool-call/result pairs. Future requests receive
-the checkpoint followed by those recent turns; repeated compaction merges the
-previous checkpoint with newly older turns. Long source histories are summarized
-in bounded chunks.
-
-The resulting **Compact** response shows the summary and estimated before/after
-context tokens. `/context` includes the last compaction receipt and preserves the
-provider's actual summary-request usage separately. Original requests, responses,
-and tool records remain available in History; images remain in Preview history.
-Transcript export still includes the original requests and responses. Checkpoints
-survive daemon restarts and session resume.
-
-Compaction uses the normal inference queue and can be stopped with **Esc Esc** or
-**Ctrl+C**. An incomplete or invalid summary leaves the prior context active. Short
-histories, and summaries that would increase context, produce a no-change receipt.
-Undo invalidates the active checkpoint and restores full context with recorded
-undo annotations; run `/compact` again to summarize that updated history.
-
-From a shell:
-
-```sh
-bun run demesne compact <session-id> "Preserve the remaining parser work"
-```
-
-The typed client exposes `compactSession(sessionId, { instructions })`. The
-authenticated `POST /v1/sessions/:id/compact` route returns a turn and event cursor
-with HTTP 202. Progress, cancellation, failures, and completion use the regular
-session event stream; `session.compacted` records a committed checkpoint.
-
-### Prompt Editing
-
-The prompt supports readline-style editing: `Up`/`Down` walk history (or the
-slash menu when it is open), `Ctrl+P`/`Ctrl+N` do the same for multi-line
-drafts, `Ctrl+R` starts an incremental reverse search, `Ctrl+A`/`Ctrl+E` move
-to the line edges, `Ctrl+U`/`Ctrl+K`/`Ctrl+W` kill text and `Ctrl+Y` yanks it,
-`Ctrl+_` undoes, `Alt+B`/`Alt+F` (or `Ctrl+Left`/`Ctrl+Right`) move by word,
-and `Ctrl+O` composes the prompt in `$VISUAL`/`$EDITOR`. `Shift+Enter` inserts
-a new line.
-
-History is stored privately at `<data-dir>/history.jsonl` (mode `0600`),
-tagged with the workspace, and capped at 500 entries. A malformed or unreadable
-history never blocks startup.
-
-### Custom Commands
-
-Markdown files in `~/.demesne/commands/` and
-`<workspace>/.demesne/commands/` become slash commands named after the file
-(`review.md` becomes `/review`). An optional `---` frontmatter block supplies
-the palette description, and the body is submitted as the prompt:
+Markdown files in `~/.demesne/commands/` or `<workspace>/.demesne/commands/` become slash commands named after the file, so `review.md` becomes `/review`. Optional frontmatter sets the description, and `$ARGUMENTS` is replaced with what you type after the command:
 
 ```markdown
 ---
@@ -373,270 +131,106 @@ description: Review a path with fresh eyes
 Review $ARGUMENTS carefully and list concrete findings.
 ```
 
-`$ARGUMENTS` is substituted when present; otherwise the argument is appended as
-a final paragraph. Project files override user files on a name collision, and
-built-in command names cannot be shadowed.
+Project commands override user commands with the same name. Built-in commands cannot be overridden.
 
-Typing while a turn is running queues the text instead of interrupting it. The
-composer clears when a prompt is sent and then draws the queue, so the next
-message is visible where you are typing it; the queue submits automatically when
-the turn finishes, and slash commands queue the same way. The scrollback
-renderer, which has no composer, previews the queue in its footer instead.
-Control keys and the approval selector keep their normal behavior.
+### Prompt editing
 
-Type `@` to open a workspace file menu for prompt mentions; `Tab` or `Enter`
-inserts the selected path. The listing excludes sensitive paths, dependency and
-build directories, and paths containing whitespace.
+The prompt has readline-style editing:
+- ↑/↓ or Ctrl+P/Ctrl+N walk history, and Ctrl+R searches it.
+- Ctrl+A/Ctrl+E jump to the start/end of the line; Alt+B/Alt+F move by word.
+- Ctrl+U/Ctrl+K/Ctrl+W cut text, Ctrl+Y pastes it back, and Ctrl+_ undoes.
+- Ctrl+O opens the prompt in `$VISUAL`/`$EDITOR`.
 
-Code fences are syntax-highlighted for TypeScript/JavaScript, JSON, Bash, YAML,
-Python, Go, Rust, and diffs; unknown languages fall back to a common keyword
-set, and `NO_COLOR` output is unchanged. Completed `edit_file` calls render a
-compact inline diff in scrollback, failed tools print their error message, and
-path-like tool details are OSC 8 hyperlinks in terminals that support them.
-Disable links with `[ui] hyperlinks = false` or `DEMESNE_NO_HYPERLINKS=1`.
+History is kept privately in `~/.demesne/history.jsonl` (the last 500 entries).
 
-For one-off scriptable queries or Unix piping:
+### Compaction
 
-```sh
-bun run demesne prompt "Inspect this repository"
-bun run demesne session list
-bun run demesne doctor --json
-bun run demesne daemon status
-bun run demesne ps
-bun run demesne prompt --output json "Summarize the test suite"
-echo "Explain this failure" | bun run demesne prompt --output stream-json
+`/compact` summarizes older turns into a checkpoint when a session gets long. It keeps the two most recent turns in full. Optional instructions steer the summary:
+
+```text
+/compact preserve the parser decisions and unfinished work
 ```
 
-`demesne ps` lists sessions with queued or running turns alongside inference
-counts; `--watch` refreshes every two seconds and `--json` emits the raw
-status. `demesne --version` checks for a newer release once a day when stdout
-is a terminal (`--check` forces it, `--no-check` or
-`DEMESNE_NO_UPDATE_CHECK=1` disables it).
+The originals stay in History and exports.
 
-`--output json` prints one result object with the response, usage, metrics, and
-recorded changes and validations; `--output stream-json` prints every event
-envelope and then a final `{"type":"result",…}` line. Prompts can be piped on
-stdin (or passed as `-`), permission requests are denied with a note on stderr,
-and the exit code is 0 for a completed turn, 1 for a failure, and 130 for a
-cancelled or interrupted turn.
+### Agent Drive
 
-The daemon listens on `127.0.0.1:7337` and stores data in `~/.demesne/demesne.sqlite` by default. Override these values with `DEMESNE_HOST`, `DEMESNE_PORT`, `DEMESNE_DATA_DIR`, or `DEMESNE_SERVER`. A custom data directory must already be private to the current user. Token authentication protects non-health routes, and `DEMESNE_HOST` remains loopback-only until paired-device authentication is implemented.
+`/drive <mission>` lets Demesne direct a longer piece of work through the same composer you use. It reviews each task's diff and checks, picks the next task, and keeps going within budgets that stop runaway loops. Alt+J opens its panel with Pause, Resume and Stop. See [Agent Drive](docs/agent-drive.md).
 
-Without model configuration, the daemon uses a deterministic placeholder processor. To connect LM Studio or another OpenAI-compatible loopback endpoint:
+## Themes
 
-```sh
-DEMESNE_MODEL='your-model-id' \
-DEMESNE_PROVIDER_URL='http://127.0.0.1:1234/v1' \
-DEMESNE_CONTEXT_WINDOW='32768' \
-DEMESNE_MAX_OUTPUT_TOKENS='4096' \
-bun run daemon
+```toml
+# ~/.demesne/config.toml
+theme = "tokyo-night"
 ```
 
-Set the context window to the provider's loaded limit, not merely the model architecture's maximum. A configured provider must have a known context window and output reserve before the daemon accepts turns; named strict runtime profiles supply their measured defaults.
+Available themes: `demesne` (the default), `demesne-light`, `dracula`, `tokyo-night`, `tokyo-night-storm`, `nord`, `gruvbox-dark`, `catppuccin-mocha`, `catppuccin-latte` and `github-light`. Use `auto` to follow your terminal's background.
 
-The preferred local profile serves the Qwen3.8 27B Q4_0 candidate with llama.cpp at a verified 100K context. It is text-only to reserve unified memory for f16 KV and expects `~/.demesne/models/qwen3.8-27b-q4_0.gguf`. The retained 32K vision profile additionally uses `~/.demesne/models/qwen3.8-mmproj.gguf`:
+`/theme` switches the theme live. `DEMESNE_THEME` overrides the config file, `NO_COLOR=1` turns color off, and `DEMESNE_REDUCED_MOTION=1` stops the animations.
 
-```sh
-brew install llama.cpp
-bun run model:llama
-```
+## Scripting
 
-In another terminal, start Demesne against that endpoint:
+`demesne prompt` runs one turn without the workbench:
 
 ```sh
-bun run daemon:llama
+demesne prompt "Summarize the test suite"
+demesne prompt --output json "List the TODOs"
+echo "Explain this failure" | demesne prompt --output stream-json
 ```
 
-This profile uses one inference slot, batch 256, f16 KV caches, mmap loading, Flash Attention, no weight repacking, llama.cpp `ngram-mod` speculation, a requested 100,000-token context (served as 100,096 by llama.cpp), and a 1,536-token output reserve. It retains short-context speed at 70.71 post-first-output tokens per second. At 93,129 unpredictable retrieval tokens it measured 71.40 prefill and 9.60 decode tokens per second; an exact 169-token passage copied from 93,274-token context reached 16.30 tokens per second cold and 20.37 warm with zero swap growth. MTP, DFlash2 on this Metal runtime, and the older `ngram-cache` remain rejected.
+- **Output:** `--output json` prints one result object with the answer, usage, changes and checks. `--output stream-json` prints every event, then a final result line.
+- **Approvals:** in scripts, permission requests are denied, with a note on stderr. Use `--permission ask` or `--permission deny` to choose explicitly.
+- **Exit codes:** 0 for a completed turn, 1 for a failure, 130 for a cancelled one.
 
-The Q4_0 file was requantized from the retained Q4_K_M GGUF while preserving its output tensor. Recreate it with the model path reported by `ollama show --modelfile qwen3.8-8k-b256:latest`:
+Other commands:
 
 ```sh
-mkdir -p ~/.demesne/models
-/opt/homebrew/opt/llama.cpp/bin/llama-quantize \
-  --allow-requantize \
-  --leave-output-tensor \
-  /path/to/qwen3.8-q4_k_m.gguf \
-  ~/.demesne/models/qwen3.8-27b-q4_0.gguf \
-  Q4_0 8
+demesne models                  # models your providers offer
+demesne session list
+demesne session create --workspace /path/to/project "Title"
+demesne compact <session-id> "What to keep"
+demesne ps --watch              # sessions with queued or running turns
+demesne doctor --json
+demesne --version               # also checks for a newer release once a day
 ```
 
-The prior Ollama profile remains the capability baseline and fallback. Create its measured alias, remove the temporary base manifest, and launch the Ollama-backed daemon with:
+## Coding tools and permissions
 
-```sh
-brew services start ollama
-ollama pull qwen3.8
-ollama create qwen3.8-8k-b256 -f experiments/ollama/qwen3.8-8k-b256.Modelfile
-ollama rm qwen3.8
-bun run daemon:ollama
-```
-
-The Ollama command selects and exposes only `qwen3.8-8k-b256:latest`, with an 8K context and 1,536-token output reserve. This Q4_K_M profile remains available as the known-good baseline. Local Q3_K_M and IQ4_XS requantizations were smaller but decoded approximately 19% and 27% more slowly, so they were rejected and removed. `DEMESNE_ALLOWED_MODELS` accepts a comma-separated allowlist when a deployment intentionally needs more than one model. The measured local profiles disable reasoning for responsiveness; custom deployments can set `DEMESNE_REASONING_EFFORT` before starting the daemon.
-
-Use `DEMESNE_API_KEY` when the endpoint requires bearer authentication. HTTPS provider URLs may target remote hosts; cleartext HTTP is restricted to loopback. Optional settings are `DEMESNE_PROVIDER_ID`, `DEMESNE_SYSTEM_PROMPT`, `DEMESNE_REASONING_EFFORT` (`none`, `low`, `medium`, `high`, or `max`), `DEMESNE_RUNTIME_PROFILE`, `DEMESNE_INFERENCE_SLOTS`, `DEMESNE_PROVIDER_FIRST_EVENT_TIMEOUT_MS` (180000 without a larger profile-derived cold-prefill floor), `DEMESNE_PROVIDER_REQUEST_TIMEOUT_MS` (default 900000), and `DEMESNE_INCLUDE_USAGE=false` for servers that reject OpenAI's streamed usage option.
-
-The experimental `balanced-32gb` runtime profile is an opt-in strict verifier for the measured 27B Ollama setup. It does not configure Ollama. Create the explicit model alias and separately configure the local Ollama service with Flash Attention and q8_0 KV caches before starting Demesne:
-
-```sh
-ollama create qwen3.8-8k-b512 -f experiments/ollama/qwen3.8-8k-b512.Modelfile
-
-DEMESNE_MODEL='qwen3.8-8k-b512:latest' \
-DEMESNE_PROVIDER_URL='http://127.0.0.1:11434/v1' \
-DEMESNE_PROVIDER_ID='ollama' \
-DEMESNE_RUNTIME_PROFILE='balanced-32gb' \
-bun run daemon
-```
-
-After each provider request starts, Demesne checks the loaded model and local `llama-server` flags before exposing the first model event. The profile requires 8K context, batch and micro-batch 512, one parallel sequence, q8_0 K/V caches, Flash Attention on, one loaded model, and one runner owned by the Ollama process listening on the configured port. A mismatch, runner replacement during verification, or unavailable inspection fails the request rather than silently using another runtime. Authenticated clients can inspect the sanitized state at `GET /v1/runtime`. The verifier accepts any model alias whose observed runtime matches; it does not rely on the requested alias as proof of configuration.
-
-`experimental-q4-kv-32gb` verifies the same 8K, batch-512, one-sequence setup with q4_0 K/V caches. `experimental-q4-kv-b256-32gb` additionally requires batch and micro-batch 256 and uses the alias created from `experiments/ollama/qwen3.8-8k-b256.Modelfile`. Both retain the one-slot and 1,536-token output defaults and exist only for controlled memory testing. Every comparison that selected these K/V precisions was made at short prompt lengths, where K/V precision is nearly unobservable; see the llama.cpp study below before treating quantized K/V as a memory optimization.
-
-`llama-ngram-mod-f16-kv-100k-b256-32gb` verifies the directly served llama.cpp profile requested by `bun run daemon:llama`. It requires requested context 100,000, mmap loading, batch and micro-batch 256, one slot, **f16 K/V caches**, Flash Attention on, `ngram-mod`, one loaded model, and no vision projector. The verifier treats load mode, context, modality, speculation, K/V precision, and batching as configuration. `model:llama:64k` / `daemon:llama:64k` retain the lower-memory text fallback; `model:llama:32k` / `daemon:llama:32k` retain vision; the baseline pair remains non-speculative.
-
-The matched speculation sweep used cold process isolation, unique aliases, AC power, f16 K/V, 32K allocation, one slot, and bracketed non-speculative baselines. `ngram-mod` measured 70.56 post-first-output tokens per second against 15.89-15.92 baselines, with zero swap growth. At 491, 4,051, 8,174, and 16,556 prompt tokens it decoded at 57.38, 64.18, 53.37, and 23.27 tokens per second, versus 15.42, 15.03, 14.95, and 14.23 without speculation. The gain is workload-dependent: the complete six-round multi-file coding fixture improved from a matched 49.39 to 43.80 seconds, 11.3%, rather than 4.4x. It nevertheless passed 3/3 multi-file runs plus read-only diagnosis, single-file repair, and repository-inspection quality gates with exact tools and workspace outcomes.
-
-f16 K/V is a measured requirement, not a default. On build `b10621`, q8_0 K/V decoded 11.95 tokens per second at 4,051 prompt tokens and 7.17 at 16,556, against 15.03 and 14.23 for f16: a 20.5% regression at agent-scale context and 49.6% at long context. It also produced 246.66 MiB of swap-out growth where f16 produced none, so it did not deliver the memory benefit that motivated testing it. Raising batch and micro-batch to 512 was neutral. `experimental-llama-f16-kv-32k-b512-32gb` retains that variant for controlled comparison only.
-
-Cold prefill still dominates a near-capacity first turn and remains near 105 tokens per second; `ngram-mod` accelerates decode, not prefill. Warm append-only turns are different because llama.cpp can reuse nearly the entire prefix. For strict llama.cpp profiles, production therefore keeps the raw transcript through the soft-hard band and compacts only above the hard input limit. When compaction is unavoidable, duplicate reads and tool output are rewritten newest-first to preserve the longest cached prefix; oldest complete-turn dropping remains the final fallback because persisted session trimming represents a contiguous retained suffix.
-
-`bench:llama:longctx` is the gated harness for these questions, and exists because `bench:provider` uses a roughly forty-token prompt at which K/V precision is nearly invisible. It sweeps 512, 4,096, 8,192, and 16,384-token fixtures, records server-measured prefill and decode separately from llama.cpp's own streamed timings, pins the fixture set with a SHA-256 prompt digest, and fails closed on battery power, a non-exclusive or replaced server, any swap-out growth, missing build provenance, or an unstable prompt length. Opt-in fixtures are `capacity-31k`, `capacity-61k`, and `capacity-96k`. `bench:llama:retrieval` places one exact deterministic needle at a configurable depth and independently gates retrieval quality, reported usage, power, runner identity, swap growth, and runtime provenance.
-
-### 32K Context
-
-The 32,768-token window is supported and reachable. A cold 31,149-token request measured 97.11 tokens per second of prefill and 13.08 of decode with wired memory at 19.67 GiB and no swap-out growth. Decode degrades only 15.2% from 491 to 31,149 prompt tokens, so there is no cliff at capacity.
-
-Cold prefill deadlines are derived from the profile rather than fixed. `DEMESNE_PROVIDER_FIRST_EVENT_TIMEOUT_MS` defaults to 180,000 ms, which was chosen for 8K contexts and permits a cold prefill of only about 18,900 tokens; a cold 31,149-token request emits its first provider event at 320.8 seconds and was therefore always aborted. A strict profile now supplies a minimum first-event deadline computed from its verified context capacity and a conservative measured prefill floor, so the 32K profile requires at least 502,000 ms while the 8K profiles keep the existing default. An explicit environment value still wins, and starting below a profile's measured budget logs a warning. llama.cpp does send keep-alive bytes during prefill, but they do not decode into provider events and do not satisfy the deadline.
-
-Prefix reuse is what makes long contexts practical, and reduction is what destroys it. llama.cpp reports `prompt_tokens_details.cached_tokens`. On an append-only transcript a 9,145-token request took 83.40 seconds cold, 0.25 seconds warm at 100% cached, and 0.78 seconds at 99.8% cached after appending another round. Rewriting the oldest turn dropped reuse to zero: the reduced 6,475-token request took 58.50 seconds against 0.78 seconds for the larger unreduced request. Cache-aware delayed-hard planning is now enabled only by strict llama.cpp profiles, not by arbitrary provider IDs. A production-path near-capacity continuation completed in one second with 29,317 of 29,338 input tokens cached (99.93%) and no context actions.
-
-### 64K And 100K Context
-
-The GGUF declares a native 262,144-token context, so neither 64K nor 100K uses RoPE extrapolation. The promoted text-only 64K profile passed exact retrieval at 58,426 reported tokens with a 695.32-second cold TTFT, zero swap growth, and unchanged runtime provenance. At 65,075 tokens it sustained 81.33 prefill and 10.96 decode tokens per second. Startup retained 22-27% system memory availability and did not grow swap. Short-context provider throughput remained 70.57 tokens per second, so increasing allocated capacity did not regress normal coding turns.
-
-The first 102,400-token profile failed memory gates, but the exact-100,000 follow-up changed two controlled variables: llama.cpp's served allocation fell to 100,096 and model loading changed from anonymous `none` to file-backed `mmap`. Startup availability improved from 12% to 18-20%. Exact 93,129-token retrieval then passed with zero swap growth, 71.40 prefill tokens per second, and 9.60 decode tokens per second. A deterministic 128-word copy payload at 93,274 tokens proved the 15-token target for reusable coding output: 16.30 native tokens per second cold with 73.4% ngram acceptance and mean draft length 48, then 20.37 tokens per second warm with 85.4% acceptance, 0.43-second TTFT, exact output, and zero swap growth. Unpredictable output remains near 9.6 tokens per second; 15 is a workload-dependent target, not a universal 100K decode claim.
-
-Rejected alternatives remain recorded. Disabling RAM cache/checkpoints saved only approximately 0.2 GiB. q8 keys collapsed prefill to 6.6 tokens per second by 35K. Offline Metal tuning selected the existing kernels in every tested bucket. A generic Qwen3.5 0.8B draft was MRoPE-incompatible, built-in MTP reduced short decode to 12.67 tokens per second, and target-specific DFlash2 required a custom llama.cpp build but started at 6% availability, decoded at 6.11 tokens per second, and grew swap by 1.2 GiB. Decision: exact 100K mmap with f16 KV and `ngram-mod` is the default; 64K remains the lower-memory fallback.
-
-### Inference Scheduling
-
-The daemon uses one active inference slot by default. Provider rounds from concurrent sessions enter a process-local FIFO queue, while tool execution and permission waits happen without holding the slot. This prevents large local generations from competing unpredictably for unified memory while still allowing another session to infer during file reads, edits, tests, or approval waits. Set `DEMESNE_INFERENCE_SLOTS` to a larger positive integer only for a backend that safely supports parallel requests. Every named strict 32 GB profile requires exactly one slot. The scheduler has an injectable, one-slot-only quiescent-boundary hook for controlled benchmarks; production does not configure it or manage model residency.
-
-`bench:scheduling-recycle` tests that hook against an isolated strict Ollama service with two distinct concurrent sessions. Two forced-recycle repetitions preserved exact session markers, tool paths, complete provider events, FIFO order, runtime provenance, and zero swap growth. In the matched control, recycling increased two-session makespan from 65.05 to 93.51 seconds. The 28.47-second cost comprised approximately 13.74 seconds of unload/reload/verification and 14.62 seconds of lost prefix reuse on the next cold request. This proves the concurrency mechanism is safe but rejects unconditional or eager recycling.
-
-A sustained matched run used ten nonce-separated concurrent pairs, 40 provider rounds, and 138,380 aggregate input tokens. Without recycling, availability fell from 35% to 14% and the workload produced 5.12 GiB of swap-out traffic. Requiring at least 12 completed rounds and at most 20% availability triggered once after round 19, restored availability from 19% to 33%, and reduced swap-outs to 130.81 MiB. All 20 turns retained exact quality and event integrity. Total makespan increased by 40.59 seconds across the approximately 17.8-minute control, or 3.8%, while median pair makespan improved by 1.2%.
-
-Replication showed that coarse available-memory percentage is not a stable trigger by itself. Equivalent pressure-gated runs fired after rounds 17, 19, and 21 and produced 1.13 GiB, 130.81 MiB, and zero swap-outs respectively. A deterministic two-recycle follow-up instead bounded each runner to 12 completed requests. Because each benchmark pair has four requests, transitions at rounds 12 and 24 preserved pair boundaries. Two unchanged repetitions retained all 10/10 pairs and complete event integrity, produced zero swap-outs with no swap-use growth, and added 1.70-1.71% aggregate pair makespan while improving median pair makespan by 1.22-1.26%. This is the preferred benchmark policy for this exact workload, but the alignment is fixture-specific. Production recycling remains disabled until a session-aware boundary can provide the same result for variable real workloads; all strict 32 GB profiles remain opt-in.
-
-The scheduler now tracks whether a released provider lease belongs to a turn that requires another model round. Benchmark maintenance is deferred while any such continuation exists, and a skipped boundary remains pending until all affected turns settle. A variable-length live fixture used one-read/two-round and two-read/three-round turns across eight concurrent pairs, totaling 40 provider rounds and 141,223 input tokens. Its control produced 2.55 GiB of swap-outs. A 12-request policy was safely deferred to complete-turn boundaries at rounds 15 and 30; two unchanged repetitions preserved all 8/8 pairs and exact round counts, produced zero swap-outs with falling swap use, and added 2.76-2.80% aggregate pair makespan. Every recycle snapshot recorded zero pending continuations. This validates the turn-aware benchmark mechanism across asymmetric turns, but production still supplies no recycle hook pending broader full-agent and continuously arriving workload evidence.
-
-Continuous admission requires bounded deferral because fresh turns can otherwise prevent the continuation set from reaching zero. The benchmark controller can now request a continuation drain once its gates pass: the scheduler temporarily holds fresh first rounds, preserves FIFO among already-started continuations, and recycles only after those turns settle. A configurable deadline abandons recycling, resumes fresh FIFO, disables further maintenance for that scheduler lifetime, and invalidates the report rather than risking starvation. With six asymmetric pairs admitted together, the 30-round control produced 749.31 MiB of swap-outs and a median pair completion time of 853.74 seconds. A four-request trigger requested drains with four pending turns at rounds 4 and 14, recycled at zero-pending boundaries 10 and 20, and divided the workload into three ten-request runner epochs. Two unchanged repetitions retained all 6/6 pairs, produced zero swap-outs and no drain timeouts, and reduced median pair completion time by 51.52%. The unusually large speedup reflects severe queueing and swap in this continuous-load control and must not be generalized beyond this fixture. Production remains strict FIFO and installs no drain or recycle hook.
-
-Deterministic mixed-lifecycle coverage now extends the drain mechanism beyond read-only turns. One shared daemon test continuously queues an approved edit, a permission wait cancelled before execution, an unknown-tool failure that recovers on its next model round, a queued cancellation, and fresh work. It proves that recovery and approved continuations bypass fresh first rounds during drain, cancelled permission state is removed, late permission resolution fails, maintenance blocks fresh inference, and FIFO resumes afterward. A separate unresolved-permission test proves that the drain deadline resumes fresh work, records one timeout, performs no recycle, and disables further maintenance. Cancelling a permission wait now transactionally changes its persisted permission state to `cancelled`; it no longer appears as a stale pending permission. These are deterministic lifecycle guarantees, not live-model memory evidence.
-
-`bench:mixed-agent-recycle` is the corresponding scenario-aware live harness. It uses one shared daemon, rolling admission, isolated workspaces, and explicit expected outcomes for read-only completion, approved editing, recoverable tool failure, permission-wait cancellation, and cancellation before provider entry. The strict wrapper owns an isolated Ollama runner lifecycle and fails closed on runtime provenance, AC power mode, exclusive runner ownership, scenario scoring, provider events, drain timeouts, transition continuity, and swap-out growth. In two matched 15-task q4/b256 repetitions, both disabled controls and both two-recycle policy arms completed 15/15 scenarios with zero swap-out growth. Because the controls were already memory-eligible, recycling provided no memory benefit and increased workload makespan by 27.9% and 31.9%. A final maximum control then completed 50/50 tasks and 100 provider rounds with 182,270 input tokens, zero swap-out growth, and availability changing only from 34% to 33%. Representative mixed work therefore provides neither a memory need nor a defensible trigger for recycling. The recycling study is closed with production remaining strict FIFO and no recycle hook; reconsideration requires independent production telemetry showing sustained runner-induced pressure.
-
-Each turn snapshots its provider, model, runtime profile, and thinking selection when submitted. A later model switch affects future turns but cannot change the model used by a multi-round turn already in progress. Waiting turns can be cancelled before they enter the provider, and shutdown waits for active provider cleanup before closing persistence.
-
-Queue duration is stored and displayed separately from provider request duration and TTFT. This keeps backend latency measurements meaningful when another session was ahead in the queue.
-
-### Context And KV Cache
-
-KV cache memory belongs to the inference server, not Demesne's SQLite database. Demesne keeps requests cache-friendly by persisting an append-only provider transcript containing user messages, visible assistant messages, tool calls, and tool results. Successful turns are reconstructed with the same message structure after a daemon restart; hidden reasoning is journaled for live display but is deliberately excluded from future model context.
-
-Before every provider call, Demesne records a deterministic context plan containing the effective known capacity, enforced output reserve, future tool-result and safety reserves, conservative input estimate, tool-definition estimate, and context-reduction actions. Estimator version 2 uses serialized OpenAI-compatible request JSON, a UTF-8 byte heuristic, and a measured 1.20 safety factor; it remains an estimate rather than an exact tokenizer. Historical reduction begins only when the selected policy crosses its boundary. Once required, the planner replaces exact duplicate reads, compacts multiline historical output while preserving valid JSON, and finally removes complete oldest turns until budget is met. System instructions, tool definitions, the current user request, and the newest current-turn tool-result batch remain protected. If a multi-round tool loop still exceeds the hard limit after historical reduction, older current-turn tool results are compacted newest-first before the newest batch is touched; this prevents a large sequence of reads from failing the turn outright. `DEMESNE_MAX_OUTPUT_TOKENS` configures and enforces the output reserve. Named strict 32 GB profiles default it to 1536 tokens.
-
-Model-authored summary checkpoints are not enabled in production. The measurement-only `bench:summary-checkpoint` harness compares raw history, dropped-prefix history, and a strict structured checkpoint while recording fidelity, injection resistance, token usage, latency, compression, runtime provenance, and paired latency break-even. Current evidence rejects production adoption; deterministic schema-3 reduction remains the active policy.
-
-`bench:context-reduction` directly compares an unreduced near-capacity provider request with its exact schema-3 projection. The pinned 12-pair experiment reduced provider-reported input from a median 5,824.5 to 3,189.5 tokens and reduced median time to first output from 63.10 to 35.00 seconds with exact probe quality in both arms. Pair-specific system nonces prevent exact-request prefix-cache reuse, order is balanced, and the report fails closed on usage, runtime, runner, power, and fidelity gates. This result supports deterministic reduction for the controlled fixture and measured 27B runtime under observed swap pressure; it is not a general quality or performance claim, and `balanced-32gb` remains opt-in.
-
-`bench:repository-context` extends that comparison to pinned inspection, single-file repair, and multi-file feature transcripts. Its clean-start smoke run preserved exact facts in all 6/6 raw and 6/6 reduced measurements with zero reduced-only failures. Depending on the fixture, schema-3 removed 951-1,405 provider-reported input tokens and saved 10.2-15.0 seconds to first output. This is positive synthetic-repository evidence, but the run still accumulated approximately 3.04 GiB of swap-out traffic and uses only two measured pairs per fixture, so it does not promote `balanced-32gb` to a default.
-
-`bench:full-agent-context` runs the same task classes through the complete daemon, permission, tool, persistence, workspace-edit, and focused-test loop. The corrected six-pair run completed every raw and schema-3 task with valid final workspaces and zero schema-3-only failures. Inspection and single-file repair remained below the soft limit, so schema 3 preserved their raw requests and matched latency within noise. The multi-file task crossed the soft limit and saved a median 2,867.5 aggregate input tokens, but changing the historical prefix added a median 8.49 seconds of summed TTFT. That run began with only 27% memory available and recorded approximately 2.32 GiB of swap-out traffic. Schema 3 therefore remains a capacity-safety policy rather than a universal latency optimization.
-
-The same harness has a measurement-only `soft-delayed-hard` comparison that preserves append-only history above the soft limit and invokes the exact production reducer only above the hard input limit. Two unchanged expanded runs completed all 24/24 pairs with exact task quality. Delaying reduction carried a median 2,862.5-2,871.5 additional input tokens on the multi-file fixture while lowering aggregate TTFT by 5.80-6.41 seconds, and carried 895 additional tokens on the long-session fixture while lowering aggregate TTFT by 11.77-11.84 seconds. In all four hard-boundary pairs, estimate 7,100 triggered the production deduplicate, truncate, and complete-turn-drop actions and produced estimate 5,155, below the 6,656 hard limit. This validates delayed intervention for the measured local runtime, but it is not the provider-neutral default: Ollama returned no cached-token counters, providers without prefix reuse would pay only the extra input cost, and the two runs recorded approximately 6.42 and 4.73 GiB of swap-out traffic. Production therefore retains the soft-boundary schema-3 planner pending an explicit cache-capability or opt-in policy backed by broader low-pressure measurements.
-
-`bench:staged-memory` requires an explicit isolated Ollama endpoint and separates unloaded baseline, model loading, idle residency, full-agent workload, and post-unload recovery. Schema 2 also samples runner RSS without reading process environments and records observed per-PID peaks. Set `DEMESNE_MEMORY_RELOAD_BETWEEN_BLOCKS=true` to run the two balanced-order fixture blocks in separate, strictly verified runner epochs. That experiment mode requires exactly two pairs per fixture and fails unless the boundary reaches zero runners, loads a new PID, restores the strict profile, and preserves model, backend, power, and ownership provenance.
-
-The first matched `experimental-q4-kv-32gb` run retained 100% full-agent task success, ended with 17% memory available, and recorded zero workload swap-outs. That result did not replicate after adding historical recall and inferred two-file repair gates. Across the expanded ten-pair suite, q8/b512, q4/b512, and q4/b256 all retained 100% task success but swapped out approximately 1.96, 1.68, and 1.13 GiB respectively. Batch 256 was approximately 9% faster than q8/b512.
-
-Two q4/b256 follow-ups recycled the runner once between the two five-fixture blocks. Both completed all 10/10 pairs with 100% raw and schema-3 quality and zero swap-outs. Midpoint availability recovered from 34% to 35%; workload page-outs were 8.14 and 14.03 MiB, and observed runner RSS peaks were 21.71-22.39 GiB. The recycle took approximately 14.12 seconds and total workload duration was 822.13 and 824.75 seconds, about 3% above the 797.63-second no-recycle run. This reproducibly identifies bounded runner lifetime as the first configuration to pass the expanded memory gate, but recycling exists only in the benchmark and a safe production trigger has not been established. All profiles therefore remain opt-in.
-
-If a provider explicitly rejects a request because it exceeds the context window, Demesne retries after dropping only complete oldest turns and persists that new context boundary. It never trims the current request, active tool calls, or matching tool results. Providers that truncate requests internally should be configured to reject over-limit input if that behavior is available.
-
-The CLI records exact request duration and time-to-first-token. It displays cached input tokens only when the provider returns an explicit `cached_tokens` counter. Ollama and LM Studio otherwise control model residency, KV precision, Flash Attention, TTL, and cache-slot eviction. Keeping the selected model loaded preserves reuse between prompts; the measured recycle experiment shows that an indefinitely retained runner can eventually trade that benefit for memory pressure. The optional strict Ollama profile verifies a measured configuration but still does not manage backend residency or recycling.
-
-Discover models and submit a prompt with:
-
-```sh
-bun run demesne models
-bun run demesne session list
-bun run demesne prompt "Explain the current architecture"
-```
-
-New sessions are bound to the current directory. Select another workspace explicitly with:
-
-```sh
-bun run demesne session create --workspace /absolute/project/path "Project session"
-```
-
-Workspace roots cannot be `/` or the user's home directory. Legacy sessions without a workspace remain usable as chat sessions but receive no coding tools.
-
-## Coding Tools
-
-The model can use these bounded tools:
-
-| Tool | Behavior | Permission |
+| Tool | What it does | Asks first |
 | --- | --- | --- |
-| `list_files` | Recursive workspace listing with optional glob patterns (`**`, `*`, `?`) | Automatic |
-| `read_file` | Bounded UTF-8 line ranges with `totalLines`/`remainingLines` metadata for precise paging | Automatic |
-| `read_files` | Batch up to 8 file reads in one call; fails soft per entry | Automatic |
-| `search_files` | Ripgrep-backed (fallback walk) case-insensitive literal search with glob includes; deterministic `path:line:text` output | Automatic |
-| `edit_file` | Create, append, or batch-edit files; matching falls back from exact text to trimmed lines to whitespace-insensitive comparison, with ambiguity guards | Per-call approval |
-| `write_file` | Full-content create or atomic overwrite (≤96 KiB), creating parent directories | Per-call approval |
-| `git_status` / `git_diff` | Read-only branch/status and unified diff (staged or unstaged) for self-verification | Automatic |
-| `move_path` | Rename/move files or directories inside the workspace, with overwrite guards | Per-call approval |
-| `delete_path` | Delete a file, or a directory with `recursive: true`; protected paths refused | Per-call approval |
-| `run_command` | Executes an argv array with a minimal environment; `background: true` returns a handle instead of blocking | Per-call approval |
-| `command_logs` / `command_stop` | Read incremental output from, or terminate, a backgrounded command | Automatic |
+| `list_files`, `read_file`, `read_files`, `search_files` | Browse, read and search the workspace | No |
+| `git_status`, `git_diff` | Read-only git state | No |
+| `edit_file`, `write_file`, `move_path`, `delete_path` | Change files | Yes |
+| `run_command` | Run a command (optionally in the background) | Yes |
+| `command_logs`, `command_stop` | Read or stop a background command | No |
 
-Write prompts offer **Allow once**, **Always this session** scoped to the file's directory, and **Deny**. When a rule can be expressed safely, a fourth option, **Always allow (save)**, appends a persistent entry to `[permissions] allow` in the user config; the daemon re-reads the file, so the rule applies immediately and survives restarts. `run_command` prompts persist the exact argv (never a bare `run_command`) and otherwise offer only **Allow once** and **Deny**; every unlisted command still requires approval. In-memory write grants remain attached to their session until the daemon exits and are listed under `/context`. Redirected or otherwise non-interactive CLI use denies these operations by default. Override the turn policy explicitly with `--permission ask` or `--permission deny`.
-
-`run_command` is host execution, not an OS sandbox. It starts in the workspace with filtered environment variables and process limits, but an approved executable still has the access of the daemon's operating-system user.
-
-Sensitive paths such as `.env`, `.git`, `.ssh`, `.aws`, `.docker`, common credential files, and private-key formats are excluded from automatic reads and searches.
+- **Commands aren't sandboxed.** `run_command` runs on your machine as your user. It starts in the workspace with a filtered environment and process limits.
+- **Secrets stay out of reach.** Sensitive files are never read or searched automatically, including `.env`, `.git`, `.ssh`, `.aws`, credential files and private keys.
+- **Saved approvals.** They live in `[permissions] allow`, for example `"edit_file:src"` or `"run_command:git status"`. A saved command rule matches that exact command only.
 
 ## Configuration
 
-Demesne reads two TOML files and merges them over built-in defaults:
-`~/.demesne/config.toml` (user) and `<workspace>/.demesne/config.toml`
-(project). Environment variables override both, and an explicit CLI flag such
-as `--server` overrides everything. Unknown keys are rejected with the file
-path so a typo cannot silently disable a setting.
+Demesne merges `~/.demesne/config.toml` (user) with `<workspace>/.demesne/config.toml` (project). Environment variables override both. Unknown keys are rejected, so a typo can't silently disable a setting. Provider, MCP and image settings are read from the user file only, so a project cannot change them.
 
 ```toml
-server = "http://127.0.0.1:7337"
 theme = "auto"
 
 [daemon]
-auto_start = "prompt"   # prompt, always, or never
+auto_start = "prompt"   # prompt, always or never
 port = 7337
+
+[provider]
+url = "http://127.0.0.1:11434/v1"   # any OpenAI-compatible endpoint
+id = "ollama"
+model = "qwen3-coder"
+context_window = 32768              # what the server actually loaded
+max_output_tokens = 4096
 
 [agent]
 max_model_rounds = 64
 max_tool_calls = 256
 
-[provider]
-url = "http://127.0.0.1:11436/v1"
-id = "llama.cpp"
-model = "qwen3.8-q4_0-100k-b256"
-context_window = 100000
-max_output_tokens = 1536
-runtime_profile = "llama-ngram-mod-f16-kv-100k-b256-32gb"
-reasoning_effort = "none"
-
 [permissions]
-# Persistent approvals: "edit_file:src", "write_file:README.md",
-# "run_command:git status", or a bare tool name for non-execution tools.
 allow = []
 
 [notifications]
@@ -644,198 +238,69 @@ enabled = true
 minimum_duration_ms = 30000
 
 [ui]
-intro = true
 hyperlinks = true
 ```
 
-The daemon uses the user file and environment only: provider settings are
-machine-wide, so a workspace cannot reconfigure the shared runtime. The CLI
-merges the project file for workspace-specific defaults. `DEMESNE_CONFIG_FILE`
-points the loader at a different user config for testing or nonstandard homes.
+Restart the daemon after changing provider settings: `demesne daemon stop`, then `demesne daemon start`.
 
-Additional model endpoints can be registered in the user configuration. The
-primary `[provider]` remains the startup default; `/model` can switch between
-models returned by the primary and additional providers. Each model ID must
-be unique across endpoints. A temporarily unavailable endpoint does not hide
-models from the other reachable endpoints, and queued turns retain their
-original provider and limits after a selection change.
+`demesne setup --yes --provider-url … --model … --context-window … --max-output-tokens …` writes the same settings non-interactively. It backs up the existing file first.
 
-```toml
-[additional_providers.home-qwen]
-id = "Qwen on PC"
-url = "http://100.115.125.89:8081/v1"
-allow_http_endpoint = "http://100.115.125.89:8081/v1"
-model = "qwen3.8-27b"
-allowed_models = ["qwen3.8-27b"]
-context_window = 262144
-max_output_tokens = 8192
-```
+**Providers.**
+- **Any endpoint.** Demesne talks to any OpenAI-compatible API. Set `api_key` (or `DEMESNE_API_KEY`) when the endpoint needs one.
+- **HTTPS rule.** Plain HTTP is allowed only on your own machine. A remote endpoint must use HTTPS, except a single Tailscale address you opt into with `allow_http_endpoint`.
+- **More than one provider.** Add endpoints under `[additional_providers.<name>]`, then use `/model` to switch between every model they offer.
 
-`max_output_tokens` is the per-request generation budget, shared by thinking,
-tool-call arguments, and the visible answer. Thinking models may need a larger
-budget than text-only replies; 8192 is a starting point for this Qwen endpoint.
-The budget must remain below the model's context window. Token-limit stops and
-reasoning-only/empty replies fail explicitly instead of being marked completed.
-Partial text and usage remain available, and the provider's `finish_reason` is
-saved with its call and completion/failure event for diagnosis and replay.
+**Per-turn limits.** Each request gets 64 model rounds and 256 tool calls by default. When a limit is reached, the model reports what it finished and what is left, and the turn is marked interrupted rather than complete.
 
-Each user request allows **64 model rounds and 256 tool calls** by default.
-A round is one model response, which may request several tools. Configure these
-positive integer allowances under `[agent]` in the user config, or with
-`DEMESNE_MAX_MODEL_ROUNDS` and `DEMESNE_MAX_TOOL_CALLS`, then restart the daemon.
-After an allowance is exhausted, one additional **tool-free status request**
-asks the model to report completed work, checks, and next steps. The turn is
-marked **interrupted**, rather than claiming the task is complete. A batch that
-would exceed the tool allowance is recorded as unexecuted. Accumulated tool
-results also trigger this final status request at 4 MiB, after the current batch.
+**Project instructions.** Put guidance for the agent in `DEMESNE.md` at the workspace root. `AGENTS.md` works too. It is read on every turn.
 
-Follow-ups retain valid tool exchanges and findings from failed, cancelled, and
-interrupted turns, with an explicit incomplete-work annotation. This survives
-daemon restart and participates in `/compact`; the full journal stays in History.
-Unanswered tool calls are excluded from model context so continuation does not
-send malformed tool exchanges. A new follow-up receives a fresh allowance.
+**Notifications.** Interactive terminals get a desktop notification when a long turn finishes or an approval is waiting. Set `DEMESNE_NO_NOTIFICATIONS=1` to turn them off.
 
-Remote providers normally require HTTPS. `allow_http_endpoint` opts in to
-one exact HTTP endpoint whose IPv4 address is in `100.64.0.0/10`; this is intended
-for an established Tailscale connection. It does not establish or verify that
-connection itself. Redirects remain disabled. Restart the daemon after changing
-provider configuration. The daemon-wide instruction, vision, scheduling and
-timeout policies continue to come from the primary configuration.
+### OpenRouter
 
-Interactive terminals emit a desktop notification (OSC 9) when a turn finishes
-after at least `minimum_duration_ms` or when an approval is waiting.
-`DEMESNE_NO_NOTIFICATIONS=1` disables them, and terminals without OSC 9 support
-ignore the sequence.
+`demesne auth login openrouter` signs in through your browser and saves the key to your user config, which is private to you. Add `--model <id>` to pick a model. If `OPENROUTER_API_KEY` is set, that key is used instead. Existing local providers are kept. Restart the daemon, then choose an OpenRouter model with `/model`.
 
-A workspace can also provide instructions for the model. `DEMESNE.md` is
-preferred, and `AGENTS.md` is accepted so repositories that already target
-other agents work unchanged. The file is read per turn (capped at 32 KiB),
-appended to the system prompt, and framed as taking precedence over general
-guidance when the two conflict.
-
-Run `demesne setup` to create the user config interactively, or
-non-interactively for automation:
-
-```sh
-bun run demesne setup --yes \
-  --provider-url http://127.0.0.1:11436/v1 \
-  --model qwen3.8-q4_0-100k-b256 \
-  --context-window 100000 --max-output-tokens 1536
-```
-
-Setup preserves unrelated settings, backs up an existing file to
-`config.toml.bak`, validates the merged result, and writes atomically with mode
-`0600`.
-
-### OpenRouter sign-in
-
-```sh
-demesne auth login openrouter
-# Or select a different OpenRouter model when connecting:
-demesne auth login openrouter --model qwen/qwen3-coder-next
-```
-
-Login opens OpenRouter's browser authorization using S256 PKCE and a one-use
-localhost callback. The resulting API key is validated and saved in the private
-user config (mode `0600`). The default model is `qwen/qwen3.8-27b`, with up to
-262144 context tokens and the catalog's maximum output budget (currently 131072
-tokens for this model). Stream-event, text-size, and default request-time limits
-scale with that budget; explicit request timeouts still take precedence. Existing local providers
-are preserved; OpenRouter is added as another provider. On a fresh installation
-it becomes the primary provider.
-
-Restart the daemon (`demesne daemon stop`, then `demesne daemon start`) and use
-`/model qwen/qwen3.8-27b` in your session. OpenRouter models appear in the model
-picker. `--no-browser` prints the authorization link for manual opening on the
-same machine. If `OPENROUTER_API_KEY` is set, login validates and saves that key
-instead of opening a browser. Keys are never printed by the login command.
-
-To route around an unavailable upstream host, add `openrouter_ignore = ["reka"]`
-to the OpenRouter provider table in the user config and restart the daemon.
-This sends OpenRouter's `provider.ignore` preference, keeping the selected model,
-reasoning settings, and output budget while allowing its other eligible hosts.
-Use `openrouter_ignore = []` to restore normal routing.
-
-### MCP Servers
-
-Model Context Protocol servers extend the tool set. Each server is declared in
-the user config:
+### MCP servers
 
 ```toml
 [mcp.servers.files]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
-env = { TOKEN = "secret" }   # optional
-timeout_ms = 15000           # optional, default 30000
+timeout_ms = 15000
 ```
 
-The daemon spawns each server over stdio, performs the MCP handshake, and
-registers its tools as `mcp__<server>__<tool>`. Every MCP tool requires
-per-call approval; a bare allowlist entry such as
-`allow = ["mcp__files__read_file"]` persists approval for that tool. A server
-that fails to start is skipped without stopping the daemon, and a crashed
-server is restarted lazily on its next call. MCP servers are read from the user
-config only, not project files.
+MCP tools appear as `mcp__<server>__<tool>` and ask for approval on each call. A server that fails to start is skipped.
 
-## Authentication
+### Images
 
-On first launch, `demesned` creates `~/.demesne/daemon.token` with mode `0600`. The CLI reads the selected data directory's token automatically for loopback connections and authenticates every non-health request. Set `DEMESNE_DAEMON_TOKEN` explicitly for other deployments. Non-loopback CLI connections require HTTPS.
+- **Screenshots.** Image-returning tools, such as a browser MCP server or macOS window capture, save their screenshots to the Preview panel (Alt+V).
+- **Vision.** For a model that can read images, set `vision = true` under `[provider]` so it sees the latest screenshots.
+- **Generating images.** Add an `[images]` section with the `url` and `model` of an OpenAI Images-compatible service, and the agent gains a `generate_image` tool. Put the key in `DEMESNE_IMAGE_API_KEY`.
 
-The daemon remains loopback-only. Remote control is intentionally unavailable until paired-device authentication is implemented.
+## Daemon, data and security
 
-## Build Executables
+The daemon listens on `127.0.0.1:7337` and keeps sessions in `~/.demesne/demesne.sqlite`. Change these with `DEMESNE_PORT` and `DEMESNE_DATA_DIR`. On first start it creates a private token in `~/.demesne/daemon.token`, and the CLI uses it for every request. The daemon only accepts connections from your own machine.
 
-```sh
-bun run build
-./dist/demesned
-./dist/demesne prompt "Run the tests and fix failures"
-```
-
-The local build command targets the current machine. Public macOS distribution additionally requires explicit arm64 and x86_64 artifacts, Developer ID signing, notarization, and published checksums; the repository does not yet automate those release steps.
-
-The compiled daemon's native image codecs are packaged in `dist/node_modules`.
-Keep that directory beside `demesned` when relocating the build. The CLI binary
-itself does not load the image decoder. To verify the packaged codec path:
-
-```sh
-bun build scripts/check-image-runtime.ts --compile --outfile dist/check-image-runtime
-./dist/check-image-runtime
-```
+Everything is saved as it happens: sessions, transcripts, tool calls and results, approvals, and undo snapshots. If the daemon crashes, running work is marked interrupted and is never replayed on its own.
 
 ## Development
 
 ```sh
-bun --version # 1.4.0
 bun run typecheck
 bun test
+bun run ui:session                 # preview the workbench with demo data
+bun run ui:session --state=approval
 ```
-
-## Structure
 
 ```text
-apps/daemon/       HTTP daemon and turn runner
-apps/cli/          Streaming command-line client
-packages/client/   Typed REST and SSE client used by the CLI
-packages/protocol/ Shared API and event contracts
-packages/providers/OpenAI-compatible provider adapters
-packages/storage/  SQLite state and event journal
-packages/config/   User and project configuration loading
-packages/brand/    Palette, command grammar, and terminal rendering
+apps/cli/           The workbench and command-line client
+apps/daemon/        The daemon: turns, tools, approvals
+packages/client/    Typed REST and event-stream client
+packages/protocol/  Shared API and event types
+packages/providers/ OpenAI-compatible provider adapters
+packages/storage/   SQLite state and event journal
+packages/config/    Config loading
+packages/brand/     Themes, commands and terminal rendering
 ```
 
-The typed client can be used directly by scripts and editor integrations:
-
-```ts
-import { DemesneClient } from "@demesne/client";
-
-const client = new DemesneClient({ server: "http://127.0.0.1:7337", token });
-const { turn } = await client.submitTurn(sessionId, { content: "Run the tests" });
-for await (const event of client.streamEvents(sessionId, turn.id)) {
-  if (event.type === "message.delta") process.stdout.write(String(event.payload.delta));
-}
-```
-
-It reconnects with exponential backoff, resumes from the last event ID, and
-throws `ApiRequestError` with the daemon's error code for failed requests.
-
-Sessions, structured model transcripts, reasoning, model requests, token usage, tool calls and results, permissions, cancellation, and file undo snapshots are persisted in the event journal. Active model and tool work is marked interrupted after a crash and is never replayed automatically. One daemon holds an exclusive data-directory lock; another process using the same directory fails before opening SQLite.
+The design rules for the workbench are in [docs/terminal-design.md](docs/terminal-design.md).

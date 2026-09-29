@@ -1959,7 +1959,7 @@ export class Workbench {
       context: this.sessionView.latest?.settled ? this.sessionView.latest.receipt?.context ?? rail.contextSnapshot : rail.contextSnapshot,
       now: Date.now(), reducedMotion: reducedMotionEnabled(),
       presence: this.state, elapsed: this.turnStartedAt === null ? undefined : Math.max(0, Date.now() - this.turnStartedAt),
-      tokensPerSecond: rail.tokensPerSecond, paused: this.sessionView.paused,
+      tokensPerSecond: rail.tokensPerSecond, paused: this.sessionView.paused, model: rail.modelId,
       hasResponse: Boolean(this.sessionView.current?.settled && this.sessionView.current.answer) });
     canvas.put(layout.height - 1, 0, "", width, "surface");
     canvas.put(layout.height - 1, inset, status.text, workspaceWidth, "surface");

@@ -6,7 +6,7 @@ import { Workbench } from "../src/workbench/controller.ts";
 import { CliContextRail } from "../src/context-rail.ts";
 import { SessionView, planRuns } from "../src/workbench/session.ts";
 import { projectRunEvidence } from "../src/workbench/evidence.ts";
-import { contextMeter, contextTone } from "../src/workbench/session-chrome.ts";
+import { contextMeter, contextTone, keycap, sessionStatus } from "../src/workbench/session-chrome.ts";
 import { seedSession, type PreviewState } from "../../../scripts/session-fixture.ts";
 
 function fixture(scenario?: PreviewState) {
@@ -1800,4 +1800,27 @@ test("thinking between routine reads folds into one Explored row that still expa
   const expanded = screen(120, 36);
   expect(expanded.match(/◇ Thought/g)).toHaveLength(3);
   for (const path of ["README.md", "package.json", "src/main.ts"]) expect(expanded).toContain(path);
+});
+
+test("the status bar follows Figma: state, model, speed and usage bar left; log and live keycaps right", () => {
+  const paint = createPainter(true);
+  const context = { used: 120_800, capacity: 262_100, estimated: false };
+  const base = { paint, state: "COMPLETE", context, model: "qwen3.8-27b", presence: "idle" as never, tokensPerSecond: 31.4 };
+  const wide = sessionStatus({ ...base, width: 140 });
+  const plain = stripVTControlCharacters(wide.text);
+  expect(plain).toMatch(/^● ready {2}qwen3\.8-27b {2}31\.4 tok\/s {2}━{10} 120\.8k \/ 262\.1k · 46%/);
+  expect(plain.trimEnd()).toEndWith("Ctrl+B log  Ctrl+G live");
+  expect(wide.text).toContain(keycap(paint, "Ctrl+B"));
+  expect(wide.zones.map((zone) => zone.action)).toEqual(["context", "log", "follow"]);
+  const logZone = wide.zones.find((zone) => zone.action === "log")!;
+  expect(plain.slice(logZone.column, logZone.column + logZone.width)).toBe("Ctrl+B log");
+  // Speed, then the model, then the bar's track give way before the numbers do.
+  const narrow = stripVTControlCharacters(sessionStatus({ ...base, width: 60 }).text);
+  expect(narrow).not.toContain("tok/s");
+  expect(narrow).toContain("120.8k / 262.1k · 46%");
+  const tiny = stripVTControlCharacters(sessionStatus({ ...base, width: 40 }).text);
+  expect(tiny).toContain("● ready");
+  expect(tiny).toContain("46%");
+  // Unknown usage stays explicit instead of drawing an empty bar.
+  expect(stripVTControlCharacters(sessionStatus({ ...base, width: 140, context: { used: null, capacity: 100_000, estimated: false } }).text)).toContain("ctx —/100k");
 });

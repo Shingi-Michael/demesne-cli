@@ -5,7 +5,7 @@ import type { ContextReceipt } from "./entries.ts";
 import type { Rect } from "./layout.ts";
 import { Canvas } from "./canvas.ts";
 import { InteractionTransitions, tint } from "./interaction.ts";
-import { contextLabel, contextMeter } from "./session-chrome.ts";
+import { keycap, keyHints, usageBar, usageLabel } from "./session-chrome.ts";
 
 export const START_OPERATIONS = [
   { tag: "EXPLORE", label: "Explore", title: "Trace a call flow end to end", description: "Follow execution from entry point through the full stack", tone: "electric",
@@ -125,26 +125,30 @@ export class StartScreen {
     // The start frame has its own top status strip and workspace header.
     // It deliberately has no conversation action rail or wall-clock heading.
     put(0, 0, "", width, "surface");
-    const context = `ctx ${contextLabel(options.context)}`;
-    const settings = width >= 90 ? "Tab settings  Ctrl+K commands" : width >= 60 ? "Tab settings" : "Tab";
-    const statusRoom = inner - settings.length - 2;
+    // Figma 8:268 strip: state, model and the usage bar; keycapped settings keys on the right.
+    const usage = usageLabel(options.context);
+    const hints: [string, string][] = width >= 90 ? [["Tab", "settings"], ["Ctrl+K", "commands"]] : width >= 60 ? [["Tab", "settings"]] : [["Tab", ""]];
+    const settings = keyHints(paint, hints.map(([key, label]) => [key, label] as const)).trimEnd();
+    const settingsWidth = visibleLength(settings);
+    const statusRoom = inner - settingsWidth - 2;
     let status = paint.text("● ready", "citron");
-    const modelRoom = statusRoom - visibleLength(status) - context.length - 4;
+    const bar = usageBar(options.context, paint);
+    const usageWidth = usage.length + (bar ? visibleLength(bar) + 1 : 0);
+    const modelRoom = statusRoom - visibleLength(status) - usageWidth - 4;
     if (modelRoom >= 8) status += "  " + paint.text(truncateText(safe(options.model), modelRoom), "muted");
     const contextColumn = inset + visibleLength(status) + 2;
-    status += "  " + paint.text(context, "muted");
-    const meter = contextMeter(options.context, paint, 8);
-    if (meter && visibleLength(status) + visibleLength(meter) + 2 <= statusRoom) status += "  " + meter;
-    put(0, inset, formatFooterLine(status, paint.text(settings, "muted"), inner), inner, "surface");
-    zone({ row: 0, column: contextColumn, width: context.length, height: 1 }, { kind: "context" });
-    const settingsColumn = width - inset - settings.length;
-    zone({ row: 0, column: settingsColumn, width: settings.startsWith("Tab settings") ? 12 : 3, height: 1 }, { kind: "settings" });
+    status += "  " + (bar && visibleLength(status) + usageWidth + 2 <= statusRoom ? `${bar} ` : "") + paint.text(usage, "muted");
+    put(0, inset, formatFooterLine(status, settings, inner), inner, "surface");
+    zone({ row: 0, column: contextColumn, width: usageWidth, height: 1 }, { kind: "context" });
+    const settingsColumn = width - inset - settingsWidth;
+    zone({ row: 0, column: settingsColumn, width: hints.length > 1 || width >= 60 ? 12 : 3, height: 1 }, { kind: "settings" });
     if (width >= 90) zone({ row: 0, column: settingsColumn + 14, width: 15, height: 1 }, { kind: "commands" });
     const headerRow = height >= 18 ? 2 : 1;
     const history = width >= 60 ? "Alt+H history" : "history";
     const branch = options.branch && width >= 70 ? `⎇ ${truncateText(safe(options.branch), 20)}  ` : "";
     const heading = paint.text("demesne", "electric") + paint.text(` · ${safe(options.path)}`, "muted");
-    put(headerRow, inset, formatFooterLine(heading, paint.text(branch + history, "muted"), inner), inner);
+    const historyHint = width >= 60 ? keyHints(paint, [["Alt+H", "history"]]) : paint.text(history, "muted");
+    put(headerRow, inset, formatFooterLine(heading, paint.text(branch, "muted") + historyHint, inner), inner);
     zone({ row: headerRow, column: inset, width: Math.max(0, inner - branch.length - history.length - 2), height: 1 }, { kind: "workspace" });
     zone({ row: headerRow, column: width - inset - history.length, width: history.length, height: 1 }, { kind: "history" });
     if (height >= 18) put(3, inset, paint.text("─".repeat(inner), "rule"), inner);
@@ -237,7 +241,7 @@ export class StartScreen {
     if (!listed.length) put(listRow, recent.column + 2, paint.text(empty, "muted"), recent.width - 4, "surface");
     if (recent.height > 1) {
       const label = "Alt+H all sessions · /resume <name>";
-      put(recent.row + recent.height - 1, recent.column, tint(paint, label, "muted", "electric", emphasis("history")), recent.width);
+      put(recent.row + recent.height - 1, recent.column, keycap(paint, "Alt+H") + tint(paint, label.slice(5), "muted", "electric", emphasis("history")), recent.width);
       zone({ row: recent.row + recent.height - 1, column: recent.column, width: Math.min(label.length, recent.width), height: 1 }, { kind: "history" });
     }
     this.controls = this.zones.filter((zone, index, zones) => (zone.action.kind === "operation" || zone.action.kind === "session" || zone.action.kind === "history")

@@ -1,4 +1,5 @@
 import { computePromptVisualLines, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, type Painter } from "@demesne/brand";
+import { keycap } from "./session-chrome.ts";
 import { mentionTokenAt, reverseSearchMatches, type PromptEditorState } from "../prompt-editor.ts";
 import { Canvas } from "./canvas.ts";
 import type { ContextReceipt } from "./entries.ts";
@@ -99,7 +100,8 @@ export function composeDraft(options: ComposeOptions): ComposerFrame {
     let column = 2;
     for (const [label, action] of items) {
       if (column + visibleLength(label) > end - tokenLabel.length - 2) break;
-      control(hintsRow, column, paint.text(label, "muted"), action);
+      const [key, ...rest] = label.split(" ");
+      control(hintsRow, column, keycap(paint, key!) + (rest.length ? paint.text(` ${rest.join(" ")}`, "muted") : ""), action);
       column += visibleLength(label) + 2;
     }
   } else {
@@ -163,7 +165,7 @@ export function composeDraft(options: ComposeOptions): ComposerFrame {
       inline(dots + paint.text(" stop", "muted"), { kind: "stop" });
       if (queued && width < 60) control(0, textColumn, paint.text(" Clear queue × ", "secondary"), { kind: "clear" });
     } else {
-      inline(sending ? paint.wash(" ↵ send ", "accentSurface", "electric") : paint.text(" ↵ send ", "muted"), sending ? { kind: "submit" } : undefined);
+      inline(sending ? paint.wash(" ↵ send ", "accentSurface", "electric") : " " + keycap(paint, "↵") + paint.text(" send ", "muted"), sending ? { kind: "submit" } : undefined);
       if (restored && width < 60) control(0, textColumn, paint.text(" Clear × ", "secondary"), { kind: "clear" });
     }
   }
@@ -223,18 +225,20 @@ function composeSessionDraft(options: ComposeOptions): ComposerFrame {
   canvas.put(firstRow, inset + 2, paint.text(options.streaming ? "◎" : "▶", options.stopArmed ? "signal" : options.streaming ? "thinking" : "electric"), 1, "surface");
   const controlRow = firstRow;
   if (options.streaming) {
-    const label = options.stopArmed ? paint.text(width >= 65 ? "Press Esc again to stop" : "Esc stop", "signal")
+    const label = options.stopArmed
+      ? width >= 65 ? paint.text("Press ", "signal") + keycap(paint, "Esc") + paint.text(" again to stop", "signal") : keycap(paint, "Esc") + paint.text(" stop", "signal")
       : thinkingDots(paint, options.now ?? 0, options.reducedMotion) + paint.text(" stop", "muted");
     control(controlRow, right - visibleLength(label), label, { kind: "stop" });
-    if (!options.stopArmed && width >= 65) control(controlRow, right - visibleLength(label) - 10, paint.text("Esc Esc", "muted"), { kind: "stop" });
+    if (!options.stopArmed && width >= 65) control(controlRow, right - visibleLength(label) - 10, keycap(paint, "Esc Esc"), { kind: "stop" });
   } else {
-    const items: [string, ComposerAction | undefined][] = [["↵ send", editor.value.trim() ? { kind: "submit" } : undefined]];
-    if (width >= 65) items.push(["/ commands", { kind: "commands" }], ["@ files", { kind: "files" }]);
-    const controlsWidth = items.reduce((sum, [label]) => sum + visibleLength(label), 0) + (items.length - 1) * 2;
+    const items: [string, string, ComposerAction | undefined][] = [["↵", "send", editor.value.trim() ? { kind: "submit" } : undefined]];
+    if (width >= 65) items.push(["/", "commands", { kind: "commands" }], ["@", "files", { kind: "files" }]);
+    const hint = ([key, label, action]: [string, string, ComposerAction | undefined]) => keycap(paint, key) + " " + paint.text(label, action?.kind === "submit" ? "electric" : "muted");
+    const controlsWidth = items.reduce((sum, item) => sum + visibleLength(hint(item)), 0) + (items.length - 1) * 2;
     let column = right - controlsWidth;
-    for (const [label, action] of items) {
-      control(controlRow, column, paint.text(label, action?.kind === "submit" ? "electric" : "muted"), action);
-      column += visibleLength(label) + 2;
+    for (const item of items) {
+      control(controlRow, column, hint(item), item[2]);
+      column += visibleLength(hint(item)) + 2;
     }
   }
   if (showAttachments) {
@@ -250,7 +254,7 @@ function composeSessionDraft(options: ComposeOptions): ComposerFrame {
   if (editor.value) {
     const counter = ` ~${formatTokenCount(draftTokens(editor.value))} tok `;
     canvas.put(height - 1, right - counter.length, paint.text(counter, "muted"), counter.length);
-    if (width >= 65) canvas.put(height - 1, inset + 2, paint.text(" ⇧↵ newline ", "muted"), 12);
+    if (width >= 65) canvas.put(height - 1, inset + 2, " " + keycap(paint, "⇧↵") + paint.text(" newline ", "muted"), 12);
   }
   return { lines: canvas.rows, zones, cursor: { row: firstRow + visual.cursorLine - start, column: Math.min(textColumn + textWidth - 1, textColumn + visual.cursorCol) } };
 }

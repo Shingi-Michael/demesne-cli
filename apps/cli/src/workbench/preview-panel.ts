@@ -122,7 +122,7 @@ export class ArtifactPreview {
       zones.push({ row, column: column + x, width: size, run: () => { this.focused = true; this.controlIndex = index; run(); } });
     };
     const artifact = this.selected;
-    put(0, paint.text("▪ PREVIEW", "electric"));
+    put(0, paint.text("PREVIEW", "secondary"));
     button(0, "×", () => this.close(), width - 3);
     rule(1);
     put(2, paint.text(sanitizeTerminalLine(artifact?.filename ?? "No image selected"), "muted"));

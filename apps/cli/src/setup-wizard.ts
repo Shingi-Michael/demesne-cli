@@ -1,11 +1,11 @@
 import { assertProviderUrl } from "@demesne/config";
-import { formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, type Painter, type PaletteColor } from "@demesne/brand";
+import { formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, wrapDisplayText, type Painter, type PaletteColor } from "@demesne/brand";
 import type { ProbeResult } from "./provider-probe.ts";
 
 /// `demesne setup` as the redesign's three-step wizard: Provider → Model →
 /// Review. State changes are pure so the flow is testable without a terminal;
 /// the caller performs the returned effects (probing, writing, leaving).
-export type WizardStep = "provider" | "custom" | "model" | "review" | "done";
+export type WizardStep = "provider" | "custom" | "auth" | "model" | "review" | "done";
 export type WizardTheme = "auto" | "dark" | "light";
 export interface WizardState {
   step: WizardStep;
@@ -13,6 +13,7 @@ export interface WizardState {
   probes: ProbeResult[] | null;
   providerIndex: number;
   custom: { text: string; error: string | null; checking: boolean };
+  auth: { url: string; status: "waiting" | "loading" | "failed"; message: string };
   provider: ProbeResult | null;
   modelIndex: number;
   modelText: string;
@@ -23,7 +24,7 @@ export interface WizardState {
   configPath: string;
   saved: { backup: string | null } | null;
 }
-export type WizardEffect = { kind: "rescan" } | { kind: "probe"; url: string } | { kind: "write" } | { kind: "cancel" } | { kind: "finish" };
+export type WizardEffect = { kind: "rescan" | "login" | "cancel-login" | "write" | "cancel" | "finish" } | { kind: "probe"; url: string };
 export interface WizardKey { name?: string; ctrl?: boolean; meta?: boolean }
 
 const DEFAULT_CONTEXT = 32_768;
@@ -33,14 +34,15 @@ const REVIEW_ROWS = ["Provider", "Model", "Context window", "Max output", "Theme
 
 export function initialWizard(configPath: string, theme: WizardTheme = "auto"): WizardState {
   return { step: "provider", probes: null, providerIndex: 0, custom: { text: "", error: null, checking: false }, provider: null,
+    auth: { url: "", status: "waiting", message: "Opening your browser…" },
     modelIndex: 0, modelText: "", review: { contextWindow: DEFAULT_CONTEXT, maxOutputTokens: DEFAULT_OUTPUT, theme, detected: false },
     reviewIndex: 2, editing: null, error: null, configPath, saved: null };
 }
 
 /// Reachable servers first, keeping the probe order within each group.
-export function providerOptions(state: WizardState): Array<ProbeResult | "custom"> {
+export function providerOptions(state: WizardState): Array<ProbeResult | "custom" | "openrouter"> {
   const probes = state.probes ?? [];
-  return [...probes.filter((probe) => probe.reachable), ...probes.filter((probe) => !probe.reachable), "custom"];
+  return [...probes.filter((probe) => probe.reachable), ...probes.filter((probe) => !probe.reachable), "custom", "openrouter"];
 }
 
 export function wizardProbed(state: WizardState, probes: ProbeResult[]): WizardState {
@@ -51,6 +53,10 @@ export function wizardProbed(state: WizardState, probes: ProbeResult[]): WizardS
 /// continues, with the model typed by hand, as the earlier setup allowed.
 export function wizardCustomProbed(state: WizardState, result: ProbeResult): WizardState {
   return chooseProvider({ ...state, custom: { ...state.custom, checking: false } }, result);
+}
+
+export function wizardAuthenticated(state: WizardState, result: ProbeResult): WizardState {
+  return chooseProvider({ ...state, auth: { url: "", status: "waiting", message: "" } }, result);
 }
 
 function chooseProvider(state: WizardState, provider: ProbeResult): WizardState {
@@ -67,7 +73,7 @@ function toReview(state: WizardState): WizardState {
   const model = state.provider?.models[state.modelIndex];
   const contextWindow = state.provider?.models.length && model?.contextWindow ? model.contextWindow : DEFAULT_CONTEXT;
   return { ...state, step: "review", reviewIndex: 2, editing: null, error: null,
-    review: { ...state.review, contextWindow, maxOutputTokens: Math.min(DEFAULT_OUTPUT, Math.max(1, Math.floor(contextWindow / 4))), detected: Boolean(state.provider?.models.length && model?.contextWindow) } };
+    review: { ...state.review, contextWindow, maxOutputTokens: model?.maxOutputTokens ?? Math.min(DEFAULT_OUTPUT, Math.max(1, Math.floor(contextWindow / 4))), detected: Boolean(state.provider?.models.length && model?.contextWindow) } };
 }
 
 const printable = (text: string, key: WizardKey) => !key.ctrl && !key.meta && text.length === 1 && text >= " " && text !== "\x7f";
@@ -87,9 +93,18 @@ export function reduceWizard(state: WizardState, key: WizardKey, text = ""): { s
     if (key.name === "return" || key.name === "enter") {
       const option = options[state.providerIndex];
       if (option === "custom") return { state: { ...state, step: "custom", custom: { ...state.custom, error: null } } };
+      if (option === "openrouter") return { state: { ...state, step: "auth", error: null, auth: { url: "", status: "waiting", message: "Opening your browser…" } }, effect: { kind: "login" } };
       if (!option) return { state };
       if (!option.reachable) return { state: { ...state, error: `${option.target.label} is not reachable. Start it, then press r to rescan.` } };
       return { state: chooseProvider(state, option) };
+    }
+    return { state };
+  }
+
+  if (state.step === "auth") {
+    if (key.name === "escape") return { state: { ...state, step: "provider", error: null }, effect: { kind: "cancel-login" } };
+    if (state.auth.status === "failed" && (key.name === "r" || key.name === "return" || key.name === "enter")) {
+      return { state: { ...state, auth: { url: "", status: "waiting", message: "Opening your browser…" } }, effect: { kind: "login" } };
     }
     return { state };
   }
@@ -174,7 +189,7 @@ export function renderWizard(state: WizardState, width: number, height: number, 
 
   // Top bar with the stepper.
   const steps: Array<[string, boolean, boolean]> = [
-    ["Provider", state.step === "provider" || state.step === "custom", state.step !== "provider" && state.step !== "custom"],
+    ["Provider", ["provider", "custom", "auth"].includes(state.step), !["provider", "custom", "auth"].includes(state.step)],
     ["Model", state.step === "model", state.step === "review" || state.step === "done"],
     ["Review", state.step === "review", state.step === "done"],
   ];
@@ -200,15 +215,29 @@ export function renderWizard(state: WizardState, width: number, height: number, 
     line(pad(paint.bold("Where should demesne run its model?", "paper")));
     hint(state.probes === null ? "Looking for local servers…" : `Found ${found} local server${found === 1 ? "" : "s"}. You can change this later with demesne setup.`);
     line();
-    providerOptions(state).forEach((item, index) => {
+    const options = providerOptions(state);
+    const visible = Math.max(1, Math.floor((height - row - 3) / 2));
+    const start = Math.max(0, Math.min(state.providerIndex - Math.floor(visible / 2), options.length - visible));
+    options.slice(start, start + visible).forEach((item, offset) => {
+      const index = start + offset;
       const selected = index === state.providerIndex;
       if (item === "custom") option(selected, ["+", "secondary"], "Custom URL", "Any OpenAI-compatible endpoint");
+      else if (item === "openrouter") option(selected, ["↗", "electric"], "OpenRouter", "Sign in with your browser · hosted models");
       else option(selected, item.reachable ? ["✓", "citron"] : ["·", "muted"], item.target.label,
         `${item.target.url} · ${item.reachable ? `${item.models.length} model${item.models.length === 1 ? "" : "s"}` : "not reachable"}`,
         item.reachable && index === 0 ? "detected" : "", !item.reachable);
     });
     line();
-    hint("Hosted models: run demesne auth login openrouter to sign in with your browser.");
+  } else if (state.step === "auth") {
+    line(pad(paint.bold("Connect OpenRouter", "paper")));
+    hint(state.auth.status === "failed" ? "× Sign-in did not complete" : state.auth.status === "loading" ? "◌ Loading your models…" : "↗ Finish signing in in your browser", state.auth.status === "failed" ? "signal" : "electric");
+    line();
+    for (const text of wrapDisplayText(safe(state.auth.message), inner)) hint(text, "secondary");
+    if (state.auth.url) {
+      line(); hint("Or open this authorization URL:");
+      for (const text of wrapDisplayText(state.auth.url, inner)) hint(text, "electric");
+    }
+    line(); hint("Your credential is saved only when you confirm Review.");
   } else if (state.step === "custom") {
     line(pad(paint.bold("Enter your server address", "paper")));
     hint("Any OpenAI-compatible endpoint: vLLM, llama.cpp, LM Studio, Ollama, or a hosted gateway.");
@@ -250,7 +279,7 @@ export function renderWizard(state: WizardState, width: number, height: number, 
       Provider: [state.provider?.target.label ?? "", state.provider?.target.url ?? ""],
       Model: [selectedModel(state), ""],
       "Context window": [state.review.contextWindow.toLocaleString("en-US"), state.review.detected ? "detected" : "default"],
-      "Max output": [state.review.maxOutputTokens.toLocaleString("en-US"), "default"],
+      "Max output": [state.review.maxOutputTokens.toLocaleString("en-US"), state.provider?.models[state.modelIndex]?.maxOutputTokens ? "detected" : "default"],
       Theme: [state.review.theme, state.review.theme === "auto" ? "follows your terminal" : ""],
     };
     REVIEW_ROWS.forEach((name, index) => {
@@ -280,6 +309,7 @@ export function renderWizard(state: WizardState, width: number, height: number, 
   if (state.error) { line(); hint(`× ${state.error}`, "signal"); }
 
   const footer = state.step === "provider" ? "↑↓ choose · r rescan · Esc quit · Enter continue"
+    : state.step === "auth" ? state.auth.status === "failed" ? "r retry · Esc back · Ctrl+C quit" : "Esc back · Ctrl+C quit"
     : state.step === "custom" ? (state.custom.checking ? "Checking the server…" : "Esc back · Enter check and continue")
       : state.step === "model" ? `${state.provider?.models.length ? "↑↓ choose · Backspace back" : "Esc back"} · Enter continue`
         : state.step === "review" ? state.editing ? "Enter save · Esc cancel edit" : "↑↓ select · e edit · Backspace back · Esc quit · Enter write config"

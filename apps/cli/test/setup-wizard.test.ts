@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import { createPainter } from "@demesne/brand";
 import type { ProbeResult } from "../src/provider-probe.ts";
-import { initialWizard, reduceWizard, renderWizard, selectedModel, wizardCustomProbed, wizardProbed, wizardSaved, type WizardKey, type WizardState } from "../src/setup-wizard.ts";
+import { initialWizard, reduceWizard, renderWizard, selectedModel, wizardAuthenticated, wizardCustomProbed, wizardProbed, wizardSaved, type WizardKey, type WizardState } from "../src/setup-wizard.ts";
 
 const llama: ProbeResult = { target: { id: "llama.cpp", label: "llama.cpp", url: "http://127.0.0.1:11436/v1" }, reachable: true,
   models: [{ id: "small", provider: "llama.cpp", contextWindow: 32_768 }, { id: "large", provider: "llama.cpp", contextWindow: 100_096 }] };
@@ -20,6 +20,21 @@ function press(state: WizardState, ...keys: Array<string | WizardKey>) {
 }
 
 describe("setup wizard", () => {
+  test("browser sign-in stays within Provider, can cancel/retry, and discovers model limits without credentials in state", () => {
+    let { state, effect } = press(wizardProbed(initialWizard("/c"), [llama]), "up", "return");
+    expect(effect).toEqual({ kind: "login" }); expect(state.step).toBe("auth");
+    expect(screen(state)).toContain("Connect OpenRouter");
+    expect(press(state, "escape").effect).toEqual({ kind: "cancel-login" });
+    expect(press(state, "return").effect).toBeUndefined();
+    state = { ...state, auth: { url: "", status: "failed", message: "Authorization declined" } };
+    expect(press(state, "r").effect).toEqual({ kind: "login" });
+    state = wizardAuthenticated(state, { ...llama, models: [{ id: "hosted", provider: "OpenRouter", contextWindow: 262144, maxOutputTokens: 131072 }] });
+    ({ state } = press(state, "return"));
+    expect(state.review.maxOutputTokens).toBe(131072);
+    expect(screen(state)).toContain("131,072");
+    const compact = wizardProbed(initialWizard("/c"), [llama, ollama, ollama]);
+    expect(screen(press(compact, "up").state, 60, 14)).toContain("OpenRouter");
+  });
   test("lists reachable servers first, blocks unreachable ones and picks the largest-context model", () => {
     let state = wizardProbed(initialWizard("/home/me/.demesne/config.toml"), [ollama, llama]);
     expect(screen(state)).toContain("Found 1 local server");

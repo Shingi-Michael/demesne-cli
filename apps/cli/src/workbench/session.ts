@@ -637,6 +637,21 @@ export class SessionView {
     return this.scrollFlow(amount);
   }
 
+  /// Finished turns fold, except where folding would take something away:
+  /// nothing folds while an Agent Drive mission is active (Drive reads the
+  /// screen) or while the reader is scrolled back (their place must not move);
+  /// the turn whose evidence is open and the most recent turn with an answer
+  /// stay open, so a stopped follow-up never hides the last answer.
+  /// `null` keeps every turn open.
+  private unfoldable(drive: DriveState | null): Set<number> | null {
+    if (drive && !["completed", "stopped", "idle"].includes(drive.status)) return null;
+    if (!this.memory.followFlow) return null;
+    const keep = new Set<number>(this.artifact ? [this.artifact.runId] : []);
+    const answered = this.runs.findLast((run) => run.settled && run.answer);
+    if (answered) keep.add(answered.id);
+    return keep;
+  }
+
   render(options: { width: number; height: number; paint: Painter; title: string; path: string; branch?: string | null; now?: number; presence?: PresenceState;
     drive?: DriveState | null;
     animateScroll?: boolean;
@@ -812,7 +827,8 @@ export class SessionView {
         activity: this.latest && options.presence ? { runId: this.latest.id, presence: options.presence } : undefined,
         copiedRunId: this.copied && this.copied.until > now ? this.copied.runId : undefined,
         emphasis: (key) => focusedKey === key ? 1 : this.transitions.value(`hover:${key}`, this.hovered === key ? 1 : 0, now, reduced),
-        expansion: (id) => this.memoryFor(id).expansion, argumentsOpen: this.argumentsOpen, markdown: options.markdown });
+        expansion: (id) => this.memoryFor(id).expansion, argumentsOpen: this.argumentsOpen, markdown: options.markdown,
+        keepOpen: this.unfoldable(options.drive ?? null) });
       const initialFlow = this.flowRows.length === 0;
       // Snapshots, navigation and geometry changes resolve immediately. Only
       // automatic prose following is paced, relative to the response so folded
@@ -823,6 +839,11 @@ export class SessionView {
       this.snapScroll = false;
       this.flowRows = flow.rows;
       this.flowExpansions = flow.expansions;
+      // Remember each automatic fold so the turn stays folded when the reader
+      // later scrolls back; only an explicit toggle opens it again.
+      for (const [key, expansion] of flow.expansions) {
+        if (key.endsWith(":fold") && !expansion.open && !this.memoryFor(expansion.runId).expansion.has(key)) this.memoryFor(expansion.runId).expansion.set(key, false);
+      }
       this.flowControls = flow.rows.flatMap((row, index) => row.controls.map((control, ordinal) => ({ key: `${row.key}:${row.line}:${ordinal}`, row: index, action: control.action })));
       const tail = Math.max(0, flow.rows.length - bodyHeight);
       const following = memory.followFlow && this.selectedId === null && (!this.panelOpen || this.drivePanelOpen);

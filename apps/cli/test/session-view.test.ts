@@ -486,6 +486,11 @@ test("hover reveals lowercase copy only on the pointed response without moving t
       paint.setTheme(theme);
       ui.beginTurn({ userText: "Second request", at: "12:34" });
       ui.assistantDelta("SECOND_RESPONSE"); ui.finishTurn("completed", "Done");
+      // Open the folded first turn so both responses are on screen.
+      ui.frame(120, 36);
+      const first = (view as unknown as { runs: { id: number }[] }).runs[0]!;
+      view.act({ kind: "toggle", runId: first.id, key: `run:${first.id}:fold` });
+      view.act({ kind: "follow" });
       void ui.readPrompt({ history: [], mentions: [], commands: [] });
       state.onKeypress("Keep this draft", {});
       const before = ui.frame(120, 36);
@@ -775,7 +780,9 @@ test("each completed response owns its mode, model, duration and speed above the
     clock.mockReturnValue(start + 518_000);
     ui.finishTurn("completed", "Complete", { tokensPerSecond: 31.2 });
     const both = screen(120, 36);
-    expect(both).toContain(receipt);
+    // The earlier turn folds to one row; its own receipt returns when opened.
+    expect(both).toContain("▸ Turn 1");
+    expect(both).not.toContain(receipt);
     expect(both).toContain("Plan · next-model · 458.0s · 31.2 tok/s");
     view.act({ kind: "run", id: firstRun });
     expect(screen()).toContain(receipt);
@@ -1531,7 +1538,12 @@ test("historical verification opens recorded evidence inline without changing th
   ui.beginRound(); ui.assistantDelta("Earlier response."); ui.finishTurn("completed", "Done");
   ui.beginTurn({ userText: "Current request", at: "now" });
   ui.assistantDelta("Current response."); ui.finishTurn("completed", "Done");
-  const rows = screen(100, 40).split("\n");
+  // The earlier turn is folded; clicking its summary row opens it in place.
+  let rows = screen(100, 40).split("\n");
+  const folded = rows.findIndex((line) => line.includes("▸ Turn 1"));
+  expect(rows[folded]).toContain("Earlier request");
+  state.handleMouse({ kind: "press", button: 0, row: folded, col: rows[folded]!.indexOf("Turn 1") });
+  rows = screen(100, 40).split("\n");
   const latest = view.current!.id;
   const row = rows.findIndex((line) => line.includes("checks failed"));
   state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("checks failed") });
@@ -1862,4 +1874,42 @@ test("turns follow Figma 28:306: verb-column tool rows, an amber live line, and 
   const receipt = screen(120, 30).split("\n").find((line) => line.includes("tok/s"))!;
   expect(receipt).toMatch(/Build · original-model · 14\.2s · 31\.4 tok\/s · ctx /);
   expect(receipt).not.toMatch(/elapsed|speed/);
+});
+
+test("finished turns before the newest fold to one row, except where that would hide something", () => {
+  const { ui, state, screen, view } = fixture();
+  const turn = (text: string, answer: string | null, status: "completed" | "stopped" = "completed") => {
+    ui.beginTurn({ userText: text, at: "12:00" });
+    if (answer) ui.assistantDelta(answer);
+    ui.finishTurn(status, "Done", { durationMs: 1_168_000 });
+  };
+  turn("First request", "FIRST_ANSWER");
+  turn("Second request", "SECOND_ANSWER");
+  turn("Third request", "THIRD_ANSWER");
+  let text = screen(120, 40);
+  // Older turns become summary rows; the newest stays open.
+  expect(text).toMatch(/▸ Turn 1 · First request · completed at 12:00 · 19m 28s · no diff · Ctrl\+B log/);
+  expect(text).toContain("▸ Turn 2");
+  expect(text).not.toContain("FIRST_ANSWER");
+  expect(text).toContain("THIRD_ANSWER");
+  // A stopped turn without an answer keeps the last answer on screen.
+  turn("Fourth request", null, "stopped");
+  text = screen(120, 40);
+  expect(text).toContain("THIRD_ANSWER");
+  expect(text).toContain("▸ Turn 2");
+  // Clicking a summary row opens that turn; its ▾ row folds it again.
+  let rows = text.split("\n");
+  const folded = rows.findIndex((line) => line.includes("▸ Turn 1"));
+  state.handleMouse({ kind: "press", button: 0, row: folded, col: rows[folded]!.indexOf("Turn 1") });
+  view.act({ kind: "follow" });
+  expect(screen(120, 40)).toContain("FIRST_ANSWER");
+  rows = screen(120, 40).split("\n");
+  const open = rows.findIndex((line) => line.includes("Turn 1 ▴"));
+  expect(rows[open]).toContain("First request");
+  state.handleMouse({ kind: "press", button: 0, row: open, col: rows[open]!.indexOf("Turn 1 ▴") });
+  expect(screen(120, 40)).not.toContain("FIRST_ANSWER");
+  // Folds stick: scrolling back never reopens or refolds turns under the reader.
+  state.onKeypress("", { name: "pageup" });
+  expect(view.memory.followFlow).toBe(false);
+  expect(screen(120, 40)).toContain("▸ Turn 2");
 });

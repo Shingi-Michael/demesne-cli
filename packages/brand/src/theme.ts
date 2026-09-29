@@ -3,7 +3,8 @@
 /// A theme maps the semantic color roles the interface draws with — `electric`
 /// for authorship and changes, `inspect`/`execute` for tool operation types,
 /// `citron` for confirmed results, `signal` for attention, `paper`/`secondary`
-/// for text, and `toolSurface`/`toolActive` for execution surfaces. Every drawing
+/// for text, `toolSurface`/`toolActive` for execution surfaces, and `syntax*`
+/// for code tokens in answers and the Changes panel. Every drawing
 /// call names a role, never a color, so a theme swap changes the whole interface
 /// without touching a renderer.
 ///
@@ -34,13 +35,24 @@ export const palette = {
   execute: "#FFB700",
   toolSurface: "#090F14",
   toolActive: "#0D1720",
+  syntaxKeyword: "#C49CE6",
+  syntaxString: "#9CCF8D",
+  syntaxNumber: "#E5A93C",
+  syntaxComment: "#5F7280",
+  syntaxType: "#6FC2D6",
+  syntaxFunction: "#5AA9E6",
 } as const;
 
 export type PaletteColor = keyof typeof palette;
-type CoreColors = Omit<Record<PaletteColor, string>, "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "userSurface">;
+type SyntaxColor = "syntaxKeyword" | "syntaxString" | "syntaxNumber" | "syntaxComment" | "syntaxType" | "syntaxFunction";
+type CoreColors = Omit<Record<PaletteColor, string>, "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "userSurface" | SyntaxColor>;
 const complete = (colors: CoreColors): Record<PaletteColor, string> => ({ ...colors,
   muted: colors.secondary, borderBright: colors.rule, thinking: colors.execute,
-  thinkingSurface: colors.raised, errorSurface: colors.raised, accentSurface: colors.toolActive, userSurface: colors.toolSurface });
+  thinkingSurface: colors.raised, errorSurface: colors.raised, accentSurface: colors.toolActive, userSurface: colors.toolSurface,
+  // Syntax roles come from each project's own accents so code keeps the
+  // theme's character: its purple/pink for keywords, green for strings.
+  syntaxKeyword: colors.execute, syntaxString: colors.citron, syntaxNumber: colors.electricBright,
+  syntaxComment: colors.secondary, syntaxType: colors.inspect, syntaxFunction: colors.electric });
 
 export type TerminalTheme = "dark" | "light";
 
@@ -80,6 +92,12 @@ const demesneLight: Record<PaletteColor, string> = {
   execute: "#946500",
   toolSurface: "#ECF4F8",
   toolActive: "#E0EDF4",
+  syntaxKeyword: "#7A3E9D",
+  syntaxString: "#2F6F1F",
+  syntaxNumber: "#8A5600",
+  syntaxComment: "#5E7684",
+  syntaxType: "#0B6A74",
+  syntaxFunction: "#1F5FAD",
 };
 
 /// https://draculatheme.com — purple is the signature accent, pink its lighter

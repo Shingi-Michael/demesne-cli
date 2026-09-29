@@ -45,6 +45,14 @@ describe("theme registry", () => {
     }
   });
 
+  test("the Demesne themes give each syntax token its own color", () => {
+    for (const name of [DEFAULT_DARK_THEME, DEFAULT_LIGHT_THEME]) {
+      const colors = THEMES[name]!.colors;
+      const syntax = [colors.syntaxKeyword, colors.syntaxString, colors.syntaxNumber, colors.syntaxComment, colors.syntaxType, colors.syntaxFunction];
+      expect(new Set(syntax).size, `${name} reuses a syntax color`).toBe(6);
+    }
+  });
+
   test("dark and light defaults keep their back-compat aliases", () => {
     expect(terminalPalette).toBe(THEMES[DEFAULT_DARK_THEME]!.colors);
     expect(lightTerminalPalette).toBe(THEMES[DEFAULT_LIGHT_THEME]!.colors);

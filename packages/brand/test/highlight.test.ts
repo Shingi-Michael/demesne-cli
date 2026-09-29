@@ -48,42 +48,49 @@ describe("highlightCode", () => {
 
   test("styles TypeScript keywords, strings, and comments", () => {
     const highlighted = highlightCode("const s = \"hi\"; // note", "ts", painter);
-    expect(highlighted).toContain(painter.bold("const", "electric"));
-    expect(highlighted).toContain(painter.text("\"hi\"", "citron"));
-    expect(highlighted).toContain(painter.dim("// note"));
+    expect(highlighted).toContain(painter.text("const", "syntaxKeyword"));
+    expect(highlighted).toContain(painter.text("\"hi\"", "syntaxString"));
+    expect(highlighted).toContain(painter.text("// note", "syntaxComment"));
   });
 
   test("tracks block comments across lines", () => {
     const state: CodeHighlightState = { inBlockComment: false };
     const first = highlightCode("/* start", "ts", painter, state);
     expect(state.inBlockComment).toBe(true);
-    expect(first).toBe(painter.dim("/* start"));
+    expect(first).toBe(painter.text("/* start", "syntaxComment"));
 
     const second = highlightCode("end */ const x", "ts", painter, state);
     expect(state.inBlockComment).toBe(false);
-    expect(second).toContain(painter.dim("end */"));
-    expect(second).toContain(painter.bold("const", "electric"));
+    expect(second).toContain(painter.text("end */", "syntaxComment"));
+    expect(second).toContain(painter.text("const", "syntaxKeyword"));
   });
 
   test("styles Python decorators, Bash variables, and JSON keys", () => {
-    expect(highlightCode("@route", "python", painter)).toContain(painter.text("@route", "electric"));
-    expect(highlightCode("echo $HOME", "bash", painter)).toContain(painter.text("$HOME", "electricBright"));
+    expect(highlightCode("@route", "python", painter)).toContain(painter.text("@route", "syntaxKeyword"));
+    expect(highlightCode("echo $HOME", "bash", painter)).toContain(painter.text("$HOME", "syntaxNumber"));
     expect(highlightCode("\"model\": \"local\"", "json", painter))
-      .toContain(painter.text("\"model\"", "electric"));
+      .toContain(painter.text("\"model\"", "syntaxType"));
     expect(highlightCode("\"model\": \"local\"", "json", painter))
-      .toContain(painter.text("\"local\"", "citron"));
+      .toContain(painter.text("\"local\"", "syntaxString"));
   });
 
   test("styles YAML keys and diff lines", () => {
-    expect(highlightCode("name: demo", "yaml", painter)).toContain(painter.text("name", "electric"));
+    expect(highlightCode("name: demo", "yaml", painter)).toContain(painter.text("name", "syntaxType"));
     expect(highlightCode("+ added", "diff", painter)).toBe(painter.text("+ added", "citron"));
     expect(highlightCode("- removed", "diff", painter)).toBe(painter.text("- removed", "signal"));
     expect(highlightCode("@@ -1 +1 @@", "diff", painter)).toBe(painter.text("@@ -1 +1 @@", "electric"));
   });
 
+  test("colors numbers, types, and calls with their own roles", () => {
+    const highlighted = highlightCode("const id: Identifier = scan(source, 42);", "ts", painter);
+    expect(highlighted).toContain(painter.text("Identifier", "syntaxType"));
+    expect(highlighted).toContain(painter.text("scan", "syntaxFunction"));
+    expect(highlighted).toContain(painter.text("42", "syntaxNumber"));
+  });
+
   test("falls back to a generic keyword set for unknown languages", () => {
     const highlighted = highlightCode("function f() { return 1 }", "zig", painter);
-    expect(highlighted).toContain(painter.bold("function", "electric"));
-    expect(highlighted).toContain(painter.bold("return", "electric"));
+    expect(highlighted).toContain(painter.text("function", "syntaxKeyword"));
+    expect(highlighted).toContain(painter.text("return", "syntaxKeyword"));
   });
 });

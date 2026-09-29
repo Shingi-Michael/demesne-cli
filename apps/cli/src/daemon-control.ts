@@ -1,5 +1,5 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { AutoStartPolicy } from "@demesne/config";
 
 /// Daemon lifecycle management for the CLI: health probes, starting a detached
@@ -57,18 +57,26 @@ export function createDaemonControlDependencies(
   };
 }
 
-export function resolveDaemonCommand(env: Record<string, string | undefined>): string[] | null {
+export function resolveDaemonCommand(
+  env: Record<string, string | undefined>,
+  location: { moduleDir: string; execPath: string } = { moduleDir: import.meta.dir, execPath: process.execPath },
+): string[] | null {
+  const { moduleDir, execPath } = location;
   const configured = env.DEMESNE_DAEMON_BIN?.trim();
   if (configured) return [configured];
   const installed = Bun.which("demesned");
   if (installed) return [installed];
   // In a source checkout the TypeScript source is authoritative: a stale
   // dist/demesned would silently run an older daemon than the CLI.
-  const source = join(import.meta.dir, "../../daemon/src/main.ts");
-  if (existsSync(source)) return [process.execPath, source];
-  const sibling = join(import.meta.dir, "demesned");
+  const source = join(moduleDir, "../../daemon/src/main.ts");
+  if (existsSync(source)) return [execPath, source];
+  // A compiled CLI's moduleDir is Bun's virtual /$bunfs/root, so look beside
+  // the real executable, where release archives and `bun run build` put it.
+  const beside = join(dirname(execPath), "demesned");
+  if (existsSync(beside)) return [beside];
+  const sibling = join(moduleDir, "demesned");
   if (existsSync(sibling)) return [sibling];
-  const compiled = join(import.meta.dir, "../../../dist/demesned");
+  const compiled = join(moduleDir, "../../../dist/demesned");
   if (existsSync(compiled)) return [compiled];
   return null;
 }

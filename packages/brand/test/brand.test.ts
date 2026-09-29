@@ -47,20 +47,20 @@ import {
 
 describe("Demesne Brand & Mathematical Alignment", () => {
   test("palette contains the official terminal design colors", () => {
-    expect(palette.ink).toBe("#050A0E");
-    expect(palette.paper).toBe("#C8DAE8");
-    expect(palette.electric).toBe("#00D4FF");
-    expect(palette.electricBright).toBe("#00D4FF");
-    expect(palette.signal).toBe("#FF4C4C");
-    expect(palette.citron).toBe("#00E676");
+    expect(palette.ink).toBe("#0B1218");
+    expect(palette.paper).toBe("#C5D2DC");
+    expect(palette.electric).toBe("#5AA9E6");
+    expect(palette.electricBright).toBe("#5AA9E6");
+    expect(palette.signal).toBe("#E5534B");
+    expect(palette.citron).toBe("#4CC38A");
   });
 
-  test("terminal rendering keeps neutral text native and uses the Demesne cyan accent", () => {
+  test("terminal rendering keeps neutral text native and uses the Demesne blue accent", () => {
     const painter = createPainter(true);
 
-    expect(terminalPalette.electric).toBe("#00D4FF");
+    expect(terminalPalette.electric).toBe("#5AA9E6");
     expect(painter.text("body", "paper")).toBe("body");
-    expect(painter.text("accent", "electric")).toContain("38;2;0;212;255");
+    expect(painter.text("accent", "electric")).toContain("38;2;90;169;230");
   });
 
   test("selects a higher-contrast palette for light terminals", () => {

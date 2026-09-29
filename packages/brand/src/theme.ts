@@ -12,32 +12,35 @@
 /// roles. Where a project has no color for a role, the nearest published one is
 /// used. Tool surfaces are cool tonal derivatives of each theme's backgrounds.
 
-/// The canonical Demesne palette, used for surfaces and reference.
+/// The canonical Demesne palette, used for surfaces and reference. Values are
+/// the redesign's `demesne/color` tokens (Figma "demesne UI redesign"); washes
+/// and diff rows are those tokens composited over `surface`, since terminals
+/// have no alpha.
 export const palette = {
-  ink: "#050A0E",
-  paper: "#C8DAE8",
-  surface: "#090F14",
-  raised: "#0D1720",
-  rule: "#1A2D3D",
-  borderBright: "#1E3A4F",
-  secondary: "#7A9FB8",
-  muted: "#536E82",
-  electric: "#00D4FF",
-  electricBright: "#00D4FF",
-  signal: "#FF4C4C",
-  citron: "#00E676",
-  thinking: "#FFB700",
-  thinkingSurface: "#272312",
-  errorSurface: "#181317",
-  accentSurface: "#082C37",
-  menuSelection: "#081F27",
-  diffAddedSurface: "#081F1C",
-  diffRemovedSurface: "#221519",
-  userSurface: "#05161C",
-  inspect: "#00D4FF",
-  execute: "#FFB700",
-  toolSurface: "#090F14",
-  toolActive: "#0D1720",
+  ink: "#0B1218",
+  paper: "#C5D2DC",
+  surface: "#0E161D",
+  raised: "#182530",
+  rule: "#1E2C38",
+  borderBright: "#2F4150",
+  secondary: "#8FA1AF",
+  muted: "#6B7D8B",
+  electric: "#5AA9E6",
+  electricBright: "#5AA9E6",
+  signal: "#E5534B",
+  citron: "#4CC38A",
+  thinking: "#E5A93C",
+  thinkingSurface: "#282821",
+  errorSurface: "#281D23",
+  accentSurface: "#172835",
+  menuSelection: "#172835",
+  diffAddedSurface: "#0F2219",
+  diffRemovedSurface: "#26161A",
+  userSurface: "#0E161D",
+  inspect: "#5AA9E6",
+  execute: "#E5A93C",
+  toolSurface: "#0E161D",
+  toolActive: "#182530",
   syntaxKeyword: "#C49CE6",
   syntaxString: "#9CCF8D",
   syntaxNumber: "#E5A93C",
@@ -72,7 +75,7 @@ export interface Theme {
   colors: Record<PaletteColor, string>;
 }
 
-/// Futuristic Terminal Harness Design, with slightly raised panel contrast.
+/// The redesign's calmer dark palette (Figma "demesne UI redesign").
 /// Translucent request/thinking fills are composited onto its dark surfaces.
 const demesne: Record<PaletteColor, string> = { ...palette };
 

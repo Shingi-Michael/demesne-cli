@@ -1,4 +1,0 @@
-FROM qwen3.8:latest
-
-# Give Ollama's OpenAI-compatible route a reproducible 8K runtime default.
-PARAMETER num_ctx 8192

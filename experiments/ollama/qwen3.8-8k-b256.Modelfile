@@ -1,4 +1,0 @@
-FROM qwen3.8:latest
-
-PARAMETER num_ctx 8192
-PARAMETER num_batch 256

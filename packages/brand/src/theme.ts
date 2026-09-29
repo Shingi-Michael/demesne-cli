@@ -30,6 +30,9 @@ export const palette = {
   thinkingSurface: "#272312",
   errorSurface: "#181317",
   accentSurface: "#082C37",
+  menuSelection: "#081F27",
+  diffAddedSurface: "#081F1C",
+  diffRemovedSurface: "#221519",
   userSurface: "#05161C",
   inspect: "#00D4FF",
   execute: "#FFB700",
@@ -45,10 +48,13 @@ export const palette = {
 
 export type PaletteColor = keyof typeof palette;
 type SyntaxColor = "syntaxKeyword" | "syntaxString" | "syntaxNumber" | "syntaxComment" | "syntaxType" | "syntaxFunction";
-type CoreColors = Omit<Record<PaletteColor, string>, "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "userSurface" | SyntaxColor>;
+type CoreColors = Omit<Record<PaletteColor, string>, "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "menuSelection" | "userSurface" | "diffAddedSurface" | "diffRemovedSurface" | SyntaxColor>;
+const menuSelection = (surface: string, accent: string): string => "#" + [1, 3, 5].map((offset) =>
+  Math.round(parseInt(surface.slice(offset, offset + 2), 16) * 0.92 + parseInt(accent.slice(offset, offset + 2), 16) * 0.08).toString(16).padStart(2, "0")).join("");
 const complete = (colors: CoreColors): Record<PaletteColor, string> => ({ ...colors,
   muted: colors.secondary, borderBright: colors.rule, thinking: colors.execute,
-  thinkingSurface: colors.raised, errorSurface: colors.raised, accentSurface: colors.toolActive, userSurface: colors.toolSurface,
+  thinkingSurface: colors.raised, errorSurface: colors.raised, accentSurface: colors.toolActive, menuSelection: menuSelection(colors.surface, colors.electric), userSurface: colors.toolSurface,
+  diffAddedSurface: menuSelection(colors.surface, colors.citron), diffRemovedSurface: menuSelection(colors.surface, colors.signal),
   // Syntax roles come from each project's own accents so code keeps the
   // theme's character: its purple/pink for keywords, green for strings.
   syntaxKeyword: colors.execute, syntaxString: colors.citron, syntaxNumber: colors.electricBright,
@@ -87,6 +93,9 @@ const demesneLight: Record<PaletteColor, string> = {
   thinkingSurface: "#F4ECD8",
   errorSurface: "#F8EAEC",
   accentSurface: "#C9E7EF",
+  menuSelection: menuSelection("#ECF4F8", "#007B9B"),
+  diffAddedSurface: menuSelection("#ECF4F8", "#087D43"),
+  diffRemovedSurface: menuSelection("#ECF4F8", "#BF303C"),
   userSurface: "#E2F2F8",
   inspect: "#007B9B",
   execute: "#946500",

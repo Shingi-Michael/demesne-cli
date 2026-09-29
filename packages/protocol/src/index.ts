@@ -1,4 +1,5 @@
 export const PROTOCOL_VERSION = 1 as const;
+export * from "./drive.ts";
 
 export type EventType =
   | "artifact.created"
@@ -17,6 +18,7 @@ export type EventType =
   | "model.request_cancelled"
   | "model.request_interrupted"
   | "tool.call_requested"
+  | "tool.call_draft"
   | "permission.requested"
   | "permission.resolved"
   | "tool.call_started"
@@ -35,6 +37,17 @@ export type EventType =
   | "turn.failed";
 
 export type TurnStatus = "queued" | "running" | "completed" | "cancelled" | "interrupted" | "failed";
+
+/// Immutable per-operation file evidence. Omitted text is explicit (binary or
+/// over the preview limit); null means the file did not exist on that side.
+export interface ToolFileChange {
+  path: string;
+  before: string | null;
+  after: string | null;
+  beforeExists: boolean;
+  afterExists: boolean;
+  unavailable?: string;
+}
 
 export interface ImageArtifact {
   id: string;
@@ -64,6 +77,7 @@ export interface ModelDescriptor {
   provider: string;
   ownedBy?: string;
   contextWindow?: number;
+  maxOutputTokens?: number;
 }
 
 export type RuntimeProfileState = "unconfigured" | "pending" | "verified" | "mismatch" | "unavailable";
@@ -228,6 +242,20 @@ export interface EventEnvelope {
   turnId: string | null;
   agentRunId: string | null;
   payload: Record<string, unknown>;
+}
+
+/// Historical transport can combine consecutive, nonempty text deltas. The
+/// envelope retains the first event's ID/time; these fields describe its range.
+/// Live SSE and the durable event journal always retain the original events.
+export interface ReplayEvent extends EventEnvelope {
+  throughEventId?: number;
+  deltaCount?: number;
+}
+
+export interface SessionReplayPage {
+  events: ReplayEvent[];
+  throughEventId: number;
+  nextCursor: number | null;
 }
 
 export interface Turn {
@@ -544,7 +572,7 @@ export function encodeServerSentEvent(event: EventEnvelope): string {
   return `id: ${event.eventId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
-export async function* readServerSentEvents(response: Response): AsyncGenerator<EventEnvelope> {
+export async function* readServerSentEvents<T = EventEnvelope>(response: Response): AsyncGenerator<T> {
   if (!response.ok) throw new EventStreamHttpError(response.status);
   if (!response.body) throw new Error("Event stream has no response body");
 
@@ -565,7 +593,7 @@ export async function* readServerSentEvents(response: Response): AsyncGenerator<
           .filter((line) => line.startsWith("data:"))
           .map((line) => line.slice(5).trimStart())
           .join("\n");
-        if (data) yield JSON.parse(data) as EventEnvelope;
+        if (data) yield JSON.parse(data) as T;
         boundary = findServerSentEventBoundary(buffer, done);
       }
       if (done) break;

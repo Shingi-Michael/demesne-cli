@@ -1,4 +1,5 @@
 import { isRecord, type StoredModelMessage } from "@demesne/protocol";
+import { DEFAULT_AGENT_LIMITS, type AgentConfig } from "@demesne/config";
 import { ingestImage } from "./artifacts.ts";
 import { hydrateImageInputs } from "./image-inputs.ts";
 import { ProviderError, type ProviderMessage, type ProviderToolCall, type ProviderToolDefinition } from "@demesne/providers";
@@ -6,6 +7,8 @@ import { DemesneStore, NotFoundError, type SnapshotFile } from "@demesne/storage
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import type { TurnInference } from "./processor.ts";
+import { providerStreamLimits } from "./provider-limits.ts";
+import { recordedToolChanges } from "./tool-change-preview.ts";
 import { PermissionBroker } from "./permissions.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { InferenceScheduler } from "./inference-scheduler.ts";
@@ -20,6 +23,9 @@ interface AssembledToolCall {
   id: string;
   name: string;
   arguments: string;
+  draftId?: string;
+  draftSent?: number;
+  draftAt?: number;
 }
 
 interface HistoryTurn {
@@ -28,7 +34,7 @@ interface HistoryTurn {
   messages: ProviderMessage[];
 }
 
-interface AgentEngineOptions {
+interface AgentEngineOptions extends AgentConfig {
   providerVision?: boolean;
   providerFirstEventTimeoutMs?: number;
   providerRequestTimeoutMs?: number;
@@ -53,7 +59,7 @@ export class AgentEngine {
     const session = this.store.getSession(turn.sessionId);
     if (!session) throw new NotFoundError(`Session not found: ${turn.sessionId}`);
 
-    const history = groupHistory(this.store.getCompletedModelTranscript(session.id));
+    const history = groupHistory(this.store.getModelContextTranscript(session.id));
     const userMessage = { role: "user" as const, content: turn.content };
     const currentUser = this.store.appendModelMessage(turnId, userMessage);
     const currentMessages: ProviderMessage[] = [userMessage];
@@ -69,13 +75,24 @@ export class AgentEngine {
     let visibleCharacters = 0;
     let reasoningCharacters = 0;
     const pendingContextDrops: HistoryTurn[] = [];
+    const maxModelRounds = this.options.maxModelRounds ?? DEFAULT_AGENT_LIMITS.maxModelRounds;
+    const maxToolCalls = this.options.maxToolCalls ?? DEFAULT_AGENT_LIMITS.maxToolCalls;
+    const streamLimits = providerStreamLimits(inference.maxOutputTokens, this.options);
+    if (![maxModelRounds, maxToolCalls].every((value) => Number.isSafeInteger(value) && value > 0)) throw new Error("Agent turn limits must be positive integers");
+    let budgetReason: string | undefined;
 
     let round = 0;
-    while (round < 8) {
+    // Reserve one tool-free status request after an allowance is exhausted.
+    while (round <= maxModelRounds) {
       if (signal.aborted) throw signal.reason;
+      if (round === maxModelRounds) budgetReason ??= `Reached the configured ${maxModelRounds} model-round allowance`;
+      if (totalToolCalls >= maxToolCalls) budgetReason ??= `Reached the configured ${maxToolCalls} tool-call allowance`;
+      const finalizing = budgetReason !== undefined;
+      const requestDefinitions = finalizing ? [] : definitions;
       const historyMessages = history.flatMap((entry) => entry.messages);
       const unplannedMessages: ProviderMessage[] = [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: systemPrompt + (finalizing
+          ? `\n${budgetReason}. Tools are unavailable for this final status request. Report what was actually done, checks and their outcomes, and the specific next steps. Distinguish unfinished work from completed work. The user can send a follow-up to continue from this saved context.` : "") },
         ...checkpointMessages,
         ...historyMessages,
         ...currentMessages,
@@ -90,7 +107,7 @@ export class AgentEngine {
         ?? (inference.preservesPromptCache ? planCacheAwareContextRequest : planContextRequest);
       const { messages, plan: contextPlan, droppedHistoricalTurnIds } = planner({
         messages: unplannedMessages,
-        tools: definitions,
+        tools: requestDefinitions,
         historicalTurns,
         capacityTokens: inference.contextCapacity,
         outputReserveTokens: this.options.providerVision && unplannedMessages.some((message) => message.role === "tool" && message.imageArtifactIds?.length)
@@ -122,18 +139,18 @@ export class AgentEngine {
         try {
           let providerEventCount = 0;
           let usageEventCount = 0;
-           const visualMessages = this.options.providerVision
-             ? await hydrateImageInputs(this.store, session.id, messages, providerController.signal) : messages;
-           const stream = inference.stream(visualMessages, definitions, providerController.signal);
+          const visualMessages = this.options.providerVision
+            ? await hydrateImageInputs(this.store, session.id, messages, providerController.signal) : messages;
+          const stream = inference.stream(visualMessages, requestDefinitions, providerController.signal);
           for await (const event of withProviderDeadlines(
             stream,
             providerController,
-            this.options.providerFirstEventTimeoutMs ?? 180_000,
-            this.options.providerRequestTimeoutMs ?? 900_000,
+            streamLimits.firstEventTimeoutMs,
+            streamLimits.requestTimeoutMs,
           )) {
             if (signal.aborted) throw signal.reason;
             providerEventCount += 1;
-            if (providerEventCount > (this.options.providerEventLimit ?? 20_000)) {
+            if (providerEventCount > streamLimits.eventLimit) {
               throw new Error("Provider stream exceeded the event limit");
             }
             if (event.type !== "usage" && event.type !== "finish") {
@@ -144,11 +161,11 @@ export class AgentEngine {
               roundHasReasoning ||= event.delta.length > 0;
               if (inference.thinkingEnabled === false) continue;
               reasoningCharacters += event.delta.length;
-              if (reasoningCharacters > 1_000_000) throw new Error("Model reasoning exceeded the turn limit");
+              if (reasoningCharacters > streamLimits.turnCharacterLimit) throw new Error("Model reasoning exceeded the turn limit");
               this.store.appendReasoningDelta(turnId, event.delta);
             } else if (event.type === "text_delta") {
               visibleCharacters += event.delta.length;
-              if (visibleCharacters > 1_000_000) throw new Error("Model output exceeded the turn limit");
+              if (visibleCharacters > streamLimits.turnCharacterLimit) throw new Error("Model output exceeded the turn limit");
               roundText += event.delta;
               this.store.appendMessageDelta(turnId, event.delta);
             } else if (event.type === "usage") {
@@ -168,12 +185,16 @@ export class AgentEngine {
               if (call.id.length > 512 || call.name.length > 256) throw new Error("Tool identity exceeded the limit");
               if (call.arguments.length > 128 * 1024) throw new Error("Tool arguments exceeded the limit");
               assembled.set(event.index, call);
+              call.draftId = `${providerCallId}:${event.index}`;
+              this.flushToolDraft(turnId, call);
             }
           }
+          for (const call of assembled.values()) this.flushToolDraft(turnId, call, true);
           // A transport completion marker does not mean the model finished its
           // answer. Validate before settling the call or executing any tools.
           assertModelResponseComplete({ finishReason, outputTokens, maxOutputTokens: inference.maxOutputTokens,
             provider: inference.providerId, text: roundText, hasReasoning: roundHasReasoning, hasToolCalls: assembled.size > 0 });
+          if (finalizing && assembled.size > 0) throw new Error(`${budgetReason}. Model requested tools during the final status request. Progress is saved; send a follow-up to continue.`);
           const requestCompletedAt = performance.now();
           this.store.recordProviderMetrics(providerCallId, {
             queueDurationMs: Math.max(0, Math.round(lease.queueDurationMs)),
@@ -182,6 +203,7 @@ export class AgentEngine {
           });
           this.store.settleProviderCall(providerCallId, "completed", undefined, finishReason);
         } catch (error) {
+          if (!signal.aborted) for (const call of assembled.values()) this.flushToolDraft(turnId, call, true);
           if (!providerController.signal.aborted) providerController.abort(error);
           if (!signal.aborted) {
             const requestCompletedAt = performance.now();
@@ -226,18 +248,19 @@ export class AgentEngine {
           const firstRetainedMessageId = history[0]?.firstMessageId ?? currentUser.id;
           this.store.trimModelContext(turnId, firstRetainedMessageId, pendingContextDrops.map((entry) => entry.id));
         }
-        this.store.completeTurn(turnId);
+        if (finalizing) this.store.interruptTurn(turnId, `${budgetReason}. Progress saved; send a follow-up to continue. Limits are configurable under [agent].`);
+        else this.store.completeTurn(turnId);
         return;
       }
 
       const providerCalls = [...assembled.entries()].sort(([left], [right]) => left - right).map(([, call]) => call);
+      const exceedsToolAllowance = totalToolCalls + providerCalls.length > maxToolCalls;
       totalToolCalls += providerCalls.length;
-      if (totalToolCalls > 24) throw new Error("Turn exceeded the tool call limit");
       if (providerCalls.some((call) => !call.id || !call.name)) throw new Error("Model returned an incomplete tool call");
       const assistantMessage = {
         role: "assistant",
         content: roundText || null,
-        toolCalls: providerCalls satisfies ProviderToolCall[],
+        toolCalls: providerCalls.map(({ id, name, arguments: args }) => ({ id, name, arguments: args })) satisfies ProviderToolCall[],
       } as const;
       currentMessages.push(assistantMessage);
       this.store.appendModelMessage(turnId, assistantMessage);
@@ -248,10 +271,23 @@ export class AgentEngine {
           providerCallId,
           call.id,
           call.name,
-          call.arguments,
+            call.arguments,
+            call.draftId,
         );
         return { call, toolCallId };
       });
+
+      if (exceedsToolAllowance) {
+        budgetReason = `Reached the configured ${maxToolCalls} tool-call allowance`;
+        for (const { call, toolCallId } of callRecords) {
+          const result = `${budgetReason}. This tool call was not executed; continue in a follow-up turn.`;
+          this.store.settleToolCall(toolCallId, "denied", result);
+          const toolMessage = { role: "tool" as const, toolCallId: call.id, content: result };
+          currentMessages.push(toolMessage);
+          this.store.appendModelMessage(turnId, toolMessage);
+        }
+        continue;
+      }
 
       const allReadOnly = callRecords.every(({ call }) => {
         const tool = this.tools.get(call.name);
@@ -274,7 +310,6 @@ export class AgentEngine {
         );
         for (const { call, result, imageArtifactIds } of results) {
           totalToolResultBytes += Buffer.byteLength(result);
-          if (totalToolResultBytes > 512 * 1024) throw new Error("Turn exceeded the tool result limit");
           const toolMessage = { role: "tool" as const, toolCallId: call.id, content: result, ...(imageArtifactIds.length ? { imageArtifactIds } : {}) };
           currentMessages.push(toolMessage);
           this.store.appendModelMessage(turnId, toolMessage);
@@ -284,14 +319,24 @@ export class AgentEngine {
           const imageArtifactIds: string[] = [];
           const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal, turn.planOnly === true, imageArtifactIds);
           totalToolResultBytes += Buffer.byteLength(result);
-          if (totalToolResultBytes > 512 * 1024) throw new Error("Turn exceeded the tool result limit");
           const toolMessage = { role: "tool" as const, toolCallId: call.id, content: result, ...(imageArtifactIds.length ? { imageArtifactIds } : {}) };
           currentMessages.push(toolMessage);
           this.store.appendModelMessage(turnId, toolMessage);
         }
       }
+      if (totalToolResultBytes >= 4 * 1024 * 1024) budgetReason = "Reached the 4 MiB tool-result allowance";
     }
-    throw new Error("Turn exceeded the model round limit");
+    throw new Error("Turn could not produce its final status report. Progress is saved; send a follow-up to continue.");
+  }
+
+  private flushToolDraft(turnId: string, call: AssembledToolCall, force = false): void {
+    if (!call.draftId || !["edit_file", "write_file", "move_path", "delete_path"].includes(call.name)) return;
+    const now = performance.now();
+    if (!force && call.draftAt !== undefined && now - call.draftAt < 60) return;
+    const delta = call.arguments.slice(call.draftSent ?? 0);
+    if (!delta && call.draftAt !== undefined) return;
+    this.store.appendToolDraft(turnId, call.draftId, call.name, delta);
+    call.draftSent = call.arguments.length; call.draftAt = now;
   }
 
   private captureSnapshot(
@@ -300,7 +345,7 @@ export class AgentEngine {
     workspaceRoot: string | undefined,
     toolName: string,
     input: unknown,
-  ): string[] {
+  ): SnapshotFile[] {
     if (!workspaceRoot) return [];
     if (!["edit_file", "write_file", "move_path", "delete_path"].includes(toolName)) return [];
     const record = isRecord(input) ? input : {};
@@ -321,7 +366,7 @@ export class AgentEngine {
         }
       }
       this.store.recordSnapshot(turnId, files);
-      return files.map((file) => file.path);
+      return files;
     } catch (error) {
       console.error(`Snapshot capture failed for session ${sessionId}; undo may be incomplete`, error);
       return [];
@@ -419,8 +464,8 @@ export class AgentEngine {
         }
       }
       result = result.slice(0, 256 * 1024);
-      this.captureSnapshotPostState(turnId, sessionId, workspaceRoot, snapshotTargets);
-      this.store.settleToolCall(toolCallId, "completed", result);
+      this.captureSnapshotPostState(turnId, sessionId, workspaceRoot, snapshotTargets.map((file) => file.path));
+      this.store.settleToolCall(toolCallId, "completed", result, recordedToolChanges(workspaceRoot, snapshotTargets));
       return result;
     } catch (error) {
       if (signal.aborted) throw error;

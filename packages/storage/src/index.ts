@@ -21,6 +21,7 @@ import {
   type TokenUsage,
   type Turn,
   type TurnStatus,
+  type ToolFileChange,
 } from "@demesne/protocol";
 
 export interface SnapshotFile {
@@ -530,7 +531,17 @@ export class DemesneStore {
   }
 
   getCompletedModelTranscript(sessionId: string): StoredModelMessage[] {
-    this.getSessionOrThrow(sessionId);
+    return this.readModelTranscript(sessionId, false);
+  }
+
+  /// Terminal turns retain useful findings even when they did not finish the
+  /// task. Reconstruct only complete tool exchanges for the next model request.
+  getModelContextTranscript(sessionId: string): StoredModelMessage[] {
+    return this.readModelTranscript(sessionId, true);
+  }
+
+  private readModelTranscript(sessionId: string, includeStopped: boolean): StoredModelMessage[] {
+    const session = this.getSessionOrThrow(sessionId);
     const rows = this.database.query(`
       SELECT model_messages.id, model_messages.turn_id, model_messages.role, model_messages.content,
               model_messages.tool_call_id, model_messages.tool_calls_json, model_messages.image_artifact_ids_json
@@ -538,20 +549,51 @@ export class DemesneStore {
       JOIN turns ON turns.id = model_messages.turn_id
       JOIN sessions ON sessions.id = model_messages.session_id
       WHERE model_messages.session_id = ?
-        AND turns.status = 'completed'
+        AND (turns.status = 'completed' OR (? AND turns.status IN ('failed', 'cancelled', 'interrupted')))
         AND turns.kind = 'chat'
         AND (sessions.context_start_message_id IS NULL OR model_messages.id >= sessions.context_start_message_id)
       ORDER BY model_messages.id
-    `).all(sessionId) as ModelMessageRow[];
+    `).all(sessionId, includeStopped ? 1 : 0) as ModelMessageRow[];
     const reverted = this.database.query("SELECT turn_id, file_path FROM turn_snapshots WHERE session_id = ? AND reverted_at IS NOT NULL")
       .all(sessionId) as { turn_id: string; file_path: string }[];
-    return rows.flatMap((row, index): StoredModelMessage[] => {
+    const transcript = rows.flatMap((row, index): StoredModelMessage[] => {
       const message = mapModelMessage(row);
       if (rows[index + 1]?.turn_id === row.turn_id) return [message];
       const paths = reverted.filter((file) => file.turn_id === row.turn_id).map((file) => file.file_path);
       return paths.length ? [message, { id: row.id, turnId: row.turn_id, message: { role: "assistant",
         content: `Recorded user undo: changes to ${JSON.stringify(paths)} from this turn were later reverted. Historical tool results describe the state before undo; inspect current files before further changes.` } }] : [message];
     });
+    if (!includeStopped) return transcript;
+    const outcomes = new Map((this.database.query(`SELECT turn_id, payload FROM events WHERE session_id = ?
+      AND type IN ('turn.failed', 'turn.cancelled', 'turn.interrupted') ORDER BY id`).all(sessionId) as { turn_id: string; payload: string }[])
+      .map((row) => [row.turn_id, JSON.parse(row.payload).message as string | undefined]));
+    const byTurn = new Map<string, StoredModelMessage[]>();
+    for (const entry of transcript) {
+      const messages = byTurn.get(entry.turnId) ?? [];
+      messages.push(entry);
+      byTurn.set(entry.turnId, messages);
+    }
+    const normalized: StoredModelMessage[] = [];
+    for (const turn of session.turns) {
+      const messages = byTurn.get(turn.id) ?? [];
+      if (turn.status === "completed" || messages.length === 0) { normalized.push(...messages); continue; }
+      for (let index = 0; index < messages.length; index++) {
+        const entry = messages[index]!;
+        if (entry.message.role === "tool") continue; // Orphaned results are not valid provider input.
+        if (entry.message.role === "assistant" && entry.message.toolCalls?.length) {
+          const results: StoredModelMessage[] = [];
+          while (messages[index + 1]?.message.role === "tool") results.push(messages[++index]!);
+          const calls = entry.message.toolCalls.filter((call) => results.filter((result) => result.message.role === "tool" && result.message.toolCallId === call.id).length === 1);
+          if (calls.length) {
+            normalized.push({ ...entry, message: { ...entry.message, toolCalls: calls } });
+            for (const call of calls) normalized.push(results.find((result) => result.message.role === "tool" && result.message.toolCallId === call.id)!);
+          } else if (entry.message.content) normalized.push({ ...entry, message: { role: "assistant", content: entry.message.content } });
+        } else normalized.push(entry);
+      }
+      normalized.push({ id: messages.at(-1)!.id, turnId: turn.id, message: { role: "assistant", content:
+        `Historical turn ended ${turn.status}${outcomes.get(turn.id) ? `: ${outcomes.get(turn.id)!.slice(0, 2000)}` : "."} Its output may be incomplete. Continue from the recorded findings and verify current files before repeating changes; do not assume the task was completed.` } });
+    }
+    return normalized;
   }
 
   recordSnapshot(turnId: string, files: SnapshotFile[]): void {
@@ -689,7 +731,7 @@ export class DemesneStore {
       }
       if (this.modelContextVersion(turn.sessionId) !== expectedVersion) throw new InvalidStateError("Session context changed during compaction; retry /compact");
       const retained = this.database.query(`SELECT m.session_id FROM model_messages m JOIN turns t ON t.id = m.turn_id
-        WHERE m.id = ? AND t.status = 'completed' AND t.kind = 'chat' AND m.role = 'user'`).get(checkpoint.firstRetainedMessageId) as { session_id: string } | null;
+        WHERE m.id = ? AND t.status IN ('completed', 'failed', 'cancelled', 'interrupted') AND t.kind = 'chat' AND m.role = 'user'`).get(checkpoint.firstRetainedMessageId) as { session_id: string } | null;
       if (retained?.session_id !== turn.sessionId) throw new InvalidStateError("Compaction boundary is outside the session");
       this.database.query("INSERT INTO session_checkpoints(id, session_id, turn_id, descriptor) VALUES (?, ?, ?, ?)")
         .run(checkpoint.id, turn.sessionId, turnId, JSON.stringify(checkpoint));
@@ -980,12 +1022,20 @@ export class DemesneStore {
     return event;
   }
 
+  appendToolDraft(turnId: string, draftId: string, name: string, delta: string): void {
+    const turn = this.getTurnOrThrow(turnId);
+    if (turn.status !== "running") throw new InvalidStateError("Tool draft requires a running turn");
+    const event = this.insertEvent("tool.call_draft", turn.sessionId, turnId, { draftId, name, delta }, new Date().toISOString());
+    this.eventSink?.(event);
+  }
+
   recordToolCall(
     turnId: string,
     providerCallId: string,
     providerToolCallId: string,
     name: string,
     argumentsJson: string,
+    draftId?: string,
   ): { toolCallId: string; event: EventEnvelope } {
     const toolCallId = crypto.randomUUID();
     const result = this.database.transaction(() => {
@@ -1001,7 +1051,7 @@ export class DemesneStore {
         "tool.call_requested",
         turn.sessionId,
         turnId,
-        { toolCallId, providerToolCallId, providerCallId, name, arguments: argumentsJson },
+        { toolCallId, providerToolCallId, providerCallId, name, arguments: argumentsJson, ...(draftId ? { draftId } : {}) },
         now,
       );
       return { toolCallId, event };
@@ -1085,6 +1135,7 @@ export class DemesneStore {
     toolCallId: string,
     outcome: "completed" | "failed" | "denied",
     resultText: string,
+    changes?: ToolFileChange[],
   ): EventEnvelope {
     const event = this.database.transaction(() => {
       const call = this.getToolCallOrThrow(toolCallId);
@@ -1108,6 +1159,7 @@ export class DemesneStore {
         name: call.name,
         outputBytes: Buffer.byteLength(resultText),
         ...toolResultMetadata(call.name, resultText),
+        ...(changes?.length ? { changes } : {}),
         ...(outcome !== "completed" ? { message: resultText } : {}),
       }, now);
     })();
@@ -1131,13 +1183,39 @@ export class DemesneStore {
     return event;
   }
 
+  interruptTurn(turnId: string, message: string): EventEnvelope {
+    const event = this.database.transaction(() => {
+      const turn = this.getTurnOrThrow(turnId);
+      if (turn.status !== "running") throw new InvalidStateError(`Turn cannot stop from ${turn.status}`);
+      const now = new Date().toISOString();
+      this.database.query("UPDATE turns SET status = 'interrupted', completed_at = ? WHERE id = ?").run(now, turnId);
+      this.database.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now, turn.sessionId);
+      return this.insertEvent("turn.interrupted", turn.sessionId, turnId, { message, reason: "turn_budget" }, now);
+    })();
+    this.eventSink?.(event);
+    return event;
+  }
+
   eventsAfter(sessionId: string, afterEventId: number, limit = 100): EventEnvelope[] {
-    this.getSessionOrThrow(sessionId);
+    this.requireSession(sessionId);
     const boundedLimit = Math.max(1, Math.min(limit, 500));
     const rows = this.database
       .query("SELECT * FROM events WHERE session_id = ? AND id > ? ORDER BY id LIMIT ?")
       .all(sessionId, afterEventId, boundedLimit) as EventRow[];
     return rows.map(mapEvent);
+  }
+
+  /// Bounded bulk reads for saved history, pinned to a snapshot cursor even
+  /// while a new turn is appending events. Avoid loading all turns per batch.
+  eventsBetween(sessionId: string, afterEventId: number, throughEventId: number, limit = 20_000): EventEnvelope[] {
+    this.requireSession(sessionId);
+    const rows = this.database.query("SELECT * FROM events WHERE session_id = ? AND id > ? AND id <= ? ORDER BY id LIMIT ?")
+      .all(sessionId, afterEventId, throughEventId, Math.max(1, Math.min(limit, 20_000))) as EventRow[];
+    return rows.map(mapEvent);
+  }
+
+  private requireSession(id: string): void {
+    if (!this.database.query("SELECT 1 FROM sessions WHERE id = ?").get(id)) throw new NotFoundError(`Session not found: ${id}`);
   }
 
   private getSessionOrThrow(id: string): Session {

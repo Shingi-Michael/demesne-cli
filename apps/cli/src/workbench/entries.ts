@@ -11,6 +11,8 @@ export interface ToolEntry {
   detail?: string; state: ToolState; durationMs?: number; message?: string; exitCode?: number;
   created?: boolean; diff?: { oldText: string; newText: string }; startedAt: number;
   waiting?: boolean; phase: ToolPhaseName;
+  draftId?: string; draftArguments?: string; drafting?: boolean;
+  changes?: import("@demesne/protocol").ToolFileChange[];
 }
 export interface NoticeEntry { id: number; type: "notice"; text: string; tone: "info" | "success" | "error"; closesTurn?: boolean; receipt?: ResponseReceipt }
 export interface BlockEntry { id: number; type: "block"; lines: string[] }

@@ -51,6 +51,7 @@ import {
   sanitizeTerminalLine,
   sanitizeTerminalText,
   SLASH_COMMANDS,
+  SLASH_MENU_LIMIT,
   slashCommandMatches,
   slashCommandValidationError,
   TerminalMarkdownStream,
@@ -84,6 +85,9 @@ import { playTensorIntro } from "./tensor-intro.ts";
 import { formatProcessView } from "./process-view.ts";
 import { formatAmbientMemory, readAmbientMemory } from "./ambient.ts";
 import { Workbench } from "./workbench/controller.ts";
+import { AgentDrive, type DriveControl } from "./agent-drive.ts";
+import { inspectDrive } from "./drive-inspection.ts";
+import { createHash } from "node:crypto";
 import { checkForUpdate } from "./update-check.ts";
 import { PromptHistory } from "./prompt-history.ts";
 import { composeInEditor } from "./external-editor.ts";
@@ -104,6 +108,7 @@ import {
 } from "./daemon-control.ts";
 import { formatDoctorReport, runDoctor } from "./doctor.ts";
 import { runSetup } from "./setup.ts";
+import { beginOpenRouterLogin, configureOpenRouter } from "./openrouter-auth.ts";
 import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus } from "./harness-panels.ts";
 import { replaySession } from "./workbench/history.ts";
 import { toolCompletion } from "./workbench/tool-result.ts";
@@ -302,7 +307,7 @@ async function readCommandPrompt(
   input.resume();
 
   return new Promise((resolve) => {
-    const matchingCommands = () => (state.menuDismissed ? [] : slashCommandMatches(state.value, commands).slice(0, 10));
+    const matchingCommands = () => (state.menuDismissed ? [] : slashCommandMatches(state.value, commands).slice(0, SLASH_MENU_LIMIT));
 
     const render = () => {
       const commands = matchingCommands();
@@ -571,6 +576,32 @@ async function run(command: string[]): Promise<void> {
     return;
   }
 
+  if (command[0] === "auth") {
+    if (command[1] !== "login" || command[2] !== "openrouter") throw new Error("Usage: demesne auth login openrouter [--model <id>] [--no-browser]");
+    const model = takeOption(command, "--model");
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    process.once("SIGINT", cancel);
+    const login = process.env.OPENROUTER_API_KEY?.trim() ? undefined : beginOpenRouterLogin({ signal: controller.signal });
+    try {
+      if (login) {
+        console.log(`Authorize Demesne in your browser:\n${login.url}`);
+        if (!command.includes("--no-browser")) {
+          const opener = process.platform === "darwin" ? ["open", login.url]
+            : process.platform === "win32" ? ["rundll32.exe", "url.dll,FileProtocolHandler", login.url] : ["xdg-open", login.url];
+          try { await Bun.spawn(opener, { stdout: "ignore", stderr: "ignore" }).exited; }
+          catch { console.log("Open the authorization URL above to continue."); }
+        }
+      }
+      const result = await configureOpenRouter({ apiKey: login ? await login.key : process.env.OPENROUTER_API_KEY!,
+        configPath: settings.configPath, model, signal: controller.signal });
+      console.log(`Connected OpenRouter. Credential saved to ${result.configPath}.`);
+      console.log(`Model: ${result.model} · context ${result.contextWindow} · output ${result.maxOutputTokens}`);
+      console.log(`Restart the daemon, then select /model ${result.model}.`);
+    } finally { process.removeListener("SIGINT", cancel); await login?.close(); }
+    return;
+  }
+
   if (command[0] === "doctor") {
     const result = await runDoctor({
       server,
@@ -771,7 +802,7 @@ async function runChat(command: string[]): Promise<void> {
   if (command.includes("--no-tui")) command.splice(command.indexOf("--no-tui"), 1);
   const useWorkbench = interactive && !noTui;
   const history = PromptHistory.load(join(settings.dataDirectory, "history.jsonl"));
-  let mentionFiles: string[] = [];
+  const mentionFiles: string[] = [];
   let customCommands: CustomCommand[] = loadCustomCommands(process.cwd());
   let allCommands: SlashCommand[] = mergeSlashCommands(SLASH_COMMANDS, customCommands);
   const refreshCustomCommands = (workspaceRoot: string): void => {
@@ -802,20 +833,19 @@ async function runChat(command: string[]): Promise<void> {
 
   const boot = Promise.all([
     request<{ provider: string; model: string; contextCapacity?: number }>("/healthz").catch(() => undefined),
-    request<{ models: ModelDescriptor[] }>("/v1/models").then((result) => result.models).catch(() => []),
     request<RuntimeProfileStatus>("/v1/runtime").catch(() => null),
+    request<SessionStateResponse>(`/v1/sessions/${sessionId}`),
   ]);
   if (!useWorkbench) await playTensorIntro(paint);
-  const [health, discoveredModels, runtimeStatus] = await boot;
-  let activeModel = discoveredModels.find((model) => model.id === health?.model) ?? {
+  const [health, runtimeStatus, initialState] = await boot;
+  // Opening the UI needs local daemon facts, not network discovery across every
+  // configured provider. Discover the catalog only when opening /model.
+  let activeModel: ModelDescriptor = {
     id: health?.model ?? "model",
     provider: health?.provider ?? "local",
   };
-  // The provider's model list is the usual source of the context window, but it
-  // is unavailable whenever the model server is down — exactly when the welcome
-  // panel is on screen. The runtime profile records the window the profile was
-  // configured with, and /healthz reports the provider's configured window; both
-  // are local facts, so prefer either over reporting that the window is unknown.
+  // The configured window is local metadata, available even when inference
+  // providers are offline. Saved sessions hydrate their own recorded plan below.
   const configuredWindow = runtimeStatus?.expected?.contextWindow
     ?? runtimeStatus?.observed?.contextWindow
     ?? health?.contextCapacity
@@ -823,21 +853,21 @@ async function runChat(command: string[]): Promise<void> {
   if (activeModel.contextWindow === undefined && configuredWindow !== undefined) {
     activeModel = { ...activeModel, contextWindow: configuredWindow };
   }
-  const initialState = await request<SessionStateResponse>(`/v1/sessions/${sessionId}`);
-  mentionFiles = await fetchMentionFiles(sessionId);
   let currentWorkspace = initialState.session.workspace?.root ?? process.cwd();
   let sessionTitle = initialState.session.title;
   refreshCustomCommands(currentWorkspace);
-  const historicalModel = initialState.latestProviderCall
-    ? discoveredModels.find((model) =>
-      model.id === initialState.latestProviderCall?.model && model.provider === initialState.latestProviderCall.provider
-    )
-    : undefined;
-  const contextRail = new CliContextRail(historicalModel ?? activeModel, currentWorkspace);
+  const contextRail = new CliContextRail(activeModel, currentWorkspace);
   contextRail.hydrate(initialState.latestProviderCall, thinkingEnabled, currentWorkspace);
   contextRail.setBranch(initialState.session.workspace?.gitBranch ?? null);
   contextRail.setRuntime(runtimeStatus);
   const fixedFooter = new CliFixedFooter();
+  let drive: AgentDrive | null = null;
+  const controlDrive = (control: DriveControl): void => {
+    try {
+      drive?.control(control);
+      if (control === "stop" && drive?.state?.homeSessionId === sessionId && chatState.streamActive) chatState.interrupt?.();
+    } catch (error) { workbench?.notice(error instanceof Error ? error.message : "Drive could not continue.", "error"); }
+  };
   const workbench = useWorkbench
     ? new Workbench({
         paint,
@@ -863,6 +893,7 @@ async function runChat(command: string[]): Promise<void> {
         },
         onExit: () => leaveChat(),
         onInterrupt: () => chatState.interrupt?.(),
+        drive: { control: controlDrive, intervene: () => drive?.intervene() },
         queue: {
           get: () => chatState.queuedInput ?? "",
           set: (value) => {
@@ -872,11 +903,57 @@ async function runChat(command: string[]): Promise<void> {
         },
       })
     : null;
-  const restoreWorkbench = async (state: SessionStateResponse): Promise<void> => {
+  const loadDrive = (): void => {
+    if (!workbench) return;
+    drive?.dispose();
+    drive = new AgentDrive({
+      continuous: true,
+      limits: settings.loaded.config.drive,
+      cancelWorker: async (turnId, signal) => {
+        signal.throwIfAborted();
+        const result = await client.request<import("@demesne/protocol").CancelTurnResponse>(`/v1/turns/${turnId}/cancel`, { method: "POST", body: "{}", signal });
+        return result.turn.status === "cancelled";
+      },
+      path: join(settings.dataDirectory, "drive", `${createHash("sha256").update(`${client.server}\n${currentWorkspace}`).digest("hex")}.json`),
+      observe: () => workbench.observeDrive(), perform: (action, observation, signal) => workbench.performDrive(action, observation, signal),
+      inspect: (action, observation, signal, activity) => inspectDrive({ observe: () => workbench.observeDrive(), perform: (action, observation, signal) => workbench.performDrive(action, observation, signal) }, action, observation, signal, activity),
+      decide: (body, signal, progress) => client.decideDrive(body, signal, progress), changed: (state) => workbench.setDrive(state),
+    });
+  };
+  loadDrive();
+  let mentionRevision = 0;
+  const refreshMentionFiles = (targetId: string): void => {
+    const revision = ++mentionRevision;
+    // Keep the array shared with an already-waiting scrollback prompt too.
+    mentionFiles.length = 0;
+    workbench?.setMentionFiles(mentionFiles);
+    void fetchMentionFiles(targetId).then((files) => {
+      if (sessionId !== targetId || revision !== mentionRevision) return;
+      for (const file of files) mentionFiles.push(file);
+      workbench?.setMentionFiles(mentionFiles);
+    });
+  };
+  const restoreArtifacts = async (targetId: string): Promise<void> => {
     if (!workbench) return;
     try {
-      const events = await replaySession(state, (id, after, signal) => client.streamEvents(id, after, signal));
+      let after = 0;
+      do {
+        const page = await client.listArtifacts(targetId, after);
+        if (sessionId !== targetId) break;
+        page.artifacts.forEach((artifact) => workbench.addArtifact(artifact));
+        if (page.nextCursor === null) break;
+        after = page.nextCursor;
+      } while (true);
+    } catch { /* Older daemons and sessions without artifact support still load. */ }
+  };
+  const restoreWorkbench = async (state: SessionStateResponse): Promise<void> => {
+    refreshMentionFiles(state.session.id);
+    if (!workbench) return;
+    try {
+      const events = await replaySession(state, (id, after, signal) => client.streamEvents(id, after, signal),
+        (id, after, through, signal) => client.replayPage(id, after, through, signal));
       workbench.restoreSession(state, events);
+      drive?.reconcileWorker(state, events);
     } catch {
       workbench.restoreSession(state);
       workbench.notice("Saved answers loaded; detailed event history could not be replayed.", "error");
@@ -892,16 +969,9 @@ async function runChat(command: string[]): Promise<void> {
         if (sessionId === state.session.id) workbench.setRecentSessions([recentSession(state)], "unavailable");
       });
     }
-    try {
-      let after = 0;
-      do {
-        const page = await client.listArtifacts(state.session.id, after);
-        if (sessionId !== state.session.id) break;
-        page.artifacts.forEach((artifact) => workbench.addArtifact(artifact));
-        if (page.nextCursor === null) break;
-        after = page.nextCursor;
-      } while (true);
-    } catch { /* Older daemons and sessions without artifact support still load. */ }
+    // Artifact metadata and workspace completion lists hydrate independently;
+    // neither should hold the prompt hostage while walking a large history/tree.
+    void restoreArtifacts(state.session.id);
   };
   if (!workbench) {
     chatState.footer = fixedFooter;
@@ -926,6 +996,7 @@ async function runChat(command: string[]): Promise<void> {
   let ambientTimer: ReturnType<typeof setInterval> | undefined;
   restoreTerminalState = () => {
     if (ambientTimer) clearInterval(ambientTimer);
+    drive?.dispose();
     workbench?.stop();
     fixedFooter.disable();
     process.stdout.removeListener("resize", onTerminalResize);
@@ -947,7 +1018,7 @@ async function runChat(command: string[]): Promise<void> {
     };
     void refreshAmbient();
     ambientTimer = setInterval(() => void refreshAmbient(), 10_000);
-  } else renderWelcome();
+  } else { refreshMentionFiles(initialState.session.id); renderWelcome(); }
 
   /// Command output helper: the workbench appends blocks to the conversation,
   /// while the scrollback renderer prints directly.
@@ -994,6 +1065,8 @@ async function runChat(command: string[]): Promise<void> {
           planOnly,
           compactInstructions,
           workbench,
+          workerStarted: (content, turnId) => drive?.workerStarted(sessionId!, content, turnId),
+          workerEvent: (event) => drive?.workerEvent(event),
           contextRail,
           paint,
         });
@@ -1044,23 +1117,20 @@ async function runChat(command: string[]): Promise<void> {
   const activateSession = async (targetId: string): Promise<void> => {
     try {
       const result = await request<SessionStateResponse>(`/v1/sessions/${targetId}`);
+      if (drive?.active && result.session.workspace?.root !== drive.state?.workspace) {
+        say("Drive can inspect sessions in its mission workspace. Pause it before switching workspaces."); return;
+      }
+      const previousWorkspace = currentWorkspace;
       sessionId = result.session.id;
       sessionTitle = result.session.title;
       workbench?.setSessionTitle(sessionTitle);
       currentWorkspace = result.session.workspace?.root ?? process.cwd();
+      if (currentWorkspace !== previousWorkspace) loadDrive();
       contextRail.setModel(activeModel);
-      if (result.latestProviderCall) {
-        const models = await request<{ models: ModelDescriptor[] }>("/v1/models")
-          .then((response) => response.models)
-          .catch(() => []);
-        const historical = models.find((model) =>
-          model.id === result.latestProviderCall?.model && model.provider === result.latestProviderCall.provider
-        );
-        if (historical) contextRail.setModel(historical);
-      }
+      // hydrate uses the recorded model and context plan, even if that provider
+      // is offline. Resuming a saved conversation never needs model discovery.
       contextRail.hydrate(result.latestProviderCall, thinkingEnabled, currentWorkspace);
       contextRail.setBranch(result.session.workspace?.gitBranch ?? null);
-      mentionFiles = await fetchMentionFiles(sessionId);
       refreshCustomCommands(currentWorkspace);
       await restoreWorkbench(result);
       const preferred = result.session.preferredModel;
@@ -1078,6 +1148,15 @@ async function runChat(command: string[]): Promise<void> {
 
   const slashHandlers: Partial<Record<SlashCommandId, (argument: string) => Promise<void>>> = {
     exit: async () => leaveChat(),
+    drive: async (argument) => {
+      if (!workbench || !drive) { say("Agent Drive needs the native workbench.", "error"); return; }
+      try {
+        const value = argument.trim();
+        if (value === "pause" || value === "resume" || value === "stop") controlDrive(value);
+        else if (value && value !== "status") drive.start(value);
+        workbench.showDrive();
+      } catch (error) { say(error instanceof Error ? error.message : "Drive could not start.", "error"); }
+    },
     compact: async (instructions) => executePrompt(`/compact${instructions ? ` ${instructions}` : ""}`, false, instructions),
     undo: async (argument) => {
       try {
@@ -1150,6 +1229,7 @@ async function runChat(command: string[]): Promise<void> {
       emit(formatHelpCard(paint, getTerminalWidth(process.stdout)));
     },
     new: async (customTitle) => {
+      const previousWorkspace = currentWorkspace;
       const title = sanitizeTerminalLine(customTitle).trim() || `Session ${new Date().toLocaleTimeString()}`;
       const created = await request<CreateSessionResponse>("/v1/sessions", {
         method: "POST",
@@ -1159,10 +1239,10 @@ async function runChat(command: string[]): Promise<void> {
       sessionTitle = title;
       workbench?.setSessionTitle(title);
       currentWorkspace = created.session.workspace?.root ?? process.cwd();
+      if (currentWorkspace !== previousWorkspace) loadDrive();
       contextRail.setModel(activeModel);
       contextRail.hydrate(null, thinkingEnabled, currentWorkspace);
       contextRail.setBranch(created.session.workspace?.gitBranch ?? null);
-      mentionFiles = await fetchMentionFiles(sessionId);
       refreshCustomCommands(currentWorkspace);
       await restoreWorkbench({ session: created.session, lastEventId: created.eventId, pendingPermissions: [], latestProviderCall: null });
       say(`Started new session ${title} (${sessionId.slice(0, 8)})`, "success");
@@ -1260,7 +1340,7 @@ async function runChat(command: string[]): Promise<void> {
       const result = await request<{ sessions: Session[] }>(
         query ? `/v1/sessions?query=${encodeURIComponent(query)}` : "/v1/sessions",
       );
-      const recent = result.sessions.slice(0, 10);
+      const recent = (drive?.active ? result.sessions.filter((session) => session.workspace?.root === currentWorkspace) : result.sessions).slice(0, 10);
       if (query && recent.length === 0) {
         say(`No sessions match "${sanitizeTerminalLine(query)}".`);
         return;
@@ -1570,6 +1650,8 @@ async function runWorkbenchTurn(options: {
   workbench: Workbench;
   contextRail: CliContextRail;
   paint: Painter;
+  workerStarted?: (content: string, turnId: string) => void;
+  workerEvent?: (event: EventEnvelope) => void;
 }): Promise<"completed" | "stopped" | "failed"> {
   const submitted = options.compactInstructions !== undefined ? await client.compactSession(options.sessionId, { instructions: options.compactInstructions })
     : await request<SubmitTurnResponse>(`/v1/sessions/${options.sessionId}/turns`, {
@@ -1581,6 +1663,7 @@ async function runWorkbenchTurn(options: {
     }),
   });
 
+  options.workerStarted?.(options.content, submitted.turn.id);
   const controller = new AbortController();
   let interrupted = false;
   let cancelFallback: ReturnType<typeof setTimeout> | undefined;
@@ -1624,6 +1707,7 @@ async function runWorkbenchTurn(options: {
   try {
     for await (const event of client.streamEvents(options.sessionId, submitted.eventId, controller.signal)) {
       if (event.turnId !== submitted.turn.id) continue;
+      options.workerEvent?.(event);
       options.contextRail.apply(event);
       if (event.type === "artifact.created" && isRecord(event.payload.artifact) && typeof event.payload.artifact.id === "string") {
         try {
@@ -1659,6 +1743,10 @@ async function runWorkbenchTurn(options: {
         } else {
           options.workbench.assistantDelta(event.payload.delta, responseAt);
         }
+      } else if (event.type === "tool.call_draft") {
+        if (pacer) await pacer.drain();
+        options.workbench.toolDraft(event);
+        presence = "working";
       } else if (event.type === "tool.call_requested") {
         // Drain first: the tool row must appear after the prose that announced
         // it, not in the middle of a still-buffered sentence.
@@ -1668,6 +1756,7 @@ async function runWorkbenchTurn(options: {
           toolCallId: String(event.payload.toolCallId ?? ""),
           name,
           arguments: event.payload.arguments,
+          draftId: typeof event.payload.draftId === "string" ? event.payload.draftId : undefined,
         });
         presence = presenceForTool(name, isValidationCommand(toolDetailForPresence(name, event.payload.arguments)));
       } else if (event.type === "tool.call_started") {
@@ -2405,6 +2494,7 @@ function printUsage(): void {
   console.log(`Usage:
   demesne [chat] [initial message] [--no-tui]
   demesne setup [--provider-url <url> --model <id>] [--context-window <n>] [--max-output-tokens <n>] [--theme auto|dark|light] [--yes]
+  demesne auth login openrouter [--model <id>] [--no-browser]
   demesne doctor [--json]
   demesne daemon start|stop|status|logs
   demesne ps [--watch] [--json]

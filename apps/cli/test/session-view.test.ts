@@ -180,7 +180,7 @@ test("approval controls remain visible and correctly clickable on a ten-row term
   expect(await approval).toBe("deny");
 });
 
-test("double Escape interrupts a run even while inspection has focus", () => {
+test("double Escape interrupts a run even while inspection has focus", async () => {
   const { ui, state, view, screen, interrupts } = fixture("working");
   void ui.readPrompt({ history: [], mentions: [], commands: [] });
   state.onKeypress("Begin", {});
@@ -188,7 +188,18 @@ test("double Escape interrupts a run even while inspection has focus", () => {
   screen();
   view.act({ kind: "surface", surface: "review" });
   state.onData("\x1b\x1b");
+  await Bun.sleep(60);
   expect(interrupts()).toBe(1);
+});
+
+test("Escape plus a coalesced wheel report does not interrupt the coding turn", async () => {
+  const { ui, state, view, screen, interrupts, queue } = fixture("working");
+  void ui.readPrompt({ history: [], mentions: [], commands: [] });
+  state.onKeypress("Begin", {}); state.onKeypress("", { name: "return" });
+  screen(); view.act({ kind: "surface", surface: "review" });
+  state.onData("\x1b\x1b[<65;229;33M");
+  await Bun.sleep(60);
+  expect(interrupts()).toBe(0); expect(queue()).toBe("");
 });
 
 test("approval keyboard routing and selected buttons survive the compact input budget", async () => {
@@ -1142,7 +1153,8 @@ test("streaming prose follows only overflowing rows and respects manual reading"
     const settled = screen(width, height);
     expect(settled).toContain("LAST_OUTPUT");
     expect(settled).toContain("tok/s");
-    expect(screen(width, height)).toBe(settled);
+    // The wall clock in the header can tick between these two renders.
+    expect(screen(width, height).split("\n").slice(2)).toEqual(settled.split("\n").slice(2));
   }
 });
 
@@ -1232,6 +1244,84 @@ test("scrolling up stops catch-up immediately and Live jumps directly to the lat
   } finally { state.started = false; ui.stop(); clock.mockRestore(); }
 });
 
+test("later-round thinking drains past earlier prose even after provider deltas pause", () => {
+  for (const [width, height] of [[40, 10], [80, 24], [120, 36]]) {
+    const { ui, state, view, screen } = fixture();
+    let now = 1000;
+    const clock = spyOn(Date, "now").mockImplementation(() => now);
+    state.started = true;
+    try {
+      const draw = () => { now += 16; return screen(width, height); };
+      ui.beginTurn({ userText: "Investigate", at: "now" }); draw();
+      ui.assistantDelta("I will inspect the parser."); draw();
+      ui.toolRequested({ toolCallId: "read", name: "read_file", arguments: { path: "parser.ts" } });
+      ui.toolFinished({ toolCallId: "read", name: "read_file", state: "done", message: "Parser source" });
+      ui.beginRound(); draw();
+      ui.reasoningDelta(Array.from({ length: 75 }, (_, index) => `TRACE_${String(index).padStart(2, "0")}`).join("\n"));
+      let previous = view.memory.flowOffset;
+      const seen = new Set<string>();
+      let text = "";
+      for (let tick = 0; tick < 120; tick++) {
+        text = draw();
+        for (const match of text.matchAll(/TRACE_\d+/g)) seen.add(match[0]);
+        expect(view.memory.flowOffset - previous).toBeGreaterThanOrEqual(0);
+        expect(view.memory.flowOffset - previous).toBeLessThanOrEqual(1);
+        previous = view.memory.flowOffset;
+        if (!view.animating(now)) break;
+      }
+      expect(view.animating(now)).toBe(false);
+      expect(text).toContain("TRACE_74");
+      expect(seen.size).toBe(75);
+      const offset = view.memory.flowOffset;
+      for (let tick = 0; tick < 5; tick++) {
+        expect(draw()).toContain("TRACE_74");
+        expect(view.memory.flowOffset).toBe(offset);
+      }
+    } finally { state.started = false; ui.stop(); clock.mockRestore(); }
+  }
+});
+
+test.each(["wheel", "pagedown", "live"] as const)("%s reaches paused later-round thinking without the next paint resetting to earlier prose", (navigation) => {
+  for (const [width, height] of [[40, 10], [80, 24], [120, 36]]) {
+    const { ui, state, view, screen, key } = fixture();
+    let now = 1000;
+    const clock = spyOn(Date, "now").mockImplementation(() => now);
+    state.started = true;
+    try {
+      const draw = () => { now += 16; return screen(width, height); };
+      ui.beginTurn({ userText: "Investigate", at: "now" }); draw();
+      ui.assistantDelta("I will inspect the parser."); draw();
+      ui.toolRequested({ toolCallId: "read", name: "read_file", arguments: { path: "parser.ts" } });
+      ui.toolFinished({ toolCallId: "read", name: "read_file", state: "done", message: "Parser source" });
+      ui.beginRound(); draw();
+      ui.reasoningDelta(Array.from({ length: 75 }, (_, index) => `TRACE_${String(index).padStart(2, "0")}`).join("\n"));
+      draw();
+      const region = (view as any).regions.find((region: { target: string }) => region.target === "flow");
+      if (navigation === "live") { key("g", { ctrl: true }); draw(); }
+      else for (let tick = 0; tick < 80 && view.memory.flowOffset < (view as any).flowMaximum; tick++) {
+        if (navigation === "wheel") state.onData(`\x1b[<65;${region.column + 1};${region.row + 1}M`);
+        else key("pagedown");
+        draw();
+      }
+      expect(view.memory.followFlow).toBe(true);
+      const bottom = view.memory.flowOffset;
+      expect(bottom).toBeGreaterThan(50);
+      for (let tick = 0; tick < 8; tick++) {
+        expect(draw()).toContain("TRACE_74");
+        expect(view.memory.flowOffset).toBe(bottom);
+        expect(view.animating(now)).toBe(false);
+      }
+      // Moving upward still pins the trace when subsequent output arrives.
+      key("pageup"); draw();
+      const anchor = view.memory.anchor;
+      ui.reasoningDelta("\nMORE_THINKING"); draw();
+      expect(view.memory.anchor).toEqual(anchor);
+      ui.assistantDelta("A final response."); draw();
+      expect(view.memory.anchor).toEqual(anchor);
+    } finally { state.started = false; ui.stop(); clock.mockRestore(); }
+  }
+});
+
 test("resize and reduced motion resolve pending scroll without a stale animation", () => {
   const { ui, state, view, screen } = fixture();
   const reduced = process.env.DEMESNE_REDUCED_MOTION;
@@ -1273,6 +1363,9 @@ test("production painting continues scroll catch-up after the last provider delt
 });
 
 test("terminal painting coalesces input bursts, writes atomic padded frames, and emits nothing for an unchanged frame", async () => {
+  // The header clock is intentionally live. Hold it still while asserting that
+  // an otherwise unchanged frame emits no output across asynchronous redraws.
+  const clock = spyOn(Date, "now").mockReturnValue(Date.now());
   const { ui, state, view } = fixture("long");
   const writes: string[] = [];
   const write = spyOn(process.stdout, "write").mockImplementation((data: any) => { writes.push(String(data)); return true; });
@@ -1304,7 +1397,7 @@ test("terminal painting coalesces input bursts, writes atomic padded frames, and
       state.onKeypress("", { name: "l", ctrl: true });
       for (const row of ui.frame(80, 24).rows) expect(visibleLength(row)).toBe(80);
     }
-  } finally { state.started = false; ui.stop(); write.mockRestore(); }
+  } finally { state.started = false; ui.stop(); write.mockRestore(); clock.mockRestore(); }
 });
 
 test("run history opens on demand and restores the selected run's view", () => {
@@ -1468,7 +1561,7 @@ test("opening evidence near the viewport edge reveals the record beside its resp
   const expanded = screen(100, 36);
   expect(expanded).toContain("▪ DIFF");
   expect(expanded).toContain("@@");
-  expect(expanded).toContain("return /[a-zA-Z_]/.test(cha");
+  expect(expanded).toMatch(/2\s+−\s+return \/\[a-zA-Z_\]\//);
   expect(expanded).not.toContain("Arguments ▸");
   expect(expanded).toContain("Unicode identifiers are accepted");
   expect(expanded).toContain("Keep this draft");

@@ -7,8 +7,10 @@ import { foldCells } from "./canvas.ts";
 import { responseMetadata } from "./session-chrome.ts";
 import { surface } from "./surface.ts";
 import { clockLabel, thinkingCursor, thinkingDots, tint } from "./interaction.ts";
+import { changeState, changeTotals, type DiffAction } from "./diff-panel.ts";
+import type { DrivePanelAction } from "./drive-panel.ts";
 
-export type FlowAction = { kind: "toggle"; runId: number; key: string }
+export type FlowAction = DrivePanelAction | DiffAction | { kind: "toggle"; runId: number; key: string }
   | { kind: "copy" | "review" | "verification" | "failure"; runId?: number }
   | { kind: "artifact"; runId: number; target: ArtifactKind }
   | { kind: "artifact-step"; step: number } | { kind: "artifact-close" }
@@ -119,14 +121,14 @@ export function renderSessionFlow(options: {
     const verb = tool.name === "run_command" ? tool.phase === "verify" ? "Check" : "Run" : safe(toolName(tool));
     const label = `${verb}${detail && detail !== tool.name ? ` ${detail}` : ""}`;
     const styledLabel = paint.bold(verb, failed(tool) ? "signal" : operation) + (detail && detail !== tool.name ? ` ${paint.text(detail, "secondary")}` : "");
-    const meta = tool.waiting ? "awaiting approval" : stopped ? "stopped" : tool.state === "denied" ? "denied"
+    const meta = tool.phase === "change" ? [changeState(tool).toLowerCase(), changeTotals(tool)].filter(Boolean).join(" · ") : tool.waiting ? "awaiting approval" : stopped ? "stopped" : tool.state === "denied" ? "denied"
       : tool.exitCode !== undefined ? `${tool.exitCode === 0 && !failed(tool) ? "passed" : "failed"} · exit ${tool.exitCode}` : unknown ? "exit unknown" : "";
     const timing = tool.durationMs !== undefined && !failed(tool) ? duration(tool.durationMs) : "";
     const fullSuffix = [meta, timing].filter(Boolean).join(" · ");
     const suffix = visibleLength(label) + visibleLength(fullSuffix) + 5 > inner ? meta : fullSuffix;
     const trailing = `${suffix ? ` · ${suffix}` : ""} ${open ? "▾" : "▸"}`;
     const text = `${margin}${paint.text(mark, outcome)} ${truncateText(styledLabel, Math.max(4, inner - visibleLength(trailing) - 2))}${paint.text(trailing, tool.waiting ? "signal" : "muted")}`;
-    add(key, text, [{ column: indent, width: inner, action: { kind: "toggle", runId: run.id, key } }], [thinkingAnchors.get(tool.id)!], background);
+    add(key, text, [{ column: indent, width: inner, action: tool.phase === "change" ? { kind: "diff-open", runId: run.id, recordId: tool.id } : { kind: "toggle", runId: run.id, key } }], [thinkingAnchors.get(tool.id)!], background);
     const detailRow = (key: string, line: string, color?: PaletteColor) => add(key,
       margin + surface(`${paint.text("│", "borderBright")} ${color ? paint.text(line, color) : line}`, inner, paint, "raised"));
     // A failed operation gets actual output immediately, even when collapsed.

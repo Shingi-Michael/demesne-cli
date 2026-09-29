@@ -33,6 +33,50 @@ afterEach(() => {
 });
 
 describe("loadConfig", () => {
+  test("Drive mission limits and check-in settings round-trip, merge, and reject unbounded values", () => {
+    const path = writeConfig(temporaryDirectory(), renderUserConfig({ drive: { maxActiveMinutes: 120, maxTokens: 500000, maxTasks: 8, checkInIntervalSeconds: 90, maxRedirects: 2 } }));
+    const project = writeConfig(temporaryDirectory(), "[drive]\nmax_tasks = 4\n");
+    const loaded = loadConfig({ userConfigPath: path, projectConfigPath: project, env: {} });
+    expect(loaded.config.drive).toEqual({ maxActiveMinutes: 120, maxTokens: 500000, maxTasks: 4, checkInIntervalSeconds: 90, maxRedirects: 2 });
+    expect(loaded.sources["drive.maxTasks"]).toBe("project");
+    for (const value of [0, -1, 0.5, "unlimited"]) expect(() => validateConfigDocument({ drive: { max_tokens: value } })).toThrow();
+    expect(() => validateConfigDocument({ drive: { max_tasks: 65 } })).toThrow();
+    expect(() => validateConfigDocument({ drive: { max_worker_requests: 257 } })).toThrow();
+    expect(() => validateConfigDocument({ drive: { max_token: 50 } })).toThrow();
+  });
+  test("OpenRouter routing exclusions persist per profile without replacing inference settings", () => {
+    const path = writeConfig(temporaryDirectory(), renderUserConfig({ provider: {
+      url: "https://openrouter.ai/api/v1", model: "qwen/test", openRouterIgnore: ["reka"],
+    } }));
+    updateUserConfig(path, { additional_providers: { openrouter: {
+      url: "https://openrouter.ai/api/v1", model: "qwen/qwen3.8-27b", context_window: 262144,
+      max_output_tokens: 131072, reasoning_effort: "high", openrouter_ignore: ["reka", "test-host"],
+    } } });
+    const load = () => loadConfig({ userConfigPath: path, projectConfigPath: null, env: {} }).config;
+    expect(load().provider.openRouterIgnore).toEqual(["reka"]);
+    expect(load().additionalProviders?.openrouter).toMatchObject({ maxOutputTokens: 131072,
+      reasoningEffort: "high", openRouterIgnore: ["reka", "test-host"] });
+    updateUserConfig(path, { additional_providers: { openrouter: { openrouter_ignore: [] } } });
+    expect(load().additionalProviders?.openrouter).toMatchObject({ maxOutputTokens: 131072,
+      reasoningEffort: "high", openRouterIgnore: [] });
+    for (const invalid of [[42], [""], ["bad slug"]]) {
+      expect(() => validateConfigDocument({ provider: { openrouter_ignore: invalid } })).toThrow();
+    }
+  });
+
+  test("agent allowances merge with environment precedence and round-trip through TOML", () => {
+    const path = writeConfig(temporaryDirectory(), renderUserConfig({ agent: { maxModelRounds: 80, maxToolCalls: 320 } }));
+    const project = writeConfig(temporaryDirectory(), "[agent]\nmax_tool_calls = 400\n");
+    const loaded = loadConfig({ userConfigPath: path, projectConfigPath: project, env: { DEMESNE_MAX_MODEL_ROUNDS: "96" } });
+    expect(loaded.config.agent).toEqual({ maxModelRounds: 96, maxToolCalls: 400 });
+    expect(loaded.sources["agent.maxModelRounds"]).toBe("env");
+    expect(loaded.sources["agent.maxToolCalls"]).toBe("project");
+    for (const key of ["max_model_rounds", "max_tool_calls"]) {
+      for (const value of [0, -1, 1.5, "many"]) expect(() => validateConfigDocument({ agent: { [key]: value } })).toThrow();
+    }
+    expect(() => validateConfigDocument({ agent: { max_rounds: 20 } })).toThrow();
+  });
+
   test("returns defaults when no files or environment exist", () => {
     const loaded = loadConfig({
       env: {},

@@ -8,6 +8,7 @@ import { ConfigError, loadConfig, userConfigPath, type ProviderConfig } from "@d
 import { MultiProviderProcessor } from "./multi-provider-processor.ts";
 import { OpenAICompatibleProvider } from "@demesne/providers";
 import { createDaemonApp } from "./app.ts";
+import { serveDaemon } from "./http-server.ts";
 import {
   createRuntimeProfileVerifier,
   runtimeProfileDefaultMaxOutputTokens,
@@ -71,10 +72,12 @@ try {
     mcpServers: config.mcp.servers,
     images: config.images,
     providerVision: config.provider.vision,
+    agent: config.agent,
     providerFirstEventTimeoutMs,
-    providerRequestTimeoutMs,
+    // Let each turn's output budget determine the default streaming deadline.
+    providerRequestTimeoutMs: config.provider.requestTimeoutMs,
   });
-  server = Bun.serve({ hostname: host, port, fetch: app.fetch });
+  server = serveDaemon(app, { hostname: host, port });
 } catch (error) {
   dataDirectoryLock.release();
   throw error;
@@ -151,6 +154,7 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
     providerId,
     includeUsage: settings.includeUsage ?? true,
     reasoningEffort: settings.reasoningEffort,
+    openRouterIgnore: settings.openRouterIgnore,
     contextWindow: configuredContextCapacity,
   });
   const verifier = createRuntimeProfileVerifier({

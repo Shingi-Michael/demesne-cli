@@ -19,7 +19,7 @@ async function fixture(run: (value: {
   client: DemesneClient; id: string; initialMessages: unknown[]; originalTurns: string[]; db: Database;
   requests: ProviderMessage[][]; consume: (submitted: SubmitTurnResponse) => Promise<EventEnvelope[]>;
   restart: () => Promise<void>; setStream: (stream: TurnProcessor["stream"]) => void; close: () => Promise<void>;
-}) => Promise<void>, options: { count?: number; size?: number; capacity?: number; source?: string; undo?: boolean } = {}) {
+}) => Promise<void>, options: { count?: number; size?: number; capacity?: number; source?: string; undo?: boolean; stopped?: number[] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "demesne-compaction-"));
   mkdirSync(join(root, "data"));
   const databasePath = join(root, "data/state.sqlite");
@@ -43,7 +43,8 @@ async function fixture(run: (value: {
     store.appendModelMessage(turn.id, { role: "tool", toolCallId: `read-${i}`, content: `OLD_SOURCE_${i}: ` + (options.source ?? "parser evidence ").repeat(options.size ?? 300) });
     store.appendModelMessage(turn.id, { role: "assistant", content: `Answer ${i}` });
     store.appendMessageDelta(turn.id, `Answer ${i}`);
-    store.completeTurn(turn.id);
+    if (options.stopped?.includes(i)) store.interruptTurn(turn.id, "Reached the model-round allowance");
+    else store.completeTurn(turn.id);
   }
   const initialMessages = store.database.query("SELECT * FROM model_messages ORDER BY id").all();
   store.close();
@@ -132,6 +133,22 @@ test("repeat compaction merges the checkpoint and only summarizes newly old turn
     expect(request[1]?.content).not.toContain("OLD_SOURCE_0");
     expect(request[1]?.content).not.toContain("One more task");
   });
+});
+
+test("compaction summarizes stopped findings and can retain an interrupted turn at the checkpoint boundary", async () => {
+  await fixture(async ({ client, id, requests, consume, restart }) => {
+    expect((await consume(await client.compactSession(id))).at(-1)?.type).toBe("turn.completed");
+    expect(requests[0]?.[1]?.content).toContain("Historical turn ended interrupted");
+    expect(requests[0]?.[1]?.content).toContain("OLD_SOURCE_0");
+    const checkpoint = (await client.getSessionState(id)).checkpoint!;
+    expect(checkpoint.summarizedTurns).toBe(3);
+    await restart();
+    await consume(await client.submitTurn(id, { content: "Continue" }));
+    const restored = JSON.stringify(requests.at(-1));
+    expect(restored).toContain("OLD_SOURCE_3");
+    expect(restored).toContain("Historical turn ended interrupted");
+    expect(restored).not.toContain("OLD_SOURCE_0");
+  }, { stopped: [0, 3] });
 });
 
 test.each(["malformed", "truncated", "empty", "tools"] as const)("%s summary failure never changes the active context", async (failure) => {

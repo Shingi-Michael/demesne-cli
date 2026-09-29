@@ -54,6 +54,24 @@ describe("PermissionBroker session grants", () => {
     expect(broker.preapproved("s", "write_file", { path: "anything/here.txt" })).toBe(true);
   });
 
+  test("move_path session grants do not preapprove an unapproved destination", async () => {
+    const broker = new PermissionBroker();
+    const controller = new AbortController();
+    // The user approves one move with "always this session". The grant must
+    // cover both endpoints of that operation, nothing else.
+    const waiter = broker.wait("pm1", "t", "s", "move_path", JSON.stringify({ from: "src/a.txt", to: "backup/a.txt" }), controller.signal);
+    broker.resolve("pm1", "allow_session");
+    await waiter;
+
+    // Same source and destination directories as approved: preapproved.
+    expect(broker.preapproved("s", "move_path", { from: "src/c.txt", to: "backup/c.txt", overwrite: true })).toBe(true);
+    // Source covered but the destination directory was never approved: a
+    // fresh approval is required (this was the over-grant bug).
+    expect(broker.preapproved("s", "move_path", { from: "src/b.txt", to: "release/b.txt", overwrite: true })).toBe(false);
+    // Destination covered but the source directory was never approved.
+    expect(broker.preapproved("s", "move_path", { from: "other/b.txt", to: "backup/b.txt" })).toBe(false);
+  });
+
   test("allow_once and deny never create grants", async () => {
     const broker = new PermissionBroker();
     const c1 = new AbortController();

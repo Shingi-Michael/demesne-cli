@@ -1,16 +1,16 @@
-import { computePromptVisualLines, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, type Painter, type SlashCommand } from "@demesne/brand";
+import { computePromptVisualLines, formatTokenCount, layoutCommandMenu, sanitizeTerminalLine, truncateText, visibleLength, type Painter, type SlashCommandSection } from "@demesne/brand";
 import { mentionMatches, mentionTokenAt, reverseSearchMatches, type PromptEditorState } from "../prompt-editor.ts";
 import { Canvas } from "./canvas.ts";
 import type { ContextReceipt } from "./entries.ts";
 import { thinkingDots, tint } from "./interaction.ts";
 
 type ComposerAction = { kind: "submit" | "stop" | "clear" }
-  | { kind: "command" | "mention"; index: number }
+  | { kind: "mention"; index: number }
   | { kind: "remove"; start: number; length: number }
   | { kind: "caret"; start: number; text: string };
 export interface ComposerZone { row: number; column: number; width: number; action: ComposerAction }
 interface ComposerOptions {
-  width: number; editor: PromptEditorState; commands: readonly SlashCommand[];
+  width: number; editor: PromptEditorState;
   mentions: readonly string[]; history: readonly string[]; streaming: boolean; context?: ContextReceipt; hero?: boolean;
   /// The draft is a queue returned unsent because its turn stopped or failed.
   restored?: boolean;
@@ -20,17 +20,27 @@ function hasDraftLabel(options: ComposerOptions): boolean {
   if (!options.editor.value.trim()) return false;
   return options.streaming || (Boolean(options.restored) && !options.hero);
 }
-function completions(options: ComposerOptions) {
+/// Mention rows, sharing the brand layout so the prompt renderer and any line
+/// map can never disagree about what is on the screen.
+interface ComposerRow {
+  label: string;
+  index: number;
+  kind: "mention";
+  /// Mentions carry no section; the field satisfies the shared menu layout's
+  /// row constraint and stays undefined so no labels are drawn.
+  section?: SlashCommandSection;
+}
+function completions(options: ComposerOptions): ComposerRow[] {
   if (options.streaming || options.editor.search) return [];
   const token = mentionTokenAt(options.editor.value, options.editor.cursor);
   const mentions = token ? mentionMatches(options.mentions, token.query) : [];
-  return mentions.length ? mentions.map((label, index) => ({ label: `@${label}`, description: "", index, kind: "mention" as const }))
-    : options.commands.map((command, index) => ({ label: command.name, description: command.description, index, kind: "command" as const }));
+  return mentions.map((label, index) => ({ label: `@${label}`, index, kind: "mention" as const }));
 }
 export function composerHeight(options: ComposerOptions): number {
   if (options.editor.search) return 4;
   const lines = computePromptVisualLines(options.editor.value, options.editor.cursor, Math.max(8, options.width - (options.width >= 65 ? 18 : 16))).lines.length;
-  return (options.hero ? 2 : 4) + Math.max(options.hero ? 1 : 2, Math.min(6, lines)) + Math.min(5, completions(options).length) + (/\B@\S+/.test(options.editor.value) ? 1 : 0)
+  const rows = layoutCommandMenu(completions(options), Number.POSITIVE_INFINITY).length;
+  return (options.hero ? 2 : 4) + Math.max(options.hero ? 1 : 2, Math.min(6, lines)) + Math.min(5, rows) + (/\B@\S+/.test(options.editor.value) ? 1 : 0)
     + (hasDraftLabel(options) ? 1 : 0);
 }
 
@@ -110,10 +120,11 @@ export function composeDraft(options: ComposerOptions & { height: number; paint:
   }
   const room = Math.max(1, (options.hero ? height - 1 : hintsRow) - firstRow);
   const menu = completions(options);
-  const menuCapacity = Math.min(5, menu.length, Math.max(0, room - 1));
+  const selected = editor.mentionSelected;
+  const rows = layoutCommandMenu(menu, Math.max(0, room - 1), selected);
   const attachments = [...editor.value.matchAll(/(?:^|\s)(@[^\s]+)/g)];
-  const showAttachments = attachments.length > 0 && room - menuCapacity > 1;
-  const promptCapacity = Math.max(1, room - menuCapacity - (showAttachments ? 1 : 0));
+  const showAttachments = attachments.length > 0 && room - rows.length > 1;
+  const promptCapacity = Math.max(1, room - rows.length - (showAttachments ? 1 : 0));
   const visual = computePromptVisualLines(editor.value, editor.cursor, textWidth);
   const start = Math.max(0, visual.cursorLine - promptCapacity + 1);
   let cursor = { row: firstRow + visual.cursorLine - start, column: Math.min(textColumn + textWidth - 1, textColumn + visual.cursorCol) };
@@ -138,14 +149,23 @@ export function composeDraft(options: ComposerOptions & { height: number; paint:
     }
     put(row++, text);
   }
-  const selected = menu[0]?.kind === "mention" ? editor.mentionSelected : editor.menuSelected;
-  const menuStart = Math.max(0, selected - menuCapacity + 1);
-  for (const item of menu.slice(menuStart, menuStart + menuCapacity)) {
-    const label = truncateText(`${item.label}${width >= 65 ? `  ${item.description}` : ""}`, textWidth - 2);
-    put(row, item.index === selected ? paint.wash(`› ${label}`.padEnd(textWidth), "electric") : paint.dim(`  ${label}`));
-    zones.push({ row, column: textColumn, width: textWidth, action: { kind: item.kind, index: item.index } });
-    row++;
+  // Mention rows: the label stays quiet, the selection is a surface not a
+  // glyph, and a `…` row marks mentions hidden outside the window.
+  let menuRow = row;
+  for (const entry of rows) {
+    if (entry.kind === "more") {
+      put(menuRow, paint.dim("  …"));
+    } else {
+      const item = menu[entry.index]!;
+      const label = truncateText(item.label, textWidth - 2);
+      put(menuRow, entry.index === selected
+        ? paint.wash(`› ${label}`.padEnd(textWidth), "electric")
+        : `  ${paint.text(item.label, "secondary")}`);
+      zones.push({ row: menuRow, column: textColumn, width: textWidth, action: { kind: "mention", index: entry.index } });
+    }
+    menuRow += 1;
   }
+  row = menuRow;
   if (editor.search) {
     const matches = reverseSearchMatches(options.history, editor.search.query);
     const selected = matches[Math.min(editor.search.index, Math.max(0, matches.length - 1))];

@@ -11,6 +11,7 @@ import {
   sanitizeTerminalLine,
   sanitizeTerminalText,
   shortenPath,
+  SLASH_MENU_LIMIT,
   slashCommandMatches,
   slashMenuLineCommands,
   TerminalMarkdownStream,
@@ -24,7 +25,10 @@ import {
   type SlashCommand,
   type ToolRowState,
 } from "@demesne/brand";
-import type { EventEnvelope, PermissionDecision, SessionStateResponse } from "@demesne/protocol";
+import { driveComposerAllowed, type DriveAction, type DriveObservation, type DriveState, type EventEnvelope, type PermissionDecision, type SessionStateResponse } from "@demesne/protocol";
+import type { DriveControl } from "../agent-drive.ts";
+import { drawDriveFeedback, driveTypingChunks, waitForDriveFrame, type DriveFeedback } from "./drive-feedback.ts";
+import { driveActivityLabel, driveTracePreview } from "./drive-trace-view.ts";
 import { emitKeypressEvents } from "node:readline";
 import { PassThrough } from "node:stream";
 import { sliceAnsi } from "bun";
@@ -34,7 +38,9 @@ import { surface } from "./surface.ts";
 import { Canvas, workspaceInset } from "./canvas.ts";
 import { TerminalInputDecoder, PASTE_ENABLE, PASTE_DISABLE, FOCUS_ENABLE, FOCUS_DISABLE, type TerminalInput } from "./terminal-input.ts";
 import { restoreSessionEntries } from "./history.ts";
+import { applyToolDraft, proposedDiff } from "./tool-preview.ts";
 import { composeDraft, composerHeight } from "./composer.ts";
+import { CommandMenu, groupSlashCommands, type CommandMenuFrame } from "./command-menu.ts";
 import { SessionView } from "./session.ts";
 import { toolFailed } from "./evidence.ts";
 import { sessionStatus } from "./session-chrome.ts";
@@ -104,6 +110,7 @@ export interface WorkbenchOptions {
   workspaceRoot?: string;
   onExit: () => void;
   onInterrupt: () => void;
+  drive?: { control(control: DriveControl): void; intervene(): void; waitForFrame?(milliseconds: number, signal: AbortSignal): Promise<void> };
   queue: {
     get(): string;
     set(value: string): void;
@@ -131,6 +138,9 @@ const TOOL_VERBS: Record<string, string> = {
 /// A click target within the composer area, addressed by content row (zero is
 /// the first line under the composing rule).
 export interface InputZone {
+  driveAllowed?: boolean;
+  driveControl?: boolean;
+  identity?: string;
   row: number;
   column?: number;
   width?: number;
@@ -138,6 +148,20 @@ export interface InputZone {
 }
 
 export class Workbench {
+  private driveState: DriveState | null = null;
+  private driveDispatch = false;
+  private inputRevision = 0;
+  private scrollRevision = 0;
+  private driveReadingHeld = false;
+  private driveTargets = new Map<string, InputZone>();
+  private driveSnapshot: { id: string; revision: number; scrollRevision: number } | null = null;
+  private readonly driveDocumentId = crypto.randomUUID();
+  private driveDocumentRevision = 0;
+  private drivePanelBounds: { column: number; width: number; height: number } | null = null;
+  private drivePanes: NonNullable<DriveObservation["panes"]> = [];
+  private driveCardBounds: { row: number; height: number; width: number } | null = null;
+  private driveFeedback: DriveFeedback | null = null;
+  private driveFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private railHovered: RailAction | null = null;
   private railZones: { row: number; height: number; column: number; width: number; action: RailAction }[] = [];
   private preview: ArtifactPreview | null = null;
@@ -179,6 +203,8 @@ export class Workbench {
   /// Click targets for the current frame, by absolute terminal row. Rebuilt on
   /// every render, so clicks land on what is actually on screen.
   private mouseZones: InputZone[] = [];
+  private commandMenu = new CommandMenu();
+  private commandMenuFrame: CommandMenuFrame | null = null;
   private readonly keyboard = new PassThrough();
   private readonly decoder = new StringDecoder("utf8");
   private readonly terminalInput = new TerminalInputDecoder();
@@ -235,6 +261,198 @@ export class Workbench {
     return this.started;
   }
 
+  setDrive(state: DriveState | null): void {
+    const previous = this.driveState?.status;
+    this.driveState = state;
+    if (!this.sessionView.paused) this.driveReadingHeld = false;
+    if (!state || ["paused", "stopped", "blocked", "completed", "idle"].includes(state.status)) this.clearDriveFeedback();
+    if (state && previous !== state.status && ["completed", "blocked", "idle"].includes(state.status)) this.showDrive();
+    this.requestRender();
+  }
+  showDrive(): void { if (!this.sessionView.driveOpen) this.openRailAction("drive"); }
+
+  private driveView(): { surface: string; focus: NonNullable<DriveObservation["focus"]> } {
+    const preview = this.preview?.open && !this.sessionView.panelOpen && this.mode === "input";
+    return { surface: this.mode === "dialog" ? "sessions" : preview ? "preview" : this.sessionView.driveSurface,
+      focus: this.mode === "dialog" ? "dialog" : this.sessionView.focused || preview && this.preview?.focused ? "content" : "composer" };
+  }
+
+  private driveActionResult(summary: string, before: DriveObservation): string {
+    if (this.started) this.render(); else this.frame(this.layout.width, this.layout.height);
+    const view = this.driveView();
+    const panes = this.drivePanes.map((pane) => `${pane.surface} at row ${pane.row}, column ${pane.column} (${pane.width}×${pane.height})`).join("; ");
+    const scroll = this.sessionView.driveScrollRegions.map((region) => `${region.surface} offset ${region.offset}/${region.maximum}`).join("; ");
+    return `${summary} Surface: ${before.surface} → ${view.surface}. Focus: ${view.focus}.${panes ? ` Visible panes: ${panes}.` : ""}${scroll ? ` Scroll positions: ${scroll}.` : ""}`;
+  }
+
+  observeDrive(): DriveObservation {
+    this.clearDriveFeedback();
+    if (!this.sessionView.paused) this.driveReadingHeld = false;
+    // Use the same production renderer and hit targets as the visible terminal.
+    if (this.started) this.render();
+    const rows = (this.started ? this.previousRows : this.frame(this.layout.width, this.layout.height).rows).map(stripVTControlCharacters);
+    // Operator-only traces cannot feed back into the planner or become evidence.
+    const panel = this.drivePanelBounds, card = this.driveCardBounds;
+    for (let row = 0; row < rows.length; row++) {
+      if (card && row >= card.row && row < card.row + card.height) rows[row] = " ".repeat(card.width) + sliceAnsi(rows[row]!, card.width);
+      if (panel && row >= 3 && row < panel.height) rows[row] = sliceAnsi(rows[row]!, 0, panel.column) + " ".repeat(panel.width) + sliceAnsi(rows[row]!, panel.column + panel.width);
+    }
+    const id = crypto.randomUUID();
+    this.driveTargets.clear();
+    const controls: DriveObservation["controls"] = [];
+    if (this.mode !== "approval") for (const [index, zone] of this.mouseZones.entries()) {
+      const column = zone.column ?? 0, width = Math.min(zone.width ?? this.layout.width, this.layout.width - column);
+      if (!zone.driveAllowed || zone.row < 0 || zone.row >= rows.length || column < 0 || width < 1) continue;
+      const target = `control-${index}`;
+      controls.push({ id: target, label: stripVTControlCharacters(sliceAnsi(rows[zone.row]!, column, column + width)).trim(), row: zone.row, column, width });
+      this.driveTargets.set(target, zone);
+      if (controls.length === 160) break;
+    }
+    this.driveSnapshot = { id, revision: this.inputRevision, scrollRevision: this.scrollRevision };
+    const preview = this.preview?.open && !this.sessionView.panelOpen && this.mode === "input";
+    const driveGeometry = sessionPanelLayout(this.layout.width, true);
+    return { id, sessionId: this.sessionId ?? "", workspace: this.options.contextRail.workspacePath, title: this.sessionTitle,
+      mode: this.mode, ready: this.mode === "dialog" ? /^Recent sessions$|^Sessions matching /.test(this.dialogTitle) : this.mode === "input" && !!this.promptResolver,
+      draft: this.mode === "streaming" ? this.options.queue.get() : this.editor.value,
+      ...this.driveView(), panes: this.drivePanes.map((pane) => ({ ...pane })),
+      navigation: { ...this.sessionView.driveNavigation, document: `${this.driveDocumentId}:${this.driveDocumentRevision}`, readingHeld: this.driveReadingHeld },
+      width: this.layout.width, height: this.layout.height, rows, controls,
+      scrollRegions: this.sessionView.driveScrollRegions.filter((region) => region.height > 0 && region.width > 0 && this.drivePanes.some((pane) =>
+        (region.surface === pane.surface || region.surface.startsWith(`${pane.surface}-`)) && region.row >= pane.row && region.row + region.height <= pane.row + pane.height
+        && region.column >= pane.column && region.column + region.width <= pane.column + pane.width)),
+      answerRows: this.drivePanes.some((pane) => pane.surface === "response") ? this.sessionView.answerEvidenceRows.map((row) => stripVTControlCharacters(row).trim())
+        .filter((text) => text && rows.some((row) => row.includes(text))) : [],
+      latestAnswerRows: this.drivePanes.some((pane) => pane.surface === "response") ? this.sessionView.latestAnswerEvidenceRows.map((row) => stripVTControlCharacters(row).trim())
+        .filter((text) => text && rows.some((row) => row.includes(text))) : [],
+      ...(this.sessionView.driveOpen ? { evidenceRows: driveGeometry.overlay ? [] : rows.map((row) => sliceAnsi(row, 0, driveGeometry.conversationWidth)) } : {}),
+      ...(preview && this.preview?.selected ? { artifactId: this.preview.selected.id } : {}) };
+  }
+
+  async performDrive(action: DriveAction, observation: DriveObservation, signal: AbortSignal): Promise<string> {
+    signal.throwIfAborted();
+    const revision = this.inputRevision, scrollRevision = this.scrollRevision;
+    const unchanged = () => this.inputRevision === revision && this.sessionId === observation.sessionId && this.mode === observation.mode
+      // Reading elsewhere does not change text already being typed into the
+      // composer. Other actions must re-observe after the viewport moves.
+      && (action.kind === "compose" || this.scrollRevision === scrollRevision)
+      && (!this.started || process.stdout.columns === observation.width && process.stdout.rows === observation.height);
+    if (this.driveSnapshot?.id !== observation.id || this.driveSnapshot.revision !== revision || this.driveSnapshot.scrollRevision !== scrollRevision || !unchanged()
+      || this.mode === "approval" || this.mode === "streaming" || this.editor.value)
+      return "UI changed since observation; inspect again before acting.";
+    if (this.mode === "dialog" && !/^Recent sessions$|^Sessions matching /.test(this.dialogTitle)) throw new Error("Drive can navigate the sessions picker only.");
+    const wait = async (milliseconds: number): Promise<void> => {
+      await (this.options.drive?.waitForFrame ?? waitForDriveFrame)(milliseconds, signal);
+      signal.throwIfAborted();
+    };
+    const route = (run: () => void): void => {
+      this.driveDispatch = true;
+      try { run(); } finally { this.driveDispatch = false; }
+    };
+    let performed = false;
+    try {
+      if (action.kind === "inspect") {
+        if (this.driveReadingHeld) return "UI changed: inspection deferred while you hold scrollback. Live resumes controller inspection.";
+        this.showDriveFeedback(`Controller · inspect ${action.target}`);
+        await wait(250);
+        if (!unchanged()) return "UI changed before inspection; observe again before navigating.";
+        route(() => {
+          if (this.preview) { this.preview.open = false; this.preview.focused = false; }
+          this.sessionView.inspectDrive(action);
+        }); performed = true;
+        return this.driveActionResult(`Opened ${action.target} for controller inspection.`, observation);
+      }
+      if (action.kind === "compose") {
+        if (this.mode !== "input" || !this.promptResolver || !driveComposerAllowed(action.text)) throw new Error("Composer is not ready for this Drive instruction.");
+        const safe = sanitizeTerminalText(action.text);
+        if (safe !== action.text) throw new Error("Drive instructions cannot contain terminal control characters.");
+        this.sessionView.focusInput();
+        this.showDriveFeedback("Typing in composer");
+        let inserted = "";
+        for (const chunk of reducedMotionEnabled() ? [safe] : driveTypingChunks(safe)) {
+          if (!unchanged() || this.editor.value !== inserted || !this.promptResolver) return "Input changed; composed draft preserved without sending.";
+          this.applyEditorResult(reducePromptEditor(this.editor, { text: chunk, key: {}, commands: [], history: [] }));
+          this.editor = { ...this.editor, menuDismissed: true };
+          inserted += chunk; this.render();
+          await wait(60);
+        }
+        this.showDriveFeedback("Sending · Enter");
+        await wait(650);
+        if (!unchanged() || this.editor.value !== safe || !this.promptResolver) return "Input changed; composed draft preserved without sending.";
+        // Inspection performed by Drive must not pin the working agent behind
+        // an old turn or a utility pane. Human scrollback remains a reading hold.
+        const startsWork = !safe.trimStart().startsWith("/") || /^\/plan\s+\S/.test(safe.trimStart());
+        if (startsWork && !this.driveReadingHeld && this.scrollRevision === scrollRevision) {
+          this.sessionView.act({ kind: "follow" });
+          if (this.preview) { this.preview.open = false; this.preview.focused = false; }
+        }
+        route(() => this.dispatchEditorKey({ name: "return" })); performed = true;
+        this.showDriveFeedback("Sent through composer");
+        return `Sent through the visible composer: ${safe.slice(0, 500)}`;
+      }
+      if (action.kind === "click") {
+        const zone = this.driveTargets.get(action.target);
+        if (!zone) throw new Error("Drive selected a control absent from the observation.");
+        const target = observation.controls.find((control) => control.id === action.target)!;
+        this.showDriveFeedback(`Click · ${target.label || action.target}`, target);
+        await wait(450);
+        if (!unchanged()) return "UI changed before the click; inspect again before acting.";
+        // Re-render to catch asynchronous changes, then match the exact action.
+        if (this.started) this.render(); else this.frame(this.layout.width, this.layout.height);
+        const current = this.mouseZones.find((item) => item.driveAllowed && item.row === zone.row && item.column === zone.column && item.width === zone.width && item.identity === zone.identity);
+        if (!current) return "Control moved since observation; inspect again before clicking.";
+        route(() => current.run(current.column)); performed = true;
+        this.showDriveFeedback(`Clicked · ${target.label || action.target}`);
+        return this.driveActionResult(`Clicked ${target.label || action.target}.`, observation);
+      }
+      if (action.kind === "key") {
+        const parts = action.key.split("+");
+        this.showDriveFeedback(`Key · ${action.key}`);
+        await wait(350);
+        if (!unchanged()) return "UI changed before the keypress; inspect again before acting.";
+        route(() => this.onKeypress("", { name: parts.at(-1)!, ctrl: parts.includes("ctrl"), meta: parts.includes("alt"), shift: parts.includes("shift") })); performed = true;
+        this.showDriveFeedback(`Pressed · ${action.key}`);
+        return this.driveActionResult(`Pressed ${action.key}.`, observation);
+      }
+      if (action.kind === "scroll") {
+        if (action.row >= observation.height || action.column >= observation.width) throw new Error("Scroll target is outside the visible terminal.");
+        this.showDriveFeedback(`Scroll ${action.amount > 0 ? "down" : "up"} · ${Math.abs(action.amount)} rows`, { row: action.row, column: action.column, width: 1 });
+        await wait(350);
+        if (!unchanged()) return "UI changed before scrolling; inspect again before acting.";
+        let scrolled = false;
+        route(() => {
+          if (this.mode === "dialog") {
+            const previous = this.dialogSelected;
+            this.onKeypress("", { name: action.amount > 0 ? "down" : "up" });
+            scrolled = previous !== this.dialogSelected;
+          } else scrolled = this.sessionView.wheel(action.row, action.column, action.amount);
+        }); performed = true;
+        this.showDriveFeedback(`Scrolled ${action.amount > 0 ? "down" : "up"} · ${Math.abs(action.amount)} rows`);
+        return this.driveActionResult(scrolled ? `Scrolled ${action.amount} rows.` : "Scroll did not move the target; it is at a boundary or outside a scrollable pane.", observation);
+      }
+      return "No UI action.";
+    } finally {
+      if (performed && !signal.aborted) {
+        this.driveFeedbackTimer = setTimeout(() => this.clearDriveFeedback(), 1400); this.driveFeedbackTimer.unref();
+      } else this.clearDriveFeedback();
+    }
+  }
+
+  private showDriveFeedback(label: string, target?: DriveFeedback["target"]): void {
+    if (this.driveFeedbackTimer) clearTimeout(this.driveFeedbackTimer);
+    this.driveFeedbackTimer = null;
+    this.driveFeedback = { label, target }; this.render();
+  }
+
+  private clearDriveFeedback(): void {
+    if (this.driveFeedbackTimer) clearTimeout(this.driveFeedbackTimer);
+    this.driveFeedbackTimer = null;
+    if (this.driveFeedback) { this.driveFeedback = null; this.requestRender(); }
+  }
+
+  private withDriveFeedback(frame: { rows: string[]; cursor: { row: number; column: number } | null }) {
+    return this.driveFeedback ? { ...frame, rows: drawDriveFeedback(frame.rows, this.layout.width, this.layout.input.width, this.options.paint, this.driveFeedback) } : frame;
+  }
+
   start(): void {
     if (this.started || !process.stdout.isTTY) return;
     this.started = true;
@@ -264,6 +482,7 @@ export class Workbench {
   }
 
   stop(): void {
+    this.clearDriveFeedback();
     if (this.renderTimer) clearTimeout(this.renderTimer);
     this.renderTimer = null;
     if (this.copyTimer) clearTimeout(this.copyTimer);
@@ -302,12 +521,19 @@ export class Workbench {
     this.recentSessions = [...sessions]; this.recentState = state; this.requestRender();
   }
 
+  setMentionFiles(files: readonly string[]): void {
+    this.promptContext = { ...this.promptContext, mentions: files };
+    this.requestRender();
+  }
+
   private get showingStart(): boolean {
     return this.sessionLayout && this.mode === "input" && !this.sessionView.panelOpen && !this.preview?.open
       && !this.entries.some((entry) => entry.type === "user" || entry.type === "assistant" || entry.type === "reasoning" || entry.type === "tool");
   }
 
   restoreSession(state: SessionStateResponse, events: readonly EventEnvelope[] = []): void {
+    this.driveDocumentRevision++;
+    this.inputRevision++;
     if (this.copyTimer) clearTimeout(this.copyTimer);
     this.copyTimer = null;
     this.turnStartedAt = null;
@@ -327,6 +553,7 @@ export class Workbench {
     this.startScreen.reset(); this.startLayout = null;
     this.options.workspaceRoot = state.session.workspace?.root;
     this.sessionView.reset();
+    this.driveReadingHeld = false;
     this.sheet = null; this.inspectorFocused = false; this.selectedTurnId = null;
     this.inspectorOffset = 0; this.sectionFocus = null;
     this.rendered.clear(); this.collapsedSections.clear(); this.expandedTools.clear(); this.expandedResponses.clear(); this.expandedReasoning.clear();
@@ -365,6 +592,7 @@ export class Workbench {
   }
 
   notice(text: string, tone: "info" | "success" | "error" = "info"): void {
+    this.driveDocumentRevision++;
     this.entries.push({ id: this.nextId++, type: "notice", text, tone });
     this.feedback = { text, tone };
     this.requestRender();
@@ -374,6 +602,7 @@ export class Workbench {
   /// verbatim: adding the turn rail here double-indented the panel and forced
   /// its opener to truncate.
   showPanel(lines: readonly string[], options: { open?: boolean; title?: string; files?: import("@demesne/protocol").WorkspaceFileInfo[] } = {}): void {
+    this.driveDocumentRevision++;
     if (lines.length === 0) return;
     const id = this.nextId++;
     this.entries.push({ id, type: "panel", lines: [...lines], title: options.title, files: options.files });
@@ -382,6 +611,7 @@ export class Workbench {
   }
 
   showBlock(lines: readonly string[]): void {
+    this.driveDocumentRevision++;
     if (lines.length === 0) return;
     const id = this.nextId++;
     this.entries.push({ id, type: "block", lines: [...lines] });
@@ -390,6 +620,7 @@ export class Workbench {
   }
 
   beginTurn(options: { userText: string; at: string; planOnly?: boolean; compaction?: boolean }): void {
+    this.driveDocumentRevision++;
     this.mode = "streaming";
     this.state = "thinking";
     this.turnStartedAt = Date.now();
@@ -402,6 +633,7 @@ export class Workbench {
   }
 
   reasoningDelta(delta: string): void {
+    this.driveDocumentRevision++;
     this.state = "reasoning";
     let entry = this.entries.findLast(
       (candidate): candidate is ReasoningEntry => candidate.type === "reasoning" && candidate.streaming,
@@ -425,6 +657,7 @@ export class Workbench {
   }
 
   assistantDelta(delta: string, at?: string): void {
+    this.driveDocumentRevision++;
     if (!delta) return;
     this.state = "writing";
     // The entry belongs to the current model round; only `beginRound` and
@@ -452,13 +685,21 @@ export class Workbench {
   }
 
   finishAssistant(): void {
+    this.driveDocumentRevision++;
     for (const entry of this.entries) {
       if (entry.type === "assistant" && entry.streaming) entry.streaming = false;
     }
     this.requestRender();
   }
 
-  toolRequested(input: { toolCallId: string; name: string; arguments: unknown }): void {
+  toolDraft(event: EventEnvelope): void {
+    this.closeReasoning(); this.finishAssistant();
+    applyToolDraft(this.entries, event.payload, () => this.nextId++, Date.parse(event.occurredAt));
+    this.state = "working";
+    this.requestRender();
+  }
+
+  toolRequested(input: { toolCallId: string; name: string; arguments: unknown; draftId?: string }): void {
     // The caller drains the pacer before this, so the round's prose is
     // complete: stop its caret and animation. The entry stays open as the same
     // paragraph, and `beginRound` separates it from the next round's prose.
@@ -466,20 +707,21 @@ export class Workbench {
     this.finishAssistant();
     const parsed = parseArguments(input.arguments);
     this.state = presenceForTool(input.name, classifyTurnPhase(input.name, parsed, this.hasChanges()) === "verify");
-    this.entries.push({
-      id: this.nextId++,
+    const draft = input.draftId ? this.entries.findLast((entry): entry is ToolEntry => entry.type === "tool" && entry.draftId === input.draftId) : undefined;
+    const record: ToolEntry = {
+      id: draft?.id ?? this.nextId++,
       type: "tool",
       toolCallId: input.toolCallId,
       name: input.name,
       input: parsed,
       detail: toolDetail(input.name, parsed),
       state: "running",
-      startedAt: Date.now(),
+      startedAt: draft?.startedAt ?? Date.now(),
       phase: classifyTurnPhase(input.name, parsed, this.hasChanges()),
-      ...(input.name === "edit_file" && typeof parsed.oldText === "string" && typeof parsed.newText === "string"
-        ? { diff: { oldText: parsed.oldText, newText: parsed.newText } }
-        : {}),
-    });
+      diff: proposedDiff(input.name, parsed),
+      ...(input.draftId ? { draftId: input.draftId, drafting: false, draftArguments: undefined } : {}),
+    };
+    if (draft) Object.assign(draft, record); else this.entries.push(record);
     this.requestRender();
   }
 
@@ -495,7 +737,9 @@ export class Workbench {
     message?: string;
     exitCode?: number;
     created?: boolean;
+    changes?: import("@demesne/protocol").ToolFileChange[];
   }): void {
+    this.driveDocumentRevision++;
     const entry = this.entries.findLast(
       (candidate): candidate is ToolEntry => candidate.type === "tool" && candidate.toolCallId === input.toolCallId,
     );
@@ -506,12 +750,14 @@ export class Workbench {
     if (input.message) entry.message = input.message;
     if (input.exitCode !== undefined) entry.exitCode = input.exitCode;
     if (input.created !== undefined) entry.created = input.created;
+    if (input.changes) entry.changes = input.changes;
     this.requestRender();
   }
 
   /// Marks a tool call as blocked on approval so it renders as an anticipatory
   /// row instead of a running one.
   toolWaiting(toolCallId: string, waiting: boolean): void {
+    this.driveDocumentRevision++;
     const entry = this.entries.findLast(
       (candidate): candidate is ToolEntry => candidate.type === "tool" && candidate.toolCallId === toolCallId,
     );
@@ -626,10 +872,24 @@ export class Workbench {
   private readonly onKeypress = (
     text: string,
     key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; sequence?: string },
+    fromScroll = false,
   ): void => {
+    if (!this.driveDispatch && !fromScroll) {
+      this.inputRevision++;
+      // Opening or reading Drive's own progress panel is observation, not a
+      // takeover of the conversation. Still invalidate stale UI targets.
+      const drivePanelKey = this.options.drive && (key.meta && key.name === "j" && this.mode !== "dialog"
+        || this.sessionView.driveOpen && !key.ctrl && !key.meta
+          && (key.name === "escape" || this.sessionView.focused && ["up", "down", "pageup", "pagedown", "home", "end"].includes(key.name ?? ""))
+        || this.sessionView.driveOpen && key.ctrl && key.name === "g");
+      const resumeReading = this.driveReadingHeld && key.ctrl && key.name === "g" && !this.sessionView.panelOpen && !this.preview?.open
+        && (this.mode === "input" || this.mode === "streaming");
+      if (this.mode !== "approval" && !drivePanelKey && !resumeReading) this.options.drive?.intervene();
+    }
     // Readline emits the terminal's Ctrl+_ / Ctrl+/ byte without a key name.
     if (text === "\x1f") key = { ...key, name: "_", ctrl: true };
     if (this.handleModalKey(text, key)) return;
+    if (key.meta && key.name === "j" && this.options.drive) { this.openRailAction("drive"); return; }
     if (key.meta && key.name === "v" && this.preview) {
       if (this.sessionView.panelOpen) this.preview.open = false;
       this.sessionView.act({ kind: "panel-close" }); this.preview.toggle(); this.requestRender(); return;
@@ -639,6 +899,12 @@ export class Workbench {
     if (this.mode === "input" && this.editor.search) {
       this.sessionView.focusInput();
       this.applyEditorResult(reducePromptEditor(this.editor, { key, text, commands: [], history: this.promptContext.history }));
+      return;
+    }
+    if (this.sessionLayout && this.mode === "input" && !key.ctrl && !key.meta && this.matchingCommands().length
+      && ["up", "down", "pageup", "pagedown", "tab", "return", "enter", "escape"].includes(key.name ?? "")) {
+      this.sessionView.focusInput();
+      this.dispatchEditorKey(key);
       return;
     }
     // Inspection never consumes ordinary typing. Editing resumes in the draft
@@ -654,6 +920,7 @@ export class Workbench {
         if (key.name === "escape") { this.sessionView.key(key); this.requestRender(); return; }
       }
       if (key.meta && key.name === "c") { this.showContext(); return; }
+      if (key.meta && key.name === "d") { this.openRailAction("diff"); return; }
       if (key.meta && key.name === "p") { this.showWorkspace(); return; }
       if (key.ctrl && key.name === "l") {
         this.sessionLayout = false; this.chatView = false; this.transcriptView = false;
@@ -919,6 +1186,7 @@ export class Workbench {
       else if (event.kind === "escape") this.onKeypress(event.sequence, { name: "escape", sequence: event.sequence });
       else if (event.kind === "text") this.keyboard.write(event.text);
       else if (event.kind === "paste" && this.mode !== "approval") {
+        this.inputRevision++; this.options.drive?.intervene();
         this.lastInterruptEscapeAt = 0;
         const text = sanitizeTerminalText(event.text.replace(/\r\n|\r/g, "\n"));
         if (this.mode === "dialog") {
@@ -939,14 +1207,40 @@ export class Workbench {
   }
 
   private handleMouse(event: MouseEvent): void {
+    // Horizontal trackpad noise has no action in these vertical panes.
+    if (event.kind === "wheel" && event.direction !== "up" && event.direction !== "down") return;
+    // Scrolling is passive inspection, not a takeover. Invalidate screen-based
+    // actions without cancelling planning or an in-progress composer entry.
+    const drivePanel = this.drivePanelBounds;
+    const readingDrive = drivePanel && event.row >= 3 && event.row < drivePanel.height && event.col >= drivePanel.column && event.col < drivePanel.column + drivePanel.width;
+    // Drive notes are excluded from observations, and their scrolling leaves
+    // actionable panes and fixed controls in place.
+    if (!this.driveDispatch && event.kind === "wheel" && !readingDrive) this.scrollRevision++;
+    if (!this.driveDispatch && event.kind === "press") {
+      this.inputRevision++;
+      const control = this.mouseZones.find((zone) => zone.row === event.row && event.col >= (zone.column ?? 0) && event.col < (zone.column ?? 0) + (zone.width ?? this.layout.width));
+      const panel = this.drivePanelBounds;
+      const overDrive = panel && event.row >= 0 && event.row < panel.height && event.col >= panel.column && event.col < panel.column + panel.width;
+      if (this.mode !== "approval" && !control?.driveControl && !overDrive) this.options.drive?.intervene();
+    }
     if (event.kind === "move" || event.kind === "drag") {
       const hovered = this.railZones.find((zone) => event.row >= zone.row && event.row < zone.row + zone.height && event.col >= zone.column && event.col < zone.column + zone.width)?.action ?? null;
       if (hovered !== this.railHovered) { this.railHovered = hovered; this.requestRender(); }
     }
     if (event.kind === "press" && this.preview && event.row >= this.layout.input.row) this.preview.focused = false;
-    // These panes scroll vertically. Consume horizontal trackpad events
-    // without moving the viewport or dispatching an Up key to a dialog.
-    if (event.kind === "wheel" && event.direction !== "up" && event.direction !== "down") return;
+    const menu = this.commandMenuFrame;
+    if (menu && this.mode === "input" && this.matchingCommands().length && event.row >= menu.rect.row && event.row < menu.rect.row + menu.rect.height
+      && event.col >= menu.rect.column && event.col < menu.rect.column + menu.rect.width) {
+      const item = menu.zones.find((zone) => zone.row === event.row);
+      if (event.kind === "wheel") {
+        this.editor = { ...this.editor, menuSelected: Math.max(0, Math.min(this.matchingCommands().length - 1, this.editor.menuSelected + (event.direction === "down" ? 3 : -3))) };
+      } else if (item && (event.kind === "move" || event.kind === "press" && event.button === 0)) {
+        this.editor = { ...this.editor, menuSelected: item.index };
+        if (event.kind === "press") { this.sessionView.focusInput(); this.dispatchEditorKey({ name: "return" }); }
+      }
+      this.requestRender();
+      return;
+    }
     if (event.kind === "move" || event.kind === "drag") {
       if (this.sessionLayout && this.mode !== "dialog" && this.mode !== "approval" && this.terminalFocused
         && (this.showingStart ? this.startScreen.hover(event.row, event.col) : this.sessionView.hover(event.row, event.col))) this.requestRender();
@@ -956,7 +1250,7 @@ export class Workbench {
     // the mouse between Escapes must not turn closing a sheet into Stop.
     this.lastInterruptEscapeAt = 0;
     if ((this.mode === "dialog" || this.mode === "approval") && event.kind === "wheel") {
-      this.onKeypress("", { name: event.direction === "down" ? "down" : "up" });
+      this.onKeypress("", { name: event.direction === "down" ? "down" : "up" }, true);
       return;
     }
     if (this.sessionLayout && event.kind === "wheel") {
@@ -965,7 +1259,12 @@ export class Workbench {
         const geometry = sessionPanelLayout(this.layout.width, !this.preview.expanded);
         if (this.preview.expanded || geometry.overlay || event.col >= geometry.conversationWidth) return;
       }
-      if (this.sessionView.wheel(event.row, event.col, event.direction === "down" ? 3 : -3)) this.requestRender();
+      if (this.sessionView.wheel(event.row, event.col, event.direction === "down" ? 3 : -3)) {
+        const panel = this.drivePanelBounds;
+        const overDrive = panel && event.row < panel.height && event.col >= panel.column && event.col < panel.column + panel.width;
+        if (!this.driveDispatch && !overDrive) this.driveReadingHeld = this.sessionView.paused;
+        this.requestRender();
+      }
       return;
     }
     if (event.kind === "wheel") {
@@ -992,7 +1291,8 @@ export class Workbench {
 
   private matchingCommands(): readonly SlashCommand[] {
     if (this.editor.menuDismissed) return [];
-    return slashCommandMatches(this.editor.value, this.promptContext.commands).slice(0, 10);
+    const commands = slashCommandMatches(this.editor.value, this.promptContext.commands);
+    return this.sessionLayout ? groupSlashCommands(commands) : commands.slice(0, SLASH_MENU_LIMIT);
   }
 
   private requestRender(): void {
@@ -1032,12 +1332,15 @@ export class Workbench {
 
   /// Production frame composition, also used by deterministic terminal previews.
   frame(width: number, height: number): { rows: string[]; cursor: { row: number; column: number } | null } {
+    this.drivePanelBounds = null;
+    this.driveCardBounds = null;
+    this.drivePanes = [];
     if (this.cachedTheme !== this.options.paint.themeName) {
       this.cachedTheme = this.options.paint.themeName;
       this.rendered.clear();
     }
     if (this.sessionLayout) this.sessionView.sync(this.entries);
-    const panel = sessionPanelLayout(Math.max(40, width), (this.sessionView.panelOpen || Boolean(this.preview?.open && !this.preview.expanded)) && (this.mode === "input" || this.mode === "streaming"));
+    const panel = sessionPanelLayout(Math.max(40, width), (this.sessionView.panelOpen && !this.sessionView.panelExpanded || Boolean(this.preview?.open && !this.preview.expanded)) && (this.mode === "input" || this.mode === "streaming"));
     this.layout = computeWorkbenchLayout(width, height, {
       sidebar: !this.sessionLayout && (this.chatView || this.transcriptView) ? "auto" : "hidden",
       inputLines: this.inputLineCount(this.sessionLayout ? panel.conversationWidth : width),
@@ -1051,13 +1354,27 @@ export class Workbench {
     } else if (this.sessionLayout && (this.mode === "input" || this.mode === "streaming")) {
       const editor = this.mode === "streaming" ? this.queuedEditor : this.editor;
       const token = mentionTokenAt(editor.value, editor.cursor);
-      const selecting = Boolean(editor.search || this.matchingCommands().length || token && mentionMatches(this.promptContext.mentions, token.query).length);
+      const selecting = Boolean(editor.search || token && mentionMatches(this.promptContext.mentions, token.query).length);
       const queued = this.mode === "streaming" && Boolean(editor.value.trim());
       const inputHeight = Math.min(this.layout.input.height, Math.max(selecting || queued || this.layout.height >= 16 ? 4 : 3, Math.floor(this.layout.height / 3)));
       this.layout.input = { row: this.layout.height - 1 - inputHeight, column: 0, width: panel.conversationWidth, height: inputHeight };
     } else if (this.sessionLayout) this.layout.input.width = panel.conversationWidth;
     this.rebuildConversation();
-    return this.composeFrame();
+    const frame = this.composeFrame();
+    this.commandMenuFrame = this.sessionLayout && this.mode === "input" && !this.editor.search
+      ? this.commandMenu.render({ commands: this.matchingCommands(), selected: this.editor.menuSelected, query: this.editor.value,
+        input: this.layout.input, paint: this.options.paint, top: this.startLayout ? 0 : 2 }) : null;
+    if (!this.commandMenuFrame) { this.commandMenu.reset(); return this.withDriveFeedback(frame); }
+    const menu = this.commandMenuFrame;
+    const canvas = new Canvas(this.layout.width, this.layout.height, this.options.paint);
+    frame.rows.forEach((text, row) => canvas.put(row, 0, text, this.layout.width));
+    menu.lines.forEach((text, row) => canvas.put(menu.rect.row + row, menu.rect.column, text, menu.rect.width));
+    // Occluded transcript controls cannot receive clicks through the popup.
+    this.mouseZones = this.mouseZones.filter((zone) => zone.row < menu.rect.row || zone.row >= menu.rect.row + menu.rect.height
+      || (zone.column ?? 0) >= menu.rect.column + menu.rect.width || (zone.column ?? 0) + (zone.width ?? this.layout.width) <= menu.rect.column);
+    for (const zone of menu.zones) this.mouseZones.push({ row: zone.row, column: menu.rect.column + 1, width: menu.rect.width - 2,
+      run: () => { this.editor = { ...this.editor, menuSelected: zone.index }; this.sessionView.focusInput(); this.dispatchEditorKey({ name: "return" }); } });
+    return this.withDriveFeedback({ ...frame, rows: canvas.rows });
   }
 
   private inputLineCount(columns = process.stdout.columns ?? 80): number {
@@ -1073,7 +1390,7 @@ export class Workbench {
       this.syncQueuedEditor();
       return composerHeight({ width: columns, editor: this.mode === "streaming" ? this.queuedEditor : this.editor,
         hero: this.showingStart, restored: this.restoredDraft,
-        streaming: this.mode === "streaming", commands: this.matchingCommands(), mentions: this.promptContext.mentions, history: this.promptContext.history });
+        streaming: this.mode === "streaming", mentions: this.promptContext.mentions, history: this.promptContext.history });
     }
     const width = Math.max(10, computeWorkbenchLayout(columns, process.stdout.rows ?? 24, { sidebar: this.sessionLayout ? "hidden" : "auto" }).input.width - HARNESS.content - 1);
     const streaming = this.mode === "streaming";
@@ -1082,7 +1399,9 @@ export class Workbench {
     const cursor = streaming ? this.queuedEditor.cursor : this.editor.cursor;
     const valueLines = computePromptVisualLines(value, cursor, width).lines.length;
     const commands = streaming ? 0 : this.matchingCommands().length;
-    const menuLines = commands > 0 ? Math.min(commands, 10) + (commands >= 6 ? 3 : 0) : 0;
+    // The shared menu layout adds a quiet label and a blank line before each
+    // of the three sections once the list is long enough to need them.
+    const menuLines = commands > 0 ? Math.min(commands, SLASH_MENU_LIMIT) + (commands >= 6 ? 5 : 0) : 0;
     // One rule above the prompt, then the prompt and any menu.
     const mention = mentionTokenAt(value, cursor);
     const mentions = !streaming && mention ? mentionMatches(this.promptContext.mentions, mention.query).length : 0;
@@ -1534,18 +1853,22 @@ export class Workbench {
     if (modal) this.sessionView.hover(-1, -1);
     const previewOpen = Boolean(this.preview?.open && !this.sessionView.panelOpen && !modal);
     const panelOpen = (this.sessionView.panelOpen || previewOpen && !this.preview?.expanded) && !modal;
-    const geometry = sessionPanelLayout(layout.width, panelOpen);
+    const geometry = sessionPanelLayout(layout.width, panelOpen && !this.sessionView.panelExpanded);
+    if (panelOpen && this.sessionView.panelExpanded) geometry.overlay = true;
     const width = geometry.conversationWidth;
     const gap = feedback ? 1 : 0;
-    const sessionHeight = layout.input.row - gap;
+    const trace = this.driveState?.traces?.at(-1);
+    const cardHeight = trace && !this.sessionView.driveOpen && !modal ? layout.height >= 18 ? 4 : 1 : 0;
+    const sessionHeight = layout.input.row - gap - cardHeight;
     const root = this.options.workspaceRoot ?? rail.workspacePath;
-    const renderOptions = { paint,
+    const renderOptions = { paint, drive: this.driveState,
       animateScroll: this.started,
       title: this.sessionTitle, path: shortenPath(root), now: Date.now(), openedAt: this.sessionOpenedAt, createdAt: this.sessionCreatedAt,
       presence: this.mode === "approval" ? "waiting" as const : this.state,
       markdown: (entry: AssistantEntry, width: number) => this.renderedMarkdown(entry, width),
     };
     const frame = this.sessionView.render({ ...renderOptions, width, height: sessionHeight });
+    if (!modal && sessionHeight > 0) this.drivePanes.push({ surface: this.sessionView.driveSurface === "history" ? "history" : "response", row: 0, column: 0, width, height: sessionHeight });
     const canvas = new Canvas(layout.width, layout.height, paint);
     for (const [row, text] of frame.rows.entries()) canvas.put(row, 0, text, width);
     const zones = panelOpen && geometry.overlay ? [] : frame.zones;
@@ -1554,6 +1877,9 @@ export class Workbench {
       const column = geometry.overlay ? 0 : width + 1;
       const panel = this.sessionView.render({ ...renderOptions, width: panelWidth, height: geometry.overlay ? sessionHeight : layout.height,
         panel: true, column, replace: geometry.overlay, contextLines: rail.lines(Math.max(16, panelWidth - 4), 1000, paint) });
+      if (geometry.overlay) this.drivePanes = [];
+      this.drivePanes.push({ surface: this.sessionView.driveSurface, row: 0, column, width: panelWidth, height: geometry.overlay ? sessionHeight : layout.height });
+      if (this.sessionView.driveOpen) this.drivePanelBounds = { column, width: panelWidth, height: geometry.overlay ? sessionHeight : layout.height };
       panel.rows.forEach((text, row) => canvas.put(row, column, text, panelWidth, "surface"));
       zones.push(...panel.zones);
     }
@@ -1567,7 +1893,10 @@ export class Workbench {
       canvas.put(3, column, paint.text(panelOpen ? "×" : "⊞", "muted"), 1, "surface");
       zones.push({ row: 3, column: width + 1, width: geometry.panelWidth - 1, action: { kind: "panel-toggle" } });
     }
-    this.mouseZones = (modal ? [] : zones).map((zone) => ({ ...zone, run: () => {
+    this.mouseZones = (modal ? [] : zones).map((zone) => ({ ...zone,
+      driveAllowed: !["settings", "workspace", "drive-control", "drive-open", "drive-follow", "drive-trace-toggle"].includes(zone.action.kind),
+      driveControl: zone.action.kind.startsWith("drive-") || this.driveReadingHeld && zone.action.kind === "follow", identity: JSON.stringify(zone.action), run: () => {
+      if (zone.action.kind === "drive-control") { this.options.drive?.control(zone.action.control); return; }
       if (zone.action.kind === "workspace") { this.showWorkspace(); this.requestRender(); return; }
       if (zone.action.kind === "context") { this.showContext(); this.requestRender(); return; }
       if (zone.action.kind === "settings") { this.openSettings(); return; }
@@ -1579,9 +1908,11 @@ export class Workbench {
       const column = overlay ? 0 : width + 1;
       const panelWidth = overlay ? width : geometry.panelWidth - 1;
       const preview = this.preview.render(panelWidth, sessionHeight, column, paint, this.graphicsReady ? this.cellSize : null);
+      if (overlay) this.drivePanes = [];
+      this.drivePanes.push({ surface: "preview", row: 0, column, width: panelWidth, height: sessionHeight });
       preview.rows.forEach((text, row) => canvas.put(row, column, text, panelWidth, "surface"));
       if (overlay) this.mouseZones = [];
-      this.mouseZones.push(...preview.zones);
+      this.mouseZones.push(...preview.zones.map((zone, index) => ({ ...zone, driveAllowed: true, identity: `preview:${this.preview?.selectedId}:${index}` })));
       this.imageIntent = preview.image;
     }
     this.railZones = [];
@@ -1590,6 +1921,18 @@ export class Workbench {
     const inset = width >= 65 ? 2 : 1;
     const workspaceWidth = width - inset * 2;
     if (gap) canvas.put(sessionHeight, inset + 2, feedback ?? "", width - inset - 2);
+    if (cardHeight && trace) {
+      const top = layout.input.row - cardHeight;
+      this.driveCardBounds = { row: top, height: cardHeight, width };
+      const elapsed = Math.max(0, ((trace.completedAt ?? Date.now()) - trace.startedAt) / 1000).toFixed(1);
+      canvas.put(top, inset, paint.text(`▷ DRIVE · ${driveActivityLabel(this.driveState!, trace)} · ${elapsed}s · Alt+J details`, "thinking"), workspaceWidth, "thinkingSurface");
+      if (cardHeight > 1) {
+        const preview = this.driveState!.status === "waiting" ? this.driveState!.activity : driveTracePreview(trace);
+        const lines = wrapDisplayText(sanitizeTerminalLine(preview.slice(-4000).replace(/\s+/g, " ")), Math.max(1, workspaceWidth - 2)).slice(-(cardHeight - 1));
+        for (let row = 1; row < cardHeight; row++) canvas.put(top + row, inset, paint.text(`▎ ${lines[row - 1] ?? ""}`, "secondary"), workspaceWidth, "thinkingSurface");
+      }
+      for (let row = top; row < layout.input.row; row++) this.mouseZones.push({ row, column: inset, width: workspaceWidth, driveControl: true, run: () => this.showDrive() });
+    }
     for (let row = 0; row < layout.input.height; row++) canvas.put(layout.input.row + row, 0, input.lines[row] ?? "", width, "surface");
     for (const zone of input.zones) this.mouseZones.push({ ...zone, row: layout.input.row + 1 + zone.row });
     const status = sessionStatus({ width: workspaceWidth, paint, state: this.mode === "approval" ? "APPROVAL" : this.sessionView.latest?.status ?? "READY",
@@ -1613,23 +1956,28 @@ export class Workbench {
   }
 
   private drawSidebarRail(canvas: Canvas, column: number, width: number): void {
-    const rail = sidebarRail(width, this.layout.height, this.options.paint, this.mode === "streaming", this.railHovered);
+    const rail = sidebarRail(width, this.layout.height, this.options.paint, this.mode === "streaming", this.railHovered,
+      this.options.drive ? this.driveState?.status === "running" || this.driveState?.status === "waiting" ? "active" : "idle" : undefined);
     rail.rows.forEach((text, row) => canvas.put(row, column, text, width, "surface"));
     this.railZones = rail.zones.map((zone) => ({ ...zone, column: column + zone.column }));
     const hovered = this.railZones.find((zone) => zone.action === this.railHovered);
     if (hovered) {
-      const label = ` ${hovered.action === "files" ? "Files" : hovered.action === "diff" ? "Diff" : "Preview"} `;
+      const label = ` ${hovered.action === "files" ? "Files" : hovered.action === "diff" ? "Diff" : hovered.action === "drive" ? "Drive" : "Preview"} `;
       canvas.put(hovered.row + 1, Math.max(0, column - label.length - 1), this.options.paint.text(label, "electric"), label.length, "raised");
     }
     // Replace the former single-toggle hit target with the three real actions.
     this.mouseZones = this.mouseZones.filter((zone) => (zone.column ?? 0) < column);
     for (const zone of this.railZones) for (let row = zone.row; row < zone.row + zone.height; row++) {
-      this.mouseZones.push({ row, column: zone.column, width: zone.width, run: () => this.openRailAction(zone.action) });
+      this.mouseZones.push({ row, column: zone.column, width: zone.width, driveAllowed: zone.action !== "drive", driveControl: zone.action === "drive", identity: `rail:${zone.action}`, run: () => this.openRailAction(zone.action) });
     }
   }
 
   private openRailAction(action: RailAction): void {
     this.railHovered = null;
+    if (action === "drive") {
+      if (this.preview) { this.preview.open = false; this.preview.focused = false; }
+      this.sessionView.act({ kind: "drive-open" }); this.requestRender(); return;
+    }
     if (action === "preview") {
       this.sessionView.act({ kind: "panel-close" });
       if (this.preview) { if (!this.preview.open) this.preview.toggle(); }
@@ -1638,8 +1986,8 @@ export class Workbench {
       if (this.preview) { this.preview.open = false; this.preview.focused = false; }
       if (action === "diff") {
         const run = this.sessionView.current;
-        if (run) this.sessionView.act({ kind: "artifact", target: "changes", runId: run.id });
-        if (!this.sessionView.panelOpen) this.showPanel(["No recorded changes in this session."], { title: "DIFF" });
+        if (this.sessionView.diffOpen) this.sessionView.act({ kind: "panel-close" });
+        else this.sessionView.act({ kind: "diff-open", runId: run?.id ?? 0 });
       } else {
         const sessionId = this.sessionId;
         this.showPanel(["Loading workspace files…"], { title: "FILES" });
@@ -1691,7 +2039,7 @@ export class Workbench {
       const result = composeDraft({ width, height: this.layout.input.height, paint, focused: this.terminalFocused && !this.sessionView.focused, context: this.options.contextRail.contextSnapshot,
         now: Date.now(), reducedMotion: reducedMotionEnabled(),
         hero: Boolean(this.startLayout), reveal: this.startLayout ? this.startScreen.reveal(1, Date.now(), this.started && paint.enabled && !reducedMotionEnabled()) : 1,
-        editor: streaming ? this.queuedEditor : this.editor, streaming, restored: this.restoredDraft, commands: this.matchingCommands(), mentions: this.promptContext.mentions, history: this.promptContext.history });
+        editor: streaming ? this.queuedEditor : this.editor, streaming, restored: this.restoredDraft, mentions: this.promptContext.mentions, history: this.promptContext.history });
       return { lines: result.lines, cursor: result.cursor, zones: result.zones.map((zone) => ({ ...zone, row: zone.row - 1, run: (column?: number) => {
         const action = zone.action;
         if (action.kind === "submit") this.dispatchEditorKey({ name: "return" });
@@ -1700,7 +2048,6 @@ export class Workbench {
           if (streaming) { this.options.queue.set(""); this.queuedEditor = createPromptEditorState(); }
           else { this.editor = createPromptEditorState(); this.restoredDraft = false; }
         }
-        else if (action.kind === "command") this.clickCommand(action.index);
         else if (action.kind === "mention") this.clickMention(action.index);
         else if (action.kind === "remove") {
           const editor = streaming ? this.queuedEditor : this.editor;

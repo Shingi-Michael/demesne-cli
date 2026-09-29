@@ -54,7 +54,7 @@ export function allowRuleMatches(rule: AllowRule, toolName: string, input: unkno
     return rule.argv.every((word, index) => argv[index] === word);
   }
   if (rule.pathPrefix !== undefined) {
-    const target = pathOf(input);
+    const target = pathsOf(input)[0];
     if (!target) return false;
     const normalized = target.split("\\").join("/").replace(/^\.\//, "");
     const prefix = rule.pathPrefix.replace(/\/+$/, "");
@@ -62,6 +62,27 @@ export function allowRuleMatches(rule: AllowRule, toolName: string, input: unkno
     return normalized === prefix || normalized.startsWith(`${prefix}/`);
   }
   return true;
+}
+
+/// A call is covered by the allowlist when every path it touches matches some
+/// entry for that tool (e.g. `move_path` needs both a source and a destination
+/// entry). `run_command` stays argv-scoped, as before.
+export function allowRulesCover(rules: AllowRule[], toolName: string, input: unknown): boolean {
+  const toolRules = rules.filter((rule) => rule.tool === toolName);
+  if (toolRules.length === 0) return false;
+  if (toolName === "run_command") return toolRules.some((rule) => allowRuleMatches(rule, toolName, input));
+  const paths = pathsOf(input);
+  if (paths.length === 0) return toolRules.some((rule) => allowRuleMatches(rule, toolName, input));
+  return paths.every((path) => toolRules.some((rule) => pathUnderPrefix(path, rule)));
+}
+
+function pathUnderPrefix(target: string, rule: AllowRule): boolean {
+  if (rule.argv) return false;
+  if (rule.pathPrefix === undefined) return true;
+  const normalized = target.split("\\").join("/").replace(/^\.\//, "");
+  const prefix = rule.pathPrefix.replace(/\/+$/, "");
+  if (!prefix) return false;
+  return normalized === prefix || normalized.startsWith(`${prefix}/`);
 }
 
 export class ConfigAllowlist {
@@ -122,11 +143,15 @@ export class ConfigAllowlist {
   }
 }
 
-function pathOf(input: unknown): string | null {
-  if (!isRecord(input)) return null;
-  for (const key of ["path", "from"]) {
+/// Every workspace path a tool call operates on. Single-path tools
+/// (edit_file, write_file, delete_path, ...) return one; `move_path` returns
+/// both its source and destination, so a grant must cover each of them.
+export function pathsOf(input: unknown): string[] {
+  if (!isRecord(input)) return [];
+  const paths: string[] = [];
+  for (const key of ["path", "from", "to"]) {
     const candidate = input[key];
-    if (typeof candidate === "string" && candidate.length > 0) return candidate;
+    if (typeof candidate === "string" && candidate.length > 0) paths.push(candidate);
   }
-  return null;
+  return paths;
 }

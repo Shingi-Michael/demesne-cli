@@ -1,5 +1,5 @@
-import { isRecord, type PermissionDecision } from "@demesne/protocol";
-import { allowRuleMatches, type ConfigAllowlist } from "./allowlist.ts";
+import { type PermissionDecision } from "@demesne/protocol";
+import { allowRulesCover, pathsOf, type ConfigAllowlist } from "./allowlist.ts";
 
 interface PendingPermission {
   turnId: string;
@@ -54,8 +54,9 @@ export class PermissionBroker {
 
   preapproved(sessionId: string, toolName: string, input: unknown): boolean {
     const rules = this.grants.get(sessionId);
-    if (rules?.some((rule) => ruleMatches(rule, toolName, input))) return true;
-    return this.allowlist?.rulesFor().some((rule) => allowRuleMatches(rule, toolName, input)) ?? false;
+    if (rules && sessionRulesCover(rules, toolName, input)) return true;
+    const allowRules = this.allowlist?.rulesFor();
+    return allowRules ? allowRulesCover(allowRules, toolName, input) : false;
   }
 
   listGrants(sessionId: string): SessionRule[] {
@@ -68,8 +69,7 @@ export class PermissionBroker {
     this.pending.delete(permissionId);
     clearTimeout(pending.timeout);
     if ((decision === "allow_session" || decision === "allow_always") && pending.toolName) {
-      const rule = deriveRule(pending.toolName, pending.argsJson);
-      if (rule) this.grant(pending.sessionId, rule);
+      for (const rule of deriveRules(pending.toolName, pending.argsJson)) this.grant(pending.sessionId, rule);
     }
     pending.resolve(decision);
     return true;
@@ -92,36 +92,40 @@ export class PermissionBroker {
   }
 }
 
-function ruleMatches(rule: SessionRule, toolName: string, input: unknown): boolean {
-  if (rule.tool !== toolName) return false;
+/// A session grant preapproves a call only when every path the call touches is
+/// covered by some stored rule for that tool. Single-path tools reduce to the
+/// original single-prefix check; `move_path` must have both endpoints covered.
+function sessionRulesCover(rules: SessionRule[], toolName: string, input: unknown): boolean {
+  if (toolName === "run_command") return false;
+  const toolRules = rules.filter((rule) => rule.tool === toolName);
+  if (toolRules.length === 0) return false;
+  const paths = pathsOf(input);
+  if (paths.length === 0) return true;
+  return paths.every((path) => toolRules.some((rule) => pathMatchesRule(path, rule)));
+}
+
+function pathMatchesRule(target: string, rule: SessionRule): boolean {
   if (!rule.pathPrefix) return true;
-  const target = pathOf(input);
-  if (!target) return true;
   const normalized = target.split("\\").join("/");
   return normalized === rule.pathPrefix || normalized.startsWith(`${rule.pathPrefix}/`);
 }
 
-function deriveRule(toolName: string, argsJson: string | undefined): SessionRule | null {
+/// Derives one scoped rule per path a tool call touches, so approving a
+/// `move_path` grants both its source and destination directories.
+function deriveRules(toolName: string, argsJson: string | undefined): SessionRule[] {
   // Host commands are unsandboxed; each argv requires explicit approval.
-  if (toolName === "run_command") return null;
+  if (toolName === "run_command") return [];
   let input: unknown;
   try {
     input = argsJson === undefined ? undefined : JSON.parse(argsJson);
   } catch {
     input = undefined;
   }
-  const target = pathOf(input);
-  if (!target) return { tool: toolName, pathPrefix: "" };
-  const segments = target.split("\\").join("/").split("/").filter(Boolean);
-  segments.pop();
-  return { tool: toolName, pathPrefix: segments.join("/") };
-}
-
-function pathOf(input: unknown): string | null {
-  if (!isRecord(input)) return null;
-  for (const key of ["path", "from"]) {
-    const candidate = input[key];
-    if (typeof candidate === "string" && candidate.length > 0) return candidate;
-  }
-  return null;
+  const paths = pathsOf(input);
+  if (paths.length === 0) return [{ tool: toolName, pathPrefix: "" }];
+  return paths.map((path) => {
+    const segments = path.split("\\").join("/").split("/").filter(Boolean);
+    segments.pop();
+    return { tool: toolName, pathPrefix: segments.join("/") };
+  });
 }

@@ -4,6 +4,7 @@ import { Workbench } from "../apps/cli/src/workbench/controller.ts";
 import { seedSession, type PreviewState } from "./session-fixture.ts";
 import type { SessionView } from "../apps/cli/src/workbench/session.ts";
 import type { ArtifactKind } from "../apps/cli/src/workbench/session-flow.ts";
+import type { DriveState } from "../packages/protocol/src/index.ts";
 
 const args = process.argv.slice(2);
 const state = (args.find((arg) => arg.startsWith("--state="))?.split("=")[1] ?? "complete") as PreviewState;
@@ -14,7 +15,14 @@ const rail = new CliContextRail({ id: "demonstration-model", provider: "demo", c
 rail.setBranch("unicode-identifiers");
 let queue = "";
 let interrupted = false;
+let drivePreview: DriveState | null = null;
 const ui = new Workbench({ paint, contextRail: rail, sessionTitle: "Unicode identifiers", workspaceRoot: "~/demesne", version: "preview",
+  drive: args.includes("--drive") ? { control(control) {
+    if (!drivePreview) return;
+    drivePreview = { ...drivePreview, status: control === "resume" ? "running" : control === "stop" ? "stopped" : "paused",
+      activity: control === "resume" ? "Reviewing the saved implementation." : `Drive ${control === "stop" ? "stopped" : "paused"}.` };
+    ui.setDrive(drivePreview);
+  }, intervene() {} } : undefined,
   onExit: () => { ui.stop(); process.exit(0); }, onInterrupt: () => {
     if (interrupted) { ui.stop(); process.exit(0); }
     interrupted = true;
@@ -79,6 +87,8 @@ if (args.includes("--long-draft")) {
   const draft = Array.from({ length: 12 }, (_, index) => `Follow-up line ${index + 1}: keep the token contract stable while ${index % 2 ? "extending the guard" : "checking the suite"}.`).join("\n");
   input.onKeypress(draft, {});
 }
+const commandQuery = args.find((arg) => arg.startsWith("--commands="))?.slice("--commands=".length);
+if (commandQuery !== undefined) input.onKeypress(commandQuery || "/", {});
 if (args.includes("--trace")) {
   // Inspect the most recent reasoning in the conversation, through production
   // input routing. Live thinking is already expanded, so toggle twice there.
@@ -95,6 +105,57 @@ if (inspect) {
   ui.frame(80, 24);
   const view = (ui as unknown as { sessionView: SessionView }).sessionView;
   if (view.current) view.act({ kind: "artifact", runId: view.current.id, target: inspect as ArtifactKind });
+}
+if (args.includes("--live-diff")) {
+  ui.beginTurn({ userText: "Add a lexer helper and regression coverage.", at: "now" });
+  for (const [index, path] of ["src/lexer.ts", "tests/lexer.test.ts"].entries()) {
+    const before = index ? "" : "export const isLetter = (c: string) => /[a-z]/i.test(c);\n";
+    const after = index ? 'test("Unicode letters", () => expect(isLetter("界")).toBe(true));\n'
+      : "export const isLetter = (c: string) => /\\p{L}/u.test(c);\n";
+    ui.toolRequested({ toolCallId: `preview-${index}`, name: "write_file", arguments: { path, content: after } });
+    ui.toolFinished({ toolCallId: `preview-${index}`, name: "write_file", state: "done", changes: [{ path, before: before || null, after, beforeExists: !!before, afterExists: true }] });
+  }
+  const content = [
+    "export interface Identifier {", '  kind: "identifier";', "  value: string;", "  end: number;", "}", "",
+    "export function scanIdentifier(", "  source: string,", "  start = 0,", "): Identifier | null {",
+    "  const first = source.codePointAt(start);", "  if (first === undefined) return null;",
+    "  const initial = String.fromCodePoint(first);", "  if (!/[\\p{L}_]/u.test(initial)) return null;", "",
+    "  // Advance by complete Unicode code points.", "  let end = start + initial.length;", "  while (end < source.length) {",
+    "    const char = String.fromCodePoint(source.codePointAt(end)!);", "    if (!/[\\p{L}\\p{N}_]/u.test(char)) break;",
+    "    end += char.length;", "  }", "", '  return { kind: "identifier", value: source.slice(start, end), end };', "}", "",
+  ].join("\n");
+  const input = { path: "src/identifier.ts", content };
+  const raw = JSON.stringify(input); let sent = 0, eventId = 0;
+  const advance = () => {
+    const end = Math.min(raw.length, sent + 90);
+    ui.toolDraft({ schemaVersion: 1, eventId: ++eventId, type: "tool.call_draft", occurredAt: new Date().toISOString(), sessionId: "demo", turnId: "demo", workspaceId: null, agentRunId: null,
+      payload: { draftId: "preview:0", name: "write_file", delta: raw.slice(sent, end) } });
+    sent = end;
+  };
+  for (let i = 0; i < 6; i++) advance();
+  ui.frame(120, 36);
+  const session = (ui as unknown as { sessionView: SessionView }).sessionView;
+  session.act({ kind: "diff-open", runId: session.current!.id });
+  if (!snapshot) {
+    const timer = setInterval(() => {
+      if (interrupted) { clearInterval(timer); return; }
+      advance();
+      if (sent < raw.length) return;
+      clearInterval(timer);
+      ui.toolRequested({ toolCallId: "preview-written", draftId: "preview:0", name: "write_file", arguments: input });
+      ui.toolFinished({ toolCallId: "preview-written", name: "write_file", state: "done", changes: [{ path: input.path, before: null, after: content, beforeExists: false, afterExists: true }] });
+      ui.finishTurn("completed", "Preview complete · demonstration data");
+    }, 350);
+  }
+}
+if (args.includes("--expand-diff")) (ui as unknown as { sessionView: SessionView }).sessionView.act({ kind: "diff-expand" });
+if (args.includes("--drive")) {
+  drivePreview = { id: "demo", mission: "Finish the Unicode identifier changes from the earlier conversation and review the result.", homeSessionId: "demo", workspace: "~/demesne", status: "running",
+    activity: "Inspecting the applied Diff and parser regression results.", step: 8, model: "demo / configured-model", updatedAt: new Date().toISOString(),
+    notes: "Recovered the ASCII compatibility requirement from History. The coding agent updated the letter guard; now review the recorded checks.",
+    completed: ["Recovered the original goal", "Submitted a targeted implementation request"], remaining: ["Review mixed-script and leading-digit coverage"],
+    evidence: [{ observationId: "demo-screen", quote: "42 pass · 0 fail" }], steps: [{ step: 8, action: '{"kind":"key","key":"alt+d"}', note: "Open the applied changes", result: "Pressed alt+d.", at: new Date().toISOString() }] };
+  ui.setDrive(drivePreview); ui.showDrive();
 }
 if (snapshot) {
   const match = /^(\d+)x(\d+)$/.exec(snapshot);

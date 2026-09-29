@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import type { EventEnvelope, SessionStateResponse } from "@demesne/protocol";
+import type { EventEnvelope, SessionReplayPage, SessionStateResponse } from "@demesne/protocol";
+import { ApiRequestError } from "@demesne/client";
 import { replaySession, restoreSessionEntries } from "../src/workbench/history.ts";
 import { planRuns } from "../src/workbench/session.ts";
 import { toolCompletion } from "../src/workbench/tool-result.ts";
@@ -124,6 +125,24 @@ test("replay stops at the saved cursor and closes the stream", async () => {
   expect(closed).toBe(true);
   expect(signal?.aborted).toBe(true);
   await expect(replaySession(state, async function* () { yield events[0]!; })).rejects.toThrow("before the saved cursor");
+});
+
+test("bulk history rejects gaps, overlaps, future ranges and partial-page failures", async () => {
+  const stream = async function* (): AsyncGenerator<EventEnvelope> { throw new Error("Unexpected SSE fallback"); };
+  const invalid: SessionReplayPage[] = [
+    { throughEventId: 8, events, nextCursor: null },
+    { throughEventId: 7, events: [], nextCursor: null },
+    { throughEventId: 7, events: events.slice(0, 2), nextCursor: null },
+    { throughEventId: 7, events: [events[0]!, events[0]!], nextCursor: 1 },
+    { throughEventId: 7, events: [{ ...events[0]!, throughEventId: 8, deltaCount: 2 }], nextCursor: null },
+    { throughEventId: 7, events, nextCursor: 7 },
+  ];
+  for (const page of invalid) await expect(replaySession(state, stream, async () => page)).rejects.toThrow();
+  let calls = 0;
+  await expect(replaySession(state, stream, async () => {
+    if (++calls === 1) return { throughEventId: 7, events: events.slice(0, 2), nextCursor: 2 };
+    throw new ApiRequestError("Missing page", 404, "not_found");
+  })).rejects.toThrow("Missing page");
 });
 
 test("command completion retains failure status, exit codes and both output streams", () => {

@@ -23,7 +23,7 @@ import type { TurnProcessor } from "./processor.ts";
 import { ToolRegistry } from "./tools.ts";
 
 export const CONTEXT_REDUCTION_BENCHMARK_SCHEMA_VERSION = 1 as const;
-const FIXTURE_ID = "schema3-paired-provider-latency-v1";
+const FIXTURE_ID = "schema3-paired-provider-latency-v2";
 const CONTEXT_CAPACITY = 8_192;
 const OUTPUT_RESERVE = 1_536;
 const HARD_INPUT_LIMIT = CONTEXT_CAPACITY - OUTPUT_RESERVE;
@@ -36,7 +36,7 @@ const READ_ARGUMENTS = {
   ],
 };
 const READ_ARGUMENTS_JSON = JSON.stringify(READ_ARGUMENTS);
-const EXPECTED_TOOL_DEFINITIONS_SHA256 = "27ba5e66b9f1bd12c29bdf712792ca46b4ee5c48066fc7e7e2f1a5b4b5918f25";
+const EXPECTED_TOOL_DEFINITIONS_SHA256 = "d8999444f152598ea03f6bc1672d6098f779ae8f04a824aaf688155b136efc2e";
 const EXPECTED_REQUEST_FIXTURE_SHA256 = "766f36c9fe4088396a9204cc96c5e2d43e2cc1f2e91613c4847de70cc0d3c80a";
 const STABLE_FILE = Array.from(
   { length: 90 },
@@ -611,7 +611,7 @@ function validateFixture(
     || deduplication.retainedToolCallId !== READ_B_ID || deduplication.path !== "data/stable.txt"
     || truncation?.kind !== "truncate_historical_tool_output" || truncation.messageIndex !== 7
     || truncation.removedLines !== 65 || drop?.kind !== "drop_historical_turn" || drop.turnId !== "turn-a"
-    || drop.messageStartIndex !== 1 || drop.messageCount !== 4 || plan.estimatedToolDefinitionTokens !== 2_453
+    || drop.messageStartIndex !== 1 || drop.messageCount !== 4 || plan.estimatedToolDefinitionTokens !== 2_478
     || plan.maximumPlannedInputTokens !== 5_376 || plan.hardInputLimitTokens !== HARD_INPUT_LIMIT
     || plan.budgetStatus !== "within_soft_limit") throw new Error("Context reduction fixture contract changed");
   const toolDefinitionsSha256 = sha256(stableJson(tools));

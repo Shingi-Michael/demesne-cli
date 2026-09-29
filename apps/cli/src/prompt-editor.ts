@@ -143,6 +143,10 @@ export function reducePromptEditor(state: PromptEditorState, input: PromptEditor
   if (menuOpen && key.name === "down") {
     return none({ ...state, menuSelected: (state.menuSelected + 1) % input.commands.length });
   }
+  if (menuOpen && key.name === "escape") return none({ ...state, menuDismissed: true });
+  if (menuOpen && (key.name === "pageup" || key.name === "pagedown")) {
+    return none({ ...state, menuSelected: Math.max(0, Math.min(input.commands.length - 1, state.menuSelected + (key.name === "pageup" ? -8 : 8))) });
+  }
 
   if (isNewlineKey(key, input.text)) {
     const value = `${state.value.slice(0, state.cursor)}\n${state.value.slice(state.cursor)}`;

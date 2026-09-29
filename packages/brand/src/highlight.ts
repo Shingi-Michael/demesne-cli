@@ -10,6 +10,7 @@ import type { Painter } from "./index.ts";
 
 export interface CodeHighlightState {
   inBlockComment: boolean;
+  multilineString?: "`" | "'''" | '"""';
 }
 
 interface LanguageSpec {
@@ -21,6 +22,8 @@ interface LanguageSpec {
   decorators?: boolean;
   typesByCase?: boolean;
   preprocessor?: boolean;
+  templateStrings?: boolean;
+  tripleStrings?: boolean;
 }
 
 const TYPESCRIPT_KEYWORDS = [
@@ -61,6 +64,8 @@ const BASH_KEYWORDS = [
 const LANGUAGE_ALIASES: Record<string, string> = {
   ts: "typescript",
   tsx: "typescript",
+  mts: "typescript",
+  cts: "typescript",
   js: "javascript",
   jsx: "javascript",
   mjs: "javascript",
@@ -82,17 +87,28 @@ const LANGUAGE_ALIASES: Record<string, string> = {
 };
 
 const SPECS: Record<string, LanguageSpec> = {
-  typescript: { keywords: new Set(TYPESCRIPT_KEYWORDS), lineComment: "//", blockComments: true, typesByCase: true },
-  javascript: { keywords: new Set(TYPESCRIPT_KEYWORDS), lineComment: "//", blockComments: true, typesByCase: true },
-  go: { keywords: new Set(GO_KEYWORDS), lineComment: "//", blockComments: true, typesByCase: true },
+  typescript: { keywords: new Set(TYPESCRIPT_KEYWORDS), lineComment: "//", blockComments: true, typesByCase: true, templateStrings: true },
+  javascript: { keywords: new Set(TYPESCRIPT_KEYWORDS), lineComment: "//", blockComments: true, typesByCase: true, templateStrings: true },
+  go: { keywords: new Set(GO_KEYWORDS), lineComment: "//", blockComments: true, typesByCase: true, templateStrings: true },
   rust: { keywords: new Set(RUST_KEYWORDS), lineComment: "//", blockComments: true, typesByCase: true },
-  python: { keywords: new Set(PYTHON_KEYWORDS), lineComment: "#", blockComments: false, hashComment: true, decorators: true, typesByCase: true },
+  python: { keywords: new Set(PYTHON_KEYWORDS), lineComment: "#", blockComments: false, hashComment: true, decorators: true, typesByCase: true, tripleStrings: true },
   bash: { keywords: new Set(BASH_KEYWORDS), lineComment: "#", blockComments: false, hashComment: true, variables: true },
 };
 
 export function normalizeLanguage(info: string): string {
   const token = info.trim().toLowerCase().split(/[\s,:{}]/, 1)[0] ?? "";
   return LANGUAGE_ALIASES[token] ?? token;
+}
+
+/// File previews opt in to known grammars. A README or unknown extension should
+/// not accidentally receive the generic C-like styling used by fenced blocks.
+export function languageForPath(path: string): string | undefined {
+  const name = path.split(/[\\/]/).at(-1)?.toLowerCase() ?? "";
+  if ([".bashrc", ".bash_profile", ".zshrc", ".zprofile", ".profile"].includes(name)) return "bash";
+  const extension = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
+  if (extension === "pyi" || extension === "pyw") return "python";
+  const language = normalizeLanguage(extension);
+  return Object.hasOwn(SPECS, language) || ["json", "yaml", "diff"].includes(language) ? language : undefined;
 }
 
 export function highlightCode(
@@ -115,6 +131,15 @@ function highlightTokens(code: string, painter: Painter, spec: LanguageSpec, sta
   let index = 0;
   while (index < code.length) {
     const rest = code.slice(index);
+
+    if (state?.multilineString) {
+      const end = closingQuote(rest, state.multilineString, 0);
+      result += painter.text(rest.slice(0, end ?? rest.length), "syntaxString");
+      if (end === undefined) return result;
+      index += end;
+      state.multilineString = undefined;
+      continue;
+    }
 
     if (state?.inBlockComment) {
       const end = rest.indexOf("*/");
@@ -140,11 +165,12 @@ function highlightTokens(code: string, painter: Painter, spec: LanguageSpec, sta
       return result + painter.text(rest, "syntaxComment");
     }
 
-    const quote = rest[0];
-    if (quote === '"' || quote === "'" || quote === "`") {
-      const end = stringEnd(rest, quote);
-      result += painter.text(rest.slice(0, end), "syntaxString");
-      index += end;
+    const quote = spec.tripleStrings && (rest.startsWith('"""') || rest.startsWith("'''")) ? rest.slice(0, 3) : rest[0];
+    if (quote === '"' || quote === "'" || quote === "`" || quote === '"""' || quote === "'''") {
+      const end = closingQuote(rest, quote, quote.length);
+      result += painter.text(rest.slice(0, end ?? rest.length), "syntaxString");
+      if (state && end === undefined && (quote === "`" && spec.templateStrings || quote === '"""' || quote === "'''")) state.multilineString = quote as CodeHighlightState["multilineString"];
+      index += end ?? rest.length;
       continue;
     }
 
@@ -263,14 +289,17 @@ function highlightDiff(code: string, painter: Painter): string {
 }
 
 function stringEnd(value: string, quote: string): number {
-  let index = 1;
+  return closingQuote(value, quote, quote.length) ?? value.length;
+}
+
+function closingQuote(value: string, quote: string, index: number): number | undefined {
   while (index < value.length) {
     if (value[index] === "\\") {
       index += 2;
       continue;
     }
-    if (value[index] === quote) return index + 1;
+    if (value.startsWith(quote, index)) return index + quote.length;
     index += 1;
   }
-  return value.length;
+  return undefined;
 }

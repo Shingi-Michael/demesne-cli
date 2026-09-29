@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { queueSummary, reduceQueuedInput, QUEUED_INPUT_LIMIT } from "../src/input-queue.ts";
+import { queueSummary, reduceQueuedInput, settleQueuedInput, QUEUED_INPUT_LIMIT } from "../src/input-queue.ts";
 
 function type(queue: string, text: string): string {
   let next = queue;
@@ -46,5 +46,21 @@ describe("queueSummary", () => {
     expect(queueSummary("")).toBeNull();
     expect(queueSummary("   ")).toBeNull();
     expect(queueSummary("x".repeat(80))).toHaveLength(40);
+  });
+});
+
+describe("settleQueuedInput", () => {
+  test("sends the queue after a completed turn", () => {
+    expect(settleQueuedInput("  also add a test  ", "completed")).toEqual({ send: "also add a test" });
+  });
+
+  test("returns the queue to the editor unsent after a stop or failure", () => {
+    expect(settleQueuedInput("also add a test\n", "stopped")).toEqual({ draft: "also add a test" });
+    expect(settleQueuedInput("retry with logging", "failed")).toEqual({ draft: "retry with logging" });
+  });
+
+  test("does nothing with an empty queue", () => {
+    expect(settleQueuedInput(undefined, "stopped")).toEqual({});
+    expect(settleQueuedInput("   \n", "completed")).toEqual({});
   });
 });

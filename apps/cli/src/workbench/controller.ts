@@ -88,6 +88,8 @@ export interface PromptContext {
   history: readonly string[];
   mentions: readonly string[];
   commands: readonly SlashCommand[];
+  /// Text to start the editor with, such as a queue returned after a stop.
+  draft?: string;
 }
 
 export interface WorkbenchOptions {
@@ -184,6 +186,9 @@ export class Workbench {
   private cachedTheme = "";
   private planMode = false;
   private savedDraft = "";
+  /// The editor holds a queue returned unsent after a stopped or failed turn.
+  private restoredDraft = false;
+  private savedDraftRestored = false;
   private transcriptView = false;
   private collapsedSections = new Set<string>();
   private sections: Array<{ key: string; row: number; run: () => void }> = [];
@@ -563,8 +568,11 @@ export class Workbench {
     this.mode = "input";
     if (this.showingStart) this.sessionView.focusInput();
     this.editor = createPromptEditorState();
-    if (this.savedDraft) {
-      this.editor = setPromptValue(this.editor, this.savedDraft);
+    const draft = context.draft || this.savedDraft;
+    this.restoredDraft = Boolean(context.draft) || Boolean(this.savedDraft) && this.savedDraftRestored;
+    this.savedDraftRestored = false;
+    if (draft) {
+      this.editor = setPromptValue(this.editor, draft);
       this.savedDraft = "";
     }
     this.requestRender();
@@ -816,6 +824,8 @@ export class Workbench {
   /// keyboard or from a synthetic dispatch (a menu click).
   private applyEditorResult(result: PromptEditorResult): void {
     this.editor = result.state;
+    // Emptying a restored draft ends it; anything typed afterwards is new.
+    if (!this.editor.value.trim()) this.restoredDraft = false;
     if (result.action.type === "cancel") {
       this.options.onExit();
       return;
@@ -823,6 +833,7 @@ export class Workbench {
     if (result.action.type === "submit") {
       if (!result.action.value.trim()) { this.requestRender(); return; }
       this.feedback = null;
+      this.restoredDraft = false;
       const resolve = this.promptResolver;
       this.promptResolver = null;
       this.mode = "streaming";
@@ -1061,7 +1072,7 @@ export class Workbench {
     if (this.sessionLayout) {
       this.syncQueuedEditor();
       return composerHeight({ width: columns, editor: this.mode === "streaming" ? this.queuedEditor : this.editor,
-        hero: this.showingStart,
+        hero: this.showingStart, restored: this.restoredDraft,
         streaming: this.mode === "streaming", commands: this.matchingCommands(), mentions: this.promptContext.mentions, history: this.promptContext.history });
     }
     const width = Math.max(10, computeWorkbenchLayout(columns, process.stdout.rows ?? 24, { sidebar: this.sessionLayout ? "hidden" : "auto" }).input.width - HARNESS.content - 1);
@@ -1680,12 +1691,15 @@ export class Workbench {
       const result = composeDraft({ width, height: this.layout.input.height, paint, focused: this.terminalFocused && !this.sessionView.focused, context: this.options.contextRail.contextSnapshot,
         now: Date.now(), reducedMotion: reducedMotionEnabled(),
         hero: Boolean(this.startLayout), reveal: this.startLayout ? this.startScreen.reveal(1, Date.now(), this.started && paint.enabled && !reducedMotionEnabled()) : 1,
-        editor: streaming ? this.queuedEditor : this.editor, streaming, commands: this.matchingCommands(), mentions: this.promptContext.mentions, history: this.promptContext.history });
+        editor: streaming ? this.queuedEditor : this.editor, streaming, restored: this.restoredDraft, commands: this.matchingCommands(), mentions: this.promptContext.mentions, history: this.promptContext.history });
       return { lines: result.lines, cursor: result.cursor, zones: result.zones.map((zone) => ({ ...zone, row: zone.row - 1, run: (column?: number) => {
         const action = zone.action;
         if (action.kind === "submit") this.dispatchEditorKey({ name: "return" });
         else if (action.kind === "stop") this.options.onInterrupt();
-        else if (action.kind === "clear") { this.options.queue.set(""); this.queuedEditor = createPromptEditorState(); }
+        else if (action.kind === "clear") {
+          if (streaming) { this.options.queue.set(""); this.queuedEditor = createPromptEditorState(); }
+          else { this.editor = createPromptEditorState(); this.restoredDraft = false; }
+        }
         else if (action.kind === "command") this.clickCommand(action.index);
         else if (action.kind === "mention") this.clickMention(action.index);
         else if (action.kind === "remove") {
@@ -1893,6 +1907,7 @@ export class Workbench {
   private runCommand(command: string): void {
     if (this.mode !== "input") return;
     this.savedDraft = this.editor.value;
+    this.savedDraftRestored = this.restoredDraft;
     this.applyEditorResult({ state: this.editor, action: { type: "submit", value: command } });
   }
 

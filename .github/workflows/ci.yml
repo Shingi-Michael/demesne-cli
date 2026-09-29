@@ -25,4 +25,4 @@ jobs:
       - run: command -v rg || (sudo apt-get update -q && sudo apt-get install -y -q ripgrep)
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      - run: bun test
+      - run: HOME=$(mktemp -d) bun test

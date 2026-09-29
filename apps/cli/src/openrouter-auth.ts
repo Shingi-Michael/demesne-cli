@@ -69,7 +69,7 @@ export function beginOpenRouterLogin(options: { fetch?: typeof fetch; timeoutMs?
 
 /** Validate the credential, discover the selected model's capacity, then merge
  * just the OpenRouter profile into the private user config. Never return keys. */
-export async function configureOpenRouter(options: { apiKey: string; configPath: string; model?: string; fetch?: typeof fetch; signal?: AbortSignal }) {
+export async function discoverOpenRouter(options: { apiKey: string; fetch?: typeof fetch; signal?: AbortSignal }) {
   const apiKey = options.apiKey.trim();
   if (!apiKey || apiKey.length > 4096 || /\s/.test(apiKey)) throw new Error("Invalid OpenRouter API key");
   const fetchImpl = options.fetch ?? fetch;
@@ -79,8 +79,14 @@ export async function configureOpenRouter(options: { apiKey: string; configPath:
   const body = await readAuthJson(response);
   if (!isRecord(body) || !isRecord(body.data)) throw new Error("OpenRouter returned invalid key metadata");
   const provider = new OpenAICompatibleProvider({ baseUrl: OPENROUTER_URL, providerId: "OpenRouter", apiKey, fetch: fetchImpl });
+  return provider.listModels(signal);
+}
+
+export async function configureOpenRouter(options: { apiKey: string; configPath: string; model?: string; fetch?: typeof fetch; signal?: AbortSignal }) {
+  const models = await discoverOpenRouter(options);
+  const apiKey = options.apiKey.trim();
   const model = options.model ?? DEFAULT_OPENROUTER_MODEL;
-  const selected = (await provider.listModels(signal)).find((entry) => entry.id === model);
+  const selected = models.find((entry) => entry.id === model);
   if (!selected?.contextWindow) throw new Error(`OpenRouter model not found or has no context capacity: ${model}`);
   // Use the advertised completion ceiling, leaving input headroom when the
   // model's total context permits it. Older catalogs retain the fallback.

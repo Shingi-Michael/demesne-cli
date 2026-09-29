@@ -50,9 +50,24 @@ Translucent cyan, amber, and red surfaces are composited into theme tokens for t
 - **Footer:** `Build/Plan/Compact · model · elapsed N.Ns · speed N.N tok/s · ctx used/total ────── N%`, followed by lowercase `copy` and a right-aligned bracketed status. Copy appears on hover or keyboard selection only when text exists. Its feedback is `copied`. Context fill is green, amber above 50%, red above 80%; safe context values are secondary and safe percentages dim.
 - **Composer:** two default text rows, cyan focus rule, bottom-aligned state glyph, cyan-wash Send, and a token estimate below the control. Running uses `◎`, `Agent is running...`, and `[  ···  ]`. Native queued editing, interruption, and Clear queue retain their established routing. The bottom hints emphasize `/` and `@` in cyan.
 - **Action rail (redesign):** the six-cell rail keeps the state pip (green idle, amber running), a short divider, Files `≡`, Diff `╪`, Preview `▣` and Drive `▷`, and `[ ]` at the bottom. The vertical `PANEL` label is gone. Hover lifts the cell onto the raised surface and brightens the icon; active Drive work stays amber. Files loads the workspace listing, Diff opens recorded changes, and Preview opens image artifacts; an open panel docks in the rail's place. Compact terminals use three cells. Settings is available through Tab / Ctrl+K; Execution log remains Ctrl+B.
-- **Setup wizard (redesign):** `demesne setup` in a terminal runs a full-screen three-step wizard — Provider (local servers found first, unreachable ones dimmed, `r` rescans, Custom URL with the HTTPS rule), Model (largest context recommended, or a typed id when none are listed), Review (detected values; `e` edits context/output, cycles theme) — then writes the config and shows where it went. Esc or Ctrl+C cancels without writing. `--provider-url`/`--model` with `--yes`, or no terminal, keeps the non-interactive path. Hosted OpenRouter sign-in remains `demesne auth login openrouter`.
+- **Setup wizard (redesign):** `demesne setup` in a terminal runs a full-screen three-step wizard — Provider (local servers found first, unreachable ones dimmed, `r` rescans, Custom URL with the HTTPS rule, OpenRouter browser sign-in), Model (largest context recommended, or a typed id when none are listed), Review (detected values; `e` edits context/output, cycles theme) — then writes the config and shows where it went. Esc or Ctrl+C cancels without writing. `--provider-url`/`--model` with `--yes`, or no terminal, keeps the non-interactive path.
 
 ## Data and motion
+
+### Setup browser sign-in
+
+The redesign's Provider step now offers **OpenRouter** alongside local servers
+and Custom URL. It opens the existing PKCE browser flow in place, then moves to
+Model and Review. Esc returns to Provider; Ctrl+C cancels. Decline/failure offers
+retry, and an unavailable browser opener leaves the full authorization URL visible.
+The key stays in runner memory, outside rendered/reducer state, until Review writes
+the private config. Cancelling before that writes nothing. Model context/output
+limits come from the authenticated catalog. `demesne auth login openrouter` also
+remains available as a standalone command.
+
+The three-step layout and semantic palette follow the merged redesign components.
+The browser-wait/error view is an in-step terminal adaptation, including a wrapped
+URL for terminals without a browser opener.
 
 ### Agent Drive
 

@@ -88,7 +88,7 @@ import { checkForUpdate } from "./update-check.ts";
 import { PromptHistory } from "./prompt-history.ts";
 import { composeInEditor } from "./external-editor.ts";
 import { createPromptEditorState, mentionMatches, mentionTokenAt, reducePromptEditor, reverseSearchMatches, setPromptValue } from "./prompt-editor.ts";
-import { queueSummary, reduceQueuedInput } from "./input-queue.ts";
+import { queueSummary, reduceQueuedInput, settleQueuedInput } from "./input-queue.ts";
 import { notify, shouldNotifyApproval, shouldNotifyCompletion, type NotificationOptions } from "./notifications.ts";
 import { derivePersistedRule } from "./allow-rules.ts";
 import { expandCustomCommand, loadCustomCommands, mergeSlashCommands, type CustomCommand } from "./custom-commands.ts";
@@ -203,6 +203,7 @@ const chatState: {
   footer?: CliFixedFooter;
   queuedInput?: string;
   refreshQueued?: () => void;
+  lastTurnOutcome?: "completed" | "stopped" | "failed";
 } = { streamActive: false, permissionActive: false };
 let restoreTerminalState = () => {};
 
@@ -244,11 +245,12 @@ function watchForDoubleEscapeInterrupt(): () => void {
   return detach;
 }
 
-/// Consumes any type-ahead text queued during the previous turn.
-function takeQueuedInput(): string | undefined {
-  const queued = chatState.queuedInput?.trim();
+/// Consumes any type-ahead text queued during the previous turn: sent as the
+/// next prompt, or returned as an editable draft when the turn did not complete.
+function takeQueuedInput(): { send?: string; draft?: string } {
+  const settled = settleQueuedInput(chatState.queuedInput, chatState.lastTurnOutcome ?? "completed");
   chatState.queuedInput = undefined;
-  return queued ? queued : undefined;
+  return settled;
 }
 
 /// Workspace files for `@` mentions. A missing workspace or a failed listing
@@ -286,11 +288,12 @@ async function readCommandPrompt(
   history: PromptHistory,
   mentions: readonly string[] = [],
   commands: readonly SlashCommand[] = SLASH_COMMANDS,
+  draft?: string,
 ): Promise<string> {
   const input = process.stdin;
   const output = process.stdout;
   const wasRaw = input.isRaw;
-  let state = createPromptEditorState();
+  let state = draft ? setPromptValue(createPromptEditorState(), draft) : createPromptEditorState();
   let prevCursorVisualLine = 0;
   let prevTotalLines = 1;
 
@@ -982,8 +985,9 @@ async function runChat(command: string[]): Promise<void> {
       workbench.setSessionTitle(sessionTitle);
       contextRail.begin(compactInstructions !== undefined ? false : thinkingEnabled);
       workbench.beginTurn({ userText: text, at: timeLabel(), planOnly, compaction: compactInstructions !== undefined });
+      chatState.lastTurnOutcome = "failed";
       try {
-        await runWorkbenchTurn({
+        chatState.lastTurnOutcome = await runWorkbenchTurn({
           sessionId: sessionId!,
           content: text,
           permissionMode,
@@ -1013,8 +1017,9 @@ async function runChat(command: string[]): Promise<void> {
     chatState.queuedInput = undefined;
     contextRail.setModel(activeModel);
     const stopWatching = watchForDoubleEscapeInterrupt();
+    chatState.lastTurnOutcome = "failed";
     try {
-      await submitAndRender(
+      chatState.lastTurnOutcome = await submitAndRender(
         sessionId!,
         text,
         permissionMode,
@@ -1381,13 +1386,13 @@ async function runChat(command: string[]): Promise<void> {
   while (true) {
     let line: string;
     const queued = takeQueuedInput();
-    if (queued) {
-      line = queued;
+    if (queued.send) {
+      line = queued.send;
     } else {
       try {
         line = workbench
-          ? await workbench.readPrompt({ history: history.entries(), mentions: mentionFiles, commands: allCommands })
-          : await readCommandPrompt(history, mentionFiles, allCommands);
+          ? await workbench.readPrompt({ history: history.entries(), mentions: mentionFiles, commands: allCommands, draft: queued.draft })
+          : await readCommandPrompt(history, mentionFiles, allCommands, queued.draft);
       } catch {
         leaveChat();
       }
@@ -1565,7 +1570,7 @@ async function runWorkbenchTurn(options: {
   workbench: Workbench;
   contextRail: CliContextRail;
   paint: Painter;
-}): Promise<void> {
+}): Promise<"completed" | "stopped" | "failed"> {
   const submitted = options.compactInstructions !== undefined ? await client.compactSession(options.sessionId, { instructions: options.compactInstructions })
     : await request<SubmitTurnResponse>(`/v1/sessions/${options.sessionId}/turns`, {
     method: "POST",
@@ -1762,6 +1767,7 @@ async function runWorkbenchTurn(options: {
       ? `${duration}s · ${counts}${failure ? ` · ${sentence(failure)}` : ""}`
       : failure ? sentence(failure) : "";
   options.workbench.finishTurn(status, narrateTurnEnd(status, details), { durationMs, tokensPerSecond: speed });
+  return status;
 }
 
 /// Best-effort command extraction for presence purposes; the activity ledger

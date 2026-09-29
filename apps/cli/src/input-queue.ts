@@ -31,6 +31,19 @@ export function reduceQueuedInput(queue: string, key: QueuedInputKey, text: stri
   return cleaned ? clamp(queue + cleaned) : queue;
 }
 
+/// What happens to type-ahead once a turn ends. Only a completed turn sends
+/// the queue as the next prompt. After a stop or a failure the follow-up was
+/// written for a result that never arrived, so it returns to the editor
+/// unsent for the user to revise.
+export function settleQueuedInput(
+  queue: string | undefined,
+  outcome: "completed" | "stopped" | "failed",
+): { send?: string; draft?: string } {
+  const text = queue?.trim();
+  if (!text) return {};
+  return outcome === "completed" ? { send: text } : { draft: text };
+}
+
 /// A single-line preview of the queue for the footer, or null when empty.
 export function queueSummary(queue: string): string | null {
   const collapsed = queue.replace(/\s+/g, " ").trim();

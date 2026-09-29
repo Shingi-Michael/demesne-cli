@@ -12,6 +12,13 @@ export interface ComposerZone { row: number; column: number; width: number; acti
 interface ComposerOptions {
   width: number; editor: PromptEditorState; commands: readonly SlashCommand[];
   mentions: readonly string[]; history: readonly string[]; streaming: boolean; context?: ContextReceipt; hero?: boolean;
+  /// The draft is a queue returned unsent because its turn stopped or failed.
+  restored?: boolean;
+}
+/// Queued and restored drafts each carry a one-row label above the prompt.
+function hasDraftLabel(options: ComposerOptions): boolean {
+  if (!options.editor.value.trim()) return false;
+  return options.streaming || (Boolean(options.restored) && !options.hero);
 }
 function completions(options: ComposerOptions) {
   if (options.streaming || options.editor.search) return [];
@@ -24,7 +31,7 @@ export function composerHeight(options: ComposerOptions): number {
   if (options.editor.search) return 4;
   const lines = computePromptVisualLines(options.editor.value, options.editor.cursor, Math.max(8, options.width - (options.width >= 65 ? 18 : 16))).lines.length;
   return (options.hero ? 2 : 4) + Math.max(options.hero ? 1 : 2, Math.min(6, lines)) + Math.min(5, completions(options).length) + (/\B@\S+/.test(options.editor.value) ? 1 : 0)
-    + (options.streaming && options.editor.value.trim() ? 1 : 0);
+    + (hasDraftLabel(options) ? 1 : 0);
 }
 
 /// Draft text uses the context planner's conservative UTF-8 / 3 estimate.
@@ -77,10 +84,14 @@ export function composeDraft(options: ComposerOptions & { height: number; paint:
     if (action) zones.push({ row, column, width: visibleLength(label), action });
   };
   const queued = options.streaming && Boolean(editor.value.trim());
-  const headerRows = queued && height >= 5 ? 1 : 0;
+  const restored = !options.streaming && hasDraftLabel(options);
+  const headerRows = (queued || restored) && height >= 5 ? 1 : 0;
   if (headerRows) {
-    canvas.put(1, textColumn, paint.text("Queued · sends after this turn", "thinking"), width - textColumn - inset, "surface");
-    if (width >= 60) control(1, width - inset - 13, paint.text("Clear queue ×", "muted"), { kind: "clear" });
+    const label = queued ? paint.text("Queued · sends after this turn", "thinking")
+      : `${paint.text("Restored · not sent", "electric")}${paint.text(" · the turn did not finish", "muted")}`;
+    const clear = queued ? "Clear queue ×" : "Clear ×";
+    canvas.put(1, textColumn, label, width - textColumn - inset - (width >= 60 ? clear.length + 1 : 0), "surface");
+    if (width >= 60) control(1, width - inset - clear.length, paint.text(clear, "muted"), { kind: "clear" });
   }
   const firstRow = (!options.hero && height >= 6 ? 2 : 1) + headerRows;
   const hintsRow = !options.hero && height >= 5 ? height - 2 : height - 1;
@@ -160,7 +171,10 @@ export function composeDraft(options: ComposerOptions & { height: number; paint:
       const dots = thinkingDots(paint, options.now ?? 0, options.reducedMotion);
       rectangle("  " + dots + "   ", "muted", { kind: "stop" });
       if (queued && width < 60) control(0, textColumn, paint.text(" Clear queue × ", "secondary"), { kind: "clear" });
-    } else rectangle(sending ? paint.wash(" SEND ↵ ", "accentSurface", "electric") : paint.text(" SEND ↵ ", "muted"), sending ? "electric" : "muted", sending ? { kind: "submit" } : undefined);
+    } else {
+      rectangle(sending ? paint.wash(" SEND ↵ ", "accentSurface", "electric") : paint.text(" SEND ↵ ", "muted"), sending ? "electric" : "muted", sending ? { kind: "submit" } : undefined);
+      if (restored && width < 60) control(0, textColumn, paint.text(" Clear × ", "secondary"), { kind: "clear" });
+    }
   }
   return { lines: canvas.rows, zones, cursor };
 }

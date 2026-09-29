@@ -1620,3 +1620,38 @@ test("the log shortcut opens a real log and docked evidence scrolls independentl
   expect(view.panelOpen).toBe(false);
   expect(screen(120, 36)).toContain("CHECK_RESPONSE");
 });
+
+test("a queue returned after a stopped or failed turn is labelled until it is sent, cleared or emptied", async () => {
+  const { ui, state, key, screen } = fixture("complete");
+  const prompt = ui.readPrompt({ history: [], mentions: [], commands: [], draft: "Also add a digit test" });
+  expect(state.editor.value).toBe("Also add a digit test");
+  expect(screen()).toContain("Restored · not sent · the turn did not finish");
+  expect(screen(50, 24)).toContain("Clear ×");
+
+  // Clear empties the editor and ends the label.
+  const rows = screen().split("\n");
+  const row = rows.findIndex((line) => line.includes("Clear ×"));
+  state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("Clear ×") + 1 });
+  expect(state.editor.value).toBe("");
+  state.onKeypress("Something new", {});
+  expect(screen()).not.toContain("Restored");
+  key("return");
+  expect(await prompt).toBe("Something new");
+});
+
+test("editing a restored draft away removes its label, and ordinary prompts never show it", async () => {
+  const { ui, state, key, screen } = fixture("complete");
+  const restored = ui.readPrompt({ history: [], mentions: [], commands: [], draft: "ab" });
+  key("backspace");
+  expect(screen()).toContain("Restored · not sent");
+  key("backspace");
+  state.onKeypress("new", {});
+  expect(screen()).not.toContain("Restored");
+  key("return");
+  expect(await restored).toBe("new");
+
+  const { ui: plain, state: plainState, screen: plainScreen } = fixture("complete");
+  void plain.readPrompt({ history: [], mentions: [], commands: [] });
+  plainState.onKeypress("typed by hand", {});
+  expect(plainScreen()).not.toContain("Restored");
+});

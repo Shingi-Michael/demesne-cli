@@ -216,11 +216,16 @@ describe("prompt editor menu", () => {
     expect(current.menuDismissed).toBe(true);
   });
 
-  test("escape clears the draft and reopens the menu", () => {
+  test("escape dismisses the menu without deleting the draft; editing opens it again", () => {
     const current = press(state("/res", 0), { name: "escape" }, "", { commands }).state;
-    expect(current.value).toBe("");
+    expect(current.value).toBe("/res");
     expect(current.cursor).toBe(0);
-    expect(current.menuDismissed).toBe(false);
+    expect(current.menuDismissed).toBe(true);
+    expect(press(current, { name: "right" }).state.menuDismissed).toBe(true);
+    const edited = press({ ...current, cursor: 4 }, {}, "u", { commands }).state;
+    expect(edited.value).toBe("/resu");
+    expect(edited.menuDismissed).toBe(false);
+    expect(press(current, { name: "escape" }, "", { commands }).state.value).toBe("");
   });
 });
 

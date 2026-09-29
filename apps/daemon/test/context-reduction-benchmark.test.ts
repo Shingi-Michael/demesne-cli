@@ -37,9 +37,9 @@ test("context reduction fixture has a stable production planner contract", async
   ]);
   expect(fixture.plan).toMatchObject({
     schemaVersion: 3,
-    originalEstimatedInputTokens: 7_289,
-    estimatedInputTokens: 5_343,
-    estimatedToolDefinitionTokens: 2_453,
+    originalEstimatedInputTokens: 7_314,
+    estimatedInputTokens: 5_368,
+    estimatedToolDefinitionTokens: 2_478,
     maximumPlannedInputTokens: 5_376,
     hardInputLimitTokens: 6_656,
     budgetStatus: "within_soft_limit",

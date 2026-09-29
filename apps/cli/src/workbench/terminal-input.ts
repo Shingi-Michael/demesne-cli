@@ -17,12 +17,15 @@ export class TerminalInputDecoder {
   private carry = "";
   private paste: string | null = null;
   private apc: string | null = null;
-  get waitingForEscape(): boolean { return this.paste === null && this.apc === null && /^\x1b(?:\[)?$/.test(this.carry); }
+  get waitingForEscape(): boolean { return this.paste === null && this.apc === null && /^\x1b+$/.test(this.carry); }
   reset(): void { this.carry = ""; this.paste = null; this.apc = null; }
   flushEscape(): TerminalInput[] {
+    // A partial CSI is a protocol packet, not a standalone key. Keep its
+    // introducer until the rest arrives, even across a delayed transport chunk.
+    if (!this.waitingForEscape) return [];
     const text = this.carry;
     this.carry = "";
-    return text === "\x1b" ? [{ kind: "escape", sequence: text }] : text ? [{ kind: "text", text }] : [];
+    return [{ kind: "escape", sequence: text }];
   }
   push(text: string): TerminalInput[] {
     this.carry += text;
@@ -77,7 +80,15 @@ export class TerminalInputDecoder {
       }
       if (/^\x1b\[<[\d;]*$/.test(this.carry) && this.carry.length < 64) break;
       const doubled = /^\x1b{2,}/.exec(this.carry);
-      if (doubled) { events.push({ kind: "escape", sequence: doubled[0] }); this.carry = this.carry.slice(doubled[0].length); continue; }
+      if (doubled) {
+        // The final ESC may introduce a mouse/focus report or an Alt key.
+        // Consuming it as another Escape both cancelled live work and leaked
+        // strings such as "[<65;229;33M" into the queued composer.
+        if (doubled[0].length === this.carry.length) break;
+        const standalone = doubled[0].length - 1;
+        events.push({ kind: "escape", sequence: this.carry.slice(0, standalone) });
+        this.carry = this.carry.slice(standalone); continue;
+      }
       // Other key sequences remain intact for readline, including split CSI.
       const next = this.carry.indexOf("\x1b", 1);
       const end = next < 0 ? this.carry.length : next;

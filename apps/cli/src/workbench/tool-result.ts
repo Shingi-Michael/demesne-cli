@@ -1,9 +1,10 @@
-import type { EventEnvelope } from "@demesne/protocol";
+import type { EventEnvelope, ToolFileChange } from "@demesne/protocol";
 import type { ToolState } from "./entries.ts";
 
 export function toolCompletion(event: EventEnvelope): {
   toolCallId: string; name: string; state: ToolState; durationMs?: number;
   exitCode?: number; message?: string; created?: boolean;
+  changes?: ToolFileChange[];
 } {
   const payload = event.payload;
   const output = [typeof payload.stdout === "string" ? payload.stdout : "", typeof payload.stderr === "string" && payload.stderr ? `stderr:\n${payload.stderr}` : ""].filter(Boolean);
@@ -18,5 +19,9 @@ export function toolCompletion(event: EventEnvelope): {
     ...(typeof payload.durationMs === "number" ? { durationMs: payload.durationMs } : {}),
     ...(typeof payload.created === "boolean" ? { created: payload.created } : {}),
     ...(message !== undefined ? { message } : {}),
+    ...(Array.isArray(payload.changes) ? { changes: payload.changes.filter((change): change is ToolFileChange => change && typeof change.path === "string"
+      && (typeof change.before === "string" || change.before === null) && (typeof change.after === "string" || change.after === null)
+      && typeof change.beforeExists === "boolean" && typeof change.afterExists === "boolean"
+      && (change.unavailable === undefined || typeof change.unavailable === "string")) } : {}),
   };
 }

@@ -162,12 +162,13 @@ test("section keyboard navigation folds the focused heading without editing the 
   expect(state.editor.value).toBe("");
 });
 
-test("coalesced Escape presses still interrupt a running turn immediately", () => {
+test("coalesced Escape presses interrupt after resolving the terminal packet boundary", async () => {
   const { state } = fixture();
   let interrupts = 0;
   state.options.onInterrupt = () => { interrupts++; };
   state.mode = "streaming";
   state.onData("\x1b\x1b");
+  await Bun.sleep(60);
   expect(interrupts).toBe(1);
   expect(state.mouseCarry).toBe("");
 });

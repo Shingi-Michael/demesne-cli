@@ -2285,6 +2285,80 @@ process.stdin.on("data", (chunk) => {
     expect(result.response).toBe("Request accepted: Piped prompt");
   });
 
+  test("event stream replays backlog and delivers a concurrent live event exactly once, in order", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const processor: TurnProcessor = {
+      providerId: "sse-provider",
+      modelId: "sse-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream() {
+        yield { type: "text_delta" as const, delta: "ok" };
+        yield { type: "usage" as const, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+      },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const url = running.url;
+
+    // Event 1: session.created (fresh database, so ids start at 1).
+    const created = await jsonRequest<CreateSessionResponse>(url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "SSE replay" }),
+    });
+    expect(created.eventId).toBe(1);
+    const sessionId = created.session.id;
+
+    // Events 2, 3, 4: one session.renamed each.
+    const rename = async (title: string): Promise<number> =>
+      (await jsonRequest<UpdateSessionResponse>(url, `/v1/sessions/${sessionId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title }),
+      })).eventId as number;
+    expect(await rename("rename-2")).toBe(2);
+    expect(await rename("rename-3")).toBe(3);
+    expect(await rename("rename-4")).toBe(4);
+
+    // Connect at after=1 so ids 2, 3, 4 are backlogged for replay. (eventsAfter
+    // is a strict `id > after`, so after=1 — not after=2 — backlogs exactly 2,3,4.)
+    const eventsUrl = new URL("/v1/events", url);
+    eventsUrl.searchParams.set("session_id", sessionId);
+    eventsUrl.searchParams.set("after", "1");
+    const controller = new AbortController();
+    const events: EventEnvelope[] = [];
+    const readTask = (async () => {
+      for await (const event of readServerSentEvents(await fetch(eventsUrl, { signal: controller.signal }))) {
+        events.push(event);
+        // After two of the three backlogged events have been delivered, the
+        // stream has not yet run the pull that would deliver the third, so
+        // replayComplete is still false and the hub discards a live event.
+        // Publish one anyway: it is written to SQLite before the hub emit, so
+        // the replay path must deliver it exactly once.
+        if (events.length === 2) {
+          const live = await jsonRequest<UpdateSessionResponse>(url, `/v1/sessions/${sessionId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ title: "rename-5" }),
+          });
+          expect(live.eventId).toBe(5);
+        }
+        if (events.length >= 4) break;
+      }
+    })();
+    const guard = setTimeout(() => controller.abort(), 2_000);
+    try {
+      await readTask;
+    } finally {
+      clearTimeout(guard);
+    }
+
+    // The invariant: the three backlogged events plus the one concurrent live
+    // event, in order, each exactly once — no gap, no duplicate from both the
+    // replay and the hub path.
+    expect(events.map((event) => event.eventId)).toEqual([2, 3, 4, 5]);
+    expect(events.filter((event) => event.type === "session.renamed")).toHaveLength(4);
+  });
+
   test("exits non-zero and reports failures in JSON mode", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

@@ -5,6 +5,7 @@ import { agentSystemPrompt, assertModelResponseComplete, groupHistory, withProvi
 import { planRawContextRequest } from "./context-planner.ts";
 import { InferenceScheduler } from "./inference-scheduler.ts";
 import type { TurnInference } from "./processor.ts";
+import { providerStreamLimits } from "./provider-limits.ts";
 import { buildSummaryCheckpointPrompt, parseSummaryCheckpoint, renderSummaryCheckpoint, type SummaryCheckpointContentV1 } from "./summary-checkpoint.ts";
 import type { ToolRegistry } from "./tools.ts";
 
@@ -30,7 +31,7 @@ export class SessionCompactor {
     this.store.startTurn(turnId);
     const session = this.store.getSession(turn.sessionId)!;
     const version = this.store.modelContextVersion(session.id);
-    const history = groupHistory(this.store.getCompletedModelTranscript(session.id));
+    const history = groupHistory(this.store.getModelContextTranscript(session.id));
     const previous = this.store.getSessionCheckpoint(session.id);
     const instructions = turn.content.slice("/compact".length).trim();
     const noChange = (message: string) => {
@@ -126,10 +127,11 @@ export class SessionCompactor {
         { thinkingEnabled: false, profile: inference.profile, contextPlan }));
       let text = ""; let hasReasoning = false; let outputTokens: number | null = null;
       let events = 0; let usageReceived = false;
+      const limits = providerStreamLimits(inference.maxOutputTokens, this.options);
       for await (const event of withProviderDeadlines(inference.stream(messages, [], controller.signal), controller,
-        this.options.providerFirstEventTimeoutMs ?? 180000, this.options.providerRequestTimeoutMs ?? 900000)) {
+        limits.firstEventTimeoutMs, limits.requestTimeoutMs)) {
         signal.throwIfAborted();
-        if (++events > (this.options.providerEventLimit ?? 20000)) throw new Error("Compaction exceeded the provider event limit");
+        if (++events > limits.eventLimit) throw new Error("Compaction exceeded the provider event limit");
         if (event.type === "text_delta" || event.type === "reasoning_delta") firstTokenAt ??= performance.now();
         if (event.type === "text_delta") {
           text += event.delta;

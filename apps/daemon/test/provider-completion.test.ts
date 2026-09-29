@@ -14,9 +14,13 @@ interface Round {
   toolArguments?: string;
   reason?: string;
   tokens?: number;
+  error?: Record<string, unknown>;
+  httpStatus?: number;
 }
 
 function stream(round: Round): Response {
+  if (round.error) return round.httpStatus ? Response.json({ error: round.error }, { status: round.httpStatus })
+    : new Response(`data: ${JSON.stringify({ error: round.error })}\n\ndata: [DONE]\n\n`);
   const events: unknown[] = [];
   if (round.reasoning) events.push({ choices: [{ delta: { reasoning_content: round.reasoning } }] });
   if (round.text) events.push({ choices: [{ delta: { content: round.text } }] });
@@ -130,19 +134,31 @@ test("an earlier narration and successful tool do not turn a later reasoning-onl
   });
 });
 
-test("normal tool and answer stops retain their reasons, and the configured budget reaches the provider and planner", async () => {
+test.each([429, undefined])("upstream rate-limit detail persists and replays through the turn failure (HTTP %s)", async (httpStatus) => {
+  await fixture([{ httpStatus, error: { message: "Provider returned error", code: 429, metadata: {
+    provider_name: "ModelRun", raw: "qwen/qwen3.8-27b:free is temporarily rate-limited upstream. Please retry shortly.",
+  } } }], async ({ events, db, turnId, replay }) => {
+    const message = "test-qwen / ModelRun (HTTP 429): qwen/qwen3.8-27b:free is temporarily rate-limited upstream. Please retry shortly.";
+    expect(events.at(-1)?.type).toBe("turn.failed");
+    expect(events.at(-1)?.payload.message).toBe(message);
+    expect(db.query("SELECT error_message FROM provider_calls WHERE turn_id = ?").get(turnId)).toEqual({ error_message: message });
+    expect(await replay()).toEqual(events);
+  });
+});
+
+test.each([8192, 131072])("normal tool and answer stops retain their reasons, and the %s-token budget reaches the provider and planner", async (maxOutputTokens) => {
   await fixture([
     { reasoning: "Inspect first", toolArguments: '{"path":"input.txt"}', reason: "tool_calls", tokens: 100 },
-    { text: "The file contains Tool result.", reason: "stop", tokens: 8192 },
+    { text: "The file contains Tool result.", reason: "stop", tokens: maxOutputTokens },
   ], async ({ events, db, turnId, requests, replay }) => {
     expect(events.at(-1)?.type).toBe("turn.completed");
     expect(requests).toHaveLength(2);
-    expect(requests.every((request) => request.max_tokens === 8192)).toBe(true);
+    expect(requests.every((request) => request.max_tokens === maxOutputTokens)).toBe(true);
     expect(events.filter((event) => event.type === "model.request_completed").map((event) => event.payload.finishReason)).toEqual(["tool_calls", "stop"]);
     for (const call of db.query("SELECT status, finish_reason, context_plan_json FROM provider_calls WHERE turn_id = ? ORDER BY rowid").all(turnId) as { status: string; context_plan_json: string }[]) {
       expect(call.status).toBe("completed");
-      expect(JSON.parse(call.context_plan_json).reserves.outputTokens).toBe(8192);
+      expect(JSON.parse(call.context_plan_json).reserves.outputTokens).toBe(maxOutputTokens);
     }
     expect(await replay()).toEqual(events);
-  }, 8192);
+  }, maxOutputTokens);
 });

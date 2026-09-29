@@ -21,6 +21,8 @@ jobs:
       # setup-bun installs to ~/.bun/bin, so expose bun where an install lives;
       # the agent benchmark fixtures run `bun test` through that tool.
       - run: sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
+      # search_files has a ripgrep path and a fallback; the tools tests cover both.
+      - run: command -v rg || (sudo apt-get update -q && sudo apt-get install -y -q ripgrep)
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test

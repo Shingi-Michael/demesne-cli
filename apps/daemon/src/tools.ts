@@ -334,7 +334,7 @@ function searchFilesTool(): AgentTool {
   return {
     definition: {
       name: "search_files",
-      description: "Literal case-insensitive search. Filter by path/include glob. Default 50; max 500. Returns path:line:text.",
+      description: "Literal case-insensitive search; include globs relative to path (*.ts matches any depth). Default 50; max 500 matching lines. Returns workspace-relative path:line:text.",
       inputSchema: {
         type: "object",
         properties: {
@@ -357,7 +357,7 @@ function searchFilesTool(): AgentTool {
       let pattern: RegExp | undefined;
       if (include) {
         try {
-          pattern = globToRegExp(include);
+          pattern = globToRegExp(include.includes("/") ? include : `**/${include}`);
         } catch {
           throw toolError("BAD_PATTERN", `invalid glob ${JSON.stringify(include)}`, 'use globs like "src/**/*.ts"');
         }
@@ -365,20 +365,23 @@ function searchFilesTool(): AgentTool {
       const limit = boundedInteger(value.limit, "limit", 1, 500, 50);
       const start = resolveWorkspacePath(context.workspaceRoot, path, false);
       const relativeStart = relative(context.workspaceRoot, start);
+      const searchRoot = statSync(start).isDirectory() ? start : dirname(start);
+      const accepts = (path: string) => !isSensitivePath(relative(context.workspaceRoot, join(searchRoot, path)))
+        && (!pattern || pattern.test(path.split(sep).join("/")));
 
-  const prefixLines = (rawPath: string): string => {
-    const posixPath = rawPath.replace(/^\.\//, "").split(sep).join("/");
-    return relativeStart === "" ? posixPath : `${relativeStart.split(sep).join("/")}/${posixPath}`;
-  };
+      const prefixLines = (rawPath: string): string => {
+        const posixPath = rawPath.replace(/^\.\//, "").split(sep).join("/");
+        return relativeStart === "" ? posixPath : `${relativeStart.split(sep).join("/")}/${posixPath}`;
+      };
 
       const ripgrepPaths = Bun.which("rg");
-      if (ripgrepPaths) {
+      if (ripgrepPaths && searchRoot === start) {
         try {
           const result = await ripgrepSearch({
             rgPath: ripgrepPaths,
             cwd: start,
             query,
-            include,
+            accepts,
             limit,
             signal: context.signal,
           });
@@ -387,10 +390,6 @@ function searchFilesTool(): AgentTool {
               .map((line) => formatRipgrepLine(line))
               .filter((entry): entry is { path: string; line: number; text: string } => entry !== null)
               .map((entry) => ({ ...entry, path: entry.path.replace(/^\.\//, "") }))
-              .filter((entry) => {
-                const platformPath = entry.path.split("/").join(sep);
-                return !isSensitivePath(platformPath) && (!pattern || pattern.test(entry.path));
-              })
               .sort((left, right) => left.path.localeCompare(right.path) || left.line - right.line)
               .slice(0, limit)
               .map((entry) => `${prefixLines(entry.path)}:${entry.line}:${entry.text}`);
@@ -401,11 +400,10 @@ function searchFilesTool(): AgentTool {
         }
       }
 
-      // One match beyond the limit is collected so `truncated` reports whether
-      // more matches exist, rather than whether the walk visited another file.
       const matches: string[] = [];
+      let truncated = false;
       walkFiles(start, context.workspaceRoot, context.signal, (absolute, relativePath) => {
-        if (pattern && !pattern.test(relativePath)) return;
+        if (!accepts(relative(searchRoot, absolute))) return;
         const stat = statSync(absolute);
         if (stat.size > 8 * 1024 * 1024) return;
         const bytes = readFileSync(absolute);
@@ -418,12 +416,12 @@ function searchFilesTool(): AgentTool {
         }
         for (const [index, line] of text.split("\n").entries()) {
           if (line.toLocaleLowerCase("en-US").includes(query.toLocaleLowerCase("en-US"))) {
+            if (matches.length === limit) { truncated = true; return; }
             matches.push(`${relativePath}:${index + 1}:${line.slice(0, 2000)}`);
-            if (matches.length > limit) return;
           }
         }
-      }, limit * 4, () => matches.length > limit);
-      return JSON.stringify({ matches: matches.slice(0, limit), truncated: matches.length > limit });
+      }, limit * 4, () => truncated);
+      return JSON.stringify({ matches, truncated });
     },
   };
 }
@@ -432,7 +430,7 @@ async function ripgrepSearch(options: {
   rgPath: string;
   cwd: string;
   query: string;
-  include?: string;
+  accepts: (path: string) => boolean;
   limit: number;
   signal: AbortSignal;
 }): Promise<{ failed: boolean; hadMore: boolean; lines: string[] }> {
@@ -443,17 +441,16 @@ async function ripgrepSearch(options: {
     "--fixed-strings",
     "--ignore-case",
     "--line-number",
+    "--with-filename",
+    "--sort", "path",
     "--max-columns",
     "2000",
     "-e",
     options.query,
   ];
-  if (options.include) {
-    // Glob filtering is applied deterministically by our own matcher on the
-    // resulting paths; ripgrep's -g semantics vary with search-root prefixes.
-  }
   args.push(".");
 
+  options.signal.throwIfAborted();
   const child = Bun.spawn([options.rgPath, ...args], {
     cwd: options.cwd,
     stdin: "ignore",
@@ -470,23 +467,28 @@ async function ripgrepSearch(options: {
     let buffer = "";
     const lines: string[] = [];
     let stoppedEarly = false;
+    const collect = (line: string) => {
+      const entry = formatRipgrepLine(line);
+      if (entry && options.accepts(entry.path.replace(/^\.\//, ""))) lines.push(line);
+      return lines.length > options.limit;
+    };
     while (true) {
       const { done, value } = await reader.read();
       buffer += decoder.decode(value, { stream: !done });
       let newline = buffer.indexOf("\n");
       while (newline !== -1) {
-        lines.push(buffer.slice(0, newline));
+        if (collect(buffer.slice(0, newline))) { stoppedEarly = true; break; }
         buffer = buffer.slice(newline + 1);
         newline = buffer.indexOf("\n");
       }
-      if (done) break;
-      if (lines.length > options.limit * 2) {
-        stoppedEarly = true;
+      if (stoppedEarly) {
         child.kill("SIGKILL");
         break;
       }
+      if (done) { if (buffer) stoppedEarly = collect(buffer); break; }
     }
     const exitCode = await child.exited;
+    options.signal.throwIfAborted();
     return { failed: exitCode > 1 && !stoppedEarly, hadMore: stoppedEarly || lines.length > options.limit, lines: lines.slice(0, options.limit) };
   } finally {
     options.signal.removeEventListener("abort", abort);

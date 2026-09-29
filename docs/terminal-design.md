@@ -2,6 +2,8 @@
 
 The visual source of truth is **Version 14** of [Futuristic Terminal Harness Design](https://www.figma.com/make/szdinDI8QBdI1jBtvCDLei/Futuristic-Terminal-Harness-Design), inspected on 2026-09-23. Version 14 standardizes live Thinking indicators and the live assistant card. The native renderer expresses its geometry in terminal cells.
 
+Later component references supersede their earlier geometry: **Version 19** for the header, **Version 20** for the composer/footer, and **Version 21** for the slash menu (inspected 2026-09-26).
+
 Live Thinking and the running Send control use the same shared `thinkingDots` renderer, including spacing, amber color and pulse timing. Per the subsequent user refinement, the bottom footer omits running/thinking labels, pulsing dots, elapsed time and token speed, retaining context and navigation. Live cards use an amber `[` and the same agent-label/timestamp header and geometry as settled cards; successful settlement restores cyan and failure uses red.
 
 ## Palette
@@ -20,6 +22,7 @@ Live Thinking and the running Send control use the same shared `thinkingDots` re
 | `--text-primary` | `paper` | `#C8DAE8` |
 | `--text-secondary` | `secondary` | `#7A9FB8` |
 | `--text-dim` | `muted` | `#536E82` |
+| 8% cyan over `--bg-2` | `menuSelection` | `#081F27` |
 | `syntax/keyword` | `syntaxKeyword` | `#C49CE6` |
 | `syntax/string` | `syntaxString` | `#9CCF8D` |
 | `syntax/number` | `syntaxNumber` | `#E5A93C` |
@@ -49,7 +52,93 @@ Translucent cyan, amber, and red surfaces are composited into theme tokens for t
 
 ## Data and motion
 
+### Agent Drive
+
+**Alt+J**, `/drive`, and the `▷` rail action open the mission panel. It follows the
+existing dock/overlay geometry, uses the semantic palette and square controls,
+and keeps Pause/Resume/Stop fixed above scrollable mission notes. Drive activity
+stays in this panel and the rail; the bottom footer remains free of telemetry.
+See [Agent Drive](agent-drive.md) for the visible UI loop and recovery behavior.
+
+### Slash menu · Version 21
+
+The menu overlays the transcript immediately above the composer, spanning its
+width and stopping before the action rail or docked panel. Its square top and
+side borders join the composer separator. Opening, filtering and dismissal keep
+the composer and conversation reading anchor in place.
+
+Dark section strips use small uppercase labels. Command names occupy a fixed
+12-cell column (the reference uses 90px), followed by muted descriptions. The
+selected row has an 8% accent wash, a narrow cyan left edge and cyan command
+text. Selection remains identifiable without color. The popup is capped at
+12 terminal rows, reduced to the space available above the composer, and scrolls
+internally without a visible scrollbar.
+
+`/` opens the menu; typing filters command names and aliases. Up/Down wrap the
+selection, Page Up/Down move through the list, and the mouse wheel navigates
+inside the popup. Hover selects and a single click accepts. Enter or Tab runs an
+argument-free command or inserts an argument-taking command for completion.
+Escape dismisses the menu while preserving the query and caret; editing opens it
+again. Section strips and borders never activate the transcript underneath.
+
+The groups use the available native commands: Session, Model, Context, Tools,
+Control, and Custom. Custom commands remain reachable beyond the initial viewport.
+Preview with `bun run ui:session --state=complete --commands=/`, or use
+`--commands=/mo` for the filtered Model group.
+
+### Live changes panel
+
+The Diff rail action (or **Alt+D**) opens a turn's file changes. Selecting an edit
+row in chat opens its recorded revision. Chat keeps a compact path, outcome and
+`+added −removed` receipt; code lives in the panel. **Expand / Restore** or
+**Alt+Enter** switches between the dock and a wide overlay, preserving the draft.
+
+For native `write_file`, `edit_file`, `move_path` and `delete_path` operations,
+`tool.call_draft` carries bounded argument fragments while the model generates
+them. Partial JSON is decoded for display only. **Drafting**, **Pending** and
+**Approval** are proposals; only a successful tool result becomes **Applied**.
+Failed, denied and stopped proposals retain their outcome. Original arguments
+and recorded results remain available in the execution log.
+
+Successful operations record immutable before/after file evidence in the event
+journal, including creations, deletions and both sides of moves. Contiguous
+operations on a file accumulate within the selected turn. External changes
+between operations are labelled as separate recorded segments. Historical
+rendering never reads today's file from disk. Binary/oversized files explicitly
+report unavailable text; textual previews are bounded to 1 MiB per side and
+10,000 diff rows. Older journals fall back to labelled input fragments.
+
+**Follow edits** tracks the latest file and turn. Selecting a file or scrolling
+pauses it and keeps a labelled snapshot, even through settlement or new edits.
+**Live / Ctrl+G** resumes following. **←/→** selects files; **↑/↓**, Page Up/Down,
+Home/End and the wheel navigate code. The file-list height is reserved so new
+files cannot shift the code viewport. Code uses filename-based syntax highlighting
+for TypeScript/JavaScript, Python, Rust, Go, JSON, YAML and shell files. Keywords,
+strings, numbers and comments retain their syntax colors on both sides; green/red
+gutter markers and subtle themed row backgrounds identify additions/removals.
+Old/new lexical state is independent and includes hidden hunk context. Wrapped
+code stays aligned beneath its source line and carries a quiet `↪` continuation
+marker. Line numbers remain muted, and no scrollbar is drawn.
+
+Preview with `bun run ui:session --live-diff` (demonstration data), optionally
+`--expand-diff` or `--snapshot=120x36 --plain`.
+
+### Conversation rendering
+
 Cards project actual `UserEntry`, `ReasoningEntry`, `AssistantEntry`, `ToolEntry`, and turn-closing `NoticeEntry` records. `ResponseReceipt` owns the original mode, model, duration, throughput and context. Unknown values remain explicit. Card timestamps use the first activity's recorded time; the clock is separate live telemetry.
+
+Startup and session switching use local daemon metadata. Provider model discovery
+is deferred until `/model`; workspace suggestions and artifact metadata load
+independently of prompt readiness.
+
+Saved history uses `/v1/sessions/:id/replay?after=N&through=M`, pinned to the
+session snapshot's cursor. Pages scan at most 20,000 original events and coalesce
+consecutive nonempty text deltas into merged chunks of at most 65,536 UTF-16 code units.
+The first timestamp/ID, final cursor and delta count retain response timestamps,
+reasoning durations and revisions; tool, permission and model-round boundaries
+stay explicit. An LRU cache retains at most 128 serialized pages / 32 MiB, keyed
+by session and snapshot. The durable journal and live SSE retain every original
+event. Older daemons use the original SSE replay path.
 
 `/compact [instructions]` uses the same cancellable turn and response card, with
 **Compact** mode and a before/after context estimate. Its validated summary is

@@ -16,6 +16,7 @@ import {
   type RuntimeProfileStatus,
   type Session,
   type SessionStateResponse,
+  type SessionReplayPage,
   type SubmitTurnRequest,
   type SubmitTurnResponse,
   type TurnChangesResponse,
@@ -23,6 +24,11 @@ import {
   type UndoTurnResponse,
   type UpdateSessionRequest,
   type UpdateSessionResponse,
+  type DriveRequest,
+  type DriveResponse,
+  type DriveProgress,
+  parseDriveStreamEvent,
+  DrivePlanningError,
 } from "@demesne/protocol";
 
 /// Typed client for the Demesne daemon.
@@ -64,6 +70,25 @@ export interface HealthResponse {
 
 export class DemesneClient {
   readonly server: string;
+  async decideDrive(request: DriveRequest, signal?: AbortSignal, progress?: (event: DriveProgress) => void): Promise<DriveResponse> {
+    if (!progress) return this.request("/v1/drive/decide", { method: "POST", body: JSON.stringify(request), signal });
+    const response = await this.fetchImpl(new URL("/v1/drive/decide", this.server), { method: "POST", body: JSON.stringify(request), signal,
+      headers: { ...this.authHeaders(), "Content-Type": "application/json", Accept: "text/event-stream" } });
+    if (!response.ok) {
+      const body: unknown = await response.json();
+      throw new ApiRequestError(parseApiError(body) ?? `Drive request failed with HTTP ${response.status}`, response.status, parseApiErrorCode(body));
+    }
+    // Older daemons return a final JSON response on the same route.
+    if (!response.headers.get("content-type")?.includes("text/event-stream")) return (parseDriveStreamEvent({ type: "result", response: await response.json() }) as { type: "result"; response: DriveResponse }).response;
+    for await (const raw of readServerSentEvents<unknown>(response)) {
+      signal?.throwIfAborted();
+      const event = parseDriveStreamEvent(raw);
+      if (event.type === "error") throw new DrivePlanningError(event.message, event.recovery);
+      if (event.type === "result") return event.response;
+      progress(event);
+    }
+    throw new DrivePlanningError("Drive planning stream ended before a validated decision arrived.", "transient");
+  }
   private readonly token?: string;
   private readonly fetchImpl: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -133,6 +158,10 @@ export class DemesneClient {
 
   async getSessionState(sessionId: string): Promise<SessionStateResponse> {
     return this.request<SessionStateResponse>(`/v1/sessions/${sessionId}`);
+  }
+
+  async replayPage(sessionId: string, after: number, through: number, signal?: AbortSignal): Promise<SessionReplayPage> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/replay?after=${after}&through=${through}`, { signal });
   }
 
   async listArtifacts(sessionId: string, after = 0): Promise<ArtifactPage> {

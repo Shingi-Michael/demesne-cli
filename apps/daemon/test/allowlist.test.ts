@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { allowRuleMatches, ConfigAllowlist, parseAllowRule } from "../src/allowlist.ts";
+import { allowRuleMatches, allowRulesCover, ConfigAllowlist, parseAllowRule } from "../src/allowlist.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -61,6 +61,21 @@ describe("allowRuleMatches", () => {
     const rule = parseAllowRule("edit_file")!;
     expect(allowRuleMatches(rule, "edit_file", { path: "anything.ts" })).toBe(true);
     expect(allowRuleMatches(rule, "write_file", { path: "anything.ts" })).toBe(false);
+  });
+});
+
+describe("allowRulesCover", () => {
+  test("move_path needs both a source and a destination entry", () => {
+    const rules = [parseAllowRule("move_path:src")!, parseAllowRule("move_path:backup")!];
+    // Both endpoints covered by the user's two entries: approved.
+    expect(allowRulesCover(rules, "move_path", { from: "src/a.ts", to: "backup/a.ts" })).toBe(true);
+    // Source covered but the destination is not: a fresh approval is required.
+    expect(allowRulesCover(rules, "move_path", { from: "src/a.ts", to: "release/a.ts" })).toBe(false);
+    // Destination covered but the source is not.
+    expect(allowRulesCover(rules, "move_path", { from: "other/a.ts", to: "backup/a.ts" })).toBe(false);
+    // Single-path tools keep the per-entry check.
+    expect(allowRulesCover(rules, "edit_file", { path: "src/a.ts" })).toBe(false);
+    expect(allowRulesCover([parseAllowRule("edit_file:src")!], "edit_file", { path: "src/a.ts" })).toBe(true);
   });
 });
 

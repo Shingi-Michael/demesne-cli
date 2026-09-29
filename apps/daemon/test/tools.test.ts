@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -292,6 +292,33 @@ describe("built-in tools", () => {
     expect(searched.truncated).toBe(true);
     const explicitSearch = JSON.parse(await tools.get("search_files")!.execute({ query: "needle", limit: 220 }, context));
     expect(explicitSearch.matches).toHaveLength(220);
+  });
+
+  test.each(["ripgrep", "fallback"] as const)("search filename globs match nested files and count only accepted lines with %s", async (backend) => {
+    if (backend === "ripgrep" && !Bun.which("rg")) throw new Error("This regression requires ripgrep");
+    const which = backend === "fallback" ? spyOn(Bun, "which").mockReturnValue(null) : undefined;
+    try {
+      const root = workspace();
+      mkdirSync(join(root, "src/nested"), { recursive: true });
+      mkdirSync(join(root, ".ssh"));
+      writeFileSync(join(root, "a.txt"), "needle ignored\n".repeat(300));
+      writeFileSync(join(root, "src/nested/parser.ts"), "needle parser\nneedle lexer\nneedle tests\n");
+      writeFileSync(join(root, ".ssh/config"), "needle private\n");
+      const tool = new ToolRegistry().get("search_files")!;
+      const context = { workspaceRoot: root, signal: new AbortController().signal };
+      for (const input of [
+        { include: "*.ts" }, { include: "**/*.ts" },
+        { path: "src", include: "nested/*.ts" }, { path: "src/nested/parser.ts", include: "*.ts" },
+      ]) {
+        const result = JSON.parse(await tool.execute({ query: "needle", limit: 2, ...input }, context));
+        expect(result).toEqual({ matches: ["src/nested/parser.ts:1:needle parser", "src/nested/parser.ts:2:needle lexer"], truncated: true });
+      }
+      const exact = JSON.parse(await tool.execute({ query: "needle", include: "*.ts", limit: 3 }, context));
+      expect(exact.matches).toHaveLength(3);
+      expect(exact.truncated).toBe(false);
+      expect(JSON.parse(await tool.execute({ query: "needle", path: ".ssh" }, context)).matches).toEqual([]);
+      await expect(tool.execute({ query: "needle" }, { ...context, signal: AbortSignal.abort() })).rejects.toThrow();
+    } finally { which?.mockRestore(); }
   });
 
   test("list_files enforces a byte budget for long paths", async () => {

@@ -56,6 +56,7 @@ export interface OpenAICompatibleOptions {
   providerId?: string;
   includeUsage?: boolean;
   reasoningEffort?: "none" | "low" | "medium" | "high" | "max";
+  openRouterIgnore?: readonly string[];
   contextWindow?: number;
   fetch?: typeof fetch;
 }
@@ -66,6 +67,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
   private readonly apiKey: string | undefined;
   private readonly includeUsage: boolean;
   private readonly reasoningEffort: OpenAICompatibleOptions["reasoningEffort"];
+  private readonly openRouterIgnore: readonly string[];
   private readonly configuredContextWindow: number | undefined;
   private readonly fetchImplementation: typeof fetch;
 
@@ -75,6 +77,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     this.id = options.providerId ?? "openai-compatible";
     this.includeUsage = options.includeUsage ?? true;
     this.reasoningEffort = options.reasoningEffort;
+    this.openRouterIgnore = [...(options.openRouterIgnore ?? [])];
     this.configuredContextWindow = options.contextWindow;
     this.fetchImplementation = options.fetch ?? fetch;
   }
@@ -85,7 +88,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       redirect: "manual",
       signal,
     });
-    if (!response.ok) throw await providerHttpError(response);
+    if (!response.ok) throw await providerHttpError(response, this.id);
     let body: unknown;
     try {
       body = JSON.parse(await readLimitedText(response, MODEL_RESPONSE_LIMIT));
@@ -102,11 +105,13 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       if (!isRecord(value) || typeof value.id !== "string" || !value.id || seen.has(value.id)) return [];
       seen.add(value.id);
       const contextWindow = readContextWindow(value);
+      const maxOutputTokens = isRecord(value.top_provider) ? positiveInteger(value.top_provider.max_completion_tokens) : undefined;
       return [{
         id: value.id,
         provider: this.id,
         ...(typeof value.owned_by === "string" ? { ownedBy: value.owned_by } : {}),
         ...(contextWindow ? { contextWindow } : {}),
+        ...(maxOutputTokens ? { maxOutputTokens } : {}),
       }];
     });
     if (this.id !== "ollama") return models.map((model) => this.withConfiguredContext(model));
@@ -125,6 +130,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       : request.thinkingEnabled === true && this.reasoningEffort === "none"
         ? "low"
         : this.reasoningEffort;
+    const openRouter = this.baseUrl.hostname === "openrouter.ai";
     const response = await this.fetchImplementation(new URL("chat/completions", this.baseUrl), {
       method: "POST",
       headers: { ...this.headers(), "Content-Type": "application/json" },
@@ -132,7 +138,11 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
         model: request.model,
         messages: serializeMessages(request.messages),
         stream: true,
-        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+        ...(openRouter && this.openRouterIgnore.length ? { provider: { ignore: this.openRouterIgnore } } : {}),
+        ...(openRouter
+          ? (reasoningEffort ? { reasoning: { effort: reasoningEffort } }
+            : request.thinkingEnabled !== undefined ? { reasoning: { enabled: request.thinkingEnabled } } : {})
+          : reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         ...(this.id === "ollama" && request.thinkingEnabled !== undefined
           ? { think: request.thinkingEnabled }
           : {}),
@@ -154,10 +164,11 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       redirect: "manual",
       signal,
     });
-    if (!response.ok) throw await providerHttpError(response);
+    if (!response.ok) throw await providerHttpError(response, this.id);
     if (!response.body) throw new ProviderError("Provider returned an empty stream");
 
     let completed = false;
+    let reportedFinishReason: string | undefined;
     for await (const data of readEventData(response.body)) {
       if (data === "[DONE]") {
         completed = true;
@@ -171,9 +182,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       }
       if (!isRecord(value)) throw new ProviderError("Provider stream contained an invalid event");
       if (isRecord(value.error)) {
-        const message = typeof value.error.message === "string" ? value.error.message : "Provider stream failed";
-        const code = typeof value.error.code === "string" ? value.error.code : undefined;
-        throw new ProviderError(message, undefined, code);
+        throw providerResponseError(value.error, this.id);
       }
 
       const reasoningDelta = readReasoningDelta(value);
@@ -184,7 +193,13 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       if (textDelta) yield { type: "text_delta", delta: textDelta };
       for (const toolCall of readToolCallDeltas(value)) yield { type: "tool_call_delta", ...toolCall };
       const finishReason = readFinishReason(value);
-      if (finishReason !== null) yield { type: "finish", reason: finishReason };
+      if (finishReason !== null) {
+        // OpenRouter repeats the terminal choice on its trailing usage frame.
+        // Normalize identical repeats while rejecting contradictory outcomes.
+        if (reportedFinishReason !== undefined && reportedFinishReason !== finishReason) throw new ProviderError("Provider stream contained conflicting finish reasons");
+        if (reportedFinishReason === undefined) yield { type: "finish", reason: finishReason };
+        reportedFinishReason = finishReason;
+      }
       const usage = readUsage(value.usage);
       if (usage) yield { type: "usage", usage };
     }
@@ -194,6 +209,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
   private headers(): Record<string, string> {
     return {
       Accept: "application/json",
+      ...(this.baseUrl.hostname === "openrouter.ai" ? { "X-OpenRouter-Title": "Demesne" } : {}),
       ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
     };
   }
@@ -338,20 +354,45 @@ function normalizeBaseUrl(value: string, allowHttpEndpoint?: string): URL {
   return url;
 }
 
-async function providerHttpError(response: Response): Promise<ProviderError> {
+async function providerHttpError(response: Response, provider: string): Promise<ProviderError> {
   const text = await readLimitedText(response, ERROR_RESPONSE_LIMIT, false);
-  let message = text.trim() || `Provider returned HTTP ${response.status}`;
-  let code: string | undefined;
   try {
     const value: unknown = JSON.parse(text);
-    if (isRecord(value) && isRecord(value.error) && typeof value.error.message === "string") {
-      message = value.error.message;
-      code = typeof value.error.code === "string" ? value.error.code : undefined;
-    }
+    if (isRecord(value) && isRecord(value.error)) return providerResponseError(value.error, provider, response.status);
   } catch {
     // Preserve the bounded plain-text response.
   }
-  return new ProviderError(message, response.status, code);
+  return providerResponseError({ message: text.trim() || "Provider request failed" }, provider, response.status);
+}
+
+/** OpenRouter puts the actionable upstream explanation in metadata.raw,
+ * underneath a generic message. Retain it in the persisted error and UI. */
+function providerResponseError(error: Record<string, unknown>, provider: string, httpStatus?: number): ProviderError {
+  const clean = (value: unknown, limit = 2000) => typeof value === "string"
+    ? value.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").trim().slice(0, limit) : "";
+  const code = typeof error.code === "string" ? error.code
+    : typeof error.code === "number" && Number.isSafeInteger(error.code) ? String(error.code) : undefined;
+  const numericCode = code && /^\d{3}$/.test(code) ? Number(code) : undefined;
+  const status = httpStatus ?? (numericCode !== undefined && numericCode >= 400 && numericCode <= 599 ? numericCode : undefined);
+  let message = clean(error.message) || "Provider request failed";
+  const metadata = isRecord(error.metadata) ? error.metadata : {};
+  const upstream = clean(metadata.provider_name, 120);
+  let detail = "";
+  if (typeof metadata.raw === "string") {
+    const raw = metadata.raw.slice(0, ERROR_RESPONSE_LIMIT);
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (isRecord(parsed)) detail = clean(isRecord(parsed.error) ? parsed.error.message : parsed.message ?? parsed.error);
+      else if (typeof parsed === "string") detail = clean(parsed);
+    } catch {
+      // Do not dump truncated JSON envelopes (which may contain request data).
+      if (!raw.trimStart().startsWith("{") && !raw.trimStart().startsWith("[")) detail = clean(raw);
+    }
+  }
+  if (detail && detail !== message) message = message === "Provider returned error" ? detail : `${message}: ${detail}`;
+  if (status === 429 && !/retry|try again/i.test(message)) message += " Retry shortly or choose another model.";
+  const label = [clean(provider, 120), upstream].filter(Boolean).join(" / ");
+  return new ProviderError(`${label}${status === undefined ? "" : ` (HTTP ${status})`}: ${message}`, status, code);
 }
 
 async function* readEventData(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {

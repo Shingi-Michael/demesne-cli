@@ -32,3 +32,32 @@ test("fragmented focus and hover reports never leak into the draft, but remain l
   }
   expect(new TerminalInputDecoder().push("\x1b[200~\x1b[I\x1b[O\x1b[201~")).toEqual([{ kind: "paste", text: "\x1b[I\x1b[O" }]);
 });
+
+test("Escape followed by a terminal report never consumes the report's introducer as a second Escape", () => {
+  for (const [report, expected] of [
+    ["\x1b[<65;229;33M", { kind: "mouse", event: { kind: "wheel", button: 1, direction: "down", col: 228, row: 32 } }],
+    ["\x1b[I", { kind: "focus", focused: true }],
+    ["\x1b[6;16;8t", { kind: "cell-size", height: 16, width: 8 }],
+  ] as const) {
+    for (const count of [1, 2]) {
+      const input = "\x1b".repeat(count) + report;
+      for (let split = 1; split < input.length; split++) {
+        const decoder = new TerminalInputDecoder();
+        expect([...decoder.push(input.slice(0, split)), ...decoder.push(input.slice(split))]).toEqual([
+          { kind: "escape", sequence: "\x1b".repeat(count) }, expected,
+        ]);
+      }
+    }
+  }
+});
+
+test("incomplete mouse introducers survive the escape timeout, while actual double Escape still flushes", () => {
+  const decoder = new TerminalInputDecoder();
+  expect(decoder.push("\x1b[")).toEqual([]);
+  expect(decoder.waitingForEscape).toBe(false);
+  expect(decoder.flushEscape()).toEqual([]);
+  expect(decoder.push("<65;229;33M")).toEqual([{ kind: "mouse", event: { kind: "wheel", button: 1, direction: "down", col: 228, row: 32 } }]);
+  expect(decoder.push("\x1b\x1b")).toEqual([]);
+  expect(decoder.waitingForEscape).toBe(true);
+  expect(decoder.flushEscape()).toEqual([{ kind: "escape", sequence: "\x1b\x1b" }]);
+});

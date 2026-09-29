@@ -9,6 +9,7 @@ import {
   parseUndoSessionRequest,
   parseUpdateSessionRequest,
   ProtocolValidationError,
+  parseDriveRequest,
   type ApiErrorBody,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
@@ -33,12 +34,15 @@ import { ConfigAllowlist } from "./allowlist.ts";
 import { canonicalWorkspace, listWorkspaceFiles, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
 import { detectGitBranch } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
+import { SessionReplay } from "./session-replay.ts";
+import { planDrive } from "./drive-planner.ts";
+import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
 import { imageGenerationTool } from "./image-generation.ts";
 import { captureWindowTool } from "./window-capture.ts";
 import { workspaceFileInfo } from "./workspace-file-info.ts";
-import type { ImageGenerationConfig } from "@demesne/config";
+import type { AgentConfig, ImageGenerationConfig } from "@demesne/config";
 import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, type InferenceBoundaryHook } from "./inference-scheduler.ts";
@@ -91,11 +95,13 @@ export function createDaemonApp(options: {
   providerRequestTimeoutMs?: number;
   providerEventLimit?: number;
   providerVision?: boolean;
+  agent?: AgentConfig;
 }): DaemonApp {
   if (options.images && Object.values(options.images).some((value) => value !== undefined)
     && (!options.images.url || !options.images.model)) throw new Error("Image generation requires both images.url and images.model");
   const hub = new EventHub();
   const store = new DemesneStore(options.databasePath, (event) => hub.publish(event));
+  const replay = new SessionReplay(store);
   const processor: TurnProcessor = options.processor ?? new PlaceholderTurnProcessor();
   const allowlist = new ConfigAllowlist(options.allowlistPath ?? null);
   const invalidRules = allowlist.invalidEntries();
@@ -137,12 +143,15 @@ export function createDaemonApp(options: {
       providerRequestTimeoutMs: options.providerRequestTimeoutMs,
       providerEventLimit: options.providerEventLimit,
       providerVision: options.providerVision,
+      ...options.agent,
     },
   );
   const activeTurns = new Set<Promise<void>>();
   const compactor = new SessionCompactor(store, scheduler, tools, options);
   const activeControllers = new Map<string, AbortController>();
   const activeStreamClosers = new Set<() => void>();
+  const driveLifecycle = new AbortController();
+  const activeDriveDecisions = new Set<Promise<unknown>>();
   const requestDrainWaiters = new Set<() => void>();
   let activeRequests = 0;
   let closing = false;
@@ -268,6 +277,39 @@ export function createDaemonApp(options: {
         } catch (error) {
           const message = error instanceof Error ? error.message : "Model discovery failed";
           return apiError("provider_error", message, 502);
+        }
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/drive/decide") {
+        const body = parseDriveRequest(await readJson(request));
+        const home = store.getSession(body.homeSessionId), viewed = store.getSession(body.observation.sessionId);
+        if (!home || !viewed) return apiError("not_found", "Drive session not found", 404);
+        if (!home.workspace || home.workspace.root !== viewed.workspace?.root || home.workspace.root !== body.observation.workspace)
+          return apiError("invalid_state", "Drive observations must belong to the mission's workspace", 409);
+        const signal = AbortSignal.any([request.signal, driveLifecycle.signal]);
+        const inference = snapshotTurnInference(processor, undefined);
+        const decide = (signal: AbortSignal, progress?: Parameters<typeof planDrive>[5]) => {
+          const planned = (async () => {
+            const leaseId = `drive:${randomUUID()}`;
+            const lease = await scheduler.acquire(leaseId, signal);
+            try {
+              let image: { id: string; url: string } | undefined;
+              if (options.providerVision && body.observation.surface === "preview" && body.observation.artifactId) {
+                const artifact = store.getImageArtifact(viewed.id, body.observation.artifactId);
+                if (artifact) { const bytes = await readArtifact(store, artifact, true); image = { id: artifact.id, url: `data:image/png;base64,${bytes.toString("base64")}` }; }
+              }
+              return await planDrive(body, inference, signal, options, image, progress);
+            } finally { lease.release({ turnContinues: false }); scheduler.finishTurn(leaseId); }
+          })();
+          activeDriveDecisions.add(planned);
+          void planned.then(() => activeDriveDecisions.delete(planned), () => activeDriveDecisions.delete(planned));
+          return planned;
+        };
+        if (request.headers.get("accept")?.includes("text/event-stream")) return driveStream(signal, decide);
+        try {
+          return json(await decide(signal));
+        } catch (error) {
+          return apiError("provider_error", error instanceof Error ? error.message : "Drive planning failed", 502);
         }
       }
 
@@ -522,6 +564,17 @@ export function createDaemonApp(options: {
         return json(response);
       }
 
+      if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "replay") {
+        const after = Number(url.searchParams.get("after") ?? 0);
+        const through = Number(url.searchParams.get("through"));
+        if (!url.searchParams.has("through") || !Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(through) || through < after) {
+          return apiError("invalid_request", "Valid after and through history cursors are required", 400);
+        }
+        return new Response(replay.page(path[2]!, after, through), {
+          headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+        });
+      }
+
       if (request.method === "GET" && url.pathname === "/v1/events") {
         const sessionId = url.searchParams.get("session_id")?.trim();
         if (!sessionId) return apiError("invalid_request", "session_id is required", 400);
@@ -561,6 +614,7 @@ export function createDaemonApp(options: {
 
   async function closeApplication(): Promise<void> {
       closing = true;
+      driveLifecycle.abort(new DOMException("Daemon shutting down", "AbortError"));
       for (const close of [...activeStreamClosers]) close();
       if (activeRequests > 0) {
         await new Promise<void>((resolve) => requestDrainWaiters.add(resolve));
@@ -573,6 +627,7 @@ export function createDaemonApp(options: {
       }
       await scheduler.close(new DOMException("Daemon shutting down", "AbortError"));
       await Promise.allSettled(activeTurns);
+      await Promise.allSettled(activeDriveDecisions);
       await mcpReady.catch(() => undefined);
       mcp.stop();
       backgroundProcesses.shutdownAll();

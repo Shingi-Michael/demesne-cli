@@ -8,6 +8,9 @@ import { InteractionTransitions } from "./interaction.ts";
 import { reducedMotionEnabled } from "../motion.ts";
 import { diffPanelLines, filePanelLines } from "./panel-content.ts";
 import { sessionHeader } from "./session-header.ts";
+import { changeFiles, DiffPanel } from "./diff-panel.ts";
+import { renderDrivePanel } from "./drive-panel.ts";
+import type { DriveInspectAction, DriveObservation, DriveState } from "@demesne/protocol";
 
 /// The three run surfaces. `response` is the default; `review` (recorded changes
 /// plus their verification) and `log` (the execution log) open on demand.
@@ -63,7 +66,7 @@ type Action = FlowAction | { kind: "run"; id: number | null } | { kind: "surface
   | { kind: "record"; id: number } | { kind: "back" | "history" | "log" | "thinking" | "request" | "follow" | "response-start" }
   | { kind: "workspace" | "context" | "panel-close" | "panel-toggle" | "settings" };
 export interface SessionZone { row: number; column: number; width: number; action: Action }
-interface ScrollRegion { row: number; column: number; width: number; height: number; target: "body" | "list" | "history" | "flow" | "output" | "context"; recordId?: number; maximum?: number }
+interface ScrollRegion { row: number; column: number; width: number; height: number; target: "body" | "list" | "history" | "flow" | "output" | "context" | "diff" | "drive"; recordId?: number; maximum?: number }
 const stateLabel = (tool: ToolEntry): string => tool.waiting ? "! APPROVAL" : tool.state === "denied" ? "× DENIED"
   : tool.state === "stopped" ? "■ STOPPED" : toolFailed(tool) ? "× FAILED" : tool.state === "done" ? "✓ DONE" : "● RUNNING";
 const checkLabel = (tool: ToolEntry): string => tool.waiting ? "! AWAITING APPROVAL" : tool.state === "running" ? "● RUNNING" : tool.state === "denied" ? "× DENIED"
@@ -89,12 +92,38 @@ export class SessionView {
   private historyIndex = 0;
   private argumentsOpen = new Set<number>();
   private flowRows: FlowRow[] = [];
+  private answerRows: string[] = [];
+  get answerEvidenceRows(): readonly string[] { return this.answerRows; }
+  private latestAnswerRows: string[] = [];
+  get latestAnswerEvidenceRows(): readonly string[] { return this.latestAnswerRows; }
+  get driveScrollRegions(): NonNullable<DriveObservation["scrollRegions"]> {
+    return this.regions.flatMap((region) => {
+      if (region.target === "drive") return [];
+      if (region.target === "diff") return this.diffPanel.scrollRegions.map((part) => ({ surface: part.surface, row: part.row, column: region.column,
+        width: region.width, height: part.height, offset: part.offset, maximum: part.maximum }));
+      const offset = region.target === "flow" ? this.memory.flowOffset : region.target === "history" ? this.historyIndex : region.target === "list" ? this.selection
+        : region.target === "context" ? this.contextOffset : region.target === "output" ? this.outputOffset : this.memory.detailOffsets.get(region.recordId!) ?? 0;
+      const maximum = region.target === "flow" ? this.flowMaximum : region.target === "history" ? Math.max(0, this.runs.length - 1) : region.target === "list" ? Math.max(0, this.records().length - 1) : region.maximum ?? 0;
+      return [{ surface: region.target === "flow" ? "response" : region.target === "body" || region.target === "list" ? this.driveSurface : region.target,
+        row: region.row, column: region.column, width: region.width, height: region.height, offset: Math.min(offset, maximum), maximum }];
+    });
+  }
   private flowMaximum = 0;
   private flowExpansions = new Map<string, FlowExpansion>();
   private flowControls: { key: string; row: number; action: FlowAction }[] = [];
   private reveal: { key: string; line: number; block?: boolean; start?: boolean } | null = null;
   private inspectionOrigin: { selectedId: number | null; runId: number } | null = null;
   private artifact: FlowArtifact | null = null;
+  private readonly diffPanel = new DiffPanel();
+  private drivePanelOpen = false;
+  private driveFollowing = true;
+  private driveCollapsed = new Set<string>();
+  private driveOffset = 0;
+  private driveRendered: DriveState | null = null;
+  private driveSnapshot: { state: DriveState; now: number } | undefined;
+  private driveScrollPending = false;
+  private driveScrollAt = 0;
+  private driveJump = true;
   private copied: { runId: number; until: number } | null = null;
   private pointer: { row: number; column: number } | null = null;
   private hovered: string | null = null;
@@ -115,6 +144,9 @@ export class SessionView {
     this.flowRows = []; this.flowMaximum = 0; this.flowExpansions.clear(); this.flowControls = []; this.reveal = null;
     this.inspectionOrigin = null;
     this.artifact = null;
+    this.diffPanel.reset();
+    this.drivePanelOpen = false; this.driveOffset = 0; this.driveFollowing = true; this.driveCollapsed.clear();
+    this.driveRendered = null; this.driveSnapshot = undefined; this.driveScrollPending = false; this.driveJump = true;
     this.copied = null;
     this.pointer = null; this.hovered = null; this.hoverRegions = []; this.transitions.clear(); this.hoverReflow = false;
     this.scrollPending = false; this.snapScroll = false; this.flowGeometry = null;
@@ -131,14 +163,15 @@ export class SessionView {
     return true;
   }
   animating(now = Date.now()): boolean {
-    return this.hoverReflow || !reducedMotionEnabled() && (this.transitions.active(now)
-      || this.scrollPending && !this.paused && !this.panelOpen);
+    return this.drivePanelOpen && this.driveFollowing && this.driveScrollPending || this.hoverReflow || !reducedMotionEnabled() && (this.transitions.active(now)
+      || this.scrollPending && !this.paused && (!this.panelOpen || this.drivePanelOpen));
   }
 
   sync(entries: readonly WorkbenchEntry[]): void {
     const previous = this.current;
     const memory = previous ? this.memory : null;
     this.runs = planRuns(entries);
+    if (this.artifact?.kind === "changes") this.diffPanel.sync(this.runs);
     // A queued follow-up can start while the reader is above the live edge.
     // Preserve the same transcript anchor across that turn boundary.
     if (this.selectedId === null && memory && !memory.followFlow && previous?.id !== this.current?.id) {
@@ -147,12 +180,50 @@ export class SessionView {
       this.memory.anchor = memory.anchor;
     }
   }
-  presentOutput(id: number): void { this.pauseFlow(); this.contextOpen = false; this.historyOpen = false; this.outputId = id; this.outputOffset = 0; this.focused = true; }
+  presentOutput(id: number): void { this.pauseFlow(); this.drivePanelOpen = false; this.contextOpen = false; this.historyOpen = false; this.outputId = id; this.outputOffset = 0; this.focused = true; }
   dismissOutput(): void { this.outputId = null; }
   showingOutput(id: number): boolean { return this.outputId === id; }
   get current(): SessionRun | undefined { return this.runs.find((run) => run.id === this.selectedId) ?? this.runs.at(-1); }
   get latest(): SessionRun | undefined { return this.runs.at(-1); }
-  get panelOpen(): boolean { return !this.historyOpen && (this.contextOpen || this.outputId !== null || this.artifact !== null || this.memory.surface !== "response"); }
+  get driveNavigation() {
+    const run = this.current;
+    return { turn: String(run?.id ?? 0), latest: run === this.latest, answer: run?.status === "COMPLETE" && !!run.answer,
+      files: changeFiles(run?.tools.filter((tool) => tool.phase === "change") ?? []).map((file) => file.path).slice(0, 128),
+      checks: run ? artifactRecords(run, "verification").map((tool) => String(tool.id)).slice(0, 128) : [],
+      ...(this.diffOpen && this.diffPanel.selected ? { item: this.diffPanel.selected.path } : this.artifact ? { item: String(this.artifact.recordId) }
+        : this.memory.surface === "log" && this.records()[this.selection] ? { item: String(this.records()[this.selection]!.id) } : {}) };
+  }
+  /// Semantic navigation uses the same handlers as the native evidence links.
+  /// It never reads hidden file contents or performs a coding-agent operation.
+  inspectDrive(action: DriveInspectAction): void {
+    const run = this.current;
+    if (!run) return;
+    this.inspectionOrigin = null;
+    const continuing = action.position === "continue" && (action.target === "answer" ? !this.panelOpen && this.memory.surface === "response"
+      : action.target === "diff" ? this.diffOpen && (!action.item || action.item === this.diffPanel.selected?.path)
+      : action.target === "checks" ? this.artifact?.kind === "verification" && (!action.item || action.item === String(this.artifact.recordId)) : this.memory.surface === "log");
+    if (continuing) { this.focused = true; return; }
+    if (action.target === "answer") this.act({ kind: "response-start" });
+    else if (action.target === "diff") {
+      this.act({ kind: "diff-open", runId: run.id });
+      if (action.item) this.act({ kind: "diff-select", path: action.item });
+      if (!this.diffPanel.expanded) this.act({ kind: "diff-expand" });
+      this.diffPanel.key("home");
+    } else if (action.target === "checks") {
+      if (this.artifact?.kind === "verification") this.act({ kind: "artifact-close" });
+      this.act({ kind: "artifact", target: "verification", runId: run.id });
+      const records = artifactRecords(run, "verification");
+      const selected = action.item ? records.find((tool) => String(tool.id) === action.item) : records[0];
+      if (selected && this.artifact) this.act({ kind: "artifact-step", step: records.indexOf(selected) - records.findIndex((tool) => tool.id === this.artifact!.recordId) });
+      if (selected) this.memory.detailOffsets.set(selected.id, 0);
+    } else { this.act({ kind: "log" }); this.key({ name: "home" }); }
+    this.focused = true;
+  }
+  get panelOpen(): boolean { return !this.historyOpen && (this.drivePanelOpen || this.contextOpen || this.outputId !== null || this.artifact !== null || this.memory.surface !== "response"); }
+  get driveOpen(): boolean { return this.drivePanelOpen; }
+  get driveSurface(): string { return this.drivePanelOpen ? "drive" : this.historyOpen ? "history" : this.diffOpen ? "diff" : this.contextOpen ? "context" : this.outputId !== null ? "output" : this.artifact ? "review" : this.memory.surface; }
+  get diffOpen(): boolean { return this.artifact?.kind === "changes" && !this.contextOpen && this.outputId === null && !this.historyOpen; }
+  get panelExpanded(): boolean { return this.diffOpen && this.diffPanel.expanded; }
   get paused(): boolean { return !this.memory.followFlow || this.selectedId !== null; }
   /// The shared evidence projection for the current run — the single source the
   /// response summary and the review surface both read, so they cannot disagree.
@@ -187,6 +258,28 @@ export class SessionView {
   private set selection(value: number) { if (this.memory.surface === "log") this.memory.logSelection = value; else this.memory.reviewSelection = value; }
 
   act(action: Action): string | undefined {
+    if (action.kind === "drive-control") return; // routed by the workbench
+    if (action.kind === "drive-follow") { this.driveFollowing = true; this.driveJump = true; return; }
+    if (action.kind === "drive-trace-toggle") {
+      if (this.driveCollapsed.has(action.id)) this.driveCollapsed.delete(action.id); else this.driveCollapsed.add(action.id);
+      this.holdDrive(); return;
+    }
+    if (action.kind === "drive-open") {
+      if (this.drivePanelOpen) { this.act({ kind: "panel-close" }); return; }
+      this.dismissOutput(); this.contextOpen = false; this.historyOpen = false; this.artifact = null;
+      this.memory.surface = "response"; this.focused = true; this.drivePanelOpen = true; this.driveOffset = 0; this.driveFollowing = true; this.driveJump = true; return;
+    }
+    if (["diff-open", "artifact", "context", "review", "log", "history", "run", "surface", "thinking", "request", "follow", "panel-close", "back"].includes(action.kind)) this.drivePanelOpen = false;
+    if (action.kind === "diff-open") {
+      this.pauseFlow(); this.dismissOutput(); this.contextOpen = false; this.historyOpen = false;
+      this.memory.surface = "response"; this.focused = true;
+      this.artifact = { kind: "changes", runId: action.runId, recordId: action.recordId ?? 0 };
+      this.diffPanel.open(this.runs, action.runId, action.recordId);
+      return;
+    }
+    if (action.kind === "diff-select" || action.kind === "diff-live" || action.kind === "diff-expand") {
+      this.focused = true; this.diffPanel.act(action); return;
+    }
     if (action.kind === "copy") {
       const run = action.runId === undefined ? this.current : this.runs.find((run) => run.id === action.runId);
       const text = run?.answer?.raw ?? run?.entries.filter((entry): entry is AssistantEntry => entry.type === "assistant").map((entry) => entry.raw).join("\n\n");
@@ -218,6 +311,7 @@ export class SessionView {
     if (action.kind === "follow") { this.follow(); return; }
     if (action.kind === "artifact") {
       if (this.artifact?.runId === action.runId && this.artifact.kind === action.target) { this.closeArtifact(); return; }
+      if (action.target === "changes") { this.act({ kind: "diff-open", runId: action.runId }); return; }
       const run = this.runs.find((run) => run.id === action.runId);
       if (!run) return;
       const records = artifactRecords(run, action.target);
@@ -229,6 +323,7 @@ export class SessionView {
       return;
     }
     if (action.kind === "artifact-step") {
+      if (this.diffOpen) { this.diffPanel.step(action.step); return; }
       if (!this.artifact) return;
       const run = this.runs.find((run) => run.id === this.artifact!.runId);
       if (!run) return;
@@ -377,6 +472,7 @@ export class SessionView {
   }
   key(key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean }): boolean {
     const { name } = key;
+    if (this.diffOpen && key.meta && (name === "return" || name === "enter")) { this.diffPanel.act({ kind: "diff-expand" }); return true; }
     if (key.ctrl && name === "x") { this.act({ kind: "thinking" }); return true; }
     if (key.meta && name === "h") { this.act({ kind: "history" }); return true; }
     if (key.meta && name === "r") { this.act({ kind: "response-start" }); return true; }
@@ -387,14 +483,16 @@ export class SessionView {
     }
     if (this.historyOpen && this.focused && !key.ctrl && !key.meta) {
       if (name === "up" || name === "down" || name === "pageup" || name === "pagedown") this.historyIndex = Math.max(0, Math.min(this.runs.length - 1, this.historyIndex + (name === "up" || name === "pageup" ? -1 : 1) * (name.startsWith("page") ? this.pageSize : 1)));
+      if (name === "home" || name === "end") this.historyIndex = name === "home" ? 0 : Math.max(0, this.runs.length - 1);
       if (name === "return") this.act({ kind: "run", id: this.runs[this.historyIndex]?.id ?? null });
       if (name === "escape" || name === "backspace") { this.historyOpen = false; this.focused = false; }
-      return ["up", "down", "pageup", "pagedown", "return", "escape", "backspace"].includes(name ?? "");
+      return ["up", "down", "pageup", "pagedown", "home", "end", "return", "escape", "backspace"].includes(name ?? "");
     }
     if (this.outputId !== null && name === "escape" && !key.ctrl && !key.meta) {
       this.dismissOutput(); this.focused = this.memory.surface !== "response" || this.artifact !== null; return true;
     }
     if (this.contextOpen && name === "escape" && !key.ctrl && !key.meta) { this.contextOpen = false; this.focused = this.panelOpen; return true; }
+    if (this.drivePanelOpen && name === "escape" && !key.ctrl && !key.meta) { this.act({ kind: "panel-close" }); return true; }
     if (this.artifact && this.memory.surface === "response" && name === "escape" && !key.ctrl && !key.meta) { this.closeArtifact(); return true; }
     if (key.ctrl && name === "t") { this.focused = !this.focused; return true; }
     if (key.meta && (name === "up" || name === "down")) { this.historyOpen = false; this.dismissOutput(); this.moveRun(name === "up" ? -1 : 1); return true; }
@@ -413,9 +511,11 @@ export class SessionView {
       this.cycleSurface(name === "left" || key.shift ? -1 : 1);
       return true;
     }
-    if (key.ctrl && name === "g") { this.follow(); return true; }
+    if (key.ctrl && name === "g") { if (this.drivePanelOpen) { this.driveFollowing = true; this.driveJump = true; } else if (this.diffOpen) this.diffPanel.act({ kind: "diff-live" }); else this.follow(); return true; }
+    if (this.diffOpen && this.focused && !key.ctrl && !key.meta && this.diffPanel.key(name)) return true;
     if (name === "pageup" || name === "pagedown") { this.scroll(name === "pageup" ? -this.pageSize : this.pageSize); return true; }
     if (!this.focused || key.ctrl || key.meta || key.shift) return false;
+    if (name === "home" || name === "end") { this.scroll(name === "home" ? -Infinity : Infinity); return true; }
     if (name === "escape" || name === "backspace") { this.act({ kind: "back" }); return true; }
     if (name === "up" || name === "down") {
       if (this.contextOpen || this.outputId !== null || this.artifact) this.scroll(name === "up" ? -1 : 1);
@@ -474,6 +574,8 @@ export class SessionView {
     this.reveal = { key: row.key, line: row.line };
   }
   private scroll(amount: number): boolean {
+    if (this.drivePanelOpen) return this.scrollPane(amount, this.regions.find((region) => region.target === "drive"));
+    if (this.diffOpen) { this.diffPanel.scroll(amount); return true; }
     if (this.contextOpen) return this.scrollPane(amount, this.regions.find((region) => region.target === "context"));
     if (this.outputId !== null) return this.scrollPane(amount, this.regions.find((region) => region.target === "output"));
     if (this.artifact) return this.scrollPane(amount, this.regions.find((region) => region.recordId === this.artifact!.recordId));
@@ -489,7 +591,7 @@ export class SessionView {
     const next = Math.max(0, Math.min(this.flowMaximum, memory.flowOffset + amount));
     // Wheel momentum at an edge must not pause following, add a footer, or
     // discard the reading anchor. Reaching live from scrollback resumes it.
-    if (amount > 0 && next === this.flowMaximum && this.selectedId === null && !this.panelOpen) {
+    if (amount > 0 && next === this.flowMaximum && this.selectedId === null && (!this.panelOpen || this.drivePanelOpen)) {
       if (memory.followFlow && next === memory.flowOffset) return false;
       memory.followFlow = true;
     } else {
@@ -503,18 +605,28 @@ export class SessionView {
   }
   private scrollPane(amount: number, region?: ScrollRegion): boolean {
     if (!region) return false;
-    const before = region.target === "context" ? this.contextOffset : region.target === "output" ? this.outputOffset : this.memory.detailOffsets.get(region.recordId!) ?? 0;
+    const before = region.target === "drive" ? this.driveOffset : region.target === "context" ? this.contextOffset : region.target === "output" ? this.outputOffset : this.memory.detailOffsets.get(region.recordId!) ?? 0;
     const next = Math.max(0, Math.min(region.maximum ?? 0, before + amount));
+    if (region.target === "drive") {
+      if (amount > 0 && next === region.maximum) { this.driveFollowing = true; this.driveJump = true; }
+      else if (next !== before) this.holdDrive();
+    }
     if (next === before) return false;
-    if (region.target === "context") this.contextOffset = next;
+    if (region.target === "drive") this.driveOffset = next;
+    else if (region.target === "context") this.contextOffset = next;
     else if (region.target === "output") this.outputOffset = next;
     else this.memory.detailOffsets.set(region.recordId!, next);
     return true;
   }
+  private holdDrive(): void {
+    if (this.driveFollowing && this.driveRendered) this.driveSnapshot = { state: structuredClone(this.driveRendered), now: Date.now() };
+    this.driveFollowing = false; this.driveScrollPending = false;
+  }
   wheel(row: number, column: number, amount: number): boolean {
     const region = this.regions.find((region) => row >= region.row && row < region.row + region.height && column >= region.column && column < region.column + region.width);
     if (!region) return false;
-    if (region.target === "output" || region.target === "context" || region.recordId !== undefined) return this.scrollPane(amount, region);
+    if (region.target === "diff") return this.diffPanel.wheel(row, amount);
+    if (region.target === "drive" || region.target === "output" || region.target === "context" || region.recordId !== undefined) return this.scrollPane(amount, region);
     if (region.target === "history") {
       const before = this.historyIndex;
       this.historyIndex = Math.max(0, Math.min(this.runs.length - 1, this.historyIndex + amount));
@@ -525,6 +637,7 @@ export class SessionView {
   }
 
   render(options: { width: number; height: number; paint: Painter; title: string; path: string; now?: number; presence?: PresenceState;
+    drive?: DriveState | null;
     animateScroll?: boolean;
     panel?: boolean; column?: number; replace?: boolean; contextLines?: string[]; openedAt?: number; createdAt?: number;
     markdown: (entry: AssistantEntry, width: number) => string[] }): { rows: string[]; zones: SessionZone[] } {
@@ -532,7 +645,7 @@ export class SessionView {
     const run = this.current;
     const memory = this.memory;
     const zones: SessionZone[] = [];
-    if (!options.panel || options.replace) { this.regions = []; this.hoverRegions = []; this.hoverReflow = false; this.scrollPending = false; }
+    if (!options.panel || options.replace) { this.regions = []; this.hoverRegions = []; this.hoverReflow = false; this.scrollPending = false; this.answerRows = []; this.latestAnswerRows = []; }
     if (options.replace && this.pointer) this.hover(this.pointer.row, this.pointer.column);
     const canvas = new Canvas(width, height, paint);
     const output = this.runs.flatMap((run) => run.entries).find((entry) => entry.id === this.outputId);
@@ -556,7 +669,7 @@ export class SessionView {
       this.hoverRegions.push({ row: header.row, column: header.history.column, width: header.history.width, key: "header-history" });
     } else {
       for (let y = 0; y < height; y++) put(y, 0, "", width, "surface");
-      const title = this.contextOpen ? "CONTEXT" : this.outputId !== null ? output?.type === "panel" && output.title ? output.title : "SESSION OUTPUT" : this.artifact?.kind === "changes" ? "DIFF"
+      const title = this.drivePanelOpen ? "AGENT DRIVE" : this.contextOpen ? "CONTEXT" : this.outputId !== null ? output?.type === "panel" && output.title ? output.title : "SESSION OUTPUT" : this.artifact?.kind === "changes" ? "DIFF"
         : this.artifact?.kind === "verification" ? "VERIFICATION" : this.artifact ? "FAILED / DENIED" : memory.surface === "review" ? "CHANGES" : "EXECUTION LOG";
       put(0, 1, paint.text(`▪ ${title}`, "electric"), width - 5, "surface");
       put(0, width - 3, paint.text("×", "muted"), 2, "surface");
@@ -564,6 +677,21 @@ export class SessionView {
       put(1, 0, paint.text("─".repeat(width), "rule"), width, "surface");
     }
     if (height <= 2) return { rows, zones };
+    if (options.panel && this.drivePanelOpen) {
+      if (this.driveFollowing) this.driveSnapshot = undefined;
+      this.driveRendered = options.drive ?? null;
+      const panel = renderDrivePanel(width, height, paint, this.driveRendered, this.driveOffset, {
+        follow: this.driveFollowing, snapshot: this.driveSnapshot, collapsed: this.driveCollapsed, now,
+        ...(options.animateScroll && !this.driveJump ? { followStep: now - this.driveScrollAt >= 16 ? 1 : 0 } : {}),
+      });
+      if (panel.offset !== this.driveOffset) this.driveScrollAt = now;
+      this.driveJump = false; this.driveScrollPending = this.driveFollowing && !!this.driveRendered?.traces?.length && panel.offset < panel.maximum;
+      this.driveOffset = panel.offset;
+      panel.rows.slice(2).forEach((text, index) => put(index + 2, 0, text, width, "surface"));
+      for (const control of panel.zones) zone(control.row, control.column, control.width, control.action);
+      region({ row: 4, column: 0, width, height: height - 4, target: "drive", maximum: panel.maximum });
+      return { rows, zones };
+    }
 
     const inspection = !options.panel && this.historyOpen;
     const paused = !memory.followFlow || this.selectedId !== null;
@@ -623,6 +751,13 @@ export class SessionView {
       this.contextOffset = pane((options.contextLines ?? []).flatMap((line) => foldCells(line, stageWidth - 1)), x, stageWidth, this.contextOffset, "context");
       return { rows, zones };
     }
+    if (options.panel && this.diffOpen) {
+      const panel = this.diffPanel.render(width, height, paint);
+      panel.rows.slice(2).forEach((text, index) => put(index + 2, 0, text, width, "surface"));
+      for (const control of panel.zones) zone(control.row, control.column, control.width, control.action);
+      region({ row: 2, column: 0, width, height: height - 2, target: "diff" });
+      return { rows, zones };
+    }
     if (options.panel && this.artifact) {
       const source = this.runs.find((run) => run.id === this.artifact!.runId);
       const records = source ? artifactRecords(source, this.artifact.kind) : [];
@@ -664,7 +799,7 @@ export class SessionView {
       this.flowExpansions = flow.expansions;
       this.flowControls = flow.rows.flatMap((row, index) => row.controls.map((control, ordinal) => ({ key: `${row.key}:${row.line}:${ordinal}`, row: index, action: control.action })));
       const tail = Math.max(0, flow.rows.length - bodyHeight);
-      const following = memory.followFlow && this.selectedId === null && !this.panelOpen;
+      const following = memory.followFlow && this.selectedId === null && (!this.panelOpen || this.drivePanelOpen);
       let offset = following || initialFlow && this.selectedId === null ? tail : memory.flowOffset;
       const response = run?.answer;
       if (following && response?.streaming && !run?.settled) {
@@ -681,7 +816,11 @@ export class SessionView {
       let windowOffset = 0;
       if (window && start >= 0) {
         const end = flow.rows.findLastIndex((row) => row.key === window.key);
-        window.line = Math.min(window.line, end - start);
+        // The reading window can advance into tools and later-round thinking.
+        // Clamping it to the old prose block rewinds every subsequent paint,
+        // including the first paint after a manual jump to the live edge.
+        // Still bound it when disclosures collapse or the viewport grows.
+        window.line = Math.min(window.line, Math.max(end, tail) - start);
         windowOffset = Math.max(0, start + window.line);
         if (following) {
           if (response?.streaming && !run?.settled && entryKey(response.id) === window.key) {
@@ -736,11 +875,14 @@ export class SessionView {
       const thinking = flow.rows[thinkingAt];
       const sticky = thinking && thinkingAt < offset && bodyHeight > 1
         && (first?.parents?.includes(thinking.key) || memory.followFlow && !this.artifact) ? thinking : undefined;
+      const answers = new Set(this.runs.flatMap((item) => item.status === "COMPLETE" && item.answer ? [entryKey(item.answer.id)] : []));
       for (let index = 0; index < bodyHeight; index++) {
         const row = index === 0 && sticky ? sticky : flow.rows[offset + index];
         if (!row) continue;
         const selected = this.focused ? row.controls.find((_, ordinal) => memory.flowFocus === `${row.key}:${row.line}:${ordinal}`) : undefined;
         put(top + index, x, row.text, stageWidth, selected ? "raised" : row.background ?? "ink");
+        if (answers.has(row.key)) this.answerRows.push(canvas.rows[top + index]!);
+        if (this.latest?.status === "COMPLETE" && this.latest.answer && row.key === entryKey(this.latest.answer.id)) this.latestAnswerRows.push(canvas.rows[top + index]!);
         if (selected) put(top + index, x + Math.max(0, selected.column - 1), paint.text("›", "electricBright"), 1, "raised");
         if (row.hoverKey) this.hoverRegions.push({ row: top + index, column: x + (row.hoverKey.endsWith(":card") ? 2 : 0), width: stageWidth - (row.hoverKey.endsWith(":card") ? 4 : 0), key: row.hoverKey });
         for (const control of row.controls) if (!control.hidden) zone(top + index, x + control.column, Math.min(control.width, stageWidth - control.column), control.action);

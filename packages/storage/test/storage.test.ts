@@ -217,6 +217,45 @@ describe("DemesneStore", () => {
     second.close();
   });
 
+  test.each(["failed", "cancelled", "interrupted"] as const)("restores valid findings from %s turns without dangling calls or changing the journal", (status) => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-context-recovery-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "state.sqlite");
+    let store = new DemesneStore(path);
+    try {
+      const { session } = store.createSession("Recover findings");
+      const { turn } = store.createTurn(session.id, "Inspect parser and lexer");
+      store.startTurn(turn.id);
+      store.appendModelMessage(turn.id, { role: "user", content: turn.content });
+      // Some providers reuse tool IDs between rounds. Match results within each
+      // assistant batch, never by ID across the whole historical turn.
+      store.appendModelMessage(turn.id, { role: "assistant", content: "Inspecting", toolCalls: [{ id: "read", name: "read_file", arguments: '{"path":"parser.ts"}' }] });
+      store.appendModelMessage(turn.id, { role: "tool", toolCallId: "read", content: "Parser finding", imageArtifactIds: ["retained-image"] });
+      store.appendModelMessage(turn.id, { role: "assistant", content: null, toolCalls: [
+        { id: "read", name: "read_file", arguments: '{"path":"lexer.ts"}' },
+        { id: "pending", name: "write_file", arguments: '{"path":"parser.ts","content":"unfinished"}' },
+      ] });
+      store.appendModelMessage(turn.id, { role: "tool", toolCallId: "read", content: "Lexer finding" });
+      store.appendModelMessage(turn.id, { role: "tool", toolCallId: "orphan", content: "Must not reach the provider" });
+      if (status === "failed") store.failTurn(turn.id, "Connection lost");
+      else if (status === "cancelled") store.cancelTurn(turn.id);
+      // Leave the last case running to exercise daemon-crash recovery.
+      store.close(); store = new DemesneStore(path);
+      const raw = store.database.query("SELECT * FROM model_messages ORDER BY id").all();
+      const restored = store.getModelContextTranscript(session.id).map((entry) => entry.message);
+      expect(store.getCompletedModelTranscript(session.id)).toEqual([]);
+      expect(restored.filter((message) => message.role === "tool")).toEqual([
+        { role: "tool", toolCallId: "read", content: "Parser finding", imageArtifactIds: ["retained-image"] },
+        { role: "tool", toolCallId: "read", content: "Lexer finding" },
+      ]);
+      expect(restored.filter((message) => message.role === "assistant").flatMap((message) => message.toolCalls ?? [])).toHaveLength(2);
+      expect(restored.at(-1)?.content).toContain(`Historical turn ended ${status}`);
+      expect(JSON.stringify(restored)).not.toContain("unfinished");
+      expect(JSON.stringify(restored)).not.toContain("Must not reach");
+      expect(store.database.query("SELECT * FROM model_messages ORDER BY id").all()).toEqual(raw);
+    } finally { store.close(); }
+  });
+
   test("migrates the previous constrained schema without losing journal entries", () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-storage-test-"));
     temporaryDirectories.push(directory);

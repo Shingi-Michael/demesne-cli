@@ -156,6 +156,30 @@ describe("OpenAICompatibleProvider", () => {
     await expect(provider.listModels()).rejects.toThrow("1000 model limit");
   });
 
+  test.each(["http", "stream"])("surfaces OpenRouter upstream rate limits from %s errors", async (transport) => {
+    const error = { message: "Provider returned error", code: 429, metadata: { provider_name: "ModelRun",
+      raw: "qwen/qwen3.8-27b:free is temporarily rate-limited upstream. Please retry shortly." } };
+    const provider = new OpenAICompatibleProvider({ baseUrl: "https://openrouter.ai/api/v1", providerId: "OpenRouter",
+      fetch: (async () => transport === "http" ? Response.json({ error }, { status: 429 })
+        : new Response(`data: ${JSON.stringify({ error })}\n\ndata: [DONE]\n\n`)) as unknown as typeof fetch });
+    let caught: unknown;
+    try {
+      for await (const _event of provider.stream({ model: "qwen/qwen3.8-27b:free", messages: [] }, AbortSignal.timeout(2000))) { /* consume */ }
+    } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(ProviderError);
+    expect(caught).toMatchObject({ status: 429, code: "429",
+      message: "OpenRouter / ModelRun (HTTP 429): qwen/qwen3.8-27b:free is temporarily rate-limited upstream. Please retry shortly." });
+  });
+
+  test("extracts nested upstream messages without exposing the surrounding metadata envelope", async () => {
+    const provider = new OpenAICompatibleProvider({ baseUrl: "https://openrouter.ai/api/v1", providerId: "OpenRouter",
+      fetch: (async () => Response.json({ error: { message: "Provider returned error", code: "context_length_exceeded",
+        metadata: { provider_name: "Upstream", raw: JSON.stringify({ error: { message: "Maximum context length exceeded" }, request: "must not appear" }) } } },
+      { status: 400 })) as unknown as typeof fetch });
+    await expect(provider.listModels()).rejects.toMatchObject({ status: 400, code: "context_length_exceeded",
+      message: "OpenRouter / Upstream (HTTP 400): Maximum context length exceeded" });
+  });
+
   test("rejects a stream that ends without a completion marker", async () => {
     const provider = new OpenAICompatibleProvider({
       baseUrl: "http://localhost:1234/v1",
@@ -224,6 +248,26 @@ describe("OpenAICompatibleProvider", () => {
     expect(events).toEqual([]);
   });
 
+  test.each(["stop", "tool_calls"])("normalizes OpenRouter's repeated %s finish reason while retaining final usage", async (reason) => {
+    const provider = new OpenAICompatibleProvider({ baseUrl: "https://openrouter.ai/api/v1", fetch: (async () => new Response([
+      { choices: [{ delta: { content: "Ready" }, finish_reason: reason }] },
+      { choices: [{ delta: {}, finish_reason: reason }], usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } },
+    ].map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n")) as unknown as typeof fetch });
+    const events = [];
+    for await (const event of provider.stream({ model: "qwen/test", messages: [{ role: "user", content: "Check" }] }, AbortSignal.timeout(2000))) events.push(event);
+    expect(events).toEqual([{ type: "text_delta", delta: "Ready" }, { type: "finish", reason },
+      { type: "usage", usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 } }]);
+  });
+
+  test("contradictory stream finish reasons still fail", async () => {
+    const provider = new OpenAICompatibleProvider({ baseUrl: "https://openrouter.ai/api/v1", fetch: (async () => new Response([
+      { choices: [{ delta: {}, finish_reason: "stop" }] }, { choices: [{ delta: {}, finish_reason: "length" }] },
+    ].map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n")) as unknown as typeof fetch });
+    await expect((async () => {
+      for await (const _event of provider.stream({ model: "qwen/test", messages: [] }, AbortSignal.timeout(2000))) { /* consume */ }
+    })()).rejects.toThrow("conflicting finish reasons");
+  });
+
   test("allows a turn to enable thinking over a disabled daemon default", async () => {
     let body: Record<string, unknown> | undefined;
     const provider = new OpenAICompatibleProvider({
@@ -249,6 +293,48 @@ describe("OpenAICompatibleProvider", () => {
   test("rejects cleartext non-loopback endpoints", () => {
     expect(() => new OpenAICompatibleProvider({ baseUrl: "http://192.168.1.10:1234/v1" }))
       .toThrow("restricted to loopback");
+  });
+
+  test.each([true, false, undefined])("OpenRouter authenticates model discovery and streams with its reasoning controls (%s)", async (thinkingEnabled) => {
+    const bodies: Record<string, unknown>[] = [];
+    const provider = new OpenAICompatibleProvider({ baseUrl: "https://openrouter.ai/api/v1", apiKey: "private-key", providerId: "OpenRouter",
+      fetch: (async (input, init) => {
+        const headers = new Headers(init?.headers);
+        expect(headers.get("authorization")).toBe("Bearer private-key");
+        expect(headers.get("x-openrouter-title")).toBe("Demesne");
+        if (String(input).endsWith("/models")) return Response.json({ data: [{ id: "qwen/test", context_length: 262144,
+          top_provider: { max_completion_tokens: 131072 } }] });
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response('data: {"choices":[{"delta":{"content":"Ready"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+      }) as typeof fetch });
+    expect((await provider.listModels())[0]).toMatchObject({ contextWindow: 262144, maxOutputTokens: 131072 });
+    const events = [];
+    for await (const event of provider.stream({ model: "qwen/test", messages: [{ role: "user", content: "Hello" }], thinkingEnabled,
+      maxOutputTokens: 131072 }, AbortSignal.timeout(2000))) events.push(event);
+    expect(bodies[0]?.max_tokens).toBe(131072);
+    expect(bodies[0]?.reasoning_effort).toBeUndefined();
+    expect(bodies[0]?.reasoning).toEqual(thinkingEnabled === undefined ? undefined : thinkingEnabled ? { enabled: true } : { effort: "none" });
+    expect(events).toEqual([{ type: "text_delta", delta: "Ready" }, { type: "finish", reason: "stop" }]);
+  });
+
+  test.each([
+    { baseUrl: "https://openrouter.ai/api/v1", ignored: ["reka"], expected: { ignore: ["reka"] } },
+    { baseUrl: "https://openrouter.ai/api/v1", ignored: [], expected: undefined },
+    { baseUrl: "http://localhost:1234/v1", ignored: ["reka"], expected: undefined },
+  ])("routing exclusions apply only to OpenRouter and preserve the model, budget and reasoning ($baseUrl/$ignored)", async ({ baseUrl, ignored, expected }) => {
+    let body: Record<string, unknown> | undefined;
+    const provider = new OpenAICompatibleProvider({ baseUrl, openRouterIgnore: ignored,
+      fetch: (async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return new Response('data: {"choices":[{"delta":{"content":"Ready"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+      }) as typeof fetch });
+    for await (const _event of provider.stream({ model: "qwen/qwen3.8-27b", messages: [{ role: "user", content: "Hello" }],
+      maxOutputTokens: 131072 }, AbortSignal.timeout(2000))) { /* consume the response */ }
+    expect(body?.provider).toEqual(expected);
+    expect(body?.model).toBe("qwen/qwen3.8-27b");
+    expect(body?.max_tokens).toBe(131072);
+    expect(body?.reasoning).toBeUndefined();
+    expect(body?.reasoning_effort).toBeUndefined();
   });
 
   test("does not follow provider redirects", async () => {

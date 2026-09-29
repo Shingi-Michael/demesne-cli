@@ -7,18 +7,18 @@ import { planContextRequest } from "./context-planner.ts";
 import { defaultSystemPrompt } from "./engine.ts";
 import { ToolRegistry } from "./tools.ts";
 
-export const REPOSITORY_CONTEXT_FIXTURE_VERSION = 2 as const;
+export const REPOSITORY_CONTEXT_FIXTURE_VERSION = 3 as const;
 export const REPOSITORY_CONTEXT_CAPACITY = 8_192;
 export const REPOSITORY_CONTEXT_OUTPUT_RESERVE = 1_536;
 export const REPOSITORY_CONTEXT_HARD_INPUT_LIMIT = REPOSITORY_CONTEXT_CAPACITY - REPOSITORY_CONTEXT_OUTPUT_RESERVE;
-export const REPOSITORY_TOOL_DEFINITIONS_SHA256 = "27ba5e66b9f1bd12c29bdf712792ca46b4ee5c48066fc7e7e2f1a5b4b5918f25";
+export const REPOSITORY_TOOL_DEFINITIONS_SHA256 = "d8999444f152598ea03f6bc1672d6098f779ae8f04a824aaf688155b136efc2e";
 
 const EXPECTED_FIXTURES = {
   "repository-inspection-v1": {
-    fixtureSha256: "5841daa99075d16923a42497c241fa232bf92467518257a7fa6ecce66e48f14f",
+    fixtureSha256: "6ea24b9bdbb3d0cbc0768c1602c5112be4207bf478236d2a07796ce28f227ffc",
     manifestSha256: "4d903234a32b03c91c7a2757d259309558796d14219c3762ebafe5f48ea8e606",
-    originalEstimate: 5_731,
-    reducedEstimate: 4_777,
+    originalEstimate: 5_756,
+    reducedEstimate: 4_802,
     actions: [
       "deduplicate_historical_file_content:packages/protocol/src/index.ts",
       "deduplicate_historical_file_content:apps/daemon/src/engine.ts",
@@ -27,17 +27,17 @@ const EXPECTED_FIXTURES = {
     ],
   },
   "repository-single-file-repair-v1": {
-    fixtureSha256: "6014a0b06beea923fff810d0d9ed9365da4bb12cfd208e3175a820833b92181f",
+    fixtureSha256: "51ee1d9cad28fdf3f57f67fbbb9fff3728dfff7ae607c608b542d2b941e693b7",
     manifestSha256: "08f32912d837036dc11e5661b61bad7ab4b2482faaf7a36bded4b1edc6a16be7",
-    originalEstimate: 6_033,
-    reducedEstimate: 3_957,
+    originalEstimate: 6_058,
+    reducedEstimate: 3_982,
     actions: ["drop_historical_turn:diagnose"],
   },
   "repository-multi-file-feature-v1": {
-    fixtureSha256: "69023592657815441024fab98d84fa3930b17036b6560900bbf82349ce02b7b2",
+    fixtureSha256: "b477683598066c1e99f7f0460c923df4d60ac963428fbef34d3220c9862d3031",
     manifestSha256: "3055ba5b2cb00ded3579140ba1d37f6bb9eeb71355cb0cf9fc61956b5be69d1f",
-    originalEstimate: 6_625,
-    reducedEstimate: 5_336,
+    originalEstimate: 6_650,
+    reducedEstimate: 5_361,
     actions: [
       "deduplicate_historical_file_content:test/runtime-info.test.ts",
       "drop_historical_turn:feature-inspect",

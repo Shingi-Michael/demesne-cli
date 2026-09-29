@@ -28,6 +28,7 @@ export interface ProviderConfig {
   maxOutputTokens?: number;
   runtimeProfile?: string;
   reasoningEffort?: ReasoningEffort;
+  openRouterIgnore?: string[];
   includeUsage?: boolean;
   systemPrompt?: string;
   firstEventTimeoutMs?: number;
@@ -46,6 +47,19 @@ export interface DaemonConfig {
   host?: string;
   port?: number;
 }
+
+export interface AgentConfig {
+  maxModelRounds?: number;
+  maxToolCalls?: number;
+}
+export interface DriveConfig {
+  maxActiveMinutes?: number; maxCycles?: number; maxTasks?: number; maxWorkerRequests?: number; maxTokens?: number; maxStalledCycles?: number;
+  checkInIntervalSeconds?: number; maxCheckIns?: number; maxRedirects?: number;
+}
+const driveFields = { max_active_minutes: "maxActiveMinutes", max_cycles: "maxCycles", max_tasks: "maxTasks", max_worker_requests: "maxWorkerRequests", max_tokens: "maxTokens", max_stalled_cycles: "maxStalledCycles",
+  check_in_interval_seconds: "checkInIntervalSeconds", max_check_ins: "maxCheckIns", max_redirects: "maxRedirects" } as const;
+
+export const DEFAULT_AGENT_LIMITS = { maxModelRounds: 64, maxToolCalls: 256 } as const;
 
 export interface NotificationConfig {
   enabled: boolean;
@@ -73,6 +87,8 @@ export interface DemesneConfig {
   additionalProviders?: Record<string, ProviderConfig>;
   images?: ImageGenerationConfig;
   daemon: DaemonConfig;
+  agent?: AgentConfig;
+  drive?: DriveConfig;
   permissions: { allow: string[] };
   notifications: NotificationConfig;
   ui: UiConfig;
@@ -210,7 +226,7 @@ function applyDocument(
   const path = source === "user" ? "user config" : "project config";
   assertKnownKeys(document, [
     "server", "data_dir", "theme", "inference_slots",
-    "provider", "additional_providers", "images", "daemon", "permissions", "notifications", "ui", "mcp",
+    "provider", "additional_providers", "images", "daemon", "agent", "drive", "permissions", "notifications", "ui", "mcp",
   ], path);
 
   assign(config, "server", document.server, source, sources, (value, key) => {
@@ -226,7 +242,7 @@ function applyDocument(
     const provider = objectValue(document.provider, "provider");
     assertKnownKeys(provider, [
       "url", "id", "model", "allowed_models", "api_key", "context_window", "allow_http_endpoint",
-      "max_output_tokens", "runtime_profile", "reasoning_effort",
+      "max_output_tokens", "runtime_profile", "reasoning_effort", "openrouter_ignore",
       "include_usage", "system_prompt", "first_event_timeout_ms", "request_timeout_ms", "vision",
     ], `${path}.provider`);
     assignInto(config.provider, "allowHttpEndpoint", provider.allow_http_endpoint, source, sources, "provider.allowHttpEndpoint", optionalString);
@@ -245,6 +261,11 @@ function applyDocument(
     assignInto(config.provider, "runtimeProfile", provider.runtime_profile, source, sources, "provider.runtimeProfile", optionalString);
     assignInto(config.provider, "reasoningEffort", provider.reasoning_effort, source, sources, "provider.reasoningEffort",
       (value, key) => optionalEnum(value, ["none", "low", "medium", "high", "max"], key));
+    assignInto(config.provider, "openRouterIgnore", provider.openrouter_ignore, source, sources, "provider.openRouterIgnore", (value, key) => {
+      const slugs = stringArray(value, key);
+      if (slugs?.some((slug) => /\s/.test(slug))) throw new ConfigError(`${key} must contain provider slugs without whitespace`);
+      return slugs;
+    });
     assignInto(config.provider, "includeUsage", provider.include_usage, source, sources, "provider.includeUsage", optionalBoolean);
     assignInto(config.provider, "systemPrompt", provider.system_prompt, source, sources, "provider.systemPrompt", optionalString);
     assignInto(config.provider, "firstEventTimeoutMs", provider.first_event_timeout_ms, source, sources, "provider.firstEventTimeoutMs", optionalPositiveInteger);
@@ -293,6 +314,24 @@ function applyDocument(
       const port = optionalPositiveInteger(value, key);
       if (port !== undefined && port > 65_535) throw new ConfigError(`${key} must be between 1 and 65535`);
       return port;
+    });
+  }
+
+  if (document.agent !== undefined) {
+    const agent = objectValue(document.agent, "agent");
+    assertKnownKeys(agent, ["max_model_rounds", "max_tool_calls"], `${path}.agent`);
+    const target = config.agent ??= {};
+    assignInto(target, "maxModelRounds", agent.max_model_rounds, source, sources, "agent.maxModelRounds", optionalPositiveInteger);
+    assignInto(target, "maxToolCalls", agent.max_tool_calls, source, sources, "agent.maxToolCalls", optionalPositiveInteger);
+  }
+
+  if (document.drive !== undefined) {
+    const drive = objectValue(document.drive, "drive"), target = config.drive ??= {};
+    assertKnownKeys(drive, Object.keys(driveFields), `${path}.drive`);
+    for (const [key, field] of Object.entries(driveFields)) assignInto(target, field, drive[key], source, sources, `drive.${field}`, (value, name) => {
+      const result = optionalPositiveInteger(value, name);
+      if (result !== undefined && (field === "maxTasks" && result > 64 || field === "maxWorkerRequests" && result > 256)) throw new ConfigError(`${name} exceeds the bounded mission history (64 tasks / 256 worker requests)`);
+      return result;
     });
   }
 
@@ -369,6 +408,8 @@ export const ENV_VARIABLE_NAMES: Record<string, string> = {
   "provider.firstEventTimeoutMs": "DEMESNE_PROVIDER_FIRST_EVENT_TIMEOUT_MS",
   "provider.requestTimeoutMs": "DEMESNE_PROVIDER_REQUEST_TIMEOUT_MS",
   "daemon.host": "DEMESNE_HOST",
+  "agent.maxModelRounds": "DEMESNE_MAX_MODEL_ROUNDS",
+  "agent.maxToolCalls": "DEMESNE_MAX_TOOL_CALLS",
   "images.url": "DEMESNE_IMAGE_URL",
   "images.model": "DEMESNE_IMAGE_MODEL",
   "images.apiKey": "DEMESNE_IMAGE_API_KEY",
@@ -388,6 +429,11 @@ function applyEnvironment(
   setFromEnv(config, "dataDir", env.DEMESNE_DATA_DIR, "dataDir", sources, optionalString);
   setFromEnv(config, "theme", env.DEMESNE_THEME, "theme", sources, optionalString);
   setFromEnv(config, "inferenceSlots", env.DEMESNE_INFERENCE_SLOTS, "inferenceSlots", sources, optionalPositiveInteger);
+  if (env.DEMESNE_MAX_MODEL_ROUNDS || env.DEMESNE_MAX_TOOL_CALLS) {
+    const agent = config.agent ??= {};
+    setFromEnv(agent, "maxModelRounds", env.DEMESNE_MAX_MODEL_ROUNDS, "agent.maxModelRounds", sources, optionalPositiveInteger);
+    setFromEnv(agent, "maxToolCalls", env.DEMESNE_MAX_TOOL_CALLS, "agent.maxToolCalls", sources, optionalPositiveInteger);
+  }
 
   setFromEnv(config.provider, "url", env.DEMESNE_PROVIDER_URL, "provider.url", sources, (value, key) => {
     assertProviderUrl(value, key, config.provider.allowHttpEndpoint);
@@ -441,6 +487,8 @@ export function renderUserConfig(settings: {
   inferenceSlots?: number;
   provider?: ProviderConfig;
   daemon?: { autoStart?: AutoStartPolicy; host?: string; port?: number };
+  agent?: AgentConfig;
+  drive?: DriveConfig;
   permissions?: { allow?: string[] };
   notifications?: Partial<NotificationConfig>;
   ui?: Partial<UiConfig>;
@@ -471,6 +519,7 @@ export function renderUserConfig(settings: {
   if (provider.maxOutputTokens) providerEntries.push(["max_output_tokens", String(provider.maxOutputTokens)]);
   if (provider.runtimeProfile) providerEntries.push(["runtime_profile", tomlString(provider.runtimeProfile)]);
   if (provider.reasoningEffort) providerEntries.push(["reasoning_effort", tomlString(provider.reasoningEffort)]);
+  if (provider.openRouterIgnore?.length) providerEntries.push(["openrouter_ignore", `[${provider.openRouterIgnore.map(tomlString).join(", ")}]`]);
   if (provider.includeUsage !== undefined) providerEntries.push(["include_usage", String(provider.includeUsage)]);
   if (provider.systemPrompt) providerEntries.push(["system_prompt", tomlString(provider.systemPrompt)]);
   if (provider.firstEventTimeoutMs) providerEntries.push(["first_event_timeout_ms", String(provider.firstEventTimeoutMs)]);
@@ -493,6 +542,18 @@ export function renderUserConfig(settings: {
     lines.push("");
   }
 
+  if (settings.agent && Object.values(settings.agent).some((value) => value !== undefined)) {
+    lines.push("[agent]");
+    if (settings.agent.maxModelRounds !== undefined) lines.push(`max_model_rounds = ${settings.agent.maxModelRounds}`);
+    if (settings.agent.maxToolCalls !== undefined) lines.push(`max_tool_calls = ${settings.agent.maxToolCalls}`);
+    lines.push("");
+  }
+
+  if (settings.drive && Object.values(settings.drive).some(value => value !== undefined)) {
+    lines.push("[drive]");
+    for (const [key, field] of Object.entries(driveFields)) if (settings.drive[field] !== undefined) lines.push(`${key} = ${settings.drive[field]}`);
+    lines.push("");
+  }
   if (settings.permissions?.allow?.length) {
     lines.push("[permissions]", `allow = [${settings.permissions.allow.map(tomlString).join(", ")}]`, "");
   }

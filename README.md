@@ -47,9 +47,15 @@ The main content area follows the work:
 - **Tool activity** uses single-line rows: a status glyph, cyan tool name, secondary-colored target, dim recorded timing, and `▸/▾` disclosure. Green marks confirmed success and red marks failures or approval requests. Consecutive confirmed reads/searches fold into an inspection summary; edits retain their paths and commands retain their outcomes. Expand a tool to read its output, recorded diff, or arguments. **Awaiting approval**, **running**, **denied**, **stopped**, and **failed** remain distinct through replay, and stopped commands never inflate failure counts. Errors use a red-tinted block with a single red left rule. A command with missing exit status remains individually visible as **unknown**.
 - **Response** is the main reading surface, with cyan headings, readable lists and code. A single **demesne** label and right-aligned timestamp sit above the entire response stream, including tool-only failures. The timestamp belongs to the first recorded activity; old summary-only records use their saved completion time when available. Footer values remain readable, with quiet field labels; lowercase **copy** fades in immediately before the status badge on the active card, briefly changing to **copied** when activated by mouse, Ctrl+Y, or keyboard selection. Changes and verification actions appear after settlement. Code uses a language label and a quiet left edge. Streaming prose starts near the top of the reading area, fills the available space, then advances only by newly overflowing rows with room below the newest line. **RESPONSE ↑** in the status strip, or **Alt+R**, jumps to the beginning of the completed answer and pauses following. Your reading position stays anchored through incoming output, completed tool batches, and queued turns; scrolling back to the bottom or pressing **Ctrl+G** resumes live following. Conversation and inspection panes have no visible scrollbars. Wheel momentum at either edge leaves the conversation still, and horizontal trackpad events are ignored rather than being interpreted as vertical scrolling.
 - **Evidence links** connect the response to recorded changes and verification. **N files changed** opens recorded diffs in the action panel; **Review attempts** identifies operations that did not succeed. Clicking verification opens recorded command output and exit status, preferring failed checks. Arrow controls navigate multiple records; **×** or Escape closes the panel. Historical evidence stays attached to its original turn while the active session continues. Failed operations expose their error before the proposed diff.
+- **Live Diff** (the Diff rail action or **Alt+D**) shows code as native file-edit arguments stream, with a file list, line numbers, context and colored additions/removals. Edit rows in chat open their recorded revision and retain compact applied `+added −removed` receipts. **Drafting / Pending / Approval** are proposals; successful writes become **Applied**, while failed, denied and stopped attempts remain explicit. Contiguous edits accumulate per file using immutable before/after evidence. **Follow edits** tracks the latest file; selecting a file or scrolling holds a labelled snapshot. **Live / Ctrl+G** resumes following. **Expand / Restore** or **Alt+Enter** gives the code more room while preserving your prompt. Older sessions show labelled argument fragments when full file evidence was not recorded.
 - **Execution log** (Ctrl+B, or **⊞** in the action rail) provides the complete ordered record: requests, reasoning, progress, tools, results, and notices. It opens in the right panel. Arguments expand with **Alt+A** or a click; **Tab / Shift+Tab** moves between records while inspecting details.
 
 The full **Review** (Alt+→) and execution log use a record navigator in the action panel. Enter opens the selected record, and Escape returns to the list. Each turn retains its disclosures, selections, and reading positions while newer work streams.
+
+Diff code is syntax-highlighted by filename, including TypeScript/JavaScript,
+Python, Rust, Go, JSON, YAML and shell files. Green/red gutter markers and subtle
+row backgrounds identify changes while keywords, strings, numbers and comments
+keep their syntax colors. Wrapped lines stay aligned and show `↪` in the gutter.
 
 The bottom **Prompt** starts with two draft rows, grows with multiline input, and scrolls within a bounded area. A cyan top rule tracks input and terminal focus; bottom-aligned **▶** is dim when unfocused, cyan when focused, and becomes amber **◎** during execution. **SEND ↵** uses a subdued cyan wash when text is ready to send. **~N tok** appears below the button while you edit, paste, or queue text and disappears when empty. A quiet hint strip lists send, newline, commands, and file references, with cyan `/` and `@` glyphs. The draft estimate uses UTF-8 bytes / 3, excludes referenced file contents and request overhead, and is not a tokenizer measurement. Open **Settings** with Tab or Ctrl+K to select Build/Plan and the active model. During execution the prompt shows **Agent is running...** and the send control becomes **[  ···  ]**; clicking it or pressing Esc Esc / Ctrl+C interrupts. The editor accepts an editable **Queued follow-up** with Clear queue. Nonempty queued input is labeled **Queued · sends after this turn**, including on compact terminals. Typing resumes your draft at its cursor; bracketed multiline paste inserts text without submitting. Content focus displays contextual navigation hints and hides the draft caret. Approvals and searchable settings use the same alignment and surfaces.
 
@@ -69,7 +75,11 @@ Resuming or switching sessions restores recorded answers, original model attribu
 | ↑/↓, Enter, with content focus | Scroll/browse; expand the selected disclosure or open a record |
 | Escape / Backspace, with content focus | Return from a record to its origin, then the response and prompt |
 | PgUp/PgDn; mouse wheel | Scroll the view; scroll the region under the pointer |
-| Ctrl+G | Follow the conversation at its live edge |
+| Ctrl+G | Follow the conversation, or resume live edits while Diff is open |
+| Alt+D | Open/close the live Diff panel |
+| Alt+J | Open/close Agent Drive |
+| Alt+Enter, with Diff open | Expand/restore the Diff panel |
+| ←/→, with Diff focused | Select previous/next file |
 | Tab / Ctrl+K with an empty draft | Settings (Tab completes commands/mentions first) |
 | Ctrl+Y with an empty draft | Copy selected run's answer, or available assistant text, via OSC 52 |
 | Ctrl+B | Open the execution log |
@@ -84,6 +94,8 @@ Preview the **production renderer** with demonstration data, without a model or 
 ```sh
 bun run ui:session
 bun run ui:session --state=start
+bun run ui:session --live-diff
+bun run ui:session --live-diff --expand-diff
 bun run ui:session --state=working
 bun run ui:session --state=tools
 bun run ui:session --state=thinking
@@ -270,9 +282,27 @@ Type `/` in the CLI to open the `SESSION`, `INSPECT`, and `CONTROL` command pale
 | `/diff` | Review the last turn's changes with plain diffs |
 | `/undo [path]` | Revert conflict-free changes from the last undoable turn, or one file |
 | `/compact [instructions]` | Summarize older context while keeping the latest two conversation turns |
+| `/drive [mission\|pause\|resume\|stop]` | Start a UI-driven mission or open/control Agent Drive |
 | `/clear` | Clear terminal and reprint masthead |
 | `/help` | Show the command reference |
 | `/exit` | Exit the CLI |
+
+### Agent Drive
+
+Agent Drive can recover context from earlier conversations, direct coding work
+through the visible composer, and review Diff, tool results, and Preview.
+After reviewing a task, it asks the coding agent about useful next improvements,
+assesses the answer against your goals, selects a concrete task, and continues.
+Its local controller collects bounded answer, Diff, and verification views without
+a model call for each navigation step. The model receives compact, quoted evidence
+and remains responsible for goals, task selection, and review conclusions.
+Periodic check-ins can leave aligned coding work alone or stop and guide a
+clearly off-track turn. Persistent mission budgets and cross-task loop detection
+stop runaway navigation, repeated goals, and interruption/restart cycles.
+Transient planning failures recover automatically from a fresh observation.
+Start with `/drive <mission>`; **Alt+J** opens its progress panel with Pause,
+Resume, and Stop. See [Agent Drive](docs/agent-drive.md) for operation and saved
+mission recovery.
 
 ### Manual context compaction
 
@@ -591,6 +621,10 @@ theme = "auto"
 auto_start = "prompt"   # prompt, always, or never
 port = 7337
 
+[agent]
+max_model_rounds = 64
+max_tool_calls = 256
+
 [provider]
 url = "http://127.0.0.1:11436/v1"
 id = "llama.cpp"
@@ -645,6 +679,22 @@ reasoning-only/empty replies fail explicitly instead of being marked completed.
 Partial text and usage remain available, and the provider's `finish_reason` is
 saved with its call and completion/failure event for diagnosis and replay.
 
+Each user request allows **64 model rounds and 256 tool calls** by default.
+A round is one model response, which may request several tools. Configure these
+positive integer allowances under `[agent]` in the user config, or with
+`DEMESNE_MAX_MODEL_ROUNDS` and `DEMESNE_MAX_TOOL_CALLS`, then restart the daemon.
+After an allowance is exhausted, one additional **tool-free status request**
+asks the model to report completed work, checks, and next steps. The turn is
+marked **interrupted**, rather than claiming the task is complete. A batch that
+would exceed the tool allowance is recorded as unexecuted. Accumulated tool
+results also trigger this final status request at 4 MiB, after the current batch.
+
+Follow-ups retain valid tool exchanges and findings from failed, cancelled, and
+interrupted turns, with an explicit incomplete-work annotation. This survives
+daemon restart and participates in `/compact`; the full journal stays in History.
+Unanswered tool calls are excluded from model context so continuation does not
+send malformed tool exchanges. A new follow-up receives a fresh allowance.
+
 Remote providers normally require HTTPS. `allow_http_endpoint` opts in to
 one exact HTTP endpoint whose IPv4 address is in `100.64.0.0/10`; this is intended
 for an established Tailscale connection. It does not establish or verify that
@@ -676,6 +726,35 @@ bun run demesne setup --yes \
 Setup preserves unrelated settings, backs up an existing file to
 `config.toml.bak`, validates the merged result, and writes atomically with mode
 `0600`.
+
+### OpenRouter sign-in
+
+```sh
+demesne auth login openrouter
+# Or select a different OpenRouter model when connecting:
+demesne auth login openrouter --model qwen/qwen3-coder-next
+```
+
+Login opens OpenRouter's browser authorization using S256 PKCE and a one-use
+localhost callback. The resulting API key is validated and saved in the private
+user config (mode `0600`). The default model is `qwen/qwen3.8-27b`, with up to
+262144 context tokens and the catalog's maximum output budget (currently 131072
+tokens for this model). Stream-event, text-size, and default request-time limits
+scale with that budget; explicit request timeouts still take precedence. Existing local providers
+are preserved; OpenRouter is added as another provider. On a fresh installation
+it becomes the primary provider.
+
+Restart the daemon (`demesne daemon stop`, then `demesne daemon start`) and use
+`/model qwen/qwen3.8-27b` in your session. OpenRouter models appear in the model
+picker. `--no-browser` prints the authorization link for manual opening on the
+same machine. If `OPENROUTER_API_KEY` is set, login validates and saves that key
+instead of opening a browser. Keys are never printed by the login command.
+
+To route around an unavailable upstream host, add `openrouter_ignore = ["reka"]`
+to the OpenRouter provider table in the user config and restart the daemon.
+This sends OpenRouter's `provider.ignore` preference, keeping the selected model,
+reasoning settings, and output budget while allowing its other eligible hosts.
+Use `openrouter_ignore = []` to restore normal routing.
 
 ### MCP Servers
 

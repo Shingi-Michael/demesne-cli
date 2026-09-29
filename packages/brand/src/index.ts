@@ -150,7 +150,7 @@ function buildPainter(enabled: boolean, initial: Theme): Painter {
 
 export type SlashCommandId =
   | "new" | "sessions" | "resume" | "rename" | "delete" | "model" | "export" | "plan"
-  | "status" | "context" | "diff" | "undo" | "compact" | "clear" | "help" | "theme" | "exit"
+  | "status" | "context" | "diff" | "undo" | "compact" | "drive" | "clear" | "help" | "theme" | "exit"
   | `custom:${string}`;
 export type SlashCommandArgument = "none" | "optional" | "required";
 export type SlashCommandSection = "session" | "inspect" | "control";
@@ -171,6 +171,11 @@ export interface SlashCommandInvocation {
   matchedName: string;
 }
 
+/// How many matching commands the menus will address. The canonical set is
+/// small, so this only bounds user-added custom commands; the visible window
+/// is separate and height-driven.
+export const SLASH_MENU_LIMIT = 20;
+
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: "new", name: "/new", aliases: [], argument: "optional", argumentLabel: "title", description: "Start a fresh session", section: "session" },
   { id: "sessions", name: "/sessions", aliases: [], argument: "optional", argumentLabel: "filter", description: "Browse or search recent sessions", section: "session" },
@@ -184,6 +189,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: "export", name: "/export", aliases: [], argument: "optional", argumentLabel: "md|json", description: "Export the session transcript", section: "inspect" },
   { id: "diff", name: "/diff", aliases: [], argument: "none", description: "Review the last turn's changes", section: "inspect" },
   { id: "plan", name: "/plan", aliases: [], argument: "required", argumentLabel: "prompt", description: "Draft a read-only plan before changing anything", section: "control" },
+  { id: "drive", name: "/drive", aliases: [], argument: "optional", argumentLabel: "mission|pause|resume|stop", description: "Give Agent Drive a mission or open its panel", section: "control" },
   { id: "undo", name: "/undo", aliases: [], argument: "optional", argumentLabel: "path", description: "Revert last turn's changes", section: "control" },
   { id: "compact", name: "/compact", aliases: [], argument: "optional", argumentLabel: "instructions", description: "Summarize older context, keeping recent turns", section: "control" },
   { id: "clear", name: "/clear", aliases: [], argument: "none", description: "Refresh the current view", section: "control" },
@@ -235,22 +241,93 @@ export function slashCommandValidationError(invocation: SlashCommandInvocation):
   return null;
 }
 
+/// One row of a command or mention menu: a command (addressing the caller's
+/// item list by index), a quiet section label, a spacer, or a `…` row standing
+/// in for items hidden outside the window.
+export interface CommandMenuRow {
+  kind: "command" | "section" | "spacer" | "more";
+  index: number;
+  section?: SlashCommandSection;
+}
+
+/// The unwindowed rows of a menu: quiet section labels above their commands,
+/// with a spacer before every label after the first — the same section grammar
+/// as the help card.
+export function commandMenuRows(items: readonly { section?: SlashCommandSection }[]): CommandMenuRow[] {
+  const rows: CommandMenuRow[] = [];
+  let currentSection: SlashCommandSection | undefined;
+  items.forEach((item, index) => {
+    const section = item.section;
+    if (items.length >= 6 && section !== undefined && section !== currentSection) {
+      currentSection = section;
+      if (rows.length > 0) rows.push({ kind: "spacer", index: -1 });
+      rows.push({ kind: "section", index: -1, section });
+    }
+    rows.push({ kind: "command", index });
+  });
+  return rows;
+}
+
+/// The windowed menu rows: at most `capacity` rows containing the selected
+/// item, opening on a section label where one fits the window, and marked with
+/// a `…` row wherever items fall outside. An unbounded capacity returns the
+/// full list, so the prompt renderer, the line map, and the workbench window
+/// all derive from one layout and never drift apart.
+export function layoutCommandMenu<T extends { section?: SlashCommandSection }>(
+  items: readonly T[],
+  capacity: number,
+  selectedIndex = 0,
+): CommandMenuRow[] {
+  const all = commandMenuRows(items);
+  const length = all.length;
+  if (capacity <= 0 || items.length === 0) return [];
+  if (!Number.isFinite(capacity) || all.length <= capacity) return all;
+  const more: CommandMenuRow = { kind: "more", index: -1 };
+  const anchor = Math.max(0, all.findIndex((row) => row.kind === "command" && row.index === selectedIndex));
+  const cap = Math.max(1, Math.floor(capacity));
+  if (cap === 1) return [all[anchor]!];
+  if (cap === 2) {
+    // Room for one row and at most one marker: the selection, plus `…` on
+    // whichever side has hidden items.
+    const rows: CommandMenuRow[] = [all[anchor]!];
+    if (anchor > 0) rows.unshift(more);
+    else if (anchor + 1 < length) rows.push(more);
+    return rows;
+  }
+  const size = (start: number, end: number) => (end - start) + (start > 0 ? 1 : 0) + (end < length ? 1 : 0);
+  // The window always keeps the selected row and opens on a section label
+  // where one fits without pushing the selection out. The `…` markers count
+  // toward the capacity, so the window is sized as content plus markers.
+  let start = -1;
+  for (let candidate = anchor; candidate >= Math.max(0, anchor - cap + 1); candidate -= 1) {
+    const row = all[candidate]!;
+    if (candidate === 0 || row.kind === "section") { start = candidate; break; }
+  }
+  if (start >= 0 && size(start, anchor + 1) > cap) start = -1;
+  if (start < 0) start = Math.max(0, anchor - cap + 3); // reserve both markers
+  let end = Math.min(length, anchor + 1);
+  while (end < length && size(start, end) < cap) end += 1;
+  while (start > 0 && size(start, end) < cap) {
+    start -= 1;
+    // Never open the window on a spacer row; land on the section label.
+    if (start > 0 && all[start]!.kind === "spacer") start -= 1;
+  }
+  const rows: CommandMenuRow[] = [];
+  if (start > 0) rows.push(more);
+  rows.push(...all.slice(start, end));
+  if (end < length) rows.push(more);
+  return rows;
+}
+
 /// The per-line map behind the slash menu: which line is a command row and
 /// which command it holds. The menu formatter and the workbench's mouse hit
 /// targets both derive from this, so clicks land where the eye looks.
-export function slashMenuLineCommands(commands: readonly SlashCommand[]): Array<number | null> {
-  const showSections = commands.length >= 6;
-  const map: Array<number | null> = [];
-  let currentSection: SlashCommandSection | null = null;
-  commands.forEach((command, index) => {
-    if (showSections && command.section !== currentSection) {
-      currentSection = command.section;
-      if (map.length > 0) map.push(null);
-      map.push(null);
-    }
-    map.push(index);
-  });
-  return map;
+export function slashMenuLineCommands(
+  commands: readonly SlashCommand[],
+  capacity: number = Number.POSITIVE_INFINITY,
+  selectedIndex = 0,
+): Array<number | null> {
+  return layoutCommandMenu(commands, capacity, selectedIndex).map((row) => (row.kind === "command" ? row.index : null));
 }
 
 export function formatSlashCommandMenu(
@@ -262,23 +339,18 @@ export function formatSlashCommandMenu(
   const available = Math.max(18, width - 4);
   const usages = commands.map(slashCommandUsage);
   const labelWidth = Math.min(18, Math.max(...usages.map((usage) => usage.length), 0));
-  const lines: string[] = [];
-  let currentSection: SlashCommandSection | null = null;
-  commands.forEach((command, index) => {
-    if (commands.length >= 6 && command.section !== currentSection) {
-      currentSection = command.section;
-      if (lines.length > 0) lines.push("");
-      lines.push(`    ${painter.bold(command.section.toUpperCase(), "secondary")}`);
-    }
-    const usage = usages[index]!;
-    const description = painter.dim(truncateText(command.description, available - labelWidth - 3));
-    if (index === selectedIndex) {
-      // The selected row is a filled surface spanning marker and usage, so the
+  const lines = layoutCommandMenu(commands, Number.POSITIVE_INFINITY, selectedIndex).map((row) => {
+    if (row.kind === "section") return `    ${painter.bold(row.section!.toUpperCase(), "secondary")}`;
+    if (row.kind === "spacer") return "";
+    if (row.kind === "more") return `    ${painter.dim("… more")}`;
+    const usage = usages[row.index]!;
+    const description = truncateText(commands[row.index]!.description, available - labelWidth - 4);
+    if (row.index === selectedIndex) {
+      // The selected row is a filled surface spanning the whole line, so the
       // eye finds the cursor without hunting for a glyph.
-      lines.push(`  ${painter.wash(`› ${usage.padEnd(labelWidth)}`, "electric")} ${description}`);
-      return;
+      return `  ${painter.wash(`› ${usage.padEnd(labelWidth)} ${description}`.padEnd(available), "electric")}`;
     }
-    lines.push(`    ${painter.text(usage.padEnd(labelWidth), "secondary")} ${description}`);
+    return `    ${painter.text(usage.padEnd(labelWidth), "electric")} ${painter.dim(description)}`;
   });
   return lines.join("\n");
 }
@@ -295,7 +367,7 @@ export function formatMentionMenu(
   return files.map((file, index) => {
     const label = truncateText(sanitizeTerminalLine(file), available);
     if (index === selectedIndex) {
-      return `  ${painter.wash(`› ${label}`, "electric")}`;
+      return `  ${painter.wash(`› ${label}`.padEnd(width - 3), "electric")}`;
     }
     return `    ${painter.text(label, "secondary")}`;
   }).join("\n");

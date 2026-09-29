@@ -40,6 +40,25 @@ test("live inference shares its dots across card and send while keeping activity
   expect(screen(120, 36)).not.toContain("···");
 });
 
+test("Figma composer stays compact and its first-Escape warning uses the real interrupt window", () => {
+  const clock = spyOn(Date, "now").mockReturnValue(10_000);
+  try {
+    const { ui, state, screen, key, interrupts } = fixture("working");
+    screen(110, 30);
+    const input = { ...state.layout.input }, before = ui.frame(110, 30);
+    expect(input.height).toBe(3);
+    expect(stripVTControlCharacters(before.rows[input.row]!)).toMatch(/^  ╭─/);
+    expect(stripVTControlCharacters(before.rows[input.row + 1]!)).toContain("Esc Esc");
+    key("escape");
+    expect(screen(110, 30)).toContain("Press Esc again to stop");
+    expect(state.layout.input).toEqual(input); expect(interrupts()).toBe(0);
+    clock.mockReturnValue(11_501);
+    expect(screen(110, 30)).not.toContain("Press Esc again");
+    key("escape"); expect(interrupts()).toBe(0);
+    clock.mockReturnValue(11_700); key("escape"); expect(interrupts()).toBe(1);
+  } finally { clock.mockRestore(); }
+});
+
 test("run projection keeps progress out of completed answers and preserves failed evidence", () => {
   const { ui, state } = fixture("working");
   ui.toolFinished({ toolCallId: "check", name: "run_command", state: "done", exitCode: 1, message: "Regression failed" });
@@ -306,7 +325,7 @@ test("queued follow-ups support caret editing and keep the running control visib
   state.onKeypress("\n" + "a long follow-up\n".repeat(20), {});
   expect(screen(40, 10)).toContain("··· stop");
   expect(screen(40, 10)).toContain("Clear queue");
-  expect(screen(40, 10)).toContain("Type to queue");
+  expect(screen(40, 10)).toContain("Queued · sends");
 });
 
 test("model picker keeps the selected result visible on a ten-row terminal", async () => {
@@ -518,10 +537,12 @@ test("terminal focus changes the prompt outline and caret while Unicode draft co
   rail.setModel({ id: "original-model", provider: "demo", contextWindow: 100000 });
   rail.apply({ schemaVersion: 1, eventId: 1, sessionId: "session", turnId: "turn", workspaceId: null, agentRunId: null,
     occurredAt: new Date().toISOString(), type: "model.usage", payload: { totalTokens: 4000 } });
-  // A short, wide terminal puts the token counter beside the shortcut hints.
+  // The compact composer keeps the count in its bottom border and the
+  // command/file controls alongside the draft, including in short terminals.
   const compact = screen(120, 10).split("\n").at(-2)!;
   expect(compact).toContain("~5 tok");
-  expect(compact).toContain("/ commands · @ files");
+  expect(compact).toContain("⇧↵ newline");
+  expect(screen(120, 10)).toContain("/ commands  @ files");
   state.onKeypress("", { name: "return" });
   expect(screen()).not.toContain("~0 tok");
   state.onData("\x1b[200~日本語\x1b[201~");

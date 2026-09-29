@@ -30,6 +30,9 @@ Live Thinking and the running Send control use the same shared `thinkingDots` re
 | `--text-secondary` | `secondary` | `#8FA1AF` |
 | `--text-dim` | `muted` | `#6B7D8B` |
 | accent wash over chrome | `menuSelection` | `#172835` |
+| 45% amber over chrome | `composerQueuedBorder` | `#6F582B` |
+| 60% red over chrome | `composerStoppedBorder` | `#8F3B39` |
+| 40% blue over chrome | `composerRestoredBorder` | `#2C516D` |
 | `syntax/keyword` | `syntaxKeyword` | `#C49CE6` |
 | `syntax/string` | `syntaxString` | `#9CCF8D` |
 | `syntax/number` | `syntaxNumber` | `#E5A93C` |
@@ -55,7 +58,7 @@ Translucent cyan, amber, and red surfaces are composited into theme tokens for t
 - **Tool:** one compact line containing status, cyan tool name, secondary target, dim timing and disclosure. Failure changes the mark/name to red. Output and arguments expand underneath, with an inset left rule. Approval, interruption and unknown exit status retain explicit production labels.
 - **Error:** red text and an error mark on a subtly red-tinted block with one red left rule.
 - **Footer:** `Build/Plan/Compact · model · elapsed N.Ns · speed N.N tok/s · ctx used/total ────── N%`, followed by lowercase `copy` and a right-aligned bracketed status. Copy appears on hover or keyboard selection only when text exists. Its feedback is `copied`. Context fill is green, amber above 50%, red above 80%; safe context values are secondary and safe percentages dim.
-- **Composer:** two default text rows, cyan focus rule, bottom-aligned state glyph, cyan-wash Send, and a token estimate below the control. Running uses `◎`, `Agent is running...`, and `[  ···  ]`. Native queued editing, interruption, and Clear queue retain their established routing. The bottom hints emphasize `/` and `@` in cyan.
+- **Conversation composer (40:105):** directly inspected current Components frame. A compact inset box holds the state glyph, draft and right-aligned send/commands/files controls. A running composer keeps its stop action and double-Escape hint; the first Escape shows the reference's red warning for the actual 1.5-second interrupt window. Queued and restored drafts add one labelled row with Clear. Long drafts grow to a bounded height and keep their caret visible; the token estimate and newline hint occupy the bottom border. The shared live dots remain as an existing motion refinement. Popups align with the composer's inset border.
 - **Action rail (redesign):** the six-cell rail keeps the state pip (green idle, amber running), a short divider, Files `≡`, Diff `╪`, Preview `▣` and Drive `▷`, and `[ ]` at the bottom. The vertical `PANEL` label is gone. Hover lifts the cell onto the raised surface and brightens the icon; active Drive work stays amber. Files loads the workspace listing, Diff opens recorded changes, and Preview opens image artifacts; an open panel docks in the rail's place. Compact terminals use three cells. Settings is available through Tab / Ctrl+K; Execution log remains Ctrl+B.
 - **Setup wizard (redesign):** `demesne setup` in a terminal runs a full-screen three-step wizard — Provider (local servers found first, unreachable ones dimmed, `r` rescans, Custom URL with the HTTPS rule, OpenRouter browser sign-in), Model (largest context recommended, or a typed id when none are listed), Review (detected values; `e` edits context/output, cycles theme) — then writes the config and shows where it went. Esc or Ctrl+C cancels without writing. `--provider-url`/`--model` with `--yes`, or no terminal, keeps the non-interactive path.
 

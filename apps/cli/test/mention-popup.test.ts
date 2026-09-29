@@ -24,7 +24,8 @@ test("mention popup stays above the composer and preserves a held conversation, 
   f.type("Fix @"); f.screen();
   const menu = f.state.mentionMenuFrame;
   expect(menu.rect.row + menu.rect.height).toBe(input.row);
-  expect(menu.rect.width).toBe(input.width);
+  expect(menu.rect.width).toBe(input.width - 4);
+  expect(menu.rect.column).toBe(input.column + 2);
   expect(f.state.layout.input).toEqual(input);
   expect(f.screen().split("\n").findIndex(row => row.includes("file-0.ts"))).toBeLessThan(input.row);
   f.type("src/file-3"); expect(f.screen()).toContain("file-3.ts"); expect(f.screen()).not.toContain("file-4.ts");
@@ -71,7 +72,7 @@ test("mentions remain reachable in the hero, narrow terminals and docked panels 
     }
     if (!start) {
       f.state.sessionView.act({ kind: "log" }); f.screen(160, 48);
-      expect(f.state.mentionMenuFrame.rect.width).toBe(f.state.layout.input.width);
+      expect(f.state.mentionMenuFrame.rect.width).toBe(f.state.layout.input.width - 4);
       expect(f.state.mentionMenuFrame.rect.width).toBeLessThan(150);
     }
   }

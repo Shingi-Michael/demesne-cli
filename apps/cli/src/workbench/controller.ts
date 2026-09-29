@@ -69,7 +69,7 @@ import {
   type PromptEditorResult,
   type PromptEditorState,
 } from "../prompt-editor.ts";
-import { reduceInterruptKey } from "../interrupt-key.ts";
+import { interruptArmed, reduceInterruptKey } from "../interrupt-key.ts";
 import { reducedMotionEnabled } from "../motion.ts";
 import { approvalOptions, reduceApprovalSelection } from "../approval-selection.ts";
 import { filterDialogIndices, reduceDialogPicker } from "../session-picker.ts";
@@ -1368,17 +1368,20 @@ export class Workbench {
       const editor = this.mode === "streaming" ? this.queuedEditor : this.editor;
       const selecting = Boolean(editor.search);
       const queued = this.mode === "streaming" && Boolean(editor.value.trim());
-      const inputHeight = Math.min(this.layout.input.height, Math.max(selecting || queued || this.layout.height >= 16 ? 4 : 3, Math.floor(this.layout.height / 3)));
+      const labelled = queued || this.mode === "input" && this.restoredDraft && Boolean(editor.value.trim());
+      const inputHeight = Math.min(this.layout.input.height, Math.max(selecting || labelled ? 4 : 3, Math.floor(this.layout.height / 3)));
       this.layout.input = { row: this.layout.height - 1 - inputHeight, column: 0, width: panel.conversationWidth, height: inputHeight };
     } else if (this.sessionLayout) this.layout.input.width = panel.conversationWidth;
     this.rebuildConversation();
     const frame = this.composeFrame();
+    const menuInset = this.startLayout ? 0 : this.layout.input.width >= 65 ? 2 : 1;
+    const menuInput = { ...this.layout.input, column: this.layout.input.column + menuInset, width: this.layout.input.width - menuInset * 2 };
     this.commandMenuFrame = this.sessionLayout && this.mode === "input" && !this.editor.search
       ? this.commandMenu.render({ commands: this.matchingCommands(), selected: this.editor.menuSelected, query: this.editor.value,
-        input: this.layout.input, paint: this.options.paint, top: this.startLayout ? 1 : 2 }) : null;
+        input: menuInput, paint: this.options.paint, top: this.startLayout ? 1 : 2 }) : null;
     this.mentionMenuFrame = this.sessionLayout && this.mode === "input" && !this.commandMenuFrame
       ? this.mentionMenu.render({ files: this.matchingMentions(), selected: this.editor.mentionSelected,
-        query: mentionTokenAt(this.editor.value, this.editor.cursor)?.query ?? "", input: this.layout.input, paint: this.options.paint, top: this.startLayout ? 1 : 2 }) : null;
+        query: mentionTokenAt(this.editor.value, this.editor.cursor)?.query ?? "", input: menuInput, paint: this.options.paint, top: this.startLayout ? 1 : 2 }) : null;
     if (!this.commandMenuFrame) this.commandMenu.reset();
     if (!this.mentionMenuFrame) this.mentionMenu.reset();
     const menu = this.mentionMenuFrame ?? this.commandMenuFrame;
@@ -2054,7 +2057,7 @@ export class Workbench {
       this.syncQueuedEditor();
       const streaming = this.mode === "streaming";
       const result = composeDraft({ width, height: this.layout.input.height, paint, focused: this.terminalFocused && !this.sessionView.focused, context: this.options.contextRail.contextSnapshot,
-        now: Date.now(), reducedMotion: reducedMotionEnabled(),
+        now: Date.now(), reducedMotion: reducedMotionEnabled(), stopArmed: streaming && interruptArmed(this.lastInterruptEscapeAt, Date.now()),
         hero: Boolean(this.startLayout), reveal: this.startLayout ? this.startScreen.reveal(1, Date.now(), this.started && paint.enabled && !reducedMotionEnabled()) : 1,
         editor: streaming ? this.queuedEditor : this.editor, streaming, restored: this.restoredDraft, mentions: this.promptContext.mentions, history: this.promptContext.history });
       return { lines: result.lines, cursor: result.cursor, zones: result.zones.map((zone) => ({ ...zone, row: zone.row - 1, run: (column?: number) => {

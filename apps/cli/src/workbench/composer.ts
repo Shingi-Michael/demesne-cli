@@ -159,9 +159,13 @@ export function composeDraft(options: ComposerOptions & { height: number; paint:
     } else {
       const item = menu[entry.index]!;
       const label = truncateText(item.label, textWidth - 2);
+      // File name first, folder dimmed; the selection is a quiet wash with an
+      // accent edge, matching the slash menu and chooser.
+      const slash = label.lastIndexOf("/") + 1;
+      const styled = paint.text(label.slice(0, slash), "muted") + paint.text(label.slice(slash), entry.index === selected ? "electric" : "paper");
       put(menuRow, entry.index === selected
-        ? paint.wash(`› ${label}`.padEnd(textWidth), "electric")
-        : `  ${paint.text(item.label, "secondary")}`);
+        ? paint.text("▎", "electric") + paint.wash(" ", "menuSelection") + paint.wash(styled + " ".repeat(Math.max(0, textWidth - 2 - visibleLength(label))), "menuSelection")
+        : `  ${styled}`);
       zones.push({ row: menuRow, column: textColumn, width: textWidth, action: { kind: "mention", index: entry.index } });
     }
     menuRow += 1;

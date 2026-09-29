@@ -2169,23 +2169,25 @@ export class Workbench {
         .slice(start, start + count);
       const filtered = this.dialogQuery ? ` of ${this.dialogItems.length}` : "";
       const at = shown.length === 0 ? 0 : this.dialogSelected + 1;
+      // The redesign's chooser: a quiet selection wash with an accent edge
+      // instead of a solid block, a labelled filter, and a short footer.
       lines.push(
-        `${" ".repeat(HARNESS.margin)}${paint.bold(this.dialogTitle, "paper")} `
-          + paint.dim(`(${at}/${this.dialogFiltered.length}${filtered})`),
+        `${" ".repeat(HARNESS.margin)}${paint.bold(this.dialogTitle, "paper")}  `
+          + paint.text(`${at}/${this.dialogFiltered.length}${filtered}`, "muted"),
       );
-      lines.push(`    ${paint.text("⌕", "electricBright")} ${sanitizeTerminalLine(this.dialogQuery) || paint.dim("Type to search…")}`);
-      if (!shown.length) lines.push("    No matches — backspace to edit");
+      lines.push(`    ${paint.text("filter", "muted")}  ${this.dialogQuery ? paint.text(sanitizeTerminalLine(this.dialogQuery), "paper") : paint.text("type to filter", "muted")}`);
+      if (!shown.length) lines.push(`    ${paint.text("No matches — backspace to edit", "secondary")}`);
       shown.forEach((item, position) => {
         position += start;
         const selected = position === this.dialogSelected;
         const label = truncateText(sanitizeTerminalLine(item.label), Math.max(8, width - HARNESS.content - 2));
-        lines.push(`   ${selected ? paint.wash(`› ${label}`.padEnd(width - 6), "electric") : paint.text(`  ${label}`, "secondary")}`);
+        lines.push(`   ${selected ? paint.text("▎", "electric") + paint.wash(` ${label}`.padEnd(width - 7), "menuSelection", "electric") : paint.text(`  ${label}`, "secondary")}`);
         zones.push({
           row: lines.length - 1,
           run: () => this.clickDialogItem(position),
         });
       });
-      lines.push(`${" ".repeat(HARNESS.margin)}  ${paint.dim("↑/↓ move · enter select · esc cancel · type to filter")}`);
+      lines.push(`${" ".repeat(HARNESS.margin)}  ${paint.text("↑↓ select · ↵ choose · Esc cancel", "muted")}`);
       return { lines, cursor: null, zones };
     }
 

@@ -1022,31 +1022,36 @@ test("live answers follow output until the reader scrolls, then hold their posit
 });
 
 test("wheel momentum rests at both edges without changing the viewport and scrolling down resumes live", () => {
-  for (const theme of ["demesne", "demesne-light"]) for (const [width, height] of [[40, 10], [80, 24], [120, 36]]) {
-    const { view, paint, screen, key } = fixture("long");
-    paint.setTheme(theme);
-    const before = screen(width, height);
-    expect(before).not.toContain("╎");
-    const region = (view as any).regions.find((region: { target: string }) => region.target === "flow");
-    const anchor = view.memory.anchor;
-    const bottom = view.memory.flowOffset;
-    for (let index = 0; index < 60; index++) expect(view.wheel(region.row, region.column, 3)).toBe(false);
-    key("pagedown");
-    expect(screen(width, height)).toBe(before);
-    expect(view.memory.followFlow).toBe(true);
-    expect(view.memory.anchor).toEqual(anchor);
-    expect(view.wheel(region.row, region.column, -3)).toBe(bottom > 0);
-    screen(width, height);
-    expect(view.memory.flowOffset).toBe(Math.max(0, bottom - 3));
-    expect((view as any).regions.find((region: { target: string }) => region.target === "flow").height).toBe(region.height);
-    view.wheel(region.row, region.column, -10_000);
-    const top = screen(width, height);
-    for (let index = 0; index < 60; index++) expect(view.wheel(region.row, region.column, -3)).toBe(false);
-    expect(screen(width, height)).toBe(top);
-    view.wheel(region.row, region.column, 10_000);
-    expect(screen(width, height)).toBe(before);
-    expect(view.memory.followFlow).toBe(true);
-  }
+  // The header clock and elapsed time are part of each frame; a second
+  // boundary between two snapshots must not read as a viewport change.
+  const clock = spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 8, 29, 0, 43, 37));
+  try {
+    for (const theme of ["demesne", "demesne-light"]) for (const [width, height] of [[40, 10], [80, 24], [120, 36]]) {
+      const { view, paint, screen, key } = fixture("long");
+      paint.setTheme(theme);
+      const before = screen(width, height);
+      expect(before).not.toContain("╎");
+      const region = (view as any).regions.find((region: { target: string }) => region.target === "flow");
+      const anchor = view.memory.anchor;
+      const bottom = view.memory.flowOffset;
+      for (let index = 0; index < 60; index++) expect(view.wheel(region.row, region.column, 3)).toBe(false);
+      key("pagedown");
+      expect(screen(width, height)).toBe(before);
+      expect(view.memory.followFlow).toBe(true);
+      expect(view.memory.anchor).toEqual(anchor);
+      expect(view.wheel(region.row, region.column, -3)).toBe(bottom > 0);
+      screen(width, height);
+      expect(view.memory.flowOffset).toBe(Math.max(0, bottom - 3));
+      expect((view as any).regions.find((region: { target: string }) => region.target === "flow").height).toBe(region.height);
+      view.wheel(region.row, region.column, -10_000);
+      const top = screen(width, height);
+      for (let index = 0; index < 60; index++) expect(view.wheel(region.row, region.column, -3)).toBe(false);
+      expect(screen(width, height)).toBe(top);
+      view.wheel(region.row, region.column, 10_000);
+      expect(screen(width, height)).toBe(before);
+      expect(view.memory.followFlow).toBe(true);
+    }
+  } finally { clock.mockRestore(); }
 });
 
 test("completed transcript stays at the bottom through raw diagonal trackpad wheel events", () => {

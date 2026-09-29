@@ -17,6 +17,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
+      # run_command gives agent commands a fixed PATH of system directories.
+      # setup-bun installs to ~/.bun/bin, so expose bun where an install lives;
+      # the agent benchmark fixtures run `bun test` through that tool.
+      - run: sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test

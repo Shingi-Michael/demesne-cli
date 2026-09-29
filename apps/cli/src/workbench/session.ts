@@ -636,7 +636,7 @@ export class SessionView {
     return this.scrollFlow(amount);
   }
 
-  render(options: { width: number; height: number; paint: Painter; title: string; path: string; now?: number; presence?: PresenceState;
+  render(options: { width: number; height: number; paint: Painter; title: string; path: string; branch?: string | null; now?: number; presence?: PresenceState;
     drive?: DriveState | null;
     animateScroll?: boolean;
     panel?: boolean; column?: number; replace?: boolean; contextLines?: string[]; openedAt?: number; createdAt?: number;
@@ -662,7 +662,8 @@ export class SessionView {
     const now = options.now ?? Date.now();
     if (!options.panel) {
       const header = sessionHeader({ width, paint, path: options.path, now, openedAt: options.openedAt ?? now,
-        createdAt: options.createdAt, accent: height >= 10, pointer: this.pointer, historyActive: this.historyOpen });
+        createdAt: options.createdAt, accent: height >= 10, pointer: this.pointer, historyActive: this.historyOpen,
+        title: options.title, branch: options.branch, presence: options.presence });
       header.rows.forEach((text, row) => put(row, 0, text, width, "surface"));
       zone(header.row, header.path.column, header.path.width, { kind: "workspace" });
       zone(header.row, header.history.column, header.history.width, { kind: "history" });

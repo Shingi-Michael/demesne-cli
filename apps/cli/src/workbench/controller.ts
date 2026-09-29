@@ -1863,7 +1863,7 @@ export class Workbench {
     const root = this.options.workspaceRoot ?? rail.workspacePath;
     const renderOptions = { paint, drive: this.driveState,
       animateScroll: this.started,
-      title: this.sessionTitle, path: shortenPath(root), now: Date.now(), openedAt: this.sessionOpenedAt, createdAt: this.sessionCreatedAt,
+      title: this.sessionTitle, path: shortenPath(root), branch: rail.workspaceBranch, now: Date.now(), openedAt: this.sessionOpenedAt, createdAt: this.sessionCreatedAt,
       presence: this.mode === "approval" ? "waiting" as const : this.state,
       markdown: (entry: AssistantEntry, width: number) => this.renderedMarkdown(entry, width),
     };

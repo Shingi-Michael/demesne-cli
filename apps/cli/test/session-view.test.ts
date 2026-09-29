@@ -383,7 +383,7 @@ test("the status strip tracks execution and approval never claims a running veri
   const failed = screen();
   expect(failed.match(/The parser check failed\./g)).toHaveLength(1);
   expect(failed).toContain("CHECK_FAILURE");
-  expect(failed.split("\n").at(-1)).toContain("FAILED");
+  expect(failed.split("\n").at(-1)).toContain("● failed");
 });
 
 test("Response navigation reveals the answer start, preserves draft and historical anchors, and returns to live", () => {
@@ -397,7 +397,7 @@ test("Response navigation reveals the answer start, preserves draft and historic
     const rows = screen(width, height).split("\n");
     expect(rows.join("\n")).not.toContain("ANSWER_START");
     const row = rows.length - 1;
-    state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("✓") });
+    state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("●") });
     expect(screen(width, height)).toContain("ANSWER_START");
     expect(view.focused).toBe(true);
     expect(view.memory.followFlow).toBe(false);
@@ -653,7 +653,7 @@ test("pulsing dots mark inline Thinking from the first-token wait through live r
     expect(screen()).not.toContain("··· THINKING");
     expect(screen()).not.toContain("boundary.▌");
     ui.finishTurn("completed", "Complete");
-    expect(screen().split("\n").at(-1)).toContain("READY");
+    expect(screen().split("\n").at(-1)).toContain("● ready");
     expect(screen()).toContain("[ COMPLETE ]");
     expect(screen()).not.toContain("···");
   } finally {
@@ -788,7 +788,7 @@ test("failed cards without a final response retain their own measurements, conte
   expect(rows.join("\n")).toContain("Plan · failed-model · elapsed 94.2s · speed 19.4 tok/s");
   expect(rows.join("\n")).toContain("63.9k/100k ───╴── 64%");
   expect(rows.join("\n")).toContain("[ FAILED ]");
-  expect(rows.at(-1)).toContain("FAILED");
+  expect(rows.at(-1)).toContain("● failed");
   expect(view.current?.answer).toBeUndefined();
   const receipt = structuredClone(view.current!.receipt);
   const runId = view.current!.id;
@@ -1168,7 +1168,7 @@ test("folding completed reasoning leaves breathing room without a visible scroll
   const region = (view as any).regions.find((region: { target: string }) => region.target === "flow");
   expect(view.memory.flowOffset).toBe(0);
   expect((view as any).flowRows.length).toBeLessThan(region.height);
-  expect(rows[1]).toContain("HISTORY ↓");
+  expect(rows[1]).toContain("history");
   expect(rows.join("\n")).toContain("SHORT_RESPONSE");
   expect(rows.join("\n")).not.toContain("╎");
 });

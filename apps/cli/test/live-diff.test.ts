@@ -97,7 +97,7 @@ test("native diff opens from an edit row and supports dock, expansion, live retu
   internals.onKeypress("", { name: "return", meta: true });
   expect(internals.sessionView.panelExpanded).toBe(true);
   let frame = ui.frame(120, 36).rows.join("\n");
-  expect(frame).toContain("New file · applied this turn"); expect(frame).toContain("keep my draft"); expect(frame).toContain("Restore");
+  expect(frame).toContain("New file · applied this turn"); expect(frame).toContain("keep my draft"); expect(frame).toContain("Alt+↵ restore");
   internals.onKeypress("", { name: "escape" });
   expect(internals.sessionView.panelOpen).toBe(false);
   const rendered = ui.frame(120, 36).rows.join("\n");
@@ -105,4 +105,30 @@ test("native diff opens from an edit row and supports dock, expansion, live retu
   internals.sessionView.act({ kind: "diff-open", runId: 1, recordId: 2 });
   internals.sessionView.key({ name: "g", ctrl: true });
   expect(internals.sessionView.diffOpen).toBe(true);
+});
+
+test("the Changes panel follows Figma 20:124: totals, file rows with counts, a file header and folded context", () => {
+  const before = Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
+  const after = before.replace("line 3\n", "line three\n").replace("line 50\n", "line fifty\nline fifty-one\n");
+  const edited = tool(2, "apps/daemon/src/app.ts", before, after);
+  const created = tool(3, "apps/daemon/src/journal.ts", "", "export const journal = [];\n");
+  const drafting: ToolEntry = { ...tool(4, "apps/daemon/test/app.test.ts"), changes: undefined, state: "running", drafting: true,
+    diff: { oldText: "", newText: "a\nb\n" } };
+  const panel = new DiffPanel(); panel.open(planRuns([user(), edited, created, drafting]), 1);
+  panel.act({ kind: "diff-select", path: "apps/daemon/src/app.ts" });
+  const rows = panel.render(90, 36, paint).rows;
+  const text = rows.join("\n");
+  // Totals across files, with drafting called out, and the follow and expand controls.
+  expect(rows[2]).toMatch(/^ 3 files \+6 −2 · 1 drafting +paused +Alt\+↵ expand/);
+  // Each file shows its folder, state and own counts; the selected one is marked.
+  expect(text).toMatch(/▎✓ apps\/daemon\/src\/app\.ts +Applied {2}\+3 −2/);
+  expect(text).toMatch(/✓ apps\/daemon\/src\/journal\.ts +Applied {2}\+1 −0/);
+  expect(text).toMatch(/◌ apps\/daemon\/test\/app\.test\.ts +Drafting {2}\+2 −0/);
+  // The header names the file, its state, language and edits, with totals right.
+  expect(text).toMatch(/app\.ts {2}Applied · TypeScript · 1 edit +\+3 −2/);
+  // Old and new line numbers, folded context, and no hunk headers.
+  expect(text).toMatch(/ 3 +− line 3/);
+  expect(text).toMatch(/ +3 \+ line three/);
+  expect(text).toContain("unchanged lines");
+  expect(text).not.toContain("@@");
 });

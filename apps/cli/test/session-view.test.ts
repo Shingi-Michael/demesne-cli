@@ -1595,8 +1595,12 @@ test("opening evidence near the viewport edge reveals the record beside its resp
   const row = rows.findIndex((line) => line.includes("1 file changed"));
   state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("1 file changed") });
   const expanded = screen(100, 36);
-  expect(expanded).toMatch(/DIFF\s+Turn \d+/);
-  expect(expanded).toContain("@@");
+  expect(expanded).toMatch(/CHANGES\s+Turn \d+/);
+  // Figma shows no hunk headers; the file header carries the totals.
+  expect(expanded).not.toContain("@@");
+  expect(expanded).toContain("lexer.ts  Applied · TypeScript");
+  expect(expanded).toMatch(/✓ src\/lexer\.ts +Applied  \+1 −1/);
+  expect(expanded).toContain("1 file +1 −1");
   expect(expanded).toMatch(/2\s+−\s+return \/\[a-zA-Z_\]\//);
   expect(expanded).not.toContain("Arguments ▸");
   expect(expanded).toContain("Unicode identifiers are accepted");

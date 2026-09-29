@@ -703,7 +703,7 @@ export class SessionView {
       this.hoverRegions.push({ row: header.row, column: header.history.column, width: header.history.width, key: "header-history" });
     } else {
       for (let y = 0; y < height; y++) put(y, 0, "", width, "surface");
-      const title = this.drivePanelOpen ? "AGENT DRIVE" : this.contextOpen ? "CONTEXT" : this.outputId !== null ? output?.type === "panel" && output.title ? output.title : "SESSION OUTPUT" : this.artifact?.kind === "changes" ? "DIFF"
+      const title = this.drivePanelOpen ? "AGENT DRIVE" : this.contextOpen ? "CONTEXT" : this.outputId !== null ? output?.type === "panel" && output.title ? output.title : "SESSION OUTPUT" : this.artifact?.kind === "changes" ? "CHANGES"
         : this.artifact?.kind === "verification" ? "VERIFICATION" : this.artifact ? "FAILED / DENIED" : memory.surface === "review" ? "CHANGES" : "EXECUTION LOG";
       // Figma panel frame: a quiet uppercase label, then what it shows. The
       // keycap footer carries Esc close; × stays for narrow panels without one.

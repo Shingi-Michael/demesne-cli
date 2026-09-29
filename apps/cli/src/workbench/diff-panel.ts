@@ -1,4 +1,5 @@
-import { sanitizeTerminalLine, truncateText, type Painter, type PaletteColor } from "@demesne/brand";
+import { formatFooterLine, sanitizeTerminalLine, truncateText, visibleLength, type Painter, type PaletteColor } from "@demesne/brand";
+import { keycap } from "./session-chrome.ts";
 import type { ToolFileChange } from "@demesne/protocol";
 import type { ToolEntry } from "./entries.ts";
 import type { SessionRun } from "./session.ts";
@@ -17,6 +18,17 @@ export function changeTotals(tool: ToolEntry): string {
   for (const change of source) { const diff = codeDiff(change.before ?? "", change.after ?? ""); added += diff.added; removed += diff.removed; }
   const label = `+${added} −${removed}`;
   totals.set(source, label); return label;
+}
+
+const stateTone = (tool: ToolEntry): PaletteColor => tool.state === "done" ? "citron" : tool.state === "failed" || tool.state === "denied" || tool.waiting ? "signal"
+  : tool.state === "stopped" ? "secondary" : "thinking";
+
+const LANGUAGES: Record<string, string> = { ts: "TypeScript", tsx: "TypeScript", js: "JavaScript", jsx: "JavaScript", mjs: "JavaScript", cjs: "JavaScript",
+  py: "Python", rs: "Rust", go: "Go", json: "JSON", yml: "YAML", yaml: "YAML", sh: "Shell", bash: "Shell", zsh: "Shell", md: "Markdown",
+  toml: "TOML", css: "CSS", html: "HTML", swift: "Swift", rb: "Ruby", java: "Java", kt: "Kotlin", c: "C", h: "C", cpp: "C++", sql: "SQL" };
+function languageName(path: string): string | undefined {
+  const extension = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase();
+  return extension ? LANGUAGES[extension] : undefined;
 }
 
 export type DiffAction = { kind: "diff-select"; path: string } | { kind: "diff-live" | "diff-expand" }
@@ -154,23 +166,48 @@ export class DiffPanel {
       if (row >= height || column + label.length > width) return;
       canvas.put(row, column, paint.text(label, "electric"), label.length, "surface"); zones.push({ row, column, width: label.length, action });
     };
-    const run = this.runs.find((run) => run.id === this.runId);
-    put(2, `Turn ${run?.number ?? "—"} · ${this.following ? "Follow edits" : "Paused"}`, this.following ? "electric" : "secondary");
-    control(2, Math.max(1, width - 7), "Live", { kind: "diff-live" });
-    put(3, `${this.files.length} file${this.files.length === 1 ? "" : "s"}`);
-    control(3, Math.max(1, width - (this.expanded ? 11 : 10)), this.expanded ? "Restore" : "Expand", { kind: "diff-expand" });
+    // Figma 20:124. Row 2: totals on the left; follow state and expand on the right.
+    const counts = (file: ChangeFile): { added: number; removed: number } | null => {
+      if (file.applied && !file.applied.unavailable) { const diff = this.diff(`${this.runId}:${file.path}:applied`, file.applied.before ?? "", file.applied.after ?? ""); return { added: diff.added, removed: diff.removed }; }
+      if (file.tool.diff) { const diff = this.diff(`${this.runId}:${file.path}:proposal`, file.tool.diff.oldText, file.tool.diff.newText); return { added: diff.added, removed: diff.removed }; }
+      return null;
+    };
+    const styledCounts = (value: { added: number; removed: number } | null) => value ? `${paint.text(`+${value.added}`, "citron")} ${paint.text(`−${value.removed}`, "signal")}` : "";
+    const totals = this.files.reduce((sum, file) => { const value = counts(file); return value ? { added: sum.added + value.added, removed: sum.removed + value.removed } : sum; }, { added: 0, removed: 0 });
+    const drafting = this.files.filter((file) => file.tool.state === "running" || file.tool.waiting).length;
+    const summary = paint.text(`${this.files.length} file${this.files.length === 1 ? "" : "s"}`, "paper") + (this.files.length ? ` ${styledCounts(totals)}` : "")
+      + (drafting ? paint.text(` · ${drafting} drafting`, "thinking") : "");
+    const expand = this.expanded ? "restore" : "expand";
+    const followLabel = this.following ? " following edits " : " paused ";
+    const controlsWidth = followLabel.length + 2 + "Alt+↵".length + 1 + expand.length;
+    const summaryRow = 2;
+    const showControls = width - 2 >= controlsWidth + 12;
+    canvas.put(summaryRow, 1, summary, Math.max(1, showControls ? width - controlsWidth - 4 : width - 2), "surface");
+    if (showControls) {
+      const followColumn = width - 1 - controlsWidth;
+      canvas.put(summaryRow, followColumn, this.following ? paint.wash(followLabel, "accentSurface", "electric") : paint.text(followLabel, "secondary"), followLabel.length, "surface");
+      zones.push({ row: summaryRow, column: followColumn, width: followLabel.length, action: { kind: "diff-live" } });
+      const expandColumn = followColumn + followLabel.length + 2;
+      canvas.put(summaryRow, expandColumn, keycap(paint, "Alt+↵") + paint.text(` ${expand}`, "muted"), controlsWidth - followLabel.length - 2, "surface");
+      zones.push({ row: summaryRow, column: expandColumn, width: controlsWidth - followLabel.length - 2, action: { kind: "diff-expand" } });
+    }
     // Reserve the file-list height so incoming files cannot shift inspected code.
     const capacity = Math.max(0, Math.min(5, Math.floor((height - 9) / 3)));
     this.listOffset = Math.min(this.listOffset, Math.max(0, this.files.length - capacity));
     this.files.slice(this.listOffset, this.listOffset + capacity).forEach((file, i) => {
-      const status = changeState(file.tool), selected = file === this.selected;
-      const suffix = ` ${status}`;
-      put(4 + i, `${selected ? "›" : " "} ${truncateText(sanitizeTerminalLine(file.path), Math.max(1, width - suffix.length - 5))}${suffix}`,
-        selected ? "electricBright" : "secondary", selected ? "menuSelection" : "surface");
-      zones.push({ row: 4 + i, column: 1, width: width - 2, action: { kind: "diff-select", path: file.path } });
+      const row = 3 + i, selected = file === this.selected;
+      const state = changeState(file.tool), tone = stateTone(file.tool);
+      const mark = file.tool.state === "done" ? "✓" : file.tool.state === "failed" || file.tool.state === "denied" ? "×" : file.tool.state === "stopped" ? "■" : file.tool.waiting ? "!" : "◌";
+      const right = `${paint.text(state, tone)}${counts(file) ? `  ${styledCounts(counts(file))}` : ""}`;
+      const path = sanitizeTerminalLine(file.path), slash = path.lastIndexOf("/");
+      const name = paint.text(path.slice(0, slash + 1), "muted") + paint.text(path.slice(slash + 1), selected ? "electricBright" : "paper");
+      const background: PaletteColor = selected ? "menuSelection" : "surface";
+      canvas.put(row, 0, selected ? paint.text("▎", "electric") : "", width, background);
+      canvas.put(row, 1, formatFooterLine(`${paint.text(mark, tone)} ${truncateText(name, Math.max(4, width - 8 - visibleLength(right)))}`, right, width - 3), width - 2, background);
+      zones.push({ row, column: 1, width: width - 2, action: { kind: "diff-select", path: file.path } });
     });
-    this.regions = [{ row: 4, height: capacity, target: "files" }];
-    let top = 4 + capacity;
+    this.regions = [{ row: 3, height: capacity, target: "files" }];
+    let top = 3 + capacity;
     put(top++, "─".repeat(Math.max(0, width - 2)), "rule");
     const file = this.frozen?.key === this.offsetKey ? this.frozen.file : this.selected;
     const signature = [width, paint.colors, paint.enabled, file?.path, file?.tool.diff, file?.tool.state, file?.tool.message, file?.tool.changes, file?.applied, file?.previous];
@@ -179,19 +216,12 @@ export class DiffPanel {
     const text = (value: string, tone: PaletteColor = "muted") => body.push(...value.split("\n").flatMap((line) => foldCells(paint.text(sanitizeTerminalLine(line), tone), Math.max(1, width - 2))));
     const show = (key: string, before: string, after: string) => {
       const diff = this.diff(key, before, after);
-      text(`+${diff.added} −${diff.removed}`, "secondary");
       const digits = Math.max(2, String(Math.max(before.split("\n").length, after.split("\n").length)).length);
       const highlighted = diffSyntax(file?.path ?? "", before, after, diff.rows.slice(0, 10_000), paint);
       for (const [index, row] of diff.rows.entries()) {
         if (index >= 10_000) { text(`… ${diff.rows.length - index} more diff lines (preview limit)`); break; }
-        if (row.kind !== "gap" && (index === 0 || diff.rows[index - 1]?.kind === "gap")) {
-          let end = index;
-          while (end < diff.rows.length && diff.rows[end]!.kind !== "gap") end++;
-          const segment = diff.rows.slice(index, end);
-          const old = segment.filter((row) => row.old !== undefined), next = segment.filter((row) => row.next !== undefined);
-          text(`@@ -${old[0]?.old ?? Math.max(0, (next[0]?.next ?? 1) - 1)},${old.length} +${next[0]?.next ?? Math.max(0, (old[0]?.old ?? 1) - 1)},${next.length} @@`, "electric");
-        }
-        if (row.kind === "gap") { text(row.text); continue; }
+        // Folded context reads `… 41 unchanged lines` in the number column.
+        if (row.kind === "gap") { body.push(surface(paint.text(`${" ".repeat(digits * 2 + 1)}${row.text}`, "muted"), width - 2, paint, "raised")); continue; }
         const numbers = `${String(row.old ?? "").padStart(digits)} ${String(row.next ?? "").padStart(digits)} `;
         const mark = row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " ";
         const tone = row.kind === "added" ? "citron" : row.kind === "removed" ? "signal" : "muted";
@@ -205,8 +235,11 @@ export class DiffPanel {
       if (!diff.rows.length) text("No textual change.");
     };
     if (file) {
-      put(top++, sanitizeTerminalLine(file.path), "paper");
-      put(top++, `${changeState(file.tool)}${this.frozen?.key === this.offsetKey ? " · paused snapshot" : file.revisions > 1 ? ` · ${file.revisions} operations` : ""}`, file.tool.state === "done" ? "citron" : file.tool.state === "running" ? "thinking" : "signal");
+      // `app.test.ts  Applied · TypeScript · 2 edits` with the totals on the right.
+      const path = sanitizeTerminalLine(file.path), name = path.slice(path.lastIndexOf("/") + 1);
+      const details = [paint.text(changeState(file.tool), stateTone(file.tool)), languageName(path), `${file.revisions} edit${file.revisions === 1 ? "" : "s"}`]
+        .filter(Boolean).map((part, index) => index ? paint.text(part!, "muted") : part).join(paint.text(" · ", "muted"));
+      canvas.put(top++, 1, formatFooterLine(`${paint.text(name, "paper")}  ${details}`, styledCounts(counts(file)), width - 3), width - 2, "surface");
       if (!cached) {
         const completedEvidence = file.tool.state === "done" && file.tool.changes?.some((change) => change.path === file.path);
         if (!completedEvidence) {
@@ -216,7 +249,9 @@ export class DiffPanel {
           if (file.tool.message) text(file.tool.message, file.tool.state === "done" ? "muted" : "signal");
         }
         if (file.applied) {
-          text(completedEvidence ? `${!file.applied.beforeExists && !file.applied.afterExists ? "Created then deleted" : !file.applied.beforeExists ? "New file" : !file.applied.afterExists ? "Deleted file" : "File changes"} · applied this turn` : "Earlier applied changes", "secondary");
+          const kind = !file.applied.beforeExists && !file.applied.afterExists ? "Created then deleted" : !file.applied.beforeExists ? "New file" : !file.applied.afterExists ? "Deleted file" : "";
+          if (!completedEvidence) text("Earlier applied changes", "secondary");
+          else if (kind) text(`${kind} · applied this turn`, "secondary");
           if (file.previous) text("File changed between operations; showing latest recorded segment.");
           if (file.applied.unavailable) text(file.applied.unavailable);
           else show(`${this.runId}:${file.path}:applied`, file.applied.before ?? "", file.applied.after ?? "");
@@ -234,7 +269,6 @@ export class DiffPanel {
     this.offsets.set(this.offsetKey, offset);
     for (let i = 0; i < room; i++) canvas.put(top + i, 1, body[offset + i] ?? "", width - 2, "surface");
     this.regions.push({ row: top, height: room, target: "code" });
-    if (footer) put(height - 1, "←/→ files · ↑/↓ scroll · Ctrl+G live", "muted");
     return { rows: canvas.rows, zones };
   }
 }

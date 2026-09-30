@@ -104,6 +104,11 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
         const tool = tools.get(String(payload.toolCallId ?? ""));
         if (tool) { tool.waiting = true; permissions.set(String(payload.permissionId ?? ""), tool.toolCallId); }
       }
+      // A question waits on the user while its tool call is already running.
+      if (event.type === "question.requested" || event.type === "question.resolved") {
+        const tool = tools.get(String(payload.toolCallId ?? ""));
+        if (tool) tool.waiting = event.type === "question.requested";
+      }
       if (event.type === "permission.resolved" || event.type === "tool.call_started") {
         const tool = tools.get(String(payload.toolCallId ?? permissions.get(String(payload.permissionId ?? "")) ?? ""));
         if (tool) tool.waiting = false;

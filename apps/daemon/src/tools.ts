@@ -15,7 +15,7 @@ import { homedir, tmpdir } from "node:os";
 import { open } from "node:fs/promises";
 import { isAbsolute, join, dirname, relative, resolve, sep } from "node:path";
 import type { ProviderToolDefinition } from "@demesne/providers";
-import { isRecord } from "@demesne/protocol";
+import { isRecord, MAX_QUESTION_SUGGESTIONS, MAX_USER_QUESTIONS, parseUserQuestions, type UserAnswer, type UserQuestion } from "@demesne/protocol";
 import { applyEdits, EditApplyError, type EditHunk } from "./edit-engine.ts";
 import { backgroundProcesses } from "./background.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
@@ -26,6 +26,9 @@ export interface ToolContext {
   sessionId?: string;
   workspaceRoot: string;
   signal: AbortSignal;
+  /// Puts questions to the person at the terminal and waits for the answers.
+  /// Absent when nobody can answer (non-interactive turns).
+  ask?: (questions: UserQuestion[]) => Promise<UserAnswer[]>;
 }
 
 export interface ToolPermission {
@@ -71,8 +74,52 @@ export class ToolRegistry {
   }
 }
 
+/// Lets the agent pause for decisions that are the user's to make. The
+/// first suggestion of each question is the recommended answer, which the
+/// user accepts with Enter; they can pick another or answer in their own words.
+function askUserTool(): AgentTool {
+  return {
+    definition: {
+      name: "ask_user",
+      description: `Ask the user up to ${MAX_USER_QUESTIONS} short questions and wait for the answers. Use only when blocked on a decision that is theirs to make (scope, a choice between valid approaches, a missing requirement) and you cannot settle it from the request, the code, or a sensible default. Do not ask for permission to proceed or for facts you can look up. Put your recommended answer first in suggestions.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          questions: {
+            type: "array", minItems: 1, maxItems: MAX_USER_QUESTIONS,
+            items: {
+              type: "object",
+              properties: {
+                question: { type: "string", description: "One question, one decision." },
+                reason: { type: "string", description: "One short sentence on why it matters or what you would otherwise assume." },
+                suggestions: { type: "array", items: { type: "string" }, maxItems: MAX_QUESTION_SUGGESTIONS, description: "Possible answers, recommended first." },
+              },
+              required: ["question"],
+            },
+          },
+        },
+        required: ["questions"],
+      },
+    },
+    permission: () => null,
+    async execute(input, context) {
+      const questions = parseUserQuestions(isRecord(input) ? input.questions : undefined);
+      if (!context.ask) return "Nobody is available to answer. Decide yourself and state the assumption you made.";
+      const answers = await context.ask(questions);
+      return questions.map((asked, index) => {
+        const given = answers[index];
+        const answer = !given || given.source === "skipped" || !given.answer
+          ? "no answer. Decide yourself and state the assumption you made."
+          : given.source === "typed" ? `${given.answer} (the user's own words)` : given.answer;
+        return `${index + 1}. ${asked.question}\n   Answer: ${answer}`;
+      }).join("\n");
+    },
+  };
+}
+
 function builtInTools(): AgentTool[] {
   return [
+    askUserTool(),
     listFilesTool(),
     readFileTool(),
     readFilesTool(),

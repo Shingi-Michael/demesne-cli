@@ -11,6 +11,8 @@ import {
   type EventType,
   type ModelMessage,
   type PermissionDecision,
+  type UserAnswer,
+  type UserQuestion,
   type PermissionMode,
   type PendingPermissionSnapshot,
   type ProviderCallSnapshot,
@@ -1085,6 +1087,29 @@ export class DemesneStore {
     })();
     this.eventSink?.(result.event);
     return result;
+  }
+
+  /// Records that a running `ask_user` call is waiting on the user. Questions
+  /// live in the event log only; a daemon restart interrupts the turn.
+  requestQuestions(toolCallId: string, questions: UserQuestion[]): { questionId: string; event: EventEnvelope } {
+    const questionId = crypto.randomUUID();
+    const event = this.database.transaction(() => {
+      const call = this.getToolCallOrThrow(toolCallId);
+      const turn = this.getTurnOrThrow(call.turn_id);
+      return this.insertEvent("question.requested", turn.sessionId, turn.id, { questionId, toolCallId, questions }, new Date().toISOString());
+    })();
+    this.eventSink?.(event);
+    return { questionId, event };
+  }
+
+  resolveQuestions(questionId: string, toolCallId: string, answers: UserAnswer[]): EventEnvelope {
+    const event = this.database.transaction(() => {
+      const call = this.getToolCallOrThrow(toolCallId);
+      const turn = this.getTurnOrThrow(call.turn_id);
+      return this.insertEvent("question.resolved", turn.sessionId, turn.id, { questionId, toolCallId, answers }, new Date().toISOString());
+    })();
+    this.eventSink?.(event);
+    return event;
   }
 
   resolveToolPermission(permissionId: string, decision: PermissionDecision): EventEnvelope {

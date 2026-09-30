@@ -89,7 +89,7 @@ function toolResult(tool: ToolEntry, paint: Painter): string {
     const state = changeState(tool).toLowerCase();
     return paint.text(state, state === "drafting" || state === "pending" ? "thinking" : state === "applied" ? "citron" : "signal");
   }
-  if (tool.waiting) return paint.text("approval", "signal");
+  if (tool.waiting) return paint.text(tool.name === "ask_user" ? "question" : "approval", "signal");
   if (tool.exitCode !== undefined) return paint.text(`exit ${tool.exitCode}`, tool.exitCode === 0 ? "muted" : "signal");
   if (tool.state === "running") return paint.text("running", "thinking");
   if (tool.state === "stopped" || tool.state === "denied") return paint.text(tool.state, "secondary");
@@ -759,6 +759,8 @@ export class SessionView {
   }
 
   render(options: { width: number; height: number; paint: Painter; title: string; path: string; branch?: string | null; now?: number; presence?: PresenceState;
+    /// The agent is waiting on answers to its questions, not on an approval.
+    asking?: boolean;
     drive?: DriveState | null;
     animateScroll?: boolean;
     panel?: boolean; column?: number; replace?: boolean; contextLines?: string[]; openedAt?: number; createdAt?: number; model?: string;
@@ -802,7 +804,7 @@ export class SessionView {
     if (!options.panel) {
       const header = sessionHeader({ width, paint, path: options.path, now, openedAt: options.openedAt ?? now,
         createdAt: options.createdAt, accent: height >= 10, pointer: this.pointer, historyActive: this.historyOpen,
-        title: options.title, branch: options.branch, presence: options.presence });
+        title: options.title, branch: options.branch, presence: options.presence, ...(options.asking ? { waitingLabel: "question" } : {}) });
       header.rows.forEach((text, row) => put(row, 0, text, width, "surface"));
       zone(header.row, header.path.column, header.path.width, { kind: "workspace" });
       zone(header.row, header.history.column, header.history.width, { kind: "history" });

@@ -90,7 +90,7 @@ export function sessionStatus(options: {
   const name = state === "COMPLETE" ? "READY" : state;
   const label = name.toLowerCase();
   // Approval needs the reader, not a repair: amber, like its header pill.
-  const tone = state === "FAILED" ? "signal" : state === "APPROVAL" ? "thinking" : state === "STOPPED" ? "secondary" : working ? "thinking" : "citron";
+  const tone = state === "FAILED" ? "signal" : state === "APPROVAL" || state === "QUESTION" ? "thinking" : state === "STOPPED" ? "secondary" : working ? "thinking" : "citron";
   // A colored dot carries the state; the label keeps it readable without color.
   const mark = paint.text("●", tone);
   const phase = working ? "" : `${mark} ${paint.text(label, tone)}`;

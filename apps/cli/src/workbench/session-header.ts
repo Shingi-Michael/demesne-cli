@@ -23,7 +23,9 @@ interface Part { key: string; text: string; width: number }
 
 export function sessionHeader(options: { width: number; paint: Painter; path: string; now: number; openedAt: number;
   createdAt?: number; accent: boolean; pointer?: { row: number; column: number } | null; historyActive?: boolean;
-  title?: string; branch?: string | null; presence?: PresenceState }) {
+  title?: string; branch?: string | null; presence?: PresenceState;
+  /// What the waiting pill says: "approval" by default, "question" for `ask_user`.
+  waitingLabel?: string }) {
   const { width, paint, now } = options;
   const row = options.accent ? 1 : 0;
   const canvas = new Canvas(width, row + 1, paint);
@@ -36,7 +38,8 @@ export function sessionHeader(options: { width: number; paint: Painter; path: st
   const safePath = sanitizeTerminalLine(options.path);
   const basename = safePath.split(/[\\/]/).filter(Boolean).at(-1) ?? safePath;
   const pathLabel = (room: number) => visibleLength(safePath) <= room ? safePath : visibleLength(basename) + 2 <= room ? `…/${basename}` : "";
-  const status = options.presence ? STATUS[options.presence] : undefined;
+  const known = options.presence ? STATUS[options.presence] : undefined;
+  const status = known && options.presence === "waiting" && options.waitingLabel ? { ...known, label: options.waitingLabel } : known;
   const hoveredHistory = (column: number) => options.pointer?.row === row && options.pointer.column >= column;
   const branch = options.branch ? sanitizeTerminalLine(options.branch) : "";
 

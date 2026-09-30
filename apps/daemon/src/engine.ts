@@ -1,4 +1,4 @@
-import { isRecord, type StoredModelMessage } from "@demesne/protocol";
+import { isRecord, type StoredModelMessage, type UserQuestion } from "@demesne/protocol";
 import { DEFAULT_AGENT_LIMITS, type AgentConfig } from "@demesne/config";
 import { ingestImage } from "./artifacts.ts";
 import { hydrateImageInputs } from "./image-inputs.ts";
@@ -10,6 +10,7 @@ import type { TurnInference } from "./processor.ts";
 import { providerStreamLimits } from "./provider-limits.ts";
 import { recordedToolChanges } from "./tool-change-preview.ts";
 import { PermissionBroker } from "./permissions.ts";
+import type { QuestionBroker } from "./questions.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { InferenceScheduler } from "./inference-scheduler.ts";
 import { composeSystemPrompt, loadProjectInstructions } from "./instructions.ts";
@@ -35,6 +36,9 @@ interface HistoryTurn {
 }
 
 interface AgentEngineOptions extends AgentConfig {
+  /// Lets `ask_user` wait on the person at the terminal. Without it the tool
+  /// is not offered, as in non-interactive (`deny`) turns.
+  questions?: QuestionBroker;
   providerVision?: boolean;
   providerFirstEventTimeoutMs?: number;
   providerRequestTimeoutMs?: number;
@@ -63,8 +67,11 @@ export class AgentEngine {
     const userMessage = { role: "user" as const, content: turn.content };
     const currentUser = this.store.appendModelMessage(turnId, userMessage);
     const currentMessages: ProviderMessage[] = [userMessage];
+    // `ask_user` needs someone to answer: not in non-interactive turns.
+    const canAsk = Boolean(this.options.questions) && turn.permissionMode !== "deny";
     const definitions = session.workspace
       ? planModeDefinitions(selectToolsForTurn(this.tools.definitions(), turn.content), turn.planOnly === true)
+        .filter((definition) => canAsk || definition.name !== "ask_user")
       : [];
     const systemPrompt = agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
       planOnly: turn.planOnly, providerVision: this.options.providerVision, configured: this.configuredSystemPrompt });
@@ -453,7 +460,14 @@ export class AgentEngine {
     this.store.startToolCall(toolCallId);
     const snapshotTargets = this.captureSnapshot(turnId, sessionId, workspaceRoot, call.name, input);
     try {
-      const output = await (tool.executeWithArtifacts ?? tool.execute)(input, { workspaceRoot, signal, sessionId });
+      const questions = permissionMode === "deny" ? undefined : this.options.questions;
+      const output = await (tool.executeWithArtifacts ?? tool.execute)(input, { workspaceRoot, signal, sessionId,
+        ...(questions ? { ask: async (asked: UserQuestion[]) => {
+          const { questionId } = this.store.requestQuestions(toolCallId, asked);
+          const answers = await questions.wait(questionId, turnId, asked.length, signal);
+          this.store.resolveQuestions(questionId, toolCallId, answers);
+          return answers;
+        } } : {}) });
       let result = typeof output === "string" ? output : output.text;
       if (typeof output !== "string") {
         for (const [index, image] of output.images.entries()) {
@@ -614,6 +628,7 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
   "search_files",
   "git_status",
   "git_diff",
+  "ask_user",
 ]);
 
 export function planModeDefinitions(

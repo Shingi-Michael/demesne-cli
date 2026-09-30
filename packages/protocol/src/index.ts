@@ -21,6 +21,8 @@ export type EventType =
   | "tool.call_draft"
   | "permission.requested"
   | "permission.resolved"
+  | "question.requested"
+  | "question.resolved"
   | "tool.call_started"
   | "tool.call_completed"
   | "tool.call_failed"
@@ -559,6 +561,66 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
     ...(value.thinkingEnabled !== undefined ? { thinkingEnabled: value.thinkingEnabled } : {}),
     ...(value.planOnly !== undefined ? { planOnly: value.planOnly } : {}),
   };
+}
+
+/// A question the agent puts to the user mid-turn (`ask_user`). The first
+/// suggestion is the agent's recommended answer.
+export interface UserQuestion {
+  question: string;
+  reason?: string;
+  suggestions: string[];
+}
+
+/// How one question was answered: a suggestion taken as offered, the user's
+/// own words, or skipped (the agent decides and says what it assumed).
+export interface UserAnswer {
+  answer: string | null;
+  source: "suggestion" | "typed" | "skipped";
+}
+
+export interface AnswerQuestionsRequest {
+  answers: UserAnswer[];
+}
+
+export const MAX_USER_QUESTIONS = 4;
+export const MAX_QUESTION_SUGGESTIONS = 4;
+
+export function parseUserQuestions(value: unknown): UserQuestion[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_USER_QUESTIONS) {
+    throw new ProtocolValidationError(`questions must be an array of 1 to ${MAX_USER_QUESTIONS} questions`);
+  }
+  return value.map((entry, index) => {
+    if (!isRecord(entry) || typeof entry.question !== "string" || !entry.question.trim() || entry.question.length > 500) {
+      throw new ProtocolValidationError(`questions[${index}].question must be 1 to 500 characters`);
+    }
+    if (entry.reason !== undefined && (typeof entry.reason !== "string" || entry.reason.length > 500)) {
+      throw new ProtocolValidationError(`questions[${index}].reason must be at most 500 characters`);
+    }
+    const suggestions = entry.suggestions ?? [];
+    if (!Array.isArray(suggestions) || suggestions.length > MAX_QUESTION_SUGGESTIONS
+      || !suggestions.every((item) => typeof item === "string" && item.trim() && item.length <= 200)) {
+      throw new ProtocolValidationError(`questions[${index}].suggestions must be up to ${MAX_QUESTION_SUGGESTIONS} strings of 1 to 200 characters`);
+    }
+    const reason = typeof entry.reason === "string" ? entry.reason.trim() : "";
+    return { question: entry.question.trim(), ...(reason ? { reason } : {}), suggestions: (suggestions as string[]).map((item) => item.trim()) };
+  });
+}
+
+export function parseAnswerQuestionsRequest(value: unknown): AnswerQuestionsRequest {
+  if (!isRecord(value) || !Array.isArray(value.answers) || value.answers.length === 0 || value.answers.length > MAX_USER_QUESTIONS) {
+    throw new ProtocolValidationError(`answers must be an array of 1 to ${MAX_USER_QUESTIONS} answers`);
+  }
+  const answers = value.answers.map((entry, index): UserAnswer => {
+    if (!isRecord(entry) || (entry.source !== "suggestion" && entry.source !== "typed" && entry.source !== "skipped")) {
+      throw new ProtocolValidationError(`answers[${index}].source must be suggestion, typed, or skipped`);
+    }
+    if (entry.source === "skipped") return { answer: null, source: "skipped" };
+    if (typeof entry.answer !== "string" || !entry.answer.trim() || entry.answer.length > 2000) {
+      throw new ProtocolValidationError(`answers[${index}].answer must be 1 to 2000 characters`);
+    }
+    return { answer: entry.answer.trim(), source: entry.source };
+  });
+  return { answers };
 }
 
 export function parseResolvePermissionRequest(value: unknown): ResolvePermissionRequest {

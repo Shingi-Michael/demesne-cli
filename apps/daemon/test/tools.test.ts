@@ -34,7 +34,7 @@ describe("built-in tools", () => {
   test("plan mode restricts tool definitions and explains the boundary", () => {
     const definitions = new ToolRegistry().definitions();
     const readOnly = planModeDefinitions(definitions, true).map((tool) => tool.name).sort();
-    expect(readOnly).toEqual(["git_diff", "git_status", "list_files", "read_file", "read_files", "search_files"]);
+    expect(readOnly).toEqual(["ask_user", "git_diff", "git_status", "list_files", "read_file", "read_files", "search_files"]);
     expect(planModeDefinitions(definitions, false)).toEqual(definitions);
     expect(planModeGuidance(true)).toContain("read-only");
     expect(planModeGuidance(false)).toBeNull();

@@ -8,9 +8,10 @@ import { parseConfigFile } from "@demesne/config";
 ///
 /// - `edit_file:src` allows edits at `src` and below (never `src2`).
 /// - `write_file:README.md` allows exactly that file.
-/// - `run_command:git status` allows argv that starts with `git status`;
-///   a bare `run_command` entry is rejected because host execution is not
-///   sandboxed and must stay explicit.
+/// - `run_command:git status` allows exactly the argv `git status`, as the
+///   approval that saved it did; `run_command:git status *` opts in to any
+///   further arguments. A bare `run_command` or `run_command:*` entry is
+///   rejected because host execution is not sandboxed and must stay explicit.
 /// - A bare `tool` entry allows every use of that tool.
 ///
 /// The daemon re-reads the user config when its mtime changes, so a rule saved
@@ -18,8 +19,10 @@ import { parseConfigFile } from "@demesne/config";
 
 export interface AllowRule {
   tool: string;
-  /// Exact argv prefix for `run_command`.
+  /// The argv for `run_command`: matched exactly, or as a prefix when the
+  /// entry ends in ` *` (`prefix`).
   argv?: string[];
+  prefix?: boolean;
   /// Workspace-relative file or directory prefix for path tools.
   pathPrefix?: string;
   raw: string;
@@ -38,8 +41,12 @@ export function parseAllowRule(entry: string): AllowRule | null {
   const value = trimmed.slice(separator + 1).trim();
   if (!tool || !value) return null;
   if (tool === "run_command") {
-    const argv = value.split(/\s+/);
-    return { tool, argv, raw: trimmed };
+    const words = value.split(/\s+/);
+    const prefix = words.at(-1) === "*";
+    const argv = prefix ? words.slice(0, -1) : words;
+    // `run_command:*` would approve arbitrary host execution, like a bare entry.
+    if (!argv.length) return null;
+    return prefix ? { tool, argv, prefix, raw: trimmed } : { tool, argv, raw: trimmed };
   }
   return { tool, pathPrefix: value, raw: trimmed };
 }
@@ -50,7 +57,7 @@ export function allowRuleMatches(rule: AllowRule, toolName: string, input: unkno
     if (!isRecord(input) || !Array.isArray(input.argv)) return false;
     const argv = input.argv;
     if (!argv.every((entry) => typeof entry === "string")) return false;
-    if (rule.argv.length > argv.length) return false;
+    if (rule.prefix ? rule.argv.length > argv.length : rule.argv.length !== argv.length) return false;
     return rule.argv.every((word, index) => argv[index] === word);
   }
   if (rule.pathPrefix !== undefined) {

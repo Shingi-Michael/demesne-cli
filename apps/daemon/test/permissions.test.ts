@@ -119,7 +119,8 @@ allow = ["edit_file:src", "run_command:git status"]
     const broker = new PermissionBroker(new ConfigAllowlist(path));
     expect(broker.preapproved("session", "edit_file", { path: "src/a.ts" })).toBe(true);
     expect(broker.preapproved("session", "edit_file", { path: "docs/a.md" })).toBe(false);
-    expect(broker.preapproved("session", "run_command", { argv: ["git", "status", "--short"] })).toBe(true);
+    expect(broker.preapproved("session", "run_command", { argv: ["git", "status"] })).toBe(true);
+    expect(broker.preapproved("session", "run_command", { argv: ["git", "status", "--short"] })).toBe(false);
     expect(broker.preapproved("session", "run_command", { argv: ["git", "push"] })).toBe(false);
   });
 

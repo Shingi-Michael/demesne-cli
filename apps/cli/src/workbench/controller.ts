@@ -907,7 +907,8 @@ export class Workbench {
       this.inputRevision++;
       // Opening or reading Drive's own progress panel is observation, not a
       // takeover of the conversation. Still invalidate stale UI targets.
-      const drivePanelKey = this.options.drive && (key.meta && key.name === "j" && this.mode !== "dialog"
+      const driveShortcut = this.driveShortcut(text, key);
+      const drivePanelKey = this.options.drive && (driveShortcut !== null || key.meta && key.name === "j" && this.mode !== "dialog"
         || this.sessionView.driveOpen && !key.ctrl && !key.meta
           && (key.name === "escape" || this.sessionView.focused && ["up", "down", "pageup", "pagedown", "home", "end"].includes(key.name ?? ""))
         || this.sessionView.driveOpen && key.ctrl && key.name === "g");
@@ -935,6 +936,13 @@ export class Workbench {
       this.sessionView.focusInput();
       this.dispatchEditorKey(key);
       return;
+    }
+    // Figma 85:697 footer keys: P pauses or resumes and S stops, but only while
+    // the Drive panel has focus and the draft is empty, so typing still types.
+    const driveKey = this.driveShortcut(text, key);
+    if (driveKey) {
+      try { this.options.drive?.control(driveKey); } catch (error) { this.notice(error instanceof Error ? error.message : "Drive could not change state.", "error"); }
+      this.requestRender(); return;
     }
     // Inspection never consumes ordinary typing. Editing resumes in the draft
     // at its existing cursor, while the selected evidence stays open.
@@ -2525,6 +2533,16 @@ export class Workbench {
     const hints = keyHints(paint, [["↑↓", "select"], ["↵", action], ["Esc", "cancel"]]);
     canvas.put(footerRow, left, formatFooterLine(hints, groups ? keyHints(paint, [["Tab", "next group"]]) : "", inner), inner, "surface");
     return { lines: canvas.rows, cursor: null, zones };
+  }
+
+  private driveShortcut(text: string, key: { ctrl?: boolean; meta?: boolean }): "pause" | "resume" | "stop" | null {
+    if (!this.options.drive || !this.driveState || key.ctrl || key.meta || !this.sessionView.driveOpen || !this.sessionView.focused || this.editor.value) return null;
+    const status = this.driveState.status;
+    if (text === "s" && !["stopped", "completed"].includes(status) && !this.driveState.protection?.trip) return "stop";
+    if (text !== "p") return null;
+    if (status === "running" || status === "waiting") return "pause";
+    const resumable = ["paused", "blocked", "stopped", "idle"].includes(status) || status === "completed" && !!this.driveState.autonomy;
+    return this.driveState.protection?.trip || !resumable ? null : "resume";
   }
 
   private clickDialogItem(position: number): void {

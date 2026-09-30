@@ -69,7 +69,7 @@ test.each(["stopped", "completed"] as const)("the real CLI resumes a %s saved mi
     await until(() => output.includes("\x1b[?2026l"));
     expect(decisions).toHaveLength(0); // Saved missions never restart on launch.
     child.stdin.write("\x1b[200~/drive status\x1b[201~\r");
-    await until(() => stripVTControlCharacters(output).includes(status.toUpperCase()) && stripVTControlCharacters(output).includes("Resume"));
+    await until(() => stripVTControlCharacters(output).includes(status === "stopped" ? "■ Stopped" : "✓ Mission complete") && stripVTControlCharacters(output).includes("Resume"));
     expect(decisions).toHaveLength(0);
     child.stdin.write("\x1b[200~/drive resume\x1b[201~\r");
     await until(() => stripVTControlCharacters(output).includes("CLI control check finished"));

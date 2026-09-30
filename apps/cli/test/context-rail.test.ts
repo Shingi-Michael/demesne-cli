@@ -59,12 +59,12 @@ describe("CLI context rail", () => {
 
     const output = rail.lines(48, 30, createPainter(false)).join("\n");
     expect(output).toContain("32.8k token capacity");
-    expect(output).toContain("LAST REQUEST · PROVIDER REPORTED");
+    expect(output).toMatch(/LAST REQUEST +reported by provider/);
     expect(output).toContain("8.2k total");
     expect(output).toContain("7k in · 1.2k out");
-    expect(output).toContain("thinking off");
-    expect(output).toContain("6.5k cached input");
-    expect(output).toContain("queue 350ms · TTFT 240ms · request 1.3s");
+    expect(output).toMatch(/thinking +off/);
+    expect(output).toContain("6.5k cached");
+    for (const field of ["queue 350ms", "first token 240ms", "request 1.3s"]) expect(output).toContain(field);
   });
 
   test("keeps context usage pending until exact provider usage arrives", () => {
@@ -96,8 +96,8 @@ describe("CLI context rail", () => {
     rail.apply(event("model.metrics", { queueDurationMs: 350, durationMs: 1_250, timeToFirstTokenMs: 240 }));
 
     const output = rail.lines(40, 30, createPainter(false)).join("\n");
-    expect(output).toContain("6.5k cached input");
-    expect(output).toContain("queue 350ms · TTFT 240ms · request 1.3s");
+    expect(output).toContain("6.5k cached");
+    for (const field of ["queue 350ms", "first token 240ms", "request 1.3s"]) expect(output).toContain(field);
   });
 
   test("pairs usage and metrics into a throughput sparkline", () => {
@@ -141,7 +141,7 @@ describe("CLI context rail", () => {
     rail.begin(false);
     rail.apply(event("model.request_started", { model: "qwen3:14b" }));
     expect(rail.statusLine(80, createPainter(false))).toBe("ctx 32.8k · no request yet");
-    expect(rail.lines(40, 30, createPainter(false)).join("\n")).toContain("LAST REQUEST · PROVIDER REPORTED\nusage pending");
+    expect(rail.lines(40, 30, createPainter(false)).join("\n")).toMatch(/LAST REQUEST +reported by provider\nusage pending/);
 
     // Turn 2 provider usage arrives and updates context counts
     rail.apply(event("model.usage", { inputTokens: 9_000, outputTokens: 1_000, totalTokens: 10_000 }));
@@ -256,12 +256,14 @@ describe("CLI context rail", () => {
     rail.apply(event("model.usage", { inputTokens: 9_800, outputTokens: 400, totalTokens: 10_200 }));
 
     const output = rail.lines(48, 40, createPainter(false)).join("\n");
-    expect(output).toContain("CONTEXT PLAN · ESTIMATED");
-    expect(output).toContain("~10k input · 31% of capacity");
-    expect(output).toContain("messages ~7.6k · tool definitions ~2.4k");
-    expect(output).toContain("reserves output 2k · results 768 · safety 512");
+    expect(output).toMatch(/CONTEXT PLAN +estimated before request/);
+    expect(output).toMatch(/~10k of \S+ · 31%/);
+    // The stacked bar's legend carries the breakdown.
+    expect(output).toContain("Messages ~7.6k");
+    expect(output).toContain("Tool definitions ~2.4k");
+    expect(output).toMatch(/reserves +output 2k · results 768 · safety 512/);
     expect(output).toContain("within soft limit · soft limit 29.4k");
-    expect(output).toContain("1 context reduction · saved ~2k");
+    expect(output).toContain("1 applied · saved ~2k");
     expect(output).toContain("10.2k total");
     expect(rail.statusLine(80, createPainter(false))).toBe("est ~10k/32.8k · ▰▰▱▱▱ 31%");
     expect(rail.contextSummary(createPainter(false))).toBe("Context ~10k/32.8k · 31%");

@@ -2079,6 +2079,20 @@ test("the approval card follows Figma 23:164: a bordered card, the command inset
   expect(await approval).toBe("allow_always");
 });
 
+test("the approval card takes Figma's spacing on tall terminals and stays compact on short ones", () => {
+  const { ui, screen } = fixture("approval");
+  void ui.askApproval({ summary: "Run the parser regression suite", toolName: "run_command", allowPersist: true,
+    previewRows: ["$ bun test tests/parser.test.ts"], cwd: "~/projects/demesne-cli" });
+  const card = (height: number) => {
+    const rows = screen(120, height).split("\n");
+    const top = rows.findIndex((row) => /╭─+╮/.test(row)), bottom = rows.findIndex((row, index) => index > top && /╰─+╯/.test(row));
+    return rows.slice(top + 1, bottom).map((row) => row.replace(/[│\s]+$/, "").replace(/^\s*│\s?/, "").trim());
+  };
+  // Title, blank, summary, blank, command and where, blank, buttons.
+  expect(card(36).map((row) => row === "" ? "" : row.slice(0, 12))).toEqual(["! Allow this", "", "Run the pars", "", "$ bun test t", "in ~/project", "", "y  Allow onc"]);
+  expect(card(24).filter((row) => row === "")).toHaveLength(0);
+});
+
 test("clicking a chooser row picks that row, not its neighbour", async () => {
   const { ui, state, screen } = fixture("complete");
   const choice = ui.choose("Switch model", ["first-model", "second-model", "third-model"], 0, { noun: "models" });

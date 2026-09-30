@@ -1439,12 +1439,13 @@ test("run history opens on demand and restores the selected run's view", () => {
   const selected = view.current!.id;
   const detail = view.memory.detail;
   key("h", { meta: true });
-  expect(screen(80, 24)).toContain("History");
+  expect(screen(80, 24)).toContain("HISTORY");
   key("escape");
   expect(view.current!.id).toBe(selected);
   expect(view.memory.detail).toBe(detail);
+  // History lists turns newest first, so the earlier turn is below.
   key("h", { meta: true });
-  key("up");
+  key("down");
   key("return");
   expect(view.current!.number).toBe(1);
   expect(screen(80, 24)).toContain("boundary");
@@ -1957,4 +1958,30 @@ test("the execution log follows Figma 25:154 and 26:174: one row per event, filt
     expect(detail).toContain("▸ Arguments  argv, cwd");
     expect(detail).toContain("Tab next event  Esc back");
   } finally { clock.mockRestore(); }
+});
+
+test("History follows Figma 48:540: this session's turns newest first, then recent sessions that open on Enter", () => {
+  const { ui, view, key, screen, state } = fixture();
+  const resumed: string[] = [];
+  view.onResume = (id) => resumed.push(id);
+  ui.beginTurn({ userText: "Trace the call flow", at: "now" }); ui.assistantDelta("Mapped."); ui.finishTurn("completed", "Done", { durationMs: 94_000 });
+  ui.beginTurn({ userText: "Check the test file", at: "now" }); ui.finishTurn("stopped", "Stopped", { durationMs: 1_140_000 });
+  ui.setRecentSessions([{ id: "other", title: "Durable compaction", updatedAt: new Date(Date.now() - 30 * 3_600_000).toISOString(), turns: 31 }]);
+  key("h", { meta: true });
+  const rows = screen(176, 30).split("\n");
+  const panel = rows[0]!.indexOf("HISTORY");
+  const body = rows.map((row) => row.slice(panel)).join("\n");
+  expect(body).toMatch(/HISTORY {2}Session +2 turns/);
+  expect(body).toMatch(/THIS SESSION +newest first/);
+  expect(body.indexOf("Check the test file")).toBeLessThan(body.indexOf("Trace the call flow"));
+  expect(body).toMatch(/2 ■ Check the test file +19m · no diff/);
+  expect(body).toMatch(/1 ✓ Trace the call flow +94s · answer/);
+  expect(body).toMatch(/RECENT SESSIONS +\/sessions for all/);
+  expect(body).toMatch(/→ Durable compaction +31 turns {2}yesterday/);
+  // The last row is another session; Enter opens it through /resume.
+  key("end");
+  expect(screen(176, 30)).toContain("Enter open session");
+  key("return");
+  expect(resumed).toEqual(["other"]);
+  void state;
 });

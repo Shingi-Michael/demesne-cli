@@ -137,6 +137,9 @@ export interface ModelToolCall {
 }
 
 export interface WorkspaceFileInfo { path: string; byteLength: number | null; status: string | null }
+/// A workspace file's text for the file viewer; `content` is null with a
+/// `reason` when it cannot be shown (protected, binary, too large, missing).
+export interface WorkspaceFileText { path: string; content: string | null; byteLength: number | null; reason?: string }
 
 export type ModelMessage =
   | { role: "system" | "user"; content: string }

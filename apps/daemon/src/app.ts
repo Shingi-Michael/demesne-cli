@@ -33,7 +33,7 @@ import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
 import { QuestionBroker } from "./questions.ts";
 import { ConfigAllowlist } from "./allowlist.ts";
-import { canonicalWorkspace, listWorkspaceFiles, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
+import { canonicalWorkspace, listWorkspaceFiles, readWorkspaceText, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
 import { detectGitBranch } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
 import { SessionReplay } from "./session-replay.ts";
@@ -443,6 +443,16 @@ export function createDaemonApp(options: {
               "Content-Length": String(bytes.byteLength), "ETag": `"${artifact.sha256}-${variant}"` } });
           } catch { return apiError("not_found", "Image content unavailable", 404); }
         }
+      }
+
+      if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "file") {
+        // One file's text for the viewer: GET /v1/sessions/:id/file?path=src/a.ts
+        const session = store.getSession(path[2]!);
+        if (!session) return apiError("not_found", "Session not found", 404);
+        if (!session.workspace) return apiError("invalid_state", "Session has no workspace", 409);
+        const target = url.searchParams.get("path");
+        if (!target) return apiError("invalid_request", "path is required", 400);
+        return json(readWorkspaceText(session.workspace.root, target));
       }
 
       if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "files") {

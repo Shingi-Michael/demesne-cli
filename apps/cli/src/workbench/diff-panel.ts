@@ -1,6 +1,7 @@
-import { formatFooterLine, sanitizeTerminalLine, truncateText, visibleLength, type Painter, type PaletteColor } from "@demesne/brand";
+import { formatFooterLine, highlightCode, languageForPath, sanitizeTerminalLine, truncateText, visibleLength, type CodeHighlightState, type Painter, type PaletteColor } from "@demesne/brand";
 import { keycap } from "./session-chrome.ts";
-import type { ToolFileChange } from "@demesne/protocol";
+import type { ToolFileChange, WorkspaceFileText } from "@demesne/protocol";
+import { fileChangeMarks, type FileChangeMarks } from "./file-marks.ts";
 import type { ToolEntry } from "./entries.ts";
 import type { SessionRun } from "./session.ts";
 import { Canvas, foldCells } from "./canvas.ts";
@@ -31,7 +32,7 @@ function languageName(path: string): string | undefined {
   return extension ? LANGUAGES[extension] : undefined;
 }
 
-export type DiffAction = { kind: "diff-select"; path: string } | { kind: "diff-live" | "diff-expand" }
+export type DiffAction = { kind: "diff-select"; path: string } | { kind: "diff-live" | "diff-expand" | "diff-view" | "diff-back" }
   | { kind: "diff-open"; runId: number; recordId?: number };
 interface ChangeFile { path: string; tool: ToolEntry; applied?: ToolFileChange; previous?: ToolFileChange; revisions: number }
 
@@ -61,6 +62,12 @@ export function changeFiles(tools: ToolEntry[]): ChangeFile[] {
   return [...files.values()];
 }
 
+/// `Diff │ Whole file` with the active view filled, then its key.
+function viewSwitch(paint: Painter, active: "diff" | "whole"): { text: string } {
+  const segment = (label: string, on: boolean) => on ? paint.wash(` ${label} `, "menuSelection", "electric") : paint.text(` ${label} `, "muted");
+  return { text: segment("Diff", active === "diff") + paint.text("│", "rule") + segment("Whole file", active === "whole") + " " + keycap(paint, "v") };
+}
+
 export class DiffPanel {
   following = true;
   expanded = false;
@@ -77,11 +84,122 @@ export class DiffPanel {
   private diffs = new Map<string, { before: string; after: string; diff: CodeDiff }>();
   private regions: { row: number; height: number; target: "files" | "code" }[] = [];
   private frozen: { key: string; file: ChangeFile } | null = null;
-  private rendered: { signature: unknown[]; body: string[] } | null = null;
+  private rendered: { signature: unknown[]; body: string[]; lines: (number | undefined)[] } | null = null;
+  /// Figma 124:1038 / 117:813: one viewer, the changed parts ("diff") or the
+  /// whole current file with this session's changes marked ("whole").
+  view: "diff" | "whole" = "diff";
+  /// A file opened on its own (from the Files list) rather than from a turn.
+  standalone: string | null = null;
+  /// Fetches a file's current text; the workbench supplies it.
+  loader: ((path: string) => Promise<WorkspaceFileText>) | null = null;
+  /// Called when a file finishes loading, so the view can repaint.
+  onLoad: (() => void) | null = null;
+  private texts = new Map<string, { revision: number; file: WorkspaceFileText | null }>();
+  private changeIndex = new Map<string, number>();
+  /// Search in the whole-file view: typing while `typing`, then Enter steps.
+  search: { query: string; typing: boolean; index: number } | null = null;
+  private wholeRendered: { key: string; text: string | null; rows: { line: number; first: boolean; code: string }[] } | null = null;
 
   reset(): void {
     this.following = true; this.expanded = false; this.runId = 0; this.followLatest = true;
     this.runs = []; this.files = []; this.selectedPath = null; this.offsets.clear(); this.diffs.clear(); this.lastSignature = []; this.regions = []; this.frozen = null; this.rendered = null;
+    this.view = "diff"; this.standalone = null; this.texts.clear(); this.changeIndex.clear(); this.search = null; this.wholeRendered = null;
+  }
+
+  /// Opens one file on its own, in the whole-file view.
+  openFile(runs: readonly SessionRun[], path: string): void {
+    this.runs = runs; this.standalone = path; this.view = "whole"; this.following = false; this.search = null;
+    this.ensureLoaded(path);
+  }
+  /// The file the viewer shows.
+  get viewPath(): string | null { return this.standalone ?? this.selectedPath; }
+
+  /// Every recorded change to a path this session, oldest first.
+  private sessionChanges(path: string): ToolFileChange[] {
+    return this.runs.flatMap((run) => run.tools).filter((tool) => tool.phase === "change" && tool.state === "done")
+      .sort((a, b) => a.id - b.id).flatMap((tool) => tool.changes?.filter((change) => change.path === path && !change.unavailable) ?? []);
+  }
+  private ensureLoaded(path: string): void {
+    const revision = this.sessionChanges(path).length;
+    if (!this.loader || this.texts.get(path)?.revision === revision) return;
+    this.texts.set(path, { revision, file: null });
+    void this.loader(path).catch(() => ({ path, content: null, byteLength: null, reason: "could not load the file" }))
+      .then((file) => { if (this.texts.get(path)?.revision === revision) this.texts.set(path, { revision, file }); this.onLoad?.(); });
+  }
+  /// The file now, or its latest recorded version while loading or when the
+  /// daemon cannot read it; `note` explains a file that cannot be shown.
+  private current(path: string): { text: string | null; note: string } {
+    const loaded = this.texts.get(path);
+    const latest = this.sessionChanges(path).at(-1);
+    if (loaded?.file?.content != null) return { text: loaded.file.content, note: "" };
+    if (latest?.afterExists) return { text: latest.after ?? "", note: loaded?.file ? "showing the last recorded version" : "" };
+    if (loaded && !loaded.file) return { text: null, note: "Loading…" };
+    return { text: null, note: loaded?.file?.reason ? `Can't show this file: ${loaded.file.reason}.` : "Loading…" };
+  }
+  /// This session's changes to a file, relative to before its first edit.
+  marks(path: string): FileChangeMarks | null {
+    const first = this.sessionChanges(path)[0];
+    const now = this.current(path).text;
+    if (!first || now === null) return null;
+    return fileChangeMarks(first.beforeExists ? first.before ?? "" : "", now);
+  }
+  private get wholeKey(): string { return `whole:${this.viewPath}`; }
+
+  /// Switches between the two views, keeping the same lines in view.
+  toggleView(): void {
+    const path = this.viewPath;
+    if (!path) return;
+    if (this.view === "diff") {
+      const offset = this.offsets.get(this.offsetKey) ?? 0;
+      const line = this.rendered?.lines.slice(offset).find((value) => value !== undefined);
+      this.view = "whole"; this.ensureLoaded(path);
+      if (line !== undefined) this.offsets.set(this.wholeKey, Math.max(0, line - 3));
+    } else {
+      if (this.standalone && !this.files.some((file) => file.path === path)) return;
+      const top = (this.offsets.get(this.wholeKey) ?? 0) + 3;
+      this.view = "diff";
+      const index = this.rendered?.lines.findIndex((value) => value !== undefined && value >= top) ?? -1;
+      if (index >= 0) { this.following = false; this.offsets.set(this.offsetKey, index); }
+    }
+  }
+  /// Steps to the next or previous change in the whole-file view.
+  stepChange(delta: number): void {
+    const path = this.viewPath, changes = path ? this.marks(path)?.changes ?? [] : [];
+    if (!path || !changes.length) return;
+    const index = ((this.changeIndex.get(path) ?? -1) + delta + changes.length) % changes.length;
+    this.changeIndex.set(path, index);
+    this.offsets.set(this.wholeKey, Math.max(0, changes[index]!.start - 4));
+  }
+  private searchMatches(path: string): number[] {
+    const text = this.current(path).text, query = this.search?.query.toLowerCase();
+    if (!text || !query) return [];
+    return text.split("\n").flatMap((line, index) => line.toLowerCase().includes(query) ? [index + 1] : []);
+  }
+  private stepSearch(delta: number): void {
+    const path = this.viewPath, matches = path ? this.searchMatches(path) : [];
+    if (!this.search || !matches.length) return;
+    this.search.index = (this.search.index + delta + matches.length) % matches.length;
+    this.offsets.set(this.wholeKey, Math.max(0, matches[this.search.index]! - 4));
+  }
+  /// The viewer's letter keys and its search field. `draftEmpty` keeps
+  /// ordinary typing in the composer when there is a draft.
+  letterKey(text: string, name: string | undefined, draftEmpty: boolean): boolean {
+    if (this.search?.typing) {
+      if (name === "escape") { this.search = null; return true; }
+      if (name === "return" || name === "enter") { this.search.typing = false; this.search.index = -1; this.stepSearch(1); return true; }
+      if (name === "backspace") { this.search.query = this.search.query.slice(0, -1); return true; }
+      if (text && !/[\x00-\x1f\x7f]/.test(text)) { this.search.query += text; this.search.index = -1; this.stepSearch(1); this.search.typing = true; return true; }
+      return true;
+    }
+    if (this.search && name === "escape") { this.search = null; return true; }
+    if (!draftEmpty || !text || text.length !== 1) return false;
+    if (text === "v") { this.toggleView(); return true; }
+    if (this.view === "whole" && (text === "n" || text === "p")) {
+      if (this.search && !this.search.typing) this.stepSearch(text === "n" ? 1 : -1); else this.stepChange(text === "n" ? 1 : -1);
+      return true;
+    }
+    if (this.view === "whole" && text === "/") { this.search = { query: "", typing: true, index: -1 }; return true; }
+    return false;
   }
   open(runs: readonly SessionRun[], runId: number, recordId?: number): void {
     this.frozen = null;
@@ -108,12 +226,12 @@ export class DiffPanel {
   get selected(): ChangeFile | undefined { return this.files.find((file) => file.path === this.selectedPath); }
   private get offsetKey(): string { return `${this.runId}:${this.selectedPath}`; }
   act(action: DiffAction): void {
-    if (action.kind === "diff-select") {
-      this.frozen = null; this.following = false; this.selectedPath = action.path;
-      if (this.selected) this.frozen = { key: this.offsetKey, file: { ...this.selected, tool: { ...this.selected.tool } } };
-    }
+    // Choosing a file stays on it without freezing it: its diff keeps
+    // updating as the agent edits; only switching files and scrolling stop.
+    if (action.kind === "diff-select") { this.frozen = null; this.following = false; this.selectedPath = action.path; }
     if (action.kind === "diff-live") { this.frozen = null; this.following = true; this.followLatest = true; this.lastSignature = []; this.sync(this.runs); }
     if (action.kind === "diff-expand") this.expanded = !this.expanded;
+    if (action.kind === "diff-view") this.toggleView();
   }
   step(delta: number): void {
     const i = this.files.findIndex((file) => file.path === this.selectedPath);
@@ -121,11 +239,11 @@ export class DiffPanel {
     if (file) { this.act({ kind: "diff-select", path: file.path }); this.listOffset = Math.max(0, this.files.indexOf(file) - 2); }
   }
   scroll(amount: number): boolean {
-    if (!this.frozen && this.selected) this.frozen = { key: this.offsetKey, file: { ...this.selected, tool: { ...this.selected.tool } } };
     this.following = false;
-    const before = this.offsets.get(this.offsetKey) ?? 0;
+    const key = this.view === "whole" ? this.wholeKey : this.offsetKey;
+    const before = this.offsets.get(key) ?? 0;
     const next = Math.max(0, Math.min(this.maximum, before + amount));
-    this.offsets.set(this.offsetKey, next); return before !== next;
+    this.offsets.set(key, next); return before !== next;
   }
   wheel(row: number, amount: number): boolean {
     const region = this.regions.find((region) => row >= region.row && row < region.row + region.height);
@@ -143,12 +261,79 @@ export class DiffPanel {
       maximum: region.target === "code" ? this.maximum : Math.max(0, this.files.length - region.height) }));
   }
   key(name?: string): boolean {
+    if ((name === "left" || name === "right") && this.standalone) return false;
     if (name === "left" || name === "right") this.step(name === "left" ? -1 : 1);
     else if (["up", "down", "pageup", "pagedown", "home", "end"].includes(name ?? "")) this.scroll(name === "home" ? -Infinity : name === "end" ? Infinity
       : (name === "up" || name === "pageup" ? -1 : 1) * (name?.startsWith("page") ? this.pageSize : 1));
     else return false;
     return true;
   }
+  /// Figma 117:813: the whole current file, this session's changes marked in
+  /// the gutter (▌ added or changed, ▾ where lines were removed), the
+  /// current change or search match highlighted.
+  private renderWhole(canvas: Canvas, zones: { row: number; column: number; width: number; action: DiffAction }[], top: number, width: number, height: number, paint: Painter, path: string) {
+    this.ensureLoaded(path);
+    const { text, note } = this.current(path);
+    const marks = this.marks(path);
+    const changes = marks?.changes ?? [];
+    const index = this.changeIndex.get(path) ?? -1;
+    const clean = sanitizeTerminalLine(path), name = clean.slice(clean.lastIndexOf("/") + 1);
+    const lines = text === null ? [] : (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n");
+    // "change 1 of 3" on the right already counts the changes.
+    const details = [languageName(path), text === null ? "" : `${lines.length} line${lines.length === 1 ? "" : "s"}`,
+      changes.length ? "" : "no changes this session"].filter(Boolean).join(" · ");
+    const back = this.standalone ? paint.text("‹ Files", "electric") : "";
+    const lead = this.standalone ? back : paint.text(name, "paper");
+    const view = changes.length || !this.standalone ? viewSwitch(paint, "whole").text : "";
+    const matches = this.search ? this.searchMatches(path) : [];
+    const right = this.search ? paint.text(`/${this.search.query}${this.search.typing ? "▏" : ""}`, "electric") + paint.text(matches.length ? ` · ${Math.max(0, this.search.index) + 1} of ${matches.length}` : this.search.query ? " · no matches" : "", "muted")
+      : changes.length ? paint.text(`change ${index >= 0 ? index + 1 : "–"} of ${changes.length}`, "electric") : "";
+    // As in the diff view, details give way before the switch.
+    const fitsWith = (value: string) => visibleLength(value) + (view ? visibleLength(view) + 2 : 0) + visibleLength(right) + 2 <= width - 3;
+    const withDetails = `${lead}  ${paint.text(details, "muted")}`;
+    const left = fitsWith(withDetails) ? withDetails : lead;
+    const fits = fitsWith(left);
+    canvas.put(top, 1, formatFooterLine(fits && view ? `${left}  ${view}` : left, right, width - 3), width - 2, "surface");
+    if (this.standalone) zones.push({ row: top, column: 1, width: 7, action: { kind: "diff-back" } });
+    if (fits && view) zones.push({ row: top, column: 1 + visibleLength(left) + 2, width: visibleLength(view), action: { kind: "diff-view" } });
+    top++;
+    if (note) canvas.put(top++, 1, paint.text(note, "muted"), width - 2, "surface");
+    // Rows: numbered, marked and highlighted; long lines fold.
+    const digits = Math.max(2, String(lines.length).length);
+    const key = `${path}:${width}:${paint.enabled}:${paint.themeName}`;
+    let rows = this.wholeRendered?.key === key && this.wholeRendered.text === text ? this.wholeRendered.rows : null;
+    if (!rows) {
+      const built: { line: number; first: boolean; code: string }[] = [];
+      const language = languageForPath(path), state: CodeHighlightState = { inBlockComment: false };
+      lines.forEach((line, lineIndex) => {
+        const plain = sanitizeTerminalLine(line.replaceAll("\t", "  "));
+        const styled = paint.enabled && language ? highlightCode(plain, language, paint, state) : plain;
+        foldCells(styled, Math.max(1, width - 2 - digits - 3)).forEach((code, part) => built.push({ line: lineIndex + 1, first: part === 0, code }));
+      });
+      rows = built;
+      this.wholeRendered = { key, text, rows };
+    }
+    const footer = height >= 12 ? 1 : 0;
+    const room = Math.max(0, height - top - footer);
+    this.maximum = Math.max(0, rows.length - room); this.pageSize = Math.max(1, room - 1);
+    // Offsets count file lines; map them to the first row of that line.
+    const firstRow = (line: number) => { const at = rows!.findIndex((row) => row.line > line); return at < 0 ? Math.max(0, rows!.length - 1) : at; };
+    const offset = Math.min(this.maximum, firstRow(this.offsets.get(this.wholeKey) ?? 0));
+    const current = index >= 0 ? changes[index] : undefined;
+    const match = this.search && this.search.index >= 0 ? matches[this.search.index] : undefined;
+    for (let i = 0; i < room; i++) {
+      const row = rows[offset + i];
+      if (row === undefined) { canvas.put(top + i, 1, "", width - 2, "surface"); continue; }
+      const { line: number, first, code } = row;
+      const mark = marks?.added.has(number) ? paint.text("▌", "citron") : marks?.removedBefore.has(number) ? paint.text("▾", "signal") : " ";
+      const gutter = first ? `${paint.text(String(number).padStart(digits), current && number >= current.start && number <= current.end ? "electric" : "muted")} ${mark} ` : `${" ".repeat(digits)} ${paint.text("↪", "muted")} `;
+      const background: PaletteColor = number === match ? "accentSurface" : current && number >= current.start && number <= current.end ? "menuSelection" : "ink";
+      canvas.put(top + i, 1, surface(gutter + code, width - 2, paint, background), width - 2, "surface");
+    }
+    this.regions.push({ row: top, height: room, target: "code" });
+    return { rows: canvas.rows, zones };
+  }
+
   private diff(key: string, before: string, after: string): CodeDiff {
     const cached = this.diffs.get(key);
     if (cached?.before === before && cached.after === after) return cached.diff;
@@ -178,9 +363,13 @@ export class DiffPanel {
     const summary = paint.text(`${this.files.length} file${this.files.length === 1 ? "" : "s"}`, "paper") + (this.files.length ? ` ${styledCounts(totals)}` : "")
       + (drafting ? paint.text(` · ${drafting} drafting`, "electric") : "");
     const expand = this.expanded ? "restore" : "expand";
-    const followLabel = this.following ? " following edits " : " paused ";
+    // Following switches to whichever file the agent edits; pinned stays on
+    // this one. Either way the diff shown is live.
+    const followLabel = this.following ? " following edits " : " pinned ";
     const controlsWidth = followLabel.length + 2 + "Alt+↵".length + 1 + expand.length;
     const summaryRow = 2;
+    // A file opened on its own has no turn to summarize: straight to the file.
+    if (this.standalone) return this.renderWhole(canvas, zones, 2, width, height, paint, this.standalone);
     // Figma panel v2: the summary and the file list form one raised tile.
     const showControls = width - 4 >= controlsWidth + 12;
     canvas.put(summaryRow, 1, "", width - 2, "raised");
@@ -212,11 +401,17 @@ export class DiffPanel {
     // The tile's lower edge, then the file's code.
     if (paint.enabled) canvas.put(3 + capacity, 1, paint.text("▀".repeat(width - 2), "raised"), width - 2, "surface");
     let top = 3 + capacity + 1;
+    if (this.view === "whole" && this.viewPath) return this.renderWhole(canvas, zones, top, width, height, paint, this.viewPath);
     const file = this.frozen?.key === this.offsetKey ? this.frozen.file : this.selected;
     const signature = [width, paint.colors, paint.enabled, file?.path, file?.tool.diff, file?.tool.state, file?.tool.message, file?.tool.changes, file?.applied, file?.previous];
     const cached = this.rendered?.signature.every((value, index) => value === signature[index]);
     const body: string[] = cached ? this.rendered!.body : [];
-    const text = (value: string, tone: PaletteColor = "muted") => body.push(...value.split("\n").flatMap((line) => foldCells(paint.text(sanitizeTerminalLine(line), tone), Math.max(1, width - 2))));
+    // The file line each body row shows, so switching views keeps your place.
+    const bodyLines: (number | undefined)[] = cached ? this.rendered!.lines : [];
+    const text = (value: string, tone: PaletteColor = "muted") => {
+      const parts = value.split("\n").flatMap((line) => foldCells(paint.text(sanitizeTerminalLine(line), tone), Math.max(1, width - 2)));
+      body.push(...parts); bodyLines.push(...parts.map(() => undefined));
+    };
     const show = (key: string, before: string, after: string) => {
       const diff = this.diff(key, before, after);
       const digits = Math.max(2, String(Math.max(before.split("\n").length, after.split("\n").length)).length);
@@ -224,7 +419,7 @@ export class DiffPanel {
       for (const [index, row] of diff.rows.entries()) {
         if (index >= 10_000) { text(`… ${diff.rows.length - index} more diff lines (preview limit)`); break; }
         // Folded context reads `… 41 unchanged lines` in the number column.
-        if (row.kind === "gap") { body.push(surface(paint.text(`${" ".repeat(digits * 2 + 1)}${row.text}`, "muted"), width - 2, paint, "raised")); continue; }
+        if (row.kind === "gap") { body.push(surface(paint.text(`${" ".repeat(digits * 2 + 1)}${row.text}`, "muted"), width - 2, paint, "raised")); bodyLines.push(undefined); continue; }
         const numbers = `${String(row.old ?? "").padStart(digits)} ${String(row.next ?? "").padStart(digits)} `;
         const mark = row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " ";
         const tone = row.kind === "added" ? "citron" : row.kind === "removed" ? "signal" : "muted";
@@ -233,7 +428,7 @@ export class DiffPanel {
         const code = highlighted.get(row) ?? sanitizeTerminalLine(row.text.replaceAll("\t", "  "));
         foldCells(code, Math.max(1, width - 2 - numbers.length - 2)).forEach((part, index) => {
           const gutter = index ? paint.text(" ".repeat(numbers.length) + "↪ ", "muted") : paint.text(numbers, "muted") + paint.text(mark + " ", tone);
-          body.push(surface(gutter + part, width - 2, paint, background));
+          body.push(surface(gutter + part, width - 2, paint, background)); bodyLines.push(row.next);
         });
       }
       if (!diff.rows.length) text("No textual change.");
@@ -243,7 +438,21 @@ export class DiffPanel {
       const path = sanitizeTerminalLine(file.path), name = path.slice(path.lastIndexOf("/") + 1);
       const details = [paint.text(changeState(file.tool), stateTone(file.tool)), languageName(path), `${file.revisions} edit${file.revisions === 1 ? "" : "s"}`]
         .filter(Boolean).map((part, index) => index ? paint.text(part!, "muted") : part).join(paint.text(" · ", "muted"));
-      canvas.put(top++, 1, formatFooterLine(`${paint.text(name, "paper")}  ${details}`, styledCounts(counts(file)), width - 3), width - 2, "surface");
+      // The switch outranks the details: they give way first on narrow panels.
+      const view = viewSwitch(paint, "diff"), right = styledCounts(counts(file));
+      const withDetails = `${paint.text(name, "paper")}  ${details}`, bare = paint.text(name, "paper");
+      const room = (left: string) => visibleLength(left) + 2 + visibleLength(view.text) + visibleLength(right) + 2 <= width - 3;
+      const headerLeft = room(withDetails) ? withDetails : bare;
+      const fits = room(headerLeft);
+      canvas.put(top, 1, formatFooterLine(fits ? `${headerLeft}  ${view.text}` : headerLeft, right, width - 3), width - 2, "surface");
+      if (fits) zones.push({ row: top, column: 1 + visibleLength(headerLeft) + 2, width: visibleLength(view.text), action: { kind: "diff-view" } });
+      top++;
+      // A past edit opened from the conversation shows the file as it was
+      // then; say when the agent has changed it since.
+      const live = this.selected;
+      if (file === this.frozen?.file && live && live.tool.id !== file.tool.id) {
+        canvas.put(top++, 1, paint.text("Showing an earlier edit · newer edits since · ", "secondary") + keycap(paint, "Ctrl+G") + paint.text(" latest", "muted"), width - 2, "surface");
+      }
       if (!cached) {
         const completedEvidence = file.tool.state === "done" && file.tool.changes?.some((change) => change.path === file.path);
         if (!completedEvidence) {
@@ -264,7 +473,7 @@ export class DiffPanel {
     } else if (!cached) {
       text("Waiting for file changes."); text("Code will appear here as the agent drafts an edit.");
     }
-    this.rendered = { signature, body };
+    this.rendered = { signature, body, lines: bodyLines };
     const footer = height >= 12 ? 1 : 0;
     const room = Math.max(0, height - top - footer);
     this.maximum = Math.max(0, body.length - room); this.pageSize = Math.max(1, room - 1);

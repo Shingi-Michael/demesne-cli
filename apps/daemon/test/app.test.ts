@@ -191,6 +191,24 @@ describe("Demesne daemon", () => {
     expect(state.latestProviderCall?.usage).toEqual({ inputTokens: 140, outputTokens: 12, totalTokens: 152 });
   });
 
+  test("the file viewer reads workspace text under read_file's rules", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "workspace"), dataPath = join(directory, "data");
+    mkdirSync(join(workspacePath, "src"), { recursive: true }); mkdirSync(dataPath);
+    writeFileSync(join(workspacePath, "src", "a.ts"), "export const a = 1;\n");
+    writeFileSync(join(workspacePath, ".env"), "TOKEN=secret\n");
+    writeFileSync(join(workspacePath, "blob.bin"), new Uint8Array([1, 0, 2]));
+    const running = startApp(join(dataPath, "demesne.sqlite"));
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", { method: "POST", body: JSON.stringify({ title: "Files", workspacePath }) });
+    const read = (path: string) => jsonRequest<{ path: string; content: string | null; reason?: string; byteLength: number | null }>(running.url, `/v1/sessions/${created.session.id}/file?path=${encodeURIComponent(path)}`);
+    expect(await read("src/a.ts")).toEqual({ path: "src/a.ts", content: "export const a = 1;\n", byteLength: 20 });
+    expect((await read(".env")).reason).toContain("protected");
+    expect((await read("../outside.txt")).reason).toContain("traversal");
+    expect((await read("blob.bin")).reason).toBe("binary file");
+    expect((await read("missing.ts")).content).toBeNull();
+  });
+
   test("ask_user pauses the turn until the user answers, then hands the answers to the model", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

@@ -61,6 +61,7 @@ import { ConversationViewport } from "./viewport.ts";
 import { MOUSE_DISABLE, MOUSE_ENABLE, type MouseEvent } from "../mouse.ts";
 import {
   createPromptEditorState,
+  mentionLabel,
   draftMentions,
   mentionMatches,
   mentionTokenAt,
@@ -106,6 +107,8 @@ export interface PromptContext {
 export interface WorkbenchOptions {
   files?: () => Promise<string[]>;
   fileInfo?: () => Promise<import("@demesne/protocol").WorkspaceFileInfo[]>;
+  /// One workspace file's current text, for the file viewer's whole-file view.
+  readFile?: (path: string) => Promise<import("@demesne/protocol").WorkspaceFileText>;
   preview?: PreviewServices;
   paint: Painter;
   contextRail: CliContextRail;
@@ -301,6 +304,16 @@ export class Workbench {
     if (options.preview) this.preview = new ArtifactPreview(options.preview, () => this.requestRender());
     this.sessionTitle = options.sessionTitle;
     this.layout = computeWorkbenchLayout(process.stdout.columns ?? 80, process.stdout.rows ?? 24, { sidebar: "hidden" });
+    if (options.readFile) this.sessionView.diffPanel.loader = options.readFile;
+    this.sessionView.diffPanel.onLoad = () => this.requestRender();
+    this.sessionView.onFilesBack = () => this.openFiles(false);
+    // `@` in the Files list: the file joins the draft as a mention.
+    this.sessionView.onMention = (path) => {
+      const { value, cursor } = this.editor;
+      const token = `${cursor > 0 && !/\s/.test(value[cursor - 1]!) ? " " : ""}@${mentionLabel(path, this.promptContext.mentions)} `;
+      this.editor = { ...setPromptValue(this.editor, value.slice(0, cursor) + token + value.slice(cursor)), cursor: cursor + token.length };
+      this.sessionView.focusInput(); this.requestRender();
+    };
   }
 
   isActive(): boolean {
@@ -990,6 +1003,8 @@ export class Workbench {
       try { this.options.drive?.control(driveKey); } catch (error) { this.notice(error instanceof Error ? error.message : "Drive could not change state.", "error"); }
       this.requestRender(); return;
     }
+    // The file viewer's own keys (v n p /) and its search, like Drive's P/S.
+    if (this.sessionLayout && (this.mode === "input" || this.mode === "streaming") && this.sessionView.viewerKey(text ?? "", key, !(this.mode === "streaming" ? this.queuedEditor : this.editor).value)) { this.requestRender(); return; }
     // Inspection never consumes ordinary typing. Editing resumes in the draft
     // at its existing cursor, while the selected evidence stays open.
     if (this.sessionLayout && !key.ctrl && !key.meta && text && /^[^\x00-\x1f\x7f]+$/u.test(text)) this.sessionView.focusInput();
@@ -2138,16 +2153,23 @@ export class Workbench {
         const run = this.sessionView.current;
         if (this.sessionView.diffOpen) this.sessionView.act({ kind: "panel-close" });
         else this.sessionView.act({ kind: "diff-open", runId: run?.id ?? 0 });
-      } else {
-        const sessionId = this.sessionId;
-        this.showPanel(["Loading workspace files…"], { title: "FILES" });
-        const outputId = this.entries.at(-1)!.id;
-        void (this.options.fileInfo?.() ?? (this.options.files?.() ?? Promise.resolve([...this.promptContext.mentions])).then((files) => files.map((path) => ({ path, byteLength: null, status: null })))).then((files) => {
-          if (sessionId !== this.sessionId || !this.sessionView.showingOutput(outputId)) return;
-          this.showPanel(files.length ? [""] : ["No workspace files available."], { title: "FILES", files });
-        }).catch(() => { if (sessionId === this.sessionId && this.sessionView.showingOutput(outputId)) this.showPanel(["Workspace files could not be loaded."], { title: "FILES" }); });
-      }
+      } else this.openFiles(true);
     }
+    this.requestRender();
+  }
+
+  /// The Files list (Figma 119:1190). A fresh open clears its filter; coming
+  /// back from a file (‹ Files) keeps it.
+  private openFiles(fresh: boolean): void {
+    if (this.preview) { this.preview.open = false; this.preview.focused = false; }
+    if (fresh) this.sessionView.resetFilesList();
+    const sessionId = this.sessionId;
+    this.showPanel(["Loading workspace files…"], { title: "FILES" });
+    const outputId = this.entries.at(-1)!.id;
+    void (this.options.fileInfo?.() ?? (this.options.files?.() ?? Promise.resolve([...this.promptContext.mentions])).then((files) => files.map((path) => ({ path, byteLength: null, status: null })))).then((files) => {
+      if (sessionId !== this.sessionId || !this.sessionView.showingOutput(outputId)) return;
+      this.showPanel(files.length ? [""] : ["No workspace files available."], { title: "FILES", files });
+    }).catch(() => { if (sessionId === this.sessionId && this.sessionView.showingOutput(outputId)) this.showPanel(["Workspace files could not be loaded."], { title: "FILES" }); });
     this.requestRender();
   }
 

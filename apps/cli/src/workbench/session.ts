@@ -138,6 +138,32 @@ function hoverChain(key: string | null): string[] {
   return parts.map((_, index) => parts.slice(0, index + 1).join(">"));
 }
 
+const TILE_TOP = "\u0000tile-top", TILE_BOTTOM = "\u0000tile-bottom";
+const blank = (line: string): boolean => !line.replace(/\x1b\[[0-9;]*m/g, "").trim();
+
+/// Wraps each run of non-blank lines in tile edges; the blank lines between
+/// runs give way to the edges. `at[i]` is where source line i now sits, so
+/// click targets placed by line number still land on their line.
+export function tileLines(lines: readonly string[]): { lines: string[]; at: number[] } {
+  const out: string[] = [], at: number[] = [];
+  let open = false;
+  for (const line of lines) {
+    if (blank(line)) { if (open) { out.push(TILE_BOTTOM); open = false; } at.push(out.length); continue; }
+    if (!open) { out.push(TILE_TOP); open = true; }
+    at.push(out.length);
+    out.push(line);
+  }
+  if (open) out.push(TILE_BOTTOM);
+  return { lines: out, at };
+}
+
+/// Panel names as titles: `EXECUTION LOG` → `Execution log`, `AGENT DRIVE`
+/// keeps its proper name. Session output titles (`FILES`) follow suit.
+function panelTitle(title: string): string {
+  if (title === "AGENT DRIVE") return "Agent Drive";
+  return title === title.toUpperCase() ? title.charAt(0) + title.slice(1).toLowerCase() : title;
+}
+
 export class SessionView {
   selectedId: number | null = null;
   focused = false;
@@ -818,7 +844,9 @@ export class SessionView {
       const subjectRun = this.artifact ? this.runs.find((item) => item.id === this.artifact!.runId) ?? run : run;
       const subject = this.historyOpen ? safe(options.title) : output?.type === "panel" && output.files ? safe(options.path) : this.drivePanelOpen || this.outputId !== null ? "" : this.contextOpen ? safe(options.model ?? "")
         : subjectRun ? `Turn ${subjectRun.number}` : "";
-      put(0, 1, paint.text(title, "muted") + (subject ? "  " + paint.text(subject, "secondary") : ""), width - 5, "surface");
+      // Figma panel v2: the panel's name as a title, what it shows beside it,
+      // meta on the right and a × to close.
+      put(0, 1, paint.bold(panelTitle(title), "strong") + (subject ? "  " + paint.text(subject, "secondary") : ""), width - 5, "surface");
       if (title === "AGENT DRIVE") {
         // Figma 85:697 header: the mission's state word on the right.
         const word = driveStatusWord(options.drive ?? null, now);
@@ -829,7 +857,7 @@ export class SessionView {
         // Files: `214 files · 3 changed` on the right of the header.
         const changed = output.files.filter((file) => file.status).length;
         const meta = `${output.files.length} file${output.files.length === 1 ? "" : "s"}${changed ? ` · ${changed} changed` : ""}`;
-        put(0, width - 1 - meta.length, paint.text(meta, "muted"), meta.length, "surface");
+        put(0, width - 4 - meta.length, paint.text(meta, "muted"), meta.length, "surface");
       }
       if (title === "HISTORY" && panelFooter) {
         // `13 turns · 7h 42m`: how much this session holds and how long it has run.
@@ -837,7 +865,7 @@ export class SessionView {
         const age = options.createdAt ? Math.max(0, now - options.createdAt) : null;
         const span = age === null ? "" : age < 3_600_000 ? ` · ${Math.max(1, Math.round(age / 60_000))}m` : ` · ${Math.floor(age / 3_600_000)}h ${Math.floor(age % 3_600_000 / 60_000)}m`;
         const meta = `${turns} turn${turns === 1 ? "" : "s"}${span}`;
-        put(0, width - 1 - meta.length, paint.text(meta, "muted"), meta.length, "surface");
+        put(0, width - 4 - meta.length, paint.text(meta, "muted"), meta.length, "surface");
       }
       if (title === "VERIFICATION" && this.artifact) {
         // The turn's overall result as a pill: `stopped · 2 of 3 passed`.
@@ -848,18 +876,16 @@ export class SessionView {
           : checks.some((tool) => tool.state === "running" || tool.waiting) ? "running" : "passed";
         const pill = ` ${overall} · ${passed} of ${checks.length} passed `;
         const tone: PaletteColor = overall === "failed" ? "signal" : overall === "passed" ? "citron" : overall === "running" ? "thinking" : "secondary";
-        if (checks.length && width > pill.length + 24) put(0, width - 1 - pill.length, paint.wash(pill, overall === "failed" ? "errorSurface" : overall === "passed" ? "diffAddedSurface" : "raised", tone), pill.length, "surface");
+        if (checks.length && width > pill.length + 27) put(0, width - 4 - pill.length, paint.wash(pill, overall === "failed" ? "errorSurface" : overall === "passed" ? "diffAddedSurface" : "raised", tone), pill.length, "surface");
       }
       if (title === "EXECUTION LOG" && run && panelFooter) {
         // `10 events · 13.4s` on the right of the log's header.
         const events = (run.request ? 1 : 0) + run.entries.length;
         const meta = `${events} event${events === 1 ? "" : "s"}${run.receipt?.durationMs != null ? ` · ${seconds(run.receipt.durationMs)}` : ""}`;
-        put(0, width - 1 - meta.length, paint.text(meta, "muted"), meta.length, "surface");
+        put(0, width - 4 - meta.length, paint.text(meta, "muted"), meta.length, "surface");
       }
-      if (!panelFooter) {
-        put(0, width - 3, paint.text("×", "muted"), 2, "surface");
-        zone(0, width - 4, 4, { kind: "panel-close" });
-      }
+      put(0, width - 3, paint.text("×", "secondary"), 2, "surface");
+      zone(0, width - 4, 4, { kind: "panel-close" });
       put(1, 0, paint.text("─".repeat(width), "rule"), width, "surface");
     }
     if (height <= 2) return { rows, zones };
@@ -902,10 +928,28 @@ export class SessionView {
       put(actionsRow, column, paint.text(back, "electricBright"), back.length);
       zone(actionsRow, column, back.length, this.historyOpen ? { kind: "history" } : { kind: "back" });
     }
-    const pane = (lines: string[], column: number, size: number, offset: number, target: ScrollRegion["target"], background: PaletteColor = "ink"): number => {
+    // Text width inside a panel tile: one cell of gutter each side of the
+    // tile and one of padding inside it.
+    const tileText = stageWidth - 3;
+    let tilePositions: number[] | null = null;
+    const pane = (source: string[], column: number, size: number, offset: number, target: ScrollRegion["target"], background: PaletteColor = "ink"): number => {
+      // Figma panel v2: a panel's content sits on raised tiles. Each run of
+      // lines is one tile; a half-block edge above and below gives it half a
+      // row of padding and stands in for the blank line between tiles.
+      const tiled = options.panel ? tileLines(source) : null;
+      const lines = tiled?.lines ?? source;
+      tilePositions = tiled?.at ?? null;
       const capacity = bodyHeight;
       offset = Math.min(offset, Math.max(0, lines.length - capacity));
-      for (let row = 0; row < capacity; row++) put(top + row, column, lines[offset + row] ?? "", size - 1, options.panel ? "surface" : lines[offset + row] !== undefined ? background : "ink");
+      for (let row = 0; row < capacity; row++) {
+        const line = lines[offset + row];
+        if (options.panel && (line === TILE_TOP || line === TILE_BOTTOM)) {
+          put(top + row, column, paint.enabled ? paint.text((line === TILE_TOP ? "▄" : "▀").repeat(size - 1), "raised") : "", size - 1, "surface");
+        } else if (options.panel && line !== undefined) {
+          put(top + row, column, "", size - 1, "raised");
+          put(top + row, column + 1, line, size - 2, "raised");
+        } else put(top + row, column, line ?? "", size - 1, options.panel ? "surface" : line !== undefined ? background : "ink");
+      }
       region({ row: top, column, width: size, height: bodyHeight, target, maximum: Math.max(0, lines.length - capacity) });
       return offset;
     };
@@ -914,7 +958,7 @@ export class SessionView {
       const items = this.historyItems();
       this.historyIndex = Math.max(0, Math.min(this.historyIndex, items.length - 1));
       const lines: { text: string; index?: number }[] = [];
-      const section = (name: string, note: string) => lines.push({ text: formatFooterLine(paint.text(name, "muted"), paint.text(note, "muted"), stageWidth - 1) });
+      const section = (name: string, note: string) => lines.push({ text: formatFooterLine(paint.text(name, "muted"), paint.text(note, "muted"), stageWidth - 3) });
       const digits = String(this.runs.at(-1)?.number ?? 1).length;
       section("THIS SESSION", "newest first");
       items.forEach((item, index) => {
@@ -930,7 +974,7 @@ export class SessionView {
           const time = ms == null ? "" : ms < 100_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`;
           const right = paint.text([time, outcome].filter(Boolean).join(" · "), outcome === "running" ? "thinking" : "muted");
           const left = `${paint.text(String(run.number).padStart(digits), "muted")} ${paint.text(mark, tone)} ${paint.text(safe(run.request?.text.split("\n")[0] ?? ""), index === this.historyIndex ? "paper" : "secondary")}`;
-          lines.push({ text: formatFooterLine(truncateText(left, Math.max(8, stageWidth - visibleLength(right) - 4)), right, stageWidth - 1), index });
+          lines.push({ text: formatFooterLine(truncateText(left, Math.max(8, stageWidth - visibleLength(right) - 5)), right, stageWidth - 3), index });
         } else {
           const session = item.session;
           const age = Math.max(0, now - Date.parse(session.updatedAt));
@@ -938,16 +982,26 @@ export class SessionView {
             : new Date(session.updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" });
           const right = paint.text([session.turns === undefined ? "" : `${session.turns} turn${session.turns === 1 ? "" : "s"}`, when].filter(Boolean).join("  "), "muted");
           const left = `${" ".repeat(digits)} ${paint.text("→", "muted")} ${paint.text(safe(session.title), index === this.historyIndex ? "paper" : "secondary")}`;
-          lines.push({ text: formatFooterLine(truncateText(left, Math.max(8, stageWidth - visibleLength(right) - 4)), right, stageWidth - 1), index });
+          lines.push({ text: formatFooterLine(truncateText(left, Math.max(8, stageWidth - visibleLength(right) - 5)), right, stageWidth - 3), index });
         }
       });
-      const selectedLine = Math.max(0, lines.findIndex((line) => line.index === this.historyIndex));
-      const start = Math.max(0, Math.min(selectedLine - bodyHeight + 1, lines.length - bodyHeight));
-      lines.slice(start, start + bodyHeight).forEach((line, offset) => {
+      // Each section is a raised tile with half-block edges, as in pane().
+      const tiled = tileLines(lines.map((line) => line.text));
+      const shownLines = tiled.lines.map((text, position) => {
+        const source = tiled.at.indexOf(position);
+        return { text, index: source >= 0 ? lines[source]!.index : undefined };
+      });
+      const selectedLine = Math.max(0, shownLines.findIndex((line) => line.index === this.historyIndex));
+      const start = Math.max(0, Math.min(selectedLine - bodyHeight + 1, shownLines.length - bodyHeight));
+      shownLines.slice(start, start + bodyHeight).forEach((line, offset) => {
         const row = top + offset, selected = line.index !== undefined && line.index === this.historyIndex;
-        const background: PaletteColor = selected ? "menuSelection" : "surface";
-        put(row, x - 1, selected ? paint.text("▎", "electric") : "", stageWidth + 1, background);
-        put(row, x, line.text, stageWidth - 1, background);
+        if (line.text === TILE_TOP || line.text === TILE_BOTTOM) {
+          put(row, x, paint.enabled ? paint.text((line.text === TILE_TOP ? "▄" : "▀").repeat(stageWidth - 1), "raised") : "", stageWidth - 1, "surface");
+          return;
+        }
+        const background: PaletteColor = selected ? "tileSelection" : "raised";
+        put(row, x, selected ? paint.text("▎", "electric") : "", stageWidth - 1, background);
+        put(row, x + 1, line.text, stageWidth - 2, background);
         if (line.index !== undefined) zone(row, x, stageWidth - 1, { kind: "history-item", index: line.index });
       });
       region({ row: top, column: x, width: stageWidth, height: bodyHeight, target: "history" });
@@ -956,13 +1010,13 @@ export class SessionView {
     if (options.panel && (output?.type === "panel" || output?.type === "block")) {
       // Session commands are global, even when the reader has pinned an old run.
       // Their temporary panel preserves that run's surface and reading position.
-      const lines = output.type === "panel" && output.files?.length ? filePanelLines(output.files, stageWidth - 1, paint)
-        : output.lines.flatMap((line) => foldCells(line, stageWidth - 1));
+      const lines = output.type === "panel" && output.files?.length ? filePanelLines(output.files, tileText, paint)
+        : output.lines.flatMap((line) => foldCells(line, tileText));
       this.outputOffset = pane(lines, x, stageWidth, this.outputOffset, "output");
       return finish([["↑↓", "scroll"]]);
     }
     if (options.panel && this.contextOpen) {
-      this.contextOffset = pane((options.contextLines ?? []).flatMap((line) => foldCells(line, stageWidth - 1)), x, stageWidth, this.contextOffset, "context");
+      this.contextOffset = pane((options.contextLines ?? []).flatMap((line) => foldCells(line, tileText)), x, stageWidth, this.contextOffset, "context");
       return finish([["↑↓", "scroll"]], "/compact to free space");
     }
     if (options.panel && this.diffOpen) {
@@ -988,13 +1042,14 @@ export class SessionView {
           : tool.state === "stopped" || tool.state === "denied" ? paint.text(tool.state, "secondary")
           : paint.text([passes && tool.exitCode === 0 ? `${passes} passed` : "", tool.exitCode === undefined ? "exit unknown" : `exit ${tool.exitCode}`].filter(Boolean).join(" · "), tone === "signal" ? "signal" : "citron");
         const time = paint.text((tool.durationMs === undefined ? "—" : tool.durationMs >= 1000 ? seconds(tool.durationMs) : `${tool.durationMs}ms`).padStart(6), "muted");
-        const background: PaletteColor = selected ? "menuSelection" : "surface";
-        put(row, 0, selected ? paint.text("▎", "electric") : "", width, background);
+        const background: PaletteColor = selected ? "tileSelection" : "raised";
+        put(row, 1, selected ? paint.text("▎", "electric") : "", width - 2, background);
         const right = `${result}  ${time}`;
-        put(row, 1, formatFooterLine(`${paint.text(mark, tone)} ${paint.text("$", "muted")} ${paint.text(truncateText(command, Math.max(4, width - 8 - visibleLength(right))), "paper")}`, right, width - 3), width - 2, background);
+        put(row, 2, formatFooterLine(`${paint.text(mark, tone)} ${paint.text("$", "muted")} ${paint.text(truncateText(command, Math.max(4, width - 10 - visibleLength(right))), "paper")}`, right, width - 5), width - 4, background);
         zone(row, 1, width - 2, { kind: "artifact-step", step: first + offset - index });
       });
       const selected = records[index];
+      if (paint.enabled) put(2 + listRows, 1, paint.text("▀".repeat(width - 2), "raised"), width - 2, "surface");
       const outputRow = 2 + listRows + 1;
       if (selected && outputRow + 1 < height - Number(panelFooter)) {
         put(outputRow, 1, paint.text("OUTPUT", "muted") + paint.text(" · last lines", "muted"), width - 2, "surface");
@@ -1019,11 +1074,11 @@ export class SessionView {
         if (records.length > 1) put(2, x, paint.text(`${back}${index + 1}/${records.length}${next}`, "secondary"), stageWidth, "surface");
         if (index > 0) zone(2, x, 2, { kind: "artifact-step", step: -1 });
         if (index + 1 < records.length) zone(2, x + `${back}${index + 1}/${records.length}`.length, 2, { kind: "artifact-step", step: 1 });
-        const detailView = this.artifact.kind === "changes" ? { lines: diffPanelLines(selected, stageWidth - 1, paint), argumentsRow: -1 } : this.detailLines(selected, stageWidth - 1, paint, options.markdown);
+        const detailView = this.artifact.kind === "changes" ? { lines: diffPanelLines(selected, tileText, paint), argumentsRow: -1 } : this.detailLines(selected, tileText, paint, options.markdown);
         const offset = pane(detailView.lines, x, stageWidth, memory.detailOffsets.get(selected.id) ?? 0, "body");
         memory.detailOffsets.set(selected.id, offset);
         this.regions.at(-1)!.recordId = selected.id;
-        const argumentsAt = detailView.argumentsRow - offset;
+        const argumentsAt = (tilePositions?.[detailView.argumentsRow] ?? detailView.argumentsRow) - offset;
         if (detailView.argumentsRow >= 0 && argumentsAt >= 0 && argumentsAt < bodyHeight) zone(top + argumentsAt, x, 14, { kind: "arguments", id: selected.id });
       }
       if (this.artifact.kind === "verification") return finish(records.length > 1 ? [["←→", "checks"], ["↑↓", "scroll"]] : [["↑↓", "scroll"]], "", "back");
@@ -1248,12 +1303,16 @@ export class SessionView {
           records.slice(Math.max(0, start), Math.max(0, start) + capacity).forEach((record, index) => {
             const row = top + index;
             const isSelected = record.id === selected?.id;
-            const background = isSelected ? "raised" : "surface";
+            // The event list is one raised tile; the selection is a tint on it.
+            const background = isSelected ? "tileSelection" : "raised";
             put(row, x, "", listWidth, background);
             if (isSelected) put(row, x, paint.text("▎", "electric"), 1, background);
             put(row, x + 1, logRow(record, base, listWidth - 2, paint), listWidth - 2, background);
             zone(row, x + 1, listWidth - 2, { kind: "record", id: record.id });
           });
+          // The event tile's lower edge, when the list leaves room for it.
+          const shownCount = Math.min(capacity, records.length - Math.max(0, start));
+          if (options.panel && paint.enabled && shownCount < bodyHeight) put(top + shownCount, x, paint.text("▀".repeat(listWidth), "raised"), listWidth, "surface");
         }
         region({ row: top, column: x, width: listWidth, height: bodyHeight, target: "list" });
       }
@@ -1268,7 +1327,7 @@ export class SessionView {
         // On a wide stage, the highlighted record is already the inspected one.
         this.regions[this.regions.length - 1]!.recordId = shown.id;
         // The Arguments toggle scrolls with the content, wherever it lands.
-        const argumentsAt = detailView.argumentsRow - offset;
+        const argumentsAt = (tilePositions?.[detailView.argumentsRow] ?? detailView.argumentsRow) - offset;
         if (detailView.argumentsRow >= 0 && argumentsAt >= 0 && argumentsAt < bodyHeight) zone(top + argumentsAt, detailX + 2, 14, { kind: "arguments", id: shown.id });
       }
       if (options.panel) return detail ? finish([["↑↓", "scroll"], ["Tab", "next event"]], "", "back")

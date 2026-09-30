@@ -35,6 +35,8 @@ export const palette = {
   errorSurface: "#281D23",
   accentSurface: "#172835",
   menuSelection: "#172835",
+  /// A selected row on a raised tile: selection composited over `raised`.
+  tileSelection: "#213749",
   diffAddedSurface: "#0F2219",
   diffRemovedSurface: "#26161A",
   userSurface: "#0E161D",
@@ -62,14 +64,15 @@ export type PaletteColor = keyof typeof palette;
 type SyntaxColor = "syntaxKeyword" | "syntaxString" | "syntaxNumber" | "syntaxComment" | "syntaxType" | "syntaxFunction";
 type ContextColor = "contextMessages" | "contextTools" | "contextReserved" | "contextFree";
 type ComposerColor = "composerQueuedBorder" | "composerStoppedBorder" | "composerRestoredBorder";
-type CoreColors = Omit<Record<PaletteColor, string>, "strong" | "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "menuSelection" | "userSurface" | "diffAddedSurface" | "diffRemovedSurface" | SyntaxColor | ContextColor | ComposerColor>;
+type CoreColors = Omit<Record<PaletteColor, string>, "strong" | "muted" | "borderBright" | "thinking" | "thinkingSurface" | "errorSurface" | "accentSurface" | "menuSelection" | "tileSelection" | "userSurface" | "diffAddedSurface" | "diffRemovedSurface" | SyntaxColor | ContextColor | ComposerColor>;
 const composite = (surface: string, accent: string, alpha: number): string => "#" + [1, 3, 5].map((offset) =>
   Math.round(parseInt(surface.slice(offset, offset + 2), 16) * (1 - alpha) + parseInt(accent.slice(offset, offset + 2), 16) * alpha).toString(16).padStart(2, "0")).join("");
 const menuSelection = (surface: string, accent: string): string => composite(surface, accent, 0.08);
 const complete = (colors: CoreColors): Record<PaletteColor, string> => ({ ...colors,
   strong: colors.paper,
   muted: colors.secondary, borderBright: colors.rule, thinking: colors.execute,
-  thinkingSurface: colors.raised, errorSurface: colors.raised, accentSurface: colors.toolActive, menuSelection: menuSelection(colors.surface, colors.electric), userSurface: colors.toolSurface,
+  thinkingSurface: colors.raised, errorSurface: colors.raised, accentSurface: colors.toolActive, menuSelection: menuSelection(colors.surface, colors.electric),
+  tileSelection: composite(colors.raised, colors.electric, 0.14), userSurface: colors.toolSurface,
   diffAddedSurface: menuSelection(colors.surface, colors.citron), diffRemovedSurface: menuSelection(colors.surface, colors.signal),
   // Syntax roles come from each project's own accents so code keeps the
   // theme's character: its purple/pink for keywords, green for strings.
@@ -117,6 +120,7 @@ const demesneLight: Record<PaletteColor, string> = {
   errorSurface: "#E8DFE1",
   accentSurface: "#D5E1EC",
   menuSelection: "#D5E1EC",
+  tileSelection: "#C7D5E3",
   diffAddedSurface: "#D4E2DF",
   diffRemovedSurface: "#E8DFE1",
   userSurface: "#EEF2F5",

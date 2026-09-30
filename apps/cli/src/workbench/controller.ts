@@ -2025,7 +2025,7 @@ export class Workbench {
       const panelWidth = geometry.overlay ? width : geometry.panelWidth - 1;
       const column = geometry.overlay ? 0 : width + 1;
       const panel = this.sessionView.render({ ...renderOptions, width: panelWidth, height: geometry.overlay ? sessionHeight : layout.height,
-        panel: true, column, replace: geometry.overlay, model: rail.modelId, contextLines: rail.lines(Math.max(16, panelWidth - 4), 1000, paint) });
+        panel: true, column, replace: geometry.overlay, model: rail.modelId, contextLines: rail.lines(Math.max(16, panelWidth - 5), 1000, paint) });
       if (geometry.overlay) this.drivePanes = [];
       this.drivePanes.push({ surface: this.sessionView.driveSurface, row: 0, column, width: panelWidth, height: geometry.overlay ? sessionHeight : layout.height });
       if (this.sessionView.driveOpen) this.drivePanelBounds = { column, width: panelWidth, height: geometry.overlay ? sessionHeight : layout.height };
@@ -2034,7 +2034,8 @@ export class Workbench {
     }
     for (let row = 0; row < layout.height; row++) {
       if (!panelOpen || geometry.overlay) canvas.put(row, width, "", geometry.panelWidth, "surface");
-      canvas.put(row, width, paint.text("│", "rule"), 1, "surface");
+      // An open panel's edge is the bright border, so it reads as its own sheet.
+      canvas.put(row, width, paint.text("│", panelOpen && !geometry.overlay ? "borderBright" : "rule"), 1, "surface");
     }
     if (!panelOpen || geometry.overlay) {
       const column = width + Math.floor((geometry.panelWidth + 1) / 2);

@@ -332,7 +332,7 @@ test("Drive shows a real click target before dispatch and cancels the click imme
   const screen = ui.observeDrive(); const close = screen.controls.find((control) => control.label.includes("×"))!;
   const pending = ui.performDrive({ kind: "click", target: close.id }, screen, new AbortController().signal);
   expect(ui.frame(120, 36).rows.join("\n")).toContain("DRIVE · Click");
-  expect(ui.frame(120, 36).rows.join("\n")).toContain("AGENT DRIVE");
+  expect(ui.frame(120, 36).rows.join("\n")).toContain("Agent Drive");
   internals.onKeypress("my draft", {}); gate.resolve();
   expect(await pending).toContain("UI changed before the click");
   expect(ui.observeDrive().surface).toBe("drive"); expect(ui.observeDrive().draft).toBe("my draft");
@@ -382,7 +382,7 @@ test("UI actions use visible controls, reject stale observations and cannot inte
   void ui.readPrompt({ history: [], commands: SLASH_COMMANDS, mentions: [] });
   ui.showDrive();
   const observed = ui.observeDrive();
-  expect(observed.rows.join("\n")).toContain("AGENT DRIVE");
+  expect(observed.rows.join("\n")).toContain("Agent Drive");
   const close = observed.controls.find((item) => item.label.includes("×")); expect(close).toBeDefined();
   await ui.performDrive({ kind: "click", target: close!.id }, observed, new AbortController().signal);
   expect(ui.observeDrive().surface).not.toBe("drive");
@@ -407,7 +407,7 @@ test.each([80, 140])("Drive reports the actual log pane after Ctrl+B from compos
   expect(receipt).toContain("Surface: response → log. Focus: content.");
   const screen = ui.observeDrive(), pane = screen.panes!.find((pane) => pane.surface === "log")!;
   expect(pane).toBeDefined(); expect(screen.surface).toBe("log");
-  expect(screen.rows.slice(pane.row, pane.row + pane.height).map((row) => row.slice(pane.column, pane.column + pane.width)).join("\n")).toContain("EXECUTION LOG");
+  expect(screen.rows.slice(pane.row, pane.row + pane.height).map((row) => row.slice(pane.column, pane.column + pane.width)).join("\n")).toContain("Execution log");
   expect(parseDriveRequest({ mission: "Review", homeSessionId: "home", observation: screen, memory: { notes: "", completed: [], remaining: [], evidence: [], steps: [] } }).observation.panes).toEqual(screen.panes);
 });
 

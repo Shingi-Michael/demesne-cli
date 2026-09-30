@@ -22,7 +22,7 @@ test("rail buttons open distinct real surfaces and a dismissed file load stays d
   expect(screen()).toContain("src/main.ts");
   state.sessionView.act({ kind: "panel-close" });
   screen(); state.handleMouse({ kind: "press", button: 0, row: 5, col: 117 });
-  expect(screen()).toContain("CHANGES");
+  expect(screen()).toContain("Changes  ");
   state.sessionView.act({ kind: "panel-close" });
   screen(); state.handleMouse({ kind: "press", button: 0, row: 7, col: 117 });
   expect(screen()).toContain("PREVIEW");

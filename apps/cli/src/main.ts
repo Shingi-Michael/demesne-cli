@@ -1346,7 +1346,8 @@ async function runChat(command: string[]): Promise<void> {
       if (grants.length > 0) {
         detail.push(paint.bold("SESSION GRANTS", "secondary"));
         for (const grant of grants) {
-          const scope = grant.pathPrefix ? ` under ${sanitizeTerminalLine(grant.pathPrefix)}/` : " (whole workspace)";
+          const scope = grant.argv ? ` \`${sanitizeTerminalLine(grant.argv.join(" "))}\`${grant.cwd && grant.cwd !== "." ? ` in ${sanitizeTerminalLine(grant.cwd)}` : ""}`
+            : grant.pathPrefix ? ` under ${sanitizeTerminalLine(grant.pathPrefix)}/` : " (whole workspace)";
           detail.push(truncateText(paint.dim(`· ${sanitizeTerminalLine(grant.tool)}${scope}`), contextWidth));
         }
       }
@@ -2390,7 +2391,7 @@ async function resolvePermission(event: EventEnvelope, onCancel?: () => void): P
     const width = getTerminalWidth(process.stdout);
     const persistedRule = derivePersistedRule(toolName, rawArgs);
     console.log(formatPermissionCard(summary, toolName, width, paint, previewRows.length > 0 ? previewRows : undefined));
-    const selection = await promptApprovalSelection(toolName !== "run_command", onCancel, persistedRule !== null);
+    const selection = await promptApprovalSelection(true, onCancel, persistedRule !== null, toolName === "run_command");
     decision = selection.decision;
     if (decision === "allow_always" && persistedRule) {
       try {
@@ -2441,11 +2442,12 @@ function promptApprovalSelection(
   allowSession: boolean,
   onCancel?: () => void,
   allowPersist = false,
+  failSafe = !allowSession,
 ): Promise<{ decision: PermissionDecision; cancelledTurn: boolean }> {
   const input = process.stdin;
   const output = process.stdout;
   const wasRaw = input.isRaw;
-  const approval = approvalOptions(allowSession, allowPersist);
+  const approval = approvalOptions(allowSession, allowPersist, failSafe);
   let selected = approval.selectedIndex;
   emitKeypressEvents(input);
   input.setRawMode(true);

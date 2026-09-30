@@ -359,7 +359,8 @@ export interface SessionStateResponse {
   lastEventId: number;
   pendingPermissions: PendingPermissionSnapshot[];
   latestProviderCall: ProviderCallSnapshot | null;
-  sessionGrants?: Array<{ tool: string; pathPrefix: string }>;
+  /// `argv`/`cwd` are set for command grants: that exact command, there.
+  sessionGrants?: Array<{ tool: string; pathPrefix: string; argv?: string[]; cwd?: string }>;
   checkpoint?: SessionCheckpoint | null;
 }
 

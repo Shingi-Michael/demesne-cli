@@ -12,7 +12,9 @@ export interface ApprovalSelectionState {
   cancelledTurn: boolean;
 }
 
-export function approvalOptions(allowSession: boolean, allowPersist = false): {
+/// `failSafe` makes Deny the default so Enter never runs something by
+/// accident; host commands always pass it, even when they offer a session grant.
+export function approvalOptions(allowSession: boolean, allowPersist = false, failSafe = !allowSession): {
   options: PermissionDecision[];
   selectedIndex: number;
 } {
@@ -26,7 +28,7 @@ export function approvalOptions(allowSession: boolean, allowPersist = false): {
   return {
     options,
     // Host execution is explicitly not sandboxed, so Enter must fail safe.
-    selectedIndex: allowSession ? 0 : options.indexOf("deny"),
+    selectedIndex: failSafe ? options.indexOf("deny") : 0,
   };
 }
 

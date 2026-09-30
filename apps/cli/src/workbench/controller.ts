@@ -883,7 +883,7 @@ export class Workbench {
 
   askApproval(request: ApprovalRequest): Promise<PermissionDecision> {
     this.approval = request;
-    this.approvalSelected = approvalOptions(request.toolName !== "run_command", request.allowPersist).selectedIndex;
+    this.approvalSelected = approvalOptions(true, request.allowPersist, request.toolName === "run_command").selectedIndex;
     this.mode = "approval";
     this.requestRender();
     return new Promise((resolve) => {
@@ -1123,7 +1123,7 @@ export class Workbench {
 
   private handleModalKey(text: string, key: PromptEditorKey): boolean {
     if (this.mode === "approval") {
-      const next = reduceApprovalSelection(this.approvalSelected, this.approval?.toolName !== "run_command", key, this.approval?.allowPersist ?? false);
+      const next = reduceApprovalSelection(this.approvalSelected, true, key, this.approval?.allowPersist ?? false);
       this.approvalSelected = next.selectedIndex;
       if (next.decision) this.resolveApproval(next.decision);
       else this.requestRender();
@@ -2236,8 +2236,8 @@ export class Workbench {
     const zones: InputZone[] = [];
 
     if (this.mode === "approval" && this.approval) {
-      const allowSession = this.approval.toolName !== "run_command";
-      const choices = approvalOptions(allowSession, this.approval.allowPersist).options;
+      // Commands too: the daemon grants exactly this argv in this directory.
+      const choices = approvalOptions(true, this.approval.allowPersist).options;
       // Rail-aligned and box-free so the request reads as part of the turn
       // rather than as a modal from a different interface.
       const askLines = formatApprovalAsk({
@@ -2549,7 +2549,7 @@ export class Workbench {
     const canvas = new Canvas(width, height, paint), zones: InputZone[] = [];
     const inner = boxWidth - 4, left = inset + 2;
     const command = approval.toolName === "run_command";
-    const choices = approvalOptions(!command, approval.allowPersist).options;
+    const choices = approvalOptions(true, approval.allowPersist).options;
     for (let row = 0; row < height; row++) canvas.put(row, inset, "", boxWidth, "surface");
     // Short terminals drop the border so the question, summary and buttons fit.
     const bordered = height >= 6, first = bordered ? 1 : 0, buttonRow = bordered ? height - 2 : height - 1;

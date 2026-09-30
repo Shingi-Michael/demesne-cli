@@ -3,6 +3,10 @@ import { SLASH_COMMANDS, type SlashCommand } from "@demesne/brand";
 import {
   createPromptEditorState,
   mentionMatches,
+  draftMentions,
+  expandMentions,
+  mentionLabel,
+  resolveMention,
   mentionTokenAt,
   reducePromptEditor,
   setPromptValue,
@@ -332,5 +336,20 @@ describe("prompt editor reverse search", () => {
     current = type(current, "zzz");
     current = press(current, { name: "enter" }, "", { history }).state;
     expect(current.value).toBe("draft");
+  });
+});
+
+describe("mention labels and expansion", () => {
+  const files = ["src/lexer.ts", "tests/lexer.test.ts", "src/index.ts", "tests/index.ts", "README.md"];
+  test("a unique name is inserted short; a shared one keeps its path", () => {
+    expect(mentionLabel("src/lexer.ts", files)).toBe("lexer.ts");
+    expect(mentionLabel("src/index.ts", files)).toBe("src/index.ts");
+    expect(mentionLabel("README.md", files)).toBe("README.md");
+  });
+  test("only tokens naming a workspace file count, and sending expands them to paths", () => {
+    const draft = "Why does @lexer.ts fail but @src/index.ts pass? cc @someone and user@host";
+    expect(draftMentions(draft, files).map((mention) => mention.path)).toEqual(["src/lexer.ts", "src/index.ts"]);
+    expect(resolveMention("index.ts", files)).toBeNull();
+    expect(expandMentions(draft, files)).toBe("Why does @src/lexer.ts fail but @src/index.ts pass? cc @someone and user@host");
   });
 });

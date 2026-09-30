@@ -34,7 +34,7 @@ test("mention popup stays above the composer and preserves a held conversation, 
   expect(f.state.mentionMenuFrame).toBeNull(); expect(f.state.editor.value).toBe("Fix @src/file-3"); expect(f.state.editor.cursor).toBe(caret);
   expect(f.state.layout.input).toEqual(input); expect(f.state.sessionView.memory.flowOffset).toBe(offset); expect(f.state.sessionView.memory.anchor).toEqual(anchor);
   f.type("."); f.screen(); expect(f.state.mentionMenuFrame).not.toBeNull();
-  f.key("tab"); f.screen(); expect(f.state.editor.value).toBe("Fix @src/file-3.ts "); expect(f.state.mode).toBe("input");
+  f.key("tab"); f.screen(); expect(f.state.editor.value).toBe("Fix @file-3.ts "); expect(f.state.mode).toBe("input");
   f.key("_", { ctrl: true }); expect(f.state.editor.value).toBe("Fix @src/file-3.");
 });
 
@@ -51,7 +51,7 @@ test("popup hover, wheel and one click select a file without clicking or scrolli
   const row = f.state.mentionMenuFrame.zones.find((zone: any) => zone.index === 5).row;
   f.state.handleMouse({ kind: "move", row, col: 20 }); expect(f.state.editor.mentionSelected).toBe(5);
   f.state.handleMouse({ kind: "press", button: 0, row, col: 20 }); f.screen();
-  expect(f.state.editor.value).toBe("@src/file-5.ts "); expect(f.state.mode).toBe("input"); expect(f.state.mentionMenuFrame).toBeNull();
+  expect(f.state.editor.value).toBe("@file-5.ts "); expect(f.state.mode).toBe("input"); expect(f.state.mentionMenuFrame).toBeNull();
 });
 
 test("mentions remain reachable in the hero, narrow terminals and docked panels without covering the editor", () => {
@@ -64,7 +64,9 @@ test("mentions remain reachable in the hero, narrow terminals and docked panels 
           f.key("down"); const frame = f.ui.frame(width!, height!), menu = f.state.mentionMenuFrame;
           expect(menu).not.toBeNull(); expect(menu.rect.row).toBeGreaterThanOrEqual(0); expect(menu.rect.height).toBeLessThanOrEqual(12);
           expect(menu.zones.some((zone: any) => zone.index === f.state.editor.mentionSelected)).toBe(true);
-          expect(menu.rect.row + menu.rect.height).toBe(f.state.layout.input.row);
+          // Above the composer, or on the start screen dropped down below it; never over it.
+          const input = f.state.layout.input;
+          expect(menu.rect.row + menu.rect.height === input.row || start && menu.rect.row === input.row + input.height).toBe(true);
           expect(frame.cursor!.row).toBeGreaterThanOrEqual(f.state.layout.input.row);
           expect(frame.rows.every(row => visibleLength(row) === width)).toBe(true);
         }

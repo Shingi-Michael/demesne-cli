@@ -61,6 +61,7 @@ import { ConversationViewport } from "./viewport.ts";
 import { MOUSE_DISABLE, MOUSE_ENABLE, type MouseEvent } from "../mouse.ts";
 import {
   createPromptEditorState,
+  draftMentions,
   mentionMatches,
   mentionTokenAt,
   reducePromptEditor,
@@ -1449,12 +1450,19 @@ export class Workbench {
     const frame = this.composeFrame();
     const menuInset = this.startLayout ? 0 : this.layout.input.width >= 65 ? 2 : 1;
     const menuInput = { ...this.layout.input, column: this.layout.input.column + menuInset, width: this.layout.input.width - menuInset * 2 };
+    // On the start screen the composer sits under the title, so menus drop
+    // down over Start from instead of covering the header (Figma 1:2).
+    // Tiny terminals may have no room there, so fall back to opening above.
+    const roomBelow = this.layout.height - 1 - (menuInput.row + menuInput.height), roomAbove = menuInput.row - 1;
+    const bottom = this.startLayout && (roomBelow >= 5 || roomBelow >= roomAbove) ? this.layout.height - 1 : undefined;
     this.commandMenuFrame = this.sessionLayout && this.mode === "input" && !this.editor.search
       ? this.commandMenu.render({ commands: this.matchingCommands(), selected: this.editor.menuSelected, query: this.editor.value,
-        input: menuInput, paint: this.options.paint, top: this.startLayout ? 1 : 2 }) : null;
+        input: menuInput, paint: this.options.paint, top: this.startLayout ? 1 : 2, bottom }) : null;
+    const mentionToken = mentionTokenAt(this.editor.value, this.editor.cursor);
     this.mentionMenuFrame = this.sessionLayout && this.mode === "input" && !this.commandMenuFrame
-      ? this.mentionMenu.render({ files: this.matchingMentions(), selected: this.editor.mentionSelected,
-        query: mentionTokenAt(this.editor.value, this.editor.cursor)?.query ?? "", input: menuInput, paint: this.options.paint, top: this.startLayout ? 1 : 2 }) : null;
+      ? this.mentionMenu.render({ files: this.matchingMentions(), selected: this.editor.mentionSelected, query: mentionToken?.query ?? "",
+        searching: Boolean(mentionToken) && !this.editor.mentionDismissed && !this.editor.search && this.promptContext.mentions.length > 0,
+        input: menuInput, paint: this.options.paint, top: this.startLayout ? 1 : 2, bottom }) : null;
     if (!this.commandMenuFrame) this.commandMenu.reset();
     if (!this.mentionMenuFrame) this.mentionMenu.reset();
     const menu = this.mentionMenuFrame ?? this.commandMenuFrame;
@@ -1506,7 +1514,7 @@ export class Workbench {
     // One rule above the prompt, then the prompt and any menu.
     const mention = mentionTokenAt(value, cursor);
     const mentions = !streaming && mention ? mentionMatches(this.promptContext.mentions, mention.query).length : 0;
-    return 4 + Math.max(1, valueLines) + (mentions || menuLines) + (/\B@\S+/.test(value) ? 1 : 0);
+    return 4 + Math.max(1, valueLines) + (mentions || menuLines) + (draftMentions(value, this.promptContext.mentions).length ? 1 : 0);
   }
 
   private rebuildConversation(): void {
@@ -2321,17 +2329,15 @@ export class Workbench {
       lines.push(`${prefix}${queued && body ? paint.italic(body, "secondary") : body}`);
     }
     const cursor = { row: layout.cursorLine + 1, column: HARNESS.content + layout.cursorCol };
-    const attachments = [...value.matchAll(/(?:^|\s)(@[^\s]+)/g)];
+    const attachments = draftMentions(value, this.promptContext.mentions);
     if (attachments.length) {
       let chips = "    ";
-      for (const match of attachments) {
-        const token = match[1]!;
-        const label = ` ${token} × `;
+      for (const mention of attachments) {
+        const label = ` ${mention.path} × `;
         const column = visibleLength(chips);
         if (column + visibleLength(label) >= width - 2) break;
         if (!streaming) zones.push({ row: lines.length, column, width: visibleLength(label), run: () => {
-          const start = match.index! + match[0].indexOf(token);
-          this.editor = setPromptValue(this.editor, value.slice(0, start) + value.slice(start + token.length));
+          this.editor = setPromptValue(this.editor, value.slice(0, mention.start) + value.slice(mention.start + mention.length));
           this.requestRender();
         } });
         chips += paint.text(label, "electric") + " ";

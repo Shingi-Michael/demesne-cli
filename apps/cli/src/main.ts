@@ -1801,6 +1801,7 @@ async function runWorkbenchTurn(options: {
             toolName,
             previewRows: permissionPreviewRows(toolName, rawArgs, options.paint),
             allowPersist: rule !== null,
+            cwd: permissionCwd(rawArgs),
           });
           if (toolCallId) options.workbench.toolWaiting(toolCallId, false);
           presence = "working";
@@ -1889,6 +1890,22 @@ function toolDetailForPresence(name: string, rawArguments: unknown): string {
   return "";
 }
 
+/// A command's own working directory, when its arguments name one.
+function permissionCwd(rawArgs: unknown): string | undefined {
+  let parsed: unknown = rawArgs;
+  if (typeof rawArgs === "string") { try { parsed = JSON.parse(rawArgs); } catch { return undefined; } }
+  return isRecord(parsed) && typeof parsed.cwd === "string" && parsed.cwd.trim() && parsed.cwd !== "." ? sanitizeTerminalLine(parsed.cwd) : undefined;
+}
+
+/// A command as a person would type it: `bun test "my file.ts"`, quoting only
+/// arguments that need it, instead of JSON-quoting every word.
+function shellCommand(argv: readonly unknown[]): string {
+  return argv.map((value) => {
+    const text = String(value);
+    return /^[\w@%+=:,./~-]+$/.test(text) ? text : JSON.stringify(text);
+  }).join(" ");
+}
+
 function permissionPreviewRows(toolName: string | undefined, rawArgs: unknown, painter: Painter): string[] {
   const rows: string[] = [];
   let parsed: Record<string, unknown> | null = null;
@@ -1906,7 +1923,7 @@ function permissionPreviewRows(toolName: string | undefined, rawArgs: unknown, p
   if (toolName === "edit_file" && typeof parsed.oldText === "string" && typeof parsed.newText === "string") {
     rows.push(...formatDiffPreview(parsed.oldText, parsed.newText, 6, painter));
   } else if (toolName === "run_command" && Array.isArray(parsed.argv)) {
-    rows.push(painter.text(`$ ${parsed.argv.map((value: unknown) => JSON.stringify(value)).join(" ")}`, "paper"));
+    rows.push(painter.text(`$ ${shellCommand(parsed.argv)}`, "paper"));
   }
   return rows;
 }
@@ -2331,14 +2348,14 @@ async function resolvePermission(event: EventEnvelope, onCancel?: () => void): P
       if (toolName === "edit_file" && typeof parsed.oldText === "string" && typeof parsed.newText === "string") {
         previewRows.push(...formatDiffPreview(parsed.oldText, parsed.newText, 6, paintLog));
       } else if (toolName === "run_command" && Array.isArray(parsed.argv)) {
-        previewRows.push(paintLog.text(`$ ${parsed.argv.map((value: unknown) => JSON.stringify(value)).join(" ")}`, "paper"));
+        previewRows.push(paintLog.text(`$ ${shellCommand(parsed.argv)}`, "paper"));
       }
     } catch {}
   } else if (isRecord(rawArgs)) {
     if (toolName === "edit_file" && typeof rawArgs.oldText === "string" && typeof rawArgs.newText === "string") {
       previewRows.push(...formatDiffPreview(rawArgs.oldText, rawArgs.newText, 6, paintLog));
     } else if (toolName === "run_command" && Array.isArray(rawArgs.argv)) {
-      previewRows.push(paintLog.text(`$ ${rawArgs.argv.map((value: unknown) => JSON.stringify(value)).join(" ")}`, "paper"));
+      previewRows.push(paintLog.text(`$ ${shellCommand(rawArgs.argv)}`, "paper"));
     }
   }
 

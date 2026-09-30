@@ -36,7 +36,8 @@ test("slash overlay filters and dismisses without reflowing a pinned conversatio
     .toBe(rows.find((line) => line.includes("/sessions"))!.indexOf("Browse or search"));
   type("mo");
   const filtered = screen();
-  expect(filtered).toContain("MODEL");
+  // Figma 14:9 groups: /model belongs to SESSION.
+  expect(filtered).toMatch(/SESSION +\d/);
   expect(filtered).toContain("Switch the active model");
   expect(filtered).not.toContain("Start a fresh session");
   key("escape");
@@ -120,3 +121,13 @@ test("every custom command stays reachable and selected through resizing, themes
     }
   }
 }, 30_000);
+
+test("the slash menu follows Figma 14:9: group counts, argument hints, aliases, and a keycap footer with what is below", () => {
+  const { type, screen } = fixture();
+  type("/");
+  const text = screen(120, 32);
+  expect(text).toMatch(/SESSION +7/);
+  expect(text).toMatch(/\/new \[title\] +Start a fresh session +↵/);
+  expect(text).toMatch(/\/resume <id> +Switch to a session +\/switch/);
+  expect(text).toMatch(/↑↓ select {2}↵ run {2}Tab complete {2}Esc close +18 commands · \d+ more below ↓/);
+});

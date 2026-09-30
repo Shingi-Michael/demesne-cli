@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { sanitizeTerminalLine, truncateText, visibleLength, type Painter } from "@demesne/brand";
 import { Canvas } from "./canvas.ts";
+import { keyHints } from "./session-chrome.ts";
 import type { ImageArtifact } from "@demesne/protocol";
 import { fitImage, type TerminalImage } from "../terminal-graphics.ts";
 
@@ -122,14 +123,22 @@ export class ArtifactPreview {
       zones.push({ row, column: column + x, width: size, run: () => { this.focused = true; this.controlIndex = index; run(); } });
     };
     const artifact = this.selected;
-    put(0, paint.text("PREVIEW", "secondary"));
+    const full = height >= 14;
+    // Figma 50:618 header: whether it follows new images, and which image of how many.
+    const follow = this.mode === "follow" ? paint.text("following new images", "electric") : this.mode === "pinned" ? paint.text("pinned", "secondary") : "";
+    put(0, paint.text("PREVIEW", "muted") + (follow && full ? "  " + follow : ""));
+    const position = artifact ? `${this.artifacts.indexOf(artifact) + 1} of ${this.artifacts.length}` : "";
+    if (position && full) canvas.put(0, width - 5 - position.length, paint.text(position, "muted"), position.length, "surface");
     button(0, "×", () => this.close(), width - 3);
+    if (full && this.mode === "manual" && this.artifacts.length > 1) button(0, "follow latest", () => { this.mode = "follow"; this.selectedId = this.artifacts.at(-1)?.id ?? null; void this.load(); this.save(); this.changed(); }, 10);
     rule(1);
-    put(2, paint.text(sanitizeTerminalLine(artifact?.filename ?? "No image selected"), "muted"));
+    // The file, then where it came from: `login-page.png  screenshot · png`.
+    const source = artifact ? sanitizeTerminalLine(`${artifact.source.name.replace(/^mcp__[^_]+__/, "")} · ${artifact.mimeType.replace(/^image\//, "")}`) : "";
+    put(2, artifact ? paint.text(sanitizeTerminalLine(artifact.filename), "paper") + paint.text(`  ${truncateText(source, Math.max(1, width - artifact.filename.length - 6))}`, "muted") : paint.text("No image selected", "muted"));
     rule(3);
     const status = this.error ?? (this.loading ? "Loading preview…" : !artifact ? "Images appear here when available." : !cell ? "Inline graphics unavailable" : "");
     let image: TerminalImage | null = null;
-    const secondaryControls = this.artifacts.length > 1 || this.history || this.mode === "manual";
+    const secondaryControls = full && (this.artifacts.length > 1 || this.history);
     const wellRows = Math.max(0, Math.min(height - (secondaryControls ? 12 : 10), Math.max(6, Math.min(18, Math.ceil((width - 4) * (cell ? cell.width / cell.height : 0.5) * (artifact ? artifact.height / artifact.width : 0.5625))))));
     const slot = { row: 5, column: column + 2, columns: Math.max(1, width - 4), rows: Math.max(0, wellRows - 2) };
     for (let row = 4; row < 4 + wellRows; row++) canvas.put(row, 1, "", width - 2, "ink");
@@ -151,15 +160,11 @@ export class ArtifactPreview {
         });
       });
     }
-    if (artifact) {
-      const count = `${this.artifacts.indexOf(artifact) + 1} of ${this.artifacts.length}`;
-      const label = truncateText(sanitizeTerminalLine(`${artifact.mimeType} · ${artifact.source.name.replace(/^mcp__[^_]+__/, "")}`), Math.max(1, width - count.length - 5));
-      put(base + 1, paint.text(`${label} · ${count}`, "muted"));
-    }
-    rule(base + 2);
-    // Shared columns keep both rows aligned as labels and selection state change.
+    // Shared columns keep the action row aligned as labels change.
     const columns = width >= 31 ? [1, 8, 17] : [1, 7, 15];
-    const actionRow = base + 3;
+    const actionRow = base + 1;
+    const graphics = cell ? "Kitty graphics" : "no inline graphics";
+    if (full && width >= 31 + graphics.length + 2) canvas.put(actionRow, width - 1 - graphics.length, paint.text(graphics, "muted"), graphics.length, "surface");
     button(actionRow, this.mode === "pinned" ? "Unpin" : "Pin", () => { this.mode = this.mode === "pinned" ? "manual" : "pinned"; this.save(); this.changed(); }, columns[0]);
     button(actionRow, this.expanded ? "Restore" : "Expand", () => { this.expanded = !this.expanded; this.changed(); }, columns[1]);
     button(actionRow, this.error ? "Retry" : width >= 31 ? "Open original" : "Open", () => {
@@ -167,10 +172,32 @@ export class ArtifactPreview {
       if (artifact) void this.services.open(artifact).catch((error) => { this.error = String(error); this.changed(); });
     }, columns[2]);
     if (secondaryControls) {
-      button(actionRow + 1, "←", () => this.select(-1), columns[0]);
-      button(actionRow + 1, "→", () => this.select(1), columns[0]! + 3);
-      button(actionRow + 1, this.history ? "Back" : "History", () => { this.history = !this.history; this.controlIndex = 0; this.changed(); }, columns[1]);
-      button(actionRow + 1, "Follow", () => { this.mode = "follow"; this.selectedId = this.artifacts.at(-1)?.id ?? null; void this.load(); this.save(); this.changed(); }, columns[2]);
+      // History chips: every image, the selected one on the selection surface.
+      const chipRow = actionRow + 2;
+      const toggle = this.history ? "back" : "history ▸";
+      let x = 1;
+      // The chips scroll so the selected image is always among them.
+      const room = width - toggle.length - 4;
+      const labels = this.artifacts.map((item) => ` ▣ ${truncateText(sanitizeTerminalLine(item.filename), 20)} `);
+      const chosen = Math.max(0, this.artifacts.findIndex((item) => item.id === this.selectedId));
+      let first = 0;
+      while (first < chosen && labels.slice(first, chosen + 1).reduce((sum, label) => sum + label.length + 1, 0) > room) first++;
+      for (const [offset, item] of this.artifacts.slice(first).entries()) {
+        const label = labels[first + offset]!;
+        if (x + label.length > width - toggle.length - 3) break;
+        const selected = item.id === this.selectedId;
+        const index = this.controls.length;
+        this.controls.push(() => { this.selectedId = item.id; if (this.mode !== "pinned") this.mode = "manual"; this.history = false; void this.load(); this.save(); this.changed(); });
+        canvas.put(chipRow, x, selected ? paint.wash(label, "menuSelection", "electric") : paint.onBackground(paint.text(label, this.focused && this.controlIndex === index ? "electric" : "secondary"), "raised"), label.length, "surface");
+        zones.push({ row: chipRow, column: column + x, width: label.length, run: () => { this.focused = true; this.controlIndex = index; this.controls[index]!(); } });
+        x += label.length + 1;
+      }
+      button(chipRow, toggle, () => { this.history = !this.history; this.controlIndex = 0; this.changed(); }, width - toggle.length - 1);
+    }
+    if (full) {
+      // Keycap footer: ←→ images, Tab actions, Esc close.
+      const keys = keyHints(paint, [["←→", "images"], ["Tab", "actions"], ["Esc", "close"]]);
+      canvas.put(height - 1, 1, keys, width - 2, "surface");
     }
     if (height < 14) put(height - 1, paint.text(`› ${compactLabel} · Tab`, "electric"));
     return { rows, zones: zones.filter((z) => z.row < height), image };

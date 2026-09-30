@@ -50,10 +50,11 @@ export function responseMetadata(receipt: ResponseReceipt, paint: Painter, _comp
     paint.text(context, contextTone(receipt.context))];
 }
 
-/// A key drawn as a keycap, as in the Figma hints: the key sits on the raised
-/// surface so it reads as something to press. Plain output keeps the text.
+/// A key drawn as a keycap, as in the Figma hints: Figma outlines the key in
+/// the bright border color, which a terminal cell can only show as a chip of
+/// that color, with the key in the main text color. Plain output keeps the text.
 export function keycap(paint: Painter, key: string): string {
-  return paint.onBackground(paint.text(key, "secondary"), "raised");
+  return paint.onBackground(paint.text(key, "paper"), "borderBright");
 }
 
 /// `Ctrl+B log  Ctrl+G live`: keycaps followed by what they do.

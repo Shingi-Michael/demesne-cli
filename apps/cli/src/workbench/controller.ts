@@ -549,7 +549,9 @@ export class Workbench {
     this.sessionView.hover(-1, -1);
     this.startScreen.hover(-1, -1);
     this.preview?.cancel();
-    process.stdout.write(this.graphics.clear() + `\x1b[?2026l\x1b[?7h\x1b[?25h${MOUSE_DISABLE}${PASTE_DISABLE}${FOCUS_DISABLE}\x1b[?1049l\x1b[23;0t`);
+    const background = this.terminalBackground ? "\x1b]111\x07" : "";
+    this.terminalBackground = null;
+    process.stdout.write(this.graphics.clear() + `\x1b[?2026l\x1b[?7h\x1b[?25h${MOUSE_DISABLE}${PASTE_DISABLE}${FOCUS_DISABLE}\x1b[?1049l\x1b[23;0t${background}`);
   }
 
   setSessionTitle(title: string): void {
@@ -1385,6 +1387,19 @@ export class Workbench {
     this.renderTimer.unref();
   }
 
+  /// The terminal's own background (OSC 11) follows the theme while demesne
+  /// runs, so window padding and cells outside the grid match the page
+  /// instead of the terminal theme's color. `stop` restores it (OSC 111).
+  private terminalBackground: string | null = null;
+  /// The OSC 11 sequence when the page color changed, else "". It goes out
+  /// inside the frame's single write, so frames stay atomic.
+  private terminalBackgroundSequence(): string {
+    const color = this.options.paint.enabled ? this.options.paint.colors.ink : null;
+    if (!color || color === this.terminalBackground) return "";
+    this.terminalBackground = color;
+    return `\x1b]11;${color}\x07`;
+  }
+
   private render(): void {
     if (!this.started) return;
     this.imageIntent = null;
@@ -1402,7 +1417,7 @@ export class Workbench {
     if (!output.length && !graphics && frame.cursor?.row === this.previousCursor?.row && frame.cursor?.column === this.previousCursor?.column) return;
     // Synchronized output makes a scroll one visible frame on supporting
     // terminals; the single write and padded rows also work without it.
-    output.unshift("\x1b[?2026h\x1b[?25l");
+    output.unshift("\x1b[?2026h\x1b[?25l" + this.terminalBackgroundSequence());
     if (graphics) output.push(graphics);
     if (frame.cursor) {
       output.push(`\x1b[${frame.cursor.row + 1};${frame.cursor.column + 1}H\x1b[?25h`);

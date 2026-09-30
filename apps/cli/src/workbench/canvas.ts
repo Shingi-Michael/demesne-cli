@@ -56,12 +56,14 @@ export class Canvas {
   }
   panel(row: number, column: number, width: number, height: number, title: string, trailing = "", background: PaletteColor = "surface"): void {
     if (height < 2) return;
-    this.put(row, column, edge(width, this.paint, { left: title, right: trailing }), width);
+    // The border sits on the panel's own fill, so a panel reads as a filled
+    // tile (Figma 1:2), not an outline on the page.
+    this.put(row, column, edge(width, this.paint, { left: title, right: trailing }), width, background);
     for (let y = row + 1; y < row + height - 1; y++) {
-      this.put(y, column, this.paint.text("│", "rule"), 1);
+      this.put(y, column, this.paint.text("│", "rule"), 1, background);
       this.put(y, column + 1, "", width - 2, background);
-      this.put(y, column + width - 1, this.paint.text("│", "rule"), 1);
+      this.put(y, column + width - 1, this.paint.text("│", "rule"), 1, background);
     }
-    this.put(row + height - 1, column, edge(width, this.paint, { bottom: true }), width);
+    this.put(row + height - 1, column, edge(width, this.paint, { bottom: true }), width, background);
   }
 }

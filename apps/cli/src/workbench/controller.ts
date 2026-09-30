@@ -44,7 +44,7 @@ import { CommandMenu, groupSlashCommands, type CommandMenuFrame } from "./comman
 import { MentionMenu } from "./mention-menu.ts";
 import { SessionView } from "./session.ts";
 import { toolFailed } from "./evidence.ts";
-import { sessionStatus } from "./session-chrome.ts";
+import { keycap, keyHints, sessionStatus } from "./session-chrome.ts";
 import { sidebarRail, type RailAction } from "./sidebar-rail.ts";
 import { ArtifactPreview, type PreviewServices } from "./preview-panel.ts";
 import { graphicsProbe, TerminalGraphics, type TerminalImage } from "../terminal-graphics.ts";
@@ -138,6 +138,21 @@ const TOOL_VERBS: Record<string, string> = {
 
 /// A click target within the composer area, addressed by content row (zero is
 /// the first line under the composing rule).
+/// Optional details for `choose()`: Figma 31:356's grouped, annotated list.
+export interface ChooseOptions {
+  subtitle?: string;
+  /// A group name per item, e.g. its provider; items are shown under headers.
+  groups?: readonly string[];
+  /// A detail column per item, e.g. `100k ctx · 8k out`.
+  details?: readonly string[];
+  /// The item marked `● current`.
+  currentIndex?: number;
+  /// What Enter does, for the footer: `switch`, `open`…
+  action?: string;
+  /// What the items are called in the count: `models`, `themes`…
+  noun?: string;
+}
+
 export interface InputZone {
   driveAllowed?: boolean;
   driveControl?: boolean;
@@ -202,6 +217,9 @@ export class Workbench {
   private dialogItems: string[] = [];
   private dialogSelected = 0;
   private dialogTitle = "";
+  /// Optional Figma 31:356 chooser details: a subtitle, per-item groups and
+  /// detail columns, the current item, and the verb Enter performs.
+  private dialogOptions: ChooseOptions = {};
   /// Type-to-filter state for the dialog picker. `dialogFiltered` holds the
   /// original indices still matching the query, in display order.
   private dialogQuery = "";
@@ -861,8 +879,9 @@ export class Workbench {
     }
   }
 
-  choose(title: string, items: readonly string[], selectedIndex = 0): Promise<number | null> {
+  choose(title: string, items: readonly string[], selectedIndex = 0, options: ChooseOptions = {}): Promise<number | null> {
     this.dialogTitle = title;
+    this.dialogOptions = options;
     this.dialogItems = items.map(stripVTControlCharacters);
     this.dialogQuery = "";
     this.dialogFiltered = filterDialogIndices(this.dialogItems, "");
@@ -1074,6 +1093,15 @@ export class Workbench {
       this.approvalSelected = next.selectedIndex;
       if (next.decision) this.resolveApproval(next.decision);
       else this.requestRender();
+      return true;
+    }
+    if (this.mode === "dialog" && key.name === "tab" && !key.ctrl && !key.meta && this.dialogOptions.groups) {
+      // Tab jumps to the first match in the next group, wrapping around.
+      const groups = this.dialogOptions.groups;
+      const current = groups[this.dialogFiltered[this.dialogSelected] ?? -1];
+      const order = this.dialogFiltered.map((index, position) => ({ position, group: groups[index] }));
+      const next = order.find((item) => item.position > this.dialogSelected && item.group !== current) ?? order.find((item) => item.group !== current);
+      if (next) { this.dialogSelected = next.position; this.requestRender(); }
       return true;
     }
     if (this.mode === "dialog") {
@@ -1375,7 +1403,12 @@ export class Workbench {
     if (this.startLayout) {
       this.layout.input = this.startLayout.input;
     } else if (this.sessionLayout && this.mode === "dialog") {
-      this.layout.input = { row: 3, column: 0, width: panel.conversationWidth, height: this.layout.height - 4 };
+      // The chooser box fits its list (borders, title, filter, rows, footer),
+      // sitting above the status bar so the conversation stays in view.
+      const groups = this.dialogOptions.groups ? new Set(this.dialogFiltered.map((index) => this.dialogOptions.groups![index])).size : 0;
+      const needed = Math.max(1, this.dialogFiltered.length) + groups + 7;
+      const height = Math.max(8, Math.min(this.layout.height - 4, needed));
+      this.layout.input = { row: this.layout.height - 1 - height, column: 0, width: panel.conversationWidth, height };
     } else if (this.sessionLayout && (this.mode === "input" || this.mode === "streaming")) {
       const editor = this.mode === "streaming" ? this.queuedEditor : this.editor;
       const selecting = Boolean(editor.search);
@@ -2110,6 +2143,7 @@ export class Workbench {
       // Keep the choice row in view; it is the last line.
       offset = Math.max(0, content.lines.length - available);
     }
+    if (this.sessionLayout && this.mode === "dialog") return this.composeChooser(width, inset, paint);
     if (this.sessionLayout) {
       const canvas = new Canvas(width, this.layout.input.height, paint);
       for (let row = 0; row < this.layout.input.height; row++) {
@@ -2442,6 +2476,57 @@ export class Workbench {
   }
 
   /// A dialog row click selects it; clicking the selected row confirms.
+  /// Figma 31:356: a titled box with a filter field, items grouped under
+  /// quiet headers with counts, a detail column, the current item marked, and
+  /// a keycap footer. Plain lists (themes, sessions) use the same frame.
+  private composeChooser(width: number, inset: number, paint: Painter): { lines: string[]; cursor: { row: number; column: number } | null; zones: InputZone[] } {
+    const height = this.layout.input.height, boxWidth = width - inset * 2;
+    const canvas = new Canvas(width, height, paint), zones: InputZone[] = [];
+    const inner = boxWidth - 4, left = inset + 2;
+    const { subtitle, groups, details, currentIndex, action = "choose" } = this.dialogOptions;
+    for (let row = 0; row < height; row++) canvas.put(row, inset, "", boxWidth, "surface");
+    canvas.put(0, inset, paint.text(`╭${"─".repeat(Math.max(0, boxWidth - 2))}╮`, "borderBright"), boxWidth);
+    canvas.put(height - 1, inset, paint.text(`╰${"─".repeat(Math.max(0, boxWidth - 2))}╯`, "borderBright"), boxWidth);
+    for (let row = 1; row < height - 1; row++) { canvas.put(row, inset, paint.text("│", "borderBright"), 1); canvas.put(row, inset + boxWidth - 1, paint.text("│", "borderBright"), 1); }
+    const noun = this.dialogOptions.noun ?? "items";
+    const count = `${this.dialogQuery ? `${this.dialogFiltered.length} of ` : ""}${this.dialogItems.length} ${this.dialogItems.length === 1 ? noun.replace(/s$/, "") : noun}`;
+    canvas.put(1, left, formatFooterLine(paint.text(this.dialogTitle, "paper") + (subtitle ? "  " + paint.text(sanitizeTerminalLine(subtitle), "muted") : ""), paint.text(count, "muted"), inner), inner, "surface");
+    // The filter field: a raised line with its label and the query.
+    const query = this.dialogQuery ? paint.text(sanitizeTerminalLine(this.dialogQuery), "paper") + paint.text("▏", "electric") : paint.text("type to filter", "muted");
+    canvas.put(2, left, paint.onBackground(" " + paint.text("filter", "muted") + "  " + query + " ".repeat(Math.max(0, inner - 10 - visibleLength(query))), "raised"), inner, "raised");
+    const footerRow = height - 2;
+    const rows: { text: string; position?: number }[] = [];
+    const detailColumn = Math.min(Math.floor(inner * 0.45), Math.max(12, ...this.dialogItems.map((item) => visibleLength(item) + 2)));
+    let lastGroup: string | undefined;
+    this.dialogFiltered.forEach((index, position) => {
+      const group = groups?.[index];
+      if (group !== undefined && group !== lastGroup) {
+        const size = this.dialogFiltered.filter((other) => groups![other] === group).length;
+        rows.push({ text: formatFooterLine(paint.text(group.toUpperCase(), "muted"), paint.text(String(size), "muted"), inner) });
+        lastGroup = group;
+      }
+      const selected = position === this.dialogSelected;
+      const label = truncateText(sanitizeTerminalLine(this.dialogItems[index] ?? ""), detailColumn - 1);
+      const detail = details?.[index] ? paint.text(truncateText(sanitizeTerminalLine(details[index]!), Math.max(4, inner - detailColumn - 12)), "muted") : "";
+      const right = selected ? keycap(paint, "↵") : index === currentIndex ? paint.text("● current", "muted") : "";
+      const text = `${paint.text(label, selected ? "electric" : "paper")}${" ".repeat(Math.max(1, detailColumn - visibleLength(label)))}${detail}`;
+      rows.push({ text: formatFooterLine(text, right, inner), position });
+    });
+    if (!rows.length) rows.push({ text: paint.text("No matches — backspace to edit", "secondary") });
+    const room = Math.max(1, footerRow - 4);
+    const selectedRow = Math.max(0, rows.findIndex((row) => row.position === this.dialogSelected));
+    const start = Math.max(0, Math.min(selectedRow - room + 1, rows.length - room));
+    rows.slice(start, start + room).forEach((row, offset) => {
+      const y = 4 + offset, selected = row.position === this.dialogSelected && row.position !== undefined;
+      canvas.put(y, inset + 1, selected ? paint.text("▎", "electric") : "", boxWidth - 2, selected ? "menuSelection" : "surface");
+      canvas.put(y, left, row.text, inner, selected ? "menuSelection" : "surface");
+      if (row.position !== undefined) { const position = row.position; zones.push({ row: y, column: left, width: inner, run: () => this.clickDialogItem(position) }); }
+    });
+    const hints = keyHints(paint, [["↑↓", "select"], ["↵", action], ["Esc", "cancel"]]);
+    canvas.put(footerRow, left, formatFooterLine(hints, groups ? keyHints(paint, [["Tab", "next group"]]) : "", inner), inner, "surface");
+    return { lines: canvas.rows, cursor: null, zones };
+  }
+
   private clickDialogItem(position: number): void {
     if (this.mode !== "dialog") return;
     if (position === this.dialogSelected) {

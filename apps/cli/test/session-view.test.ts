@@ -2036,3 +2036,28 @@ test("while a turn runs, Escapes that step back or close a panel never stop it",
   expect(interrupts()).toBe(1);
   void ui;
 });
+
+test("the model chooser follows Figma 31:356: grouped by provider with limits, the current model marked, Tab between groups", async () => {
+  const { ui, state, screen } = fixture("complete");
+  const models = [["local-100k", "llama.cpp"], ["local-32k", "llama.cpp"], ["hosted-coder", "OpenRouter"]] as const;
+  const choice = ui.choose("Switch model", models.map((model) => model[0]), 0, {
+    subtitle: "current: local-100k", groups: models.map((model) => model[1]), details: ["100k ctx · 2k out", "33k ctx · 4k out", "262k ctx · 131k out"],
+    currentIndex: 0, action: "switch", noun: "models" });
+  let text = screen(120, 30);
+  expect(text).toMatch(/Switch model {2}current: local-100k +3 models/);
+  expect(text).toMatch(/LLAMA\.CPP +2/);
+  expect(text).toMatch(/OPENROUTER +1/);
+  expect(text).toMatch(/local-100k +100k ctx · 2k out +↵/);
+  expect(text).toContain("↑↓ select  ↵ switch  Esc cancel");
+  expect(text).toContain("Tab next group");
+  // Tab jumps to the next provider; the current model keeps its marker.
+  state.onKeypress("", { name: "tab" });
+  text = screen(120, 30);
+  expect(text).toMatch(/hosted-coder +262k ctx · 131k out +↵/);
+  expect(text).toMatch(/local-100k +100k ctx · 2k out +● current/);
+  // Filtering narrows the list and the count.
+  state.onKeypress("32", {});
+  expect(screen(120, 30)).toMatch(/1 of 3 models/);
+  state.onKeypress("", { name: "return" });
+  expect(await choice).toBe(1);
+});

@@ -1265,6 +1265,7 @@ async function runChat(command: string[]): Promise<void> {
           "Themes",
           names.map((name) => `${themeLabel(name)} · ${name}${name === paint.themeName ? " · active" : ""}`),
           Math.max(0, names.indexOf(paint.themeName)),
+          { currentIndex: names.indexOf(paint.themeName), action: "apply", noun: "themes" },
         );
         if (index === null || !names[index]) {
           say("Theme selection cancelled.");
@@ -1353,6 +1354,7 @@ async function runChat(command: string[]): Promise<void> {
           query ? `Sessions matching "${sanitizeTerminalLine(query)}"` : "Recent sessions",
           recent.map((session) => `${session.title}  ${paint.dim(`(${session.id.slice(0, 8)})`)}`),
           currentIndex,
+          { currentIndex: recent.findIndex((session) => session.id === sessionId), action: "open", noun: "sessions" },
         );
         if (selected === null) {
           say("Session selection cancelled.");
@@ -1379,16 +1381,28 @@ async function runChat(command: string[]): Promise<void> {
         }
         selected = match.model;
       } else if (workbench) {
+        // Figma 31:356: models grouped by provider, with their limits beside them.
+        const models = [...discovered.models].sort((a, b) => a.provider.localeCompare(b.provider));
+        const current = models.findIndex((model) => model.id === activeModel.id);
         const index = await workbench.choose(
-          "Models",
-          discovered.models.map((model) => `${model.id}${model.contextWindow ? paint.dim(` · ctx ${formatTokenCount(model.contextWindow)}`) : ""}`),
-          Math.max(0, discovered.models.findIndex((model) => model.id === activeModel.id)),
+          "Switch model",
+          models.map((model) => model.id),
+          Math.max(0, current),
+          {
+            subtitle: `current: ${activeModel.id}`,
+            groups: models.map((model) => model.provider),
+            details: models.map((model) => [model.contextWindow ? `${formatTokenCount(model.contextWindow)} ctx` : "",
+              model.maxOutputTokens ? `${formatTokenCount(model.maxOutputTokens)} out` : ""].filter(Boolean).join(" · ")),
+            currentIndex: current >= 0 ? current : undefined,
+            action: "switch",
+            noun: "models",
+          },
         );
-        if (index === null || !discovered.models[index]) {
+        if (index === null || !models[index]) {
           say("Model selection cancelled.");
           return;
         }
-        selected = discovered.models[index]!;
+        selected = models[index]!;
       } else {
         const picked = await selectModelInteractive(discovered.models, activeModel.id, paint);
         if (!picked) {

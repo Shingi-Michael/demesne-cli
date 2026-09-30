@@ -895,6 +895,7 @@ async function runChat(command: string[]): Promise<void> {
         workspaceRoot: currentWorkspace,
         files: () => sessionId ? client.listWorkspaceFiles(sessionId) : Promise.resolve([]),
         fileInfo: () => sessionId ? client.listWorkspaceFileInfo(sessionId) : Promise.resolve([]),
+        readFile: (path) => sessionId ? client.readWorkspaceFile(sessionId, path) : Promise.resolve({ path, content: null, byteLength: null, reason: "no session" }),
         preview: {
           preferences: join(settings.dataDirectory, `preview-${Buffer.from(client.server).toString("base64url")}.json`),
           content: (artifact, variant, signal) => client.artifactContent(artifact, variant, signal),

@@ -331,6 +331,26 @@ function readFilesTool(): AgentTool {
 
 const READ_BATCH_LIMIT_BYTES = 256 * 1024;
 
+/// Files the viewer shows in full; larger ones are summarized instead.
+export const VIEWER_BYTE_LIMIT = 2 * 1024 * 1024;
+
+/// A workspace file's text for the file viewer, under read_file's rules:
+/// inside the workspace, no symlinks, secrets stay protected, text only.
+export function readWorkspaceText(workspaceRoot: string, path: string): { path: string; content: string | null; byteLength: number | null; reason?: string } {
+  const refuse = (reason: string, byteLength: number | null = null) => ({ path, content: null, byteLength, reason });
+  if (isSensitivePath(path)) return refuse("protected: secrets and key material are never shown");
+  let absolute: string;
+  try { absolute = resolveWorkspacePath(workspaceRoot, path, false); } catch (error) { return refuse(error instanceof Error ? error.message : "invalid path"); }
+  let stat: ReturnType<typeof lstatSync>;
+  try { stat = lstatSync(absolute); } catch { return refuse("file not found"); }
+  if (!stat.isFile() || stat.nlink > 1) return refuse("not a regular file");
+  if (stat.size > VIEWER_BYTE_LIMIT) return refuse("too large to show", stat.size);
+  const bytes = readFileSync(absolute);
+  if (bytes.includes(0)) return refuse("binary file", stat.size);
+  try { return { path, content: new TextDecoder("utf-8", { fatal: true }).decode(bytes), byteLength: stat.size }; }
+  catch { return refuse("not valid UTF-8", stat.size); }
+}
+
 async function readSingleFile(
   workspaceRoot: string,
   path: string,

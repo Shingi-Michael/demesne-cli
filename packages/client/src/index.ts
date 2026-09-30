@@ -214,6 +214,10 @@ export class DemesneClient {
     return response.entries ?? (response.files ?? []).map((path) => ({ path, byteLength: null, status: null }));
   }
 
+  async readWorkspaceFile(sessionId: string, path: string): Promise<import("@demesne/protocol").WorkspaceFileText> {
+    return this.request(`/v1/sessions/${sessionId}/file?path=${encodeURIComponent(path)}`);
+  }
+
   async exportSession(sessionId: string, format: "md" | "json" = "md"): Promise<string> {
     const response = await this.fetchImpl(
       new URL(`/v1/sessions/${sessionId}/export?format=${format}`, this.server),

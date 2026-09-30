@@ -1,4 +1,4 @@
-import { formatDiffPreview, formatFooterLine, sanitizeTerminalLine, toolPhaseColor, truncateText, visibleLength, type Painter, type PaletteColor, type PresenceState } from "@demesne/brand";
+import { createPainter, formatDiffPreview, formatFooterLine, sanitizeTerminalLine, toolPhaseColor, truncateText, visibleLength, type Painter, type PaletteColor, type PresenceState } from "@demesne/brand";
 import { keyHints } from "./session-chrome.ts";
 import type { RecentSession } from "../recent-sessions.ts";
 import type { AssistantEntry, ResponseReceipt, ToolEntry, UserEntry, WorkbenchEntry } from "./entries.ts";
@@ -8,7 +8,8 @@ import { Canvas, foldCells } from "./canvas.ts";
 import { artifactRecords, entryKey, renderSessionFlow, toolVerb, type FlowAction, type FlowExpansion, type FlowRow, type FlowArtifact } from "./session-flow.ts";
 import { InteractionTransitions } from "./interaction.ts";
 import { reducedMotionEnabled } from "../motion.ts";
-import { diffPanelLines, filePanelLines } from "./panel-content.ts";
+import { diffPanelLines } from "./panel-content.ts";
+import { fileListLines, readingTrail } from "./file-list.ts";
 import { sessionHeader } from "./session-header.ts";
 import { changeFiles, changeState, changeTotals, DiffPanel } from "./diff-panel.ts";
 import { driveStatusWord, renderDrivePanel, type DriveSection } from "./drive-panel.ts";
@@ -69,7 +70,7 @@ interface RunMemory {
 type Action = FlowAction | { kind: "run"; id: number | null } | { kind: "surface"; surface: Surface }
   | { kind: "record"; id: number } | { kind: "back" | "history" | "log" | "thinking" | "request" | "follow" | "response-start" }
   | { kind: "workspace" | "context" | "panel-close" | "panel-toggle" | "settings" } | { kind: "log-filter"; filter: LogFilter }
-  | { kind: "history-item"; index: number };
+  | { kind: "history-item"; index: number } | { kind: "file-open"; path: string };
 type LogFilter = "all" | "changes" | "checks" | "failed";
 const LOG_FILTERS: readonly [LogFilter, string][] = [["all", "All"], ["changes", "Changes"], ["checks", "Checks"], ["failed", "Failed"]];
 const failedRecord = (record: RecordEntry): boolean => record.type === "tool" && (toolFailed(record) || record.state === "denied" || record.state === "stopped")
@@ -138,6 +139,8 @@ function hoverChain(key: string | null): string[] {
   return parts.map((_, index) => parts.slice(0, index + 1).join(">"));
 }
 
+/// For list layouts computed only to learn their order (no colors needed).
+const PLAIN = createPainter(false);
 const TILE_TOP = "\u0000tile-top", TILE_BOTTOM = "\u0000tile-bottom";
 const blank = (line: string): boolean => !line.replace(/\x1b\[[0-9;]*m/g, "").trim();
 
@@ -209,7 +212,7 @@ export class SessionView {
   private artifact: FlowArtifact | null = null;
   /// Verification lists every check; Enter opens one check's full output.
   private verificationFull = false;
-  private readonly diffPanel = new DiffPanel();
+  readonly diffPanel = new DiffPanel();
   private drivePanelOpen = false;
   private driveFollowing = true;
   private driveCollapsed = new Set<string>();
@@ -335,6 +338,44 @@ export class SessionView {
   get driveOpen(): boolean { return this.drivePanelOpen; }
   get driveSurface(): string { return this.drivePanelOpen ? "drive" : this.historyOpen ? "history" : this.diffOpen ? "diff" : this.contextOpen ? "context" : this.outputId !== null ? "output" : this.artifact ? "review" : this.memory.surface; }
   get diffOpen(): boolean { return this.artifact?.kind === "changes" && !this.contextOpen && this.outputId === null && !this.historyOpen; }
+  /// Reopens the Files list after ‹ Files; the workbench supplies it.
+  onFilesBack: (() => void) | null = null;
+  /// Inserts a file into the draft as a mention; the workbench supplies it.
+  onMention: ((path: string) => void) | null = null;
+  /// The Files list's filter and selected file (Figma 119:1190).
+  private filesQuery = "";
+  private filesSelected = 0;
+  resetFilesList(): void { this.filesQuery = ""; this.filesSelected = 0; }
+  private get filesOutput() {
+    if (this.outputId === null) return null;
+    const output = this.runs.flatMap((run) => run.entries).find((entry) => entry.id === this.outputId);
+    return output?.type === "panel" && output.files?.length ? output : null;
+  }
+  get filesListOpen(): boolean { return this.filesOutput !== null; }
+  private filePaths(): string[] {
+    const files = this.filesOutput?.files ?? [];
+    return fileListLines(files, readingTrail(this.runs), this.filesQuery, 80, PLAIN).flatMap((line) => line.path ? [line.path] : []);
+  }
+
+  /// Opens one workspace file in the viewer's whole-file view (Figma 117:813).
+  openFile(path: string): void {
+    this.act({ kind: "diff-open", runId: this.latest?.id ?? 0 });
+    this.diffPanel.openFile(this.runs, path);
+  }
+
+  /// The viewer's letter keys (v, n, p, /) and its search field, while the
+  /// viewer has focus; ordinary typing still goes to a non-empty draft.
+  viewerKey(text: string, key: { name?: string; ctrl?: boolean; meta?: boolean }, draftEmpty: boolean): boolean {
+    if (this.filesListOpen && this.focused && !key.ctrl && !key.meta) {
+      // `@` mentions the selected file; typing narrows the list.
+      if (text === "@") { const path = this.filePaths()[this.filesSelected]; if (path) this.onMention?.(path); return Boolean(path); }
+      if (key.name === "backspace" && this.filesQuery) { this.filesQuery = this.filesQuery.slice(0, -1); this.filesSelected = 0; return true; }
+      if (draftEmpty && text.length === 1 && !/[\x00-\x1f\x7f]/.test(text) && key.name !== "return") { this.filesQuery += text; this.filesSelected = 0; return true; }
+      return false;
+    }
+    if (!this.diffOpen || !this.focused || key.ctrl || key.meta) return false;
+    return this.diffPanel.letterKey(text, key.name, draftEmpty);
+  }
   get panelExpanded(): boolean { return this.diffOpen && this.diffPanel.expanded; }
   get paused(): boolean { return !this.memory.followFlow || this.selectedId !== null; }
   /// The shared evidence projection for the current run — the single source the
@@ -394,12 +435,16 @@ export class SessionView {
       this.pauseFlow(); this.dismissOutput(); this.contextOpen = false; this.historyOpen = false;
       this.memory.surface = "response"; this.focused = true;
       this.artifact = { kind: "changes", runId: action.runId, recordId: action.recordId ?? 0 };
+      this.diffPanel.standalone = null; this.diffPanel.view = "diff";
       this.diffPanel.open(this.runs, action.runId, action.recordId);
       return;
     }
-    if (action.kind === "diff-select" || action.kind === "diff-live" || action.kind === "diff-expand") {
+    if (action.kind === "diff-select" || action.kind === "diff-live" || action.kind === "diff-expand" || action.kind === "diff-view") {
       this.focused = true; this.diffPanel.act(action); return;
     }
+    if (action.kind === "file-open") { this.openFile(action.path); return; }
+    // ‹ Files: back to where a file opened on its own came from.
+    if (action.kind === "diff-back") { this.closeArtifact(); this.onFilesBack?.(); return; }
     if (action.kind === "copy") {
       const run = action.runId === undefined ? this.current : this.runs.find((run) => run.id === action.runId);
       const text = run?.answer?.raw ?? run?.entries.filter((entry): entry is AssistantEntry => entry.type === "assistant").map((entry) => entry.raw).join("\n\n");
@@ -537,6 +582,7 @@ export class SessionView {
     if (action.kind === "back") {
       const memory = this.memory;
       if (memory.surface === "response" && this.artifact?.kind === "verification" && this.verificationFull) { this.verificationFull = false; return; }
+      if (memory.surface === "response" && this.diffOpen && this.diffPanel.standalone) { this.act({ kind: "diff-back" }); return; }
       if (memory.surface === "response" && this.artifact) { this.closeArtifact(); return; }
       if (memory.detail !== null) { memory.detail = null; memory.surface = memory.detailOrigin; }
       else if (memory.surface !== "response") memory.surface = "response";
@@ -616,6 +662,13 @@ export class SessionView {
       if (name === "escape" || name === "backspace") { this.historyOpen = false; this.focused = false; }
       return ["up", "down", "pageup", "pagedown", "home", "end", "return", "escape", "backspace"].includes(name ?? "");
     }
+    if (this.filesListOpen && this.focused && !key.ctrl && !key.meta) {
+      const last = Math.max(0, this.filePaths().length - 1);
+      if (name === "up" || name === "down" || name === "pageup" || name === "pagedown") { this.filesSelected = Math.max(0, Math.min(last, this.filesSelected + (name === "up" || name === "pageup" ? -1 : 1) * (name.startsWith("page") ? this.pageSize : 1))); return true; }
+      if (name === "home" || name === "end") { this.filesSelected = name === "home" ? 0 : last; return true; }
+      if (name === "return" || name === "enter") { const path = this.filePaths()[this.filesSelected]; if (path) this.openFile(path); return true; }
+      if (name === "escape" && this.filesQuery) { this.filesQuery = ""; this.filesSelected = 0; return true; }
+    }
     if (this.outputId !== null && name === "escape" && !key.ctrl && !key.meta) {
       this.dismissOutput(); this.focused = this.memory.surface !== "response" || this.artifact !== null; return true;
     }
@@ -626,6 +679,7 @@ export class SessionView {
       if (!this.verificationFull && this.focused && (name === "up" || name === "down")) { this.act({ kind: "artifact-step", step: name === "up" ? -1 : 1 }); return true; }
       if (!this.verificationFull && this.focused && name === "return") { this.verificationFull = true; return true; }
     }
+    if (this.diffOpen && this.diffPanel.standalone && name === "escape" && !key.ctrl && !key.meta) { this.act({ kind: "diff-back" }); return true; }
     if (this.artifact && this.memory.surface === "response" && name === "escape" && !key.ctrl && !key.meta) { this.closeArtifact(); return true; }
     if (key.ctrl && name === "t") { this.focused = !this.focused; return true; }
     if (key.meta && (name === "up" || name === "down")) { this.historyOpen = false; this.dismissOutput(); this.moveRun(name === "up" ? -1 : 1); return true; }
@@ -837,12 +891,14 @@ export class SessionView {
       this.hoverRegions.push({ row: header.row, column: header.history.column, width: header.history.width, key: "header-history" });
     } else {
       for (let y = 0; y < height; y++) put(y, 0, "", width, "surface");
-      const title = this.historyOpen ? "HISTORY" : this.drivePanelOpen ? "AGENT DRIVE" : this.contextOpen ? "CONTEXT" : this.outputId !== null ? output?.type === "panel" && output.title ? output.title : "SESSION OUTPUT" : this.artifact?.kind === "changes" ? "CHANGES"
+      const title = this.historyOpen ? "HISTORY" : this.drivePanelOpen ? "AGENT DRIVE" : this.contextOpen ? "CONTEXT" : this.outputId !== null ? output?.type === "panel" && output.title ? output.title : "SESSION OUTPUT"
+        : this.artifact?.kind === "changes" ? this.diffPanel.standalone ? safe(this.diffPanel.standalone.slice(this.diffPanel.standalone.lastIndexOf("/") + 1)) : "CHANGES"
         : this.artifact?.kind === "verification" ? "VERIFICATION" : this.artifact ? "FAILED / DENIED" : memory.surface === "review" ? "CHANGES" : "EXECUTION LOG";
       // Figma panel frame: a quiet uppercase label, then what it shows. The
       // keycap footer carries Esc close; × stays for narrow panels without one.
       const subjectRun = this.artifact ? this.runs.find((item) => item.id === this.artifact!.runId) ?? run : run;
       const subject = this.historyOpen ? safe(options.title) : output?.type === "panel" && output.files ? safe(options.path) : this.drivePanelOpen || this.outputId !== null ? "" : this.contextOpen ? safe(options.model ?? "")
+        : this.diffOpen && this.diffPanel.standalone ? safe(this.diffPanel.standalone.slice(0, this.diffPanel.standalone.lastIndexOf("/") + 1))
         : subjectRun ? `Turn ${subjectRun.number}` : "";
       // Figma panel v2: the panel's name as a title, what it shows beside it,
       // meta on the right and a × to close.
@@ -1007,11 +1063,38 @@ export class SessionView {
       region({ row: top, column: x, width: stageWidth, height: bodyHeight, target: "history" });
       return finish([["↑↓", "select"], ["Enter", items[this.historyIndex]?.kind === "session" ? "open session" : "jump to turn"]]);
     }
+    if (options.panel && output?.type === "panel" && output.files?.length) {
+      // Figma 119:1190: a filter row, then THIS SESSION, GIT CHANGES and ALL
+      // FILES as tiles; Enter opens the selected file in the viewer.
+      const lines = fileListLines(output.files, readingTrail(this.runs), this.filesQuery, tileText, paint);
+      const selectable = lines.flatMap((line, index) => line.path ? [index] : []);
+      this.filesSelected = Math.max(0, Math.min(this.filesSelected, selectable.length - 1));
+      const filter = this.filesQuery ? paint.text(safe(this.filesQuery), "paper") + (this.focused ? paint.text("▏", "electric") : "") : paint.text(this.focused ? "Type to filter" : "Select a file, then type to filter", "muted");
+      put(top, x, `${paint.text("⌕", "muted")} ${filter}`, stageWidth - 1, "surface");
+      const tiled = tileLines(lines.map((line) => line.text));
+      const shown = tiled.lines.map((text, position) => { const source = tiled.at.indexOf(position); return { text, path: source >= 0 ? lines[source]!.path : undefined }; });
+      const selectedPath = lines[selectable[this.filesSelected] ?? -1]?.path;
+      const bodyTop = top + 1, room = Math.max(1, bodyHeight - 1);
+      const selectedLine = Math.max(0, shown.findIndex((line) => line.path !== undefined && line.path === selectedPath));
+      const start = Math.max(0, Math.min(selectedLine - room + 2, shown.length - room));
+      shown.slice(start, start + room).forEach((line, offset) => {
+        const row = bodyTop + offset, selected = line.path !== undefined && line.path === selectedPath;
+        if (line.text === TILE_TOP || line.text === TILE_BOTTOM) {
+          put(row, x, paint.enabled ? paint.text((line.text === TILE_TOP ? "▄" : "▀").repeat(stageWidth - 1), "raised") : "", stageWidth - 1, "surface");
+          return;
+        }
+        const background: PaletteColor = selected ? "tileSelection" : "raised";
+        put(row, x, selected ? paint.text("▎", "electric") : "", stageWidth - 1, background);
+        put(row, x + 1, line.text, stageWidth - 2, background);
+        if (line.path) zone(row, x, stageWidth - 1, { kind: "file-open", path: line.path });
+      });
+      region({ row: bodyTop, column: x, width: stageWidth, height: room, target: "output" });
+      return finish([["↑↓", "select"], ["Enter", "open"], ["@", "mention"]]);
+    }
     if (options.panel && (output?.type === "panel" || output?.type === "block")) {
       // Session commands are global, even when the reader has pinned an old run.
       // Their temporary panel preserves that run's surface and reading position.
-      const lines = output.type === "panel" && output.files?.length ? filePanelLines(output.files, tileText, paint)
-        : output.lines.flatMap((line) => foldCells(line, tileText));
+      const lines = output.lines.flatMap((line) => foldCells(line, tileText));
       this.outputOffset = pane(lines, x, stageWidth, this.outputOffset, "output");
       return finish([["↑↓", "scroll"]]);
     }
@@ -1024,7 +1107,11 @@ export class SessionView {
       panel.rows.slice(2).forEach((text, index) => put(index + 2, 0, text, width, "surface"));
       for (const control of panel.zones) zone(control.row, control.column, control.width, control.action);
       region({ row: 2, column: 0, width, height: height - 2 - Number(panelFooter), target: "diff" });
-      return finish([["←→", "files"], ["↑↓", "scroll"], ["Ctrl+G", "live"]]);
+      // Keys for the view on screen: diff, whole file, or searching in it.
+      const viewer = this.diffPanel;
+      if (viewer.search) return finish([["Enter", viewer.search.typing ? "find" : "next match"], ["n p", "matches"]], "", "back");
+      if (viewer.view === "whole") return finish(viewer.standalone ? [["n p", "changes"], ["/", "search"], ["↑↓", "scroll"]] : [["n p", "changes"], ["/", "search"], ["v", "diff"]], "", viewer.standalone ? "back" : "close");
+      return finish([["←→", "files"], ["v", "whole file"], ["↑↓", "scroll"], ["Ctrl+G", "live"]]);
     }
     if (options.panel && this.artifact?.kind === "verification" && !this.verificationFull) {
       // Figma 53:676: every check of the turn, then the selected one's last lines.

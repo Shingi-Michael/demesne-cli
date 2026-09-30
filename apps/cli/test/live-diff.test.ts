@@ -125,7 +125,8 @@ test("the Changes panel follows Figma 20:124: totals, file rows with counts, a f
   expect(text).toMatch(/✓ apps\/daemon\/src\/journal\.ts +Applied {2}\+1 −0/);
   expect(text).toMatch(/◌ apps\/daemon\/test\/app\.test\.ts +Drafting {2}\+2 −0/);
   // The header names the file, its state, language and edits, with totals right.
-  expect(text).toMatch(/app\.ts {2}Applied · TypeScript · 1 edit +\+3 −2/);
+  // Beside it, the Diff / Whole file switch (Figma 124:1038).
+  expect(text).toMatch(/app\.ts {2}Applied · TypeScript · 1 edit {2}(?: Diff │ Whole file  v +)?\+3 −2/);
   // Old and new line numbers, folded context, and no hunk headers.
   expect(text).toMatch(/ 3 +− line 3/);
   expect(text).toMatch(/ +3 \+ line three/);
@@ -154,4 +155,104 @@ test("an edit row says open on hover without shifting, and keeps its card lit", 
   expect(rows[at]!.indexOf("+1 −0")).toBe(rest.indexOf("+1 −0"));
   // The row sits inside the response card, whose copy link stays shown.
   expect(rows.some((row) => /\bcopy\b/.test(row))).toBe(true);
+});
+
+test("one viewer: v switches between the diff and the whole file, which marks this session's changes and steps through them", async () => {
+  const before = "import { a } from \"./a.ts\";\n\nexport const one = 1;\nexport const two = 2;\nexport const three = 3;\n";
+  const after = "import { a } from \"./a.ts\";\n\nexport const one = 1;\nexport const TWO = 2;\nexport const three = 3;\nexport const four = 4;\n";
+  const loaded: string[] = [];
+  const ui = new Workbench({ paint, contextRail: new CliContextRail({ id: "test", provider: "test" }, "/project"), sessionTitle: "Test", version: "test", onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} },
+    readFile: async (path) => { loaded.push(path); return { path, content: after, byteLength: after.length }; } });
+  const internals = ui as unknown as { onKeypress(text: string, key: { name?: string }): void; sessionView: SessionView };
+  const key = (text: string, name = text) => internals.onKeypress(text, { name });
+  ui.beginTurn({ userText: "Rename two", at: "12:00" });
+  ui.toolRequested({ toolCallId: "edit", name: "edit_file", arguments: { path: "src/n.ts" } });
+  ui.toolFinished({ toolCallId: "edit", name: "edit_file", state: "done", changes: [{ path: "src/n.ts", before, after, beforeExists: true, afterExists: true }] });
+  ui.finishTurn("completed", "Done");
+  void ui.readPrompt({ history: [], commands: [], mentions: [] });
+  internals.sessionView.act({ kind: "diff-open", runId: 1 });
+  let text = ui.frame(200, 40).rows.join("\n");
+  expect(text).toMatch(/ Diff │ Whole file {2}v/);
+  expect(text).toContain("v whole file");
+  key("v");
+  await Bun.sleep(0);
+  text = ui.frame(200, 40).rows.join("\n");
+  expect(loaded).toEqual(["src/n.ts"]);
+  expect(text).toMatch(/n\.ts {2}TypeScript · 6 lines {2} Diff │ Whole file/);
+  // Every line of the file, the changed ones marked.
+  expect(text).toMatch(/ 1 {3}import \{ a \}/);
+  expect(text).toMatch(/ 4 ▌ export const TWO = 2;/);
+  expect(text).toMatch(/ 6 ▌ export const four = 4;/);
+  expect(text).toContain("change – of 2");
+  key("n");
+  expect(ui.frame(200, 40).rows.join("\n")).toContain("change 1 of 2");
+  key("n");
+  expect(ui.frame(200, 40).rows.join("\n")).toContain("change 2 of 2");
+  // Search: type, Enter finds, Escape ends the search but keeps the viewer open.
+  key("/");
+  for (const character of "three") key(character);
+  expect(ui.frame(200, 40).rows.join("\n")).toMatch(/\/three▏ · 1 of 1/);
+  internals.onKeypress("", { name: "escape" });
+  text = ui.frame(200, 40).rows.join("\n");
+  expect(text).not.toContain("/three");
+  expect(text).toContain("change 2 of 2");
+  key("v");
+  expect(ui.frame(200, 40).rows.join("\n")).toMatch(/ Diff │ Whole file/);
+});
+
+test("a file opened on its own shows the whole file, explains files it cannot show, and Esc goes back", async () => {
+  const ui = new Workbench({ paint, contextRail: new CliContextRail({ id: "test", provider: "test" }, "/project"), sessionTitle: "Test", version: "test", onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} },
+    readFile: async (path) => path === ".env" ? { path, content: null, byteLength: null, reason: "protected: secrets and key material are never shown" } : { path, content: "line one\nline two\n", byteLength: 18 } });
+  const internals = ui as unknown as { onKeypress(text: string, key: { name?: string }): void; sessionView: SessionView };
+  void ui.readPrompt({ history: [], commands: [], mentions: [] });
+  ui.beginTurn({ userText: "Look", at: "12:00" }); ui.finishTurn("completed", "Done");
+  let back = 0;
+  internals.sessionView.onFilesBack = () => { back++; };
+  internals.sessionView.openFile("docs/notes.md");
+  await Bun.sleep(0);
+  let text = ui.frame(200, 40).rows.join("\n");
+  expect(text).toMatch(/notes\.md {2}docs\//);
+  expect(text).toContain("‹ Files");
+  expect(text).toContain("no changes this session");
+  expect(text).toMatch(/ 2 {3}line two/);
+  internals.onKeypress("", { name: "escape" });
+  expect(back).toBe(1);
+  expect(ui.frame(200, 40).rows.join("\n")).not.toContain("‹ Files");
+  internals.sessionView.openFile(".env");
+  await Bun.sleep(0);
+  expect(ui.frame(200, 40).rows.join("\n")).toContain("Can't show this file: protected: secrets and key material are never shown.");
+});
+
+test("the Files list filters as you type, opens a file in the viewer, returns with the filter kept, and @ mentions a file", async () => {
+  let draft = "";
+  const ui = new Workbench({ paint, contextRail: new CliContextRail({ id: "test", provider: "test" }, "/project"), sessionTitle: "Test", version: "test", onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} },
+    fileInfo: async () => [{ path: "src/lexer.ts", byteLength: 20, status: "M" }, { path: "docs/notes.md", byteLength: 18, status: null }, { path: "src/parser.ts", byteLength: 30, status: null }],
+    readFile: async (path) => ({ path, content: `contents of ${path}\n`, byteLength: 20 }) });
+  const internals = ui as unknown as { onKeypress(text: string, key: { name?: string }): void; sessionView: SessionView; openRailAction(action: string): void; editor: { value: string } };
+  void ui.readPrompt({ history: [], commands: [], mentions: ["src/lexer.ts", "docs/notes.md", "src/parser.ts"] });
+  ui.beginTurn({ userText: "Look", at: "12:00" }); ui.finishTurn("completed", "Done");
+  internals.openRailAction("files");
+  await Bun.sleep(0);
+  let text = ui.frame(200, 40).rows.join("\n");
+  expect(text).toMatch(/Files {2}/);
+  expect(text).toContain("⌕ Type to filter");
+  expect(text).toMatch(/GIT CHANGES +1/);
+  for (const character of "note") internals.onKeypress(character, { name: character });
+  text = ui.frame(200, 40).rows.join("\n");
+  expect(text).toContain("⌕ note");
+  expect(text).toContain("docs/notes.md");
+  expect(text).not.toContain("src/parser.ts");
+  internals.onKeypress("", { name: "return" });
+  await Bun.sleep(0);
+  text = ui.frame(200, 40).rows.join("\n");
+  expect(text).toContain("‹ Files");
+  expect(text).toMatch(/ 1 {3}contents of docs\/notes\.md/);
+  internals.onKeypress("", { name: "escape" });
+  await Bun.sleep(0);
+  text = ui.frame(200, 40).rows.join("\n");
+  expect(text).toContain("⌕ note");
+  // @ puts the selected file in the draft as a mention.
+  internals.onKeypress("@", { name: undefined });
+  draft = internals.editor.value;
+  expect(draft).toBe("@notes.md ");
 });

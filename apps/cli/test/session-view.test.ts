@@ -1607,7 +1607,8 @@ test("opening evidence near the viewport edge reveals the record beside its resp
   expect(expanded).toMatch(/Changes\s+Turn \d+/);
   // Figma shows no hunk headers; the file header carries the totals.
   expect(expanded).not.toContain("@@");
-  expect(expanded).toContain("lexer.ts  Applied · TypeScript");
+  // On a narrow panel the details give way to the Diff / Whole file switch.
+  expect(expanded).toMatch(/lexer\.ts {2}(Applied · TypeScript| Diff │ Whole file)/);
   expect(expanded).toMatch(/✓ src\/lexer\.ts +Applied  \+1 −1/);
   expect(expanded).toContain("1 file +1 −1");
   expect(expanded).toMatch(/2\s+−\s+return \/\[a-zA-Z_\]\//);

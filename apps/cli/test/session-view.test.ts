@@ -2090,3 +2090,19 @@ test("clicking a chooser row picks that row, not its neighbour", async () => {
   state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("second-model") });
   expect(await choice).toBe(1);
 });
+
+test("@ mentions follow Figma 39:452: a FILES header with the match count, folders, Tab on the selection, and chips in the draft", () => {
+  const { ui, state, screen } = fixture("complete");
+  void ui.readPrompt({ history: [], mentions: [], commands: [] });
+  ui.setMentionFiles(["src/lexer.ts", "docs/lexical-grammar.md", "tests/lexer.test.ts", "src/parser.ts"]);
+  state.onKeypress("@lex", {});
+  const text = screen(120, 30);
+  expect(text).toMatch(/FILES +3 match "lex"/);
+  expect(text).toMatch(/lexer\.ts +src\/ +Tab/);
+  expect(text).toMatch(/↑↓ select {2}↵ insert {2}Esc close +files with spaces are skipped/);
+  state.onKeypress("", { name: "tab" });
+  state.onKeypress(" why?", {});
+  // The inserted mention stays in the draft as text and shows as a chip.
+  expect(state.editor.value).toContain("@src/lexer.ts");
+  expect(screen(120, 30)).toContain(" @src/lexer.ts × ");
+});

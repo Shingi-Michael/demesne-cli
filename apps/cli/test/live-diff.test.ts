@@ -53,18 +53,19 @@ test("accumulated file evidence preserves creations, deletions and earlier write
   expect(changeFiles([first, second, external])[0]?.previous).toBeDefined();
 });
 
-test("following tracks the active file and next turn; scrolling freezes code through settlement and resize", () => {
+test("following tracks the active file and next turn; scrolling pins the file but its diff stays live through settlement and resize", () => {
   const first = tool(2, "first.ts"), live: ToolEntry = { ...tool(3, "live.ts"), changes: undefined, state: "running", drafting: true,
     diff: { oldText: "", newText: Array.from({ length: 60 }, (_, i) => `line ${i}`).join("\n") } };
   const entries: WorkbenchEntry[] = [user(), first, live];
   const panel = new DiffPanel(); panel.open(planRuns(entries), 1);
   expect(panel.render(60, 26, paint).rows.join("\n")).toContain("line 59");
   panel.scroll(-6);
-  const paused = panel.render(60, 26, paint).rows.slice(9, 25).join("\n");
+  expect(panel.render(60, 26, paint).rows.join("\n")).toContain(" pinned ");
   live.state = "done"; live.drafting = false; live.changes = [{ path: "live.ts", before: null, after: "COMPLETELY DIFFERENT", beforeExists: false, afterExists: true }];
   entries.push(tool(4, "later.ts")); panel.sync(planRuns(entries));
-  expect(panel.render(60, 26, paint).rows.slice(9, 25).join("\n")).toBe(paused);
+  // Pinned: still on live.ts while the agent moves to later.ts, showing its latest content.
   expect(panel.following).toBe(false); expect(panel.selected?.path).toBe("live.ts");
+  expect(panel.render(60, 26, paint).rows.join("\n")).toContain("COMPLETELY DIFFERENT");
   for (const width of [34, 40, 80, 140]) for (const height of [8, 12, 24, 40]) {
     const frame = panel.render(width, height, paint);
     expect(frame.rows).toHaveLength(height);
@@ -119,7 +120,7 @@ test("the Changes panel follows Figma 20:124: totals, file rows with counts, a f
   const rows = panel.render(90, 36, paint).rows;
   const text = rows.join("\n");
   // Totals across files, with drafting called out, and the follow and expand controls.
-  expect(rows[2]).toMatch(/^ {2}3 files \+6 −2 · 1 drafting +paused +Alt\+↵ expand/);
+  expect(rows[2]).toMatch(/^ {2}3 files \+6 −2 · 1 drafting +pinned +Alt\+↵ expand/);
   // Each file shows its folder, state and own counts; the selected one is marked.
   expect(text).toMatch(/▎✓ apps\/daemon\/src\/app\.ts +Applied {2}\+3 −2/);
   expect(text).toMatch(/✓ apps\/daemon\/src\/journal\.ts +Applied {2}\+1 −0/);
@@ -255,4 +256,29 @@ test("the Files list filters as you type, opens a file in the viewer, returns wi
   internals.onKeypress("@", { name: undefined });
   draft = internals.editor.value;
   expect(draft).toBe("@notes.md ");
+});
+
+test("a file you chose keeps updating as the agent edits it; an earlier edit opened from the conversation says when newer ones exist", () => {
+  const ui = new Workbench({ paint, contextRail: new CliContextRail({ id: "t", provider: "t" }, "/p"), sessionTitle: "S", version: "t", onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} } });
+  const view = (ui as unknown as { sessionView: SessionView }).sessionView;
+  const edit = (id: string, before: string, after: string) => {
+    ui.toolRequested({ toolCallId: id, name: "edit_file", arguments: JSON.stringify({ path: "src/a.ts" }) });
+    ui.toolFinished({ toolCallId: id, name: "edit_file", state: "done", changes: [{ path: "src/a.ts", before, after, beforeExists: true, afterExists: true }] });
+  };
+  ui.beginTurn({ userText: "Edit", at: "1" });
+  edit("e1", "one\n", "ONE\n");
+  ui.frame(160, 30);
+  view.act({ kind: "diff-open", runId: 1 });
+  view.act({ kind: "diff-select", path: "src/a.ts" });
+  edit("e2", "ONE\n", "ONE\ntwo\n");
+  let text = ui.frame(160, 30).rows.join("\n");
+  expect(text).toContain(" pinned ");
+  expect(text).toMatch(/2 \+ two/);
+  // Opening the first edit itself shows that moment, and says newer edits exist.
+  view.act({ kind: "diff-open", runId: 1, recordId: 2 });
+  text = ui.frame(160, 30).rows.join("\n");
+  expect(text).not.toMatch(/2 \+ two/);
+  expect(text).toContain("Showing an earlier edit · newer edits since · Ctrl+G latest");
+  view.act({ kind: "diff-live" });
+  expect(ui.frame(160, 30).rows.join("\n")).toMatch(/2 \+ two/);
 });

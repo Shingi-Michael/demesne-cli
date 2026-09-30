@@ -159,7 +159,7 @@ export class DiffPanel {
       const top = (this.offsets.get(this.wholeKey) ?? 0) + 3;
       this.view = "diff";
       const index = this.rendered?.lines.findIndex((value) => value !== undefined && value >= top) ?? -1;
-      if (index >= 0) { this.frozen ??= this.selected ? { key: this.offsetKey, file: { ...this.selected, tool: { ...this.selected.tool } } } : null; this.following = false; this.offsets.set(this.offsetKey, index); }
+      if (index >= 0) { this.following = false; this.offsets.set(this.offsetKey, index); }
     }
   }
   /// Steps to the next or previous change in the whole-file view.
@@ -226,10 +226,9 @@ export class DiffPanel {
   get selected(): ChangeFile | undefined { return this.files.find((file) => file.path === this.selectedPath); }
   private get offsetKey(): string { return `${this.runId}:${this.selectedPath}`; }
   act(action: DiffAction): void {
-    if (action.kind === "diff-select") {
-      this.frozen = null; this.following = false; this.selectedPath = action.path;
-      if (this.selected) this.frozen = { key: this.offsetKey, file: { ...this.selected, tool: { ...this.selected.tool } } };
-    }
+    // Choosing a file stays on it without freezing it: its diff keeps
+    // updating as the agent edits; only switching files and scrolling stop.
+    if (action.kind === "diff-select") { this.frozen = null; this.following = false; this.selectedPath = action.path; }
     if (action.kind === "diff-live") { this.frozen = null; this.following = true; this.followLatest = true; this.lastSignature = []; this.sync(this.runs); }
     if (action.kind === "diff-expand") this.expanded = !this.expanded;
     if (action.kind === "diff-view") this.toggleView();
@@ -240,7 +239,6 @@ export class DiffPanel {
     if (file) { this.act({ kind: "diff-select", path: file.path }); this.listOffset = Math.max(0, this.files.indexOf(file) - 2); }
   }
   scroll(amount: number): boolean {
-    if (!this.frozen && this.selected) this.frozen = { key: this.offsetKey, file: { ...this.selected, tool: { ...this.selected.tool } } };
     this.following = false;
     const key = this.view === "whole" ? this.wholeKey : this.offsetKey;
     const before = this.offsets.get(key) ?? 0;
@@ -365,7 +363,9 @@ export class DiffPanel {
     const summary = paint.text(`${this.files.length} file${this.files.length === 1 ? "" : "s"}`, "paper") + (this.files.length ? ` ${styledCounts(totals)}` : "")
       + (drafting ? paint.text(` · ${drafting} drafting`, "electric") : "");
     const expand = this.expanded ? "restore" : "expand";
-    const followLabel = this.following ? " following edits " : " paused ";
+    // Following switches to whichever file the agent edits; pinned stays on
+    // this one. Either way the diff shown is live.
+    const followLabel = this.following ? " following edits " : " pinned ";
     const controlsWidth = followLabel.length + 2 + "Alt+↵".length + 1 + expand.length;
     const summaryRow = 2;
     // A file opened on its own has no turn to summarize: straight to the file.
@@ -447,6 +447,12 @@ export class DiffPanel {
       canvas.put(top, 1, formatFooterLine(fits ? `${headerLeft}  ${view.text}` : headerLeft, right, width - 3), width - 2, "surface");
       if (fits) zones.push({ row: top, column: 1 + visibleLength(headerLeft) + 2, width: visibleLength(view.text), action: { kind: "diff-view" } });
       top++;
+      // A past edit opened from the conversation shows the file as it was
+      // then; say when the agent has changed it since.
+      const live = this.selected;
+      if (file === this.frozen?.file && live && live.tool.id !== file.tool.id) {
+        canvas.put(top++, 1, paint.text("Showing an earlier edit · newer edits since · ", "secondary") + keycap(paint, "Ctrl+G") + paint.text(" latest", "muted"), width - 2, "surface");
+      }
       if (!cached) {
         const completedEvidence = file.tool.state === "done" && file.tool.changes?.some((change) => change.path === file.path);
         if (!completedEvidence) {

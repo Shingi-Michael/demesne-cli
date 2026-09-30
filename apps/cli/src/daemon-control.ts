@@ -64,7 +64,8 @@ export function resolveDaemonCommand(
   const { moduleDir, execPath } = location;
   const configured = env.DEMESNE_DAEMON_BIN?.trim();
   if (configured) return [configured];
-  const installed = Bun.which("demesned");
+  // Searches the given environment's PATH, so callers (and tests) control it.
+  const installed = env.PATH ? Bun.which("demesned", { PATH: env.PATH }) : null;
   if (installed) return [installed];
   // In a source checkout the TypeScript source is authoritative: a stale
   // dist/demesned would silently run an older daemon than the CLI.

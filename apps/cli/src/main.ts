@@ -108,6 +108,7 @@ import {
 } from "./daemon-control.ts";
 import { formatDoctorReport, runDoctor } from "./doctor.ts";
 import { runSetup } from "./setup.ts";
+import { isPlaceholderTitle, titleFromRequest } from "./session-title.ts";
 import { beginOpenRouterLogin, configureOpenRouter } from "./openrouter-auth.ts";
 import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus } from "./harness-panels.ts";
 import { replaySession } from "./workbench/history.ts";
@@ -1543,6 +1544,16 @@ async function runChat(command: string[]): Promise<void> {
       continue;
     }
 
+    // The first request names a session that still has its placeholder title.
+    if (isPlaceholderTitle(sessionTitle)) {
+      const title = titleFromRequest(sanitizeTerminalLine(input));
+      const target = sessionId;
+      // Set locally first, so a second request sent meanwhile does not rename it again.
+      if (title) { sessionTitle = title; workbench?.setSessionTitle(title); }
+      if (title) void request<UpdateSessionResponse>(`/v1/sessions/${target}`, { method: "PATCH", body: JSON.stringify({ title }) })
+        .then((result) => { if (sessionId === target) { sessionTitle = result.session.title; workbench?.setSessionTitle(sessionTitle); } })
+        .catch(() => undefined);
+    }
     await executePrompt(input);
   }
 }

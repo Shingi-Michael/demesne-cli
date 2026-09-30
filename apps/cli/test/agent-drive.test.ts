@@ -512,3 +512,25 @@ test("protocol rejects arbitrary commands, keys, invalid payload sizes and coord
   expect(() => parseDriveDecision(decision({ kind: "scroll", row: -1, column: 0, amount: 1 }))).toThrow();
   expect(() => parseDriveRequest({ mission: "a".repeat(8001), homeSessionId: "home", observation: observation(), memory: { notes: "", completed: [], remaining: [], evidence: [], steps: [] } })).toThrow();
 });
+
+test("a saved mission shows only in the session it belongs to; new sessions start without it", async () => {
+  let drive: AgentDrive;
+  const { ui, internals } = workbench({ intervene: () => drive.intervene(), control: (control) => drive.control(control) });
+  drive = new AgentDrive({ observe: () => ui.observeDrive(), changed: (state) => ui.setDrive(state), perform: (action, screen, signal) => ui.performDrive(action, screen, signal),
+    decide: async () => response(decision({ kind: "wait" })), delayMs: 60_000 });
+  try {
+    ui.beginTurn({ userText: "Review", at: "now" }); ui.assistantDelta("Ready."); ui.finishTurn("completed", "Done");
+    void ui.readPrompt({ history: [], commands: SLASH_COMMANDS, mentions: [] });
+    drive.start("Review the recorded results"); drive.control("pause");
+    ui.showDrive();
+    expect(ui.frame(120, 30).rows.join("\n")).toContain("Review the recorded results");
+    // Another session in the same workspace: the paused mission stays out of view.
+    internals.sessionId = "fresh";
+    const other = ui.frame(120, 30).rows.join("\n");
+    expect(other).not.toContain("Review the recorded results");
+    expect(other).not.toContain("DRIVE ·");
+    // Back in its own session, it is all still there.
+    internals.sessionId = "home";
+    expect(ui.frame(120, 30).rows.join("\n")).toContain("Review the recorded results");
+  } finally { drive.dispose(); }
+});

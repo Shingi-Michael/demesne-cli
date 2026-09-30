@@ -872,6 +872,12 @@ async function runChat(command: string[]): Promise<void> {
   let drive: AgentDrive | null = null;
   const controlDrive = (control: DriveControl): void => {
     try {
+      // A saved mission belongs to its own session; this one starts without it.
+      const home = drive?.state?.homeSessionId;
+      if (home && home !== sessionId) {
+        workbench?.notice(`That Drive mission belongs to another session (/resume ${home}). Start a new one here with /drive <mission>.`, "error");
+        return;
+      }
       drive?.control(control);
       if (control === "stop" && drive?.state?.homeSessionId === sessionId && chatState.streamActive) chatState.interrupt?.();
     } catch (error) { workbench?.notice(error instanceof Error ? error.message : "Drive could not continue.", "error"); }

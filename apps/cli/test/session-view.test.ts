@@ -1622,6 +1622,7 @@ test("inline evidence navigates original records, prefers failures and retains i
   expect(screen(100, 36)).toContain("One check failed.");
   view.act({ kind: "artifact-step", step: -1 });
   expect(screen(100, 36)).toContain("PASS_RECORDED_OUTPUT");
+  view.focused = true; view.key({ name: "return" });
   const rows = screen(100, 36).split("\n");
   const row = rows.findIndex((line) => line.includes("Arguments"));
   state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("Arguments") });
@@ -1643,6 +1644,9 @@ test("inline evidence navigates original records, prefers failures and retains i
       }
     }
   }
+  // Esc steps back from the full output to the check list, then closes it.
+  key("escape");
+  expect(screen(100, 36)).toContain("OUTPUT · last lines");
   key("escape");
   expect(screen(100, 36)).not.toContain("PASS_RECORDED_OUTPUT");
   expect(view.memory.surface).toBe("response");
@@ -1741,6 +1745,9 @@ test("the log shortcut opens a real log and docked evidence scrolls independentl
   key("escape");
   expect(view.panelOpen).toBe(false);
   view.act({ kind: "artifact", runId: view.current!.id, target: "verification" });
+  // The check list shows the output's last lines; Enter opens the whole output.
+  expect(screen(120, 36)).toContain("OUTPUT_69");
+  view.focused = true; view.key({ name: "return" });
   expect(screen(120, 36)).toContain("OUTPUT_0");
   expect(screen(120, 36)).toContain("CHECK_RESPONSE");
   const region = (view as any).regions.find((region: { recordId?: number }) => region.recordId !== undefined);
@@ -1755,8 +1762,12 @@ test("the log shortcut opens a real log and docked evidence scrolls independentl
   expect(screen(80, 24)).toContain("VERIFICATION");
   expect(screen(80, 24)).not.toContain("CHECK_RESPONSE");
   expect(screen(120, 36)).toContain("CHECK_RESPONSE");
-  // The panel frame's keycap footer carries the close control.
-  const frame = screen(120, 36).split("\n");
+  // The full output's footer steps back to the check list, whose footer closes.
+  let frame = screen(120, 36).split("\n");
+  const back = frame.findIndex((line) => line.includes("Esc back"));
+  state.handleMouse({ kind: "press", button: 0, row: back, col: frame[back]!.indexOf("Esc back") });
+  frame = screen(120, 36).split("\n");
+  expect(frame.join("\n")).toContain("OUTPUT · last lines");
   const footer = frame.findIndex((line) => line.includes("Esc close"));
   state.handleMouse({ kind: "press", button: 0, row: footer, col: frame[footer]!.indexOf("Esc close") });
   expect(view.panelOpen).toBe(false);
@@ -1957,4 +1968,44 @@ test("the execution log follows Figma 25:154 and 26:174: one row per event, filt
     expect(detail).toContain("▸ Arguments  argv, cwd");
     expect(detail).toContain("Tab next event  Esc back");
   } finally { clock.mockRestore(); }
+});
+
+test("verification follows Figma 53:676: an overall pill, every check on a row, and the selected check's last lines", () => {
+  const { ui, view, screen } = fixture();
+  ui.beginTurn({ userText: "Verify", at: "now" });
+  const checks: [string, number | undefined, string][] = [["parser", 0, "tests/parser.test.ts:\n✓ accepts café [3ms]\n 42 pass\n 0 fail"], ["typecheck", 0, ""], ["daemon", undefined, ""]];
+  for (const [id, exitCode, message] of checks) {
+    ui.toolRequested({ toolCallId: id, name: "run_command", arguments: { argv: ["bun", "test", id] } });
+    ui.toolFinished({ toolCallId: id, name: "run_command", state: id === "daemon" ? "stopped" : "done", exitCode, durationMs: 1200, ...(message ? { message } : {}) });
+  }
+  ui.finishTurn("stopped", "Stopped");
+  screen(176, 30);
+  view.act({ kind: "artifact", runId: view.current!.id, target: "verification" });
+  const rows = screen(176, 30).split("\n");
+  const panel = rows[0]!.indexOf("VERIFICATION");
+  const body = rows.map((row) => row.slice(panel)).join("\n");
+  expect(body).toMatch(/VERIFICATION {2}Turn 1 +stopped · 2 of 3 passed/);
+  expect(body).toMatch(/✓ \$ bun test parser +42 passed · exit 0 +1\.2s/);
+  expect(body).toMatch(/■ \$ bun test daemon +stopped +1\.2s/);
+  // ↑↓ moves between checks; the output follows the selection.
+  view.focused = true;
+  view.key({ name: "up" }); view.key({ name: "up" });
+  const first = screen(176, 30);
+  expect(first).toContain("OUTPUT · last lines");
+  expect(first).toContain("✓ accepts café");
+  expect(first).toContain("Enter full output  Esc close");
+});
+
+test("while a turn runs, Escapes that step back or close a panel never stop it", () => {
+  const { ui, key, screen, interrupts, view } = fixture("thinking");
+  key("b", { ctrl: true });
+  expect(screen()).toContain("EXECUTION LOG");
+  key("return");
+  key("escape"); key("escape");
+  expect(interrupts()).toBe(0);
+  expect(view.panelOpen).toBe(false);
+  // With nothing open, Esc Esc still stops the turn.
+  key("escape"); key("escape");
+  expect(interrupts()).toBe(1);
+  void ui;
 });

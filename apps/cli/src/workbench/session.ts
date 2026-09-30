@@ -1111,6 +1111,7 @@ export class SessionView {
       const viewer = this.diffPanel;
       if (viewer.search) return finish([["Enter", viewer.search.typing ? "find" : "next match"], ["n p", "matches"]], "", "back");
       if (viewer.view === "whole") return finish(viewer.standalone ? [["n p", "changes"], ["/", "search"], ["↑↓", "scroll"]] : [["n p", "changes"], ["/", "search"], ["v", "diff"]], "", viewer.standalone ? "back" : "close");
+      if (viewer.standalone) return finish([["v", "whole file"], ["↑↓", "scroll"]], "", "back");
       return finish([["←→", "files"], ["v", "whole file"], ["↑↓", "scroll"], ["Ctrl+G", "live"]]);
     }
     if (options.panel && this.artifact?.kind === "verification" && !this.verificationFull) {

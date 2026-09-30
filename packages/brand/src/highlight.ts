@@ -272,8 +272,8 @@ function highlightYaml(code: string, painter: Painter): string {
     const value = key[4]!;
     const renderedValue = /^\s*["']/.test(value)
       ? painter.text(value, "syntaxString")
-      : value.replace(/\b(true|false|null|yes|no)\b/gi, (match) => painter.text(match, "syntaxKeyword"))
-        .replace(/\b\d+(?:\.\d+)?\b/g, (match) => painter.text(match, "syntaxNumber"));
+      // One pass: a second one would color the digits inside the first's escape codes.
+      : value.replace(/\b(?:true|false|null|yes|no)\b|\b\d+(?:\.\d+)?\b/gi, (match) => painter.text(match, /^\d/.test(match) ? "syntaxNumber" : "syntaxKeyword"));
     return `${key[1]}${painter.text(key[2]!, "syntaxType")}${key[3]}${renderedValue}${trailing}`;
   }
   return body + trailing;

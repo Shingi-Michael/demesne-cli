@@ -94,3 +94,10 @@ describe("highlightCode", () => {
     expect(highlighted).toContain(painter.text("return", "syntaxKeyword"));
   });
 });
+
+test("YAML values color keywords and numbers in one pass, never inside each other's escape codes", () => {
+  const painter = createPainter(true);
+  const line = highlightCode("  fail-fast: false", "yaml", painter);
+  expect(line).toBe(`  ${painter.text("fail-fast", "syntaxType")}: ${painter.text("false", "syntaxKeyword")}`);
+  expect(highlightCode("  retries: 3", "yaml", painter)).toBe(`  ${painter.text("retries", "syntaxType")}: ${painter.text("3", "syntaxNumber")}`);
+});

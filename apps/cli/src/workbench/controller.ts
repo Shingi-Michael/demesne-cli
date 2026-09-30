@@ -1024,6 +1024,8 @@ export class Workbench {
       }
       if (key.meta && key.name === "c") { this.showContext(); return; }
       if (key.meta && key.name === "d") { this.openRailAction("diff"); return; }
+      // Alt+O: the Files list (Alt+F moves by word in the composer).
+      if (key.meta && key.name === "o") { this.openRailAction("files"); return; }
       if (key.meta && key.name === "p") { this.showWorkspace(); return; }
       if (key.ctrl && key.name === "l") {
         this.sessionLayout = false; this.chatView = false; this.transcriptView = false;

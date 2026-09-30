@@ -8,12 +8,14 @@ import type {
 } from "@demesne/protocol";
 import { isRecord } from "@demesne/protocol";
 import {
+  formatFooterLine,
   formatSparkline,
   formatTokenCount,
   sanitizeTerminalLine,
   toolKindBadge,
   truncateText,
   visibleLength,
+  wrapDisplayText,
   type Painter,
 } from "@demesne/brand";
 import { classifyTurnPhase, isValidationCommand } from "./turn-activity.ts";
@@ -208,10 +210,6 @@ export class CliContextRail {
   lines(width: number, height: number, painter: Painter): string[] {
     const lines: string[] = [];
     const compact = height < 20;
-    const addHeading = (label: string) => {
-      if (!compact && lines.length > 0) lines.push("");
-      lines.push(painter.bold(label, "secondary"));
-    };
     const thinking = this.thinkingEnabled === undefined ? "default" : this.thinkingEnabled ? "on" : "off";
     const reportedTokens = exactUsageTotal(this.usage);
     const contextWindow = this.plan?.capacityTokens ?? this.model.contextWindow ?? null;
@@ -220,82 +218,89 @@ export class CliContextRail {
       ? Math.min(999, Math.round((plannedTokens / contextWindow) * 100))
       : null;
 
-    addHeading("CONTEXT PLAN · ESTIMATED");
-    lines.push(painter.bold(truncateText(sanitizeTerminalLine(this.model.id), width), "paper"));
-    lines.push(painter.dim(`${sanitizeTerminalLine(this.model.provider)} · ${workspaceName(this.workspace)}`));
-    lines.push(contextWindow
-      ? painter.text(`${formatTokenCount(contextWindow)} token capacity`, "secondary")
-      : painter.text("capacity unknown", "signal"));
+    // Figma 52:657: a quiet heading with its source on the right, one large
+    // figure, the stacked bar with an inline legend, then label/value rows.
+    const heading = (label: string, note: string) => {
+      if (!compact && lines.length > 0) lines.push("");
+      lines.push(formatFooterLine(painter.text(label, "muted"), painter.text(note, "muted"), width));
+    };
+    // Values wrap under their label rather than being cut off in narrow panels.
+    const row = (label: string, value: string, tone: Parameters<Painter["text"]>[1] = "secondary") => {
+      const room = Math.max(8, width - 12), parts: string[] = [];
+      // Break between ` · ` fields first, so `6.5k cached` stays together.
+      for (const field of value.split(" · ")) {
+        const last = parts.at(-1);
+        if (last !== undefined && visibleLength(`${last} · ${field}`) <= room) parts[parts.length - 1] = `${last} · ${field}`;
+        else parts.push(...wrapDisplayText(field, room));
+      }
+      parts.forEach((part, index) => lines.push(painter.text((index ? "" : label).padEnd(12), "muted") + painter.text(part, tone)));
+    };
+    heading("CONTEXT PLAN", "estimated before request");
     if (!this.plan) {
+      lines.push(contextWindow ? painter.text(`${formatTokenCount(contextWindow)} token capacity`, "secondary") : painter.text("capacity unknown", "signal"));
       lines.push(painter.dim("plan pending · calculated before request"));
     } else {
-      if (!compact) lines.push(...contextUsageStack(this.plan, width, painter));
-      lines.push(painter.text(
-        `~${formatTokenCount(this.plan.estimatedInputTokens)} input${percentage !== null ? ` · ${percentage}% of capacity` : ""}`,
-        budgetColor(this.plan, percentage),
-      ));
-      lines.push(painter.dim(
-        `messages ~${formatTokenCount(this.plan.estimatedMessageTokens)} · tool definitions ~${formatTokenCount(this.plan.estimatedToolDefinitionTokens)}`,
-      ));
+      lines.push(painter.bold(`~${formatTokenCount(this.plan.estimatedInputTokens)}`, "paper")
+        + painter.text(contextWindow ? ` of ${formatTokenCount(contextWindow)}${percentage !== null ? ` · ${percentage}%` : ""}` : " · capacity unknown", budgetColor(this.plan, percentage)));
       if (!compact) {
-        const outputReserve = this.plan.reserves.outputTokens === null
-          ? "output unknown"
-          : `output ${formatTokenCount(this.plan.reserves.outputTokens)}`;
-        lines.push(painter.dim(
-          `reserves ${outputReserve} · results ${formatTokenCount(this.plan.reserves.toolResultTokens)} · safety ${formatTokenCount(this.plan.reserves.safetyTokens)}`,
-        ));
+        const [bar, ...legend] = contextUsageStack(this.plan, width, painter);
+        lines.push(bar!);
+        // The legend on as few lines as fit: `■ Messages ~38k  ■ Tool definitions ~8k`.
+        let current = "";
+        for (const item of legend) {
+          if (current && visibleLength(current) + visibleLength(item) + 2 > width) { lines.push(current); current = ""; }
+          current += (current ? "  " : "") + item;
+        }
+        if (current) lines.push(current);
       }
-      lines.push(painter.text(formatBudgetStatus(this.plan), budgetColor(this.plan, percentage)));
+      // Compact panels skip the bar, so the breakdown stays as one row.
+      else row("input", `messages ~${formatTokenCount(this.plan.estimatedMessageTokens)} · tool definitions ~${formatTokenCount(this.plan.estimatedToolDefinitionTokens)}`, "secondary");
+      const outputReserve = this.plan.reserves.outputTokens === null ? "output unknown" : `output ${formatTokenCount(this.plan.reserves.outputTokens)}`;
+      row("reserves", `${outputReserve} · results ${formatTokenCount(this.plan.reserves.toolResultTokens)} · safety ${formatTokenCount(this.plan.reserves.safetyTokens)}`, "secondary");
+      row("budget", formatBudgetStatus(this.plan), budgetColor(this.plan, percentage));
       if (this.plan.actions.length > 0) {
         const saved = this.plan.actions.reduce((total, action) => total + action.estimatedTokensSaved, 0);
-        lines.push(painter.dim(`${this.plan.actions.length} context reduction${this.plan.actions.length === 1 ? "" : "s"} · saved ~${formatTokenCount(saved)}`));
+        row("reductions", `${this.plan.actions.length} applied · saved ~${formatTokenCount(saved)}`, "citron");
       }
     }
 
-    addHeading("LAST REQUEST · PROVIDER REPORTED");
+    heading("LAST REQUEST", "reported by provider");
     if (reportedTokens === null) {
       lines.push(painter.dim("usage pending"));
     } else {
-      lines.push(painter.text(`${formatTokenCount(reportedTokens)} total`, "secondary"));
-      const input = this.usage?.inputTokens === null || this.usage?.inputTokens === undefined
-        ? "input unavailable"
-        : `${formatTokenCount(this.usage.inputTokens)} in`;
-      const output = this.usage?.outputTokens === null || this.usage?.outputTokens === undefined
-        ? "output unavailable"
-        : `${formatTokenCount(this.usage.outputTokens)} out`;
-      lines.push(painter.dim(`${input} · ${output}`));
-    }
-    if (this.usage?.cachedInputTokens !== undefined) {
-      lines.push(painter.dim(`${formatTokenCount(this.usage.cachedInputTokens)} cached input`));
+      const input = this.usage?.inputTokens == null ? "input unavailable" : `${formatTokenCount(this.usage.inputTokens)} in`;
+      const output = this.usage?.outputTokens == null ? "output unavailable" : `${formatTokenCount(this.usage.outputTokens)} out`;
+      const cached = this.usage?.cachedInputTokens !== undefined ? ` · ${formatTokenCount(this.usage.cachedInputTokens)} cached` : "";
+      row("tokens", `${input} · ${output}${cached} · ${formatTokenCount(reportedTokens)} total`, "secondary");
     }
     if (this.requestDurationMs !== null) {
       const queue = this.queueDurationMs === null ? "" : `queue ${formatMetricDuration(this.queueDurationMs)} · `;
-      const ttft = this.timeToFirstTokenMs === null ? "" : `TTFT ${formatMetricDuration(this.timeToFirstTokenMs)} · `;
-      lines.push(painter.dim(`${queue}${ttft}request ${formatMetricDuration(this.requestDurationMs)}`));
+      const ttft = this.timeToFirstTokenMs === null ? "" : `first token ${formatMetricDuration(this.timeToFirstTokenMs)} · `;
+      row("timing", `${queue}${ttft}request ${formatMetricDuration(this.requestDurationMs)}`, "secondary");
     }
-    // One glanceable line for recent rounds' effective throughput. The bar shows
-    // the shape; the label carries the newest rate, which is the number worth
-    // knowing.
+    // Recent rounds' effective throughput: the newest rate, then the shape.
     if (!compact && this.throughput.length > 0) {
       const latest = this.throughput.at(-1)!;
-      lines.push(`${formatSparkline(this.throughput, painter)} ${painter.dim(`${latest.toFixed(1)} tok/s · ${this.throughput.length} round${this.throughput.length === 1 ? "" : "s"}`)}`);
+      lines.push(painter.text("speed".padEnd(12), "muted") + `${painter.text(`${latest.toFixed(1)} tok/s`, "secondary")} ${formatSparkline(this.throughput, painter)} ${painter.dim(`${this.throughput.length} round${this.throughput.length === 1 ? "" : "s"}`)}`);
     }
 
-    addHeading("TURN");
+    heading("TURN", "");
     const elapsedMs = this.startedAt === null ? this.durationMs : Date.now() - this.startedAt;
     const elapsed = elapsedMs === null ? "" : ` · ${formatElapsed(elapsedMs)}`;
-    lines.push(painter.text(`${statusGlyph(this.status)} ${this.status}${elapsed}`, statusColor(this.status)));
-    lines.push(painter.dim(`thinking ${thinking}`));
+    row("status", `${statusGlyph(this.status)} ${this.status}${elapsed}`, statusColor(this.status));
+    row("thinking", thinking, "secondary");
+    // The model and where it runs, for reference.
+    row("model", `${sanitizeTerminalLine(this.model.id)} · ${sanitizeTerminalLine(this.model.provider)} · ${workspaceName(this.workspace)}`, "secondary");
 
-    addHeading("RECENT CHANGES");
+    heading("RECENT CHANGES", "");
     if (!compact && this.changes.length === 0) lines.push(painter.dim("— none this turn"));
     for (const change of this.changes.slice(-3)) lines.push(formatResult(change, "change", width, painter));
 
-    addHeading("RECENT VALIDATION");
+    heading("RECENT VALIDATION", "");
     if (!compact && this.validations.length === 0) lines.push(painter.dim("— not run"));
     for (const validation of this.validations.slice(-2)) lines.push(formatResult(validation, "validation", width, painter));
 
-    addHeading("ACTIVITY");
+    heading("ACTIVITY", "");
     if (!compact && this.activity.length === 0) lines.push(painter.dim("— waiting"));
     for (const item of this.activity.slice(-3)) lines.push(painter.dim(`· ${truncateText(item, width - 2)}`));
 

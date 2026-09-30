@@ -34,13 +34,20 @@ export interface SetupOptions {
   theme?: "dark" | "light" | "auto";
   yes?: boolean;
   openBrowser?: (url: string) => Promise<boolean>;
+  /// Where OPENROUTER_API_KEY is read from; defaults to the process environment.
+  env?: Record<string, string | undefined>;
 }
 
 export interface SetupResult extends SetupChoices {
   configPath: string;
   backup: string | null;
   nonInteractive: boolean;
+  /// The wizard ended with "Open demesne here" rather than quit.
+  open?: boolean;
 }
+
+/// How long the OpenRouter loopback callback listens (the login's default).
+const LOGIN_TIMEOUT_MS = 600_000;
 
 export function writeSetupConfig(configPath: string, choices: SetupChoices, apiKey?: string): { backup: string | null } {
   if (!Number.isSafeInteger(choices.contextWindow) || choices.contextWindow <= 0) {
@@ -90,7 +97,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<SetupResult>
   }
 
   return runWizard({ configPath, input, output, fetch: options.fetch, painter: options.painter ?? createPainter(false),
-    providerId: options.providerId, theme: options.theme, openBrowser: options.openBrowser ?? openSetupBrowser });
+    providerId: options.providerId, theme: options.theme, openBrowser: options.openBrowser ?? openSetupBrowser, env: options.env ?? process.env });
 }
 
 async function openSetupBrowser(url: string): Promise<boolean> {
@@ -104,7 +111,7 @@ async function openSetupBrowser(url: string): Promise<boolean> {
 /// terminal however it ends. Cancelling writes nothing.
 async function runWizard(options: {
   configPath: string; input: NodeJS.ReadStream; output: NodeJS.WriteStream; fetch?: typeof fetch; painter: Painter;
-  providerId?: string; theme?: SetupChoices["theme"]; openBrowser: (url: string) => Promise<boolean>;
+  providerId?: string; theme?: SetupChoices["theme"]; openBrowser: (url: string) => Promise<boolean>; env: Record<string, string | undefined>;
 }): Promise<SetupResult> {
   const { input, output, painter } = options;
   let state: WizardState = initialWizard(options.configPath, options.theme ?? "auto");
@@ -129,22 +136,30 @@ async function runWizard(options: {
     const previous = login; login = undefined; credential = undefined;
     if (previous) void previous.close();
   };
+  const openBrowser = (url: string) => {
+    const failed = () => {
+      if (!active || state.step !== "auth" || state.auth.status !== "waiting" || state.auth.url !== url) return;
+      state = { ...state, auth: { ...state.auth, message: "Could not open the browser. Open the link below to continue." } }; draw();
+    };
+    void options.openBrowser(url).then((opened) => { if (!opened) failed(); }).catch(failed);
+  };
   const authenticate = async () => {
     cancelLogin();
     const controller = loginController = new AbortController();
     const current = () => active && controller === loginController && !controller.signal.aborted && state.step === "auth";
     let attempt: ReturnType<typeof beginOpenRouterLogin> | undefined;
     try {
-      attempt = login = beginOpenRouterLogin({ fetch: options.fetch, signal: controller.signal });
-      state = { ...state, auth: { url: attempt.url, status: "waiting", message: "Waiting for browser authorization…" } }; draw();
-      void options.openBrowser(attempt.url).then(opened => {
-        if (current() && state.auth.status === "waiting" && !opened) {
-          state = { ...state, auth: { ...state.auth, message: "Could not open the browser. Open the URL below to continue." } }; draw();
-        }
-      }).catch(() => {
-        if (current() && state.auth.status === "waiting") { state = { ...state, auth: { ...state.auth, message: "Open the URL below to continue." } }; draw(); }
-      });
-      const apiKey = await attempt.key;
+      // A key already in the environment skips the browser entirely.
+      const envKey = options.env.OPENROUTER_API_KEY?.trim();
+      let apiKey: string;
+      if (envKey) apiKey = envKey;
+      else {
+        attempt = login = beginOpenRouterLogin({ fetch: options.fetch, signal: controller.signal, timeoutMs: LOGIN_TIMEOUT_MS });
+        state = { ...state, auth: { url: attempt.url, status: "waiting", expiresAt: Date.now() + LOGIN_TIMEOUT_MS,
+          message: "We opened openrouter.ai in your browser. Approve the \"Demesne\" key, then come back here." } }; draw();
+        openBrowser(attempt.url);
+        apiKey = await attempt.key;
+      }
       if (!current()) return;
       state = { ...state, auth: { url: "", status: "loading", message: "Authorization received. Checking your credential and model catalog…" } }; draw();
       const models = await discoverOpenRouter({ apiKey, fetch: options.fetch, signal: controller.signal });
@@ -164,6 +179,8 @@ async function runWizard(options: {
   input.setRawMode?.(true);
   input.resume();
   output.on("resize", draw);
+  // The sign-in card animates and counts down while it waits.
+  const ticker = setInterval(() => { if (state.step === "auth" && state.auth.status === "waiting" && state.auth.url) draw(); }, 400);
   try {
     return await new Promise<SetupResult>((resolve, reject) => {
       const onKeypress = (text: string | undefined, key: { name?: string; ctrl?: boolean; meta?: boolean } = {}) => {
@@ -176,12 +193,15 @@ async function runWizard(options: {
           const providerUrl = state.provider!.target.url;
           resolve({ providerUrl, providerId: options.providerId ?? state.provider!.target.id, model: selectedModel(state),
             contextWindow: state.review.contextWindow, maxOutputTokens: state.review.maxOutputTokens, theme: state.review.theme,
-            configPath: options.configPath, backup: state.saved?.backup ?? null, nonInteractive: false });
+            configPath: options.configPath, backup: state.saved?.backup ?? null, nonInteractive: false, open: effect.open });
           return;
         }
         if (effect?.kind === "rescan") void scan();
         if (effect?.kind === "login") void authenticate();
         if (effect?.kind === "cancel-login") cancelLogin();
+        // OSC 52 puts the link on the clipboard, over SSH too.
+        if (effect?.kind === "copy") output.write(`\x1b]52;c;${Buffer.from(effect.url).toString("base64")}\x07`);
+        if (effect?.kind === "open") openBrowser(effect.url);
         if (effect?.kind === "probe") {
           void probeProvider(targetForUrl(effect.url), { fetch: options.fetch }).then((result) => { if (active && state.step === "custom") { state = wizardCustomProbed(state, result); draw(); } });
         }
@@ -201,7 +221,7 @@ async function runWizard(options: {
       void scan();
     });
   } finally {
-    active = false; cancelLogin();
+    active = false; cancelLogin(); clearInterval(ticker);
     output.off("resize", draw);
     input.setRawMode?.(wasRaw);
     input.pause();

@@ -572,7 +572,15 @@ async function run(command: string[]): Promise<void> {
     });
     console.log(`  ${paint.text("●", "citron")} Wrote ${result.configPath}`);
     if (result.backup) console.log(paint.dim(`    Previous config backed up to ${result.backup}`));
-    console.log(paint.dim("    Next: `demesne doctor`, then `demesne`."));
+    if (!result.open) { console.log(paint.dim("    Next: `demesne doctor`, then `demesne`.")); return; }
+    // "Open demesne here": a daemon already running keeps its old provider
+    // until it restarts, and stopping it could end other sessions' turns.
+    const status = await daemonStatus(createDaemonControlDependencies(server, settings.dataDirectory));
+    if (status.running && status.health?.model !== result.model) {
+      console.log(paint.dim(`    The running daemon still uses ${sanitizeTerminalText(status.health?.model ?? "the previous model")}. Run \`demesne daemon stop\`, then \`demesne\`.`));
+      return;
+    }
+    await runChat([]);
     return;
   }
 

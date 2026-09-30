@@ -4,6 +4,7 @@ import { runSetup } from "../../src/setup.ts";
 let attempt = 0;
 try {
   const result = await runSetup({
+    env: {},
     fetch: (async (input) => {
       const url = String(input);
       if (url.endsWith("/auth/keys")) return Response.json({ key: "fixture-private-key" });

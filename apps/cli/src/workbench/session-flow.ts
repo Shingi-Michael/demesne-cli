@@ -151,12 +151,20 @@ export function renderSessionFlow(options: {
       : paint.text(tool.waiting ? "awaiting approval" : stopped ? "stopped" : tool.state === "denied" ? "denied"
         : tool.exitCode !== undefined ? `${tool.exitCode === 0 && !failed(tool) ? "passed" : "failed"} · exit ${tool.exitCode}` : unknown ? "exit unknown" : "", tool.waiting ? "signal" : "muted");
     const timing = tool.durationMs !== undefined && !failed(tool) ? duration(tool.durationMs) : "";
-    const right = paint.text(`${timing}${timing ? " " : ""}${open ? "▾" : "▸"}`, "muted");
+    // Figma 39:533: an edit row opens its diff, and says so on hover or focus.
+    // `open` keeps its cells at rest so the row never shifts.
+    const rowHover = tool.phase === "change" && hoverKey ? `${hoverKey}>${key}` : hoverKey;
+    const openEmphasis = tool.phase === "change" && rowHover ? options.emphasis?.(rowHover) ?? 0 : 0;
+    const openLabel = tool.phase !== "change" ? "" : openEmphasis > 0 ? `${tint(paint, "open", background, "electric", openEmphasis)} ` : "     ";
+    const right = `${paint.text(`${timing}${timing ? " " : ""}`, "muted")}${openLabel}${paint.text(open ? "▾" : "▸", "muted")}`;
     const lead = grouped ? paint.text("│", "rule") : paint.text(mark, outcome);
     const leftRoom = Math.max(4, inner - visibleLength(right) - 2);
     const left = `${lead} ${styledLabel}${visibleLength(meta) ? `  ${meta}` : ""}`;
     const text = margin + formatFooterLine(truncateText(left, leftRoom), right, inner);
+    const cardHover = hoverKey;
+    hoverKey = rowHover;
     add(key, text, [{ column: indent, width: inner, action: tool.phase === "change" ? { kind: "diff-open", runId: run.id, recordId: tool.id } : { kind: "toggle", runId: run.id, key } }], [thinkingAnchors.get(tool.id)!], background);
+    hoverKey = cardHover;
     const detailRow = (key: string, line: string, color?: PaletteColor) => add(key,
       margin + surface(`${paint.text("│", "borderBright")} ${color ? paint.text(line, color) : line}`, inner, paint, "raised"));
     // A failed operation gets actual output immediately, even when collapsed.

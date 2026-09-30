@@ -132,3 +132,26 @@ test("the Changes panel follows Figma 20:124: totals, file rows with counts, a f
   expect(text).toContain("unchanged lines");
   expect(text).not.toContain("@@");
 });
+
+test("an edit row says open on hover without shifting, and keeps its card lit", () => {
+  const ui = new Workbench({ paint, contextRail: new CliContextRail({ id: "test", provider: "test" }, "/project"), sessionTitle: "Test", version: "test", onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} } });
+  const internals = ui as unknown as { sessionView: SessionView };
+  ui.beginTurn({ userText: "Implement this", at: "12:00" });
+  ui.toolRequested({ toolCallId: "edit", name: "write_file", arguments: { path: "src/new.ts", content: "export const answer = 42;\n" } });
+  ui.toolFinished({ toolCallId: "edit", name: "write_file", state: "done", changes: [{ path: "src/new.ts", before: null, after: "export const answer = 42;\n", beforeExists: false, afterExists: true }] });
+  ui.assistantDelta("Added the answer.");
+  ui.finishTurn("completed", "Done");
+  let rows = ui.frame(120, 36).rows;
+  expect(rows.some((row) => /\bcopy\b/.test(row))).toBe(false);
+  const at = rows.findIndex((row) => row.includes("src/new.ts") && row.includes("+1 −0"));
+  expect(at).toBeGreaterThan(-1);
+  const rest = rows[at]!;
+  expect(rest).not.toContain("open ▸");
+  expect(internals.sessionView.hover(at, 40, 0)).toBe(true);
+  rows = ui.frame(120, 36).rows;
+  expect(rows[at]).toContain("open ▸");
+  expect(visibleLength(rows[at]!)).toBe(visibleLength(rest));
+  expect(rows[at]!.indexOf("+1 −0")).toBe(rest.indexOf("+1 −0"));
+  // The row sits inside the response card, whose copy link stays shown.
+  expect(rows.some((row) => /\bcopy\b/.test(row))).toBe(true);
+});

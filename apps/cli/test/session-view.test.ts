@@ -2098,6 +2098,37 @@ test("the approval card takes Figma's spacing on tall terminals and stays compac
   expect(card(24).filter((row) => row === "")).toHaveLength(0);
 });
 
+test("agent questions follow Figma 101:736: one at a time, Enter takes the suggestion, typing answers in your own words", async () => {
+  const { ui, screen, state, key } = fixture("approval");
+  const questions = [{ question: "Which guard should change?", suggestions: ["The lexer guard", "Both guards"] },
+    { question: "Allow digits after the first letter?", reason: "The ASCII rule already does.", suggestions: ["Yes, match ASCII"] }];
+  const answers = ui.askQuestions(questions);
+  let text = screen(120, 36);
+  expect(text).toMatch(/\? Question 1 of 2 +ask_user · Turn \d+/);
+  expect(text).toMatch(/1 {2}The lexer guard +suggested Enter/);
+  expect(text).toContain("3  Type your own answer…");
+  expect(text).toMatch(/Enter accept · next {2}↑↓ choose {2}type your own answer {2}Esc let the agent decide/);
+  expect(text).toMatch(/● question/);
+  key("return");
+  text = screen(120, 36);
+  expect(text).toContain("✓ Which guard should change?  ·  The lexer guard");
+  expect(text).toMatch(/\? Question 2 of 2/);
+  expect(text).toContain("The ASCII rule already does.");
+  expect(text).toContain("← previous");
+  state.onKeypress("only after a letter", {});
+  expect(screen(120, 36)).toMatch(/2 {2}only after a letter▏ +Enter/);
+  key("return");
+  expect(await answers).toEqual([{ answer: "The lexer guard", source: "suggestion" }, { answer: "only after a letter", source: "typed" }]);
+  expect(screen(120, 36)).not.toContain("Question 2 of 2");
+  // Clicking a suggestion answers with it; Esc lets the agent decide the rest.
+  const clicked = ui.askQuestions(questions);
+  const rows = screen(120, 36).split("\n");
+  const row = rows.findIndex((line) => line.includes("Both guards"));
+  state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("Both guards") });
+  key("escape");
+  expect(await clicked).toEqual([{ answer: "Both guards", source: "suggestion" }, { answer: null, source: "skipped" }]);
+});
+
 test("clicking a chooser row picks that row, not its neighbour", async () => {
   const { ui, state, screen } = fixture("complete");
   const choice = ui.choose("Switch model", ["first-model", "second-model", "third-model"], 0, { noun: "models" });

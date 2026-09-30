@@ -191,6 +191,60 @@ describe("Demesne daemon", () => {
     expect(state.latestProviderCall?.usage).toEqual({ inputTokens: 140, outputTokens: 12, totalTokens: 152 });
   });
 
+  test("ask_user pauses the turn until the user answers, then hands the answers to the model", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "workspace");
+    const dataPath = join(directory, "data");
+    mkdirSync(workspacePath);
+    mkdirSync(dataPath);
+    const offered: string[][] = [];
+    let toolResult = "";
+    const questions = [{ question: "Which guard should change?", suggestions: ["The lexer guard", "Both"] }, { question: "Allow digits?" }];
+    const processor: TurnProcessor = {
+      providerId: "asking-provider", modelId: "asking-model", contextCapacity: 8_192, maxOutputTokens: 1_536,
+      async listModels() { return [{ id: this.modelId, provider: this.providerId, contextWindow: this.contextCapacity }]; },
+      async *stream(messages, tools) {
+        offered.push(tools.map((tool) => tool.name));
+        const last = messages.at(-1);
+        if (last?.role === "tool") {
+          toolResult = String(last.content);
+          yield { type: "text_delta" as const, delta: "Thanks, changing the lexer guard." };
+          return;
+        }
+        if (messages.some((message) => message.role === "user" && String(message.content).includes("non-interactive"))) {
+          yield { type: "text_delta" as const, delta: "Done." };
+          return;
+        }
+        yield { type: "tool_call_delta" as const, index: 0, idDelta: "call-ask", nameDelta: "ask_user", argumentsDelta: JSON.stringify({ questions }) };
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Questions", workspacePath }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "Accept Unicode identifiers", permissionMode: "ask" }) });
+    const asked = await waitForPersistedEvent(running.url, created.session.id, submitted.eventId, "question.requested");
+    expect(asked.payload.questions).toEqual([{ question: "Which guard should change?", suggestions: ["The lexer guard", "Both"] }, { question: "Allow digits?", suggestions: [] }]);
+    const questionId = String(asked.payload.questionId);
+    // Answers must line up one-to-one with the questions.
+    const mismatched = await fetch(new URL(`/v1/questions/${questionId}`, running.url), { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers: [{ source: "suggestion", answer: "The lexer guard" }] }) });
+    expect(mismatched.status).toBe(409);
+    await jsonRequest(running.url, `/v1/questions/${questionId}`, { method: "POST",
+      body: JSON.stringify({ answers: [{ source: "suggestion", answer: "The lexer guard" }, { source: "typed", answer: "yes, after the first letter" }] }) });
+    const events = await collectPersistedEvents(running.url, created.session.id, submitted.eventId);
+    expect(events.map((event) => event.type)).toEqual(expect.arrayContaining(["question.requested", "question.resolved", "tool.call_completed", "turn.completed"]));
+    expect(toolResult).toBe("1. Which guard should change?\n   Answer: The lexer guard\n2. Allow digits?\n   Answer: yes, after the first letter (the user's own words)");
+    expect(offered[0]).toContain("ask_user");
+    // A non-interactive turn is never offered the tool.
+    const quiet = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "non-interactive follow-up", permissionMode: "deny" }) });
+    await collectPersistedEvents(running.url, created.session.id, quiet.eventId);
+    expect(offered.at(-1)).not.toContain("ask_user");
+  });
+
   test("persists a completed turn and replays its events after restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

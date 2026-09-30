@@ -36,7 +36,7 @@ export const artifactRecords = (run: SessionRun, kind: ArtifactKind): ToolEntry[
   : kind === "verification" ? tool.phase === "verify" && tool.name === "run_command" : failed(tool));
 export const toolName = (tool: ToolEntry): string => ({ read_file: "Read", read_files: "Read", edit_file: "Edit", write_file: "Write",
   search_files: "Search", list_files: "List", git_status: "Git status", git_diff: "Git diff", move_path: "Move", delete_path: "Delete",
-  web_search: "Web search", command_logs: "Command output", command_stop: "Stop command" })[tool.name] ?? tool.name.replaceAll("_", " ");
+  web_search: "Web search", command_logs: "Command output", command_stop: "Stop command", ask_user: "Ask" })[tool.name] ?? tool.name.replaceAll("_", " ");
 
 /// The official design's chronological request bands and assistant cards.
 /// Thinking and tool disclosures share its scroll position; evidence links
@@ -148,7 +148,7 @@ export function renderSessionFlow(options: {
     const totals = tool.phase === "change" ? changeTotals(tool) : "";
     const styledTotals = totals ? totals.split(" ").map((part) => paint.text(part, part.startsWith("+") ? "citron" : "signal")).join(" ") : "";
     const meta = tool.phase === "change" ? [paint.text(state, stateTone), styledTotals].filter(Boolean).join(" ")
-      : paint.text(tool.waiting ? "awaiting approval" : stopped ? "stopped" : tool.state === "denied" ? "denied"
+      : paint.text(tool.waiting ? tool.name === "ask_user" ? "awaiting your answer" : "awaiting approval" : stopped ? "stopped" : tool.state === "denied" ? "denied"
         : tool.exitCode !== undefined ? `${tool.exitCode === 0 && !failed(tool) ? "passed" : "failed"} · exit ${tool.exitCode}` : unknown ? "exit unknown" : "", tool.waiting ? "signal" : "muted");
     const timing = tool.durationMs !== undefined && !failed(tool) ? duration(tool.durationMs) : "";
     // Figma 39:533: an edit row opens its diff, and says so on hover or focus.
@@ -439,7 +439,7 @@ export function renderSessionFlow(options: {
     const liveTool = run.settled ? undefined : run.tools.findLast((tool) => tool.waiting || tool.state === "running");
     if (liveTool) {
       const target = safe(liveTool.detail ?? "").replace(/^\$\s*/, "");
-      const doing = liveTool.waiting ? "Waiting for your approval ·"
+      const doing = liveTool.waiting ? liveTool.name === "ask_user" ? "Waiting for your answer ·" : "Waiting for your approval ·"
         : liveTool.name === "run_command" ? liveTool.phase === "verify" ? "Checking" : "Running"
         : liveTool.phase === "change" ? "Drafting" : /search|grep|find/.test(liveTool.name) ? "Searching"
         : /list/.test(liveTool.name) ? "Listing" : /read/.test(liveTool.name) ? "Reading" : "Working on";

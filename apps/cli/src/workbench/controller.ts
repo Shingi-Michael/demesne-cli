@@ -25,7 +25,7 @@ import {
   type SlashCommand,
   type ToolRowState,
 } from "@demesne/brand";
-import { driveComposerAllowed, type DriveAction, type DriveObservation, type DriveState, type EventEnvelope, type PermissionDecision, type SessionStateResponse } from "@demesne/protocol";
+import { driveComposerAllowed, type DriveAction, type DriveObservation, type DriveState, type EventEnvelope, type PermissionDecision, type SessionStateResponse, type UserAnswer, type UserQuestion } from "@demesne/protocol";
 import type { DriveControl } from "../agent-drive.ts";
 import { drawDriveFeedback, driveTypingChunks, waitForDriveFrame, type DriveFeedback } from "./drive-feedback.ts";
 import { driveActivityLabel, driveTracePreview } from "./drive-trace-view.ts";
@@ -73,6 +73,7 @@ import {
 import { escapePresses, interruptArmed, reduceInterruptKey } from "../interrupt-key.ts";
 import { reducedMotionEnabled } from "../motion.ts";
 import { approvalOptions, reduceApprovalSelection } from "../approval-selection.ts";
+import { createQuestionPrompt, ownRow, reduceQuestionPrompt, type QuestionPromptState } from "./question-prompt.ts";
 import { filterDialogIndices, reduceDialogPicker } from "../session-picker.ts";
 import { planTranscript, type PlannedTool } from "./transcript.ts";
 import { classifyTurnPhase } from "../turn-activity.ts";
@@ -227,6 +228,9 @@ export class Workbench {
   private promptContext: PromptContext = { history: [], mentions: [], commands: [] };
   private promptResolver: ((value: string) => void) | null = null;
   private approvalResolver: ((decision: PermissionDecision) => void) | null = null;
+  /// Questions from the agent (`ask_user`), shown while the mode is "approval"
+  /// so every waiting-on-you rule applies: keys go to the card, Drive waits.
+  private question: { state: QuestionPromptState; resolve: (answers: UserAnswer[]) => void } | null = null;
   private approval: ApprovalRequest | null = null;
   private approvalSelected = 0;
   private dialogResolver: ((index: number | null) => void) | null = null;
@@ -881,6 +885,22 @@ export class Workbench {
     });
   }
 
+  /// Shows the agent's questions one at a time and resolves with every answer
+  /// once the last is answered, or with the rest skipped on Esc.
+  askQuestions(questions: readonly UserQuestion[]): Promise<UserAnswer[]> {
+    this.mode = "approval";
+    this.requestRender();
+    return new Promise((resolve) => { this.question = { state: createQuestionPrompt(questions), resolve }; this.requestRender(); });
+  }
+
+  private answerQuestions(answers: UserAnswer[]): void {
+    const pending = this.question;
+    this.question = null;
+    this.mode = "streaming";
+    this.requestRender();
+    pending?.resolve(answers);
+  }
+
   askApproval(request: ApprovalRequest): Promise<PermissionDecision> {
     this.approval = request;
     this.approvalSelected = approvalOptions(true, request.allowPersist, request.toolName === "run_command").selectedIndex;
@@ -1122,6 +1142,13 @@ export class Workbench {
   };
 
   private handleModalKey(text: string, key: PromptEditorKey): boolean {
+    if (this.mode === "approval" && this.question) {
+      const result = reduceQuestionPrompt(this.question.state, key, text);
+      this.question.state = result.state;
+      if ("answers" in result) this.answerQuestions(result.answers);
+      else this.requestRender();
+      return true;
+    }
     if (this.mode === "approval") {
       const next = reduceApprovalSelection(this.approvalSelected, true, key, this.approval?.allowPersist ?? false);
       this.approvalSelected = next.selectedIndex;
@@ -1503,6 +1530,7 @@ export class Workbench {
   }
 
   private inputLineCount(columns = process.stdout.columns ?? 80, rows = this.layout.height): number {
+    if (this.mode === "approval" && this.question) return this.questionCardRows(columns - (columns >= 65 ? 4 : 2) - 4, this.options.paint, rows >= AIRY_APPROVAL_ROWS).length + 2;
     if (this.mode === "approval") {
       // Title, summary, previews, the sandbox note and one row of choices.
       // Card: borders, title, summary, the inset block and the buttons, plus
@@ -1985,7 +2013,7 @@ export class Workbench {
     const renderOptions = { paint, drive: this.drive,
       animateScroll: this.started,
       title: this.sessionTitle, path: shortenPath(root), branch: rail.workspaceBranch, now: Date.now(), openedAt: this.sessionOpenedAt, createdAt: this.sessionCreatedAt,
-      presence: this.mode === "approval" ? "waiting" as const : this.state,
+      presence: this.mode === "approval" ? "waiting" as const : this.state, asking: Boolean(this.question),
       markdown: (entry: AssistantEntry, width: number) => this.renderedMarkdown(entry, width),
     };
     const frame = this.sessionView.render({ ...renderOptions, width, height: sessionHeight });
@@ -2056,7 +2084,7 @@ export class Workbench {
     }
     for (let row = 0; row < layout.input.height; row++) canvas.put(layout.input.row + row, 0, input.lines[row] ?? "", width, "surface");
     for (const zone of input.zones) this.mouseZones.push({ ...zone, row: layout.input.row + 1 + zone.row });
-    const status = sessionStatus({ width: workspaceWidth, paint, state: this.mode === "approval" ? "APPROVAL" : this.sessionView.latest?.status ?? "READY",
+    const status = sessionStatus({ width: workspaceWidth, paint, state: this.mode === "approval" ? this.question ? "QUESTION" : "APPROVAL" : this.sessionView.latest?.status ?? "READY",
       context: this.sessionView.latest?.settled ? this.sessionView.latest.receipt?.context ?? rail.contextSnapshot : rail.contextSnapshot,
       now: Date.now(), reducedMotion: reducedMotionEnabled(),
       presence: this.state, elapsed: this.turnStartedAt === null ? undefined : Math.max(0, Date.now() - this.turnStartedAt),
@@ -2202,6 +2230,7 @@ export class Workbench {
     if (this.sessionLayout && this.mode === "dialog") return withOwnTitle(this.composeChooser(width, inset, paint));
     // These draw their own titles, so their zones cancel the frame's +1 row
     // offset that assumes the wrapper's title row above the content.
+    if (this.mode === "approval" && this.question) return withOwnTitle(this.composeQuestionCard(width, inset, paint));
     if (this.sessionLayout && this.mode === "approval" && this.approval) return withOwnTitle(this.composeApprovalCard(width, inset, paint));
     if (this.sessionLayout) {
       const canvas = new Canvas(width, this.layout.input.height, paint);
@@ -2544,6 +2573,74 @@ export class Workbench {
   /// the tool and turn; the command sits in an inset block with where it runs
   /// and that it is not sandboxed; Allow once and Deny lead, with the saved
   /// options as quiet key hints. Keys and selection are unchanged.
+  /// Figma 101:736: the card's rows between its borders. Row text is painted;
+  /// `select` marks the rows a click chooses, `wash` the selected one.
+  private questionCardRows(inner: number, paint: Painter, airy: boolean): { text: string; right?: string; wash?: boolean; select?: number }[] {
+    const { state } = this.question!;
+    const question = state.questions[state.index]!;
+    const rows: { text: string; right?: string; wash?: boolean; select?: number }[] = [];
+    const turn = this.sessionView.latest?.number;
+    const count = state.questions.length;
+    rows.push({ text: paint.text("? ", "thinking") + paint.text(count > 1 ? `Question ${state.index + 1} of ${count}` : "Question", "paper"),
+      right: paint.text(["ask_user", turn ? `Turn ${turn}` : ""].filter(Boolean).join(" · "), "muted") });
+    // Answered questions collapse to one line each; the latest two stay visible.
+    for (let index = Math.max(0, state.index - 2); index < state.index; index++) {
+      const answer = state.answers[index];
+      const said = answer?.source === "skipped" || !answer?.answer ? "agent decides" : answer.answer;
+      rows.push({ text: paint.text("✓ ", "citron") + paint.text(`${sanitizeTerminalLine(state.questions[index]!.question)}  ·  ${sanitizeTerminalLine(said)}`, "muted") });
+    }
+    for (const line of wrapDisplayText(sanitizeTerminalLine(question.question), inner).slice(0, 3)) rows.push({ text: paint.text(line, "strong") });
+    if (question.reason) rows.push({ text: paint.text(sanitizeTerminalLine(question.reason), "secondary") });
+    if (airy) rows.push({ text: "" });
+    const own = ownRow(question);
+    question.suggestions.forEach((suggestion, index) => {
+      const selected = state.selected === index;
+      rows.push({ text: `${paint.text(`${index + 1}  `, selected ? "electric" : "muted")}${paint.text(sanitizeTerminalLine(suggestion), selected ? "electric" : "paper")}`,
+        right: index === 0 ? paint.text("suggested", "muted") + (selected ? " " + keycap(paint, "Enter") : "") : selected ? keycap(paint, "Enter") : "", wash: selected, select: index });
+    });
+    const typed = state.typed[state.index] ?? "";
+    const editing = state.selected === own;
+    rows.push({ text: `${paint.text(`${own + 1}  `, editing ? "electric" : "muted")}${typed ? paint.text(sanitizeTerminalLine(typed), "paper") : paint.text("Type your own answer…", "muted")}${editing ? paint.text("▏", "electric") : ""}`,
+      right: editing && typed.trim() ? keycap(paint, "Enter") : "", wash: editing, select: own });
+    if (airy) rows.push({ text: "" });
+    const hints: [string, string][] = [["Enter", state.index + 1 < count ? "accept · next" : "accept"], ["↑↓", "choose"], ["type", "your own answer"]];
+    if (state.index > 0) hints.push(["←", "previous"]);
+    hints.push(["Esc", "let the agent decide"]);
+    rows.push({ text: keyHints(paint, hints) });
+    return rows;
+  }
+
+  private composeQuestionCard(width: number, inset: number, paint: Painter): { lines: string[]; cursor: { row: number; column: number } | null; zones: InputZone[] } {
+    const height = this.layout.input.height, boxWidth = width - inset * 2, inner = boxWidth - 4, left = inset + 2;
+    const canvas = new Canvas(width, height, paint), zones: InputZone[] = [];
+    const rows = this.questionCardRows(inner, paint, this.layout.height >= AIRY_APPROVAL_ROWS);
+    for (let row = 0; row < height; row++) canvas.put(row, inset, "", boxWidth, "surface");
+    canvas.put(0, inset, paint.text(`╭${"─".repeat(Math.max(0, boxWidth - 2))}╮`, "thinking"), boxWidth, "surface");
+    canvas.put(height - 1, inset, paint.text(`╰${"─".repeat(Math.max(0, boxWidth - 2))}╯`, "thinking"), boxWidth, "surface");
+    // When the card is short, keep the title, the choices and the keys; drop the middle first.
+    const room = Math.max(0, height - 2);
+    const shown = rows.length <= room ? rows : [rows[0]!, ...rows.slice(rows.length - (room - 1))].slice(0, room);
+    shown.forEach((entry, index) => {
+      const row = index + 1;
+      const background = entry.wash ? "menuSelection" : "surface";
+      canvas.put(row, inset, paint.text("│", "thinking"), 1, "surface");
+      canvas.put(row, inset + boxWidth - 1, paint.text("│", "thinking"), 1, "surface");
+      canvas.put(row, inset + 1, entry.wash ? paint.text("▎", "electric") : "", boxWidth - 2, background);
+      canvas.put(row, left, formatFooterLine(truncateText(entry.text, Math.max(1, inner - visibleLength(entry.right ?? "") - 2)), entry.right ?? "", inner), inner, background);
+      if (entry.select !== undefined) {
+        const choice = entry.select;
+        zones.push({ row, column: inset + 1, width: boxWidth - 2, run: () => {
+          if (!this.question) return;
+          this.question.state = { ...this.question.state, selected: choice };
+          const result = reduceQuestionPrompt(this.question.state, { name: "return" });
+          this.question.state = result.state;
+          if ("answers" in result) this.answerQuestions(result.answers); else this.requestRender();
+        } });
+      }
+    });
+    return { lines: canvas.rows, cursor: null, zones };
+  }
+
   private composeApprovalCard(width: number, inset: number, paint: Painter): { lines: string[]; cursor: { row: number; column: number } | null; zones: InputZone[] } {
     const approval = this.approval!, height = this.layout.input.height, boxWidth = width - inset * 2;
     const canvas = new Canvas(width, height, paint), zones: InputZone[] = [];
@@ -2723,6 +2820,11 @@ function parseArguments(value: unknown): Record<string, unknown> {
 }
 
 function toolDetail(name: string, input: Record<string, unknown>): string | undefined {
+  if (name === "ask_user") {
+    const questions = Array.isArray(input.questions) ? input.questions : [];
+    const first = questions[0] && typeof questions[0] === "object" && typeof (questions[0] as { question?: unknown }).question === "string" ? (questions[0] as { question: string }).question : "";
+    return first ? `${first}${questions.length > 1 ? ` (+${questions.length - 1} more)` : ""}` : undefined;
+  }
   if (name === "move_path") {
     const from = typeof input.from === "string" ? input.from : undefined;
     const to = typeof input.to === "string" ? input.to : undefined;

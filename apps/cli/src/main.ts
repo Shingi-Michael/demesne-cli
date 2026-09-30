@@ -7,6 +7,9 @@ import {
   type EventEnvelope,
   type ModelDescriptor,
   type PermissionDecision,
+  type UserAnswer,
+  type UserQuestion,
+  parseUserQuestions,
   type RuntimeProfileStatus,
   type Session,
   type SessionStateResponse,
@@ -1851,6 +1854,26 @@ async function runWorkbenchTurn(options: {
             throw new Error(`Could not deliver the approval decision: ${error instanceof Error ? error.message : "request failed"}`);
           }
         }
+      } else if (event.type === "question.requested") {
+        if (pacer) await pacer.drain();
+        const questionId = typeof event.payload.questionId === "string" ? event.payload.questionId : null;
+        const toolCallId = typeof event.payload.toolCallId === "string" ? event.payload.toolCallId : null;
+        let questions: UserQuestion[] = [];
+        try { questions = parseUserQuestions(event.payload.questions); } catch { questions = []; }
+        if (questionId && questions.length) {
+          presence = "waiting";
+          if (toolCallId) options.workbench.toolWaiting(toolCallId, true);
+          updateFooter();
+          const answers = await options.workbench.askQuestions(questions);
+          if (toolCallId) options.workbench.toolWaiting(toolCallId, false);
+          presence = "working";
+          try {
+            await request(`/v1/questions/${questionId}`, { method: "POST", body: JSON.stringify({ answers }) });
+          } catch (error) {
+            void request(`/v1/turns/${submitted.turn.id}/cancel`, { method: "POST", body: JSON.stringify({}) }).catch(() => undefined);
+            throw new Error(`Could not deliver your answers: ${error instanceof Error ? error.message : "request failed"}`);
+          }
+        }
       } else if (event.type === "turn.completed") {
         status = "completed";
         presence = "done";
@@ -2205,6 +2228,19 @@ async function renderTurn(
         }
       }
 
+      if (event.type === "question.requested") {
+        await drainResponse();
+        closeReasoning();
+        stopBeacon();
+        if (shouldNotifyApproval(notificationOptions(interactive))) notify("The agent has a question for you", notificationOptions(interactive));
+        chatState.permissionActive = true;
+        try {
+          await answerQuestionsInScrollback(event, interactive);
+        } finally {
+          chatState.permissionActive = false;
+        }
+      }
+
       if (event.type === "tool.call_started") {
         await drainResponse();
         const toolName = String(event.payload.name ?? "tool");
@@ -2359,6 +2395,36 @@ async function renderTurn(
     }
     stream.abort();
   }
+}
+
+/// The scrollback prompt's version of the question card: one question at a
+/// time; Enter takes the suggested answer, a number picks another, anything
+/// else is the user's own answer. Without a terminal every question is skipped.
+async function answerQuestionsInScrollback(event: EventEnvelope, interactive: boolean): Promise<void> {
+  const questionId = typeof event.payload.questionId === "string" ? event.payload.questionId : null;
+  let questions: UserQuestion[] = [];
+  try { questions = parseUserQuestions(event.payload.questions); } catch { return; }
+  if (!questionId) return;
+  const answers: UserAnswer[] = [];
+  const rl = interactive && process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null;
+  try {
+    for (const [index, question] of questions.entries()) {
+      if (!rl) { answers.push({ answer: null, source: "skipped" }); continue; }
+      const count = questions.length > 1 ? ` ${index + 1} of ${questions.length}` : "";
+      console.log(`\n  ${paint.text("?", "thinking")} ${paint.bold(`Question${count}`, "paper")}  ${sanitizeTerminalLine(question.question)}`);
+      if (question.reason) console.log(paint.dim(`    ${sanitizeTerminalLine(question.reason)}`));
+      question.suggestions.forEach((suggestion, option) => console.log(`    ${paint.text(String(option + 1), option === 0 ? "electric" : "muted")}  ${sanitizeTerminalLine(suggestion)}${option === 0 ? paint.dim("  (Enter)") : ""}`));
+      const reply = (await rl.question(paint.dim(question.suggestions.length ? "    Enter, a number, or your own answer (Esc-Enter skips): " : "    Your answer (empty skips): "))).trim();
+      const picked = /^[1-9]$/.test(reply) ? question.suggestions[Number(reply) - 1] : undefined;
+      if (picked) answers.push({ answer: picked, source: "suggestion" });
+      else if (!reply && question.suggestions[0]) answers.push({ answer: question.suggestions[0], source: "suggestion" });
+      else if (reply && reply !== "\x1b") answers.push({ answer: reply, source: "typed" });
+      else answers.push({ answer: null, source: "skipped" });
+    }
+  } finally {
+    rl?.close();
+  }
+  await request(`/v1/questions/${questionId}`, { method: "POST", body: JSON.stringify({ answers }) });
 }
 
 async function resolvePermission(event: EventEnvelope, onCancel?: () => void): Promise<void> {

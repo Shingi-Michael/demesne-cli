@@ -4,6 +4,7 @@ import {
   isRecord,
   parseCreateSessionRequest,
   parseCompactSessionRequest,
+  parseAnswerQuestionsRequest,
   parseResolvePermissionRequest,
   parseSubmitTurnRequest,
   parseUndoSessionRequest,
@@ -30,6 +31,7 @@ import { SessionCompactor } from "./session-compaction.ts";
 import type { ContextPlanner } from "./context-planner.ts";
 import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
+import { QuestionBroker } from "./questions.ts";
 import { ConfigAllowlist } from "./allowlist.ts";
 import { canonicalWorkspace, listWorkspaceFiles, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
 import { detectGitBranch } from "./git-branch.ts";
@@ -109,6 +111,7 @@ export function createDaemonApp(options: {
     console.warn(`Ignoring ${invalidRules.length} invalid permissions.allow entr${invalidRules.length === 1 ? "y" : "ies"}: ${invalidRules.join(", ")}`);
   }
   const permissions = new PermissionBroker(allowlist);
+  const questions = new QuestionBroker();
   const inferenceSlots = options.inferenceSlots ?? 1;
   const runtimeProfile = processor.runtimeStatus?.().profile;
   if (runtimeProfileRequiresSingleInferenceSlot(runtimeProfile) && inferenceSlots !== 1) {
@@ -143,6 +146,7 @@ export function createDaemonApp(options: {
       providerRequestTimeoutMs: options.providerRequestTimeoutMs,
       providerEventLimit: options.providerEventLimit,
       providerVision: options.providerVision,
+      questions,
       ...options.agent,
     },
   );
@@ -494,6 +498,14 @@ export function createDaemonApp(options: {
         return json(response, 202);
       }
 
+      if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "questions") {
+        const body = parseAnswerQuestionsRequest(await readJson(request));
+        if (!questions.resolve(path[2]!, body.answers)) {
+          return apiError("invalid_state", "Question is no longer pending, or the answers do not match what was asked", 409);
+        }
+        return json({ questionId: path[2] }, 202);
+      }
+
       if (
         request.method === "POST" &&
         path.length === 3 &&
@@ -524,6 +536,7 @@ export function createDaemonApp(options: {
         const { turn, event } = store.cancelTurn(turnId);
         controller.abort(new DOMException("Turn cancelled", "AbortError"));
         permissions.cancelTurn(turnId, controller.signal.reason);
+        questions.cancelTurn(turnId, controller.signal.reason);
         const response: CancelTurnResponse = { turn, eventId: event.eventId };
         return json(response);
       }
@@ -624,6 +637,7 @@ export function createDaemonApp(options: {
         if (turn?.status === "queued" || turn?.status === "running") store.cancelTurn(turnId);
         controller.abort(new DOMException("Daemon shutting down", "AbortError"));
         permissions.cancelTurn(turnId, controller.signal.reason);
+        questions.cancelTurn(turnId, controller.signal.reason);
       }
       await scheduler.close(new DOMException("Daemon shutting down", "AbortError"));
       await Promise.allSettled(activeTurns);

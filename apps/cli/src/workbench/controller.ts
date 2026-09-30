@@ -299,12 +299,20 @@ export class Workbench {
     return this.started;
   }
 
+  /// Drive state is saved per workspace, but a mission belongs to the session
+  /// it started in: other sessions, including new ones, start without it.
+  private get drive(): DriveState | null {
+    const state = this.driveState;
+    return state && (!this.sessionId || state.homeSessionId === this.sessionId) ? state : null;
+  }
+
   setDrive(state: DriveState | null): void {
-    const previous = this.driveState?.status;
+    const previous = this.drive?.status;
     this.driveState = state;
     if (!this.sessionView.paused) this.driveReadingHeld = false;
     if (!state || ["paused", "stopped", "blocked", "completed", "idle"].includes(state.status)) this.clearDriveFeedback();
-    if (state && previous !== state.status && ["completed", "blocked", "idle"].includes(state.status)) this.showDrive();
+    const shown = this.drive;
+    if (shown && previous !== shown.status && ["completed", "blocked", "idle"].includes(shown.status)) this.showDrive();
     this.requestRender();
   }
   showDrive(): void { if (!this.sessionView.driveOpen) this.openRailAction("drive"); }
@@ -1943,11 +1951,11 @@ export class Workbench {
     if (panelOpen && this.sessionView.panelExpanded) geometry.overlay = true;
     const width = geometry.conversationWidth;
     const gap = feedback ? 1 : 0;
-    const trace = this.driveState?.traces?.at(-1);
+    const trace = this.drive?.traces?.at(-1);
     const cardHeight = trace && !this.sessionView.driveOpen && !modal ? layout.height >= 18 ? 4 : 1 : 0;
     const sessionHeight = layout.input.row - gap - cardHeight;
     const root = this.options.workspaceRoot ?? rail.workspacePath;
-    const renderOptions = { paint, drive: this.driveState,
+    const renderOptions = { paint, drive: this.drive,
       animateScroll: this.started,
       title: this.sessionTitle, path: shortenPath(root), branch: rail.workspaceBranch, now: Date.now(), openedAt: this.sessionOpenedAt, createdAt: this.sessionCreatedAt,
       presence: this.mode === "approval" ? "waiting" as const : this.state,
@@ -2011,9 +2019,9 @@ export class Workbench {
       const top = layout.input.row - cardHeight;
       this.driveCardBounds = { row: top, height: cardHeight, width };
       const elapsed = Math.max(0, ((trace.completedAt ?? Date.now()) - trace.startedAt) / 1000).toFixed(1);
-      canvas.put(top, inset, paint.text(`▷ DRIVE · ${driveActivityLabel(this.driveState!, trace)} · ${elapsed}s · Alt+J details`, "thinking"), workspaceWidth, "thinkingSurface");
+      canvas.put(top, inset, paint.text(`▷ DRIVE · ${driveActivityLabel(this.drive!, trace)} · ${elapsed}s · Alt+J details`, "thinking"), workspaceWidth, "thinkingSurface");
       if (cardHeight > 1) {
-        const preview = this.driveState!.status === "waiting" ? this.driveState!.activity : driveTracePreview(trace);
+        const preview = this.drive!.status === "waiting" ? this.drive!.activity : driveTracePreview(trace);
         const lines = wrapDisplayText(sanitizeTerminalLine(preview.slice(-4000).replace(/\s+/g, " ")), Math.max(1, workspaceWidth - 2)).slice(-(cardHeight - 1));
         for (let row = 1; row < cardHeight; row++) canvas.put(top + row, inset, paint.text(`▎ ${lines[row - 1] ?? ""}`, "secondary"), workspaceWidth, "thinkingSurface");
       }
@@ -2043,7 +2051,7 @@ export class Workbench {
 
   private drawSidebarRail(canvas: Canvas, column: number, width: number): void {
     const rail = sidebarRail(width, this.layout.height, this.options.paint, this.mode === "streaming", this.railHovered,
-      this.options.drive ? this.driveState?.status === "running" || this.driveState?.status === "waiting" ? "active" : "idle" : undefined);
+      this.options.drive ? this.drive?.status === "running" || this.drive?.status === "waiting" ? "active" : "idle" : undefined);
     rail.rows.forEach((text, row) => canvas.put(row, column, text, width, "surface"));
     this.railZones = rail.zones.map((zone) => ({ ...zone, column: column + zone.column }));
     const hovered = this.railZones.find((zone) => zone.action === this.railHovered);
@@ -2626,13 +2634,13 @@ export class Workbench {
   }
 
   private driveShortcut(text: string, key: { ctrl?: boolean; meta?: boolean }): "pause" | "resume" | "stop" | null {
-    if (!this.options.drive || !this.driveState || key.ctrl || key.meta || !this.sessionView.driveOpen || !this.sessionView.focused || this.editor.value) return null;
-    const status = this.driveState.status;
-    if (text === "s" && !["stopped", "completed"].includes(status) && !this.driveState.protection?.trip) return "stop";
+    if (!this.options.drive || !this.drive || key.ctrl || key.meta || !this.sessionView.driveOpen || !this.sessionView.focused || this.editor.value) return null;
+    const status = this.drive.status;
+    if (text === "s" && !["stopped", "completed"].includes(status) && !this.drive.protection?.trip) return "stop";
     if (text !== "p") return null;
     if (status === "running" || status === "waiting") return "pause";
-    const resumable = ["paused", "blocked", "stopped", "idle"].includes(status) || status === "completed" && !!this.driveState.autonomy;
-    return this.driveState.protection?.trip || !resumable ? null : "resume";
+    const resumable = ["paused", "blocked", "stopped", "idle"].includes(status) || status === "completed" && !!this.drive.autonomy;
+    return this.drive.protection?.trip || !resumable ? null : "resume";
   }
 
   /// A dialog row click selects it; clicking the selected row confirms.

@@ -206,7 +206,7 @@ demesne --version               # also checks for a newer release once a day
 
 - **Commands aren't sandboxed.** `run_command` runs on your machine as your user. It starts in the workspace with a filtered environment and process limits.
 - **Secrets stay out of reach.** Sensitive files are never read or searched automatically, including `.env`, `.git`, `.ssh`, `.aws`, credential files and private keys.
-- **Saved approvals.** They live in `[permissions] allow`, for example `"edit_file:src"` or `"run_command:git status"`. A saved command rule matches that exact command only.
+- **Saved approvals.** They live in `[permissions] allow`, for example `"edit_file:src"` or `"run_command:git status"`. A saved command rule matches that exact command only; end it with ` *` (`"run_command:git status *"`) to also allow further arguments.
 
 ## Configuration
 

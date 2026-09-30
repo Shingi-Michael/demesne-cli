@@ -36,14 +36,29 @@ describe("parseAllowRule", () => {
 });
 
 describe("allowRuleMatches", () => {
-  test("matches an exact argv prefix with word boundaries", () => {
+  test("a saved command matches that exact argv only", () => {
     const rule = parseAllowRule("run_command:git status")!;
     expect(allowRuleMatches(rule, "run_command", { argv: ["git", "status"] })).toBe(true);
-    expect(allowRuleMatches(rule, "run_command", { argv: ["git", "status", "--short"] })).toBe(true);
+    expect(allowRuleMatches(rule, "run_command", { argv: ["git", "status", "--short"] })).toBe(false);
+    const remove = parseAllowRule("run_command:rm -rf build")!;
+    expect(allowRuleMatches(remove, "run_command", { argv: ["rm", "-rf", "build"] })).toBe(true);
+    expect(allowRuleMatches(remove, "run_command", { argv: ["rm", "-rf", "build", "/"] })).toBe(false);
     expect(allowRuleMatches(rule, "run_command", { argv: ["git", "statusx"] })).toBe(false);
     expect(allowRuleMatches(rule, "run_command", { argv: ["git"] })).toBe(false);
     expect(allowRuleMatches(rule, "run_command", { argv: "git status" })).toBe(false);
     expect(allowRuleMatches(rule, "edit_file", { path: "src/a.ts" })).toBe(false);
+  });
+
+  test("a trailing * opts in to further arguments, with word boundaries", () => {
+    const rule = parseAllowRule("run_command:git status *")!;
+    expect(rule).toEqual({ tool: "run_command", argv: ["git", "status"], prefix: true, raw: "run_command:git status *" });
+    expect(allowRuleMatches(rule, "run_command", { argv: ["git", "status"] })).toBe(true);
+    expect(allowRuleMatches(rule, "run_command", { argv: ["git", "status", "--short"] })).toBe(true);
+    expect(allowRuleMatches(rule, "run_command", { argv: ["git", "statusx"] })).toBe(false);
+    expect(allowRuleMatches(rule, "run_command", { argv: ["git"] })).toBe(false);
+    // `*` alone would approve any host command.
+    expect(parseAllowRule("run_command:*")).toBeNull();
+    expect(parseAllowRule("run_command: * ")).toBeNull();
   });
 
   test("matches a path scope only at directory boundaries", () => {

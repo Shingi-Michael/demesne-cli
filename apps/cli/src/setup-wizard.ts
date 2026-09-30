@@ -1,5 +1,6 @@
 import { assertProviderUrl } from "@demesne/config";
-import { formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, wrapDisplayText, type Painter, type PaletteColor } from "@demesne/brand";
+import { formatFooterLine, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, wrapDisplayText, type Painter, type PaletteColor } from "@demesne/brand";
+import { keycap, keyHints } from "./workbench/session-chrome.ts";
 import type { ProbeResult } from "./provider-probe.ts";
 
 /// `demesne setup` as the redesign's three-step wizard: Provider → Model →
@@ -13,7 +14,9 @@ export interface WizardState {
   probes: ProbeResult[] | null;
   providerIndex: number;
   custom: { text: string; error: string | null; checking: boolean };
-  auth: { url: string; status: "waiting" | "loading" | "failed"; message: string };
+  /// `expiresAt` is when the loopback callback stops listening; `copied`
+  /// marks that the sign-in link was just copied.
+  auth: { url: string; status: "waiting" | "loading" | "failed"; message: string; expiresAt?: number; copied?: boolean };
   provider: ProbeResult | null;
   modelIndex: number;
   modelText: string;
@@ -24,7 +27,8 @@ export interface WizardState {
   configPath: string;
   saved: { backup: string | null } | null;
 }
-export type WizardEffect = { kind: "rescan" | "login" | "cancel-login" | "write" | "cancel" | "finish" } | { kind: "probe"; url: string };
+export type WizardEffect = { kind: "rescan" | "login" | "cancel-login" | "write" | "cancel" } | { kind: "probe"; url: string }
+  | { kind: "copy" | "open"; url: string } | { kind: "finish"; open: boolean };
 export interface WizardKey { name?: string; ctrl?: boolean; meta?: boolean }
 
 const DEFAULT_CONTEXT = 32_768;
@@ -39,10 +43,26 @@ export function initialWizard(configPath: string, theme: WizardTheme = "auto"): 
     reviewIndex: 2, editing: null, error: null, configPath, saved: null };
 }
 
-/// Reachable servers first, keeping the probe order within each group.
+/// Reachable servers first, keeping the probe order within each group, then
+/// OpenRouter and a custom URL (Figma 34:431).
 export function providerOptions(state: WizardState): Array<ProbeResult | "custom" | "openrouter"> {
   const probes = state.probes ?? [];
-  return [...probes.filter((probe) => probe.reachable), ...probes.filter((probe) => !probe.reachable), "custom", "openrouter"];
+  return [...probes.filter((probe) => probe.reachable), ...probes.filter((probe) => !probe.reachable), "openrouter", "custom"];
+}
+
+/// Models in the order the list shows them: the recommendation (the first
+/// with the largest context) on top, the rest in the server's order.
+export function modelOrder(provider: ProbeResult | null): number[] {
+  const models = provider?.models ?? [];
+  const recommended = recommendedModel(provider);
+  const rest = models.map((_, index) => index).filter((index) => index !== recommended);
+  return recommended < 0 ? rest : [recommended, ...rest];
+}
+
+function recommendedModel(provider: ProbeResult | null): number {
+  const models = provider?.models ?? [];
+  const largest = models.reduce((best, model) => Math.max(best, model.contextWindow ?? 0), 0);
+  return largest ? models.findIndex((model) => model.contextWindow === largest) : -1;
 }
 
 export function wizardProbed(state: WizardState, probes: ProbeResult[]): WizardState {
@@ -60,9 +80,7 @@ export function wizardAuthenticated(state: WizardState, result: ProbeResult): Wi
 }
 
 function chooseProvider(state: WizardState, provider: ProbeResult): WizardState {
-  const largest = provider.models.reduce((best, model, index) =>
-    (model.contextWindow ?? 0) > (provider.models[best]?.contextWindow ?? 0) ? index : best, 0);
-  return { ...state, step: "model", provider, modelIndex: provider.models.length ? largest : 0, modelText: "", error: null };
+  return { ...state, step: "model", provider, modelIndex: modelOrder(provider)[0] ?? 0, modelText: "", error: null };
 }
 
 export function selectedModel(state: WizardState): string {
@@ -80,7 +98,11 @@ const printable = (text: string, key: WizardKey) => !key.ctrl && !key.meta && te
 
 export function reduceWizard(state: WizardState, key: WizardKey, text = ""): { state: WizardState; effect?: WizardEffect } {
   if (key.ctrl && key.name === "c") return { state, effect: { kind: "cancel" } };
-  if (state.step === "done") return { state, effect: key.name === "q" || key.name === "escape" ? { kind: "cancel" } : { kind: "finish" } };
+  // The config is already written: q leaves, Enter opens demesne here.
+  if (state.step === "done") {
+    if (key.name === "q" || key.name === "escape") return { state, effect: { kind: "finish", open: false } };
+    return { state, effect: key.name === "return" || key.name === "enter" ? { kind: "finish", open: true } : undefined };
+  }
 
   if (state.step === "provider") {
     const options = providerOptions(state);
@@ -103,9 +125,12 @@ export function reduceWizard(state: WizardState, key: WizardKey, text = ""): { s
 
   if (state.step === "auth") {
     if (key.name === "escape") return { state: { ...state, step: "provider", error: null }, effect: { kind: "cancel-login" } };
-    if (state.auth.status === "failed" && (key.name === "r" || key.name === "return" || key.name === "enter")) {
+    // r starts a fresh sign-in at any time; Enter does too once one failed.
+    if (key.name === "r" || state.auth.status === "failed" && (key.name === "return" || key.name === "enter")) {
       return { state: { ...state, auth: { url: "", status: "waiting", message: "Opening your browser…" } }, effect: { kind: "login" } };
     }
+    if (state.auth.url && state.auth.status === "waiting" && key.name === "c") return { state: { ...state, auth: { ...state.auth, copied: true } }, effect: { kind: "copy", url: state.auth.url } };
+    if (state.auth.url && state.auth.status === "waiting" && key.name === "o") return { state, effect: { kind: "open", url: state.auth.url } };
     return { state };
   }
 
@@ -127,8 +152,8 @@ export function reduceWizard(state: WizardState, key: WizardKey, text = ""): { s
     const listed = state.provider?.models.length ?? 0;
     if (key.name === "escape" || listed && key.name === "backspace") return { state: { ...state, step: "provider", error: null } };
     if (listed && (key.name === "up" || key.name === "down")) {
-      const step = key.name === "up" ? -1 : 1;
-      return { state: { ...state, modelIndex: (state.modelIndex + step + listed) % listed } };
+      const order = modelOrder(state.provider), step = key.name === "up" ? -1 : 1;
+      return { state: { ...state, modelIndex: order[(order.indexOf(state.modelIndex) + step + listed) % listed]! } };
     }
     if (key.name === "return" || key.name === "enter") {
       if (!selectedModel(state)) return { state: { ...state, error: "Enter a model id." } };
@@ -177,8 +202,8 @@ export function wizardSaved(state: WizardState, backup: string | null): WizardSt
 }
 
 /// Renders the wizard for the terminal size. The painter decides color; the
-/// layout reads the same without it.
-export function renderWizard(state: WizardState, width: number, height: number, paint: Painter): string[] {
+/// layout reads the same without it. `now` drives the sign-in countdown.
+export function renderWizard(state: WizardState, width: number, height: number, paint: Painter, now = Date.now()): string[] {
   const rows: string[] = Array.from({ length: height }, () => "");
   const column = Math.max(2, Math.floor((width - Math.min(72, width - 4)) / 2));
   const inner = Math.min(72, width - column - 2);
@@ -200,15 +225,41 @@ export function renderWizard(state: WizardState, width: number, height: number, 
   rows[row++] = paint.text("─".repeat(width), "rule");
   line();
 
-  const option = (selected: boolean, mark: [string, PaletteColor], title: string, detail: string, right = "", dim = false) => {
-    const edge = selected ? paint.text("▎", "electric") : " ";
-    const name = paint.text(truncateText(title, inner - 20), dim ? "muted" : selected ? "electric" : "paper");
-    const body = `${edge} ${paint.text(mark[0], mark[1])}  ${name}`;
-    const tail = right ? paint.text(right, selected ? "citron" : "muted") : "";
-    line(pad(selected ? paint.wash(body + " ".repeat(Math.max(1, inner - visibleLength(body) - visibleLength(tail))) + tail, "menuSelection") : body + (tail ? " ".repeat(Math.max(1, inner - visibleLength(body) - visibleLength(tail))) + tail : "")));
-    if (detail) line(pad(`     ${paint.text(truncateText(detail, inner - 6), dim ? "muted" : "secondary")}`));
-  };
   const hint = (text: string, tone: PaletteColor = "muted") => line(pad(paint.text(truncateText(text, inner), tone)));
+  const wrapped = (text: string, tone: PaletteColor = "muted") => { for (const part of wrapDisplayText(text, inner)) hint(part, tone); };
+
+  // Bordered boxes (Figma 34:431): rounded corners, hairline dividers, and
+  // the selected row washed with a blue left edge.
+  const content = inner - 4;
+  const edge = (left: string, right: string, tone: PaletteColor = "rule") => line(pad(paint.text(`${left}${"─".repeat(Math.max(0, inner - 2))}${right}`, tone)));
+  const boxRow = (left: string, right = "", selected = false, tone: PaletteColor = "rule") => {
+    const body = ` ${formatFooterLine(left, right, content)} `;
+    line(pad(`${selected ? paint.text("▎", "electric") : paint.text("│", tone)}${selected ? paint.wash(body, "menuSelection") : body}${paint.text("│", tone)}`));
+  };
+  const box = (rows: Array<[string, string?]>, tone: PaletteColor = "rule") => {
+    edge("╭", "╮", tone);
+    for (const [left, right] of rows) boxRow(left, right ?? "", false, tone);
+    edge("╰", "╯", tone);
+  };
+  /// A bordered list scrolled to keep `selected` in view. Dividers separate
+  /// items when every item fits with them; otherwise they are dropped first.
+  const list = (count: number, selected: number, rowsEach: number, reserve: number, draw: (index: number) => Array<[string, string?]>) => {
+    const space = height - 2 - row - reserve;
+    const dividers = count * (rowsEach + 1) + 1 <= space;
+    const visible = Math.max(1, Math.min(count, dividers ? count : Math.floor((space - 2) / rowsEach)));
+    const start = Math.max(0, Math.min(selected - Math.floor(visible / 2), count - visible));
+    edge("╭", "╮");
+    for (let index = start; index < start + visible; index++) {
+      if (dividers && index > start) edge("├", "┤");
+      for (const [left, right] of draw(index)) boxRow(left, right ?? "", index === selected);
+    }
+    edge("╰", "╯");
+  };
+  const input = (text: string, placeholder: string) => {
+    edge("╭", "╮", "electric");
+    boxRow(`${paint.text(truncateText(safe(text) || placeholder, content - 1), text ? "paper" : "muted")}${paint.text("▏", "electric")}`, "", false, "electric");
+    edge("╰", "╯", "electric");
+  };
 
   if (state.step === "provider") {
     const found = state.probes?.filter((probe) => probe.reachable).length ?? 0;
@@ -216,38 +267,54 @@ export function renderWizard(state: WizardState, width: number, height: number, 
     hint(state.probes === null ? "Looking for local servers…" : `Found ${found} local server${found === 1 ? "" : "s"}. You can change this later with demesne setup.`);
     line();
     const options = providerOptions(state);
-    const visible = Math.max(1, Math.floor((height - row - 3) / 2));
-    const start = Math.max(0, Math.min(state.providerIndex - Math.floor(visible / 2), options.length - visible));
-    options.slice(start, start + visible).forEach((item, offset) => {
-      const index = start + offset;
-      const selected = index === state.providerIndex;
-      if (item === "custom") option(selected, ["+", "secondary"], "Custom URL", "Any OpenAI-compatible endpoint");
-      else if (item === "openrouter") option(selected, ["↗", "electric"], "OpenRouter", "Sign in with your browser · hosted models");
-      else option(selected, item.reachable ? ["✓", "citron"] : ["·", "muted"], item.target.label,
-        `${item.target.url} · ${item.reachable ? `${item.models.length} model${item.models.length === 1 ? "" : "s"}` : "not reachable"}`,
-        item.reachable && index === 0 ? "detected" : "", !item.reachable);
+    const unreachable = state.probes?.some((probe) => !probe.reachable) ?? false;
+    list(options.length, state.providerIndex, 2, unreachable ? 2 : 0, (index) => {
+      const item = options[index]!, selected = index === state.providerIndex;
+      const title = (mark: string, markTone: PaletteColor, name: string, dim = false) =>
+        `${paint.text(mark, markTone)}  ${paint.text(safe(name), dim ? "muted" : selected ? "electric" : "paper")}`;
+      const detail = (text: string) => `   ${paint.text(safe(text), "muted")}`;
+      if (item === "openrouter") return [[title("↗", "electric", "OpenRouter")], [detail("Hosted models · sign in with your browser")]];
+      if (item === "custom") return [[title("+", "secondary", "Custom URL")], [detail("Any OpenAI-compatible endpoint")]];
+      const models = `${item.models.length} model${item.models.length === 1 ? "" : "s"}`;
+      return [[title(item.reachable ? "✓" : "·", item.reachable ? "citron" : "muted", item.target.label, !item.reachable),
+        item.reachable && index === 0 ? paint.text("detected", "secondary") : ""], [detail(`${item.target.url} · ${item.reachable ? models : "not reachable"}`)]];
     });
-    line();
+    if (unreachable) { line(); wrapped("Unreachable servers stay listed so you can start them and press r to rescan."); }
   } else if (state.step === "auth") {
-    line(pad(paint.bold("Connect OpenRouter", "paper")));
-    hint(state.auth.status === "failed" ? "× Sign-in did not complete" : state.auth.status === "loading" ? "◌ Loading your models…" : "↗ Finish signing in in your browser", state.auth.status === "failed" ? "signal" : "electric");
+    // Figma 36:543: the callback card, the link as a fallback, and where the key goes.
+    const { status, url } = state.auth;
+    line(pad(paint.bold(status === "failed" ? "Connect OpenRouter" : "Finish signing in to OpenRouter", "paper")));
+    wrapped(safe(state.auth.message));
     line();
-    for (const text of wrapDisplayText(safe(state.auth.message), inner)) hint(text, "secondary");
-    if (state.auth.url) {
-      line(); hint("Or open this authorization URL:");
-      for (const text of wrapDisplayText(state.auth.url, inner)) hint(text, "electric");
+    if (status === "waiting") {
+      const dots = url ? [0, 1, 2].map((dot) => paint.text("●", dot === Math.floor(now / 400) % 3 ? "thinking" : "rule")).join("") : "";
+      const left = Math.max(0, (state.auth.expiresAt ?? 0) - now);
+      const countdown = state.auth.expiresAt ? `times out in ${Math.floor(left / 60_000)}:${String(Math.floor(left / 1000) % 60).padStart(2, "0")}` : "";
+      box([[`${paint.bold("Waiting for approval", "thinking")} ${dots}`, paint.text(countdown, "muted")],
+        [paint.text(url ? "Listening on localhost for a one-time callback." : "Starting the one-time callback…", "secondary")]], "thinking");
+    } else if (status === "loading") box([[paint.bold("◌ Authorization received", "electric")], [paint.text("Checking your key and loading the model catalog…", "secondary")]], "electric");
+    else box([[paint.bold("× Sign-in did not complete", "signal")], [paint.text("Press r or Enter to try again.", "secondary")]], "signal");
+    if (url && status === "waiting") {
+      line();
+      hint("Browser didn't open?", "secondary");
+      const action = state.auth.copied ? paint.text("copied", "citron") : `${keycap(paint, "c")} ${paint.text("copy", "muted")}`;
+      box([[paint.text(truncateText(url, content - 8), "paper"), action]]);
     }
-    line(); hint("Your credential is saved only when you confirm Review.");
+    line();
+    wrapped(`Your API key goes from OpenRouter straight to this machine and is saved only in ${safe(state.configPath)} when you confirm Review. It is never shown on screen.`);
+    wrapped("Already have a key? Set OPENROUTER_API_KEY and run demesne setup again.");
   } else if (state.step === "custom") {
     line(pad(paint.bold("Enter your server address", "paper")));
-    hint("Any OpenAI-compatible endpoint: vLLM, llama.cpp, LM Studio, Ollama, or a hosted gateway.");
+    wrapped("Any OpenAI-compatible endpoint: vLLM, llama.cpp, LM Studio, Ollama, or a hosted gateway.");
     line();
     hint("Base URL");
-    line(pad(`${paint.text("▎", "electric")} ${paint.text(safe(state.custom.text) || "http://127.0.0.1:8000/v1", state.custom.text ? "paper" : "muted")}${paint.text("▏", "electric")}`));
+    input(state.custom.text, "http://127.0.0.1:8000/v1");
     if (state.custom.checking) hint("◌ Checking…", "thinking");
     else if (state.custom.error) hint(`× ${state.custom.error}`, "signal");
+    else hint("Enter checks the address and lists its models.");
     line();
     hint("Remote servers need https://. Plain http:// works only for localhost.");
+    wrapped(`Needs an API key? Add it in ${safe(state.configPath)} after setup; it is never typed here.`);
   } else if (state.step === "model") {
     const provider = state.provider!;
     line(pad(paint.bold("Which model should it use?", "paper")));
@@ -255,19 +322,18 @@ export function renderWizard(state: WizardState, width: number, height: number, 
       provider.reachable ? "muted" : "thinking");
     line();
     if (provider.models.length) {
-      // One recommendation: the first model with the largest context.
-      const largest = provider.models.reduce((best, model) => Math.max(best, model.contextWindow ?? 0), 0);
-      const recommended = largest ? provider.models.findIndex((model) => model.contextWindow === largest) : -1;
-      const visible = Math.max(1, height - row - 6);
-      const start = Math.max(0, Math.min(state.modelIndex - Math.floor(visible / 2), provider.models.length - visible));
-      provider.models.slice(start, start + visible).forEach((model, offset) => {
-        const index = start + offset;
-        const context = model.contextWindow ? `${formatTokenCount(model.contextWindow)} ctx` : "context unknown";
-        option(index === state.modelIndex, [" ", "muted"], safe(model.id), "", `${context}${index === recommended ? " · recommended" : ""}`);
+      // One recommendation, listed first: the first model with the largest context.
+      const order = modelOrder(provider), recommended = recommendedModel(provider);
+      list(order.length, order.indexOf(state.modelIndex), 2, 2, (position) => {
+        const index = order[position]!, model = provider.models[index]!, selected = index === state.modelIndex;
+        const facts = [model.contextWindow ? `${model.contextWindow.toLocaleString("en-US")} ctx` : "context unknown",
+          model.maxOutputTokens ? `${formatTokenCount(model.maxOutputTokens)} output` : "", index === recommended ? "largest context on this server" : ""].filter(Boolean);
+        return [[paint.text(safe(model.id), selected ? "electric" : "paper"), index === recommended ? paint.text("recommended", "citron") : ""],
+          [paint.text(facts.join(" · "), "muted")]];
       });
     } else {
       hint("Model id");
-      line(pad(`${paint.text("▎", "electric")} ${paint.text(safe(state.modelText) || "model-name", state.modelText ? "paper" : "muted")}${paint.text("▏", "electric")}`));
+      input(state.modelText, "model-name");
     }
     line();
     hint("Context size is read from the server when it reports one. You can adjust it on the next step.");
@@ -282,15 +348,14 @@ export function renderWizard(state: WizardState, width: number, height: number, 
       "Max output": [state.review.maxOutputTokens.toLocaleString("en-US"), state.provider?.models[state.modelIndex]?.maxOutputTokens ? "detected" : "default"],
       Theme: [state.review.theme, state.review.theme === "auto" ? "follows your terminal" : ""],
     };
-    REVIEW_ROWS.forEach((name, index) => {
-      const selected = index === state.reviewIndex;
+    // Figma 34:570: a bordered table; the selected value is blue.
+    const labelWidth = 16;
+    list(REVIEW_ROWS.length, state.reviewIndex, 1, state.editing?.error ? 3 : 2, (index) => {
+      const name = REVIEW_ROWS[index]!, selected = index === state.reviewIndex;
       const [value, note] = values[name];
       const shown = selected && state.editing ? `${state.editing.text}▏` : value;
-      const label = paint.text(name.padEnd(16), "muted");
-      const body = `${selected ? paint.text("▎", "electric") : " "} ${label}${paint.text(safe(shown), selected ? "electric" : "paper")}  ${paint.text(note, "muted")}`;
-      const tail = selected && !state.editing && index >= 2 ? paint.text("e edit", "secondary") : "";
-      const text = body + " ".repeat(Math.max(1, inner - visibleLength(body) - visibleLength(tail))) + tail;
-      line(pad(selected ? paint.wash(text, "menuSelection") : text));
+      const left = `${paint.text(name.padEnd(labelWidth), "muted")}${paint.text(safe(shown), selected ? "electric" : "paper")}  ${paint.text(safe(note), "muted")}`;
+      return [[left, selected && !state.editing && index >= 2 ? paint.text("e edit", "secondary") : ""]];
     });
     if (state.editing?.error) hint(`× ${state.editing.error}`, "signal");
     line();
@@ -299,7 +364,12 @@ export function renderWizard(state: WizardState, width: number, height: number, 
     line(pad(paint.text("✓ ", "citron") + paint.bold("demesne is ready", "paper")));
     hint(`Connected to ${state.provider?.target.label ?? "your provider"} · ${selectedModel(state)} · ${formatTokenCount(state.review.contextWindow)} context`);
     line();
-    line(pad(paint.wash(` ${paint.text("Saved", "citron")} ${state.configPath}${state.saved?.backup ? paint.text(`  previous file → ${state.saved.backup}`, "muted") : ""} `, "diffAddedSurface")));
+    // The backup sits beside the config, so its name alone says where it is.
+    const backup = state.saved?.backup ?? null, folder = state.configPath.slice(0, state.configPath.lastIndexOf("/") + 1);
+    const previous = backup ? `previous file → ${safe(folder && backup.startsWith(folder) ? backup.slice(folder.length) : backup)}` : "";
+    const saved = `${paint.text("Saved", "citron")}  ${paint.text(safe(state.configPath), "paper")}`;
+    box(visibleLength(saved) + previous.length + 2 <= content ? [[saved, paint.text(previous, "muted")]]
+      : [[saved], ...(previous ? [[paint.text(previous, "muted")] as [string]] : [])], "citron");
     line();
     hint("NEXT");
     for (const [command, description] of [["demesne", "start a session in the current folder"], ["demesne doctor", "check the connection any time"], ["demesne setup", "change provider or model later"]]) {
@@ -308,13 +378,17 @@ export function renderWizard(state: WizardState, width: number, height: number, 
   }
   if (state.error) { line(); hint(`× ${state.error}`, "signal"); }
 
-  const footer = state.step === "provider" ? "↑↓ choose · r rescan · Esc quit · Enter continue"
-    : state.step === "auth" ? state.auth.status === "failed" ? "r retry · Esc back · Ctrl+C quit" : "Esc back · Ctrl+C quit"
-    : state.step === "custom" ? (state.custom.checking ? "Checking the server…" : "Esc back · Enter check and continue")
-      : state.step === "model" ? `${state.provider?.models.length ? "↑↓ choose · Backspace back" : "Esc back"} · Enter continue`
-        : state.step === "review" ? state.editing ? "Enter save · Esc cancel edit" : "↑↓ select · e edit · Backspace back · Esc quit · Enter write config"
-          : "Enter finish · q quit";
+  // Keycap footer: the keys on the left, the step's main action on the right.
+  const action = (label: string) => `${paint.text(label, "secondary")} ${keycap(paint, "Enter")}`;
+  const listed = Boolean(state.provider?.models.length);
+  const [keys, right]: [Array<[string, string]>, string] = state.step === "provider" ? [[["↑↓", "choose"], ["r", "rescan"], ["Esc", "quit"]], action("Continue")]
+    : state.step === "auth" ? [[...(state.auth.url && state.auth.status === "waiting" ? [["c", "copy link"], ["o", "reopen browser"]] as Array<[string, string]> : []), ["r", "retry"], ["Esc", "back"]],
+      state.auth.status === "failed" ? action("Retry") : ""]
+    : state.step === "custom" ? state.custom.checking ? [[], paint.text("Checking the server…", "thinking")] : [[["Esc", "back"]], action("Continue")]
+    : state.step === "model" ? [listed ? [["↑↓", "choose"], ["Esc", "back"]] : [["Esc", "back"]], action("Continue")]
+    : state.step === "review" ? state.editing ? [[["Esc", "cancel edit"]], action("Save")] : [[["↑↓", "select"], ["e", "edit"], ["Backspace", "back"], ["Esc", "quit"]], action("Write config")]
+    : [[["q", "quit"]], action("Open demesne here")];
   rows[height - 2] = paint.text("─".repeat(width), "rule");
-  rows[height - 1] = `  ${paint.text(truncateText(footer, width - 4), "muted")}`;
+  rows[height - 1] = `  ${formatFooterLine(keyHints(paint, keys), right, width - 4)}`;
   return rows.map((text) => truncateText(text, width));
 }

@@ -131,6 +131,13 @@ const safe = sanitizeTerminalLine;
 
 /// Interaction state lives with the run, rather than with a particular terminal
 /// layout. Resizing changes geometry without discarding reading/selection state.
+/// `run:4:card>entry:9` → [`run:4:card`, `run:4:card>entry:9`]: a hover key and the keys it sits inside.
+function hoverChain(key: string | null): string[] {
+  if (!key) return [];
+  const parts = key.split(">");
+  return parts.map((_, index) => parts.slice(0, index + 1).join(">"));
+}
+
 export class SessionView {
   selectedId: number | null = null;
   focused = false;
@@ -221,8 +228,11 @@ export class SessionView {
     this.pointer = row < 0 ? null : { row, column };
     const key = this.hoverRegions.find((region) => region.row === row && column >= region.column && column < region.column + region.width)?.key ?? null;
     if (key === this.hovered) return false;
-    if (this.hovered) this.transitions.set(`hover:${this.hovered}`, 0, 1, now);
-    if (key) this.transitions.set(`hover:${key}`, 1, 0, now);
+    // Keys nest as `card>row`: moving between a card and a row inside it
+    // keeps the card lit and fades only what the pointer really left.
+    const before = hoverChain(this.hovered), after = hoverChain(key);
+    for (const item of before) if (!after.includes(item)) this.transitions.set(`hover:${item}`, 0, 1, now);
+    for (const item of after) if (!before.includes(item)) this.transitions.set(`hover:${item}`, 1, 0, now);
     this.hovered = key;
     return true;
   }
@@ -1025,7 +1035,7 @@ export class SessionView {
         width: stageWidth, compact: height < 12, paint, now: reduced ? 0 : now, reducedMotion: reduced,
         activity: this.latest && options.presence ? { runId: this.latest.id, presence: options.presence } : undefined,
         copiedRunId: this.copied && this.copied.until > now ? this.copied.runId : undefined,
-        emphasis: (key) => focusedKey === key ? 1 : this.transitions.value(`hover:${key}`, this.hovered === key ? 1 : 0, now, reduced),
+        emphasis: (key) => hoverChain(focusedKey ?? null).includes(key) ? 1 : this.transitions.value(`hover:${key}`, hoverChain(this.hovered).includes(key) ? 1 : 0, now, reduced),
         expansion: (id) => this.memoryFor(id).expansion, argumentsOpen: this.argumentsOpen, markdown: options.markdown,
         keepOpen: this.unfoldable(options.drive ?? null) });
       const initialFlow = this.flowRows.length === 0;
@@ -1130,7 +1140,7 @@ export class SessionView {
         if (answers.has(row.key)) this.answerRows.push(canvas.rows[top + index]!);
         if (this.latest?.status === "COMPLETE" && this.latest.answer && row.key === entryKey(this.latest.answer.id)) this.latestAnswerRows.push(canvas.rows[top + index]!);
         if (selected) put(top + index, x + Math.max(0, selected.column - 1), paint.text("›", "electricBright"), 1, "raised");
-        if (row.hoverKey) this.hoverRegions.push({ row: top + index, column: x + (row.hoverKey.endsWith(":card") ? 2 : 0), width: stageWidth - (row.hoverKey.endsWith(":card") ? 4 : 0), key: row.hoverKey });
+        if (row.hoverKey) { const inset = hoverChain(row.hoverKey)[0]!.endsWith(":card"); this.hoverRegions.push({ row: top + index, column: x + (inset ? 2 : 0), width: stageWidth - (inset ? 4 : 0), key: row.hoverKey }); }
         for (const control of row.controls) if (!control.hidden) zone(top + index, x + control.column, Math.min(control.width, stageWidth - control.column), control.action);
       }
       if (this.pointer) this.hoverReflow = this.hover(this.pointer.row, this.pointer.column, now);

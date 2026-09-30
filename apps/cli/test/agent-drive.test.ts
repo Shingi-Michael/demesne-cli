@@ -500,7 +500,8 @@ test("Drive panel fits compact terminals, scrolls notes and retains fixed contro
     for (const width of [20, 34, 60, 100]) for (const height of [5, 12, 30]) {
       const panel = renderDrivePanel(width, height, createPainter(false), drive.state, 20);
       expect(panel.rows).toHaveLength(height); expect(panel.rows.every((row) => visibleLength(row) <= width)).toBe(true);
-      expect(panel.rows[2]).toContain("Pause"); expect(panel.rows[2]).toContain("Stop");
+      // Pause and Stop live in the keycap footer, the panel's last row.
+      expect(panel.rows.at(-1)).toContain("P pause"); expect(panel.rows.at(-1)).toContain("S stop");
     }
   } finally { drive.dispose(); }
 });

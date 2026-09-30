@@ -70,7 +70,7 @@ test("trace panel follows streaming output, holds a reading offset, and exposes 
   updateDriveTrace(s, { type: "reasoning.delta", delta: Array.from({ length: 60 }, (_, i) => `Thinking line ${i}`).join("\n") });
   const paint = createPainter(false);
   const live = renderDrivePanel(44, 24, paint, s, 0, { follow: true });
-  expect(live.rows.join("\n")).toContain("Thinking line 59"); expect(live.rows[2]).toContain("Pause"); expect(live.rows[3]).toContain("THINKING");
+  expect(live.rows.join("\n")).toContain("Thinking line 59"); expect(live.rows.at(-1)).toContain("P pause"); expect(live.rows.join("\n")).toContain("THINKING");
   const held = renderDrivePanel(44, 24, paint, s, 12);
   updateDriveTrace(s, { type: "reasoning.delta", delta: "\nLatest thinking line" });
   expect(renderDrivePanel(44, 24, paint, s, 12).rows).toEqual(held.rows);
@@ -114,4 +114,48 @@ test("Drive reading snapshots survive new steps; Live catches up and streamed ro
   for (let now = 1320; now <= 2000; now += 20) render(now);
   expect(render(2020).join("\n")).toContain("New line 19");
   expect(view.animating(2020)).toBe(false);
+});
+
+test("the Drive panel follows Figma 85:697: a verdict card per state, buttons where Drive holds, and keycap controls", () => {
+  const paint = createPainter(false), now = Date.parse("2026-09-29T12:00:00Z");
+  const panel = (over: Partial<DriveState>) => renderDrivePanel(44, 24, paint, { ...state(), step: 57, updatedAt: new Date(now - 30_000).toISOString(), ...over }, 0, { now });
+  const text = (over: Partial<DriveState>) => panel(over).rows.join("\n");
+  const step = (action: object, note = "Reason for it.") => ({ steps: [{ step: 57, action: JSON.stringify(action), note, result: "", at: "" }] });
+  expect(text(step({ kind: "keep_working" }, "On task."))).toMatch(/✓ Keep working[\s\S]*On task\./);
+  expect(text(step({ kind: "redirect", text: "Stay test-only." }, "It drifted."))).toMatch(/↻ Redirected the coder[\s\S]*Sent: “Stay test-only\.”/);
+  expect(text(step({ kind: "next_task", task: "Add the regression test" }))).toMatch(/→ Next task[\s\S]*Add the regression test/);
+  expect(text({ status: "waiting", activity: "Coder is drafting." })).toContain("◌ Coder is working");
+  expect(text({ status: "completed", activity: "All checks pass." })).toMatch(/✓ Mission complete[\s\S]*SUMMARY/);
+  expect(text({ recovery: { kind: "transient", attempt: 2, limit: 5, retryAt: now + 12_000, message: "Connection reset." } })).toMatch(/↻ Retrying in 12s[\s\S]*attempt 2 of 5/);
+  // Paused and blocked hold for you: Resume and Stop buttons, and P resumes.
+  const paused = panel({ status: "paused" });
+  expect(paused.rows.join("\n")).toMatch(/‖ Paused[\s\S]*p {2}Resume {4}s {2}Stop/);
+  expect(paused.zones.filter((zone) => zone.action.kind === "drive-control").map((zone) => zone.action.kind === "drive-control" && zone.action.control)).toEqual(["resume", "stop", "resume", "stop"]);
+  expect(paused.rows.at(-1)).toContain("P resume  S stop  Alt+J hide");
+  // A running mission pauses from the footer; details stay folded until opened.
+  const running = panel(step({ kind: "keep_working" }));
+  expect(running.rows.at(-1)).toContain("P pause  S stop  Alt+J hide");
+  expect(running.rows.join("\n")).toMatch(/▸ Show reasoning[\s\S]*▸ Raw output[\s\S]*▸ Constraints carried/);
+  expect(running.rows.join("\n")).not.toContain("MISSION");
+  const open = renderDrivePanel(44, 40, paint, { ...state(), ...step({ kind: "keep_working" }) }, 0, { now, sections: new Set(["constraints"]) });
+  expect(open.rows.join("\n")).toMatch(/▾ Constraints carried[\s\S]*MISSION[\s\S]*Inspect the saved result/);
+});
+
+test("P and S control Drive only while its panel has focus and the draft is empty", () => {
+  const controls: string[] = [];
+  const ui = new Workbench({ paint: createPainter(false), contextRail: new CliContextRail({ id: "model", provider: "test" }, "/project"), sessionTitle: "Review", version: "test",
+    drive: { control: (control) => controls.push(control), intervene() {} }, onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} } });
+  const internals = ui as unknown as { onKeypress(text: string, key: object): void; editor: { value: string } };
+  void ui.readPrompt({ history: [], commands: SLASH_COMMANDS, mentions: [] });
+  ui.setDrive(state()); ui.showDrive(); ui.frame(120, 30);
+  internals.onKeypress("p", { name: "p" });
+  expect(controls).toEqual(["pause"]);
+  ui.setDrive({ ...state(), status: "paused" }); ui.frame(120, 30);
+  internals.onKeypress("p", { name: "p" }); internals.onKeypress("s", { name: "s" });
+  expect(controls).toEqual(["pause", "resume", "stop"]);
+  // With a draft, letters type as usual.
+  internals.onKeypress("x", { name: "x" }); ui.showDrive(); ui.frame(120, 30);
+  internals.onKeypress("p", { name: "p" });
+  expect(controls).toHaveLength(3);
+  ui.stop();
 });

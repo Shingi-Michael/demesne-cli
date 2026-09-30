@@ -11,7 +11,7 @@ import { reducedMotionEnabled } from "../motion.ts";
 import { diffPanelLines, filePanelLines } from "./panel-content.ts";
 import { sessionHeader } from "./session-header.ts";
 import { changeFiles, changeState, changeTotals, DiffPanel } from "./diff-panel.ts";
-import { renderDrivePanel } from "./drive-panel.ts";
+import { driveStatusWord, renderDrivePanel, type DriveSection } from "./drive-panel.ts";
 import type { DriveInspectAction, DriveObservation, DriveState } from "@demesne/protocol";
 
 /// The three run surfaces. `response` is the default; `review` (recorded changes
@@ -180,6 +180,8 @@ export class SessionView {
   private drivePanelOpen = false;
   private driveFollowing = true;
   private driveCollapsed = new Set<string>();
+  /// Drive panel details the reader opened: reasoning, raw output, constraints.
+  private driveSections = new Set<DriveSection>();
   private driveOffset = 0;
   private driveRendered: DriveState | null = null;
   private driveSnapshot: { state: DriveState; now: number } | undefined;
@@ -338,6 +340,10 @@ export class SessionView {
       return;
     }
     if (action.kind === "drive-follow") { this.driveFollowing = true; this.driveJump = true; return; }
+    if (action.kind === "drive-section-toggle") {
+      if (this.driveSections.has(action.section)) this.driveSections.delete(action.section); else this.driveSections.add(action.section);
+      this.holdDrive(); return;
+    }
     if (action.kind === "drive-trace-toggle") {
       if (this.driveCollapsed.has(action.id)) this.driveCollapsed.delete(action.id); else this.driveCollapsed.add(action.id);
       this.holdDrive(); return;
@@ -801,6 +807,12 @@ export class SessionView {
       const subject = this.historyOpen ? safe(options.title) : this.drivePanelOpen || this.outputId !== null ? "" : this.contextOpen ? safe(options.model ?? "")
         : subjectRun ? `Turn ${subjectRun.number}` : "";
       put(0, 1, paint.text(title, "muted") + (subject ? "  " + paint.text(subject, "secondary") : ""), width - 5, "surface");
+      if (title === "AGENT DRIVE") {
+        // Figma 85:697 header: the mission's state word on the right.
+        const word = driveStatusWord(options.drive ?? null, now);
+        // × stays beside it: Drive's own navigation closes the panel with it.
+        if (word) put(0, width - 5 - word.text.length, paint.text(word.text, word.tone), word.text.length, "surface");
+      }
       if (title === "HISTORY" && panelFooter) {
         // `13 turns · 7h 42m`: how much this session holds and how long it has run.
         const turns = this.runs.filter((item) => item.request).length;
@@ -837,7 +849,7 @@ export class SessionView {
       if (this.driveFollowing) this.driveSnapshot = undefined;
       this.driveRendered = options.drive ?? null;
       const panel = renderDrivePanel(width, height, paint, this.driveRendered, this.driveOffset, {
-        follow: this.driveFollowing, snapshot: this.driveSnapshot, collapsed: this.driveCollapsed, now,
+        follow: this.driveFollowing, snapshot: this.driveSnapshot, collapsed: this.driveCollapsed, sections: this.driveSections, now,
         ...(options.animateScroll && !this.driveJump ? { followStep: now - this.driveScrollAt >= 16 ? 1 : 0 } : {}),
       });
       if (panel.offset !== this.driveOffset) this.driveScrollAt = now;
@@ -845,7 +857,7 @@ export class SessionView {
       this.driveOffset = panel.offset;
       panel.rows.slice(2).forEach((text, index) => put(index + 2, 0, text, width, "surface"));
       for (const control of panel.zones) zone(control.row, control.column, control.width, control.action);
-      region({ row: 4, column: 0, width, height: height - 4, target: "drive", maximum: panel.maximum });
+      region({ row: 2, column: 0, width, height: Math.max(0, height - 2 - Number(height >= 4)), target: "drive", maximum: panel.maximum });
       return { rows, zones };
     }
 

@@ -29,7 +29,7 @@ test("mission cycles survive pause, task boundaries, journal reload and Resume; 
     const again = new AgentDrive(options);
     expect(again.state?.protection?.trip?.kind).toBe("budget"); expect(() => again.control("resume")).toThrow("protection stopped"); again.dispose();
     const panel = renderDrivePanel(100, 50, createPainter(false), restored.state, 0);
-    expect(panel.rows.join("\n")).toContain("PROTECTION STOP"); expect(panel.zones.some(zone => zone.action.kind === "drive-control" && zone.action.control === "resume")).toBe(false);
+    expect(panel.rows.join("\n")).toContain("Stopped at a limit"); expect(panel.zones.some(zone => zone.action.kind === "drive-control" && zone.action.control === "resume")).toBe(false);
     restored.start("Investigate a different parser edge case"); expect(restored.state?.protection?.used.cycles).toBe(0);
   } finally { restored?.dispose(); first.dispose(); rmSync(root, { recursive: true, force: true }); }
 });

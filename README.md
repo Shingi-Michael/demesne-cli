@@ -155,7 +155,7 @@ The originals stay in History and exports.
 
 ### Agent Drive
 
-`/drive <mission>` lets Demesne direct a longer piece of work through the same composer you use. It reviews each task's diff and checks, picks the next task, and keeps going within budgets that stop runaway loops. Alt+J opens its panel with Pause, Resume and Stop. See [Agent Drive](docs/agent-drive.md).
+`/drive <mission>` lets Demesne direct a longer piece of work through the same composer you use. It reviews each task's diff and checks, picks the next task, and keeps going within budgets that stop runaway loops. Alt+J opens its panel: a card shows what Drive decided (keep working, redirected, next task, blocked…), and with the panel focused and an empty draft, P pauses or resumes and S stops. See [Agent Drive](docs/agent-drive.md).
 
 ## Themes
 

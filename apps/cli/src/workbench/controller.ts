@@ -176,6 +176,9 @@ export interface InputZone {
   run: (column?: number) => void;
 }
 
+/// Terminals at least this tall give the approval card Figma's spacing.
+const AIRY_APPROVAL_ROWS = 30;
+
 export class Workbench {
   private driveState: DriveState | null = null;
   private driveDispatch = false;
@@ -1440,7 +1443,7 @@ export class Workbench {
     const panel = sessionPanelLayout(Math.max(40, width), (this.sessionView.panelOpen && !this.sessionView.panelExpanded || Boolean(this.preview?.open && !this.preview.expanded)) && (this.mode === "input" || this.mode === "streaming"));
     this.layout = computeWorkbenchLayout(width, height, {
       sidebar: !this.sessionLayout && (this.chatView || this.transcriptView) ? "auto" : "hidden",
-      inputLines: this.inputLineCount(this.sessionLayout ? panel.conversationWidth : width),
+      inputLines: this.inputLineCount(this.sessionLayout ? panel.conversationWidth : width, height),
     });
     this.startLayout = this.showingStart ? startScreenLayout(this.layout.width, this.layout.height,
       this.inputLineCount(Math.min(86, this.layout.width - (this.layout.width >= 65 ? 4 : 2))), Boolean(this.feedback)) : null;
@@ -1499,11 +1502,12 @@ export class Workbench {
     return this.withDriveFeedback({ ...frame, rows: canvas.rows });
   }
 
-  private inputLineCount(columns = process.stdout.columns ?? 80): number {
+  private inputLineCount(columns = process.stdout.columns ?? 80, rows = this.layout.height): number {
     if (this.mode === "approval") {
       // Title, summary, previews, the sandbox note and one row of choices.
-      // Card: borders, title, summary, the inset block and the buttons.
-      if (this.sessionLayout) return 5 + (this.approval?.toolName === "run_command" ? 2 : Math.min(6, this.approval?.previewRows?.length ?? 0));
+      // Card: borders, title, summary, the inset block and the buttons, plus
+      // Figma's blank lines between them when the terminal has room.
+      if (this.sessionLayout) return 5 + (this.approval?.toolName === "run_command" ? 2 : Math.min(6, this.approval?.previewRows?.length ?? 0)) + (rows >= AIRY_APPROVAL_ROWS ? 3 : 0);
       // Voice line + permission card + preview rows + selection row.
       return Math.max(7, 6 + (this.approval?.previewRows?.length ?? 0) + 2);
     }
@@ -2549,6 +2553,11 @@ export class Workbench {
     for (let row = 0; row < height; row++) canvas.put(row, inset, "", boxWidth, "surface");
     // Short terminals drop the border so the question, summary and buttons fit.
     const bordered = height >= 6, first = bordered ? 1 : 0, buttonRow = bordered ? height - 2 : height - 1;
+    // Figma 23:164 spacing: a blank line after the title, after the summary
+    // and before the buttons, when the card was given the room for it.
+    const blockLength = command ? 2 : Math.min(6, (approval.previewRows ?? []).filter((row) => !/^Working directory:/.test(stripVTControlCharacters(row))).length);
+    const airy = bordered && height >= 8 + blockLength;
+    const summaryRow = first + (airy ? 2 : 1), blockStart = summaryRow + (airy ? 2 : 1);
     if (bordered) {
       canvas.put(0, inset, paint.text(`╭${"─".repeat(Math.max(0, boxWidth - 2))}╮`, "thinking"), boxWidth);
       canvas.put(height - 1, inset, paint.text(`╰${"─".repeat(Math.max(0, boxWidth - 2))}╯`, "thinking"), boxWidth);
@@ -2559,7 +2568,7 @@ export class Workbench {
     const title = paint.text("! ", "thinking") + paint.text(command ? "Allow this command?" : "Allow this action?", "paper");
     // The question always reads whole; the tool and turn drop on narrow cards.
     canvas.put(first, left, formatFooterLine(title, visibleLength(title) + tool.length + 2 <= inner ? paint.text(tool, "muted") : "", inner), inner, "surface");
-    if (first + 1 < buttonRow) canvas.put(first + 1, left, paint.text(truncateText(sanitizeTerminalLine(approval.summary), inner), "secondary"), inner, "surface");
+    if (summaryRow < buttonRow) canvas.put(summaryRow, left, paint.text(truncateText(sanitizeTerminalLine(approval.summary), inner), "secondary"), inner, "surface");
     // The inset block: the command and where it runs, or the change preview.
     const preview = (approval.previewRows ?? []).map((row) => sanitizeTerminalLine(stripVTControlCharacters(row)));
     const where = approval.cwd ?? preview.find((row) => row.startsWith("Working directory: "))?.slice(19) ?? this.options.workspaceRoot ?? "the workspace";
@@ -2568,8 +2577,8 @@ export class Workbench {
       ? [paint.text("$ ", "muted") + paint.text(commandText, "paper"),
         paint.text(`in ${where} · `, "muted") + paint.text("runs on your machine, not sandboxed", "thinking")]
       : (approval.previewRows ?? []).filter((row) => !/^Working directory:/.test(stripVTControlCharacters(row)));
-    const blockRows = Math.max(0, Math.min(block.length, buttonRow - first - 2));
-    for (let index = 0; index < blockRows; index++) canvas.put(first + 2 + index, left, paint.onBackground(" " + truncateText(block[index]!, inner - 2) + " ".repeat(Math.max(0, inner - 2 - visibleLength(truncateText(block[index]!, inner - 2)))) + " ", "raised"), inner, "raised");
+    const blockRows = Math.max(0, Math.min(block.length, buttonRow - blockStart - (airy ? 1 : 0)));
+    for (let index = 0; index < blockRows; index++) canvas.put(blockStart + index, left, paint.onBackground(" " + truncateText(block[index]!, inner - 2) + " ".repeat(Math.max(0, inner - 2 - visibleLength(truncateText(block[index]!, inner - 2)))) + " ", "raised"), inner, "raised");
     // Buttons, then the saved-rule options as quiet hints on the right.
     const keys: Record<PermissionDecision, string> = { allow_once: "y", allow_session: "a", allow_always: "s", deny: "n" };
     const labels: Record<PermissionDecision, string> = { allow_once: "Allow once", allow_session: "allow this session", allow_always: "always allow", deny: "Deny" };

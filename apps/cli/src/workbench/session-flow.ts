@@ -81,7 +81,9 @@ export function renderSessionFlow(options: {
   let cardLive = false;
   // The redesign draws a response as a left rail rather than a box: amber
   // while live, red when failed, a quiet rule once complete.
-  const railTone = (): PaletteColor => cardFailed ? "signal" : cardLive ? "thinking" : "borderBright";
+  // A live response is blue: working, nothing needed from you. Amber is kept
+  // for what waits on you (approvals, questions); red for failure.
+  const railTone = (): PaletteColor => cardFailed ? "signal" : cardLive ? "electric" : "borderBright";
   const border = (text: string) => paint.text(text, railTone());
   let hoverKey: string | undefined;
   const add = (key: string, text = "", controls: FlowControl[] = [], anchors?: string[], background?: PaletteColor) => {
@@ -144,7 +146,7 @@ export function renderSessionFlow(options: {
     const verbCell = verb.padEnd(Math.max(6, verb.length));
     const styledLabel = paint.text(verbCell, failed(tool) ? "signal" : operation) + (target ? ` ${paint.text(target, failed(tool) ? "signal" : "paper")}` : "");
     const state = tool.phase === "change" ? changeState(tool).toLowerCase() : "";
-    const stateTone: PaletteColor = state === "applied" ? "citron" : state === "failed" || state === "denied" || state === "approval" ? "signal" : state === "drafting" ? "thinking" : "muted";
+    const stateTone: PaletteColor = state === "applied" ? "citron" : state === "failed" || state === "denied" || state === "approval" ? "signal" : state === "drafting" ? "electric" : "muted";
     const totals = tool.phase === "change" ? changeTotals(tool) : "";
     const styledTotals = totals ? totals.split(" ").map((part) => paint.text(part, part.startsWith("+") ? "citron" : "signal")).join(" ") : "";
     const meta = tool.phase === "change" ? [paint.text(state, stateTone), styledTotals].filter(Boolean).join(" ")
@@ -281,7 +283,7 @@ export function renderSessionFlow(options: {
       cardEdge(`run:${run.id}:card-top`);
       const first = activity[0];
       const at = first?.type === "assistant" ? first.at : first?.startedAt ?? run.request?.startedAt;
-      add(`run:${run.id}:timestamp`, formatFooterLine(margin + paint.bold("demesne", cardFailed ? "signal" : cardLive ? "thinking" : "electric"), paint.text(clockLabel(at), "muted"), width - 3));
+      add(`run:${run.id}:timestamp`, formatFooterLine(margin + paint.bold("demesne", cardFailed ? "signal" : "electric"), paint.text(clockLabel(at), "muted"), width - 3));
     }
     const reasoningRows = (entry: ReasoningEntry) => {
       const key = entryKey(entry.id);
@@ -289,7 +291,7 @@ export function renderSessionFlow(options: {
       const timing = entry.durationMs !== null ? ` ${(entry.durationMs / 1000).toFixed(1)}s` : "";
       const live = entry === liveReasoning;
       const label = live
-        ? paint.text("◇ Thinking", "thinking") + " " + thinkingDots(paint, options.now, options.reducedMotion) + paint.text(timing, "muted")
+        ? paint.text("◇ Thinking", "electric") + " " + thinkingDots(paint, options.now, options.reducedMotion) + paint.text(timing, "muted")
         : paint.text("◇ ", "muted") + paint.text("Thought", "secondary") + paint.text(timing, "muted");
       const header = disclosure(run, key, label, live ? "" : paint.text(open ? "▾" : "▸", "muted"), [thinkingAnchors.get(entry.id)!]);
       header.activeThinking = live;
@@ -297,7 +299,7 @@ export function renderSessionFlow(options: {
       if (open) {
         parents.push(key);
         const lines = wrap(entry.raw.trim(), inner - (live ? 3 : 2));
-        for (const [index, line] of lines.entries()) add(`${key}:body`, margin + surface(`${paint.text("▎", "thinking")} ${paint.text(line, "secondary")}${live && index === lines.length - 1 ? thinkingCursor(paint, options.now, options.reducedMotion) : ""}`, inner, paint, "thinkingSurface"));
+        for (const [index, line] of lines.entries()) add(`${key}:body`, margin + surface(`${paint.text("▎", "electric")} ${paint.text(line, "secondary")}${live && index === lines.length - 1 ? thinkingCursor(paint, options.now, options.reducedMotion) : ""}`, inner, paint, "menuSelection"));
         parents.pop();
       }
     };
@@ -444,14 +446,14 @@ export function renderSessionFlow(options: {
         : liveTool.phase === "change" ? "Drafting" : /search|grep|find/.test(liveTool.name) ? "Searching"
         : /list/.test(liveTool.name) ? "Listing" : /read/.test(liveTool.name) ? "Reading" : "Working on";
       add(`run:${run.id}:live-gap`);
-      add(`run:${run.id}:live`, margin + paint.text(truncateText(`● ${doing} ${target}${liveTool.waiting ? "" : "…"}`, inner), "thinking"));
+      add(`run:${run.id}:live`, margin + paint.text(truncateText(`● ${doing} ${target}${liveTool.waiting ? "" : "…"}`, inner), liveTool.waiting ? "thinking" : "electric"));
     }
     // A transient status while waiting for the first token of a model round.
     // Its successor inherits the anchor; no empty reasoning record is invented.
     if (inferring && !liveReasoning) {
       const key = thinkingKey(run.id, after);
       if (activity.length || links.length) add(`${key}:gap`);
-      add(key, `${margin}${paint.text("◇ Thinking", "thinking")} ${thinkingDots(paint, options.now, options.reducedMotion)} ${thinkingCursor(paint, options.now, options.reducedMotion)}`).activeThinking = true;
+      add(key, `${margin}${paint.text("◇ Thinking", "electric")} ${thinkingDots(paint, options.now, options.reducedMotion)} ${thinkingCursor(paint, options.now, options.reducedMotion)}`).activeThinking = true;
     }
     if (hasCard) cardEdge(`run:${run.id}:card-bottom`, true);
     hoverKey = undefined;

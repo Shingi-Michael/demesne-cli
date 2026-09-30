@@ -804,7 +804,7 @@ export class SessionView {
       // Figma panel frame: a quiet uppercase label, then what it shows. The
       // keycap footer carries Esc close; × stays for narrow panels without one.
       const subjectRun = this.artifact ? this.runs.find((item) => item.id === this.artifact!.runId) ?? run : run;
-      const subject = this.historyOpen ? safe(options.title) : this.drivePanelOpen || this.outputId !== null ? "" : this.contextOpen ? safe(options.model ?? "")
+      const subject = this.historyOpen ? safe(options.title) : output?.type === "panel" && output.files ? safe(options.path) : this.drivePanelOpen || this.outputId !== null ? "" : this.contextOpen ? safe(options.model ?? "")
         : subjectRun ? `Turn ${subjectRun.number}` : "";
       put(0, 1, paint.text(title, "muted") + (subject ? "  " + paint.text(subject, "secondary") : ""), width - 5, "surface");
       if (title === "AGENT DRIVE") {
@@ -812,6 +812,12 @@ export class SessionView {
         const word = driveStatusWord(options.drive ?? null, now);
         // × stays beside it: Drive's own navigation closes the panel with it.
         if (word) put(0, width - 5 - word.text.length, paint.text(word.text, word.tone), word.text.length, "surface");
+      }
+      if (output?.type === "panel" && output.files?.length && panelFooter) {
+        // Files: `214 files · 3 changed` on the right of the header.
+        const changed = output.files.filter((file) => file.status).length;
+        const meta = `${output.files.length} file${output.files.length === 1 ? "" : "s"}${changed ? ` · ${changed} changed` : ""}`;
+        put(0, width - 1 - meta.length, paint.text(meta, "muted"), meta.length, "surface");
       }
       if (title === "HISTORY" && panelFooter) {
         // `13 turns · 7h 42m`: how much this session holds and how long it has run.

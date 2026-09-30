@@ -1637,11 +1637,12 @@ test("inline evidence navigates original records, prefers failures and retains i
   const row = rows.findIndex((line) => line.includes("Arguments"));
   state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("Arguments") });
   expect(screen(100, 36)).toContain('"argv"');
-  const anchor = view.memory.anchor;
   ui.beginTurn({ userText: "Later request", at: "now" });
   ui.assistantDelta("Later response.");
-  expect(screen(100, 36)).toContain("PASS_RECORDED_OUTPUT");
-  expect(view.memory.anchor).toEqual(anchor);
+  // The panel keeps its evidence; the conversation beside it follows the new turn.
+  const after = screen(100, 36);
+  expect(after).toContain("PASS_RECORDED_OUTPUT");
+  expect(after).toContain("Later response.");
   for (const theme of ["demesne", "demesne-light"]) {
     paint.setTheme(theme);
     for (const [width, height] of [[40, 10], [80, 24], [120, 36]]) {
@@ -2212,4 +2213,22 @@ test("Settings follows Figma 49:560: grouped settings with their values and comm
   state.onKeypress("", { name: "tab" });
   state.onKeypress("", { name: "end" }); state.onKeypress("", { name: "return" }); await Bun.sleep(0);
   expect(state.editor.value).toBe("/");
+});
+
+test("with a panel docked, a streaming response keeps scrolling into view", () => {
+  const { ui, view, screen } = fixture("complete");
+  ui.beginTurn({ userText: "Explain the lexer", at: "now" });
+  screen(160, 30);
+  // Open panels the way the reader would: Changes, then Context, then the log.
+  for (const open of [() => view.act({ kind: "diff-open", runId: view.current!.id }), () => view.act({ kind: "context" }), () => view.act({ kind: "log" })]) {
+    open();
+    for (let line = 1; line <= 40; line++) ui.assistantDelta(`Line ${line} of the answer.\n`);
+    const text = screen(160, 30);
+    expect(text).toContain("Line 40 of the answer.");
+  }
+  // Scrolling the conversation itself still pauses following, panel or not.
+  const flow = (view as unknown as { regions: { target: string; row: number; column: number }[] }).regions.find((region) => region.target === "flow")!;
+  view.wheel(flow.row, flow.column, -10);
+  ui.assistantDelta("Line 41 of the answer.\n");
+  expect(screen(160, 30)).not.toContain("Line 41 of the answer.");
 });

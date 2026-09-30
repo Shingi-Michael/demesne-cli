@@ -283,7 +283,7 @@ export class SessionView {
       this.memory.anchor = memory.anchor;
     }
   }
-  presentOutput(id: number): void { this.pauseFlow(); this.drivePanelOpen = false; this.contextOpen = false; this.historyOpen = false; this.outputId = id; this.outputOffset = 0; this.focused = true; }
+  presentOutput(id: number): void { this.drivePanelOpen = false; this.contextOpen = false; this.historyOpen = false; this.outputId = id; this.outputOffset = 0; this.focused = true; }
   dismissOutput(): void { this.outputId = null; }
   showingOutput(id: number): boolean { return this.outputId === id; }
   get current(): SessionRun | undefined { return this.runs.find((run) => run.id === this.selectedId) ?? this.runs.at(-1); }
@@ -432,7 +432,8 @@ export class SessionView {
     }
     if (["diff-open", "artifact", "context", "review", "log", "history", "run", "surface", "thinking", "request", "follow", "panel-close", "back"].includes(action.kind)) this.drivePanelOpen = false;
     if (action.kind === "diff-open") {
-      this.pauseFlow(); this.dismissOutput(); this.contextOpen = false; this.historyOpen = false;
+      // A side panel never stops the conversation following new output.
+      this.dismissOutput(); this.contextOpen = false; this.historyOpen = false;
       this.memory.surface = "response"; this.focused = true;
       this.artifact = { kind: "changes", runId: action.runId, recordId: action.recordId ?? 0 };
       this.diffPanel.standalone = null; this.diffPanel.view = "diff";
@@ -460,7 +461,7 @@ export class SessionView {
     }
     if (action.kind === "panel-toggle") { this.act(this.panelOpen ? { kind: "panel-close" } : { kind: "log" }); return; }
     if (action.kind === "context") {
-      this.pauseFlow(); this.dismissOutput(); this.historyOpen = false; this.contextOpen = true; this.focused = true;
+      this.dismissOutput(); this.historyOpen = false; this.contextOpen = true; this.focused = true;
       return;
     }
     if (action.kind === "response-start") {
@@ -482,7 +483,9 @@ export class SessionView {
       const records = artifactRecords(run, action.target);
       const record = records.find((tool) => toolFailed(tool) || tool.state === "denied") ?? records[0];
       if (!record) return;
-      this.pauseFlow();
+      // Evidence for an earlier turn scrolls the conversation back to it, so
+      // following stops; the live turn's evidence leaves it following.
+      if (run.id !== this.latest?.id) this.pauseFlow();
       this.dismissOutput(); this.contextOpen = false; this.historyOpen = false; this.memory.surface = "response";
       this.artifact = { runId: run.id, kind: action.target, recordId: record.id };
       this.verificationFull = false;
@@ -544,7 +547,7 @@ export class SessionView {
     }
     if (action.kind === "review") { this.openReview(); return; }
     if (action.kind === "verification" || action.kind === "failure") {
-      this.pauseFlow(); this.contextOpen = false; this.artifact = null; this.dismissOutput(); this.historyOpen = false;
+      this.contextOpen = false; this.artifact = null; this.dismissOutput(); this.historyOpen = false;
       const memory = this.memory;
       memory.surface = action.kind === "verification" ? "review" : "log";
       const records = this.records();
@@ -611,7 +614,7 @@ export class SessionView {
   /// Open the change review when the run recorded changes or checks, otherwise
   /// the log — a question-only run never shows empty coding controls.
   private openReview(): void {
-    this.pauseFlow(); this.contextOpen = false; this.artifact = null; this.dismissOutput(); this.historyOpen = false;
+    this.contextOpen = false; this.artifact = null; this.dismissOutput(); this.historyOpen = false;
     const memory = this.memory;
     memory.detail = null;
     memory.detailOrigin = memory.surface;
@@ -619,7 +622,7 @@ export class SessionView {
     this.selection = 0;
   }
   private openLog(): void {
-    this.pauseFlow(); this.contextOpen = false; this.artifact = null; this.dismissOutput(); this.historyOpen = false;
+    this.contextOpen = false; this.artifact = null; this.dismissOutput(); this.historyOpen = false;
     const memory = this.memory;
     memory.detail = null;
     memory.detailOrigin = memory.surface;
@@ -1199,7 +1202,8 @@ export class SessionView {
       }
       this.flowControls = flow.rows.flatMap((row, index) => row.controls.map((control, ordinal) => ({ key: `${row.key}:${row.line}:${ordinal}`, row: index, action: control.action })));
       const tail = Math.max(0, flow.rows.length - bodyHeight);
-      const following = memory.followFlow && this.selectedId === null && (!this.panelOpen || this.drivePanelOpen);
+      // Docked panels sit beside the conversation, so it keeps following.
+      const following = memory.followFlow && this.selectedId === null;
       let offset = following || initialFlow && this.selectedId === null ? tail : memory.flowOffset;
       const response = run?.answer;
       if (following && response?.streaming && !run?.settled) {

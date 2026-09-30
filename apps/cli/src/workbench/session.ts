@@ -166,6 +166,8 @@ export class SessionView {
   private reveal: { key: string; line: number; block?: boolean; start?: boolean } | null = null;
   private inspectionOrigin: { selectedId: number | null; runId: number } | null = null;
   private artifact: FlowArtifact | null = null;
+  /// Verification lists every check; Enter opens one check's full output.
+  private verificationFull = false;
   private readonly diffPanel = new DiffPanel();
   private drivePanelOpen = false;
   private driveFollowing = true;
@@ -268,6 +270,8 @@ export class SessionView {
       const selected = action.item ? records.find((tool) => String(tool.id) === action.item) : records[0];
       if (selected && this.artifact) this.act({ kind: "artifact-step", step: records.indexOf(selected) - records.findIndex((tool) => tool.id === this.artifact!.recordId) });
       if (selected) this.memory.detailOffsets.set(selected.id, 0);
+      // Drive pages through one check's whole output, so it reads the full view.
+      this.verificationFull = true;
     } else { this.act({ kind: "log" }); this.key({ name: "home" }); }
     this.focused = true;
   }
@@ -376,6 +380,7 @@ export class SessionView {
       this.pauseFlow();
       this.dismissOutput(); this.contextOpen = false; this.historyOpen = false; this.memory.surface = "response";
       this.artifact = { runId: run.id, kind: action.target, recordId: record.id };
+      this.verificationFull = false;
       return;
     }
     if (action.kind === "artifact-step") {
@@ -466,6 +471,7 @@ export class SessionView {
     }
     if (action.kind === "back") {
       const memory = this.memory;
+      if (memory.surface === "response" && this.artifact?.kind === "verification" && this.verificationFull) { this.verificationFull = false; return; }
       if (memory.surface === "response" && this.artifact) { this.closeArtifact(); return; }
       if (memory.detail !== null) { memory.detail = null; memory.surface = memory.detailOrigin; }
       else if (memory.surface !== "response") memory.surface = "response";
@@ -549,6 +555,11 @@ export class SessionView {
     }
     if (this.contextOpen && name === "escape" && !key.ctrl && !key.meta) { this.contextOpen = false; this.focused = this.panelOpen; return true; }
     if (this.drivePanelOpen && name === "escape" && !key.ctrl && !key.meta) { this.act({ kind: "panel-close" }); return true; }
+    if (this.artifact?.kind === "verification" && this.memory.surface === "response" && !key.ctrl && !key.meta) {
+      if (this.verificationFull && name === "escape") { this.verificationFull = false; return true; }
+      if (!this.verificationFull && this.focused && (name === "up" || name === "down")) { this.act({ kind: "artifact-step", step: name === "up" ? -1 : 1 }); return true; }
+      if (!this.verificationFull && this.focused && name === "return") { this.verificationFull = true; return true; }
+    }
     if (this.artifact && this.memory.surface === "response" && name === "escape" && !key.ctrl && !key.meta) { this.closeArtifact(); return true; }
     if (key.ctrl && name === "t") { this.focused = !this.focused; return true; }
     if (key.meta && (name === "up" || name === "down")) { this.historyOpen = false; this.dismissOutput(); this.moveRun(name === "up" ? -1 : 1); return true; }
@@ -766,6 +777,17 @@ export class SessionView {
       const subject = this.drivePanelOpen || this.outputId !== null ? "" : this.contextOpen ? safe(options.model ?? "")
         : subjectRun ? `Turn ${subjectRun.number}` : "";
       put(0, 1, paint.text(title, "muted") + (subject ? "  " + paint.text(subject, "secondary") : ""), width - 5, "surface");
+      if (title === "VERIFICATION" && this.artifact) {
+        // The turn's overall result as a pill: `stopped · 2 of 3 passed`.
+        const source = this.runs.find((item) => item.id === this.artifact!.runId);
+        const checks = source ? artifactRecords(source, "verification") : [];
+        const passed = checks.filter((tool) => tool.state === "done" && tool.exitCode === 0).length;
+        const overall = checks.some((tool) => toolFailed(tool) || tool.state === "denied") ? "failed" : checks.some((tool) => tool.state === "stopped") ? "stopped"
+          : checks.some((tool) => tool.state === "running" || tool.waiting) ? "running" : "passed";
+        const pill = ` ${overall} · ${passed} of ${checks.length} passed `;
+        const tone: PaletteColor = overall === "failed" ? "signal" : overall === "passed" ? "citron" : overall === "running" ? "thinking" : "secondary";
+        if (checks.length && width > pill.length + 24) put(0, width - 1 - pill.length, paint.wash(pill, overall === "failed" ? "errorSurface" : overall === "passed" ? "diffAddedSurface" : "raised", tone), pill.length, "surface");
+      }
       if (title === "EXECUTION LOG" && run && panelFooter) {
         // `10 events · 13.4s` on the right of the log's header.
         const events = (run.request ? 1 : 0) + run.entries.length;
@@ -860,6 +882,42 @@ export class SessionView {
       region({ row: 2, column: 0, width, height: height - 2 - Number(panelFooter), target: "diff" });
       return finish([["←→", "files"], ["↑↓", "scroll"], ["Ctrl+G", "live"]]);
     }
+    if (options.panel && this.artifact?.kind === "verification" && !this.verificationFull) {
+      // Figma 53:676: every check of the turn, then the selected one's last lines.
+      const source = this.runs.find((run) => run.id === this.artifact!.runId);
+      const records = source ? artifactRecords(source, "verification") : [];
+      const index = Math.max(0, records.findIndex((tool) => tool.id === this.artifact!.recordId));
+      const listRows = Math.min(records.length, Math.max(1, Math.floor((bodyHeight + 1) / 2)));
+      const first = Math.max(0, Math.min(index - listRows + 1, records.length - listRows));
+      records.slice(first, first + listRows).forEach((tool, offset) => {
+        const row = 2 + offset, selected = first + offset === index;
+        const [mark, tone] = toolMark(tool);
+        const command = safe(tool.detail ?? tool.name).replace(/^\$\s*/, "");
+        const passes = /(\d+) pass/.exec(tool.message ?? "")?.[1];
+        const result = tool.waiting ? paint.text("awaiting approval", "signal") : tool.state === "running" ? paint.text("running", "thinking")
+          : tool.state === "stopped" || tool.state === "denied" ? paint.text(tool.state, "secondary")
+          : paint.text([passes && tool.exitCode === 0 ? `${passes} passed` : "", tool.exitCode === undefined ? "exit unknown" : `exit ${tool.exitCode}`].filter(Boolean).join(" · "), tone === "signal" ? "signal" : "citron");
+        const time = paint.text((tool.durationMs === undefined ? "—" : tool.durationMs >= 1000 ? seconds(tool.durationMs) : `${tool.durationMs}ms`).padStart(6), "muted");
+        const background: PaletteColor = selected ? "menuSelection" : "surface";
+        put(row, 0, selected ? paint.text("▎", "electric") : "", width, background);
+        const right = `${result}  ${time}`;
+        put(row, 1, formatFooterLine(`${paint.text(mark, tone)} ${paint.text("$", "muted")} ${paint.text(truncateText(command, Math.max(4, width - 8 - visibleLength(right))), "paper")}`, right, width - 3), width - 2, background);
+        zone(row, 1, width - 2, { kind: "artifact-step", step: first + offset - index });
+      });
+      const selected = records[index];
+      const outputRow = 2 + listRows + 1;
+      if (selected && outputRow + 1 < height - Number(panelFooter)) {
+        put(outputRow, 1, paint.text("OUTPUT", "muted") + paint.text(" · last lines", "muted"), width - 2, "surface");
+        const room = height - Number(panelFooter) - outputRow - 2;
+        const output = (selected.message ?? "").replace(/\n+$/, "").split("\n").flatMap((line) => foldCells(safe(line), Math.max(1, width - 4)));
+        const tail = selected.message ? output.slice(-room) : [paint.text(selected.state === "running" ? "Waiting for output…" : "No command output recorded.", "muted")];
+        tail.forEach((line, offset) => {
+          const lineTone: PaletteColor = /^\s*(✓|\(pass\)|pass\b|\d+ pass)/i.test(line) ? "citron" : /^\s*(×|✗|\(fail\)|fail\b|\d+ fail|error)/i.test(line) ? "signal" : "secondary";
+          put(outputRow + 1 + offset, 1, " " + paint.text(line, lineTone), width - 2, "raised");
+        });
+      }
+      return finish([["↑↓", "select"], ["Enter", "full output"]]);
+    }
     if (options.panel && this.artifact) {
       const source = this.runs.find((run) => run.id === this.artifact!.runId);
       const records = source ? artifactRecords(source, this.artifact.kind) : [];
@@ -878,6 +936,7 @@ export class SessionView {
         const argumentsAt = detailView.argumentsRow - offset;
         if (detailView.argumentsRow >= 0 && argumentsAt >= 0 && argumentsAt < bodyHeight) zone(top + argumentsAt, x, 14, { kind: "arguments", id: selected.id });
       }
+      if (this.artifact.kind === "verification") return finish(records.length > 1 ? [["←→", "checks"], ["↑↓", "scroll"]] : [["↑↓", "scroll"]], "", "back");
       return finish(records.length > 1 ? [["←→", "records"], ["↑↓", "scroll"]] : [["↑↓", "scroll"]]);
     }
     if (!options.panel) {

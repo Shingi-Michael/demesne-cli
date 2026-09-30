@@ -128,7 +128,7 @@ export function composeDraft(options: ComposeOptions): ComposerFrame {
     const info = visual.lineInfos[start + index]!;
     const placeholder = options.streaming ? "Agent is running..." : options.hero ? "Describe what you want to build, fix, or explore..." : "Continue the conversation...";
     const row = firstRow + index;
-    put(row, info.text || (editor.value ? "" : paint.text(placeholder, "muted")));
+    put(row, info.text ? mentionText(info.text, paint) : editor.value ? "" : paint.text(placeholder, "muted"));
     zones.push({ row, column: textColumn, width: textWidth, action: { kind: "caret", start: info.start, text: info.text } });
   }
    const glyphRow = firstRow;
@@ -140,7 +140,7 @@ export function composeDraft(options: ComposeOptions): ComposerFrame {
       const label = ` ${match[1]} × `;
       if (visibleLength(text) + visibleLength(label) > textWidth) break;
       zones.push({ row, column: textColumn + visibleLength(text), width: visibleLength(label), action: { kind: "remove", start: match.index! + match[0].indexOf(match[1]!), length: match[1]!.length } });
-      text += paint.dim(label);
+      text += mentionChip(match[1]!, paint) + " ";
     }
     put(row++, text);
   }
@@ -219,7 +219,7 @@ function composeSessionDraft(options: ComposeOptions): ComposerFrame {
   const start = Math.max(0, visual.cursorLine - capacity + 1);
   for (let index = 0; index < Math.min(capacity, visual.lines.length); index++) {
     const info = visual.lineInfos[start + index]!;
-    put(firstRow + index, info.text || (editor.value ? "" : paint.text(options.streaming ? "Type to queue a follow-up..." : "Continue the conversation...", "muted")));
+    put(firstRow + index, info.text ? mentionText(info.text, paint) : editor.value ? "" : paint.text(options.streaming ? "Type to queue a follow-up..." : "Continue the conversation...", "muted"));
     zones.push({ row: firstRow + index, column: textColumn, width: textWidth, action: { kind: "caret", start: info.start, text: info.text } });
   }
   canvas.put(firstRow, inset + 2, paint.text(options.streaming ? "◎" : "▶", options.stopArmed ? "signal" : options.streaming ? "thinking" : "electric"), 1, "surface");
@@ -247,8 +247,8 @@ function composeSessionDraft(options: ComposeOptions): ComposerFrame {
     for (const match of attached) {
       const label = ` ${match[1]} × `;
       if (column + visibleLength(label) > textColumn + textWidth) break;
-      control(row, column, paint.text(label, "secondary"), { kind: "remove", start: match.index! + match[0].indexOf(match[1]!), length: match[1]!.length });
-      column += visibleLength(label);
+      control(row, column, mentionChip(match[1]!, paint), { kind: "remove", start: match.index! + match[0].indexOf(match[1]!), length: match[1]!.length });
+      column += visibleLength(label) + 1;
     }
   }
   if (editor.value) {
@@ -257,4 +257,16 @@ function composeSessionDraft(options: ComposeOptions): ComposerFrame {
     if (width >= 65) canvas.put(height - 1, inset + 2, " " + keycap(paint, "⇧↵") + paint.text(" newline ", "muted"), 12);
   }
   return { lines: canvas.rows, zones, cursor: { row: firstRow + visual.cursorLine - start, column: Math.min(textColumn + textWidth - 1, textColumn + visual.cursorCol) } };
+}
+
+/// Figma 39:452: `@file` mentions in the draft read in the accent color.
+/// Only color is added, so cursor columns are unchanged.
+function mentionText(text: string, paint: Painter): string {
+  return text.replace(/(^|\s)(@[^\s@]+)/g, (_, space: string, mention: string) => space + paint.text(mention, "electric"));
+}
+
+/// An attached file as a chip: its path on the raised surface, then ×.
+/// Same width as the old ` path × ` label, so click zones are unchanged.
+function mentionChip(path: string, paint: Painter): string {
+  return paint.onBackground(paint.text(` ${sanitizeTerminalLine(path)} `, "paper") + paint.text("× ", "muted"), "raised");
 }

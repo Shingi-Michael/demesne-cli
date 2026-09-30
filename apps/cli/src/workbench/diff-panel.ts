@@ -181,14 +181,16 @@ export class DiffPanel {
     const followLabel = this.following ? " following edits " : " paused ";
     const controlsWidth = followLabel.length + 2 + "Alt+↵".length + 1 + expand.length;
     const summaryRow = 2;
-    const showControls = width - 2 >= controlsWidth + 12;
-    canvas.put(summaryRow, 1, summary, Math.max(1, showControls ? width - controlsWidth - 4 : width - 2), "surface");
+    // Figma panel v2: the summary and the file list form one raised tile.
+    const showControls = width - 4 >= controlsWidth + 12;
+    canvas.put(summaryRow, 1, "", width - 2, "raised");
+    canvas.put(summaryRow, 2, summary, Math.max(1, showControls ? width - controlsWidth - 6 : width - 4), "raised");
     if (showControls) {
-      const followColumn = width - 1 - controlsWidth;
-      canvas.put(summaryRow, followColumn, this.following ? paint.wash(followLabel, "accentSurface", "electric") : paint.text(followLabel, "secondary"), followLabel.length, "surface");
+      const followColumn = width - 2 - controlsWidth;
+      canvas.put(summaryRow, followColumn, this.following ? paint.wash(followLabel, "accentSurface", "electric") : paint.text(followLabel, "secondary"), followLabel.length, "raised");
       zones.push({ row: summaryRow, column: followColumn, width: followLabel.length, action: { kind: "diff-live" } });
       const expandColumn = followColumn + followLabel.length + 2;
-      canvas.put(summaryRow, expandColumn, keycap(paint, "Alt+↵") + paint.text(` ${expand}`, "muted"), controlsWidth - followLabel.length - 2, "surface");
+      canvas.put(summaryRow, expandColumn, keycap(paint, "Alt+↵") + paint.text(` ${expand}`, "muted"), controlsWidth - followLabel.length - 2, "raised");
       zones.push({ row: summaryRow, column: expandColumn, width: controlsWidth - followLabel.length - 2, action: { kind: "diff-expand" } });
     }
     // Reserve the file-list height so incoming files cannot shift inspected code.
@@ -201,14 +203,15 @@ export class DiffPanel {
       const right = `${paint.text(state, tone)}${counts(file) ? `  ${styledCounts(counts(file))}` : ""}`;
       const path = sanitizeTerminalLine(file.path), slash = path.lastIndexOf("/");
       const name = paint.text(path.slice(0, slash + 1), "muted") + paint.text(path.slice(slash + 1), selected ? "electricBright" : "paper");
-      const background: PaletteColor = selected ? "menuSelection" : "surface";
-      canvas.put(row, 0, selected ? paint.text("▎", "electric") : "", width, background);
-      canvas.put(row, 1, formatFooterLine(`${paint.text(mark, tone)} ${truncateText(name, Math.max(4, width - 8 - visibleLength(right)))}`, right, width - 3), width - 2, background);
+      const background: PaletteColor = selected ? "tileSelection" : "raised";
+      canvas.put(row, 1, selected ? paint.text("▎", "electric") : "", width - 2, background);
+      canvas.put(row, 2, formatFooterLine(`${paint.text(mark, tone)} ${truncateText(name, Math.max(4, width - 10 - visibleLength(right)))}`, right, width - 5), width - 4, background);
       zones.push({ row, column: 1, width: width - 2, action: { kind: "diff-select", path: file.path } });
     });
     this.regions = [{ row: 3, height: capacity, target: "files" }];
-    let top = 3 + capacity;
-    put(top++, "─".repeat(Math.max(0, width - 2)), "rule");
+    // The tile's lower edge, then the file's code.
+    if (paint.enabled) canvas.put(3 + capacity, 1, paint.text("▀".repeat(width - 2), "raised"), width - 2, "surface");
+    let top = 3 + capacity + 1;
     const file = this.frozen?.key === this.offsetKey ? this.frozen.file : this.selected;
     const signature = [width, paint.colors, paint.enabled, file?.path, file?.tool.diff, file?.tool.state, file?.tool.message, file?.tool.changes, file?.applied, file?.previous];
     const cached = this.rendered?.signature.every((value, index) => value === signature[index]);
@@ -225,7 +228,8 @@ export class DiffPanel {
         const numbers = `${String(row.old ?? "").padStart(digits)} ${String(row.next ?? "").padStart(digits)} `;
         const mark = row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " ";
         const tone = row.kind === "added" ? "citron" : row.kind === "removed" ? "signal" : "muted";
-        const background = row.kind === "added" ? "diffAddedSurface" : row.kind === "removed" ? "diffRemovedSurface" : "surface";
+        // The diff is an inset code block: unchanged lines on the page color.
+        const background = row.kind === "added" ? "diffAddedSurface" : row.kind === "removed" ? "diffRemovedSurface" : "ink";
         const code = highlighted.get(row) ?? sanitizeTerminalLine(row.text.replaceAll("\t", "  "));
         foldCells(code, Math.max(1, width - 2 - numbers.length - 2)).forEach((part, index) => {
           const gutter = index ? paint.text(" ".repeat(numbers.length) + "↪ ", "muted") : paint.text(numbers, "muted") + paint.text(mark + " ", tone);

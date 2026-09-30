@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { createPainter, SLASH_COMMANDS, visibleLength } from "@demesne/brand";
 import { Workbench } from "../src/workbench/controller.ts";
 import { CliContextRail } from "../src/context-rail.ts";
-import { SessionView, planRuns } from "../src/workbench/session.ts";
+import { SessionView, planRuns, tileLines } from "../src/workbench/session.ts";
 import { sessionPanelLayout } from "../src/workbench/layout.ts";
 import { projectRunEvidence } from "../src/workbench/evidence.ts";
 import { contextMeter, contextTone, keycap, sessionStatus } from "../src/workbench/session-chrome.ts";
@@ -971,7 +971,7 @@ test("context capacity and project path stay visible in narrow frames and open d
   key("escape");
   const contextRows = screen().split("\n"), contextRow = contextRows.findIndex(line => line.includes("ctx —/100k"));
   state.handleMouse({ kind: "press", button: 0, row: contextRow, col: contextRows[contextRow]!.indexOf("ctx —/100k") });
-  expect(screen()).toMatch(/CONTEXT\s+original-model/);
+  expect(screen()).toMatch(/Context\s+original-model/);
   key("escape");
   key("return");
   expect(await prompt).toBe("preserve this draft");
@@ -980,7 +980,7 @@ test("context capacity and project path stay visible in narrow frames and open d
 test("closing context and project details during inference does not count as double Escape", () => {
   const { key, screen, state, interrupts } = fixture("thinking");
   key("c", { meta: true });
-  expect(screen()).toMatch(/CONTEXT\s+original-model/);
+  expect(screen()).toMatch(/Context\s+original-model/);
   key("escape");
   key("p", { meta: true });
   expect(screen()).toContain("PROJECT FOLDER");
@@ -990,7 +990,7 @@ test("closing context and project details during inference does not count as dou
     const rows = screen().split("\n");
     const row = rows.findLastIndex((line) => line.includes(target));
     state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf(target) });
-    expect(screen()).toMatch(target === "ctx" ? /CONTEXT\s+original-model/ : /PROJECT FOLDER/);
+    expect(screen()).toMatch(target === "ctx" ? /Context\s+original-model/ : /PROJECT FOLDER/);
     key("escape");
     expect(interrupts()).toBe(0);
   }
@@ -1005,7 +1005,7 @@ test("session command output opens above pinned evidence and returns to it on Es
   key("return");
   const detail = view.memory.detail;
   ui.showPanel(["CONTEXT PLAN", "Only measured context goes here."]);
-  expect(screen()).toContain("SESSION OUTPUT");
+  expect(screen()).toContain("Session output");
   expect(screen()).toContain("CONTEXT PLAN");
   expect(view.focused).toBe(true);
   key("escape");
@@ -1444,7 +1444,7 @@ test("run history opens on demand and restores the selected run's view", () => {
   const selected = view.current!.id;
   const detail = view.memory.detail;
   key("h", { meta: true });
-  expect(screen(80, 24)).toContain("HISTORY");
+  expect(screen(80, 24)).toContain("History  ");
   key("escape");
   expect(view.current!.id).toBe(selected);
   expect(view.memory.detail).toBe(detail);
@@ -1601,7 +1601,7 @@ test("opening evidence near the viewport edge reveals the record beside its resp
   const row = rows.findIndex((line) => line.includes("1 file changed"));
   state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("1 file changed") });
   const expanded = screen(100, 36);
-  expect(expanded).toMatch(/CHANGES\s+Turn \d+/);
+  expect(expanded).toMatch(/Changes\s+Turn \d+/);
   // Figma shows no hunk headers; the file header carries the totals.
   expect(expanded).not.toContain("@@");
   expect(expanded).toContain("lexer.ts  Applied · TypeScript");
@@ -1737,17 +1737,17 @@ test("the log shortcut opens a real log and docked evidence scrolls independentl
   ui.beginRound(); ui.assistantDelta("CHECK_RESPONSE"); ui.finishTurn("completed", "Complete");
   const rows = screen(120, 36).split("\n");
   key("b", { ctrl: true });
-  expect(screen(120, 36)).toContain("EXECUTION LOG");
+  expect(screen(120, 36)).toContain("Execution log");
   expect(view.panelOpen).toBe(true);
   const selection = view.memory.logSelection;
   key("c", { meta: true });
-  expect(screen(80, 24)).toMatch(/CONTEXT\s+original-model/);
+  expect(screen(80, 24)).toMatch(/Context\s+original-model/);
   key("down"); key("return");
   expect(view.memory.logSelection).toBe(selection);
   expect(view.memory.detail).toBeNull();
   expect((view as any).contextOffset).toBeGreaterThan(0);
   key("escape");
-  expect(screen(120, 36)).toContain("EXECUTION LOG");
+  expect(screen(120, 36)).toContain("Execution log");
   key("escape");
   expect(view.panelOpen).toBe(false);
   view.act({ kind: "artifact", runId: view.current!.id, target: "verification" });
@@ -1765,7 +1765,7 @@ test("the log shortcut opens a real log and docked evidence scrolls independentl
   for (let count = 0; count < 20; count++) expect(view.wheel(region.row, region.column, 3)).toBe(false);
   expect(screen(120, 36)).toBe(settled);
   expect(view.memory.flowOffset).toBe(flow);
-  expect(screen(80, 24)).toContain("VERIFICATION");
+  expect(screen(80, 24)).toContain("Verification  ");
   expect(screen(80, 24)).not.toContain("CHECK_RESPONSE");
   expect(screen(120, 36)).toContain("CHECK_RESPONSE");
   // The full output's footer steps back to the check list, whose footer closes.
@@ -1865,8 +1865,8 @@ test("docked panels share the Figma frame: label and subject, a keycap footer, a
   const { key, screen, view } = fixture("complete");
   key("b", { ctrl: true });
   const rows = screen(176, 30).split("\n");
-  const panelColumn = rows[0]!.indexOf("EXECUTION LOG");
-  expect(rows[0]!.slice(panelColumn)).toMatch(/^EXECUTION LOG {2}Turn \d+ +\d+ events · [\d.]+s\s*$/);
+  const panelColumn = rows[0]!.indexOf("Execution log");
+  expect(rows[0]!.slice(panelColumn)).toMatch(/^Execution log {2}Turn \d+ +\d+ events · [\d.]+s +×\s*$/);
   const footer = rows.findIndex((line) => line.includes("Esc close"));
   expect(rows[footer]!.slice(panelColumn)).toMatch(/^↑↓ select {2}Enter open {2}Esc close/);
   // The docked panel takes 40% of a wide window instead of a fixed 43 columns.
@@ -1950,7 +1950,7 @@ test("the execution log follows Figma 25:154 and 26:174: one row per event, filt
     ui.finishTurn("failed", "Check failed");
     key("b", { ctrl: true });
     let rows = screen(176, 30).split("\n");
-    const panel = rows[0]!.indexOf("EXECUTION LOG");
+    const panel = rows[0]!.indexOf("Execution log");
     const body = rows.map((row) => row.slice(panel));
     // Filter tabs with counts sit under the header.
     expect(body[2]).toMatch(/^All \d+ {3}Changes 0 {3}Checks 1 {3}Failed 1/);
@@ -1985,9 +1985,9 @@ test("History follows Figma 48:540: this session's turns newest first, then rece
   ui.setRecentSessions([{ id: "other", title: "Durable compaction", updatedAt: new Date(Date.now() - 30 * 3_600_000).toISOString(), turns: 31 }]);
   key("h", { meta: true });
   const rows = screen(176, 30).split("\n");
-  const panel = rows[0]!.indexOf("HISTORY");
+  const panel = rows[0]!.indexOf("History");
   const body = rows.map((row) => row.slice(panel)).join("\n");
-  expect(body).toMatch(/HISTORY {2}Session +2 turns/);
+  expect(body).toMatch(/History {2}Session +2 turns/);
   expect(body).toMatch(/THIS SESSION +newest first/);
   expect(body.indexOf("Check the test file")).toBeLessThan(body.indexOf("Trace the call flow"));
   expect(body).toMatch(/2 ■ Check the test file +19m · no diff/);
@@ -2014,9 +2014,9 @@ test("verification follows Figma 53:676: an overall pill, every check on a row, 
   screen(176, 30);
   view.act({ kind: "artifact", runId: view.current!.id, target: "verification" });
   const rows = screen(176, 30).split("\n");
-  const panel = rows[0]!.indexOf("VERIFICATION");
+  const panel = rows[0]!.indexOf("Verification");
   const body = rows.map((row) => row.slice(panel)).join("\n");
-  expect(body).toMatch(/VERIFICATION {2}Turn 1 +stopped · 2 of 3 passed/);
+  expect(body).toMatch(/Verification {2}Turn 1 +stopped · 2 of 3 passed/);
   expect(body).toMatch(/✓ \$ bun test parser +42 passed · exit 0 +1\.2s/);
   expect(body).toMatch(/■ \$ bun test daemon +stopped +1\.2s/);
   // ↑↓ moves between checks; the output follows the selection.
@@ -2031,7 +2031,7 @@ test("verification follows Figma 53:676: an overall pill, every check on a row, 
 test("while a turn runs, Escapes that step back or close a panel never stop it", () => {
   const { ui, key, screen, interrupts, view } = fixture("thinking");
   key("b", { ctrl: true });
-  expect(screen()).toContain("EXECUTION LOG");
+  expect(screen()).toContain("Execution log");
   key("return");
   key("escape"); key("escape");
   expect(interrupts()).toBe(0);
@@ -2127,6 +2127,28 @@ test("agent questions follow Figma 101:736: one at a time, Enter takes the sugge
   state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("Both guards") });
   key("escape");
   expect(await clicked).toEqual([{ answer: "Both guards", source: "suggestion" }, { answer: null, source: "skipped" }]);
+});
+
+test("panels are their own surface: a titled bar with ×, and content on raised tiles with half-block edges", () => {
+  const { key, screen, state } = fixture("complete");
+  key("b", { ctrl: true });
+  const rows = screen(176, 30).split("\n");
+  const panel = rows[0]!.indexOf("Execution log");
+  expect(rows[0]!.slice(panel)).toMatch(/^Execution log {2}Turn \d+ .* ×/);
+  // The × closes the panel.
+  state.handleMouse({ kind: "press", button: 0, row: 0, col: rows[0]!.lastIndexOf("×") });
+  expect(screen(176, 30).split("\n")[0]).not.toContain("Execution log");
+  // Context: every section is a tile between half-block edges.
+  state.sessionView.act({ kind: "context" });
+  const context = screen(176, 30).split("\n").map((row) => row.slice(panel));
+  expect(context.some((row) => /^ ?▄{20,}/.test(row))).toBe(true);
+  expect(context.some((row) => /^ ?▀{20,}/.test(row))).toBe(true);
+});
+
+test("tileLines wraps each run of lines in edges and keeps line positions for click targets", () => {
+  const { lines, at } = tileLines(["A", "B", "", "C"]);
+  expect(lines.map((line) => line.startsWith("\u0000") ? line.slice(6) : line)).toEqual(["top", "A", "B", "bottom", "top", "C", "bottom"]);
+  expect(at).toEqual([1, 2, 4, 5]);
 });
 
 test("clicking a chooser row picks that row, not its neighbour", async () => {

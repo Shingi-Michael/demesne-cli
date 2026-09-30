@@ -119,7 +119,7 @@ test("the Changes panel follows Figma 20:124: totals, file rows with counts, a f
   const rows = panel.render(90, 36, paint).rows;
   const text = rows.join("\n");
   // Totals across files, with drafting called out, and the follow and expand controls.
-  expect(rows[2]).toMatch(/^ 3 files \+6 −2 · 1 drafting +paused +Alt\+↵ expand/);
+  expect(rows[2]).toMatch(/^ {2}3 files \+6 −2 · 1 drafting +paused +Alt\+↵ expand/);
   // Each file shows its folder, state and own counts; the selected one is marked.
   expect(text).toMatch(/▎✓ apps\/daemon\/src\/app\.ts +Applied {2}\+3 −2/);
   expect(text).toMatch(/✓ apps\/daemon\/src\/journal\.ts +Applied {2}\+1 −0/);

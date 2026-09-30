@@ -159,6 +159,10 @@ export interface ChooseOptions {
   action?: string;
   /// What the items are called in the count: `models`, `themes`…
   noun?: string;
+  /// Right-hand text per item, e.g. the command that also changes it.
+  hints?: readonly string[];
+  /// Footer text on the right, in place of `Tab next group`.
+  note?: string;
 }
 
 export interface InputZone {
@@ -2479,23 +2483,30 @@ export class Workbench {
     for (let row = 0; row < height; row++) rows[rect.row + row] = surface(content[row] ?? "", width, paint, "ink");
   }
 
+  /// Figma 49:560: what this session uses, each with its current value and
+  /// the command that also changes it, grouped as Session, Appearance and
+  /// Navigate. Enter changes the selected one.
   private openSettings(): void {
     if (this.mode !== "input") return;
     const commands = this.promptContext.commands;
-    const items = [this.planMode ? "Mode: Plan → Build" : "Mode: Build → Plan", `Model: ${this.options.contextRail.modelId}`, "Theme", "Sessions", ...commands.map((command) => `${command.name}  ${command.description}`)];
-    void this.choose("Settings", items).then((index) => {
+    const paint = this.options.paint;
+    const sessions = this.recentSessions.filter((session) => session.id !== this.sessionId).length;
+    const items = ["Mode", "Model", "Theme", "Sessions", "All commands"];
+    void this.choose("Settings", items, 0, {
+      subtitle: "this session",
+      groups: ["Session", "Session", "Appearance", "Navigate", "Navigate"],
+      details: [this.planMode ? "Plan · read-only" : "Build · edits allowed", this.options.contextRail.modelId,
+        `${paint.themeName} · ${paint.theme}`, sessions ? `${sessions} recent` : "recent and saved sessions", `${commands.length} commands`],
+      hints: [this.planMode ? "to Build" : "to Plan", "/model", "/theme", "/sessions", "/"],
+      action: "change", noun: "settings", note: "Tab or Ctrl+K opens this",
+    }).then((index) => {
       if (index === null) return;
       if (index === 0) { this.planMode = !this.planMode; this.requestRender(); }
       else if (index <= 3) this.runCommand(["", "/model", "/theme", "/sessions"][index]!);
-      else {
-        const command = commands[index - 4]!;
-        this.editor = setPromptValue(this.editor, command.name + (command.argument === "none" ? "" : " "));
-        this.requestRender();
-      }
+      else { this.editor = setPromptValue(this.editor, "/"); this.requestRender(); }
     });
   }
 
-  /// A dialog row click selects it; clicking the selected row confirms.
   /// Figma 23:164: an amber-bordered card. The title names the decision and
   /// the tool and turn; the command sits in an inset block with where it runs
   /// and that it is not sandboxed; Allow once and Deny lead, with the saved
@@ -2569,7 +2580,7 @@ export class Workbench {
     const height = this.layout.input.height, boxWidth = width - inset * 2;
     const canvas = new Canvas(width, height, paint), zones: InputZone[] = [];
     const inner = boxWidth - 4, left = inset + 2;
-    const { subtitle, groups, details, currentIndex, action = "choose" } = this.dialogOptions;
+    const { subtitle, groups, details, currentIndex, action = "choose", hints: rowHints, note } = this.dialogOptions;
     for (let row = 0; row < height; row++) canvas.put(row, inset, "", boxWidth, "surface");
     canvas.put(0, inset, paint.text(`╭${"─".repeat(Math.max(0, boxWidth - 2))}╮`, "borderBright"), boxWidth);
     canvas.put(height - 1, inset, paint.text(`╰${"─".repeat(Math.max(0, boxWidth - 2))}╯`, "borderBright"), boxWidth);
@@ -2594,7 +2605,8 @@ export class Workbench {
       const selected = position === this.dialogSelected;
       const label = truncateText(sanitizeTerminalLine(this.dialogItems[index] ?? ""), detailColumn - 1);
       const detail = details?.[index] ? paint.text(truncateText(sanitizeTerminalLine(details[index]!), Math.max(4, inner - detailColumn - 12)), "muted") : "";
-      const right = selected ? keycap(paint, "↵") : index === currentIndex ? paint.text("● current", "muted") : "";
+      const hint = rowHints?.[index] ? paint.text(rowHints[index]!, "muted") : "";
+      const right = selected ? (hint ? `${hint} ` : "") + keycap(paint, "↵") : index === currentIndex ? paint.text("● current", "muted") : hint;
       const text = `${paint.text(label, selected ? "electric" : "paper")}${" ".repeat(Math.max(1, detailColumn - visibleLength(label)))}${detail}`;
       rows.push({ text: formatFooterLine(text, right, inner), position });
     });
@@ -2609,7 +2621,7 @@ export class Workbench {
       if (row.position !== undefined) { const position = row.position; zones.push({ row: y, column: left, width: inner, run: () => this.clickDialogItem(position) }); }
     });
     const hints = keyHints(paint, [["↑↓", "select"], ["↵", action], ["Esc", "cancel"]]);
-    canvas.put(footerRow, left, formatFooterLine(hints, groups ? keyHints(paint, [["Tab", "next group"]]) : "", inner), inner, "surface");
+    canvas.put(footerRow, left, formatFooterLine(hints, note ? paint.text(note, "muted") : groups ? keyHints(paint, [["Tab", "next group"]]) : "", inner), inner, "surface");
     return { lines: canvas.rows, cursor: null, zones };
   }
 
@@ -2623,6 +2635,7 @@ export class Workbench {
     return this.driveState.protection?.trip || !resumable ? null : "resume";
   }
 
+  /// A dialog row click selects it; clicking the selected row confirms.
   private clickDialogItem(position: number): void {
     if (this.mode !== "dialog") return;
     if (position === this.dialogSelected) {

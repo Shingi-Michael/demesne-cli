@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { emitKeypressEvents } from "node:readline";
 import { stripVTControlCharacters } from "node:util";
-import { createPainter, visibleLength } from "@demesne/brand";
+import { createPainter, SLASH_COMMANDS, visibleLength } from "@demesne/brand";
 import { Workbench } from "../src/workbench/controller.ts";
 import { CliContextRail } from "../src/context-rail.ts";
 import { SessionView, planRuns } from "../src/workbench/session.ts";
@@ -2105,4 +2105,24 @@ test("@ mentions follow Figma 39:452: a FILES header with the match count, folde
   // The inserted mention stays in the draft as text and shows as a chip.
   expect(state.editor.value).toContain("@src/lexer.ts");
   expect(screen(120, 30)).toContain(" @src/lexer.ts × ");
+});
+
+test("Settings follows Figma 49:560: grouped settings with their values and commands, and Enter changes the selected one", async () => {
+  const { ui, state, screen } = fixture("complete");
+  void ui.readPrompt({ history: [], mentions: [], commands: SLASH_COMMANDS });
+  state.onKeypress("", { name: "tab" });
+  const text = screen(120, 30);
+  expect(text).toMatch(/Settings {2}this session +5 settings/);
+  expect(text).toMatch(/SESSION +2/);
+  expect(text).toMatch(/Mode +Build · edits allowed +to Plan ↵/);
+  expect(text).toMatch(/Theme +\S+ · (dark|light) +\/theme/);
+  expect(text).toMatch(/All commands +\d+ commands +\//);
+  expect(text).toContain("Tab or Ctrl+K opens this");
+  // Enter on Mode switches to Plan.
+  state.onKeypress("", { name: "return" }); await Bun.sleep(0);
+  expect(state.planMode).toBe(true);
+  // All commands opens the slash menu in the draft.
+  state.onKeypress("", { name: "tab" });
+  state.onKeypress("", { name: "end" }); state.onKeypress("", { name: "return" }); await Bun.sleep(0);
+  expect(state.editor.value).toBe("/");
 });

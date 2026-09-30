@@ -13,7 +13,7 @@ test("the rail retains its three targets, state pip and bottom brackets without 
     expect(result.rows.at(-1)).toContain(width === 6 ? "[ ]" : "[]");
     expect(result.rows.slice(0, -1).join("")).not.toMatch(/[PANEL]/);
   }
-  expect(sidebarRail(6, 24, paint, true, "preview").rows[0]).toContain(paint.text("▪", "thinking"));
+  expect(sidebarRail(6, 24, paint, true, "preview").rows[0]).toContain(paint.text("▪", "electric"));
   // Hover lifts the cell onto the raised surface instead of bracketing the icon.
   const hovered = sidebarRail(6, 24, paint, false, "preview").rows[7]!;
   expect(hovered).toContain("▣");

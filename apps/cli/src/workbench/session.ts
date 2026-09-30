@@ -87,7 +87,7 @@ function toolResult(tool: ToolEntry, paint: Painter): string {
     const totals = changeTotals(tool);
     if (totals) return totals.split(" ").map((part) => paint.text(part, part.startsWith("+") ? "citron" : "signal")).join(" ");
     const state = changeState(tool).toLowerCase();
-    return paint.text(state, state === "drafting" || state === "pending" ? "thinking" : state === "applied" ? "citron" : "signal");
+    return paint.text(state, state === "drafting" || state === "pending" ? "electric" : state === "applied" ? "citron" : "signal");
   }
   if (tool.waiting) return paint.text(tool.name === "ask_user" ? "question" : "approval", "signal");
   if (tool.exitCode !== undefined) return paint.text(`exit ${tool.exitCode}`, tool.exitCode === 0 ? "muted" : "signal");

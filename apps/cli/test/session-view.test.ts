@@ -32,7 +32,10 @@ test("live inference shares its dots across card and send while keeping activity
   expect(initial.match(/···/g)).toHaveLength(2);
   expect(initial.split("\n").at(-1)).not.toMatch(/RUNNING|THINKING|WORKING|···/);
   expect(initial).toContain("demesne");
-  expect(ui.frame(120, 36).rows.join("\n")).toContain(paint.text("▎", "thinking"));
+  // A live response is blue; amber is kept for what waits on you.
+  const live = ui.frame(120, 36).rows.join("\n");
+  expect(live).toContain(paint.text("▎", "electric"));
+  expect(live).not.toContain(paint.text("▎", "thinking"));
   ui.reasoningDelta("Inspecting the entry point.");
   expect(screen(120, 36).match(/···/g)).toHaveLength(2);
   ui.assistantDelta("The entry point is main.ts.");

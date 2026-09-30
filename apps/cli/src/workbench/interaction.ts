@@ -4,12 +4,12 @@ export const INTERACTION_MS = 160;
 
 /// Fixed cells pulse in amber without moving text or the reading anchor.
 export function thinkingDots(paint: Painter, now: number, reduced = false): string {
-  return [0, 1, 2].map((index) => tint(paint, "·", "surface", "thinking",
+  return [0, 1, 2].map((index) => tint(paint, "·", "surface", "electric",
     reduced || !paint.enabled ? 1 : 0.4 + 0.6 * (1 - Math.cos((now - index * 180) / 1400 * Math.PI * 2)) / 2)).join("");
 }
 
 export function thinkingCursor(paint: Painter, now: number, reduced = false): string {
-  return paint.text(reduced || !paint.enabled || Math.floor(now / 550) % 2 === 0 ? "▌" : " ", "thinking");
+  return paint.text(reduced || !paint.enabled || Math.floor(now / 550) % 2 === 0 ? "▌" : " ", "electric");
 }
 
 /// Cell geometry stays fixed during transitions; only the foreground changes.

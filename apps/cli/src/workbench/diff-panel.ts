@@ -21,7 +21,7 @@ export function changeTotals(tool: ToolEntry): string {
 }
 
 const stateTone = (tool: ToolEntry): PaletteColor => tool.state === "done" ? "citron" : tool.state === "failed" || tool.state === "denied" || tool.waiting ? "signal"
-  : tool.state === "stopped" ? "secondary" : "thinking";
+  : tool.state === "stopped" ? "secondary" : "electric";
 
 const LANGUAGES: Record<string, string> = { ts: "TypeScript", tsx: "TypeScript", js: "JavaScript", jsx: "JavaScript", mjs: "JavaScript", cjs: "JavaScript",
   py: "Python", rs: "Rust", go: "Go", json: "JSON", yml: "YAML", yaml: "YAML", sh: "Shell", bash: "Shell", zsh: "Shell", md: "Markdown",
@@ -176,7 +176,7 @@ export class DiffPanel {
     const totals = this.files.reduce((sum, file) => { const value = counts(file); return value ? { added: sum.added + value.added, removed: sum.removed + value.removed } : sum; }, { added: 0, removed: 0 });
     const drafting = this.files.filter((file) => file.tool.state === "running" || file.tool.waiting).length;
     const summary = paint.text(`${this.files.length} file${this.files.length === 1 ? "" : "s"}`, "paper") + (this.files.length ? ` ${styledCounts(totals)}` : "")
-      + (drafting ? paint.text(` · ${drafting} drafting`, "thinking") : "");
+      + (drafting ? paint.text(` · ${drafting} drafting`, "electric") : "");
     const expand = this.expanded ? "restore" : "expand";
     const followLabel = this.following ? " following edits " : " paused ";
     const controlsWidth = followLabel.length + 2 + "Alt+↵".length + 1 + expand.length;

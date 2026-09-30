@@ -134,7 +134,7 @@ export function composeDraft(options: ComposeOptions): ComposerFrame {
     zones.push({ row, column: textColumn, width: textWidth, action: { kind: "caret", start: info.start, text: info.text } });
   }
    const glyphRow = firstRow;
-  if (!options.hero) canvas.put(glyphRow, inset, paint.text(options.streaming ? "◎" : "▶", options.streaming ? "thinking" : options.focused === false ? "muted" : "electric"), 1, "surface");
+  if (!options.hero) canvas.put(glyphRow, inset, paint.text(options.streaming ? "◎" : "▶", options.streaming ? "electric" : options.focused === false ? "muted" : "electric"), 1, "surface");
   let row = firstRow + Math.min(promptCapacity, visual.lines.length);
   if (showAttachments) {
     let text = "";
@@ -224,7 +224,7 @@ function composeSessionDraft(options: ComposeOptions): ComposerFrame {
     put(firstRow + index, info.text ? mentionText(info.text, paint) : editor.value ? "" : paint.text(options.streaming ? "Type to queue a follow-up..." : "Continue the conversation...", "muted"));
     zones.push({ row: firstRow + index, column: textColumn, width: textWidth, action: { kind: "caret", start: info.start, text: info.text } });
   }
-  canvas.put(firstRow, inset + 2, paint.text(options.streaming ? "◎" : "▶", options.stopArmed ? "signal" : options.streaming ? "thinking" : "electric"), 1, "surface");
+  canvas.put(firstRow, inset + 2, paint.text(options.streaming ? "◎" : "▶", options.stopArmed ? "signal" : "electric"), 1, "surface");
   const controlRow = firstRow;
   if (options.streaming) {
     const label = options.stopArmed

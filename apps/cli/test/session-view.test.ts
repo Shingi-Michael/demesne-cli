@@ -2061,3 +2061,32 @@ test("the model chooser follows Figma 31:356: grouped by provider with limits, t
   state.onKeypress("", { name: "return" });
   expect(await choice).toBe(1);
 });
+
+test("the approval card follows Figma 23:164: a bordered card, the command inset with where it runs, and quiet saved-rule hints", async () => {
+  const { ui, screen, state } = fixture("approval");
+  const approval = ui.askApproval({ summary: "Run the parser regression suite", toolName: "run_command", allowPersist: true,
+    previewRows: ["$ bun test tests/parser.test.ts"], cwd: "~/projects/demesne-cli" });
+  const text = screen(120, 36);
+  expect(text).toMatch(/╭─+╮/);
+  expect(text).toMatch(/! Allow this command\? +run_command · Turn \d+/);
+  expect(text).toContain("$ bun test tests/parser.test.ts");
+  expect(text).toContain("in ~/projects/demesne-cli · runs on your machine, not sandboxed");
+  expect(text).toMatch(/y {2}Allow once {4}n {2}Deny +s always allow/);
+  // The saved-rule hint is a real control.
+  const rows = text.split("\n");
+  const row = rows.findIndex((line) => line.includes("s always allow"));
+  state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("s always allow") });
+  expect(await approval).toBe("allow_always");
+});
+
+test("clicking a chooser row picks that row, not its neighbour", async () => {
+  const { ui, state, screen } = fixture("complete");
+  const choice = ui.choose("Switch model", ["first-model", "second-model", "third-model"], 0, { noun: "models" });
+  const rows = screen(120, 30).split("\n");
+  const row = rows.findIndex((line) => line.includes("second-model"));
+  // The first click selects the row under the pointer; the second confirms it.
+  state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("second-model") });
+  expect(state.dialogSelected).toBe(1);
+  state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("second-model") });
+  expect(await choice).toBe(1);
+});

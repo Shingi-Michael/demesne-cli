@@ -89,6 +89,8 @@ export interface ApprovalRequest {
   toolName?: string;
   previewRows?: string[];
   allowPersist: boolean;
+  /// Where a command would run, shown under it; the workspace when omitted.
+  cwd?: string;
 }
 
 export interface PromptContext {
@@ -138,6 +140,12 @@ const TOOL_VERBS: Record<string, string> = {
 
 /// A click target within the composer area, addressed by content row (zero is
 /// the first line under the composing rule).
+/// Frames that draw their own title row report zones one row up, since the
+/// caller offsets input zones by the wrapper's title row.
+function withOwnTitle<T extends { zones: InputZone[] }>(frame: T): T {
+  return { ...frame, zones: frame.zones.map((zone) => ({ ...zone, row: zone.row - 1 })) };
+}
+
 /// Optional details for `choose()`: Figma 31:356's grouped, annotated list.
 export interface ChooseOptions {
   subtitle?: string;
@@ -1459,7 +1467,8 @@ export class Workbench {
   private inputLineCount(columns = process.stdout.columns ?? 80): number {
     if (this.mode === "approval") {
       // Title, summary, previews, the sandbox note and one row of choices.
-      if (this.sessionLayout) return 5 + (this.approval?.toolName === "run_command" ? 1 : 0) + Math.min(3, this.approval?.previewRows?.length ?? 0);
+      // Card: borders, title, summary, the inset block and the buttons.
+      if (this.sessionLayout) return 5 + (this.approval?.toolName === "run_command" ? 2 : Math.min(6, this.approval?.previewRows?.length ?? 0));
       // Voice line + permission card + preview rows + selection row.
       return Math.max(7, 6 + (this.approval?.previewRows?.length ?? 0) + 2);
     }
@@ -2151,7 +2160,10 @@ export class Workbench {
       // Keep the choice row in view; it is the last line.
       offset = Math.max(0, content.lines.length - available);
     }
-    if (this.sessionLayout && this.mode === "dialog") return this.composeChooser(width, inset, paint);
+    if (this.sessionLayout && this.mode === "dialog") return withOwnTitle(this.composeChooser(width, inset, paint));
+    // These draw their own titles, so their zones cancel the frame's +1 row
+    // offset that assumes the wrapper's title row above the content.
+    if (this.sessionLayout && this.mode === "approval" && this.approval) return withOwnTitle(this.composeApprovalCard(width, inset, paint));
     if (this.sessionLayout) {
       const canvas = new Canvas(width, this.layout.input.height, paint);
       for (let row = 0; row < this.layout.input.height; row++) {
@@ -2484,6 +2496,72 @@ export class Workbench {
   }
 
   /// A dialog row click selects it; clicking the selected row confirms.
+  /// Figma 23:164: an amber-bordered card. The title names the decision and
+  /// the tool and turn; the command sits in an inset block with where it runs
+  /// and that it is not sandboxed; Allow once and Deny lead, with the saved
+  /// options as quiet key hints. Keys and selection are unchanged.
+  private composeApprovalCard(width: number, inset: number, paint: Painter): { lines: string[]; cursor: { row: number; column: number } | null; zones: InputZone[] } {
+    const approval = this.approval!, height = this.layout.input.height, boxWidth = width - inset * 2;
+    const canvas = new Canvas(width, height, paint), zones: InputZone[] = [];
+    const inner = boxWidth - 4, left = inset + 2;
+    const command = approval.toolName === "run_command";
+    const choices = approvalOptions(!command, approval.allowPersist).options;
+    for (let row = 0; row < height; row++) canvas.put(row, inset, "", boxWidth, "surface");
+    // Short terminals drop the border so the question, summary and buttons fit.
+    const bordered = height >= 6, first = bordered ? 1 : 0, buttonRow = bordered ? height - 2 : height - 1;
+    if (bordered) {
+      canvas.put(0, inset, paint.text(`╭${"─".repeat(Math.max(0, boxWidth - 2))}╮`, "thinking"), boxWidth);
+      canvas.put(height - 1, inset, paint.text(`╰${"─".repeat(Math.max(0, boxWidth - 2))}╯`, "thinking"), boxWidth);
+      for (let row = 1; row < height - 1; row++) { canvas.put(row, inset, paint.text("│", "thinking"), 1); canvas.put(row, inset + boxWidth - 1, paint.text("│", "thinking"), 1); }
+    } else for (let row = 0; row < height; row++) canvas.put(row, inset, paint.text("▎", "thinking"), 1);
+    const turn = this.sessionView.latest?.number;
+    const tool = [approval.toolName, turn ? `Turn ${turn}` : ""].filter(Boolean).join(" · ");
+    const title = paint.text("! ", "thinking") + paint.text(command ? "Allow this command?" : "Allow this action?", "paper");
+    // The question always reads whole; the tool and turn drop on narrow cards.
+    canvas.put(first, left, formatFooterLine(title, visibleLength(title) + tool.length + 2 <= inner ? paint.text(tool, "muted") : "", inner), inner, "surface");
+    if (first + 1 < buttonRow) canvas.put(first + 1, left, paint.text(truncateText(sanitizeTerminalLine(approval.summary), inner), "secondary"), inner, "surface");
+    // The inset block: the command and where it runs, or the change preview.
+    const preview = (approval.previewRows ?? []).map((row) => sanitizeTerminalLine(stripVTControlCharacters(row)));
+    const where = approval.cwd ?? preview.find((row) => row.startsWith("Working directory: "))?.slice(19) ?? this.options.workspaceRoot ?? "the workspace";
+    const commandText = preview.find((row) => row && !row.startsWith("Working directory: "))?.replace(/^\$ /, "") ?? approval.summary;
+    const block: string[] = command
+      ? [paint.text("$ ", "muted") + paint.text(commandText, "paper"),
+        paint.text(`in ${where} · `, "muted") + paint.text("runs on your machine, not sandboxed", "thinking")]
+      : (approval.previewRows ?? []).filter((row) => !/^Working directory:/.test(stripVTControlCharacters(row)));
+    const blockRows = Math.max(0, Math.min(block.length, buttonRow - first - 2));
+    for (let index = 0; index < blockRows; index++) canvas.put(first + 2 + index, left, paint.onBackground(" " + truncateText(block[index]!, inner - 2) + " ".repeat(Math.max(0, inner - 2 - visibleLength(truncateText(block[index]!, inner - 2)))) + " ", "raised"), inner, "raised");
+    // Buttons, then the saved-rule options as quiet hints on the right.
+    const keys: Record<PermissionDecision, string> = { allow_once: "y", allow_session: "a", allow_always: "s", deny: "n" };
+    const labels: Record<PermissionDecision, string> = { allow_once: "Allow once", allow_session: "allow this session", allow_always: "always allow", deny: "Deny" };
+    let column = left;
+    for (const decision of choices.filter((choice) => choice === "allow_once" || choice === "deny")) {
+      const selected = choices[this.approvalSelected] === decision;
+      const label = ` ${keys[decision]}  ${labels[decision]} `;
+      const text = selected ? paint.wash(label, decision === "deny" ? "errorSurface" : "diffAddedSurface", decision === "deny" ? "signal" : "citron") : paint.wash(label, "raised", "paper");
+      canvas.put(buttonRow, column, text, label.length, "surface");
+      zones.push({ row: buttonRow, column, width: label.length, run: () => this.resolveApproval(decision) });
+      column += label.length + 2;
+    }
+    const quiet = choices.filter((choice) => choice === "allow_session" || choice === "allow_always");
+    let hints = "";
+    for (const decision of quiet) {
+      const text = choices[this.approvalSelected] === decision ? paint.wash(` ${keys[decision]} ${labels[decision]} `, "menuSelection", "electric")
+        : paint.text(keys[decision], "secondary") + " " + paint.text(labels[decision], "muted");
+      hints += (hints ? "   " : "") + text;
+    }
+    if (hints && column + visibleLength(hints) + 2 <= left + inner) {
+      const start = left + inner - visibleLength(hints);
+      canvas.put(buttonRow, start, hints, visibleLength(hints), "surface");
+      let at = start;
+      for (const decision of quiet) {
+        const width = visibleLength(choices[this.approvalSelected] === decision ? ` ${keys[decision]} ${labels[decision]} ` : `${keys[decision]} ${labels[decision]}`);
+        zones.push({ row: buttonRow, column: at, width, run: () => this.resolveApproval(decision) });
+        at += width + 3;
+      }
+    }
+    return { lines: canvas.rows, cursor: null, zones };
+  }
+
   /// Figma 31:356: a titled box with a filter field, items grouped under
   /// quiet headers with counts, a detail column, the current item marked, and
   /// a keycap footer. Plain lists (themes, sessions) use the same frame.

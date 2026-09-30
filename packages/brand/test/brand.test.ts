@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { stripVTControlCharacters } from "node:util";
 import {
   buildCard,
   computePromptVisualLines,
@@ -794,4 +795,17 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(wide.cursorCol).toBe(4);
     expect(textIndexAtVisualColumn("古a", 2)).toBe(1);
   });
+});
+
+test("answers in the session follow Figma 32:438: closed code boxes and quiet tables", () => {
+  const stream = new TerminalMarkdownStream(createPainter(false), 40, 0, true, "gutter");
+  const out = stripVTControlCharacters(stream.write("```ts\nconst a = 1;\n```\n\n| Suite | Result |\n| --- | --- |\n| lexer | passed |\n") + stream.flush());
+  const lines = out.split("\n").filter(Boolean);
+  expect(lines[0]).toMatch(/^╭─ ts ─+╮$/);
+  expect(lines[1]).toMatch(/^│ const a = 1; +│$/);
+  expect(lines[2]).toMatch(/^╰─+╯$/);
+  // Every box row is the full width, so the right edge lines up.
+  for (const line of lines.slice(0, 3)) expect(line.length).toBe(40);
+  expect(out).toMatch(/SUITE +RESULT\n─+\nlexer +passed/);
+  expect(out).not.toMatch(/[┌┬┐├┼┤└┴┘]/);
 });

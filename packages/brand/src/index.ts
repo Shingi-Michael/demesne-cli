@@ -2021,6 +2021,20 @@ export class TerminalMarkdownStream {
       }).join("\n");
     };
 
+    if (this.codeStyle === "gutter") {
+      // Figma 32:438: quiet uppercase headers, one hairline, no cell borders.
+      const quietRow = (cells: string[], heading: boolean) => {
+        const wrapped = cells.map((cell, index) => wrapDisplayText(heading ? cell.toUpperCase() : cell, widths[index]!));
+        const height = Math.max(...wrapped.map((cell) => cell.length));
+        return Array.from({ length: height }, (_, rowIndex) => this.prefix + wrapped.map((cell, column) => {
+          const text = cell[rowIndex] ?? "";
+          const styled = heading ? this.painter.text(text, "muted") : this.formatInline(text);
+          return padTableCell(styled, widths[column]!, alignments[column] ?? "left");
+        }).join("   ")).join("\n");
+      };
+      const total = widths.reduce((sum, width) => sum + width, 0) + (widths.length - 1) * 3;
+      return [quietRow(header, true), this.painter.text(`${this.prefix}${"─".repeat(Math.min(total, available))}`, "rule"), ...rows.map((row) => quietRow(row, false))].join("\n");
+    }
     return [
       rule("┌", "┬", "┐"),
       renderRow(header, true),
@@ -2057,20 +2071,31 @@ export class TerminalMarkdownStream {
       if (this.inCodeBlock) {
         this.codeBlockLang = trimmed.slice(3).trim();
         if (this.codeStyle === "gutter") {
-          const label = truncateText(this.codeBlockLang || "code", Math.max(1, this.width - visibleLength(this.prefix) - 2));
-          return `\n${this.painter.text(`${this.prefix}╭ ${label}`, "secondary")}`;
+          // Figma 32:438: a closed box with the language in its top edge.
+          const inner = Math.max(2, this.width - visibleLength(this.prefix) - 2);
+          const label = truncateText(this.codeBlockLang || "code", Math.max(1, inner - 4));
+          return `\n${this.prefix}${this.painter.text("╭─ ", "rule")}${this.painter.text(label, "secondary")}${this.painter.text(` ${"─".repeat(Math.max(0, inner - label.length - 3))}╮`, "rule")}`;
         }
         const rawHeader = this.codeBlockLang ? ` [${this.codeBlockLang}] ` : " ";
         const header = truncateText(rawHeader, Math.max(1, this.width - visibleLength(this.prefix) - 3));
         const ruleLen = Math.max(0, this.width - visibleLength(this.prefix) - visibleLength(header) - 3);
         return `\n${this.painter.text(`${this.prefix}┌──${header}${"─".repeat(ruleLen)}`, "rule")}`;
       }
-      return this.codeStyle === "gutter" ? this.prefix : `${this.painter.text(`${this.prefix}└──${"─".repeat(Math.max(0, this.width - visibleLength(this.prefix) - 3))}`, "rule")}\n`;
+      return this.codeStyle === "gutter"
+        ? this.painter.text(`${this.prefix}╰${"─".repeat(Math.max(0, this.width - visibleLength(this.prefix) - 2))}╯`, "rule")
+        : `${this.painter.text(`${this.prefix}└──${"─".repeat(Math.max(0, this.width - visibleLength(this.prefix) - 3))}`, "rule")}\n`;
     }
 
     // Inside a code block: format with clean indentation and subtle rule border (preserve code as-is)
     if (this.inCodeBlock) {
       const border = this.painter.text(`${this.prefix}│ `, "rule");
+      if (this.codeStyle === "gutter") {
+        // Inside the box: code padded to the right edge, which closes each row.
+        const codeWidth = Math.max(1, this.width - visibleLength(border) - 2);
+        return splitDisplayCells(rawLine, codeWidth)
+          .map((segment) => `${border}${this.highlightCode(segment)}${" ".repeat(Math.max(0, codeWidth - visibleLength(segment)))}${this.painter.text(" │", "rule")}`)
+          .join("\n");
+      }
       const codeWidth = Math.max(1, this.width - visibleLength(border));
       return splitDisplayCells(rawLine, codeWidth)
         .map((segment) => `${border}${this.highlightCode(segment)}`)

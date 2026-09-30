@@ -108,13 +108,13 @@ test("start controls support keyboard browsing while caret edits, multiline inpu
   expect(state.editor.value).toBe("Explain @");
   expect(screen()).toMatch(/lexer\.ts +src\//);
   key("return");
-  expect(state.editor.value).toBe("Explain @src/lexer.ts ");
+  expect(state.editor.value).toBe("Explain @lexer.ts ");
   expect(state.mode).toBe("input");
   key("return", { shift: true }); state.onKeypress("and callers", {});
-  expect(state.editor.value).toBe("Explain @src/lexer.ts \nand callers");
+  expect(state.editor.value).toBe("Explain @lexer.ts \nand callers");
   screen(40, 10); screen(120, 36);
   key("return");
-  expect(await prompt).toBe("Explain @src/lexer.ts \nand callers");
+  expect(await prompt).toBe("Explain @lexer.ts \nand callers");
 });
 
 test("History and recent-session actions use the session commands and carry the draft through resume", async () => {

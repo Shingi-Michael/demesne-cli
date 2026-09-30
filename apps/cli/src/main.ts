@@ -91,7 +91,7 @@ import { createHash } from "node:crypto";
 import { checkForUpdate } from "./update-check.ts";
 import { PromptHistory } from "./prompt-history.ts";
 import { composeInEditor } from "./external-editor.ts";
-import { createPromptEditorState, mentionMatches, mentionTokenAt, reducePromptEditor, reverseSearchMatches, setPromptValue } from "./prompt-editor.ts";
+import { createPromptEditorState, expandMentions, mentionMatches, mentionTokenAt, reducePromptEditor, reverseSearchMatches, setPromptValue } from "./prompt-editor.ts";
 import { queueSummary, reduceQueuedInput, settleQueuedInput } from "./input-queue.ts";
 import { notify, shouldNotifyApproval, shouldNotifyCompletion, type NotificationOptions } from "./notifications.ts";
 import { derivePersistedRule } from "./allow-rules.ts";
@@ -1501,6 +1501,8 @@ async function runChat(command: string[]): Promise<void> {
       }
     }
 
+    // Short `@name` mentions go out as workspace paths.
+    line = expandMentions(line, mentionFiles);
     const input = line.trim();
     if (!input) continue;
     history.add(input, currentWorkspace);

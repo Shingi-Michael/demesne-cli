@@ -33,10 +33,13 @@ export class CommandMenu {
 
   reset(): void { this.offset = 0; this.query = ""; }
 
-  render(options: { commands: readonly SlashCommand[]; selected: number; query: string; input: Rect; paint: Painter; top: number }): CommandMenuFrame | null {
+  /// `bottom` opens the menu below the composer (the start screen), using
+  /// the rows up to that one; otherwise it sits above, down from `top`.
+  render(options: { commands: readonly SlashCommand[]; selected: number; query: string; input: Rect; paint: Painter; top: number; bottom?: number }): CommandMenuFrame | null {
     const { commands, input, paint } = options;
+    const dropDown = options.bottom !== undefined;
     // At most twelve rows in all: the top edge, ten entries and the footer.
-    const capacity = Math.min(10, input.row - options.top - 2);
+    const capacity = Math.min(10, (dropDown ? options.bottom! - (input.row + input.height) : input.row - options.top) - 2);
     if (!commands.length || capacity < 1) { this.reset(); return null; }
     if (this.query !== options.query) { this.offset = 0; this.query = options.query; }
     const rows: MenuRow[] = [];
@@ -54,7 +57,7 @@ export class CommandMenu {
     if (anchor >= this.offset + capacity) this.offset = anchor - capacity + 1;
     const visible = rows.slice(this.offset, this.offset + capacity);
     const below = rows.slice(this.offset + capacity).filter((row) => row.index !== undefined).length;
-    const rect = { row: input.row - visible.length - 2, column: input.column, width: input.width, height: visible.length + 2 };
+    const rect = { row: dropDown ? input.row + input.height : input.row - visible.length - 2, column: input.column, width: input.width, height: visible.length + 2 };
     const canvas = new Canvas(rect.width, rect.height, paint);
     const zones: CommandMenuFrame["zones"] = [];
     const border = (text: string) => paint.text(text, "rule");

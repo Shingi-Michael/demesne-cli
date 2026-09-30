@@ -21,10 +21,15 @@ export class MentionMenu {
 
   reset(): void { this.offset = 0; this.query = ""; }
 
-  render(options: { files: readonly string[]; selected: number; query: string; input: Rect; top: number; paint: Painter }): CommandMenuFrame | null {
+  /// `searching` keeps the menu open with a "no files match" row while a
+  /// query matches nothing. `bottom` opens it below the composer instead
+  /// (the start screen), using the rows up to that one.
+  render(options: { files: readonly string[]; selected: number; query: string; input: Rect; top: number; paint: Painter; searching?: boolean; bottom?: number }): CommandMenuFrame | null {
     const { files, input, paint } = options;
-    const space = Math.min(12, input.row - options.top);
-    if (!files.length || space < 2) { this.reset(); return null; }
+    const below = options.bottom !== undefined;
+    const space = Math.min(12, below ? options.bottom! - (input.row + input.height) : input.row - options.top);
+    const empty = !files.length && Boolean(options.searching && options.query);
+    if (!files.length && !empty || space < 2) { this.reset(); return null; }
     const framed = space >= 5;
     const capacity = space - (framed ? 3 : 1);
     if (this.query !== options.query) { this.offset = 0; this.query = options.query; }
@@ -33,8 +38,8 @@ export class MentionMenu {
     if (selected < this.offset) this.offset = selected;
     if (selected >= this.offset + capacity) this.offset = selected - capacity + 1;
     const visible = files.slice(this.offset, this.offset + capacity);
-    const height = visible.length + (framed ? 3 : 1);
-    const rect = { row: input.row - height, column: input.column, width: input.width, height };
+    const height = Math.max(1, visible.length) + (framed ? 3 : 1);
+    const rect = { row: below ? input.row + input.height : input.row - height, column: input.column, width: input.width, height };
     const canvas = new Canvas(rect.width, rect.height, paint), zones: CommandMenuFrame["zones"] = [];
     const inner = rect.width - 4;
     const side = (row: number, background: PaletteColor = "surface") => { canvas.put(row, 0, paint.text("│", "rule"), 1, background); canvas.put(row, rect.width - 1, paint.text("│", "rule"), 1, "surface"); };
@@ -42,8 +47,13 @@ export class MentionMenu {
     const query = sanitizeTerminalLine(options.query);
     if (framed) {
       side(1);
-      const count = query ? `${files.length} match "${truncateText(query, 16)}"` : `${files.length} file${files.length === 1 ? "" : "s"}`;
+      const count = empty ? `no match "${truncateText(query, 16)}"` : query ? `${files.length} match "${truncateText(query, 16)}"` : `${files.length} file${files.length === 1 ? "" : "s"}`;
       canvas.put(1, 2, formatFooterLine(paint.text("FILES", "muted"), paint.text(count, "muted"), inner), inner, "surface");
+    }
+    if (empty) {
+      const row = framed ? 2 : 1;
+      side(row);
+      canvas.put(row, 2, paint.text(truncateText(`No files match "${query}". Keep typing, or Esc to close.`, inner), "muted"), inner, "surface");
     }
     const names = visible.map((file) => { const safe = sanitizeTerminalLine(file), slash = safe.lastIndexOf("/"); return { name: safe.slice(slash + 1), directory: slash < 0 ? "" : safe.slice(0, slash + 1) }; });
     const nameWidth = Math.min(Math.max(12, ...names.map((item) => item.name.length + 2)), Math.floor(inner * 0.45));
@@ -63,7 +73,7 @@ export class MentionMenu {
     if (framed) {
       const footer = rect.height - 1;
       side(footer);
-      const keys = keyHints(paint, [["↑↓", "select"], ["↵", "insert"], ["Esc", "close"]]);
+      const keys = keyHints(paint, empty ? [["Esc", "close"]] : [["↑↓", "select"], ["↵", "insert"], ["Esc", "close"]]);
       const note = "files with spaces are skipped";
       canvas.put(footer, 2, formatFooterLine(keys, visibleLength(keys) + note.length + 2 <= inner ? paint.text(note, "muted") : "", inner), inner, "surface");
     }

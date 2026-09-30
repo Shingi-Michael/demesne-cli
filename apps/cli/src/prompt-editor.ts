@@ -130,7 +130,10 @@ export function reducePromptEditor(state: PromptEditorState, input: PromptEditor
     : [];
   const mentionActive = !state.mentionDismissed && mention !== null && mentionCandidates.length > 0;
 
-  if (mentionActive && key.name === "escape") return none({ ...state, mentionDismissed: true });
+  // Esc closes the file menu, including its "no files match" state, and
+  // never clears the draft while that menu is showing.
+  const mentionOpen = mentionActive || !state.mentionDismissed && mention !== null && mention.query.length > 0 && (input.mentions?.length ?? 0) > 0;
+  if (mentionOpen && key.name === "escape") return none({ ...state, mentionDismissed: true });
   if (mentionActive && (key.name === "pageup" || key.name === "pagedown")) {
     return none({ ...state, mentionSelected: Math.max(0, Math.min(mentionCandidates.length - 1, state.mentionSelected + (key.name === "pageup" ? -5 : 5))) });
   }
@@ -163,7 +166,7 @@ export function reducePromptEditor(state: PromptEditorState, input: PromptEditor
 
   if (mentionActive && (key.name === "tab" || key.name === "return" || key.name === "enter")) {
     const file = mentionCandidates[Math.min(state.mentionSelected, mentionCandidates.length - 1)]!;
-    const completed = `@${file} `;
+    const completed = `@${mentionLabel(file, input.mentions!)} `;
     const value = state.value.slice(0, mention.start) + completed + state.value.slice(state.cursor);
     return none(mutate(state, value, mention.start + completed.length));
   }
@@ -498,6 +501,44 @@ export function mentionTokenAt(value: string, cursor: number): MentionToken | nu
     index -= 1;
   }
   return null;
+}
+
+const basename = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
+/// What a completed mention puts in the draft (Figma 39:452): the file's
+/// name when no other workspace file shares it, otherwise its path.
+export function mentionLabel(file: string, files: readonly string[]): string {
+  const name = basename(file);
+  return name !== file && files.filter((other) => basename(other) === name).length === 1 ? name : file;
+}
+
+/// The workspace file an `@name` token refers to: an exact path, or a name
+/// only one file has. Anything else is plain text, not an attachment.
+export function resolveMention(name: string, files: readonly string[]): string | null {
+  if (!name) return null;
+  if (files.includes(name)) return name;
+  const matches = name.includes("/") ? [] : files.filter((file) => basename(file) === name);
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+/// `@name` tokens in a draft that resolve to workspace files, with where each
+/// token (including `@`) sits in the text.
+export function draftMentions(value: string, files: readonly string[]): { start: number; length: number; path: string }[] {
+  return [...value.matchAll(/(^|\s)@([^\s@]+)/g)].flatMap((match) => {
+    const path = resolveMention(match[2]!, files);
+    return path ? [{ start: match.index! + match[1]!.length, length: match[2]!.length + 1, path }] : [];
+  });
+}
+
+/// A submitted draft names files by path, so the agent never has to guess
+/// which `lexer.ts` a short mention meant.
+export function expandMentions(value: string, files: readonly string[]): string {
+  let result = "", last = 0;
+  for (const mention of draftMentions(value, files)) {
+    result += value.slice(last, mention.start) + `@${mention.path}`;
+    last = mention.start + mention.length;
+  }
+  return result + value.slice(last);
 }
 
 /// Ranks workspace files for a mention query: basename prefixes first, then

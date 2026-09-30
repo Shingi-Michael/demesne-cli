@@ -1,6 +1,6 @@
 import { computePromptVisualLines, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, type Painter } from "@demesne/brand";
 import { keycap } from "./session-chrome.ts";
-import { mentionTokenAt, reverseSearchMatches, type PromptEditorState } from "../prompt-editor.ts";
+import { draftMentions, mentionTokenAt, reverseSearchMatches, type PromptEditorState } from "../prompt-editor.ts";
 import { Canvas } from "./canvas.ts";
 import type { ContextReceipt } from "./entries.ts";
 import { thinkingDots } from "./interaction.ts";
@@ -32,15 +32,17 @@ function hasDraftLabel(options: ComposerOptions): boolean {
   if (!options.editor.value.trim()) return false;
   return options.streaming || (Boolean(options.restored) && !options.hero);
 }
-function attachments(editor: PromptEditorState): RegExpMatchArray[] {
+/// Files the draft mentions, as chips: only tokens that name a workspace
+/// file, and not the one still being typed.
+function attachments(editor: PromptEditorState, files: readonly string[]): { start: number; length: number; path: string }[] {
   const active = mentionTokenAt(editor.value, editor.cursor);
-  return [...editor.value.matchAll(/(?:^|\s)(@[^\s]+)/g)].filter(match => match.index! + match[0].indexOf(match[1]!) !== active?.start);
+  return draftMentions(editor.value, files).filter((mention) => mention.start !== active?.start);
 }
 export function composerHeight(options: ComposerOptions): number {
   if (options.editor.search) return 4;
   const textWidth = options.hero ? options.width - 4 : sessionComposerGeometry(options).textWidth;
   const lines = computePromptVisualLines(options.editor.value, options.editor.cursor, Math.max(8, textWidth)).lines.length;
-  return (options.hero ? 3 : 2) + Math.max(options.hero ? 2 : 1, Math.min(6, lines)) + (attachments(options.editor).length ? 1 : 0)
+  return (options.hero ? 3 : 2) + Math.max(options.hero ? 2 : 1, Math.min(6, lines)) + (attachments(options.editor, options.mentions).length ? 1 : 0)
     + (hasDraftLabel(options) ? 1 : 0);
 }
 
@@ -118,7 +120,7 @@ export function composeDraft(options: ComposeOptions): ComposerFrame {
     canvas.put(hintsRow, inset, styledHint, hintWidth, "surface");
   }
   const room = Math.max(1, hintsRow - firstRow);
-  const attached = attachments(editor);
+  const attached = attachments(editor, options.mentions);
   const showAttachments = attached.length > 0 && room > 1;
   const promptCapacity = Math.max(1, room - (showAttachments ? 1 : 0));
   const visual = computePromptVisualLines(editor.value, editor.cursor, textWidth);
@@ -136,11 +138,11 @@ export function composeDraft(options: ComposeOptions): ComposerFrame {
   let row = firstRow + Math.min(promptCapacity, visual.lines.length);
   if (showAttachments) {
     let text = "";
-    for (const match of attached) {
-      const label = ` ${match[1]} × `;
+    for (const mention of attached) {
+      const label = ` ${mention.path} × `;
       if (visibleLength(text) + visibleLength(label) > textWidth) break;
-      zones.push({ row, column: textColumn + visibleLength(text), width: visibleLength(label), action: { kind: "remove", start: match.index! + match[0].indexOf(match[1]!), length: match[1]!.length } });
-      text += mentionChip(match[1]!, paint) + " ";
+      zones.push({ row, column: textColumn + visibleLength(text), width: visibleLength(label), action: { kind: "remove", start: mention.start, length: mention.length } });
+      text += mentionChip(mention.path, paint) + " ";
     }
     put(row++, text);
   }
@@ -213,7 +215,7 @@ function composeSessionDraft(options: ComposeOptions): ComposerFrame {
   }
   const firstRow = header ? 2 : 1;
   const room = Math.max(1, height - 1 - firstRow);
-  const attached = attachments(editor), showAttachments = attached.length > 0 && room > 1;
+  const attached = attachments(editor, options.mentions), showAttachments = attached.length > 0 && room > 1;
   const capacity = room - Number(showAttachments);
   const visual = computePromptVisualLines(editor.value, editor.cursor, textWidth);
   const start = Math.max(0, visual.cursorLine - capacity + 1);
@@ -244,10 +246,10 @@ function composeSessionDraft(options: ComposeOptions): ComposerFrame {
   if (showAttachments) {
     const row = firstRow + Math.min(capacity, visual.lines.length);
     let column = textColumn;
-    for (const match of attached) {
-      const label = ` ${match[1]} × `;
+    for (const mention of attached) {
+      const label = ` ${mention.path} × `;
       if (column + visibleLength(label) > textColumn + textWidth) break;
-      control(row, column, mentionChip(match[1]!, paint), { kind: "remove", start: match.index! + match[0].indexOf(match[1]!), length: match[1]!.length });
+      control(row, column, mentionChip(mention.path, paint), { kind: "remove", start: mention.start, length: mention.length });
       column += visibleLength(label) + 1;
     }
   }

@@ -2102,9 +2102,20 @@ test("@ mentions follow Figma 39:452: a FILES header with the match count, folde
   expect(text).toMatch(/↑↓ select {2}↵ insert {2}Esc close +files with spaces are skipped/);
   state.onKeypress("", { name: "tab" });
   state.onKeypress(" why?", {});
-  // The inserted mention stays in the draft as text and shows as a chip.
-  expect(state.editor.value).toContain("@src/lexer.ts");
-  expect(screen(120, 30)).toContain(" @src/lexer.ts × ");
+  // The draft reads the file's name; the chip shows where it lives.
+  expect(state.editor.value).toContain("@lexer.ts  why?");
+  expect(screen(120, 30)).toContain(" src/lexer.ts × ");
+  // A token that names no file is plain text: no chip, and the menu says so.
+  state.onKeypress(" @zzz", {});
+  let after = screen(120, 30);
+  expect(after).toMatch(/FILES +no match "zzz"/);
+  expect(after).toContain('No files match "zzz". Keep typing, or Esc to close.');
+  expect(after).not.toContain(" zzz × ");
+  // Esc closes that menu without clearing the draft.
+  state.onKeypress("", { name: "escape" });
+  expect(state.editor.value).toBe("@lexer.ts  why? @zzz");
+  after = screen(120, 30);
+  expect(after).not.toContain("No files match");
 });
 
 test("Settings follows Figma 49:560: grouped settings with their values and commands, and Enter changes the selected one", async () => {

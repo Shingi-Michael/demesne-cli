@@ -32,16 +32,38 @@ describe("PermissionBroker session grants", () => {
     expect(broker.listGrants("session")).toEqual([{ tool: "edit_file", pathPrefix: "src/util" }]);
   });
 
-  test("host commands never receive persistent session grants", async () => {
+  test("a command allowed for the session covers only that exact argv in that directory", async () => {
     const broker = new PermissionBroker();
     const controller = new AbortController();
-    const waiter = broker.wait("p2", "t", "s", "run_command", JSON.stringify({ argv: ["echo"] }), controller.signal);
+    const waiter = broker.wait("p2", "t", "s", "run_command", JSON.stringify({ argv: ["bun", "test", "apps/x.test.ts"], cwd: "./" }), controller.signal);
     broker.resolve("p2", "allow_session");
     await waiter;
 
-    expect(broker.preapproved("s", "run_command", { argv: ["git", "status"] })).toBe(false);
-    expect(broker.listGrants("s")).toEqual([]);
+    // The same command, however the directory is spelled, and with a different timeout.
+    expect(broker.preapproved("s", "run_command", { argv: ["bun", "test", "apps/x.test.ts"] })).toBe(true);
+    expect(broker.preapproved("s", "run_command", { argv: ["bun", "test", "apps/x.test.ts"], cwd: ".", timeoutMs: 5000 })).toBe(true);
+    // Never a longer, shorter or different command, another directory, or another session.
+    expect(broker.preapproved("s", "run_command", { argv: ["bun", "test", "apps/x.test.ts", "--update-snapshots"] })).toBe(false);
+    expect(broker.preapproved("s", "run_command", { argv: ["bun", "test"] })).toBe(false);
+    expect(broker.preapproved("s", "run_command", { argv: ["bun", "test", "apps/y.test.ts"] })).toBe(false);
+    expect(broker.preapproved("s", "run_command", { argv: ["bun", "test", "apps/x.test.ts"], cwd: "apps" })).toBe(false);
+    expect(broker.preapproved("other", "run_command", { argv: ["bun", "test", "apps/x.test.ts"] })).toBe(false);
+    expect(broker.preapproved("s", "run_command", { argv: "bun test apps/x.test.ts" })).toBe(false);
+    // It is not a grant for other tools either.
     expect(broker.preapproved("s", "delete_path", { path: "x" })).toBe(false);
+    expect(broker.listGrants("s")).toEqual([{ tool: "run_command", pathPrefix: "", argv: ["bun", "test", "apps/x.test.ts"], cwd: "." }]);
+  });
+
+  test("malformed command arguments grant nothing", async () => {
+    const broker = new PermissionBroker();
+    const controller = new AbortController();
+    for (const [id, args] of [["m1", "{not json"], ["m2", JSON.stringify({ argv: [] })], ["m3", JSON.stringify({ argv: ["ls", 3] })]] as const) {
+      const waiter = broker.wait(id, "t", "s", "run_command", args, controller.signal);
+      broker.resolve(id, "allow_session");
+      await waiter;
+    }
+    expect(broker.listGrants("s")).toEqual([]);
+    expect(broker.preapproved("s", "run_command", { argv: ["ls"] })).toBe(false);
   });
 
   test("root-level files grant workspace-wide scope for that tool", async () => {

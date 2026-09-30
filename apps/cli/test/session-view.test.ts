@@ -226,9 +226,14 @@ test("approval keyboard routing and selected buttons survive the compact input b
   const { ui, key, screen } = fixture("approval");
   const approval = ui.askApproval({ summary: "Run test suite", toolName: "run_command", allowPersist: false });
   screen(40, 10);
-  key("left");
+  // Deny is selected first; commands now offer "allow this session" before it.
+  key("left"); key("left");
   key("return");
   expect(await approval).toBe("allow_once");
+  const session = ui.askApproval({ summary: "Run test suite", toolName: "run_command", allowPersist: false });
+  screen(40, 10);
+  key("a");
+  expect(await session).toBe("allow_session");
 });
 
 test("scrolling live thinking pins it when a response arrives and live follow releases it", () => {
@@ -2071,7 +2076,7 @@ test("the approval card follows Figma 23:164: a bordered card, the command inset
   expect(text).toMatch(/! Allow this command\? +run_command · Turn \d+/);
   expect(text).toContain("$ bun test tests/parser.test.ts");
   expect(text).toContain("in ~/projects/demesne-cli · runs on your machine, not sandboxed");
-  expect(text).toMatch(/y {2}Allow once {4}n {2}Deny +s always allow/);
+  expect(text).toMatch(/y {2}Allow once {4}n {2}Deny +a allow this session {3}s always allow/);
   // The saved-rule hint is a real control.
   const rows = text.split("\n");
   const row = rows.findIndex((line) => line.includes("s always allow"));

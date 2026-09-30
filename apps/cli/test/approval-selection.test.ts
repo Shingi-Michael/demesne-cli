@@ -68,3 +68,14 @@ describe("approval selection persistence", () => {
     expect(line).toContain("\x1b[38;2;");
   });
 });
+
+describe("commands with a session grant still fail safe", () => {
+  test("Deny stays the default for host commands even when allow this session is offered", () => {
+    const command = approvalOptions(true, true, true);
+    expect(command.options).toEqual(["allow_once", "allow_session", "allow_always", "deny"]);
+    expect(command.options[command.selectedIndex]).toBe("deny");
+    expect(approvalOptions(true, false, true).options[approvalOptions(true, false, true).selectedIndex]).toBe("deny");
+    // File tools keep Allow once as the default.
+    expect(approvalOptions(true, true).selectedIndex).toBe(0);
+  });
+});

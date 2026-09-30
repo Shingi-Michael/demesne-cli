@@ -958,7 +958,8 @@ async function runChat(command: string[]): Promise<void> {
       workbench.restoreSession(state);
       workbench.notice("Saved answers loaded; detailed event history could not be replayed.", "error");
     }
-    if (state.session.turns.length === 0) {
+    // Recent sessions feed the start screen and the History panel alike.
+    {
       workbench.setRecentSessions([], "loading");
       void loadRecentSessions(state, {
         list: () => request<{ sessions: Session[] }>("/v1/sessions").then((result) => result.sessions),

@@ -1,5 +1,6 @@
 import { formatDiffPreview, formatFooterLine, sanitizeTerminalLine, toolPhaseColor, truncateText, visibleLength, type Painter, type PaletteColor, type PresenceState } from "@demesne/brand";
 import { keyHints } from "./session-chrome.ts";
+import type { RecentSession } from "../recent-sessions.ts";
 import type { AssistantEntry, ResponseReceipt, ToolEntry, UserEntry, WorkbenchEntry } from "./entries.ts";
 import { projectRunEvidence, toolFailed, verificationOutcome, type RunEvidence } from "./evidence.ts";
 import { computeSessionLayout, conversationInset } from "./layout.ts";
@@ -67,7 +68,8 @@ interface RunMemory {
 }
 type Action = FlowAction | { kind: "run"; id: number | null } | { kind: "surface"; surface: Surface }
   | { kind: "record"; id: number } | { kind: "back" | "history" | "log" | "thinking" | "request" | "follow" | "response-start" }
-  | { kind: "workspace" | "context" | "panel-close" | "panel-toggle" | "settings" } | { kind: "log-filter"; filter: LogFilter };
+  | { kind: "workspace" | "context" | "panel-close" | "panel-toggle" | "settings" } | { kind: "log-filter"; filter: LogFilter }
+  | { kind: "history-item"; index: number };
 type LogFilter = "all" | "changes" | "checks" | "failed";
 const LOG_FILTERS: readonly [LogFilter, string][] = [["all", "All"], ["changes", "Changes"], ["checks", "Checks"], ["failed", "Failed"]];
 const failedRecord = (record: RecordEntry): boolean => record.type === "tool" && (toolFailed(record) || record.state === "denied" || record.state === "stopped")
@@ -141,7 +143,13 @@ export class SessionView {
   private contextOpen = false;
   private contextOffset = 0;
   private historyOpen = false;
+  /// Index into the History panel's list: this session's turns, newest
+  /// first, then recent sessions.
   private historyIndex = 0;
+  /// Recent sessions shown under this session's turns in History.
+  recentSessions: readonly RecentSession[] = [];
+  /// Opens another session from History; the workbench supplies it.
+  onResume: ((id: string) => void) | null = null;
   private argumentsOpen = new Set<number>();
   private flowRows: FlowRow[] = [];
   private answerRows: string[] = [];
@@ -275,7 +283,17 @@ export class SessionView {
     } else { this.act({ kind: "log" }); this.key({ name: "home" }); }
     this.focused = true;
   }
-  get panelOpen(): boolean { return !this.historyOpen && (this.drivePanelOpen || this.contextOpen || this.outputId !== null || this.artifact !== null || this.memory.surface !== "response"); }
+  /// History's rows: this session's turns newest first, then other sessions.
+  private historyItems(): ({ kind: "turn"; run: SessionRun } | { kind: "session"; session: RecentSession })[] {
+    return [...[...this.runs].filter((run) => run.request).reverse().map((run) => ({ kind: "turn" as const, run })),
+      ...this.recentSessions.map((session) => ({ kind: "session" as const, session }))];
+  }
+  private openHistoryItem(): void {
+    const item = this.historyItems()[this.historyIndex];
+    if (item?.kind === "turn") this.act({ kind: "run", id: item.run.id });
+    else if (item?.kind === "session") this.onResume?.(item.session.id);
+  }
+  get panelOpen(): boolean { return this.historyOpen || this.drivePanelOpen || this.contextOpen || this.outputId !== null || this.artifact !== null || this.memory.surface !== "response"; }
   get driveOpen(): boolean { return this.drivePanelOpen; }
   get driveSurface(): string { return this.drivePanelOpen ? "drive" : this.historyOpen ? "history" : this.diffOpen ? "diff" : this.contextOpen ? "context" : this.outputId !== null ? "output" : this.artifact ? "review" : this.memory.surface; }
   get diffOpen(): boolean { return this.artifact?.kind === "changes" && !this.contextOpen && this.outputId === null && !this.historyOpen; }
@@ -454,9 +472,14 @@ export class SessionView {
     if (action.kind === "log") { this.openLog(); return; }
     if (action.kind === "history") {
       this.historyOpen = !this.historyOpen;
-      this.historyIndex = Math.max(0, this.runs.findIndex((run) => run.id === this.current?.id));
+      if (this.historyOpen) {
+        // History overlays whatever panel was open; Esc returns to it.
+        this.drivePanelOpen = false; this.focused = true;
+      }
+      this.historyIndex = Math.max(0, this.historyItems().findIndex((item) => item.kind === "turn" && item.run.id === this.current?.id));
       return;
     }
+    if (action.kind === "history-item") { this.historyIndex = action.index; this.openHistoryItem(); return; }
     this.historyOpen = false;
     if (this.outputId !== null) {
       this.outputId = null;
@@ -544,9 +567,10 @@ export class SessionView {
       return true;
     }
     if (this.historyOpen && this.focused && !key.ctrl && !key.meta) {
-      if (name === "up" || name === "down" || name === "pageup" || name === "pagedown") this.historyIndex = Math.max(0, Math.min(this.runs.length - 1, this.historyIndex + (name === "up" || name === "pageup" ? -1 : 1) * (name.startsWith("page") ? this.pageSize : 1)));
-      if (name === "home" || name === "end") this.historyIndex = name === "home" ? 0 : Math.max(0, this.runs.length - 1);
-      if (name === "return") this.act({ kind: "run", id: this.runs[this.historyIndex]?.id ?? null });
+      const last = Math.max(0, this.historyItems().length - 1);
+      if (name === "up" || name === "down" || name === "pageup" || name === "pagedown") this.historyIndex = Math.max(0, Math.min(last, this.historyIndex + (name === "up" || name === "pageup" ? -1 : 1) * (name.startsWith("page") ? this.pageSize : 1)));
+      if (name === "home" || name === "end") this.historyIndex = name === "home" ? 0 : last;
+      if (name === "return") this.openHistoryItem();
       if (name === "escape" || name === "backspace") { this.historyOpen = false; this.focused = false; }
       return ["up", "down", "pageup", "pagedown", "home", "end", "return", "escape", "backspace"].includes(name ?? "");
     }
@@ -696,7 +720,7 @@ export class SessionView {
     if (region.target === "drive" || region.target === "output" || region.target === "context" || region.recordId !== undefined) return this.scrollPane(amount, region);
     if (region.target === "history") {
       const before = this.historyIndex;
-      this.historyIndex = Math.max(0, Math.min(this.runs.length - 1, this.historyIndex + amount));
+      this.historyIndex = Math.max(0, Math.min(this.historyItems().length - 1, this.historyIndex + amount));
       return before !== this.historyIndex;
     }
     if (region.target === "list") return this.moveRecord(amount);
@@ -769,14 +793,22 @@ export class SessionView {
       this.hoverRegions.push({ row: header.row, column: header.history.column, width: header.history.width, key: "header-history" });
     } else {
       for (let y = 0; y < height; y++) put(y, 0, "", width, "surface");
-      const title = this.drivePanelOpen ? "AGENT DRIVE" : this.contextOpen ? "CONTEXT" : this.outputId !== null ? output?.type === "panel" && output.title ? output.title : "SESSION OUTPUT" : this.artifact?.kind === "changes" ? "CHANGES"
+      const title = this.historyOpen ? "HISTORY" : this.drivePanelOpen ? "AGENT DRIVE" : this.contextOpen ? "CONTEXT" : this.outputId !== null ? output?.type === "panel" && output.title ? output.title : "SESSION OUTPUT" : this.artifact?.kind === "changes" ? "CHANGES"
         : this.artifact?.kind === "verification" ? "VERIFICATION" : this.artifact ? "FAILED / DENIED" : memory.surface === "review" ? "CHANGES" : "EXECUTION LOG";
       // Figma panel frame: a quiet uppercase label, then what it shows. The
       // keycap footer carries Esc close; × stays for narrow panels without one.
       const subjectRun = this.artifact ? this.runs.find((item) => item.id === this.artifact!.runId) ?? run : run;
-      const subject = this.drivePanelOpen || this.outputId !== null ? "" : this.contextOpen ? safe(options.model ?? "")
+      const subject = this.historyOpen ? safe(options.title) : this.drivePanelOpen || this.outputId !== null ? "" : this.contextOpen ? safe(options.model ?? "")
         : subjectRun ? `Turn ${subjectRun.number}` : "";
       put(0, 1, paint.text(title, "muted") + (subject ? "  " + paint.text(subject, "secondary") : ""), width - 5, "surface");
+      if (title === "HISTORY" && panelFooter) {
+        // `13 turns · 7h 42m`: how much this session holds and how long it has run.
+        const turns = this.runs.filter((item) => item.request).length;
+        const age = options.createdAt ? Math.max(0, now - options.createdAt) : null;
+        const span = age === null ? "" : age < 3_600_000 ? ` · ${Math.max(1, Math.round(age / 60_000))}m` : ` · ${Math.floor(age / 3_600_000)}h ${Math.floor(age % 3_600_000 / 60_000)}m`;
+        const meta = `${turns} turn${turns === 1 ? "" : "s"}${span}`;
+        put(0, width - 1 - meta.length, paint.text(meta, "muted"), meta.length, "surface");
+      }
       if (title === "VERIFICATION" && this.artifact) {
         // The turn's overall result as a pill: `stopped · 2 of 3 passed`.
         const source = this.runs.find((item) => item.id === this.artifact!.runId);
@@ -817,7 +849,7 @@ export class SessionView {
       return { rows, zones };
     }
 
-    const inspection = !options.panel && this.historyOpen;
+    const inspection = false;
     const paused = !memory.followFlow || this.selectedId !== null;
     // Keep the reading region the same height when follow/focus changes. The
     // quiet gap above the prompt becomes the scrollback control when needed.
@@ -847,21 +879,49 @@ export class SessionView {
       region({ row: top, column, width: size, height: bodyHeight, target, maximum: Math.max(0, lines.length - capacity) });
       return offset;
     };
-    if (this.historyOpen && !options.panel) {
-      if (this.pointer) this.hover(this.pointer.row, this.pointer.column, now);
-      const capacity = Math.max(1, Math.floor(bodyHeight / 2));
-      const start = Math.max(0, this.historyIndex - capacity + 1);
-      this.runs.slice(start, start + capacity).forEach((item, index) => {
-        const row = top + index * 2;
-        const label = ` ${number(item.number)}  ${safe(item.request?.text ?? "Session")}`;
-        const selected = start + index === this.historyIndex;
-        put(row, x + 1, selected ? paint.bold(label, "electricBright") : paint.text(label, "secondary"), stageWidth - 2, selected ? "surface" : "ink");
-        if (selected) put(row, x + 1, paint.text("▎", "electric"), 1, "surface");
-        put(row + 1, x + 6, paint.text(`${item.status.toLowerCase()} · ${item.request?.at ?? ""}${item.request?.model ? ` · ${safe(item.request.model)}` : ""}`, "secondary"), stageWidth - 8);
-        zone(row, x + 1, stageWidth - 2, { kind: "run", id: item.id });
+    if (options.panel && this.historyOpen) {
+      // Figma 48:540: this session's turns newest first, then recent sessions.
+      const items = this.historyItems();
+      this.historyIndex = Math.max(0, Math.min(this.historyIndex, items.length - 1));
+      const lines: { text: string; index?: number }[] = [];
+      const section = (name: string, note: string) => lines.push({ text: formatFooterLine(paint.text(name, "muted"), paint.text(note, "muted"), stageWidth - 1) });
+      const digits = String(this.runs.at(-1)?.number ?? 1).length;
+      section("THIS SESSION", "newest first");
+      items.forEach((item, index) => {
+        if (item.kind === "session" && items[index - 1]?.kind !== "session") { lines.push({ text: "" }); section("RECENT SESSIONS", "/sessions for all"); }
+        if (item.kind === "turn") {
+          const run = item.run, evidence = projectRunEvidence(run.entries);
+          const [mark, tone]: [string, PaletteColor] = !run.settled ? ["◎", "thinking"] : run.status === "FAILED" ? ["×", "signal"] : run.status === "STOPPED" ? ["■", "secondary"] : ["✓", "citron"];
+          const files = new Set(evidence.changes.filter((change) => change.outcome === "done").map((change) => change.path)).size;
+          const close = run.entries.findLast((entry) => entry.type === "notice" && entry.closesTurn);
+          const outcome = !run.settled ? "running" : files ? `${files} file${files === 1 ? "" : "s"}` : close?.type === "notice" && /round limit/i.test(close.text) ? "round limit"
+            : run.answer ? "answer" : run.status === "FAILED" ? "failed" : "no diff";
+          const ms = run.receipt?.durationMs;
+          const time = ms == null ? "" : ms < 100_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`;
+          const right = paint.text([time, outcome].filter(Boolean).join(" · "), outcome === "running" ? "thinking" : "muted");
+          const left = `${paint.text(String(run.number).padStart(digits), "muted")} ${paint.text(mark, tone)} ${paint.text(safe(run.request?.text.split("\n")[0] ?? ""), index === this.historyIndex ? "paper" : "secondary")}`;
+          lines.push({ text: formatFooterLine(truncateText(left, Math.max(8, stageWidth - visibleLength(right) - 4)), right, stageWidth - 1), index });
+        } else {
+          const session = item.session;
+          const age = Math.max(0, now - Date.parse(session.updatedAt));
+          const when = !Number.isFinite(age) ? "" : age < 86_400_000 ? `${Math.max(1, Math.round(age / 3_600_000))}h ago` : age < 172_800_000 ? "yesterday"
+            : new Date(session.updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+          const right = paint.text([session.turns === undefined ? "" : `${session.turns} turn${session.turns === 1 ? "" : "s"}`, when].filter(Boolean).join("  "), "muted");
+          const left = `${" ".repeat(digits)} ${paint.text("→", "muted")} ${paint.text(safe(session.title), index === this.historyIndex ? "paper" : "secondary")}`;
+          lines.push({ text: formatFooterLine(truncateText(left, Math.max(8, stageWidth - visibleLength(right) - 4)), right, stageWidth - 1), index });
+        }
+      });
+      const selectedLine = Math.max(0, lines.findIndex((line) => line.index === this.historyIndex));
+      const start = Math.max(0, Math.min(selectedLine - bodyHeight + 1, lines.length - bodyHeight));
+      lines.slice(start, start + bodyHeight).forEach((line, offset) => {
+        const row = top + offset, selected = line.index !== undefined && line.index === this.historyIndex;
+        const background: PaletteColor = selected ? "menuSelection" : "surface";
+        put(row, x - 1, selected ? paint.text("▎", "electric") : "", stageWidth + 1, background);
+        put(row, x, line.text, stageWidth - 1, background);
+        if (line.index !== undefined) zone(row, x, stageWidth - 1, { kind: "history-item", index: line.index });
       });
       region({ row: top, column: x, width: stageWidth, height: bodyHeight, target: "history" });
-      return { rows, zones };
+      return finish([["↑↓", "select"], ["Enter", items[this.historyIndex]?.kind === "session" ? "open session" : "jump to turn"]]);
     }
     if (options.panel && (output?.type === "panel" || output?.type === "block")) {
       // Session commands are global, even when the reader has pinned an old run.

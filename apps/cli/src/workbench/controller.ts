@@ -172,7 +172,12 @@ export class Workbench {
   private imageIntent: TerminalImage | null = null;
   private probeUntil = 0;
   private sessionLayout = true;
-  private readonly sessionView = new SessionView((text) => this.copyResponse(text));
+  private readonly sessionView = (() => {
+    const view = new SessionView((text) => this.copyResponse(text));
+    // History opens another session through the same path as /resume.
+    view.onResume = (id) => this.runCommand(`/resume ${id}`);
+    return view;
+  })();
   private readonly startScreen = new StartScreen();
   private startLayout: StartLayout | null = null;
   private sessionId: string | undefined;
@@ -521,7 +526,9 @@ export class Workbench {
   setArtifactSession(sessionId: string): void { this.preview?.reset(sessionId); }
 
   setRecentSessions(sessions: readonly RecentSession[], state: "loading" | "ready" | "unavailable" = "ready"): void {
-    this.recentSessions = [...sessions]; this.recentState = state; this.requestRender();
+    this.recentSessions = [...sessions]; this.recentState = state;
+    this.sessionView.recentSessions = this.recentSessions.filter((session) => session.id !== this.sessionId);
+    this.requestRender();
   }
 
   setMentionFiles(files: readonly string[]): void {
@@ -1893,7 +1900,7 @@ export class Workbench {
       markdown: (entry: AssistantEntry, width: number) => this.renderedMarkdown(entry, width),
     };
     const frame = this.sessionView.render({ ...renderOptions, width, height: sessionHeight });
-    if (!modal && sessionHeight > 0) this.drivePanes.push({ surface: this.sessionView.driveSurface === "history" ? "history" : "response", row: 0, column: 0, width, height: sessionHeight });
+    if (!modal && sessionHeight > 0) this.drivePanes.push({ surface: "response", row: 0, column: 0, width, height: sessionHeight });
     const canvas = new Canvas(layout.width, layout.height, paint);
     for (const [row, text] of frame.rows.entries()) canvas.put(row, 0, text, width);
     const zones = panelOpen && geometry.overlay ? [] : frame.zones;

@@ -48,3 +48,21 @@ test("a pinned selection and dismissal survive a new client instance", () => {
     expect(restored.mode).toBe("pinned"); expect(restored.selectedId).toBe("a"); expect(restored.open).toBe(false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("the preview follows Figma 50:618: follow state and position in the header, history chips, and a keycap footer", () => {
+  const preview = new ArtifactPreview({ content: async () => new Uint8Array([1]), open: async () => {} }, () => {});
+  preview.reset("session"); for (const id of ["a-home", "b-signup", "c-login"]) preview.add(image(id)); preview.toggle();
+  let frame = preview.render(70, 30, 0, createPainter(false), { width: 8, height: 16 });
+  expect(frame.rows[0]).toMatch(/PREVIEW {2}following new images +3 of 3 {2}×/);
+  expect(frame.rows[2]).toMatch(/^ c-login\.png {2}test · png/);
+  expect(frame.rows.join("\n")).toMatch(/Pin +Expand +Open original +Kitty graphics/);
+  expect(frame.rows.at(-1)).toContain("←→ images  Tab actions  Esc close");
+  // Clicking a chip selects that image and stops following.
+  const chips = frame.rows.findIndex((row) => row.includes("▣ a-home.png"));
+  const chip = frame.zones.find((zone) => zone.row === chips && frame.rows[chips]!.slice(zone.column, zone.column + zone.width).includes("a-home"))!;
+  chip.run();
+  expect(preview.selectedId).toBe("a-home");
+  frame = preview.render(70, 30, 0, createPainter(false), null);
+  expect(frame.rows[0]).toMatch(/PREVIEW +follow latest +1 of 3/);
+  expect(frame.rows.join("\n")).toContain("no inline graphics");
+});

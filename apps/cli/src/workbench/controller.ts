@@ -69,7 +69,7 @@ import {
   type PromptEditorResult,
   type PromptEditorState,
 } from "../prompt-editor.ts";
-import { interruptArmed, reduceInterruptKey } from "../interrupt-key.ts";
+import { escapePresses, interruptArmed, reduceInterruptKey } from "../interrupt-key.ts";
 import { reducedMotionEnabled } from "../motion.ts";
 import { approvalOptions, reduceApprovalSelection } from "../approval-selection.ts";
 import { filterDialogIndices, reduceDialogPicker } from "../session-picker.ts";
@@ -924,6 +924,11 @@ export class Workbench {
     if (this.sessionLayout && (this.mode === "input" || this.mode === "streaming")) {
       this.sessionView.sync(this.entries);
       if (this.mode === "streaming") {
+        // An Escape that steps back or closes an open panel is navigation, so
+        // it must not arm Esc Esc: backing out twice would stop the turn.
+        if (key.name === "escape" && !key.ctrl && escapePresses(key) === 1 && this.sessionView.panelOpen) {
+          this.lastInterruptEscapeAt = 0; this.sessionView.key(key); this.requestRender(); return;
+        }
         const interrupt = reduceInterruptKey(this.lastInterruptEscapeAt, key, Date.now());
         this.lastInterruptEscapeAt = interrupt.lastEscapeAt;
         if (interrupt.interrupt) { this.options.onInterrupt(); return; }

@@ -109,6 +109,9 @@ export class DiffPanel {
   /// Opens one file on its own, in the whole-file view.
   openFile(runs: readonly SessionRun[], path: string): void {
     this.runs = runs; this.standalone = path; this.view = "whole"; this.following = false; this.search = null;
+    // The turn that last edited this file, so `v` can show its recorded diff.
+    const edited = [...runs].reverse().find((run) => run.tools.some((tool) => tool.phase === "change" && tool.changes?.some((change) => change.path === path)));
+    if (edited) { this.runId = edited.id; this.followLatest = false; this.lastSignature = []; this.sync(runs); this.selectedPath = path; }
     this.ensureLoaded(path);
   }
   /// The file the viewer shows.
@@ -280,11 +283,14 @@ export class DiffPanel {
     const clean = sanitizeTerminalLine(path), name = clean.slice(clean.lastIndexOf("/") + 1);
     const lines = text === null ? [] : (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n");
     // "change 1 of 3" on the right already counts the changes.
+    // Edits can be undone later (reverted, or lost to a checkout): then the
+    // file matches its original again, and `v` still shows what was done.
+    const edited = this.sessionChanges(path).length > 0;
     const details = [languageName(path), text === null ? "" : `${lines.length} line${lines.length === 1 ? "" : "s"}`,
-      changes.length ? "" : "no changes this session"].filter(Boolean).join(" · ");
+      changes.length ? "" : edited ? "edited, since undone" : "no changes this session"].filter(Boolean).join(" · ");
     const back = this.standalone ? paint.text("‹ Files", "electric") : "";
     const lead = this.standalone ? back : paint.text(name, "paper");
-    const view = changes.length || !this.standalone ? viewSwitch(paint, "whole").text : "";
+    const view = changes.length || edited || !this.standalone ? viewSwitch(paint, "whole").text : "";
     const matches = this.search ? this.searchMatches(path) : [];
     const right = this.search ? paint.text(`/${this.search.query}${this.search.typing ? "▏" : ""}`, "electric") + paint.text(matches.length ? ` · ${Math.max(0, this.search.index) + 1} of ${matches.length}` : this.search.query ? " · no matches" : "", "muted")
       : changes.length ? paint.text(`change ${index >= 0 ? index + 1 : "–"} of ${changes.length}`, "electric") : "";
@@ -298,6 +304,9 @@ export class DiffPanel {
     if (fits && view) zones.push({ row: top, column: 1 + visibleLength(left) + 2, width: visibleLength(view), action: { kind: "diff-view" } });
     top++;
     if (note) canvas.put(top++, 1, paint.text(note, "muted"), width - 2, "surface");
+    // Too narrow for the details: an undone edit still needs explaining,
+    // since the whole file shows no markers for it.
+    if (left === lead && edited && !changes.length) canvas.put(top++, 1, paint.text("Edited this session, since undone · ", "muted") + keycap(paint, "v") + paint.text(" shows the edit", "muted"), width - 2, "surface");
     // Rows: numbered, marked and highlighted; long lines fold.
     const digits = Math.max(2, String(lines.length).length);
     const key = `${path}:${width}:${paint.enabled}:${paint.themeName}`;
@@ -368,8 +377,10 @@ export class DiffPanel {
     const followLabel = this.following ? " following edits " : " pinned ";
     const controlsWidth = followLabel.length + 2 + "Alt+↵".length + 1 + expand.length;
     const summaryRow = 2;
-    // A file opened on its own has no turn to summarize: straight to the file.
-    if (this.standalone) return this.renderWhole(canvas, zones, 2, width, height, paint, this.standalone);
+    // A file opened on its own has no turn to summarize: straight to the file,
+    // in either view.
+    let top = 2;
+    if (!this.standalone) {
     // Figma panel v2: the summary and the file list form one raised tile.
     const showControls = width - 4 >= controlsWidth + 12;
     canvas.put(summaryRow, 1, "", width - 2, "raised");
@@ -400,7 +411,8 @@ export class DiffPanel {
     this.regions = [{ row: 3, height: capacity, target: "files" }];
     // The tile's lower edge, then the file's code.
     if (paint.enabled) canvas.put(3 + capacity, 1, paint.text("▀".repeat(width - 2), "raised"), width - 2, "surface");
-    let top = 3 + capacity + 1;
+    top = 3 + capacity + 1;
+    }
     if (this.view === "whole" && this.viewPath) return this.renderWhole(canvas, zones, top, width, height, paint, this.viewPath);
     const file = this.frozen?.key === this.offsetKey ? this.frozen.file : this.selected;
     const signature = [width, paint.colors, paint.enabled, file?.path, file?.tool.diff, file?.tool.state, file?.tool.message, file?.tool.changes, file?.applied, file?.previous];
@@ -440,7 +452,9 @@ export class DiffPanel {
         .filter(Boolean).map((part, index) => index ? paint.text(part!, "muted") : part).join(paint.text(" · ", "muted"));
       // The switch outranks the details: they give way first on narrow panels.
       const view = viewSwitch(paint, "diff"), right = styledCounts(counts(file));
-      const withDetails = `${paint.text(name, "paper")}  ${details}`, bare = paint.text(name, "paper");
+      const back = this.standalone ? paint.text("‹ Files", "electric") + "  " : "";
+      if (back) zones.push({ row: top, column: 1, width: 7, action: { kind: "diff-back" } });
+      const withDetails = `${back}${paint.text(name, "paper")}  ${details}`, bare = back + paint.text(name, "paper");
       const room = (left: string) => visibleLength(left) + 2 + visibleLength(view.text) + visibleLength(right) + 2 <= width - 3;
       const headerLeft = room(withDetails) ? withDetails : bare;
       const fits = room(headerLeft);

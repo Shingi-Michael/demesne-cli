@@ -70,7 +70,8 @@ Demesne works in the folder you start it from. Each session is bound to that wor
 
 | Panel | Open with | Shows |
 | --- | --- | --- |
-| Diff | Alt+D | Edits as they stream, per file, with syntax highlighting |
+| Diff | Alt+D | Edits as they stream, per file, with syntax highlighting; `v` shows the whole file with this session's changes marked (`n`/`p` step through them, `/` searches) |
+| Files | Alt+O, or ≡ in the rail | What the agent edited and read this session, git changes, then every file; type to filter, Enter opens a file, `@` adds it to your message |
 | Execution log | Ctrl+B | Every request, thought, tool call and result, in order |
 | Context | Alt+C, or click `ctx` | Context budget, token usage and timing |
 | Workspace | Alt+P, or click the path | Full path and branch |

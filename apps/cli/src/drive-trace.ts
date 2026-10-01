@@ -24,6 +24,7 @@ export function updateDriveTrace(state: DriveState, event: DriveProgress): void 
   if (!trace || event.type === "attempt" && !traceActive(trace)) trace = beginDriveTrace(state, event.type === "attempt" ? event.attempt : 1);
   if (event.type === "attempt") {
     trace.attempt = event.attempt; trace.model = state.model = `${event.provider} / ${event.model}`; trace.status = "thinking";
+    if (event.thinking !== undefined) trace.thinking = event.thinking;
   } else if (event.type === "queued") trace.status = "queued";
   else if (event.type === "correction") settleDriveTrace(state, "corrected", `Correcting decision: ${event.message}`);
   else if (event.type === "usage") trace.usage = event.usage;
@@ -58,6 +59,7 @@ export function restoreDriveTraces(value: unknown): DriveTrace[] {
     // Keep only validated fields so a partial trace cannot poison restoration.
     traces.push({ id: trace.id, step: trace.step, attempt: trace.attempt, model: trace.model,
       ...(trace.source === "controller" ? { source: "controller" as const } : {}),
+      ...(typeof trace.thinking === "boolean" ? { thinking: trace.thinking } : {}),
       status: traceActive(trace) ? "stopped" : trace.status, startedAt: trace.startedAt, completedAt: trace.completedAt ?? Date.now(),
       reasoning: trace.reasoning, text: trace.text, actionDraft: trace.actionDraft, action: trace.action, note: trace.note,
       result: traceActive(trace) ? "Planning interrupted when the workbench closed." : trace.result, truncated: trace.truncated === true, ...(usage ? { usage } : {}) });

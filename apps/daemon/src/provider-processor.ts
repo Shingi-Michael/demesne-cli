@@ -7,7 +7,7 @@ import type {
 } from "@demesne/providers";
 import type { RuntimeProfileStatus } from "@demesne/protocol";
 import type { RuntimeProfileVerifier } from "./ollama-runtime.ts";
-import type { TurnInference, TurnProcessor } from "./processor.ts";
+import type { InferenceOverrides, TurnInference, TurnProcessor } from "./processor.ts";
 
 type ProviderRequestDefaults = Pick<ProviderRequest, "maxOutputTokens" | "temperature" | "seed">;
 
@@ -86,11 +86,13 @@ export class ProviderTurnProcessor implements TurnProcessor {
     return models;
   }
 
-  createTurnInference(thinkingEnabled: boolean | undefined): TurnInference {
+  createTurnInference(thinkingEnabled: boolean | undefined, overrides?: InferenceOverrides): TurnInference {
     const model = this.currentModelId;
     const modelGeneration = this.modelGeneration;
     const profile = this.runtimeVerifier?.status().profile ?? null;
     const requestDefaults = { ...this.requestDefaults };
+    // A cap only ever lowers the configured output limit.
+    if (overrides?.maxOutputTokens) requestDefaults.maxOutputTokens = Math.min(requestDefaults.maxOutputTokens ?? overrides.maxOutputTokens, overrides.maxOutputTokens);
     const contextCapacity = this.effectiveContextCapacity(model);
     if (contextCapacity && requestDefaults.maxOutputTokens && requestDefaults.maxOutputTokens >= contextCapacity) {
       throw new Error("The model output limit must be smaller than the effective context capacity");

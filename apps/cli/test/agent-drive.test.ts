@@ -534,3 +534,36 @@ test("a saved mission shows only in the session it belongs to; new sessions star
     expect(ui.frame(120, 30).rows.join("\n")).toContain("Review the recorded results");
   } finally { drive.dispose(); }
 });
+
+test("Drive thinks only on judgment steps: the first decision and each newly finished turn; navigation is quick", async () => {
+  const nav = (turn: string, answer: boolean) => ({ document: `doc-${turn}`, turn, latest: true, answer, readingHeld: false, files: [], checks: [] });
+  let current: DriveObservation = { ...observation(), navigation: nav("t1", false) };
+  const thinking: (boolean | undefined)[] = [];
+  const keys = ["ctrl+b", "alt+d", "escape", "ctrl+g", "alt+h", "alt+r"] as const;
+  const drive = new AgentDrive({ observe: () => current, perform: async () => "", changed() {}, delayMs: 60_000, retryDelaysMs: [],
+    decide: async (body) => { thinking.push(body.thinking); return response(decision({ kind: "key", key: keys[thinking.length % keys.length]! })); } });
+  try {
+    drive.start("Explain the lexer");
+    await drive.step();                                                     // first decision: think
+    await drive.step();                                                     // coder's turn not finished: quick
+    current = { ...observation(), navigation: nav("t1", true), latestAnswerRows: ["The lexer scans identifiers."] };
+    await drive.step();                                                     // turn t1 finished: think
+    await drive.step();                                                     // following steps on t1: quick
+    current = { ...observation(), navigation: nav("t2", true), latestAnswerRows: ["Fixed the guard."] };
+    await drive.step();                                                     // new finished turn t2: think
+    expect(thinking).toEqual([true, false, true, false, true]);
+  } finally { drive.dispose(); }
+});
+
+test("in continuous mode an answered question ends Drive instead of looking for more work", async () => {
+  const answer = "The UI is a workbench with a docked panel.";
+  const screen = { ...observation(), surface: "response", rows: [answer], evidenceRows: [answer], answerRows: [answer], latestAnswerRows: [answer] };
+  const drive = new AgentDrive({ observe: () => screen, perform: async () => "", changed() {}, delayMs: 60_000, retryDelaysMs: [], continuous: true,
+    decide: async () => response(decision({ kind: "complete", basis: "answer" }, { note: "It is a workbench with a docked panel.", remaining: [],
+      evidence: [{ observationId: screen.id, quote: "workbench with a docked panel" }] })) });
+  try {
+    drive.start("Tell me about the UI of this CLI"); await drive.step();
+    expect(drive.state?.status).toBe("completed");
+    expect(drive.state?.autonomy?.phase).toBe("working");
+  } finally { drive.dispose(); }
+});

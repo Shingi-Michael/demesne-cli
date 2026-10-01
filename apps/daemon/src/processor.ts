@@ -26,7 +26,7 @@ export interface TurnProcessor {
   readonly temperature?: number;
   readonly seed?: number;
   readonly preservesPromptCache?: boolean;
-  createTurnInference?(thinkingEnabled: boolean | undefined): TurnInference;
+  createTurnInference?(thinkingEnabled: boolean | undefined, overrides?: InferenceOverrides): TurnInference;
   setModel?(modelId: string): void;
   runtimeStatus?(): RuntimeProfileStatus;
   listModels(signal?: AbortSignal): Promise<ModelDescriptor[]>;
@@ -39,11 +39,15 @@ export interface TurnProcessor {
   ): AsyncIterable<ProviderStreamEvent>;
 }
 
+/// Per-call adjustments, e.g. Drive's cap on a single decision's output.
+export interface InferenceOverrides { maxOutputTokens?: number }
+
 export function snapshotTurnInference(
   processor: TurnProcessor,
   thinkingEnabled: boolean | undefined,
+  overrides?: InferenceOverrides,
 ): TurnInference {
-  const inference = processor.createTurnInference?.(thinkingEnabled);
+  const inference = processor.createTurnInference?.(thinkingEnabled, overrides);
   if (inference) return inference;
   if (processor.setModel) {
     throw new Error("A model-switching turn processor must implement createTurnInference");

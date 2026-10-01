@@ -37,7 +37,7 @@ import { canonicalWorkspace, listWorkspaceFiles, readWorkspaceText, resolveWorks
 import { detectGitBranch } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
 import { SessionReplay } from "./session-replay.ts";
-import { planDrive } from "./drive-planner.ts";
+import { DRIVE_QUICK_TOKENS, DRIVE_THOUGHT_TOKENS, planDrive } from "./drive-planner.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
@@ -291,7 +291,9 @@ export function createDaemonApp(options: {
         if (!home.workspace || home.workspace.root !== viewed.workspace?.root || home.workspace.root !== body.observation.workspace)
           return apiError("invalid_state", "Drive observations must belong to the mission's workspace", 409);
         const signal = AbortSignal.any([request.signal, driveLifecycle.signal]);
-        const inference = snapshotTurnInference(processor, undefined);
+        // Each attempt's model call: thinking on or off, under Drive's cap.
+        const inferenceFor = (thinking: boolean | undefined) => snapshotTurnInference(processor, thinking,
+          { maxOutputTokens: thinking === false ? DRIVE_QUICK_TOKENS : DRIVE_THOUGHT_TOKENS });
         const decide = (signal: AbortSignal, progress?: Parameters<typeof planDrive>[5]) => {
           const planned = (async () => {
             const leaseId = `drive:${randomUUID()}`;
@@ -302,7 +304,7 @@ export function createDaemonApp(options: {
                 const artifact = store.getImageArtifact(viewed.id, body.observation.artifactId);
                 if (artifact) { const bytes = await readArtifact(store, artifact, true); image = { id: artifact.id, url: `data:image/png;base64,${bytes.toString("base64")}` }; }
               }
-              return await planDrive(body, inference, signal, options, image, progress);
+              return await planDrive(body, inferenceFor, signal, options, image, progress);
             } finally { lease.release({ turnContinues: false }); scheduler.finishTurn(leaseId); }
           })();
           activeDriveDecisions.add(planned);

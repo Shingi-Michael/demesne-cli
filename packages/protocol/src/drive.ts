@@ -64,10 +64,13 @@ export interface DriveRequest {
   autonomy?: DriveAutonomy;
   inspection?: DriveInspection;
   checkIn?: { turnId: string; cursor: number };
+  /// Whether the model thinks for this decision. The client decides: judging
+  /// a finished turn does; navigation, waiting and check-ins don't.
+  thinking?: boolean;
 }
 export interface DriveResponse { decision: DriveDecision; model: string; provider: string; imageInspected: boolean }
 export type DriveProgress = { type: "queued" }
-  | { type: "attempt"; attempt: number; model: string; provider: string }
+  | { type: "attempt"; attempt: number; model: string; provider: string; thinking?: boolean }
   | { type: "reasoning.delta" | "text.delta" | "action.delta"; delta: string }
   | { type: "usage"; usage: TokenUsage }
   | { type: "correction"; message: string };
@@ -94,6 +97,8 @@ export interface DriveTrace {
   reasoning: string; text: string; actionDraft: string; action: string; note: string; result: string;
   usage?: TokenUsage; truncated?: boolean;
   source?: "controller";
+  /// Whether this attempt ran with thinking on ("thought") or off ("quick").
+  thinking?: boolean;
 }
 export type DriveStatus = "running" | "waiting" | "paused" | "blocked" | "completed" | "stopped" | "idle";
 export interface DriveLimits {
@@ -359,6 +364,7 @@ export function parseDriveRequest(value: unknown): DriveRequest {
     ...(value.autonomy !== undefined ? { autonomy: parseDriveAutonomy(value.autonomy) } : {}),
     ...(value.inspection !== undefined ? { inspection: parseDriveInspection(value.inspection) } : {}),
     ...(value.checkIn !== undefined ? { checkIn: parseDriveCheckIn(value.checkIn) } : {}),
+    ...(typeof value.thinking === "boolean" ? { thinking: value.thinking } : {}),
     memory: { notes: text(memory.notes, 8000, "memory.notes", true), completed: list(memory.completed, "memory.completed"), remaining: list(memory.remaining, "memory.remaining"), evidence: evidence(memory.evidence, "memory.evidence"),
       ...(memory.feedback !== undefined ? { feedback: text(memory.feedback, 8000, "memory.feedback") } : {}),
       steps: memory.steps.map((step, index) => {

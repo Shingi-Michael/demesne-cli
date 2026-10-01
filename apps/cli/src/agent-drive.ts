@@ -90,6 +90,9 @@ export class AgentDrive {
   private nextAttemptAt = 0;
   private skipped = 0;
   private inspection: DriveInspection | undefined;
+  /// Turns (and collected answer pages) already judged with thinking, so the
+  /// follow-up steps on them stay quick.
+  private judged = new Set<string>();
   private pendingInspection: { action: DriveInspectAction; sessionId: string; document: string; turn: string } | undefined;
   private autoInspectedTurn = "";
   private inspectionRetries = 0;
@@ -111,13 +114,30 @@ export class AgentDrive {
     }
     services.changed(this.state);
   }
+  /// Whether this decision's model call thinks. Judgment steps do: the
+  /// mission's first decision, a newly finished turn not yet judged, answer
+  /// pages just collected, and any step after a failed decision or a repeated
+  /// action. Everything else — navigation, waiting on the coder — is quick.
+  private thinkingFor(observation: DriveObservation, state: DriveState, recovering: boolean): boolean {
+    if (recovering || this.repeated.count >= 2 || !state.steps.length) return true;
+    if (observation.mode !== "input") return false;
+    const turn = observation.navigation?.turn ?? "";
+    if (this.inspection) {
+      const key = `${turn}:pages:${this.inspection.document}`;
+      if (!this.judged.has(key)) { this.judged.add(key); return true; }
+    }
+    const finished = Boolean(observation.navigation?.latest && observation.navigation.answer) || Boolean(observation.latestAnswerRows?.length);
+    if (finished && turn && !this.judged.has(turn)) { this.judged.add(turn); return true; }
+    return false;
+  }
+
   start(mission: string): void {
     mission = mission.trim();
     if (!mission || mission.length > 8000) throw new Error("Use /drive <mission> (up to 8,000 characters).");
     const observed = this.services.observe();
     if (!observed.workspace || !observed.sessionId) throw new Error("Open a workspace session before starting Drive.");
     this.halt(); this.journal?.acquire();
-    this.lastSubmission = ""; this.duplicateSubmissions = 0; this.repeated = { signature: "", count: 0 }; this.allowance = 256;
+    this.lastSubmission = ""; this.duplicateSubmissions = 0; this.repeated = { signature: "", count: 0 }; this.allowance = 256; this.judged.clear();
     this.state = { id: crypto.randomUUID(), mission, homeSessionId: observed.sessionId, workspace: observed.workspace, status: "running",
       activity: "Recovering the mission from the visible conversation.", step: 0, model: null, updatedAt: new Date().toISOString(),
       notes: "", completed: [], remaining: [mission.slice(0, 1000)], evidence: [], steps: [], protection: newDriveProtection(this.services.limits),
@@ -341,7 +361,7 @@ export class AgentDrive {
       if (!this.active || controller.signal.aborted) return;
       observation = this.services.observe();
       if (observation.mode !== "streaming" || observation.sessionId !== state.homeSessionId || worker.settled) return;
-      const request: DriveRequest = { mission: state.mission, homeSessionId: state.homeSessionId, observation, checkIn: { turnId: worker.turnId, cursor: worker.cursor },
+      const request: DriveRequest = { mission: state.mission, homeSessionId: state.homeSessionId, observation, checkIn: { turnId: worker.turnId, cursor: worker.cursor }, thinking: false,
         ...(state.autonomy ? { autonomy: structuredClone(state.autonomy) } : {}), memory: { notes: state.notes, completed: state.completed, remaining: state.remaining,
           evidence: [], steps: state.steps.slice(-6), ...(state.feedback ? { feedback: state.feedback } : {}) } };
       guard.planning = newTokenMeter(Math.ceil(JSON.stringify(request).length / 4)); chargeDriveTokens(guard, guard.planning, "planningTokens");
@@ -501,6 +521,7 @@ export class AgentDrive {
     const controller = this.pending = new AbortController();
     let actionStarted = false;
     beginDriveTrace(state);
+    const recovering = state.recovery?.kind === "decision";
     state.recovery = undefined;
     state.status = "running"; state.activity = state.autonomy?.phase === "discovering" ? "Finding useful next work with the coding agent." : "Reading the visible workbench and choosing the next action."; this.publish();
     try {
@@ -511,7 +532,8 @@ export class AgentDrive {
       const request: DriveRequest = { mission: state.mission, homeSessionId: state.homeSessionId,
         ...(state.autonomy ? { autonomy: structuredClone(state.autonomy) } : {}),
         ...(this.inspection ? { inspection: this.inspection } : {}),
-        memory: { notes: state.notes, completed: state.completed, remaining: state.remaining, evidence: state.evidence, steps: state.steps.slice(-12), ...(state.feedback ? { feedback: state.feedback } : {}) }, observation };
+        memory: { notes: state.notes, completed: state.completed, remaining: state.remaining, evidence: state.evidence, steps: state.steps.slice(-12), ...(state.feedback ? { feedback: state.feedback } : {}) }, observation,
+        thinking: this.thinkingFor(observation, state, recovering) };
       state.protection!.planning = newTokenMeter(Math.ceil(JSON.stringify(request).length / 4));
       chargeDriveTokens(state.protection!, state.protection!.planning, "planningTokens");
       if (state.protection!.used.planningTokens + state.protection!.used.workerTokens >= state.protection!.limits.maxTokens) { this.protectionStop(driveBudgetReason(state.protection!)!); return; }
@@ -568,7 +590,9 @@ export class AgentDrive {
       if (decision.action.kind === "complete" || decision.action.kind === "blocked") {
         state.status = decision.action.kind === "complete" ? "completed" : "blocked"; record.result = decision.note;
         settleDriveTrace(state, decision.action.kind === "complete" ? "completed" : "failed", decision.note);
-        if (decision.action.kind === "complete" && state.autonomy) {
+        // An answered question (basis: answer) ends the mission; finished work
+        // (verified-work) moves on to finding the next useful task.
+        if (decision.action.kind === "complete" && state.autonomy && decision.action.basis !== "answer") {
           const autonomy = state.autonomy;
           autonomy.history = [...autonomy.history, { task: autonomy.task, summary: decision.note, at: new Date().toISOString() }].slice(-8);
           autonomy.phase = "discovering"; autonomy.consulted = false;

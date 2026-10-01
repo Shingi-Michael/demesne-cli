@@ -31,9 +31,12 @@ export function driveTraceLines(trace: DriveTrace, width: number, paint: Painter
   add(`DRIVE · step ${trace.step}${trace.attempt > 1 ? ` · attempt ${trace.attempt}` : ""}`, "electric");
   add(`${driveTraceLabel(trace)} · ${seconds}s`, live ? "thinking" : trace.status === "failed" ? "signal" : "muted");
   const thinkingRow = rows.length;
-  rows.push(trace.source === "controller" ? paint.text("UI navigation · no model inference", "muted") : (live && trace.status === "thinking" ? thinkingDots(paint, now, reducedMotionEnabled()) : paint.text("●", "thinking"))
-    + paint.text(` THINKING ${expanded ? "▾" : "▸"}`, "thinking"));
-  if (expanded && trace.source !== "controller") {
+  // A quick step runs with thinking off; say so instead of an empty THINKING.
+  rows.push(trace.source === "controller" ? paint.text("UI navigation · no model inference", "muted")
+    : trace.thinking === false ? paint.text("● QUICK STEP · thinking off", "muted")
+    : (live && trace.status === "thinking" ? thinkingDots(paint, now, reducedMotionEnabled()) : paint.text("●", "thinking"))
+      + paint.text(` THINKING ${expanded ? "▾" : "▸"}`, "thinking"));
+  if (expanded && trace.source !== "controller" && trace.thinking !== false) {
     if (trace.reasoning) add(trace.reasoning, "secondary", "reasoning");
     else add(live ? "Waiting for thinking output…" : "No thinking text returned by the provider.", "muted");
   }

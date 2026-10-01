@@ -29,7 +29,7 @@ test.each(["length", "missing", "multiple", "invalid", "valid"])("planner reject
         argumentsDelta: kind === "invalid" ? '{"action":' : JSON.stringify(choose({ kind: "key", key: "alt+h" })) };
       yield { type: "finish", reason: kind === "length" ? "length" : "tool_calls" };
     } };
-  const planned = planDrive(request(), snapshotTurnInference(processor, undefined), new AbortController().signal);
+  const planned = planDrive(request(), (thinking) => snapshotTurnInference(processor, thinking), new AbortController().signal);
   if (kind === "valid") expect((await planned).decision.action).toEqual({ kind: "key", key: "alt+h" });
   else await expect(planned).rejects.toThrow();
 });
@@ -41,7 +41,7 @@ test("planner supplies only the visible artifact's pixels in its separate contex
     yield { type: "tool_call_delta", index: 0, idDelta: "ui", nameDelta: "drive_ui", argumentsDelta: JSON.stringify(choose({ kind: "wait" })) };
     yield { type: "finish", reason: "tool_calls" };
   } };
-  const planned = await planDrive(request(), snapshotTurnInference(processor, undefined), new AbortController().signal, {}, { id: "artifact", url: "data:image/png;base64,cGl4ZWxz" });
+  const planned = await planDrive(request(), (thinking) => snapshotTurnInference(processor, thinking), new AbortController().signal, {}, { id: "artifact", url: "data:image/png;base64,cGl4ZWxz" });
   expect(planned.imageInspected).toBe(true);
   expect(received[1]?.imageInputs).toEqual([{ artifactId: "artifact", url: "data:image/png;base64,cGl4ZWxz" }]);
 });
@@ -55,7 +55,8 @@ test("completion validation is corrected in the planner before the CLI can rejec
   body.observation.answerRows = ["Prior audit: consolidate menu paths."];
   const corrections: string[] = [];
   const processor: TurnProcessor = { providerId: "test", modelId: "test", maxOutputTokens: 131072, async listModels() { return []; }, async *stream(messages, _tools, _signal, thinking) {
-    expect(thinking).toBeUndefined();
+    // The first attempt uses the client's choice (none here); the correction thinks.
+    expect(thinking).toBe(calls === 0 ? undefined : true);
     if (++calls === 2) {
       expect(messages.at(-1)?.content).toContain("verified-work completion requires");
       expect(messages.at(-1)?.content).toContain("basis: answer");
@@ -65,7 +66,7 @@ test("completion validation is corrected in the planner before the CLI can rejec
     })) };
     yield { type: "finish", reason: "tool_calls" };
   } };
-  const planned = await planDrive(body, snapshotTurnInference(processor, undefined), new AbortController().signal, {}, undefined, (event) => { if (event.type === "correction") corrections.push(event.message); });
+  const planned = await planDrive(body, (thinking) => snapshotTurnInference(processor, thinking), new AbortController().signal, {}, undefined, (event) => { if (event.type === "correction") corrections.push(event.message); });
   expect(calls).toBe(2); expect(corrections).toHaveLength(1);
   expect(planned.decision.action).toEqual({ kind: "complete", basis: "answer" });
 });
@@ -82,7 +83,7 @@ test("implementation completion and advisory completion both require fresh eligi
       })) };
       yield { type: "finish", reason: "tool_calls" };
     } };
-    await expect(planDrive(body, snapshotTurnInference(processor, undefined), new AbortController().signal)).rejects.toThrow("invalid after one correction");
+    await expect(planDrive(body, (thinking) => snapshotTurnInference(processor, thinking), new AbortController().signal)).rejects.toThrow("invalid after one correction");
     expect(calls).toBe(2);
   }
 });
@@ -105,22 +106,26 @@ test.each(["missing-field", "bad-json", "unknown-target"])("planner corrects a m
   } };
   const inference = snapshotTurnInference(processor, undefined);
   expect(inference.maxOutputTokens).toBe(131072);
-  expect((await planDrive(request(), inference, new AbortController().signal)).decision.action).toEqual({ kind: "key", key: "ctrl+b" });
+  expect((await planDrive(request(), () => inference, new AbortController().signal)).decision.action).toEqual({ kind: "key", key: "ctrl+b" });
   expect(calls).toBe(2);
 });
 
-test("invalid corrections stop with the exact field, while truncated decisions are never retried", async () => {
+test("invalid corrections stop with the exact field; a decision that thinks past its cap is retried once without thinking", async () => {
   for (const truncated of [false, true]) {
     let calls = 0;
-    const processor: TurnProcessor = { providerId: "test", modelId: "test", async listModels() { return []; }, async *stream() {
-      calls++;
+    const thinkingByCall: (boolean | undefined)[] = [];
+    const processor: TurnProcessor = { providerId: "test", modelId: "test", async listModels() { return []; }, async *stream(_messages, _tools, _signal, thinking) {
+      calls++; thinkingByCall.push(thinking);
       yield { type: "tool_call_delta", index: 0, idDelta: "bad", nameDelta: "drive_ui", argumentsDelta: JSON.stringify(choose({ kind: "scroll", row: 0, column: 0, amount: 0 })) };
       yield { type: "finish", reason: truncated ? "length" : "tool_calls" };
     } };
-    const pending = planDrive(request(), snapshotTurnInference(processor, undefined), new AbortController().signal);
-    if (truncated) await expect(pending).rejects.toThrow();
+    const pending = planDrive(request(), (thinking) => snapshotTurnInference(processor, thinking), new AbortController().signal);
+    if (truncated) await expect(pending).rejects.toThrow("output token limit");
     else await expect(pending).rejects.toThrow("Drive decision invalid after one correction: Agent Drive action.amount");
-    expect(calls).toBe(truncated ? 1 : 2);
+    // Two calls either way: a correction that thinks, or one quick retry after
+    // the cap — never a third, so a decision cannot loop.
+    expect(calls).toBe(2);
+    expect(thinkingByCall).toEqual(truncated ? [undefined, false] : [undefined, true]);
   }
 });
 
@@ -131,7 +136,7 @@ test("a correction remains cancellable and cannot yield a late action", async ()
     yield { type: "tool_call_delta", index: 0, idDelta: "bad", nameDelta: "drive_ui", argumentsDelta: '{"action":' };
     yield { type: "finish", reason: "tool_calls" };
   } };
-  await expect(planDrive(request(), snapshotTurnInference(processor, undefined), controller.signal)).rejects.toThrow("Operator paused");
+  await expect(planDrive(request(), (thinking) => snapshotTurnInference(processor, thinking), controller.signal)).rejects.toThrow("Operator paused");
   expect(calls).toBe(2);
 });
 
@@ -148,7 +153,7 @@ test("planner corrects self-cited evidence before navigation without weakening t
     })) };
     yield { type: "finish", reason: "tool_calls" };
   } };
-  const result = await planDrive(body, snapshotTurnInference(processor, undefined), new AbortController().signal);
+  const result = await planDrive(body, (thinking) => snapshotTurnInference(processor, thinking), new AbortController().signal);
   expect(calls).toBe(2); expect(result.decision.evidence[0]?.quote).toBe("Recorded output: 999 pass");
 });
 
@@ -377,4 +382,19 @@ test("daemon authenticates Drive and aborts pending planning before shutting dow
     const pending = client.decideDrive(body).catch((error) => error);
     await entered.promise; await app.close(); await pending; expect(aborted).toBe(true);
   } finally { await app.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Drive caps each decision's output: quick steps lower than thinking ones, never above the configured limit", async () => {
+  const seen: (number | undefined)[] = [];
+  const processor = { providerId: "test", modelId: "test", maxOutputTokens: 131072, async listModels() { return []; },
+    createTurnInference(thinking: boolean | undefined, overrides?: { maxOutputTokens?: number }) {
+      seen.push(overrides?.maxOutputTokens);
+      return snapshotTurnInference({ providerId: "test", modelId: "test", maxOutputTokens: Math.min(131072, overrides?.maxOutputTokens ?? 131072), async listModels() { return []; },
+        async *stream() { yield { type: "tool_call_delta" as const, index: 0, idDelta: "ok", nameDelta: "drive_ui", argumentsDelta: JSON.stringify(choose({ kind: "key", key: "ctrl+b" })) }; yield { type: "finish" as const, reason: "tool_calls" }; } } as TurnProcessor, thinking);
+    } } as unknown as TurnProcessor;
+  const { DRIVE_QUICK_TOKENS, DRIVE_THOUGHT_TOKENS } = await import("../src/drive-planner.ts");
+  const inferenceFor = (thinking: boolean | undefined) => snapshotTurnInference(processor, thinking, { maxOutputTokens: thinking === false ? DRIVE_QUICK_TOKENS : DRIVE_THOUGHT_TOKENS });
+  await planDrive({ ...request(), thinking: false }, inferenceFor, new AbortController().signal);
+  await planDrive({ ...request(), thinking: true }, inferenceFor, new AbortController().signal);
+  expect(seen).toEqual([8_000, 16_000]);
 });

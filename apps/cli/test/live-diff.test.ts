@@ -308,3 +308,47 @@ test("a file whose edits were undone says so, v still shows the recorded edit, a
   expect(text).toMatch(/2 +− two/);
   expect(text).toContain("v whole file");
 });
+
+test("a file pinned in Changes follows into the next turn that edits it, so a deletion shows live as it streams", () => {
+  const ui = new Workbench({ paint, contextRail: new CliContextRail({ id: "t", provider: "t" }, "/p"), sessionTitle: "S", version: "t", onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} } });
+  const view = (ui as unknown as { sessionView: SessionView }).sessionView;
+  ui.beginTurn({ userText: "Add copy", at: "now" });
+  ui.toolRequested({ toolCallId: "a", name: "edit_file", arguments: JSON.stringify({ path: "donkeys.py" }) });
+  ui.toolFinished({ toolCallId: "a", name: "edit_file", state: "done", changes: [{ path: "donkeys.py", before: "x\n", after: "x\ny\n", beforeExists: true, afterExists: true }] });
+  ui.finishTurn("completed", "Done");
+  ui.frame(170, 40);
+  view.act({ kind: "diff-open", runId: view.current!.id });
+  view.act({ kind: "diff-select", path: "donkeys.py" });
+  // Turn 2 deletes, streaming oldText (the removed method) before newText.
+  ui.beginTurn({ userText: "Delete copy", at: "now" });
+  const args = JSON.stringify({ path: "donkeys.py", edits: [{ oldText: "    def copy(self):\n        return deepcopy(self)\n", newText: "" }] });
+  ui.toolDraft({ schemaVersion: 1, eventId: 1, type: "tool.call_draft", occurredAt: "", sessionId: "s", turnId: "t", workspaceId: null, agentRunId: null,
+    payload: { draftId: "d", name: "edit_file", delta: args.slice(0, args.indexOf("newText") - 3) } });
+  let text = ui.frame(170, 40).rows.join("\n");
+  expect(text).toMatch(/Changes {2}Turn 2/);
+  expect(text).toContain(" pinned ");
+  expect(text).toMatch(/− +def copy\(self\):/);
+  // In the whole-file view, an edit still being written is called out.
+  view.act({ kind: "diff-view" });
+  text = ui.frame(170, 40).rows.join("\n");
+  expect(text).toContain("● The agent is editing this file · v shows it live");
+});
+
+test("an earlier turn's changes opened on purpose stay on that turn", () => {
+  const ui = new Workbench({ paint, contextRail: new CliContextRail({ id: "t", provider: "t" }, "/p"), sessionTitle: "S", version: "t", onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} } });
+  const view = (ui as unknown as { sessionView: SessionView }).sessionView;
+  let first = 0;
+  for (const [turn, after] of [["One", "a\nb\n"], ["Two", "a\nb\nc\n"]] as const) {
+    ui.beginTurn({ userText: turn, at: "now" });
+    ui.toolRequested({ toolCallId: turn, name: "edit_file", arguments: JSON.stringify({ path: "f.py" }) });
+    ui.toolFinished({ toolCallId: turn, name: "edit_file", state: "done", changes: [{ path: "f.py", before: "a\n", after, beforeExists: true, afterExists: true }] });
+    ui.finishTurn("completed", "Done");
+    ui.frame(170, 40);
+    first ||= view.current!.id;
+  }
+  view.act({ kind: "diff-open", runId: first });
+  view.act({ kind: "diff-select", path: "f.py" });
+  ui.beginTurn({ userText: "Three", at: "now" });
+  ui.toolRequested({ toolCallId: "3", name: "edit_file", arguments: JSON.stringify({ path: "f.py" }) });
+  expect(ui.frame(170, 40).rows.join("\n")).toMatch(/Changes {2}Turn 1/);
+});

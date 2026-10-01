@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPainter, SLASH_COMMANDS, visibleLength } from "@demesne/brand";
-import { parseDriveDecision, parseDriveRequest, type DriveAction, type DriveDecision, type DriveObservation, type DriveRequest, type DriveResponse } from "@demesne/protocol";
+import { parseDriveDecision, parseDriveRequest, validateDriveDecisionContext, type DriveAction, type DriveDecision, type DriveObservation, type DriveRequest, type DriveResponse } from "@demesne/protocol";
 import { AgentDrive, DriveJournal } from "../src/agent-drive.ts";
 import { Workbench, type WorkbenchOptions, type InputZone } from "../src/workbench/controller.ts";
 import type { MouseEvent } from "../src/mouse.ts";
@@ -566,4 +566,41 @@ test("in continuous mode an answered question ends Drive instead of looking for 
     expect(drive.state?.status).toBe("completed");
     expect(drive.state?.autonomy?.phase).toBe("working");
   } finally { drive.dispose(); }
+});
+
+test("a long decision still sends its message after unrelated UI changes, and a stray blank draft is not kept", async () => {
+  const { ui, internals } = workbench({ control() {}, intervene() {}, waitForFrame: async () => {} });
+  ui.beginTurn({ userText: "Review", at: "now" }); ui.assistantDelta("Recorded result\n".repeat(60)); ui.finishTurn("completed", "Done");
+  let sent: string | undefined;
+  void ui.readPrompt({ history: [], commands: SLASH_COMMANDS, mentions: [] }).then((value) => { sent = value; });
+  const planned = ui.observeDrive();
+  // While the model thinks: another observation, a scroll, and a stray newline.
+  ui.observeDrive(); internals.onData("\x1b[<64;10;5M"); internals.onKeypress("", { name: "return", meta: true });
+  expect(ui.observeDrive().draft).toBe("\n");
+  expect(await ui.performDrive({ kind: "compose", text: "Describe this UI" }, planned, new AbortController().signal)).toStartWith("Sent through the visible composer:");
+  expect(sent).toBe("Describe this UI");
+});
+
+test("a Drive key that only types into the composer is undone instead of leaving a draft", async () => {
+  const { ui } = workbench({ control() {}, intervene() {}, waitForFrame: async () => {} });
+  void ui.readPrompt({ history: [], commands: SLASH_COMMANDS, mentions: [] });
+  const result = await ui.performDrive({ kind: "key", key: "alt+enter" }, ui.observeDrive(), new AbortController().signal);
+  expect(result).toContain("undone"); expect(ui.observeDrive().draft).toBe("");
+});
+
+test("a blank composer draft does not block Drive", async () => {
+  const drive = new AgentDrive({ observe: () => ({ ...observation(), draft: "\n" }), perform: async () => "ok", changed() {}, delayMs: 60_000,
+    decide: async () => response(decision({ kind: "wait" })) });
+  try { drive.start("Describe this UI"); await drive.step(); expect(drive.state?.status).not.toBe("blocked"); }
+  finally { drive.dispose(); }
+});
+
+test("Drive is told why alt+enter outside a Diff, and inspecting before any turn, are invalid", () => {
+  const navigation = { document: "doc:1", turn: "0", latest: true, answer: false, readingHeld: false, files: [], checks: [] };
+  const request = (screen: Partial<DriveObservation>): DriveRequest => ({ mission: "Describe this UI", homeSessionId: "home",
+    observation: { ...observation(), navigation, ...screen }, memory: { notes: "", completed: [], remaining: [], evidence: [], steps: [] } });
+  expect(() => validateDriveDecisionContext(decision({ kind: "key", key: "alt+enter" }), request({}))).toThrow("types a newline into the composer");
+  expect(() => validateDriveDecisionContext(decision({ kind: "key", key: "alt+enter" }), request({ panes: [{ surface: "diff", row: 0, column: 60, width: 40, height: 30 }] }))).not.toThrow();
+  expect(() => validateDriveDecisionContext(decision({ kind: "inspect", target: "log" }), request({}))).toThrow("no turn to inspect yet");
+  expect(() => validateDriveDecisionContext(decision({ kind: "inspect", target: "log" }), request({ navigation: { ...navigation, turn: "3" } }))).not.toThrow();
 });

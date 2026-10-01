@@ -493,7 +493,7 @@ export class AgentDrive {
       if (state.activity !== activity || state.status !== "waiting") { state.status = "waiting"; state.activity = activity; this.publish(); }
       this.schedule(); return;
     }
-    if (observation.draft) { this.block("There is an existing composer draft. Submit or clear it, then Resume Drive."); return; }
+    if (observation.draft.trim()) { this.block("There is an existing composer draft. Submit or clear it, then Resume Drive."); return; }
     if (this.pendingCorrection) { await this.sendCorrection(observation); return; }
     if (this.inspection && (this.inspection.document !== observation.navigation?.document || this.inspection.turn !== observation.navigation?.turn || this.inspection.sessionId !== observation.sessionId)) this.inspection = undefined;
     if (this.pendingInspection && (observation.mode !== "input" || this.pendingInspection.sessionId !== observation.sessionId

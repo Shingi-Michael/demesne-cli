@@ -2232,3 +2232,22 @@ test("with a panel docked, a streaming response keeps scrolling into view", () =
   ui.assistantDelta("Line 41 of the answer.\n");
   expect(screen(160, 30)).not.toContain("Line 41 of the answer.");
 });
+
+test("with a panel docked and scrolling animated as in the app, the response scrolls all the way to its newest line", () => {
+  const { ui, view } = fixture("complete");
+  const internals = ui as unknown as { started: boolean };
+  let now = Date.now();
+  const clock = spyOn(Date, "now").mockImplementation(() => now);
+  try {
+    internals.started = true; // animateScroll follows `started`, as in the running app
+    ui.beginTurn({ userText: "Explain the lexer", at: "now" });
+    ui.frame(160, 30);
+    view.act({ kind: "log" });
+    ui.frame(160, 30);
+    for (let line = 1; line <= 40; line++) ui.assistantDelta(`Line ${line} of the answer.\n`);
+    // The render loop: keep painting while the view says it is animating.
+    let frames = 0, text = ui.frame(160, 30).rows.join("\n");
+    while (view.animating(now) && frames++ < 400) { now += 20; text = ui.frame(160, 30).rows.join("\n"); }
+    expect(text).toContain("Line 40 of the answer.");
+  } finally { internals.started = false; clock.mockRestore(); }
+});

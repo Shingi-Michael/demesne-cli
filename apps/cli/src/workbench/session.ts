@@ -267,7 +267,9 @@ export class SessionView {
   }
   animating(now = Date.now()): boolean {
     return this.drivePanelOpen && this.driveFollowing && this.driveScrollPending || this.hoverReflow || !reducedMotionEnabled() && (this.transitions.active(now)
-      || this.scrollPending && !this.paused && (!this.panelOpen || this.drivePanelOpen));
+      // Keep animating the conversation toward new output with a panel
+      // docked too; otherwise it moves only when text arrives and falls behind.
+      || this.scrollPending && !this.paused);
   }
 
   sync(entries: readonly WorkbenchEntry[]): void {

@@ -243,10 +243,15 @@ export function validateDriveDecisionContext(decision: DriveDecision, request: D
   const inspectedQuote = (item: DriveEvidence) => inspected.find((page) => page.observationId === item.observationId && page.rows.some((row) => row.includes(item.quote)));
   if (action.kind === "inspect") {
     if (!screen.navigation) invalid("action.inspect", "this client does not support controller inspection; use the visible controls");
+    if (screen.navigation.turn === "0") invalid("action.inspect", "this session has no turn to inspect yet; compose the request to the coding agent first");
     if (action.target === "answer" && !screen.navigation.answer) invalid("action.inspect", "the selected turn has no completed answer");
     if (action.target === "diff" && (!screen.navigation.files.length || action.item && !screen.navigation.files.includes(action.item))) invalid("action.item", "choose a path from navigation.files");
     if (action.target === "checks" && (!screen.navigation.checks.length || action.item && !screen.navigation.checks.includes(action.item))) invalid("action.item", "choose a check id from navigation.checks");
   }
+  // Alt+Enter expands an open Diff; anywhere else it types a newline into the
+  // composer, which leaves a draft that stops Drive.
+  if (action.kind === "key" && action.key === "alt+enter" && !screen.surface?.startsWith("diff") && !screen.panes?.some((pane) => pane.surface.startsWith("diff")))
+    invalid("action.key", "alt+enter only expands an open Diff (open one with alt+d or inspect target=diff); elsewhere it types a newline into the composer. Alt+V opens Preview, which shows images and pages the agent produced, not the workbench itself");
   if (action.kind === "click" && !screen.controls.some((control) => control.id === action.target)) invalid("action.target", "choose an id from observation.controls");
   if (action.kind === "scroll" && (action.row >= screen.height || action.column >= screen.width)) invalid("action.scroll", "coordinates must be inside the observed screen");
   if (action.kind === "compose" && (!action.text.trimStart().startsWith("/") || /^\/plan(?:\s|$)/.test(action.text.trimStart())) && screen.sessionId !== request.homeSessionId)

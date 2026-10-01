@@ -403,8 +403,12 @@ export class Workbench {
       // composer. Other actions must re-observe after the viewport moves.
       && (action.kind === "compose" || this.scrollRevision === scrollRevision)
       && (!this.started || process.stdout.columns === observation.width && process.stdout.rows === observation.height);
-    if (this.driveSnapshot?.id !== observation.id || this.driveSnapshot.revision !== revision || this.driveSnapshot.scrollRevision !== scrollRevision || !unchanged()
-      || this.mode === "approval" || this.mode === "streaming" || this.editor.value)
+    // Typing into an empty composer of the same session does not depend on the
+    // rest of the screen, so a long decision does not cancel its own message
+    // because something unrelated (a key, a title, a render) changed meanwhile.
+    const composeReady = action.kind === "compose" && this.sessionId === observation.sessionId && this.mode === "input" && observation.mode === "input";
+    if (!composeReady && (this.driveSnapshot?.id !== observation.id || this.driveSnapshot.revision !== revision || this.driveSnapshot.scrollRevision !== scrollRevision || !unchanged())
+      || this.mode === "approval" || this.mode === "streaming" || this.editor.value.trim())
       return "UI changed since observation; inspect again before acting.";
     if (this.mode === "dialog" && !/^Recent sessions$|^Sessions matching /.test(this.dialogTitle)) throw new Error("Drive can navigate the sessions picker only.");
     const wait = async (milliseconds: number): Promise<void> => {
@@ -432,11 +436,19 @@ export class Workbench {
         if (this.mode !== "input" || !this.promptResolver || !driveComposerAllowed(action.text)) throw new Error("Composer is not ready for this Drive instruction.");
         const safe = sanitizeTerminalText(action.text);
         if (safe !== action.text) throw new Error("Drive instructions cannot contain terminal control characters.");
+        // A whitespace-only draft (a stray newline) holds nothing to preserve.
+        if (this.editor.value) this.editor = setPromptValue(this.editor, "");
         this.sessionView.focusInput();
         this.showDriveFeedback("Typing in composer");
         let inserted = "";
+        // If Drive stops partway, its own half-typed text is removed; text a
+        // person added is theirs and stays.
+        const abandon = (): string => {
+          if (inserted && this.editor.value === inserted && this.mode === "input") { this.editor = setPromptValue(this.editor, ""); this.requestRender(); return "Input changed; Drive's partial text was cleared without sending."; }
+          return "Input changed; composed draft preserved without sending.";
+        };
         for (const chunk of reducedMotionEnabled() ? [safe] : driveTypingChunks(safe)) {
-          if (!unchanged() || this.editor.value !== inserted || !this.promptResolver) return "Input changed; composed draft preserved without sending.";
+          if (!unchanged() || this.editor.value !== inserted || !this.promptResolver) return abandon();
           this.applyEditorResult(reducePromptEditor(this.editor, { text: chunk, key: {}, commands: [], history: [] }));
           this.editor = { ...this.editor, menuDismissed: true };
           inserted += chunk; this.render();
@@ -444,7 +456,7 @@ export class Workbench {
         }
         this.showDriveFeedback("Sending · Enter");
         await wait(650);
-        if (!unchanged() || this.editor.value !== safe || !this.promptResolver) return "Input changed; composed draft preserved without sending.";
+        if (!unchanged() || this.editor.value !== safe || !this.promptResolver) return abandon();
         // Inspection performed by Drive must not pin the working agent behind
         // an old turn or a utility pane. Human scrollback remains a reading hold.
         const startsWork = !safe.trimStart().startsWith("/") || /^\/plan\s+\S/.test(safe.trimStart());
@@ -476,7 +488,14 @@ export class Workbench {
         this.showDriveFeedback(`Key · ${action.key}`);
         await wait(350);
         if (!unchanged()) return "UI changed before the keypress; inspect again before acting.";
+        const draft = this.editor.value;
         route(() => this.onKeypress("", { name: parts.at(-1)!, ctrl: parts.includes("ctrl"), meta: parts.includes("alt"), shift: parts.includes("shift") })); performed = true;
+        // Keys navigate; a key that only typed into the composer (a newline)
+        // is undone, so Drive never leaves itself a draft it then refuses.
+        if (this.mode === "input" && !draft && this.editor.value) {
+          this.editor = setPromptValue(this.editor, ""); this.requestRender();
+          return this.driveActionResult(`Pressed ${action.key}: it only typed into the composer, so that was undone. It has no other effect here.`, observation);
+        }
         this.showDriveFeedback(`Pressed · ${action.key}`);
         return this.driveActionResult(`Pressed ${action.key}.`, observation);
       }

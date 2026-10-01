@@ -282,3 +282,29 @@ test("a file you chose keeps updating as the agent edits it; an earlier edit ope
   view.act({ kind: "diff-live" });
   expect(ui.frame(160, 30).rows.join("\n")).toMatch(/2 \+ two/);
 });
+
+test("a file whose edits were undone says so, v still shows the recorded edit, and Alt+O opens Files", async () => {
+  const original = "one\ntwo\nthree\n";
+  const ui = new Workbench({ paint, contextRail: new CliContextRail({ id: "t", provider: "t" }, "/p"), sessionTitle: "S", version: "t", onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} },
+    fileInfo: async () => [{ path: "ci.yml", byteLength: 14, status: null }],
+    readFile: async (path) => ({ path, content: original, byteLength: original.length }) });
+  const internals = ui as unknown as { onKeypress(text: string, key: { name?: string; meta?: boolean }): void; sessionView: SessionView };
+  ui.beginTurn({ userText: "Trim", at: "1" });
+  ui.toolRequested({ toolCallId: "e", name: "edit_file", arguments: JSON.stringify({ path: "ci.yml" }) });
+  ui.toolFinished({ toolCallId: "e", name: "edit_file", state: "done", changes: [{ path: "ci.yml", before: original, after: "one\n", beforeExists: true, afterExists: true }] });
+  ui.finishTurn("completed", "Done");
+  void ui.readPrompt({ history: [], commands: [], mentions: [] });
+  internals.onKeypress("", { name: "o", meta: true });
+  await Bun.sleep(0);
+  let text = ui.frame(200, 40).rows.join("\n");
+  expect(text).toMatch(/✎ ci\.yml +edited {2}\+0 −2/);
+  internals.onKeypress("", { name: "return" });
+  await Bun.sleep(0);
+  text = ui.frame(200, 40).rows.join("\n");
+  expect(text).toMatch(/‹ Files {2}YAML · 3 lines · edited, since undone {2} Diff │ Whole file/);
+  internals.onKeypress("v", { name: "v" });
+  text = ui.frame(200, 40).rows.join("\n");
+  expect(text).toContain("‹ Files  ci.yml");
+  expect(text).toMatch(/2 +− two/);
+  expect(text).toContain("v whole file");
+});

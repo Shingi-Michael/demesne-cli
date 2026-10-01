@@ -901,7 +901,9 @@ export class SessionView {
         : this.artifact?.kind === "verification" ? "VERIFICATION" : this.artifact ? "FAILED / DENIED" : memory.surface === "review" ? "CHANGES" : "EXECUTION LOG";
       // Figma panel frame: a quiet uppercase label, then what it shows. The
       // keycap footer carries Esc close; × stays for narrow panels without one.
-      const subjectRun = this.artifact ? this.runs.find((item) => item.id === this.artifact!.runId) ?? run : run;
+      // The Changes panel moves between turns as it follows; name the one shown.
+      const shownRunId = this.diffOpen ? this.diffPanel.runId : this.artifact?.runId;
+      const subjectRun = shownRunId !== undefined ? this.runs.find((item) => item.id === shownRunId) ?? run : run;
       const subject = this.historyOpen ? safe(options.title) : output?.type === "panel" && output.files ? safe(options.path) : this.drivePanelOpen || this.outputId !== null ? "" : this.contextOpen ? safe(options.model ?? "")
         : this.diffOpen && this.diffPanel.standalone ? safe(this.diffPanel.standalone.slice(0, this.diffPanel.standalone.lastIndexOf("/") + 1))
         : subjectRun ? `Turn ${subjectRun.number}` : "";

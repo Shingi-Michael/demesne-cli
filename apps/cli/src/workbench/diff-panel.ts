@@ -68,6 +68,12 @@ function viewSwitch(paint: Painter, active: "diff" | "whole"): { text: string } 
   return { text: segment("Diff", active === "diff") + paint.text("│", "rule") + segment("Whole file", active === "whole") + " " + keycap(paint, "v") };
 }
 
+/// Whether a change tool edits `path`, from its recorded changes or, while
+/// it is still being drafted, its (partial) arguments.
+function touches(tool: ToolEntry, path: string): boolean {
+  return tool.changes?.some((change) => change.path === path) ?? (tool.input.path === path || tool.input.from === path);
+}
+
 export class DiffPanel {
   following = true;
   expanded = false;
@@ -215,6 +221,13 @@ export class DiffPanel {
   sync(runs: readonly SessionRun[]): void {
     this.runs = runs;
     if (this.following && this.followLatest) this.runId = runs.at(-1)?.id ?? this.runId;
+    // Pinned to a file: a newer turn that edits it (even while drafting)
+    // brings the panel along, still on that file. An earlier turn opened on
+    // purpose (followLatest off) stays put.
+    else if (this.followLatest && this.selectedPath && !this.standalone) {
+      const latest = runs.at(-1);
+      if (latest && latest.id !== this.runId && latest.tools.some((tool) => tool.phase === "change" && touches(tool, this.selectedPath!))) this.runId = latest.id;
+    }
     const tools = runs.find((run) => run.id === this.runId)?.tools.filter((tool) => tool.phase === "change") ?? [];
     const signature = [this.runId, ...tools.flatMap((tool) => [tool.id, tool.diff, tool.changes, tool.state, tool.waiting, tool.drafting, tool.detail])];
     if (signature.length === this.lastSignature.length && signature.every((part, i) => part === this.lastSignature[i])) return;
@@ -304,6 +317,10 @@ export class DiffPanel {
     if (fits && view) zones.push({ row: top, column: 1 + visibleLength(left) + 2, width: visibleLength(view), action: { kind: "diff-view" } });
     top++;
     if (note) canvas.put(top++, 1, paint.text(note, "muted"), width - 2, "surface");
+    // The whole file is the saved file; an edit still being written shows
+    // only in the diff, so say so while one is in progress.
+    const drafting = this.runs.at(-1)?.tools.some((tool) => tool.phase === "change" && tool.state === "running" && touches(tool, path));
+    if (drafting) canvas.put(top++, 1, paint.text("● The agent is editing this file · ", "electric") + keycap(paint, "v") + paint.text(" shows it live", "muted"), width - 2, "surface");
     // Too narrow for the details: an undone edit still needs explaining,
     // since the whole file shows no markers for it.
     if (left === lead && edited && !changes.length) canvas.put(top++, 1, paint.text("Edited this session, since undone · ", "muted") + keycap(paint, "v") + paint.text(" shows the edit", "muted"), width - 2, "surface");

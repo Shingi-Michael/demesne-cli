@@ -337,14 +337,16 @@ test("a file pinned in Changes follows into the next turn that edits it, so a de
 test("an earlier turn's changes opened on purpose stay on that turn", () => {
   const ui = new Workbench({ paint, contextRail: new CliContextRail({ id: "t", provider: "t" }, "/p"), sessionTitle: "S", version: "t", onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} } });
   const view = (ui as unknown as { sessionView: SessionView }).sessionView;
+  let first = 0;
   for (const [turn, after] of [["One", "a\nb\n"], ["Two", "a\nb\nc\n"]] as const) {
     ui.beginTurn({ userText: turn, at: "now" });
     ui.toolRequested({ toolCallId: turn, name: "edit_file", arguments: JSON.stringify({ path: "f.py" }) });
     ui.toolFinished({ toolCallId: turn, name: "edit_file", state: "done", changes: [{ path: "f.py", before: "a\n", after, beforeExists: true, afterExists: true }] });
     ui.finishTurn("completed", "Done");
+    ui.frame(170, 40);
+    first ||= view.current!.id;
   }
-  ui.frame(170, 40);
-  view.act({ kind: "diff-open", runId: view.runs[0]!.id });
+  view.act({ kind: "diff-open", runId: first });
   view.act({ kind: "diff-select", path: "f.py" });
   ui.beginTurn({ userText: "Three", at: "now" });
   ui.toolRequested({ toolCallId: "3", name: "edit_file", arguments: JSON.stringify({ path: "f.py" }) });

@@ -112,7 +112,7 @@ export function composeDraft(options: ComposeOptions): ComposerFrame {
     const hintEnd = hintsRow === firstRow + 1 ? buttonColumn - 2 : width - inset;
     if (tokenLabel) canvas.put(counterRow, hintEnd - tokenLabel.length, paint.text(tokenLabel, "muted"), tokenLabel.length, "surface");
     const hintWidth = Math.max(0, hintEnd - inset - (tokenLabel ? tokenLabel.length + 2 : 0));
-    const hints = options.streaming ? ["Type to queue a follow-up · Esc Esc / Ctrl+C stop", "Type to queue · Esc Esc stop", "Type to queue · ^C stop"]
+    const hints = options.streaming ? ["Type to queue a follow-up", "Type to queue"]
       : options.hero ? ["↵ send · ⇧↵ newline · / commands · @ files", "↵ send · ⇧↵ newline · / cmds · @ files", "↵ send · ⇧↵ line · / @"]
         : ["⇧↵ newline · / commands · @ files", "⇧↵ newline · / cmds · @ files", "⇧↵ line · / @"];
     const hint = hints.find((hint) => visibleLength(hint) <= hintWidth) ?? hints.at(-1)!;
@@ -161,10 +161,9 @@ export function composeDraft(options: ComposeOptions): ComposerFrame {
     const buttonRow = options.hero ? hintsRow : firstRow;
     const inline = (label: string, action?: ComposerAction) => control(buttonRow, width - (options.hero ? 2 : inset) - visibleLength(label), label, action);
     if (options.streaming) {
-      // The running glyphs occupy the same control as Send. Its native action
-      // remains interruption, alongside the explicit keyboard hint below.
-      const dots = thinkingDots(paint, options.now ?? 0, options.reducedMotion);
-      inline(dots + paint.text(" stop", "muted"), { kind: "stop" });
+      // The running glyphs occupy the same control as Send; clicking them
+      // still stops. No stop hint is shown (Esc Esc still works).
+      inline(thinkingDots(paint, options.now ?? 0, options.reducedMotion), { kind: "stop" });
       if (queued && width < 60) control(0, textColumn, paint.text(" Clear queue × ", "secondary"), { kind: "clear" });
     } else {
       inline(sending ? paint.wash(" ↵ send ", "accentSurface", "electric") : " " + keycap(paint, "↵") + paint.text(" send ", "muted"), sending ? { kind: "submit" } : undefined);
@@ -229,12 +228,13 @@ function composeSessionDraft(options: ComposeOptions): ComposerFrame {
   if (options.streaming) {
     const label = options.stopArmed
       ? width >= 65 ? paint.text("Press ", "signal") + keycap(paint, "Esc") + paint.text(" again to stop", "signal") : keycap(paint, "Esc") + paint.text(" stop", "signal")
-      : thinkingDots(paint, options.now ?? 0, options.reducedMotion) + paint.text(" stop", "muted");
+      : thinkingDots(paint, options.now ?? 0, options.reducedMotion);
+    // No stop hint while running (Esc Esc still stops); the dots stay clickable.
     control(controlRow, right - visibleLength(label), label, { kind: "stop" });
-    if (!options.stopArmed && width >= 65) control(controlRow, right - visibleLength(label) - 10, keycap(paint, "Esc Esc"), { kind: "stop" });
   } else {
-    const items: [string, string, ComposerAction | undefined][] = [["↵", "send", editor.value.trim() ? { kind: "submit" } : undefined]];
-    if (width >= 65) items.push(["/", "commands", { kind: "commands" }], ["@", "files", { kind: "files" }]);
+    // A draft shows how to send it; an empty composer shows what / and @ do.
+    const items: [string, string, ComposerAction | undefined][] = editor.value.trim() ? [["↵", "send", { kind: "submit" }]]
+      : width >= 65 ? [["/", "commands", { kind: "commands" }], ["@", "files", { kind: "files" }]] : [];
     const hint = ([key, label, action]: [string, string, ComposerAction | undefined]) => keycap(paint, key) + " " + paint.text(label, action?.kind === "submit" ? "electric" : "muted");
     const controlsWidth = items.reduce((sum, item) => sum + visibleLength(hint(item)), 0) + (items.length - 1) * 2;
     let column = right - controlsWidth;

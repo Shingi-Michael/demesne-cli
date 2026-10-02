@@ -78,8 +78,9 @@ export function usageLabel(context: ContextReceipt | undefined): string {
   return `${context?.estimated ? "~" : ""}${formatTokenCount(context!.used!)} / ${formatTokenCount(context!.capacity!)} · ${percentage}%`;
 }
 
-/// Figma status bar: state, model, speed and the usage bar on the left; the
-/// log and live keys on the right. Optional fields drop first as width runs out.
+/// The status bar, kept quiet: a state only when it needs attention, then the
+/// model and context usage; `live ↓` on the right once scrolled away.
+/// Optional fields drop first as width runs out.
 export function sessionStatus(options: {
   width: number; paint: Painter; state: string; context: ContextReceipt; model?: string;
   presence: PresenceState; elapsed?: number; tokensPerSecond?: number | null;
@@ -93,39 +94,36 @@ export function sessionStatus(options: {
   const tone = state === "FAILED" ? "signal" : state === "APPROVAL" || state === "QUESTION" ? "thinking" : state === "STOPPED" ? "secondary" : working ? "thinking" : "citron";
   // A colored dot carries the state; the label keeps it readable without color.
   const mark = paint.text("●", tone);
-  const phase = working ? "" : `${mark} ${paint.text(label, tone)}`;
+  // A quiet footer: "ready" says nothing, and working shows in the composer.
+  // Only states that need attention (failed, approval, stopped…) get a word.
+  const phase = working || name === "READY" ? "" : `${mark} ${paint.text(label, tone)}`;
   const bar = usageBar(options.context, paint);
-  const usage = paint.text(usageLabel(options.context), contextTone(options.context));
-  const rate = options.tokensPerSecond != null && Number.isFinite(options.tokensPerSecond) && options.tokensPerSecond > 0
-    ? paint.text(`${throughput(options.tokensPerSecond)} tok/s`, "secondary") : "";
+  const percentage = contextPercentage(options.context);
+  const usage = paint.text(percentage === null ? "ctx —" : `${formatTokenCount(options.context.used!)} · ${percentage}%`, contextTone(options.context));
   const model = options.model ? paint.text(truncateText(sanitizeTerminalLine(options.model), 28), "secondary") : "";
-  const log = keyHints(paint, [["Ctrl+B", "log"]]);
-  const live = keyHints(paint, [["Ctrl+G", "live"]]);
-  // Drop in this order: speed, model, the bar's track, the log key, then the
-  // live key shortens. State and usage numbers always stay.
-  const fits = (parts: string[], right: string) => visibleLength(parts.filter(Boolean).join("  ")) + visibleLength(right) + 3 <= width;
-  let show = { rate: Boolean(rate), model: Boolean(model), bar: Boolean(bar), log: true, liveLong: true };
-  const build = () => {
-    const usagePart = (show.bar && bar ? `${bar} ` : "") + usage;
-    const leftParts = [phase, show.model ? model : "", show.rate ? rate : "", usagePart];
-    const rightParts = [show.log ? log : "", show.liveLong ? live : paint.text("live ↓", "muted")].filter(Boolean);
-    return { leftParts, right: rightParts.join("  ") };
-  };
-  for (const drop of ["rate", "model", "bar", "log", "liveLong"] as const) {
-    const { leftParts, right } = build();
-    if (fits(leftParts, right)) break;
+  // Ctrl+B and Ctrl+G still work; the footer only points back to live output
+  // once the reader has scrolled away from it.
+  const right = options.paused ? paint.text("live ↓", "muted") : "";
+  // Speed lives in each response's receipt, not here. Drop the model, then
+  // the bar's track; state and usage numbers always stay.
+  const fits = (parts: string[]) => visibleLength(parts.filter(Boolean).join("  ")) + visibleLength(right) + 3 <= width;
+  let show = { model: Boolean(model), bar: Boolean(bar) };
+  const build = () => [phase, show.model ? model : "", (show.bar && bar ? `${bar} ` : "") + usage];
+  for (const drop of ["model", "bar"] as const) {
+    if (fits(build())) break;
     show = { ...show, [drop]: false };
   }
-  const { leftParts, right } = build();
-  const parts = leftParts.filter(Boolean);
+  const parts = build().filter(Boolean);
   const left = truncateText(parts.join("  "), Math.max(0, width - visibleLength(right) - 2));
   const zones: { column: number; width: number; action: "context" | "response-start" | "follow" | "log" }[] = [];
-  const usageText = parts.at(-1)!;
-  const usageColumn = visibleLength(parts.slice(0, -1).join("  ")) + (parts.length > 1 ? 2 : 0);
-  if (usageColumn < visibleLength(left)) zones.push({ column: usageColumn, width: Math.min(visibleLength(usageText), visibleLength(left) - usageColumn), action: "context" });
-  let column = width - visibleLength(right);
-  if (show.log) { zones.push({ column, width: visibleLength(log), action: "log" }); column += visibleLength(log) + 2; }
-  zones.push({ column, width: width - column, action: "follow" });
-  if (options.hasResponse && phase) zones.push({ column: 0, width: visibleLength(phase), action: "response-start" });
+  const usageIndex = parts.findIndex((part) => part.endsWith(usage));
+  if (usageIndex >= 0) {
+    const usageColumn = visibleLength(parts.slice(0, usageIndex).join("  ")) + (usageIndex > 0 ? 2 : 0);
+    if (usageColumn < visibleLength(left)) zones.push({ column: usageColumn, width: Math.min(visibleLength(parts[usageIndex]!), visibleLength(left) - usageColumn), action: "context" });
+  }
+  if (right) zones.push({ column: width - visibleLength(right), width: visibleLength(right), action: "follow" });
+  // The first item (state, else model) jumps to the start of the answer.
+  const lead = phase || (show.model ? model : "");
+  if (options.hasResponse && lead) zones.push({ column: 0, width: visibleLength(lead), action: "response-start" });
   return { text: formatFooterLine(left, right, width), zones };
 }

@@ -52,7 +52,9 @@ test("Figma composer stays compact and its first-Escape warning uses the real in
     const input = { ...state.layout.input }, before = ui.frame(110, 30);
     expect(input.height).toBe(3);
     expect(stripVTControlCharacters(before.rows[input.row]!)).toMatch(/^  ╭─/);
-    expect(stripVTControlCharacters(before.rows[input.row + 1]!)).toContain("Esc Esc");
+    // No stop hint while running: only the dots, which still stop on click.
+    expect(stripVTControlCharacters(before.rows[input.row + 1]!)).not.toContain("Esc Esc");
+    expect(stripVTControlCharacters(before.rows[input.row + 1]!)).toContain("··· │");
     key("escape");
     expect(screen(110, 30)).toContain("Press Esc again to stop");
     expect(state.layout.input).toEqual(input); expect(interrupts()).toBe(0);
@@ -186,7 +188,7 @@ test("the prompt retains drafts and queued instructions when focus changes", asy
   // The queued draft labels its automatic handoff even while editing it.
   expect(screen()).toContain("Next step");
   expect(screen()).toContain("Queued · sends after this turn");
-  expect(screen()).toContain("··· stop");
+  expect(screen()).toContain("··· │");
   key("t", { ctrl: true });
   key("c", { ctrl: true });
   expect(interrupts()).toBe(1);
@@ -332,7 +334,7 @@ test("queued follow-ups support caret editing and keep the running control visib
   key("return");
   expect(queue()).toBe("abc");
   state.onKeypress("\n" + "a long follow-up\n".repeat(20), {});
-  expect(screen(40, 10)).toContain("··· stop");
+  expect(screen(40, 10)).toContain("··· │");
   expect(screen(40, 10)).toContain("Clear queue");
   expect(screen(40, 10)).toContain("Queued · sends");
 });
@@ -425,7 +427,7 @@ test("Response navigation reveals the answer start, preserves draft and historic
     const rows = screen(width, height).split("\n");
     expect(rows.join("\n")).not.toContain("ANSWER_START");
     const row = rows.length - 1;
-    state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("●") });
+    state.handleMouse({ kind: "press", button: 0, row, col: rows[row]!.indexOf("original-model") });
     expect(screen(width, height)).toContain("ANSWER_START");
     expect(view.focused).toBe(true);
     expect(view.memory.followFlow).toBe(false);
@@ -556,7 +558,8 @@ test("terminal focus changes the prompt outline and caret while Unicode draft co
   const compact = screen(120, 10).split("\n").at(-2)!;
   expect(compact).toContain("~5 tok");
   expect(compact).toContain("⇧↵ newline");
-  expect(screen(120, 10)).toContain("/ commands  @ files");
+  // A draft shows ↵ send in place of the / and @ hints.
+  expect(screen(120, 10)).not.toContain("/ commands  @ files");
   state.onKeypress("", { name: "return" });
   expect(screen()).not.toContain("~0 tok");
   state.onData("\x1b[200~日本語\x1b[201~");
@@ -690,7 +693,7 @@ test("pulsing dots mark inline Thinking from the first-token wait through live r
     expect(screen()).not.toContain("◇ Thinking ···");
     expect(screen()).not.toContain("boundary.▌");
     ui.finishTurn("completed", "Complete");
-    expect(screen().split("\n").at(-1)).toContain("● ready");
+    expect(screen().split("\n").at(-1)).not.toContain("ready");
     expect(screen()).toContain("tok/s");
     expect(screen()).not.toContain("···");
   } finally {
@@ -1843,28 +1846,32 @@ test("thinking between routine reads folds into one Explored row that still expa
   for (const path of ["README.md", "package.json", "src/main.ts"]) expect(expanded).toContain(path);
 });
 
-test("the status bar follows Figma: state, model, speed and usage bar left; log and live keycaps right", () => {
+test("the status bar stays quiet: model and usage, a state only when it needs attention, no keycaps", () => {
   const paint = createPainter(true);
   const context = { used: 120_800, capacity: 262_100, estimated: false };
   const base = { paint, state: "COMPLETE", context, model: "qwen3.8-27b", presence: "idle" as never, tokensPerSecond: 31.4 };
   const wide = sessionStatus({ ...base, width: 140 });
   const plain = stripVTControlCharacters(wide.text);
-  expect(plain).toMatch(/^● ready {2}qwen3\.8-27b {2}31\.4 tok\/s {2}━{10} 120\.8k \/ 262\.1k · 46%/);
-  expect(plain.trimEnd()).toEndWith("Ctrl+B log  Ctrl+G live");
-  expect(wide.text).toContain(keycap(paint, "Ctrl+B"));
-  expect(wide.zones.map((zone) => zone.action)).toEqual(["context", "log", "follow"]);
-  const logZone = wide.zones.find((zone) => zone.action === "log")!;
-  expect(plain.slice(logZone.column, logZone.column + logZone.width)).toBe("Ctrl+B log");
-  // Speed, then the model, then the bar's track give way before the numbers do.
-  const narrow = stripVTControlCharacters(sessionStatus({ ...base, width: 60 }).text);
-  expect(narrow).not.toContain("tok/s");
-  expect(narrow).toContain("120.8k / 262.1k · 46%");
-  const tiny = stripVTControlCharacters(sessionStatus({ ...base, width: 40 }).text);
-  expect(tiny).toContain("● ready");
-  expect(tiny).toContain("46%");
-  // Unknown usage stays explicit instead of drawing an empty bar.
-  expect(stripVTControlCharacters(sessionStatus({ ...base, width: 140, context: { used: null, capacity: 100_000, estimated: false } }).text)).toContain("ctx —/100k");
+  expect(plain).toMatch(/^qwen3\.8-27b {2}━{10} 120\.8k · 46% *$/);
+  expect(plain).not.toMatch(/ready|tok\/s|Ctrl\+B|Ctrl\+G|Esc/);
+  expect(wide.zones.map((zone) => zone.action)).toEqual(["context"]);
+  // States that need attention keep their word; working shows in the composer.
+  expect(stripVTControlCharacters(sessionStatus({ ...base, width: 140, state: "FAILED" }).text)).toMatch(/^● failed {2}qwen3\.8-27b/);
+  expect(stripVTControlCharacters(sessionStatus({ ...base, width: 140, state: "WORKING" }).text)).toMatch(/^qwen3\.8-27b/);
+  // Scrolled away from live output, the right edge points back to it.
+  const paused = sessionStatus({ ...base, width: 140, paused: true });
+  expect(stripVTControlCharacters(paused.text).trimEnd()).toEndWith("live ↓");
+  expect(paused.zones.map((zone) => zone.action)).toEqual(["context", "follow"]);
+  // The model, then the bar's track give way before the numbers do.
+  const tiny = stripVTControlCharacters(sessionStatus({ ...base, width: 20 }).text);
+  expect(tiny).not.toContain("qwen");
+  expect(tiny).toContain("120.8k · 46%");
+  // Unknown usage stays short and clickable instead of drawing an empty bar.
+  const unknown = sessionStatus({ ...base, width: 140, context: { used: null, capacity: 100_000, estimated: false } });
+  expect(stripVTControlCharacters(unknown.text)).toContain("ctx —");
+  expect(unknown.zones.map((zone) => zone.action)).toEqual(["context"]);
 });
+
 
 test("docked panels share the Figma frame: label and subject, a keycap footer, about 40% of the width", () => {
   const { key, screen, view } = fixture("complete");

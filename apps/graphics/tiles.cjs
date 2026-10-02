@@ -28,7 +28,9 @@ class TileFrame {
     }
     return changed;
   }
-  drain(encode) {
+  // Raw BGRA tiles that differ from what the terminal already shows; the
+  // caller encodes them (in parallel, off the main thread).
+  drain() {
     const tiles = [], reset = this.first;
     for (const id of this.dirty) {
       const x = id % this.columns * this.tileWidth, y = Math.floor(id / this.columns) * this.tileHeight;
@@ -36,7 +38,7 @@ class TileFrame {
       const data = Buffer.allocUnsafe(width * height * 4);
       for (let row = 0; row < height; row++) this.bitmap.copy(data, row * width * 4, ((y + row) * this.width + x) * 4, ((y + row) * this.width + x + width) * 4);
       if (!data.equals(this.previous.get(id) ?? Buffer.alloc(0))) {
-        tiles.push({ id, x, y, width, height, png: encode(data, width, height) }); this.previous.set(id, data);
+        tiles.push({ id, x, y, width, height, data }); this.previous.set(id, data);
       }
     }
     this.dirty.clear(); this.first = false;

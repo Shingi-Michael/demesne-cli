@@ -19,6 +19,7 @@ for (const file of [
   "renderer.cjs",
   "bridge.cjs",
   "tiles.cjs",
+  "tile-encoder.cjs",
   "input-queue.cjs",
   "live.html",
   "live.css",

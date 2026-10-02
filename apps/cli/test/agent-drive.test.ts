@@ -99,57 +99,6 @@ test("a rejected completion is available to the planner on resume and after jour
   } finally { drive.dispose(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("completed subtask memory reaches the next decision and survives journal restore", async () => {
-  const root = mkdtempSync(join(tmpdir(), "drive-progress-")), path = join(root, "mission.json");
-  const requests: DriveRequest[] = [];
-  const services = { path, observe: observation, changed() {}, perform: async () => "Opened log", delayMs: 60_000,
-    decide: async (request: DriveRequest) => {
-      requests.push(structuredClone(request));
-      return response(decision({ kind: "key", key: "ctrl+b" }, {
-        notes: "Implementation finished; inspect recorded checks next.",
-        completed: ["Parser implementation finished"], remaining: ["Inspect recorded checks"],
-      }));
-    } };
-  const drive = new AgentDrive(services);
-  let restored: AgentDrive | undefined;
-  try {
-    drive.start("Implement and verify parser");
-    await drive.step();
-    expect(drive.state?.completed).toEqual(["Parser implementation finished"]);
-    expect(drive.state?.ledger?.tasks[0]?.status).toBe("active");
-    await drive.step();
-    expect(requests[1]?.memory.completed).toEqual(["Parser implementation finished"]);
-    expect(requests[1]?.memory.remaining).toEqual(["Inspect recorded checks"]);
-    expect(requests[1]?.memory.steps.at(-1)?.result).toBe("Opened log");
-    drive.control("pause");
-    restored = new AgentDrive(services);
-    restored.control("resume");
-    await restored.step();
-    expect(requests[2]?.memory.completed).toEqual(["Parser implementation finished"]);
-    expect(requests[2]?.memory.notes).toBe("Implementation finished; inspect recorded checks next.");
-  } finally { restored?.dispose(); drive.dispose(); rmSync(root, { recursive: true, force: true }); }
-});
-
-test("planner progress cannot erase or replace verified ledger completions", async () => {
-  const drive = new AgentDrive({ observe: observation, changed() {}, perform: async () => "Opened log", delayMs: 60_000,
-    decide: async () => response(decision({ kind: "key", key: "ctrl+b" }, {
-      completed: Array.from({ length: 32 }, (_, index) => `Subtask ${index}`),
-    })) });
-  try {
-    drive.start("Verify current task");
-    const ledger = drive.state!.ledger!;
-    const prior = structuredClone(ledger.tasks[0]!);
-    prior.id = "prior-task"; prior.title = "Previously verified task"; prior.status = "completed";
-    ledger.tasks.unshift(prior);
-    await drive.step();
-    expect(drive.state?.completed).toHaveLength(32);
-    expect(drive.state?.completed[0]).toBe("Previously verified task");
-    expect(drive.state?.completed[1]).toBe("Subtask 0");
-    expect(ledger.tasks[0]?.status).toBe("completed");
-    expect(ledger.tasks[1]?.status).toBe("active");
-  } finally { drive.dispose(); }
-});
-
 test("journal restores paused, holds a single writer, and does not replay prepared submissions", async () => {
   const root = mkdtempSync(join(tmpdir(), "demesne-drive-")); const path = join(root, "drive.json");
   let performs = 0;

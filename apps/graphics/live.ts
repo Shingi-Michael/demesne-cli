@@ -333,7 +333,7 @@ function renderStatus() {
   // needs attention (failed, approval, offline…). "ready" says nothing.
   const working = Boolean(state.activeTurnId) && !["approval", "waiting", "failed"].includes(phase);
   el("status").innerHTML =
-    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}</span>${state.model.provider === "ChatGPT" ? `<span title="${h(state.chatgptAccount?.label ?? "ChatGPT")}">Using ChatGPT plan${state.chatgptAccount?.email ? ` · ${h(state.chatgptAccount.email)}` : ""}</span>${btn("open-link", "Manage usage", { url: "https://chatgpt.com/settings/usage" }, "key-action")}` : ""}<div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${state.runs.length ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
+    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${state.runs.length ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   const workspace = state.workspace.replace(/^.*\/projects\//, "projects/");
   el("header").innerHTML =
     `<div class="identity"><strong>demesne</strong>${pane === "changes" && state.session ? `<span class="session-title">${h(state.session.title)}</span>` : ""}<span title="${h(state.workspace)}">${pane === "changes" ? "" : "· "}${h(workspace)}</span></div><div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}${state.runs.length ? `<span class="age">${pane === "changes" ? clock(Date.now()).slice(0, 5) : `· ${duration(Date.now() - Date.parse(state.session!.createdAt))}`}</span>` : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true)}</div>`;
@@ -1842,6 +1842,19 @@ function renderOverlay() {
         data: {},
         hint: "setup",
       },
+      // The ChatGPT plan lives here, not in the status bar.
+      ...(state.model.provider === "ChatGPT"
+        ? [
+            {
+              label: "ChatGPT plan",
+              value: state.chatgptAccount?.email ?? state.chatgptAccount?.label ?? "signed in",
+              group: "CONNECTION",
+              action: "open-link",
+              data: { url: "https://chatgpt.com/settings/usage" },
+              hint: "manage usage ↗",
+            },
+          ]
+        : []),
     ];
   } else if (overlay === "models") {
     title = "Switch model";
@@ -2621,6 +2634,7 @@ async function dispatch(
     return api("clear-queue");
   }
   if (action === "setup" || action === "setup-action") return api(action, args);
+  if (action === "open-link") return api("open-link", { url: args.url });
   if (
     [
       "permission",

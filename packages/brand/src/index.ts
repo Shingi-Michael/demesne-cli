@@ -1893,6 +1893,10 @@ export class TerminalMarkdownStream {
   private codeBlockLang = "";
   private highlightState: CodeHighlightState = { inBlockComment: false };
   private tableLines: string[] = [];
+  private listIndents: number[] = [];
+  /// Whether the last line drawn was blank, so a heading or code block does
+  /// not add a second blank line above itself.
+  private afterBlank = false;
   private painter: Painter;
   private width: number;
   private prefix: string;
@@ -1960,10 +1964,12 @@ export class TerminalMarkdownStream {
 
   private formattedBlocks(line: string): string[] {
     const formatted = this.formatLine(line);
+    if (formatted !== null) this.afterBlank = !stripVTControlCharacters(formatted).trim();
     return formatted === null ? [] : [formatted];
   }
 
   private flushTable(): string {
+    this.afterBlank = false;
     const lines = this.tableLines;
     this.tableLines = [];
     if (lines.length < 2) return this.formatLine(lines[0] ?? "") ?? "";
@@ -1982,64 +1988,52 @@ export class TerminalMarkdownStream {
 
   private renderTable(header: string[], rows: string[][], alignments: TableAlignment[]): string {
     const available = Math.max(1, this.width - visibleLength(this.prefix));
-    const borderWidth = header.length * 3 + 1;
-    const contentWidth = available - borderWidth;
-    if (header.length > 4 || contentWidth < header.length * 12) {
-      return this.renderStackedTable(header, rows);
-    }
-
-    const naturalWidths = header.map((cell, column) => Math.max(
-      3,
-      visibleLength(cell),
-      ...rows.map((row) => visibleLength(row[column] ?? "")),
-    ));
-    const baseWidth = Math.max(6, Math.min(12, Math.floor(contentWidth / header.length)));
-    const widths = naturalWidths.map((width) => Math.max(3, Math.min(width, baseWidth)));
-    while (widths.reduce((sum, width) => sum + width, 0) < contentWidth) {
-      const pressure = naturalWidths.map((width, index) => width > widths[index]! ? width / widths[index]! : 0);
-      const column = pressure.reduce((best, value, index) => value > pressure[best]! ? index : best, 0);
-      if (pressure[column] === 0) break;
-      widths[column] = widths[column]! + 1;
+    const quiet = this.codeStyle === "gutter";
+    const contentWidth = available - (quiet ? (header.length - 1) * 3 : header.length * 3 + 1);
+    // Cells are measured as displayed: markers like ** and ` take no room.
+    const headings = header.map((cell) => quiet ? this.painter.text(cell.toUpperCase(), "muted") : this.painter.bold(this.formatInline(cell), "paper"));
+    const cells = rows.map((row) => header.map((_, column) => this.formatInline(row[column] ?? "")));
+    const plain = (column: number) => [headings[column]!, ...cells.map((row) => row[column]!)].map((cell) => stripVTControlCharacters(cell));
+    const natural = header.map((_, column) => Math.max(3, ...plain(column).map(visibleLength)));
+    // A column narrower than its longest word (up to 24) or 16 cells reads
+    // badly; when the table can't give every column that, it is stacked.
+    const minimum = natural.map((width, column) => Math.min(width,
+      Math.max(16, Math.min(24, ...plain(column).flatMap((cell) => cell.split(/\s+/).map(visibleLength))))));
+    if (minimum.reduce((sum, width) => sum + width, 0) > contentWidth) return this.renderStackedTable(header, rows);
+    // Keep each column at its natural width; take any overflow from the widest.
+    const widths = [...natural];
+    while (widths.reduce((sum, width) => sum + width, 0) > contentWidth) {
+      let column = -1;
+      widths.forEach((width, index) => { if (width > minimum[index]! && (column < 0 || width > widths[column]!)) column = index; });
+      if (column < 0) break;
+      widths[column] = widths[column]! - 1;
     }
 
     const rule = (left: string, middle: string, right: string) => this.painter.text(
       `${this.prefix}${left}${widths.map((width) => "─".repeat(width + 2)).join(middle)}${right}`,
       "rule",
     );
-    const renderRow = (cells: string[], heading: boolean) => {
-      const wrapped = cells.map((cell, index) => wrapDisplayText(cell, widths[index]!));
+    // Styled first, then wrapped, so a style never breaks across lines.
+    const renderRow = (styled: string[], join: (cells: string[]) => string) => {
+      const wrapped = styled.map((cell, index) => this.wrapStyled(cell, widths[index]!));
       const height = Math.max(...wrapped.map((cell) => cell.length));
-      return Array.from({ length: height }, (_, rowIndex) => {
-        const rendered = wrapped.map((cell, column) => {
-          const text = cell[rowIndex] ?? "";
-          const styled = heading
-            ? this.painter.bold(this.formatInline(text), "paper")
-            : this.formatInline(text);
-          return ` ${padTableCell(styled, widths[column]!, alignments[column] ?? "left")} `;
-        });
-        return `${this.prefix}${this.painter.text("│", "rule")}${rendered.join(this.painter.text("│", "rule"))}${this.painter.text("│", "rule")}`;
-      }).join("\n");
+      return Array.from({ length: height }, (_, rowIndex) =>
+        join(wrapped.map((cell, column) => padTableCell(cell[rowIndex] ?? "", widths[column]!, alignments[column] ?? "left")))).join("\n");
     };
 
-    if (this.codeStyle === "gutter") {
+    if (quiet) {
       // Figma 32:438: quiet uppercase headers, one hairline, no cell borders.
-      const quietRow = (cells: string[], heading: boolean) => {
-        const wrapped = cells.map((cell, index) => wrapDisplayText(heading ? cell.toUpperCase() : cell, widths[index]!));
-        const height = Math.max(...wrapped.map((cell) => cell.length));
-        return Array.from({ length: height }, (_, rowIndex) => this.prefix + wrapped.map((cell, column) => {
-          const text = cell[rowIndex] ?? "";
-          const styled = heading ? this.painter.text(text, "muted") : this.formatInline(text);
-          return padTableCell(styled, widths[column]!, alignments[column] ?? "left");
-        }).join("   ")).join("\n");
-      };
+      const quietRow = (styled: string[]) => renderRow(styled, (line) => this.prefix + line.join("   "));
       const total = widths.reduce((sum, width) => sum + width, 0) + (widths.length - 1) * 3;
-      return [quietRow(header, true), this.painter.text(`${this.prefix}${"─".repeat(Math.min(total, available))}`, "rule"), ...rows.map((row) => quietRow(row, false))].join("\n");
+      return [quietRow(headings), this.painter.text(`${this.prefix}${"─".repeat(Math.min(total, available))}`, "rule"), ...cells.map(quietRow)].join("\n");
     }
+    const bar = this.painter.text("│", "rule");
+    const boxRow = (styled: string[]) => renderRow(styled, (line) => `${this.prefix}${bar}${line.map((cell) => ` ${cell} `).join(bar)}${bar}`);
     return [
       rule("┌", "┬", "┐"),
-      renderRow(header, true),
+      boxRow(headings),
       rule("├", "┼", "┤"),
-      ...rows.map((row) => renderRow(row, false)),
+      ...cells.map(boxRow),
       rule("└", "┴", "┘"),
     ].join("\n");
   }
@@ -2074,12 +2068,12 @@ export class TerminalMarkdownStream {
           // Figma 32:438: a closed box with the language in its top edge.
           const inner = Math.max(2, this.width - visibleLength(this.prefix) - 2);
           const label = truncateText(this.codeBlockLang || "code", Math.max(1, inner - 4));
-          return `\n${this.prefix}${this.painter.text("╭─ ", "rule")}${this.painter.text(label, "secondary")}${this.painter.text(` ${"─".repeat(Math.max(0, inner - label.length - 3))}╮`, "rule")}`;
+          return `${this.gap()}${this.prefix}${this.painter.text("╭─ ", "rule")}${this.painter.text(label, "secondary")}${this.painter.text(` ${"─".repeat(Math.max(0, inner - label.length - 3))}╮`, "rule")}`;
         }
         const rawHeader = this.codeBlockLang ? ` [${this.codeBlockLang}] ` : " ";
         const header = truncateText(rawHeader, Math.max(1, this.width - visibleLength(this.prefix) - 3));
         const ruleLen = Math.max(0, this.width - visibleLength(this.prefix) - visibleLength(header) - 3);
-        return `\n${this.painter.text(`${this.prefix}┌──${header}${"─".repeat(ruleLen)}`, "rule")}`;
+        return `${this.gap()}${this.painter.text(`${this.prefix}┌──${header}${"─".repeat(ruleLen)}`, "rule")}`;
       }
       return this.codeStyle === "gutter"
         ? this.painter.text(`${this.prefix}╰${"─".repeat(Math.max(0, this.width - visibleLength(this.prefix) - 2))}╯`, "rule")
@@ -2111,22 +2105,27 @@ export class TerminalMarkdownStream {
 
     if (!this.painter.enabled && !this.prefix && !this.renderUnstyled) return line;
 
-    // Headings
-    if (line.startsWith("### ")) {
-      return `\n${this.wrapStyledLine(line.slice(4), this.prefix, this.prefix, (row) => this.painter.bold(row, this.codeStyle === "gutter" ? "electric" : "paper"))}`;
-    }
-    if (line.startsWith("## ")) {
-      return `\n${this.wrapStyledLine(line.slice(3), this.prefix, this.prefix, (row) => this.painter.bold(row, this.codeStyle === "gutter" ? "electric" : "paper"))}`;
-    }
-    if (line.startsWith("# ")) {
-      return `\n${this.wrapStyledLine(line.slice(2), this.prefix, this.prefix, (row) => this.painter.bold(row, this.codeStyle === "gutter" ? "electric" : "paper"))}`;
+    // Headings: # and ## lead, ### is a subheading, #### and deeper are quiet.
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (heading) {
+      this.listIndents = [];
+      const level = heading[1]!.length;
+      const color: PaletteColor = level >= 4 ? "secondary" : this.codeStyle === "gutter" && level <= 2 ? "electric" : "paper";
+      // A heading is already bold; inline markers inside it are dropped.
+      return `${this.gap()}${this.wrapStyledLine(heading[2]!.replace(/\*\*|__|`/g, ""), this.prefix, this.prefix, (row) => this.painter.bold(row, color))}`;
     }
 
-    // Unordered lists
-    if (/^\s*[-*·•]\s+/.test(line)) {
-      const indent = line.match(/^\s*/)?.[0] ?? "";
-      const content = line.replace(/^\s*[-*·•]\s+/, "");
-      const bullet = this.painter.text(this.codeStyle === "gutter" ? "·" : "•", this.codeStyle === "gutter" ? "muted" : "electric");
+    // Unordered lists, nested by indentation; - [ ] and - [x] are tasks.
+    if (/^\s*[-*+·•]\s+/.test(line)) {
+      const indent = this.listIndent(line.match(/^\s*/)?.[0].length ?? 0);
+      let content = line.replace(/^\s*[-*+·•]\s+/, "");
+      const glyphs = this.codeStyle === "gutter" ? ["·", "◦", "▪"] : ["•", "◦", "▪"];
+      let bullet = this.painter.text(glyphs[(indent.length / 2) % 3]!, this.codeStyle === "gutter" ? "muted" : "electric");
+      const task = /^\[([ xX])\]\s+/.exec(content);
+      if (task) {
+        bullet = task[1] === " " ? this.painter.text("☐", "muted") : this.painter.text("☑", "citron");
+        content = content.slice(task[0].length);
+      }
       const firstPrefix = `${this.prefix}${indent}${bullet} `;
       const continuationPrefix = `${this.prefix}${indent}  `;
       return this.wrapStyledLine(content, firstPrefix, continuationPrefix, (row) => this.formatInline(row));
@@ -2136,7 +2135,8 @@ export class TerminalMarkdownStream {
     if (/^\s*\d+\.\s+/.test(line)) {
       const match = line.match(/^(\s*)(\d+\.)\s+(.+)$/);
       if (match) {
-        const [, indent, num, content] = match;
+        const [, , num, content] = match;
+        const indent = this.listIndent(match[1]!.length);
         const numStyled = this.painter.bold(num!, "electric");
         const firstPrefix = `${this.prefix}${indent}${numStyled} `;
         const continuationPrefix = `${this.prefix}${indent}${" ".repeat(num!.length + 1)}`;
@@ -2157,14 +2157,25 @@ export class TerminalMarkdownStream {
     }
 
     if (this.codeStyle === "gutter" && /^\*\*[^*]+\*\*$/.test(trimmed)) {
-      return this.wrapStyledLine(trimmed.slice(2, -2), this.prefix, this.prefix, (row) => this.painter.bold(row, "electric"));
+      return this.wrapStyledLine(trimmed.slice(2, -2).replaceAll("`", ""), this.prefix, this.prefix, (row) => this.painter.bold(row, "electric"));
     }
     // Regular line with inline formatting
     return this.wrapRegularLine(line);
   }
 
+  /// Models indent nested lists by 2, 3 or 4 spaces; each deeper level is
+  /// drawn two cells in, whatever the source used.
+  private gap(): string { return this.afterBlank ? "" : "\n"; }
+
+  private listIndent(spaces: number): string {
+    while (this.listIndents.length && this.listIndents.at(-1)! > spaces) this.listIndents.pop();
+    if (!this.listIndents.length || this.listIndents.at(-1)! < spaces) this.listIndents.push(spaces);
+    return "  ".repeat(this.listIndents.length - 1);
+  }
+
   private wrapRegularLine(line: string): string {
     if (!line.trim()) return this.prefix;
+    if (!/^\s/.test(line)) this.listIndents = [];
     return this.wrapStyledLine(line, this.prefix, this.prefix, (row) => this.formatInline(row));
   }
 
@@ -2181,24 +2192,64 @@ export class TerminalMarkdownStream {
       visibleLength(safeFirstPrefix),
       visibleLength(safeContinuationPrefix),
     ));
-    // Style first, then wrap by visible cells. Delimiters that span a wrap
-    // boundary must not leak into the output or consume the reading width.
-    const styled = format(content.trim());
-    const plain = stripVTControlCharacters(styled);
-    return wrapPromptParagraph(plain, 0, contentWidth).map((line, index) => {
-      const start = visibleLength(plain.slice(0, line.start));
-      const end = start + visibleLength(line.text);
-      return `${index === 0 ? safeFirstPrefix : safeContinuationPrefix}${sliceAnsi(styled, start, end)}`;
-    }).join("\n");
+    return this.wrapStyled(format(content.trim()), contentWidth)
+      .map((line, index) => `${index === 0 ? safeFirstPrefix : safeContinuationPrefix}${line}`).join("\n");
   }
 
+  /// Style first, then wrap by visible cells. Delimiters that span a wrap
+  /// boundary must not leak into the output or consume the reading width.
+  private wrapStyled(styled: string, width: number): string[] {
+    const plain = stripVTControlCharacters(styled);
+    return wrapPromptParagraph(plain, 0, width).map((line) => {
+      const start = visibleLength(plain.slice(0, line.start));
+      return sliceAnsi(styled, start, start + visibleLength(line.text));
+    });
+  }
+
+  /// Inline Markdown: `code`, **bold** / __bold__, *italic* / _italic_,
+  /// [links](url) and <https://autolinks>. Styles nest (code inside bold),
+  /// and a marker without its closing partner stays literal text.
   private formatInline(text: string): string {
     if (!this.painter.enabled && !this.renderUnstyled) return text;
+    return this.inlineRuns(text, {});
+  }
 
-    return text.replace(/`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|(?<!\*)\*([^*]+)\*(?!\*)|(?<!\w)_([^_]+)_(?!\w)/g,
-      (_, code, bold, strong, italic, emphasis) => code !== undefined ? this.painter.text(code, "electricBright")
-        : bold !== undefined || strong !== undefined ? this.painter.bold(bold ?? strong, "paper")
-        : this.painter.italic(italic ?? emphasis, "secondary"));
+  private inlineRuns(text: string, style: { bold?: boolean; italic?: boolean; link?: boolean }): string {
+    let output = "", run = "";
+    const flush = () => {
+      if (!run) return;
+      output += style.link ? this.painter.underline(run, "electric") : style.bold ? this.painter.bold(run, "paper") : style.italic ? this.painter.italic(run, "secondary") : run;
+      run = "";
+    };
+    for (let index = 0; index < text.length;) {
+      const char = text[index]!, rest = text.slice(index);
+      if (char === "`") {
+        const end = text.indexOf("`", index + 1);
+        if (end > index + 1) { flush(); output += this.painter.text(text.slice(index + 1, end), "electricBright"); index = end + 1; continue; }
+      }
+      const link = char === "[" ? /^\[([^\]]+)\]\(([^)\s]+)\)/.exec(rest) : null;
+      if (link) {
+        flush(); output += this.inlineRuns(link[1]!, { ...style, link: true });
+        if (link[2] !== link[1]) output += this.painter.text(` (${link[2]})`, "muted");
+        index += link[0].length; continue;
+      }
+      const autolink = char === "<" ? /^<(https?:\/\/[^>\s]+)>/.exec(rest) : null;
+      if (autolink) { flush(); output += this.inlineRuns(autolink[1]!, { ...style, link: true }); index += autolink[0].length; continue; }
+      const strong = rest.startsWith("**") ? "**" : rest.startsWith("__") && !/\w/.test(text[index - 1] ?? "") ? "__" : null;
+      if (strong) {
+        const end = text.indexOf(strong, index + 2);
+        if (end > index + 2) { flush(); output += this.inlineRuns(text.slice(index + 2, end), { ...style, bold: true }); index = end + 2; continue; }
+      }
+      // Emphasis hugs its text: `2 * 3 * 4` and snake_case_names stay literal.
+      if ((char === "*" || char === "_" && !/\w/.test(text[index - 1] ?? "")) && text[index + 1] && !/[\s*_]/.test(text[index + 1]!)) {
+        let end = text.indexOf(char, index + 1);
+        while (end > 0 && (/\s/.test(text[end - 1]!) || text[end + 1] === char || char === "_" && /\w/.test(text[end + 1] ?? ""))) end = text.indexOf(char, text[end + 1] === char ? end + 2 : end + 1);
+        if (end > index + 1) { flush(); output += this.inlineRuns(text.slice(index + 1, end), { ...style, italic: true }); index = end + 1; continue; }
+      }
+      run += char; index++;
+    }
+    flush();
+    return output;
   }
 
   private highlightCode(code: string): string {

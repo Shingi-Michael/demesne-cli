@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalWorkspace, listWorkspaceFiles, ToolRegistry } from "../src/tools.ts";
-import { defaultSystemPrompt, planModeDefinitions, planModeGuidance, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
+import { agentSystemPrompt, ANSWER_FORMAT_GUIDANCE, defaultSystemPrompt, planModeDefinitions, planModeGuidance, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 import { applyEdits, EditApplyError } from "../src/edit-engine.ts";
 
 const temporaryDirectories: string[] = [];
@@ -514,4 +514,11 @@ describe("edit_file creation via edits array", () => {
     expect(result.created).toBe(true);
     expect(readFileSync(join(root, "made/thing.txt"), "utf8")).toBe("hello\n");
   });
+});
+
+test("the coding agent is told how its answers are displayed, even with a configured prompt", () => {
+  for (const configured of [undefined, "Custom project prompt."]) {
+    expect(agentSystemPrompt({ workspaceRoot: "/workspace", definitions: [], configured })).toContain(ANSWER_FORMAT_GUIDANCE);
+  }
+  expect(ANSWER_FORMAT_GUIDANCE).toContain("at most 5 short columns");
 });

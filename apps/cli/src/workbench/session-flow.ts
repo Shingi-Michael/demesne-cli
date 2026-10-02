@@ -136,9 +136,10 @@ export function renderSessionFlow(options: {
     const outcome = failed(tool) || tool.waiting ? "signal" : stopped || unknown ? "secondary" : running ? operation : "citron";
     const background = running || tool.waiting ? "toolActive" : "toolSurface";
     const mark = tool.waiting ? "!" : stopped ? "■" : failed(tool) ? "×" : running ? renderPresence("thinking", options.now, paint) : unknown ? "·" : "✓";
-    // A thinking sub-agent's card cycles a phrase ("Licking the semicolons");
-    // real steps replace it as they happen. Reduced motion keeps it plain.
-    const thinking = tool.name === "subagent" && running && tool.thinkingSince !== undefined
+    // A running sub-agent's card cycles a phrase ("Licking the semicolons")
+    // the whole time; its steps count on the right and list in its trace.
+    // Reduced motion keeps it plain.
+    const thinking = tool.name === "subagent" && running
       ? options.reducedMotion ? "thinking" : subagentPhrase(run.tools.filter((item) => item.name === "subagent").indexOf(tool), options.now, tool.subagentModel ?? run.request?.model ?? "") : "";
     const detail = safe(tool.detail ?? "").replace(/^\$\s*/, "");
     const verb = tool.name === "run_command" ? tool.phase === "verify" ? "Check" : "Run" : safe(toolName(tool));
@@ -156,7 +157,9 @@ export function renderSessionFlow(options: {
     const stateTone: PaletteColor = state === "applied" ? "citron" : state === "failed" || state === "denied" || state === "approval" ? "signal" : state === "drafting" ? "electric" : "muted";
     const totals = tool.phase === "change" ? changeTotals(tool) : "";
     const styledTotals = totals ? totals.split(" ").map((part) => paint.text(part, part.startsWith("+") ? "citron" : "signal")).join(" ") : "";
+    const steps = tool.name === "subagent" ? (tool.trace ?? []).filter((segment) => segment.kind === "step").length : 0;
     const meta = tool.phase === "change" ? [paint.text(state, stateTone), styledTotals].filter(Boolean).join(" ")
+      : tool.name === "subagent" && running ? paint.text(steps ? `${steps} step${steps === 1 ? "" : "s"}` : "", "muted")
       : paint.text(tool.waiting ? tool.name === "ask_user" ? "awaiting your answer" : "awaiting approval" : stopped ? "stopped" : tool.state === "denied" ? "denied"
         : tool.exitCode !== undefined ? `${tool.exitCode === 0 && !failed(tool) ? "passed" : "failed"} · exit ${tool.exitCode}` : unknown ? "exit unknown" : "", tool.waiting ? "signal" : "muted");
     const timing = tool.durationMs !== undefined && !failed(tool) ? duration(tool.durationMs) : "";
@@ -455,7 +458,9 @@ export function renderSessionFlow(options: {
     // the latest output. Approval waits name the command being asked about.
     const liveTool = run.settled ? undefined : run.tools.findLast((tool) => tool.waiting || tool.state === "running");
     if (liveTool) {
-      const target = safe(liveTool.detail ?? "").replace(/^\$\s*/, "");
+      // A sub-agent's working line names its latest step.
+      const step = liveTool.name === "subagent" ? liveTool.trace?.findLast((segment) => segment.kind === "step")?.text : undefined;
+      const target = [safe(liveTool.detail ?? "").replace(/^\$\s*/, ""), step ? safe(step) : ""].filter(Boolean).join(" · ");
       const doing = liveTool.waiting ? liveTool.name === "ask_user" ? "Waiting for your answer ·" : "Waiting for your approval ·"
         : liveTool.name === "run_command" ? liveTool.phase === "verify" ? "Checking" : "Running"
         : liveTool.phase === "change" ? "Drafting" : /search|grep|find/.test(liveTool.name) ? "Searching"

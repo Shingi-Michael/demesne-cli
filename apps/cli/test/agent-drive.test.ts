@@ -604,3 +604,31 @@ test("Drive is told why alt+enter outside a Diff, and inspecting before any turn
   expect(() => validateDriveDecisionContext(decision({ kind: "inspect", target: "log" }), request({}))).toThrow("no turn to inspect yet");
   expect(() => validateDriveDecisionContext(decision({ kind: "inspect", target: "log" }), request({ navigation: { ...navigation, turn: "3" } }))).not.toThrow();
 });
+
+test("clicking and navigating the workbench never pauses Drive; writing in the composer does", async () => {
+  let drive: AgentDrive;
+  const { ui, internals } = workbench({ intervene: () => drive.intervene(), control: (control) => drive.control(control) });
+  const mouse = ui as unknown as { handleMouse(event: MouseEvent): void; drivePanelBounds: { column: number; width: number; height: number } };
+  drive = new AgentDrive({ observe: () => ui.observeDrive(), changed: (state) => ui.setDrive(state), perform: (action, screen, signal) => ui.performDrive(action, screen, signal),
+    decide: async () => response(decision({ kind: "wait" })), delayMs: 60_000 });
+  try {
+    ui.beginTurn({ userText: "Review", at: "now" }); ui.assistantDelta("Ready to review.\n".repeat(40)); ui.finishTurn("completed", "Done");
+    void ui.readPrompt({ history: [], commands: SLASH_COMMANDS, mentions: [] }); ui.frame(120, 30); drive.start("Review the recorded results");
+    internals.onKeypress("", { name: "j", meta: true }); ui.frame(120, 30);
+    const panel = mouse.drivePanelBounds;
+    for (let row = 0; row < panel.height; row += 3) mouse.handleMouse({ kind: "press", button: 0, row, col: panel.column + 1 });
+    mouse.handleMouse({ kind: "press", button: 0, row: panel.height - 1, col: panel.column - 1 });
+    mouse.handleMouse({ kind: "press", button: 0, row: 5, col: 10 });
+    for (const key of [{ name: "b", ctrl: true }, { name: "d", meta: true }, { name: "escape" }, { name: "up" }, { name: "pagedown" }, { name: "tab" }]) {
+      internals.onKeypress("", key); ui.frame(120, 30);
+    }
+    expect(drive.state?.status).toBe("running");
+    // A click above opened the session picker; typing in its search is not
+    // writing in the composer either.
+    internals.onKeypress("x", {}); expect(drive.state?.status).toBe("running");
+    internals.onKeypress("", { name: "escape" });
+    (ui as unknown as { sessionView: SessionView }).sessionView.focusInput();
+    internals.onKeypress("a", {});
+    expect(drive.state?.status).toBe("paused"); expect(ui.observeDrive().draft).toBe("a");
+  } finally { drive.dispose(); }
+});

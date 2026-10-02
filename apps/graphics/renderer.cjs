@@ -166,7 +166,11 @@ function paint(_event, dirty, image) {
   }
   if (!ready) return;
   const diffStart = performance.now();
-  const changed = frame.update(image.toBitmap(), size.width, size.height, dirty);
+  // Copy only what changed: Chromium hands over the whole frame (30 MB at
+  // Retina) even when a spinner glyph is all that moved.
+  const whole = dirty.x <= 0 && dirty.y <= 0 && dirty.width >= size.width && dirty.height >= size.height;
+  const changed = whole ? frame.update(image.toBitmap(), size.width, size.height, dirty)
+    : frame.update(image.crop(dirty).toBitmap(), dirty.width, dirty.height, dirty);
   metrics.diffMs += performance.now() - diffStart;
   if (tracePath) trace({ stage: "paint", start: now() - (performance.now() - diffStart), end: now(), changed, dirty });
   if (changed) schedule();

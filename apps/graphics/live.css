@@ -2189,3 +2189,13 @@ button:disabled {
   width: auto;
   margin: 0;
 }
+/* The braille spinner shown wherever work is running (tool rows, thinking,
+   the live activity line, the status bar). Fixed width so text never shifts. */
+.spin {
+  display: inline-block;
+  flex: none;
+  width: 1ch;
+  text-align: center;
+  color: var(--electric);
+  font-family: JetBrains Mono, monospace;
+}

@@ -329,14 +329,11 @@ function renderStatus() {
   ]);
   if (signature === statusSignature) return;
   statusSignature = signature;
-  const speed =
-    last?.receipt?.tokensPerSecond ??
-    (state.provider?.usage?.outputTokens && state.provider.metrics?.durationMs
-      ? state.provider.usage.outputTokens /
-        (state.provider.metrics.durationMs / 1000)
-      : null);
+  // A quiet footer: a spinner while working, a word only when the state
+  // needs attention (failed, approval, offline…). "ready" says nothing.
+  const working = Boolean(state.activeTurnId) && !["approval", "waiting", "failed"].includes(phase);
   el("status").innerHTML =
-    `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}">${state.activeTurnId && !["approval", "waiting", "failed"].includes(phase) ? spinner() : `<img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">`}${h(phase)}</span><span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}</span>${state.model.provider === "ChatGPT" ? `<span title="${h(state.chatgptAccount?.label ?? "ChatGPT")}">Using ChatGPT plan${state.chatgptAccount?.email ? ` · ${h(state.chatgptAccount.email)}` : ""}</span>${btn("open-link", "Manage usage", { url: "https://chatgpt.com/settings/usage" }, "key-action")}` : ""}${state.runs.length ? `<span class="speed">${speed == null ? "—" : speed.toFixed(1)} tok/s</span>` : ""}${btn("panel", `<div class="context"><div class="meter"><i style="--usage:${Math.min(100, c.percentage ?? 0)}%"></i></div><span>${c.estimated ? "~" : ""}${num(c.used)} / ${num(c.capacity)}${c.percentage == null ? "" : ` · ${c.percentage}%`}</span></div>`, { name: "context" })}<div class="spacer"></div>${state.runs.length ? btn("panel", `${k("Ctrl+B")} log`, { name: "log" }, "key-action", true) + btn("follow", `${k("Ctrl+G")} live`, {}, "key-action", true) : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
+    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}</span>${state.model.provider === "ChatGPT" ? `<span title="${h(state.chatgptAccount?.label ?? "ChatGPT")}">Using ChatGPT plan${state.chatgptAccount?.email ? ` · ${h(state.chatgptAccount.email)}` : ""}</span>${btn("open-link", "Manage usage", { url: "https://chatgpt.com/settings/usage" }, "key-action")}` : ""}${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}<div class="spacer"></div>${state.runs.length ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   const workspace = state.workspace.replace(/^.*\/projects\//, "projects/");
   el("header").innerHTML =
     `<div class="identity"><strong>demesne</strong>${pane === "changes" && state.session ? `<span class="session-title">${h(state.session.title)}</span>` : ""}<span title="${h(state.workspace)}">${pane === "changes" ? "" : "· "}${h(workspace)}</span></div><div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}${state.runs.length ? `<span class="age">${pane === "changes" ? clock(Date.now()).slice(0, 5) : `· ${duration(Date.now() - Date.parse(state.session!.createdAt))}`}</span>` : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true)}</div>`;
@@ -714,11 +711,14 @@ function renderComposer() {
     state.questions.length > 0;
   el("composer-slot").hidden =
     state.approvals.length > 0 || state.questions.length > 0;
+  // No stop hint while running (Esc Esc still stops); only the armed
+  // confirmation shows. Shortcut hints appear in an empty, idle composer.
+  const armed = Date.now() < stopArmed;
   el("send-label").innerHTML = state.activeTurnId
-    ? Date.now() < stopArmed
-      ? `Press ${k("Esc")} again to stop`
-      : `${k("Esc Esc")} stop`
+    ? armed ? `Press ${k("Esc")} again to stop` : ""
     : "send";
+  form.querySelector<HTMLElement>(".send")!.hidden = Boolean(state.activeTurnId) && !armed;
+  form.querySelector<HTMLElement>(".hints")!.hidden = Boolean(state.activeTurnId || editor.value.trim());
   (form.querySelector(".send") as HTMLButtonElement).disabled =
     state.connection !== "online" || state.busy;
   form.querySelector<HTMLElement>(".send>kbd")!.hidden = Boolean(

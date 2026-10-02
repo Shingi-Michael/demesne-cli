@@ -663,6 +663,50 @@ describe("Demesne Brand & Mathematical Alignment", () => {
     expect(spans[2]!).toBeGreaterThan(spans[1]!);
   });
 
+  // How answers render in the workbench: unstyled text, quiet ("gutter") tables.
+  const answer = (markdown: string, width: number) => {
+    const stream = new TerminalMarkdownStream(createPainter(false), width, 0, true, "gutter");
+    return stripVTControlCharacters(stream.write(markdown) + stream.flush());
+  };
+
+  test("keeps a five-column table as columns when it fits, numbers right-aligned", () => {
+    const table = "| File | Change | Lines | Tests | Status |\n|---|---|---:|---:|---|\n| src/parser.ts | Rewrote tokenizer | +120 | 14 | passing |\n| src/index.ts | Export | +2 | 0 | ok |\n\n";
+    const wide = answer(table, 96).split("\n");
+    expect(wide.some((line) => /^FILE\s+CHANGE\s+LINES\s+TESTS\s+STATUS/.test(line))).toBe(true);
+    const parser = wide.find((line) => line.startsWith("src/parser.ts"))!, index = wide.find((line) => line.startsWith("src/index.ts"))!;
+    expect(parser.indexOf("+120") + 4).toBe(index.indexOf("+2") + 2);
+    expect(answer(table, 40)).toContain("File: src/parser.ts");
+  });
+
+  test("wraps styled table cells without leaking markers", () => {
+    const output = answer("| Option | What it does |\n|---|---|\n| `--watch` | Re-runs the **whole build whenever a source file changes** after a short delay |\n\n", 50);
+    expect(output).toContain("--watch");
+    expect(output).not.toContain("**");
+    expect(output).not.toContain("`");
+    expect(output.split("\n").every((line) => visibleLength(line) <= 50)).toBe(true);
+  });
+
+  test("renders nested inline styles and links, leaving arithmetic and snake_case alone", () => {
+    expect(answer("Uses **nested `code`** and [the docs](https://example.com/docs).\n", 96))
+      .toContain("Uses nested code and the docs (https://example.com/docs).");
+    expect(answer("See <https://example.com>.\n", 96)).toContain("See https://example.com.");
+    expect(answer("Compute 2 * 3 * 4 in snake_case_name.\n", 96)).toContain("Compute 2 * 3 * 4 in snake_case_name.");
+    const painter = createPainter(true);
+    const styled = new TerminalMarkdownStream(painter, 96, 0, true, "gutter");
+    expect(styled.write("Use **bold `code` more** here\n")).toContain(painter.bold(" more", "paper"));
+    expect(answer("**Heading with `code`**\n", 96)).toContain("Heading with code");
+  });
+
+  test("renders every heading level, nested lists, and tasks", () => {
+    const output = answer("Intro\n\n#### Details\n- Top\n    - Nested by four\n        - Third\n- [ ] Open task\n- [x] Done task\n", 96);
+    const lines = output.split("\n");
+    expect(output).not.toContain("####");
+    expect(lines).toContain("Details");
+    expect(lines.slice(0, lines.indexOf("Details"))).toEqual(["Intro", ""]);
+    expect(lines).toContain("· Top"); expect(lines).toContain("  ◦ Nested by four"); expect(lines).toContain("    ▪ Third");
+    expect(lines).toContain("☐ Open task"); expect(lines).toContain("☑ Done task");
+  });
+
   test("keeps non-table pipe prose as ordinary text", () => {
     const stream = new TerminalMarkdownStream(createPainter(false), 60, 2);
     const output = stream.write("Use A | B when comparing alternatives.\nNext line.\n") + stream.flush();

@@ -23,6 +23,7 @@ import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.
 import { createInferenceRecycleController } from "../src/inference-recycle-controller.ts";
 import type { InferenceBoundaryHook } from "../src/inference-scheduler.ts";
 import { ProviderTurnProcessor } from "../src/provider-processor.ts";
+import { ANSWER_FORMAT_GUIDANCE } from "../src/engine.ts";
 import { isolatedCliEnv } from "../../cli/test/isolated-env.ts";
 
 const temporaryDirectories: string[] = [];
@@ -1375,6 +1376,8 @@ describe("Demesne daemon", () => {
   });
 
   test("proactively drops complete oldest turns at the calibrated soft limit and persists the boundary", async () => {
+    // Calibrated to the system prompt; the answer-format guidance is part of it.
+    const FORMAT_GUIDANCE_TOKENS = Math.ceil(Buffer.byteLength(`\n${ANSWER_FORMAT_GUIDANCE}`, "utf8") / 3 * 1.2);
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);
     const databasePath = join(directory, "demesne.sqlite");
@@ -1382,7 +1385,7 @@ describe("Demesne daemon", () => {
     const processor: TurnProcessor = {
       providerId: "planned-bounded-provider",
       modelId: "planned-bounded-model",
-      contextCapacity: 2_108,
+      contextCapacity: 2_108 + FORMAT_GUIDANCE_TOKENS,
       maxOutputTokens: 128,
       async listModels() { return [{ id: this.modelId, provider: this.providerId, contextWindow: this.contextCapacity }]; },
       async *stream(messages) {

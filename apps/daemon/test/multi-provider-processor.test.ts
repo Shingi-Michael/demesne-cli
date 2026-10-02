@@ -40,3 +40,16 @@ test("duplicate model IDs fail closed rather than silently rerouting", () => {
   expect(() => new MultiProviderProcessor([processor("local", "qwen", 4096), processor("pc", "qwen", 8192)], []))
     .toThrow("Ambiguous model ID");
 });
+
+test("a call for another configured model routes to its provider and keeps per-call overrides", async () => {
+  const router = new MultiProviderProcessor([processor("cloud", "astra", 262144), processor("pc", "qwen3.8-27b", 262144)], []);
+  const local = router.createTurnInference(false, { model: "qwen3.8-27b", maxOutputTokens: 128 });
+  expect([local.providerId, local.modelId, local.maxOutputTokens]).toEqual(["pc", "qwen3.8-27b", 128]);
+  // The selected model is unchanged, and its own overrides are no longer dropped.
+  expect(router.modelId).toBe("astra");
+  expect(router.createTurnInference(false, { maxOutputTokens: 100 }).maxOutputTokens).toBe(100);
+  const events = [];
+  for await (const event of local.stream([], [], new AbortController().signal)) events.push(event);
+  expect(events).toEqual([{ type: "text_delta", delta: "pc/qwen3.8-27b" }]);
+  expect(() => router.createTurnInference(false, { model: "missing" })).toThrow("Unknown model");
+});

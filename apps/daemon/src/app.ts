@@ -52,7 +52,7 @@ import { workspaceFileInfo } from "./workspace-file-info.ts";
 import type { AgentConfig, ImageGenerationConfig } from "@demesne/config";
 import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
-import { InferenceScheduler, type InferenceBoundaryHook } from "./inference-scheduler.ts";
+import { InferenceScheduler, InferenceSchedulers, type InferenceBoundaryHook } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
@@ -123,7 +123,7 @@ export function createDaemonApp(options: {
     store.close();
     throw new Error(`The ${runtimeProfile} runtime profile requires one inference slot`);
   }
-  const scheduler = new InferenceScheduler(inferenceSlots, undefined, options.inferenceBoundaryHook);
+  const scheduler = new InferenceSchedulers(new InferenceScheduler(inferenceSlots, undefined, options.inferenceBoundaryHook), processor.providerId);
   const tools = new ToolRegistry();
   if (options.providerVision || options.images?.model || Object.keys(options.mcpServers ?? {}).length) {
     tools.register(viewImageTool());
@@ -154,6 +154,7 @@ export function createDaemonApp(options: {
       providerVision: options.providerVision,
       questions,
       commands,
+      inferenceFor: (model, thinkingEnabled) => snapshotTurnInference(processor, thinkingEnabled, { model }),
       ...options.agent,
     },
   );
@@ -336,7 +337,8 @@ export function createDaemonApp(options: {
         const decide = (signal: AbortSignal, progress?: Parameters<typeof planDrive>[5]) => {
           const planned = (async () => {
             const leaseId = `drive:${randomUUID()}`;
-            const lease = await scheduler.acquire(leaseId, signal, body.checkIn ? {reviewFor:body.checkIn.turnId} : {});
+            const slots = scheduler.for(processor.providerId);
+            const lease = await slots.acquire(leaseId, signal, body.checkIn ? {reviewFor:body.checkIn.turnId} : {});
             try {
               if(body.checkIn?.freshEvidence) {
                 const packet=collectDriveReview(store,commands,body.homeSessionId,body.checkIn.turnId,body.checkIn.reason,lease.queueDurationMs);
@@ -356,7 +358,7 @@ export function createDaemonApp(options: {
               const result=await planDrive(body, inferenceFor, signal, options, image, progress);
               if(body.review)body.review.modelMs=Math.round(performance.now()-reviewStarted);
               return {...result,...(body.review?{review:body.review}:{})};
-            } finally { lease.release({ turnContinues: false }); scheduler.finishTurn(leaseId); }
+            } finally { lease.release({ turnContinues: false }); slots.finishTurn(leaseId); }
           })();
           activeDriveDecisions.add(planned);
           void planned.then(() => activeDriveDecisions.delete(planned), () => activeDriveDecisions.delete(planned));

@@ -266,3 +266,36 @@ export class InferenceScheduler {
     }
   }
 }
+
+/// One scheduler per provider, so separate model servers never queue behind
+/// each other: a sub-agent on a local model can run while the main turn's
+/// cloud model is busy. The primary provider keeps the configured boundary
+/// hook (managed-runtime recycling); every other provider gets the same slot
+/// count. With a single provider this is exactly one scheduler.
+export class InferenceSchedulers {
+  private readonly others = new Map<string, InferenceScheduler>();
+  private closed = false;
+
+  constructor(readonly primary: InferenceScheduler, private readonly primaryProviderId: string) {}
+
+  for(providerId: string): InferenceScheduler {
+    if (providerId === this.primaryProviderId || this.closed) return this.primary;
+    let scheduler = this.others.get(providerId);
+    if (!scheduler) this.others.set(providerId, scheduler = new InferenceScheduler(this.primary.capacity));
+    return scheduler;
+  }
+
+  private get all(): InferenceScheduler[] { return [this.primary, ...this.others.values()]; }
+  get activeCount(): number { return this.all.reduce((sum, scheduler) => sum + scheduler.activeCount, 0); }
+  get queuedCount(): number { return this.all.reduce((sum, scheduler) => sum + scheduler.queuedCount, 0); }
+  queuePosition(turnId: string): number | null {
+    for (const scheduler of this.all) { const position = scheduler.queuePosition(turnId); if (position !== null) return position; }
+    return null;
+  }
+  /// A turn may have used several providers (its sub-agents); settle it on each.
+  finishTurn(turnId: string): void { for (const scheduler of this.all) scheduler.finishTurn(turnId); }
+  async close(reason?: unknown): Promise<void> {
+    this.closed = true;
+    await Promise.all(this.all.map((scheduler) => scheduler.close(reason)));
+  }
+}

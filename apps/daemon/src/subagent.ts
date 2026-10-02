@@ -112,8 +112,8 @@ export async function runSubagent(options: {
       lease.release({ turnContinues: true });
     }
 
-    if (!calls.size) return report(text, used);
-    if (finalizing) return report(text || "The sub-agent ran out of budget before writing a report.", used);
+    if (!calls.size) return report(text, used, inference.modelId);
+    if (finalizing) return report(text || "The sub-agent ran out of budget before writing a report.", used, inference.modelId);
     const ordered = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
     if (ordered.some((call) => !call.id || !call.name)) throw new Error("Sub-agent returned an incomplete tool call");
     messages.push({ role: "assistant", content: text || null, toolCalls: ordered, ...(responses ? { responses } : {}) });
@@ -154,9 +154,9 @@ export function describeCall(name: string, input: unknown): string {
   return `${verb}${target ? ` ${target}` : ""}`.slice(0, 200);
 }
 
-function report(text: string, used: ReadonlyMap<string, number>): string {
+function report(text: string, used: ReadonlyMap<string, number>, model: string): string {
   const body = text.trim().slice(0, SUBAGENT_LIMITS.reportBytes) || "The sub-agent finished without a report.";
   const total = [...used.values()].reduce((sum, count) => sum + count, 0);
   const tally = [...used.entries()].map(([name, count]) => `${name} ×${count}`).join(", ");
-  return `${body}\n\n(Sub-agent used ${total} tool call${total === 1 ? "" : "s"}${tally ? `: ${tally}` : ""}.)`;
+  return `${body}\n\n(Sub-agent on ${model} used ${total} tool call${total === 1 ? "" : "s"}${tally ? `: ${tally}` : ""}.)`;
 }

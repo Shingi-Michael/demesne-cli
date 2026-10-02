@@ -26,6 +26,7 @@ export interface ProviderRequest {
 }
 
 export type ProviderStreamEvent =
+  | { type: "response_state"; state: import("@demesne/protocol").ResponsesState }
   | { type: "reasoning_delta"; delta: string }
   | { type: "text_delta"; delta: string }
   | { type: "tool_call_delta"; index: number; idDelta: string; nameDelta: string; argumentsDelta: string }
@@ -395,7 +396,7 @@ function providerResponseError(error: Record<string, unknown>, provider: string,
   return new ProviderError(`${label}${status === undefined ? "" : ` (HTTP ${status})`}: ${message}`, status, code);
 }
 
-async function* readEventData(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+export async function* readEventData(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -424,7 +425,7 @@ async function* readEventData(body: ReadableStream<Uint8Array>): AsyncGenerator<
   }
 }
 
-async function readLimitedText(response: Response, limit: number, rejectOverflow = true): Promise<string> {
+export async function readLimitedText(response: Response, limit: number, rejectOverflow = true): Promise<string> {
   if (!response.body) return "";
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -551,3 +552,5 @@ function readUsage(value: unknown): TokenUsage | null {
 function integerOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
+
+export { ChatGPTProvider } from "./chatgpt.ts";

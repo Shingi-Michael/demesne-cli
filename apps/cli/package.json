@@ -7,6 +7,7 @@
     "@demesne/client": "workspace:*",
     "@demesne/config": "workspace:*",
     "@demesne/protocol": "workspace:*",
-    "@demesne/providers": "workspace:*"
+    "@demesne/providers": "workspace:*",
+    "@demesne/chatgpt-auth": "workspace:*"
   }
 }

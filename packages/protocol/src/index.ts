@@ -79,6 +79,7 @@ export interface ArtifactPage {
 }
 
 export interface ModelDescriptor {
+  displayName?: string;
   id: string;
   provider: string;
   ownedBy?: string;
@@ -146,9 +147,12 @@ export interface WorkspaceFileInfo { path: string; byteLength: number | null; st
 export interface WorkspaceFileStatus { path: string; byteLength: number | null; revision?: string; modifiedAt?: string; reason?: string }
 export interface WorkspaceFileText extends WorkspaceFileStatus { content: string | null }
 
+/// Opaque Responses items, retained for stateless tool and reasoning continuity.
+export interface ResponsesState { accountId: string; model: string; output: Record<string, unknown>[] }
+
 export type ModelMessage =
   | { role: "system" | "user"; content: string }
-  | { role: "assistant"; content: string | null; toolCalls?: ModelToolCall[] }
+  | { role: "assistant"; content: string | null; toolCalls?: ModelToolCall[]; responses?: ResponsesState }
   | { role: "tool"; toolCallId: string; content: string; imageArtifactIds?: string[] };
 
 export interface StoredModelMessage {

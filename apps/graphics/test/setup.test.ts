@@ -28,7 +28,7 @@ test("setup checks URLs, edits review values, and writes only on explicit Review
   });
   try {
     await setup.start();
-    await setup.action({ index: 4, key: "return" });
+    await setup.action({ index: 5, key: "return" });
     expect(setup.snapshot().step).toBe("custom");
     await setup.action({ field: "url", value: "http://remote.example/v1" });
     await setup.action({ key: "return" });
@@ -87,4 +87,26 @@ test("OpenRouter credential stays in the host until Review and never enters UI s
     setup.dispose();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("ChatGPT setup signs in, acknowledges plan usage, and writes a token-free provider profile", async () => {
+  const { fakeChatGPT } = await import("../../../packages/chatgpt-auth/test/fixture.ts");
+  const { loadConfig } = await import("@demesne/config");
+  const fake = await fakeChatGPT(), root = mkdtempSync(join(tmpdir(), "graphics-chatgpt-")), path = join(root, "config.toml");
+  const snapshots: string[] = [];
+  const setup = new GraphicsSetup({ configPath: path, dataDirectory: root, env: {}, changed: () => snapshots.push(JSON.stringify(setup.snapshot())), copy: async () => {}, finish: async () => {},
+    open: async url => { await fake.callback(url); }, fetch: (async (url, init) => String(url).startsWith("http:") ? Response.json({ data: [] }) : fake.fetch(url, init)) as typeof fetch });
+  try {
+    await setup.start(); await setup.action({ index: 4, key: "return" });
+    expect(setup.snapshot().step).toBe("accounts");
+    await setup.action({ key: "return" }); await eventually(() => setup.snapshot().step === "plan");
+    expect(existsSync(path)).toBe(false); expect(setup.snapshot().chatgptAccount?.acknowledged).toBe(false);
+    await setup.action({ key: "return" }); expect(setup.snapshot().step).toBe("model");
+    await setup.action({ key: "return" }); await setup.action({ key: "return" });
+    expect(setup.snapshot().step).toBe("done");
+    const config = loadConfig({ userConfigPath: path, includeProject: false, env: {} }).config;
+    expect(config.provider.auth).toBe("chatgpt"); expect(config.provider.authProfile).toBe(setup.snapshot().chatgptAccount!.id);
+    expect(config.provider.apiKey).toBeUndefined(); expect(readFileSync(path, "utf8")).not.toMatch(/access-secret|refresh-secret|eyJ/);
+    expect(snapshots.join("\n")).not.toMatch(/access-secret|refresh-secret|eyJ/);
+  } finally { setup.dispose(); rmSync(root, { recursive: true, force: true }); }
 });

@@ -1,9 +1,10 @@
+import { chatGPTAuthForConfig, chatGPTProfile, connectChatGPT } from "./chatgpt-auth.ts";
 import { emitKeypressEvents } from "node:readline";
 import { homedir } from "node:os";
-import { assertProviderUrl, updateUserConfig, userConfigPath } from "@demesne/config";
+import { assertProviderUrl, loadConfig, updateUserConfig, userConfigPath } from "@demesne/config";
 import { createPainter, type Painter } from "@demesne/brand";
 import { DEFAULT_PROBE_TARGETS, probeProvider, probeTargets, targetForUrl } from "./provider-probe.ts";
-import { initialWizard, reduceWizard, renderWizard, selectedModel, wizardAuthenticated, wizardCustomProbed, wizardProbed, wizardSaved, type WizardState } from "./setup-wizard.ts";
+import { initialWizard, reduceWizard, renderWizard, selectedModel, wizardAuthenticated, wizardChatGPTConnected, wizardCustomProbed, wizardProbed, wizardSaved, type WizardState } from "./setup-wizard.ts";
 import { beginOpenRouterLogin, discoverOpenRouter, OPENROUTER_URL } from "./openrouter-auth.ts";
 
 /// `demesne setup` turns the environment-variable and config-file surface into
@@ -12,6 +13,7 @@ import { beginOpenRouterLogin, discoverOpenRouter, OPENROUTER_URL } from "./open
 /// for automation via `--provider-url` and `--model`.
 
 export interface SetupChoices {
+  authProfile?: string;
   providerUrl: string;
   providerId: string;
   model: string;
@@ -60,9 +62,16 @@ export function writeSetupConfig(configPath: string, choices: SetupChoices, apiK
     throw new Error("max output tokens must be smaller than the context window");
   }
   assertProviderUrl(choices.providerUrl, "provider.url");
+  const current = loadConfig({ userConfigPath: configPath, includeProject: false, env: {} }).config;
+  // Setup makes ChatGPT primary. Remove an earlier CLI-added ChatGPT route so
+  // one model slug never resolves to two registrations after the restart.
+  const redundant = choices.authProfile ? Object.fromEntries(Object.entries(current.additionalProviders ?? {}).filter(([, p]) => p.auth === "chatgpt").map(([id]) => [id, null])) : {};
   const { backup } = updateUserConfig(configPath, {
+    ...(Object.keys(redundant).length ? { additional_providers: redundant } : {}),
     ...(choices.theme ? { theme: choices.theme } : {}),
-    provider: {
+    provider: choices.authProfile ? chatGPTProfile(choices.authProfile, choices.model, choices.contextWindow, choices.maxOutputTokens) : {
+      auth: "api-key",
+      auth_profile: null,
       url: choices.providerUrl,
       id: choices.providerId,
       model: choices.model,
@@ -97,7 +106,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<SetupResult>
   }
 
   return runWizard({ configPath, input, output, fetch: options.fetch, painter: options.painter ?? createPainter(false),
-    providerId: options.providerId, theme: options.theme, openBrowser: options.openBrowser ?? openSetupBrowser, env: options.env ?? process.env });
+    home, providerId: options.providerId, theme: options.theme, openBrowser: options.openBrowser ?? openSetupBrowser, env: options.env ?? process.env });
 }
 
 async function openSetupBrowser(url: string): Promise<boolean> {
@@ -108,13 +117,15 @@ async function openSetupBrowser(url: string): Promise<boolean> {
 }
 
 /// Runs the full-screen wizard on the alternate screen and restores the
-/// terminal however it ends. Cancelling writes nothing.
+/// terminal however it ends. Review is the only provider-config write; a
+/// completed ChatGPT login retains its protected registration independently.
 async function runWizard(options: {
-  configPath: string; input: NodeJS.ReadStream; output: NodeJS.WriteStream; fetch?: typeof fetch; painter: Painter;
+  home: string; configPath: string; input: NodeJS.ReadStream; output: NodeJS.WriteStream; fetch?: typeof fetch; painter: Painter;
   providerId?: string; theme?: SetupChoices["theme"]; openBrowser: (url: string) => Promise<boolean>; env: Record<string, string | undefined>;
 }): Promise<SetupResult> {
   const { input, output, painter } = options;
   let state: WizardState = initialWizard(options.configPath, options.theme ?? "auto");
+  const chatgpt = chatGPTAuthForConfig(options.configPath, { fetch: options.fetch, env: options.env, home: options.home });
   let active = true, scanId = 0;
   let loginController: AbortController | undefined, login: ReturnType<typeof beginOpenRouterLogin> | undefined;
   // Credentials never enter reducer state, rendered frames, or SetupResult.
@@ -143,7 +154,30 @@ async function runWizard(options: {
     };
     void options.openBrowser(url).then((opened) => { if (!opened) failed(); }).catch(failed);
   };
+  const authenticateChatGPT = async (reauthorize = false) => {
+    cancelLogin();
+    const controller = loginController = new AbortController();
+    const current = () => active && controller === loginController && !controller.signal.aborted && state.step === "auth";
+    try {
+      const result = await connectChatGPT({ auth: chatgpt, accountId: state.accountId, reauthorize, signal: controller.signal, fetch: options.fetch,
+        onAccount: account => { if (current()) state = { ...state, accountId: account.id }; },
+        onLogin: async url => { if (!current()) return; state = { ...state, auth: { url, status: "waiting", expiresAt: Date.now() + LOGIN_TIMEOUT_MS, message: "Finish signing in with ChatGPT, then return here." } }; draw(); openBrowser(url); } });
+      if (current()) { state = wizardChatGPTConnected(state, result.account, result.provider); draw(); }
+    } catch (error) { if (current()) { state = { ...state, auth: { url: "", status: "failed", message: error instanceof Error ? error.message : "ChatGPT connection failed." } }; draw(); } }
+  };
+  const chatGPTEffect = async (kind: string) => {
+    try {
+      if (kind === "logout-chatgpt" && state.accountId) {
+        const result = await chatgpt.logout(state.accountId);
+        state = { ...state, error: result.revoked ? null : "Signed out locally. Remote revocation could not be confirmed; remove Demesne in ChatGPT settings." };
+      }
+      if (kind === "accounts" || kind === "logout-chatgpt") { const accounts = await chatgpt.accounts(); if (active && state.step === "accounts") state = { ...state, accounts }; }
+      if (kind === "acknowledge-plan" && state.chatgptAccount && state.provider) { await chatgpt.acknowledge(state.chatgptAccount.id); if (active && state.step === "plan") state = wizardChatGPTConnected(state, { ...state.chatgptAccount, acknowledged: true }, state.provider); }
+    } catch (error) { state = { ...state, error: error instanceof Error ? error.message : "ChatGPT account update failed." }; }
+    draw();
+  };
   const authenticate = async () => {
+    if (state.authProvider === "chatgpt") return authenticateChatGPT(true);
     cancelLogin();
     const controller = loginController = new AbortController();
     const current = () => active && controller === loginController && !controller.signal.aborted && state.step === "auth";
@@ -187,7 +221,7 @@ async function runWizard(options: {
         const next = reduceWizard(state, key, text ?? "");
         state = next.state;
         const effect = next.effect;
-        if (effect?.kind === "cancel") { active = false; input.off("keypress", onKeypress); reject(new Error(state.saved ? "Setup closed; configuration was saved." : "Setup cancelled; nothing was written.")); return; }
+        if (effect?.kind === "cancel") { active = false; input.off("keypress", onKeypress); reject(new Error(state.saved ? "Setup closed; configuration was saved." : "Setup cancelled; provider configuration was not changed.")); return; }
         if (effect?.kind === "finish") {
           active = false; input.off("keypress", onKeypress);
           const providerUrl = state.provider!.target.url;
@@ -198,6 +232,8 @@ async function runWizard(options: {
         }
         if (effect?.kind === "rescan") void scan();
         if (effect?.kind === "login") void authenticate();
+        if (effect?.kind === "chatgpt-connect") void authenticateChatGPT();
+        if (effect && ["accounts", "logout-chatgpt", "acknowledge-plan"].includes(effect.kind)) void chatGPTEffect(effect.kind);
         if (effect?.kind === "cancel-login") cancelLogin();
         // OSC 52 puts the link on the clipboard, over SSH too.
         if (effect?.kind === "copy") output.write(`\x1b]52;c;${Buffer.from(effect.url).toString("base64")}\x07`);
@@ -209,7 +245,8 @@ async function runWizard(options: {
           try {
             const providerUrl = state.provider!.target.url;
             const { backup } = writeSetupConfig(options.configPath, { providerUrl, providerId: options.providerId ?? state.provider!.target.id,
-              model: selectedModel(state), contextWindow: state.review.contextWindow, maxOutputTokens: state.review.maxOutputTokens, theme: state.review.theme },
+              model: selectedModel(state), contextWindow: state.review.contextWindow, maxOutputTokens: state.review.maxOutputTokens, theme: state.review.theme,
+              ...(state.provider?.target.id === "ChatGPT" ? { authProfile: state.chatgptAccount!.id } : {}) },
               providerUrl === OPENROUTER_URL ? credential : undefined);
             state = wizardSaved(state, backup);
           } catch (error) { state = { ...state, error: error instanceof Error ? error.message : "Could not write the config." }; }

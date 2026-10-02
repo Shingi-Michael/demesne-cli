@@ -1,3 +1,5 @@
+import { ChatGPTAuth, type ChatGPTAccount } from "@demesne/chatgpt-auth";
+import { configuredChatGPTAccount } from "../cli/src/chatgpt-auth.ts";
 import { codeDiff } from "../cli/src/workbench/change-diff.ts";
 import type {
   CommandsResponse,
@@ -102,6 +104,7 @@ export class GraphicsHost {
   private autoStarted = false;
   readonly workspace: string;
   private client: DemesneClient;
+  chatgptAccount: ChatGPTAccount | null = null;
   model: ModelDescriptor = { id: "", provider: "" };
   current: GraphicsSession | null = null;
   sessions: Session[] = [];
@@ -210,6 +213,7 @@ export class GraphicsHost {
       runs: this.current?.runs() ?? [],
       cursor: this.current?.cursor ?? 0,
       model: this.model,
+      chatgptAccount: this.model.provider === "ChatGPT" ? this.chatgptAccount : null,
       provider: this.current?.provider ?? null,
       checkpoint: this.current?.state.checkpoint ?? null,
       approvals: [...(this.current?.approvals.values() ?? [])],
@@ -263,6 +267,10 @@ export class GraphicsHost {
             }
           : {}),
       };
+      try {
+        const id = configuredChatGPTAccount(this.settings.configPath);
+        this.chatgptAccount = id ? (await new ChatGPTAuth(this.settings.dataDirectory).accounts()).find(a => a.id === id) ?? null : null;
+      } catch { this.chatgptAccount = null; }
       this.sessions = await this.client.listSessions();
       this.connection = "online";
       if (this.selectedSession) await this.select(this.selectedSession);
@@ -747,6 +755,7 @@ export class GraphicsHost {
     if (method === "setup") {
       this.setup?.dispose();
       this.setup = new GraphicsSetup({
+        dataDirectory: this.settings.dataDirectory,
         configPath: this.settings.configPath,
         changed: () => this.publish(),
         copy: (text) => this.copy(text),

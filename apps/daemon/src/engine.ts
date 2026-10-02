@@ -125,6 +125,7 @@ export class AgentEngine {
       });
       const assembled = new Map<number, AssembledToolCall>();
       let roundText = "";
+      let responses: import("@demesne/protocol").ResponsesState | undefined;
       let roundHasReasoning = false;
       let finishReason: string | undefined;
       let outputTokens: number | null = null;
@@ -186,6 +187,8 @@ export class AgentEngine {
             } else if (event.type === "finish") {
               if (finishReason !== undefined) throw new Error("Provider stream emitted multiple finish reasons");
               finishReason = event.reason;
+            } else if (event.type === "response_state") {
+              responses = event.state;
             } else {
               if (event.index >= 8) throw new Error("Model requested too many tools in one round");
               const call = assembled.get(event.index) ?? { id: "", name: "", arguments: "" };
@@ -253,7 +256,7 @@ export class AgentEngine {
 
       round += 1;
       if (assembled.size === 0) {
-        this.store.appendModelMessage(turnId, { role: "assistant", content: roundText });
+        this.store.appendModelMessage(turnId, { role: "assistant", content: roundText, ...(responses ? { responses } : {}) });
         if (pendingContextDrops.length > 0) {
           const firstRetainedMessageId = history[0]?.firstMessageId ?? currentUser.id;
           this.store.trimModelContext(turnId, firstRetainedMessageId, pendingContextDrops.map((entry) => entry.id));
@@ -270,6 +273,7 @@ export class AgentEngine {
       const assistantMessage = {
         role: "assistant",
         content: roundText || null,
+        ...(responses ? { responses } : {}),
         toolCalls: providerCalls.map(({ id, name, arguments: args }) => ({ id, name, arguments: args })) satisfies ProviderToolCall[],
       } as const;
       currentMessages.push(assistantMessage);

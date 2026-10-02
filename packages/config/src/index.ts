@@ -17,6 +17,8 @@ export type AutoStartPolicy = "prompt" | "always" | "never";
 export type ConfigSource = "env" | "user" | "project";
 
 export interface ProviderConfig {
+  auth?: "api-key" | "chatgpt";
+  authProfile?: string;
   allowHttpEndpoint?: string;
   vision?: boolean;
   url?: string;
@@ -241,10 +243,12 @@ function applyDocument(
   if (document.provider !== undefined) {
     const provider = objectValue(document.provider, "provider");
     assertKnownKeys(provider, [
-      "url", "id", "model", "allowed_models", "api_key", "context_window", "allow_http_endpoint",
+      "auth", "auth_profile", "url", "id", "model", "allowed_models", "api_key", "context_window", "allow_http_endpoint",
       "max_output_tokens", "runtime_profile", "reasoning_effort", "openrouter_ignore",
       "include_usage", "system_prompt", "first_event_timeout_ms", "request_timeout_ms", "vision",
     ], `${path}.provider`);
+    assignInto(config.provider, "auth", provider.auth, source, sources, "provider.auth", (value, key) => optionalEnum(value, ["api-key", "chatgpt"], key));
+    assignInto(config.provider, "authProfile", provider.auth_profile, source, sources, "provider.authProfile", optionalString);
     assignInto(config.provider, "allowHttpEndpoint", provider.allow_http_endpoint, source, sources, "provider.allowHttpEndpoint", optionalString);
     assignInto(config.provider, "url", provider.url, source, sources, "provider.url", (value, key) => {
       const text = stringValue(value, key);
@@ -506,6 +510,8 @@ export function renderUserConfig(settings: {
 
   const provider = settings.provider ?? {};
   const providerEntries: Array<[string, string]> = [];
+  if (provider.auth) providerEntries.push(["auth", tomlString(provider.auth)]);
+  if (provider.authProfile) providerEntries.push(["auth_profile", tomlString(provider.authProfile)]);
   if (provider.vision !== undefined) providerEntries.push(["vision", String(provider.vision)]);
   if (provider.url) providerEntries.push(["url", tomlString(provider.url)]);
   if (provider.allowHttpEndpoint) providerEntries.push(["allow_http_endpoint", tomlString(provider.allowHttpEndpoint)]);
@@ -643,8 +649,9 @@ function deepMerge(base: Record<string, unknown>, updates: Record<string, unknow
   const merged: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(updates)) {
     if (value === undefined) continue;
+    if (value === null) { delete merged[key]; continue; }
     const current = merged[key];
-    merged[key] = isRecord(value) && isRecord(current) ? deepMerge(current, value) : value;
+    merged[key] = isRecord(value) ? deepMerge(isRecord(current) ? current : {}, value) : value;
   }
   return merged;
 }

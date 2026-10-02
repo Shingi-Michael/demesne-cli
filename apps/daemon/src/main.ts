@@ -6,7 +6,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync
 import { randomBytes } from "node:crypto";
 import { ConfigError, loadConfig, userConfigPath, type ProviderConfig } from "@demesne/config";
 import { MultiProviderProcessor } from "./multi-provider-processor.ts";
-import { OpenAICompatibleProvider } from "@demesne/providers";
+import { ChatGPTAuth } from "@demesne/chatgpt-auth";
+import { ChatGPTProvider, OpenAICompatibleProvider } from "@demesne/providers";
 import { createDaemonApp } from "./app.ts";
 import { serveDaemon } from "./http-server.ts";
 import {
@@ -133,7 +134,7 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
   }
   if (!model) return undefined;
   const baseUrl = settings.url ?? "http://127.0.0.1:1234/v1";
-  const providerId = settings.id ?? "openai-compatible";
+  const providerId = settings.auth === "chatgpt" ? "ChatGPT" : settings.id ?? "openai-compatible";
   const configuredContextCapacity = settings.contextWindow;
   const allowedModelIds = settings.allowedModels;
   const maxOutputTokens = settings.maxOutputTokens
@@ -147,7 +148,9 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
   if (configuredContextCapacity && maxOutputTokens && maxOutputTokens >= configuredContextCapacity) {
     throw new Error("provider.max_output_tokens must be smaller than provider.context_window");
   }
-  const provider = new OpenAICompatibleProvider({
+  if (settings.auth === "chatgpt" && !settings.authProfile) throw new Error("ChatGPT requires an auth_profile. Run demesne auth login chatgpt.");
+  const auth = settings.auth === "chatgpt" ? new ChatGPTAuth(dataDirectory) : undefined;
+  const provider = auth ? new ChatGPTProvider({ accountId: settings.authProfile!, accessToken: signal => auth.accessToken(settings.authProfile!, signal), contextWindow: configuredContextCapacity }) : new OpenAICompatibleProvider({
     baseUrl,
     allowHttpEndpoint: settings.allowHttpEndpoint,
     apiKey: settings.apiKey,
@@ -157,7 +160,7 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
     openRouterIgnore: settings.openRouterIgnore,
     contextWindow: configuredContextCapacity,
   });
-  const verifier = createRuntimeProfileVerifier({
+  const verifier = auth ? undefined : createRuntimeProfileVerifier({
     profile: runtimeProfile,
     providerId,
     baseUrl,

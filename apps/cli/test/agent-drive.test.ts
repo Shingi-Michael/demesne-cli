@@ -35,7 +35,7 @@ test("Resume explains missing or completed missions instead of silently returnin
   })), changed() {}, delayMs: 60_000, retryDelaysMs: [] });
   try {
     expect(() => drive.control("resume")).toThrow("No saved Drive mission");
-    drive.start("Verify the result"); await drive.step();
+    drive.start("--bounded Verify the result"); await drive.step();
     expect(() => drive.control("resume")).toThrow("mission is complete");
   } finally { drive.dispose(); }
 });
@@ -57,7 +57,7 @@ test.each(["invented", "response-only", "own-notes", "remaining", "verified"])("
   const drive = new AgentDrive({ observe: () => current, perform: async () => "", decide: async () => response(decision({ kind: "complete" }, {
     evidence: [{ observationId: current.id, quote: kind === "invented" ? "made up result" : "test suite: 12 passed" }], remaining: kind === "remaining" ? ["Still broken"] : [],
   })), changed() {}, delayMs: 60_000, retryDelaysMs: [] });
-  try { drive.start("Finish"); await drive.step(); expect(drive.state?.status).toBe(kind === "verified" ? "completed" : "blocked"); }
+  try { drive.start("--bounded Finish"); await drive.step(); expect(drive.state?.status).toBe(kind === "verified" ? "completed" : "blocked"); }
   finally { drive.dispose(); }
 });
 
@@ -695,4 +695,16 @@ test("a sub-agent card shows its task and live step, then just the task when don
   const done = ui.frame(140, 36).rows.join("\n");
   expect(done).toContain("Find session restore");
   expect(done).not.toContain("· read apps/cli");
+});
+
+test("/drive keeps choosing worthwhile work by default; --bounded or a bounded workbench opts out", () => {
+  const services = { observe: observation, perform: async () => "", decide: async () => response(decision({ kind: "wait" })), changed() {}, delayMs: 60_000 };
+  for (const [continuous, mission, mode] of [[undefined, "Improve the parser", "continuous"], [undefined, "--bounded Fix one bug", "bounded"],
+    [false, "Fix one bug", "bounded"], [false, "--continuous Improve the parser", "continuous"]] as const) {
+    const drive = new AgentDrive({ ...services, continuous });
+    try {
+      drive.start(mission);
+      expect([drive.state?.mode, Boolean(drive.state?.autonomy)]).toEqual([mode, mode === "continuous"]);
+    } finally { drive.dispose(); }
+  }
 });

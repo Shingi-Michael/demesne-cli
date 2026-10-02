@@ -1048,7 +1048,7 @@ function contextBody() {
 function driveBody() {
   const drive = state!.drive;
   if (!drive)
-    return `<div class="drive-content"><h3>Give Drive a mission</h3><p class="muted">Drive reads the session, directs work, and reviews the results. Tool approvals remain yours.</p><form id="drive-form"><input name="mission" placeholder="What should Drive finish?" aria-label="Drive mission" required><label class="drive-mode"><input type="checkbox" name="continuous"> Keep choosing improvements</label><button type="submit" class="chip">Start Drive</button></form></div>`;
+    return `<div class="drive-content"><h3>Give Drive a mission</h3><p class="muted">Drive reads the session, directs work, and reviews the results. Tool approvals remain yours.</p><form id="drive-form"><input name="mission" placeholder="What should Drive finish?" aria-label="Drive mission" required><label class="drive-mode"><input type="checkbox" name="continuous" checked> Keep choosing improvements</label><button type="submit" class="chip">Start Drive</button></form></div>`;
   const retry = drive.recovery && drive.recovery.retryAt > Date.now(),
     label = retry
       ? `↻ Retrying in ${Math.ceil((drive.recovery!.retryAt - Date.now()) / 1000)}s`
@@ -2775,7 +2775,7 @@ document.addEventListener("submit", (event) => {
     }
     if (form.id === "drive-form")
       await api("drive", {
-        text: `${(form.elements.namedItem("continuous") as HTMLInputElement)?.checked ? "--continuous " : ""}${(form.elements.namedItem("mission") as HTMLInputElement).value}`,
+        text: `${(form.elements.namedItem("continuous") as HTMLInputElement)?.checked ? "--continuous " : "--bounded "}${(form.elements.namedItem("mission") as HTMLInputElement).value}`,
       });
     if (form.id === "reference-form") {
       const path = (form.elements.namedItem("path") as HTMLInputElement).value;

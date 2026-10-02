@@ -28,29 +28,35 @@ test("status-only progress lines are told apart from real steps", () => {
   expect(subagentStatus("qwen3.8-27b · read src/app.ts")).toBeNull();
 });
 
-test("a thinking sub-agent's card cycles phrases; real steps replace them; finishing clears them", () => {
+test("a running sub-agent's phrase stays on its card through its steps; steps count, and show on the working line", () => {
   const ui = new Workbench({ paint: createPainter(false), contextRail: new CliContextRail({ id: "t", provider: "t" }, "/project"), sessionTitle: "S", version: "t",
     onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} } });
   (ui as unknown as { sessionId: string }).sessionId = "home";
-  const card = () => ui.frame(120, 20).rows.map((row) => stripVTControlCharacters(row)).find((row) => row.includes("Agent"))!.trim();
+  const rows = () => ui.frame(120, 20).rows.map((row) => stripVTControlCharacters(row));
+  const card = () => rows().find((row) => row.includes("Agent"))!.trim();
   const real = Date.now;
   try {
     const start = 1_000_000_000_000;
     Date.now = () => start;
     ui.beginTurn({ userText: "Investigate", at: "now" });
     ui.toolRequested({ toolCallId: "a", name: "subagent", arguments: { description: "Find restore", prompt: "x" } });
+    // The phrase is there from the start, before any progress arrives.
+    expect(card()).toContain(`Find restore · ${subagentPhrase(0, start, "")}`);
     ui.toolProgress({ toolCallId: "a", text: "qwen3.8-27b · starting" });
-    const first = card();
-    expect(first).toContain(`Find restore · ${subagentPhrase(0, start, "qwen3.8-27b")}`);
-    expect(first).not.toContain("starting");
+    expect(card()).toContain(`Find restore · ${subagentPhrase(0, start, "qwen3.8-27b")}`);
+    // A real step: the phrase stays, the counter ticks, the working line names it.
+    ui.toolProgress({ toolCallId: "a", text: "qwen3.8-27b · read history.ts" });
+    expect(card()).toContain(`Find restore · ${subagentPhrase(0, start, "qwen3.8-27b")}`);
+    expect(card()).toContain("1 step");
+    expect(card()).not.toContain("read history.ts");
+    expect(rows().some((row) => row.includes("Find restore · qwen3.8-27b · read history.ts…"))).toBe(true);
+    ui.toolProgress({ toolCallId: "a", text: "qwen3.8-27b · search \"restore\"" });
+    expect(card()).toContain("2 steps");
     Date.now = () => start + SUBAGENT_PHRASE_MS;
     expect(card()).toContain(`Find restore · ${subagentPhrase(0, start + SUBAGENT_PHRASE_MS, "qwen3.8-27b")}`);
-    ui.toolProgress({ toolCallId: "a", text: "qwen3.8-27b · read history.ts" });
-    expect(card()).toContain("Find restore · qwen3.8-27b · read history.ts");
-    ui.toolProgress({ toolCallId: "a", text: "qwen3.8-27b · thinking · 1 tool call" });
-    expect(card()).not.toContain("read history.ts");
     ui.toolFinished({ toolCallId: "a", name: "subagent", state: "done", message: "Report" });
     expect(card()).toMatch(/Agent +Find restore(?! ·)/);
+    expect(card()).not.toContain("steps");
   } finally { Date.now = real; }
 });
 

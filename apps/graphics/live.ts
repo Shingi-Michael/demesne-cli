@@ -367,17 +367,20 @@ const counts = (value: { added: number; removed: number }) =>
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const spinnerFrame = () => SPINNER[Math.floor(Date.now() / 90) % SPINNER.length]!;
 const spinner = () => `<span class="spin" aria-hidden="true">${spinnerFrame()}</span>`;
-/// A sub-agent's target: its task, then its latest real step, or while it
-/// thinks between steps a cycling phrase (updated in place by a timer).
+/// A running sub-agent's target: its task and a phrase that cycles the whole
+/// time it runs (updated in place by a timer); its steps count on the right.
 function toolTarget(run: GraphicsRun, tool: ToolEntry) {
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   if (tool.name !== "subagent" || tool.state !== "running") return h(base);
-  const last = tool.trace?.at(-1);
-  if (last?.kind === "step") return `${h(base)} · ${h(last.text)}`;
   const slot = run.entries.filter((entry) => entry.type === "tool" && entry.name === "subagent").indexOf(tool);
   const model = /^([^·]+) · /.exec(tool.trace?.find((segment) => segment.kind === "step")?.text ?? "")?.[1]?.trim() ?? state!.model.id;
   const phrase = matchMedia("(prefers-reduced-motion: reduce)").matches ? "thinking" : subagentPhrase(slot, Date.now(), model);
   return `${h(base)}<span class="muted"> · </span><span class="phrase" data-subagent-phrase data-slot="${slot}" data-model="${h(model)}">${h(phrase)}</span>`;
+}
+/// "3 steps": a running sub-agent's progress, quietly on its row.
+function subagentSteps(tool: ToolEntry) {
+  const steps = tool.name === "subagent" ? (tool.trace ?? []).filter((segment) => segment.kind === "step").length : 0;
+  return steps ? `${steps} step${steps === 1 ? "" : "s"}` : "";
 }
 function toolRow(run: GraphicsRun, tool: ToolEntry) {
   const result =
@@ -398,7 +401,7 @@ function toolRow(run: GraphicsRun, tool: ToolEntry) {
             : tool.state === "done" && tool.name === "run_command"
               ? "exit unknown"
               : tool.state === "running"
-                ? ""
+                ? subagentSteps(tool)
                 : tool.state;
   return btn(
     "tool",
@@ -522,7 +525,7 @@ function runHTML(run: GraphicsRun, index: number) {
             ? `${verb(latestTool)} `
             : "Thinking";
   const activity = active(run)
-    ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.detail ?? "") + (latestTool ? "…" : "…"))}</div>`
+    ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
     : "";
   return `<div class="request"><span class="mark">▶</span><span class="text">${h(run.content)}</span><time>${clock(run.createdAt).slice(0, 5)}</time></div><div class="response ${active(run) ? "running" : run.status === "failed" ? "failed" : ""}"><div class="speaker"><span>demesne</span><time>${clock(run.entries.find((e) => e.type === "assistant")?.type === "assistant" ? (run.entries.find((e) => e.type === "assistant") as any).at : run.createdAt)}${active(run) ? " · live" : ""}</time></div>${body}${footer}${activity}</div>`;
 }

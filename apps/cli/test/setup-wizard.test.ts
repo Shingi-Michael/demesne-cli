@@ -33,7 +33,7 @@ describe("setup wizard", () => {
     expect(state.review.maxOutputTokens).toBe(131072);
     expect(screen(state)).toContain("131,072");
     const compact = wizardProbed(initialWizard("/c"), [llama, ollama, ollama]);
-    expect(screen(press(compact, "up", "up").state, 60, 14)).toContain("OpenRouter");
+    expect(screen(press(compact, "up", "up", "up").state, 60, 14)).toContain("OpenRouter");
   });
   test("lists reachable servers first, blocks unreachable ones and picks the largest-context model", () => {
     let state = wizardProbed(initialWizard("/home/me/.demesne/config.toml"), [ollama, llama]);
@@ -53,7 +53,7 @@ describe("setup wizard", () => {
 
   test("rejects remote cleartext URLs and continues with a typed model when a custom server does not answer", () => {
     let state = wizardProbed(initialWizard("/c"), [llama]);
-    ({ state } = press(state, "down", "down", "return"));
+    ({ state } = press(state, "down", "down", "down", "return"));
     expect(state.step).toBe("custom");
     let result = press(state, ..."http://10.0.0.5:8000/v1".split(""), "return");
     expect(result.effect).toBeUndefined();
@@ -145,7 +145,7 @@ describe("setup wizard", () => {
   });
 
   test("custom URL and review draw bordered fields and tables", () => {
-    let { state } = press(wizardProbed(initialWizard("/c"), [llama]), "down", "down", "return", ..."http://127.0.0.1:8000/v1".split(""));
+    let { state } = press(wizardProbed(initialWizard("/c"), [llama]), "down", "down", "down", "return", ..."http://127.0.0.1:8000/v1".split(""));
     let text = screen(state);
     expect(text).toMatch(/│ http:\/\/127\.0\.0\.1:8000\/v1▏ +│/);
     expect(text).toContain("Needs an API key? Add it in /c after setup; it is never typed here.");

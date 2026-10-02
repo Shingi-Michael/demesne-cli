@@ -28,7 +28,13 @@ demesne setup    # connect a model
 demesne          # open the workbench in the current folder
 ```
 
-`demesne setup` looks for local model servers (Ollama, LM Studio and llama.cpp), lets you pick a model, and writes `~/.demesne/config.toml`. To use a hosted model instead, sign in to OpenRouter:
+`demesne setup` looks for local model servers (Ollama, LM Studio and llama.cpp), lets you pick a model, and writes `~/.demesne/config.toml`. Choose **Continue with ChatGPT** to use an eligible ChatGPT plan, or sign in from the CLI:
+
+```sh
+demesne auth login chatgpt
+```
+
+To use OpenRouter instead:
 
 ```sh
 demesne auth login openrouter
@@ -269,6 +275,24 @@ Restart the daemon after changing provider settings: `demesne daemon stop`, then
 **Project instructions.** Put guidance for the agent in `DEMESNE.md` at the workspace root. `AGENTS.md` works too. It is read on every turn.
 
 **Notifications.** Interactive terminals get a desktop notification when a long turn finishes or an approval is waiting. Set `DEMESNE_NO_NOTIFICATIONS=1` to turn them off.
+
+### ChatGPT sign-in
+
+`demesne auth login chatgpt` opens **Continue with ChatGPT** in your browser, verifies the returned identity, and lists models available to that account. Review the first-use plan notice, then select a model with `--model <slug>` or use the setup model picker. Existing local providers are kept; the CLI adds ChatGPT as an additional provider. Restart the daemon when sessions are idle, then select its model with `/model`.
+
+```sh
+demesne auth accounts chatgpt
+demesne auth login chatgpt --new-account
+demesne auth use chatgpt --account <id> --model <slug>
+demesne auth login chatgpt --account <id> --consent
+demesne auth logout chatgpt --account <id>
+```
+
+Setup also lets you select a saved account, add another account or workspace, and sign out. Each registration keeps its own issued client ID and validated identity. Tokens live in `<data_dir>/auth/chatgpt.json` (owner-only, atomic writes); the config contains only a profile reference. Refresh is serialized across Demesne processes. Demesne does not read another app’s credentials. Sign-out revokes the refresh token and clears local tokens while retaining the registration for later sign-in.
+
+This uses OpenAI’s [locally run app sign-in flow](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) and the public Responses API. Requests use `store: false` and `stream: true`; full conversation context and encrypted reasoning items are retained locally for tool continuity. Incomplete streams never execute pending tools. Eligible requests count toward the ChatGPT plan and available credits; [Manage usage](https://chatgpt.com/settings/usage). Usage-limit errors stop the turn without switching to API-key billing.
+
+The preview route does not accept an output-token cap, so `max_output_tokens` is only Demesne’s context-planning reserve for this provider. Reasoning summaries follow the UI’s thinking visibility; Demesne does not force a reasoning effort unsupported by the chosen model. If the account catalog omits context capacity, setup starts with a conservative 32,768-token budget, editable in Review or with `--context-window`. For browserless terminals use `--no-browser`; the callback must reach the same machine’s `127.0.0.1`. Non-interactive scripts can acknowledge the displayed usage notice with `--accept-plan-usage`.
 
 ### OpenRouter
 

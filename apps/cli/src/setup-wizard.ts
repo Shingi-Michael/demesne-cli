@@ -1,3 +1,4 @@
+import type { ChatGPTAccount } from "@demesne/chatgpt-auth";
 import { assertProviderUrl } from "@demesne/config";
 import { formatFooterLine, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, wrapDisplayText, type Painter, type PaletteColor } from "@demesne/brand";
 import { keycap, keyHints } from "./workbench/session-chrome.ts";
@@ -6,10 +7,15 @@ import type { ProbeResult } from "./provider-probe.ts";
 /// `demesne setup` as the redesign's three-step wizard: Provider → Model →
 /// Review. State changes are pure so the flow is testable without a terminal;
 /// the caller performs the returned effects (probing, writing, leaving).
-export type WizardStep = "provider" | "custom" | "auth" | "model" | "review" | "done";
+export type WizardStep = "provider" | "custom" | "auth" | "accounts" | "plan" | "model" | "review" | "done";
 export type WizardTheme = "auto" | "dark" | "light";
 export interface WizardState {
   step: WizardStep;
+  authProvider?: "openrouter" | "chatgpt";
+  accounts?: ChatGPTAccount[];
+  accountIndex?: number;
+  accountId?: string;
+  chatgptAccount?: ChatGPTAccount;
   /// Null while the local servers are being probed.
   probes: ProbeResult[] | null;
   providerIndex: number;
@@ -27,7 +33,7 @@ export interface WizardState {
   configPath: string;
   saved: { backup: string | null } | null;
 }
-export type WizardEffect = { kind: "rescan" | "login" | "cancel-login" | "write" | "cancel" } | { kind: "probe"; url: string }
+export type WizardEffect = { kind: "rescan" | "login" | "cancel-login" | "write" | "cancel" | "accounts" | "chatgpt-connect" | "acknowledge-plan" | "logout-chatgpt" } | { kind: "probe"; url: string }
   | { kind: "copy" | "open"; url: string } | { kind: "finish"; open: boolean };
 export interface WizardKey { name?: string; ctrl?: boolean; meta?: boolean }
 
@@ -45,15 +51,16 @@ export function initialWizard(configPath: string, theme: WizardTheme = "auto"): 
 
 /// Reachable servers first, keeping the probe order within each group, then
 /// OpenRouter and a custom URL (Figma 34:431).
-export function providerOptions(state: WizardState): Array<ProbeResult | "custom" | "openrouter"> {
+export function providerOptions(state: WizardState): Array<ProbeResult | "custom" | "openrouter" | "chatgpt"> {
   const probes = state.probes ?? [];
-  return [...probes.filter((probe) => probe.reachable), ...probes.filter((probe) => !probe.reachable), "openrouter", "custom"];
+  return [...probes.filter((probe) => probe.reachable), ...probes.filter((probe) => !probe.reachable), "openrouter", "chatgpt", "custom"];
 }
 
 /// Models in the order the list shows them: the recommendation (the first
 /// with the largest context) on top, the rest in the server's order.
 export function modelOrder(provider: ProbeResult | null): number[] {
   const models = provider?.models ?? [];
+  if (provider?.target.id === "ChatGPT") return models.map((_, i) => i);
   const recommended = recommendedModel(provider);
   const rest = models.map((_, index) => index).filter((index) => index !== recommended);
   return recommended < 0 ? rest : [recommended, ...rest];
@@ -61,6 +68,7 @@ export function modelOrder(provider: ProbeResult | null): number[] {
 
 function recommendedModel(provider: ProbeResult | null): number {
   const models = provider?.models ?? [];
+  if (provider?.target.id === "ChatGPT") return -1;
   const largest = models.reduce((best, model) => Math.max(best, model.contextWindow ?? 0), 0);
   return largest ? models.findIndex((model) => model.contextWindow === largest) : -1;
 }
@@ -79,6 +87,11 @@ export function wizardAuthenticated(state: WizardState, result: ProbeResult): Wi
   return chooseProvider({ ...state, auth: { url: "", status: "waiting", message: "" } }, result);
 }
 
+export function wizardChatGPTConnected(state: WizardState, account: ChatGPTAccount, provider: ProbeResult): WizardState {
+  const next = { ...state, chatgptAccount: account, accountId: account.id, provider, error: null, auth: { url: "", status: "waiting" as const, message: "" } };
+  return account.acknowledged ? chooseProvider(next, provider) : { ...next, step: "plan" };
+}
+
 function chooseProvider(state: WizardState, provider: ProbeResult): WizardState {
   return { ...state, step: "model", provider, modelIndex: modelOrder(provider)[0] ?? 0, modelText: "", error: null };
 }
@@ -91,7 +104,7 @@ function toReview(state: WizardState): WizardState {
   const model = state.provider?.models[state.modelIndex];
   const contextWindow = state.provider?.models.length && model?.contextWindow ? model.contextWindow : DEFAULT_CONTEXT;
   return { ...state, step: "review", reviewIndex: 2, editing: null, error: null,
-    review: { ...state.review, contextWindow, maxOutputTokens: model?.maxOutputTokens ?? Math.min(DEFAULT_OUTPUT, Math.max(1, Math.floor(contextWindow / 4))), detected: Boolean(state.provider?.models.length && model?.contextWindow) } };
+    review: { ...state.review, contextWindow, maxOutputTokens: state.provider?.target.id === "ChatGPT" ? Math.min(16384, Math.max(1, Math.floor(contextWindow / 4))) : model?.maxOutputTokens ?? Math.min(DEFAULT_OUTPUT, Math.max(1, Math.floor(contextWindow / 4))), detected: Boolean(state.provider?.models.length && model?.contextWindow) } };
 }
 
 const printable = (text: string, key: WizardKey) => !key.ctrl && !key.meta && text.length === 1 && text >= " " && text !== "\x7f";
@@ -115,7 +128,8 @@ export function reduceWizard(state: WizardState, key: WizardKey, text = ""): { s
     if (key.name === "return" || key.name === "enter") {
       const option = options[state.providerIndex];
       if (option === "custom") return { state: { ...state, step: "custom", custom: { ...state.custom, error: null } } };
-      if (option === "openrouter") return { state: { ...state, step: "auth", error: null, auth: { url: "", status: "waiting", message: "Opening your browser…" } }, effect: { kind: "login" } };
+      if (option === "chatgpt") return { state: { ...state, step: "accounts", authProvider: "chatgpt", error: null, accounts: undefined, accountIndex: 0 }, effect: { kind: "accounts" } };
+      if (option === "openrouter") return { state: { ...state, authProvider: "openrouter", step: "auth", error: null, auth: { url: "", status: "waiting", message: "Opening your browser…" } }, effect: { kind: "login" } };
       if (!option) return { state };
       if (!option.reachable) return { state: { ...state, error: `${option.target.label} is not reachable. Start it, then press r to rescan.` } };
       return { state: chooseProvider(state, option) };
@@ -123,6 +137,21 @@ export function reduceWizard(state: WizardState, key: WizardKey, text = ""): { s
     return { state };
   }
 
+  if (state.step === "accounts") {
+    if (key.name === "escape") return { state: { ...state, step: "provider" } };
+    if (!state.accounts) return { state };
+    const length = state.accounts.length + 1, index = state.accountIndex ?? 0;
+    if (key.name === "up" || key.name === "down") return { state: { ...state, accountIndex: (index + (key.name === "up" ? -1 : 1) + length) % length } };
+    if (key.name === "s" && state.accounts[index]) return { state: { ...state, accountId: state.accounts[index]!.id }, effect: { kind: "logout-chatgpt" } };
+    if (key.name === "return" || key.name === "enter") return { state: { ...state, step: "auth", accountId: state.accounts[index]?.id, auth: { url: "", status: "loading", message: "Connecting to ChatGPT…" }, error: null }, effect: { kind: "chatgpt-connect" } };
+    return { state };
+  }
+  if (state.step === "plan") {
+    if (key.name === "escape") return { state: { ...state, step: "provider" } };
+    if (key.name === "o") return { state, effect: { kind: "open", url: "https://chatgpt.com/settings/usage" } };
+    if (key.name === "return" || key.name === "enter") return { state, effect: { kind: "acknowledge-plan" } };
+    return { state };
+  }
   if (state.step === "auth") {
     if (key.name === "escape") return { state: { ...state, step: "provider", error: null }, effect: { kind: "cancel-login" } };
     // r starts a fresh sign-in at any time; Enter does too once one failed.
@@ -214,7 +243,7 @@ export function renderWizard(state: WizardState, width: number, height: number, 
 
   // Top bar with the stepper.
   const steps: Array<[string, boolean, boolean]> = [
-    ["Provider", ["provider", "custom", "auth"].includes(state.step), !["provider", "custom", "auth"].includes(state.step)],
+    ["Provider", ["provider", "custom", "auth", "accounts", "plan"].includes(state.step), !["provider", "custom", "auth", "accounts", "plan"].includes(state.step)],
     ["Model", state.step === "model", state.step === "review" || state.step === "done"],
     ["Review", state.step === "review", state.step === "done"],
   ];
@@ -273,6 +302,7 @@ export function renderWizard(state: WizardState, width: number, height: number, 
       const title = (mark: string, markTone: PaletteColor, name: string, dim = false) =>
         `${paint.text(mark, markTone)}  ${paint.text(safe(name), dim ? "muted" : selected ? "electric" : "paper")}`;
       const detail = (text: string) => `   ${paint.text(safe(text), "muted")}`;
+      if (item === "chatgpt") return [[title("↗", "electric", "Continue with ChatGPT")], [detail("Use your ChatGPT plan · browser sign-in")]];
       if (item === "openrouter") return [[title("↗", "electric", "OpenRouter")], [detail("Hosted models · sign in with your browser")]];
       if (item === "custom") return [[title("+", "secondary", "Custom URL")], [detail("Any OpenAI-compatible endpoint")]];
       const models = `${item.models.length} model${item.models.length === 1 ? "" : "s"}`;
@@ -280,10 +310,23 @@ export function renderWizard(state: WizardState, width: number, height: number, 
         item.reachable && index === 0 ? paint.text("detected", "secondary") : ""], [detail(`${item.target.url} · ${item.reachable ? models : "not reachable"}`)]];
     });
     if (unreachable) { line(); wrapped("Unreachable servers stay listed so you can start them and press r to rescan."); }
+  } else if (state.step === "accounts") {
+    line(pad(paint.bold("Choose a ChatGPT account", "paper")));
+    wrapped("Saved registrations stay separate, including different workspaces."); line();
+    for (const [index, account] of [...(state.accounts ?? []), null].entries()) {
+      boxRow(safe(account?.label ?? "Continue with ChatGPT · add another account"), account ? account.planEnabled ? "Using ChatGPT plan" : "Sign in again" : "", index === (state.accountIndex ?? 0));
+    }
+    wrapped("↑↓ choose · Enter continue · s sign out · Esc back");
+    if (!state.accounts) wrapped("Loading accounts…");
+  } else if (state.step === "plan") {
+    line(pad(paint.bold("You’re using your ChatGPT plan", "paper"))); line();
+    wrapped("Eligible requests from Demesne count toward your ChatGPT plan usage and available credits."); line();
+    wrapped("Manage usage: https://chatgpt.com/settings/usage");
+    wrapped("Enter · Got it     o · Manage usage     Esc · back");
   } else if (state.step === "auth") {
     // Figma 36:543: the callback card, the link as a fallback, and where the key goes.
     const { status, url } = state.auth;
-    line(pad(paint.bold(status === "failed" ? "Connect OpenRouter" : "Finish signing in to OpenRouter", "paper")));
+    line(pad(paint.bold(state.authProvider === "chatgpt" ? "Continue with ChatGPT" : status === "failed" ? "Connect OpenRouter" : "Finish signing in to OpenRouter", "paper")));
     wrapped(safe(state.auth.message));
     line();
     if (status === "waiting") {
@@ -301,8 +344,11 @@ export function renderWizard(state: WizardState, width: number, height: number, 
       box([[paint.text(truncateText(url, content - 8), "paper"), action]]);
     }
     line();
+    if (state.authProvider === "chatgpt") wrapped("Tokens are saved in Demesne’s protected local credential file. Review applies the provider configuration.");
+    else {
     wrapped(`Your API key goes from OpenRouter straight to this machine and is saved only in ${safe(state.configPath)} when you confirm Review. It is never shown on screen.`);
     wrapped("Already have a key? Set OPENROUTER_API_KEY and run demesne setup again.");
+    }
   } else if (state.step === "custom") {
     line(pad(paint.bold("Enter your server address", "paper")));
     wrapped("Any OpenAI-compatible endpoint: vLLM, llama.cpp, LM Studio, Ollama, or a hosted gateway.");
@@ -328,7 +374,7 @@ export function renderWizard(state: WizardState, width: number, height: number, 
         const index = order[position]!, model = provider.models[index]!, selected = index === state.modelIndex;
         const facts = [model.contextWindow ? `${model.contextWindow.toLocaleString("en-US")} ctx` : "context unknown",
           model.maxOutputTokens ? `${formatTokenCount(model.maxOutputTokens)} output` : "", index === recommended ? "largest context on this server" : ""].filter(Boolean);
-        return [[paint.text(safe(model.id), selected ? "electric" : "paper"), index === recommended ? paint.text("recommended", "citron") : ""],
+        return [[paint.text(safe(model.displayName ?? model.id), selected ? "electric" : "paper"), index === recommended ? paint.text("recommended", "citron") : ""],
           [paint.text(facts.join(" · "), "muted")]];
       });
     } else {
@@ -359,6 +405,7 @@ export function renderWizard(state: WizardState, width: number, height: number, 
     });
     if (state.editing?.error) hint(`× ${state.editing.error}`, "signal");
     line();
+    if (state.provider?.target.id === "ChatGPT") wrapped("Max output is a context-planning reserve; the ChatGPT plan API does not accept an output cap.");
     hint(`Writes ${state.configPath} · an existing file is backed up first.`);
   } else {
     line(pad(paint.text("✓ ", "citron") + paint.bold("demesne is ready", "paper")));
@@ -382,6 +429,8 @@ export function renderWizard(state: WizardState, width: number, height: number, 
   const action = (label: string) => `${paint.text(label, "secondary")} ${keycap(paint, "Enter")}`;
   const listed = Boolean(state.provider?.models.length);
   const [keys, right]: [Array<[string, string]>, string] = state.step === "provider" ? [[["↑↓", "choose"], ["r", "rescan"], ["Esc", "quit"]], action("Continue")]
+    : state.step === "accounts" ? [[["↑↓", "choose"], ["s", "sign out"], ["Esc", "back"]], action("Continue")]
+    : state.step === "plan" ? [[["o", "Manage usage"], ["Esc", "back"]], action("Got it")]
     : state.step === "auth" ? [[...(state.auth.url && state.auth.status === "waiting" ? [["c", "copy link"], ["o", "reopen browser"]] as Array<[string, string]> : []), ["r", "retry"], ["Esc", "back"]],
       state.auth.status === "failed" ? action("Retry") : ""]
     : state.step === "custom" ? state.custom.checking ? [[], paint.text("Checking the server…", "thinking")] : [[["Esc", "back"]], action("Continue")]

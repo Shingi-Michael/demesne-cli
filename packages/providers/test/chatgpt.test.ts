@@ -1,0 +1,104 @@
+import { expect, test } from "bun:test";
+import { ChatGPTProvider, type ProviderRequest, type ProviderStreamEvent } from "../src/index.ts";
+import { reasoning, tool, responseStream } from "./chatgpt-fixture.ts";
+const request: ProviderRequest = { model: "model-fixture", messages: [{ role: "system", content: "Be helpful" }, { role: "user", content: "Inspect input.txt" }], tools: [{ name: "read_file", description: "Read a file", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } }], maxOutputTokens: 42, temperature: 0.5, seed: 1 };
+const collect = async (p: ChatGPTProvider, r = request) => Array.fromAsync(p.stream(r, new AbortController().signal));
+
+test("uses the account catalog's order, visibility, slugs and display names", async () => {
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+    expect(String(url)).toBe("https://api.openai.com/v1/models"); expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer access"); expect(init?.redirect).toBe("manual");
+    return Response.json({ models: [{ slug: "first", display_name: "First", visibility: "list" }, { slug: "hidden", visibility: "hide" }, { slug: "second", display_name: "Second", visibility: "list", context_window: 65536 }, { slug: "first", visibility: "list" }] });
+  }) as unknown as typeof fetch });
+  expect((await p.listModels()).map(m => [m.id, m.displayName])).toEqual([["first", "First"], ["second", "Second"]]);
+});
+
+test.each(["full", "empty"] as const)("Responses request preserves streamed tools and reasoning with %s terminal output", async terminalOutput => {
+  const bodies: any[] = [];
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+    expect(String(url)).toBe("https://api.openai.com/v1/responses"); expect(init?.redirect).toBe("manual"); bodies.push(JSON.parse(String(init?.body))); return responseStream({ tool: bodies.length === 1, terminalOutput });
+  }) as unknown as typeof fetch });
+  const events = await collect(p); const state = events.find((e): e is Extract<ProviderStreamEvent, { type: "response_state" }> => e.type === "response_state")!.state;
+  expect(bodies[0].store).toBe(false); expect(bodies[0].stream).toBe(true); expect(bodies[0].input[0].role).toBe("developer");
+  expect(bodies[0].tools[0]).toMatchObject({ type: "namespace", name: "demesne", tools: [{ type: "function", name: "read_file", strict: false }] });
+  for (const field of ["max_output_tokens", "max_tokens", "temperature", "seed", "previous_response_id", "metadata"]) expect(bodies[0]).not.toHaveProperty(field);
+  expect(events.filter(e => e.type === "tool_call_delta").map(e => e.index)).toEqual([0, 0]);
+  expect(events.at(-1)).toEqual({ type: "finish", reason: "tool_calls" });
+  const next: ProviderRequest = { ...request, messages: [...request.messages, { role: "assistant", content: null, toolCalls: [{ id: "call_1", name: "read_file", arguments: tool.arguments }], responses: state }, { role: "tool", toolCallId: "call_1", content: "file content" }] };
+  await collect(p, next);
+  expect(bodies[1].input).toContainEqual(reasoning); expect(bodies[1].input).toContainEqual(tool); expect(bodies[1].input.at(-1)).toEqual({ type: "function_call_output", call_id: "call_1", output: "file content" });
+  await collect(p, { ...next, model: "other-model" }); expect(JSON.stringify(bodies[2])).not.toContain("opaque-reasoning");
+  const other = new ChatGPTProvider({ accountId: "b", accessToken: async () => "other", fetch: (async (_url: string | URL | Request, init?: RequestInit) => { expect(String(init?.body)).not.toContain("opaque-reasoning"); return responseStream(); }) as unknown as typeof fetch });
+  await collect(other, next);
+});
+
+test("interrupted streams never emit successful finish", async () => {
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async () => responseStream({ tool: true, complete: false })) as unknown as typeof fetch });
+  const events: ProviderStreamEvent[] = [];
+  await expect((async () => { for await (const event of p.stream(request, new AbortController().signal)) events.push(event); })()).rejects.toThrow("before response.completed");
+  expect(events.some(e => e.type === "finish" || e.type === "response_state")).toBe(false);
+});
+
+test("late usage-limit errors offer Manage usage and do not replay the request", async () => {
+  let calls = 0;
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async () => { calls++; return responseStream({ failure: "subscription_sharing_usage_limit_exceeded" }); }) as unknown as typeof fetch });
+  await expect(collect(p)).rejects.toThrow("https://chatgpt.com/settings/usage"); expect(calls).toBe(1);
+});
+
+test("OAuth detail-only errors and redirects cannot leak bearer credentials", async () => {
+  for (const status of [401, 302]) {
+    const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "secret", fetch: (async () => Response.json({ detail: "Authorization: Bearer secret" }, { status, headers: { Location: "https://elsewhere.example" } })) as unknown as typeof fetch });
+    try { await collect(p); throw new Error("expected failure"); } catch (error) { expect(String(error)).toContain(String(status)); expect(String(error)).not.toContain("secret"); }
+  }
+});
+
+test("unknown namespaces and conflicting completed calls are rejected", async () => {
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async () => new Response(`data: ${JSON.stringify({ type: "response.output_item.added", output_index: 0, item: { ...tool, namespace: "other" } })}\n\n`)) as unknown as typeof fetch });
+  await expect(collect(p)).rejects.toThrow("unknown tool call");
+});
+
+test("empty terminal output retains completed assistant text for the next turn", async () => {
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async () => responseStream({ terminalOutput: "empty" })) as unknown as typeof fetch });
+  const events = await collect(p);
+  const state = events.find((e): e is Extract<ProviderStreamEvent, { type: "response_state" }> => e.type === "response_state")!.state;
+  expect(state.output).toMatchObject([{ type: "message", content: [{ type: "output_text", text: "File inspected." }] }]);
+  expect(events.at(-1)).toEqual({ type: "finish", reason: "stop" });
+});
+
+for (const invalid of ["missing-done", "unfinished", "changed-arguments", "changed-identity", "duplicate-done"] as const) test(`empty terminal output still rejects ${invalid} tool items`, async () => {
+  const events: unknown[] = [
+    { type: "response.output_item.added", output_index: 0, item: { ...tool, arguments: "", status: "in_progress" } },
+    { type: "response.function_call_arguments.delta", output_index: 0, delta: tool.arguments },
+    { type: "response.function_call_arguments.done", output_index: 0, item_id: tool.id, arguments: tool.arguments },
+  ];
+  const done = { type: "response.output_item.done", output_index: 0, item: { ...tool,
+    ...(invalid === "unfinished" ? { status: "in_progress" } : {}),
+    ...(invalid === "changed-arguments" ? { arguments: '{"path":"other.txt"}' } : {}),
+    ...(invalid === "changed-identity" ? { id: "fc_other" } : {}),
+  } };
+  if (invalid !== "missing-done") events.push(done);
+  if (invalid === "duplicate-done") events.push(done);
+  events.push({ type: "response.completed", response: { status: "completed", output: [] } });
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async () => new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(""))) as unknown as typeof fetch });
+  const seen: ProviderStreamEvent[] = [];
+  await expect((async () => { for await (const e of p.stream(request, new AbortController().signal)) seen.push(e); })()).rejects.toThrow();
+  expect(seen.some(e => e.type === "response_state" || e.type === "finish")).toBe(false);
+});
+
+test("completed items retain output-index order even if completion events are interleaved", async () => {
+  const second = { ...tool, id: "fc_2", call_id: "call_2", arguments: '{"path":"second.txt"}' };
+  const events: unknown[] = [
+    { type: "response.output_item.added", output_index: 0, item: { ...reasoning, encrypted_content: null } },
+    { type: "response.output_item.added", output_index: 1, item: { ...tool, arguments: "", status: "in_progress" } },
+    { type: "response.function_call_arguments.delta", output_index: 1, delta: tool.arguments },
+    { type: "response.output_item.added", output_index: 2, item: { ...second, arguments: "", status: "in_progress" } },
+    { type: "response.function_call_arguments.delta", output_index: 2, delta: second.arguments },
+    { type: "response.output_item.done", output_index: 2, item: second },
+    { type: "response.output_item.done", output_index: 0, item: reasoning },
+    { type: "response.output_item.done", output_index: 1, item: tool },
+    { type: "response.completed", response: { status: "completed", output: [] } },
+  ];
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async () => new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(""))) as unknown as typeof fetch });
+  const result = await collect(p);
+  expect(result.find(e => e.type === "response_state")?.state.output).toEqual([reasoning, tool, second]);
+  expect(result.flatMap(e => e.type === "tool_call_delta" && e.idDelta ? [e.idDelta] : [])).toEqual([tool.call_id, second.call_id]);
+});

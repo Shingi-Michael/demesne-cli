@@ -88,6 +88,7 @@ Continuous discovery gets one read-only coder consultation and at most one focus
       await progress?.({ type: "attempt", attempt: attempt + 1, model: inference.modelId, provider: inference.providerId, thinking: thinking !== false });
       let argumentsJson = "", name = "", id = "", response = "", hasReasoning = false, finishReason: string | undefined;
       outputTokens = null;
+      let responses: import("@demesne/protocol").ResponsesState | undefined;
       const remaining = limits.requestTimeoutMs - (Date.now() - started);
       if (remaining <= 0) throw new Error("Drive planning timed out");
       for await (const event of withProviderDeadlines(inference.stream(messages, [tool], controller.signal), controller, limits.firstEventTimeoutMs, remaining)) {
@@ -99,6 +100,7 @@ Continuous discovery gets one read-only coder consultation and at most one focus
         } else if (event.type === "text_delta") { response += event.delta; characters += event.delta.length; await progress?.({ type: "text.delta", delta: event.delta }); }
         else if (event.type === "reasoning_delta") { hasReasoning = true; characters += event.delta.length; await progress?.({ type: "reasoning.delta", delta: event.delta }); }
         else if (event.type === "finish") finishReason = event.reason;
+        else if (event.type === "response_state") responses = event.state;
         else if (event.type === "usage") { outputTokens = event.usage.outputTokens; await progress?.({ type: "usage", usage: event.usage }); }
         if (argumentsJson.length > 128_000 || characters > limits.turnCharacterLimit) throw new Error("Drive provider stream exceeded its character limit");
       }
@@ -129,7 +131,7 @@ Continuous discovery gets one read-only coder consultation and at most one focus
         thinking = true;
         const feedback = `No UI action was performed. Validation failed: ${detail}. Correct this decision using the same observation and call drive_ui once. Keep the mission and evidence requirements unchanged.`;
         if (name && id) {
-          messages.push({ role: "assistant", content: response || null, toolCalls: [{ id, name, arguments: argumentsJson }] }, { role: "tool", toolCallId: id, content: feedback });
+          messages.push({ role: "assistant", content: response || null, ...(responses ? { responses } : {}), toolCalls: [{ id, name, arguments: argumentsJson }] }, { role: "tool", toolCallId: id, content: feedback });
         } else messages.push({ role: "assistant", content: response || "No valid UI decision returned." }, { role: "user", content: feedback });
       }
     }

@@ -333,7 +333,7 @@ function renderStatus() {
         (state.provider.metrics.durationMs / 1000)
       : null);
   el("status").innerHTML =
-    `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span><span>${h(state.model.id || "Connecting…")}</span>${state.runs.length ? `<span class="speed">${speed == null ? "—" : speed.toFixed(1)} tok/s</span>` : ""}${btn("panel", `<div class="context"><div class="meter"><i style="--usage:${Math.min(100, c.percentage ?? 0)}%"></i></div><span>${c.estimated ? "~" : ""}${num(c.used)} / ${num(c.capacity)}${c.percentage == null ? "" : ` · ${c.percentage}%`}</span></div>`, { name: "context" })}<div class="spacer"></div>${state.runs.length ? btn("panel", `${k("Ctrl+B")} log`, { name: "log" }, "key-action", true) + btn("follow", `${k("Ctrl+G")} live`, {}, "key-action", true) : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
+    `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span><span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}</span>${state.model.provider === "ChatGPT" ? `<span title="${h(state.chatgptAccount?.label ?? "ChatGPT")}">Using ChatGPT plan${state.chatgptAccount?.email ? ` · ${h(state.chatgptAccount.email)}` : ""}</span>${btn("open-link", "Manage usage", { url: "https://chatgpt.com/settings/usage" }, "key-action")}` : ""}${state.runs.length ? `<span class="speed">${speed == null ? "—" : speed.toFixed(1)} tok/s</span>` : ""}${btn("panel", `<div class="context"><div class="meter"><i style="--usage:${Math.min(100, c.percentage ?? 0)}%"></i></div><span>${c.estimated ? "~" : ""}${num(c.used)} / ${num(c.capacity)}${c.percentage == null ? "" : ` · ${c.percentage}%`}</span></div>`, { name: "context" })}<div class="spacer"></div>${state.runs.length ? btn("panel", `${k("Ctrl+B")} log`, { name: "log" }, "key-action", true) + btn("follow", `${k("Ctrl+G")} live`, {}, "key-action", true) : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   const workspace = state.workspace.replace(/^.*\/projects\//, "projects/");
   el("header").innerHTML =
     `<div class="identity"><strong>demesne</strong>${pane === "changes" && state.session ? `<span class="session-title">${h(state.session.title)}</span>` : ""}<span title="${h(state.workspace)}">${pane === "changes" ? "" : "· "}${h(workspace)}</span></div><div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}${state.runs.length ? `<span class="age">${pane === "changes" ? clock(Date.now()).slice(0, 5) : `· ${duration(Date.now() - Date.parse(state.session!.createdAt))}`}</span>` : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true)}</div>`;
@@ -1818,7 +1818,7 @@ function renderOverlay() {
     overlayRows = [...models]
       .sort((a, b) => a.provider.localeCompare(b.provider))
       .map((model) => ({
-        label: model.id,
+        label: model.displayName ?? model.id,
         value: [
           model.contextWindow
             ? `${num(model.contextWindow)} ctx`
@@ -3298,6 +3298,7 @@ function handleSetupKey(event: KeyboardEvent) {
       "o",
       "e",
       "q",
+      "s",
     ].includes(name)
   )
     return;
@@ -3329,7 +3330,7 @@ function renderSetup() {
     model = setup.provider?.models.length
       ? (setup.provider.models[setup.modelIndex]?.id ?? "")
       : setup.modelText;
-  const stepIndex = ["provider", "custom", "auth"].includes(step)
+  const stepIndex = ["provider", "custom", "auth", "accounts", "plan"].includes(step)
     ? 0
     : step === "model"
       ? 1
@@ -3366,20 +3367,21 @@ function renderSetup() {
         ...probes.filter((p) => p.reachable),
         ...probes.filter((p) => !p.reachable),
         "openrouter",
+        "chatgpt",
         "custom",
       ] as const;
-    body = `<h1>Where should demesne run its model?</h1><p>${probes.filter((p) => p.reachable).length ? `Found ${probes.filter((p) => p.reachable).length} local server${probes.filter((p) => p.reachable).length === 1 ? "" : "s"}.` : "No local servers detected."} You can change this later with demesne setup.</p>${list(options.map((option, index) => (typeof option === "string" ? row(index, option === "openrouter" ? "OpenRouter" : "Custom URL", option === "openrouter" ? "Hosted models · sign in with your browser" : "Any OpenAI-compatible endpoint", "", index === setup.providerIndex) : row(index, h(option.target.label), `${h(option.target.url)} · ${option.reachable ? `${option.models.length} models` : "not reachable"}`, option.reachable ? '<span class="muted">detected</span>' : "", index === setup.providerIndex))))}<p class="setup-note">${setup.probes === null ? "Checking local servers…" : "Unreachable servers stay listed so you can start them and press r to rescan."}</p>`;
+    body = `<h1>Where should demesne run its model?</h1><p>${probes.filter((p) => p.reachable).length ? `Found ${probes.filter((p) => p.reachable).length} local server${probes.filter((p) => p.reachable).length === 1 ? "" : "s"}.` : "No local servers detected."} You can change this later with demesne setup.</p>${list(options.map((option, index) => (typeof option === "string" ? row(index, option === "chatgpt" ? "Continue with ChatGPT" : option === "openrouter" ? "OpenRouter" : "Custom URL", option === "chatgpt" ? "Use your ChatGPT plan · browser sign-in" : option === "openrouter" ? "Hosted models · sign in with your browser" : "Any OpenAI-compatible endpoint", "", index === setup.providerIndex) : row(index, h(option.target.label), `${h(option.target.url)} · ${option.reachable ? `${option.models.length} models` : "not reachable"}`, option.reachable ? '<span class="muted">detected</span>' : "", index === setup.providerIndex))))}<p class="setup-note">${setup.probes === null ? "Checking local servers…" : "Unreachable servers stay listed so you can start them and press r to rescan."}</p>`;
     left = `${k("↑↓")} choose ${button("r", `${k("r")} rescan`)} ${button("escape", `${k("Esc")} quit`)}`;
   }
   if (step === "model") {
     const models = setup.provider?.models ?? [],
       largest = Math.max(...models.map((m) => m.contextWindow ?? 0)),
-      recommended = models.findIndex((m) => (m.contextWindow ?? 0) === largest),
+      recommended = setup.provider?.target.id === "ChatGPT" ? -1 : models.findIndex((m) => (m.contextWindow ?? 0) === largest),
       order = [
         recommended,
         ...models.map((_, i) => i).filter((i) => i !== recommended),
       ].filter((i) => i >= 0);
-    body = `<h1>Choose a model</h1><p>${h(setup.provider?.target.label)} · ${h(setup.provider?.target.url)}</p>${models.length ? list(order.map((index) => row(index, h(models[index]!.id), `${num(models[index]!.contextWindow)} context${models[index]!.maxOutputTokens ? ` · ${num(models[index]!.maxOutputTokens)} max output` : ""}`, index === recommended ? '<span class="success">recommended</span>' : "", index === setup.modelIndex))) : `<form id="setup-form"><label>MODEL ID<input name="model" value="${h(setup.modelText)}" placeholder="Enter a model id" autofocus></label></form>`}<p class="setup-note">${models.length ? "Models reported by your provider. Context size is checked in Review." : "The server did not list models. Enter the exact id it expects."}</p>`;
+    body = `<h1>Choose a model</h1><p>${h(setup.provider?.target.label)} · ${h(setup.provider?.target.url)}</p>${models.length ? list(order.map((index) => row(index, h(models[index]!.displayName ?? models[index]!.id), `${num(models[index]!.contextWindow)} context${models[index]!.maxOutputTokens ? ` · ${num(models[index]!.maxOutputTokens)} max output` : ""}`, index === recommended ? '<span class="success">recommended</span>' : "", index === setup.modelIndex))) : `<form id="setup-form"><label>MODEL ID<input name="model" value="${h(setup.modelText)}" placeholder="Enter a model id" autofocus></label></form>`}<p class="setup-note">${models.length ? "Models reported by your provider. Context size is checked in Review." : "The server did not list models. Enter the exact id it expects."}</p>`;
     left = `${k("↑↓")} choose ${button("escape", `${k("Esc")} back`)}`;
   }
   if (step === "custom") {
@@ -3387,9 +3389,18 @@ function renderSetup() {
     body = `<h1>Enter your server address</h1><p>Any OpenAI-compatible endpoint: vLLM, llama.cpp, LM Studio, Ollama, or a hosted gateway.</p><form id="setup-form"><label>Base URL<input name="url" type="url" value="${h(setup.custom.text)}" placeholder="http://127.0.0.1:8000/v1" autocomplete="off"></label></form><div class="probe-result ${setup.custom.checking ? "amber" : result?.reachable ? "success" : result ? "amber" : "muted"}">${setup.custom.checking ? "◌ Checking the server…" : result?.reachable ? `✓ Reachable · OpenAI-compatible · ${result.models.length} models` : result ? "○ Server did not respond · you can continue and enter a model id" : "The server is checked as you type."}</div>${setup.custom.error ? `<p class="danger">${h(setup.custom.error)}</p>` : ""}<p class="setup-note">Needs an API key? Add it in ~/.demesne/config.toml after setup; it is never typed here.</p>`;
     left = button("escape", `${k("Esc")} back`);
   }
+  if (step === "accounts") {
+    body = `<h1>Choose a ChatGPT account</h1><p>Each account and workspace has its own connection.</p>${setup.accounts ? list([...setup.accounts, null].map((account, index) => row(index, h(account?.label ?? "Continue with ChatGPT"), account ? account.planEnabled ? "Using ChatGPT plan" : "Sign in again" : "Add another account or workspace", "", index === (setup.accountIndex ?? 0)))) : "<p>Loading accounts…</p>"}`;
+    left = `${k("↑↓")} choose ${button("s", "Sign out")} ${button("escape", `${k("Esc")} back`)}`;
+  }
+  if (step === "plan") {
+    body = `<h1>You’re using your ChatGPT plan</h1><p>Eligible requests from Demesne count toward your ChatGPT plan usage and available credits.</p><div class="auth-card"><strong>${h(setup.chatgptAccount?.label)}</strong><p>Your account is connected to Demesne.</p></div>`;
+    left = button("o", "Manage usage") + button("escape", `${k("Esc")} back`);
+    right = button("return", `Got it ${k("Enter")}`);
+  }
   if (step === "auth") {
     const auth = setup.auth;
-    body = `<h1>Sign in to OpenRouter</h1><p>Your browser opens a secure sign-in page.</p><div class="auth-card ${auth.status === "failed" ? "failed" : ""}"><div><strong>${auth.status === "failed" ? "× Sign-in failed" : auth.status === "loading" ? "Connected · loading models" : "Waiting for sign-in"}</strong>${auth.status === "waiting" ? '<img src="assets/auth-dots.svg" alt=""><span id="auth-timer" class="right"></span>' : ""}</div><p>${h(auth.message)}</p></div>${auth.url ? `<div class="auth-link">${button("o", h(auth.url))}</div>` : ""}<p class="setup-note">A one-time localhost callback receives your sign-in. Your credential is saved only when you write the config in Review.</p><p class="setup-note">Already have a key? Set <code>OPENROUTER_API_KEY</code> before starting setup.</p>`;
+    body = `<h1>${setup.authProvider === "chatgpt" ? "Continue with ChatGPT" : "Sign in to OpenRouter"}</h1><p>Your browser opens a secure sign-in page.</p><div class="auth-card ${auth.status === "failed" ? "failed" : ""}"><div><strong>${auth.status === "failed" ? "× Sign-in failed" : auth.status === "loading" ? "Connected · loading models" : "Waiting for sign-in"}</strong>${auth.status === "waiting" ? '<img src="assets/auth-dots.svg" alt=""><span id="auth-timer" class="right"></span>' : ""}</div><p>${h(auth.message)}</p></div>${auth.url ? `<div class="auth-link">${button("o", h(auth.url))}</div>` : ""}${setup.authProvider === "chatgpt" ? `<p class="setup-note">A one-time loopback callback receives your sign-in. Tokens are stored in Demesne’s protected local credentials file and kept out of this interface. Review applies the provider configuration.</p>` : `<p class="setup-note">A one-time localhost callback receives your sign-in. Your credential is saved only when you write the config in Review.</p><p class="setup-note">Already have a key? Set <code>OPENROUTER_API_KEY</code> before starting setup.</p>`}`;
     left = `${auth.url ? button("c", `${k("c")} ${auth.copied ? "copied" : "copy link"}`) + button("o", `${k("o")} reopen browser`) : ""}${button("r", `${k("r")} retry`)}${button("escape", `${k("Esc")} back`)}`;
     right =
       auth.status === "failed" ? button("return", `Retry ${k("Enter")}`) : "";
@@ -3404,9 +3415,9 @@ function renderSetup() {
         setup.review.detected ? "detected" : "manual",
       ],
       [
-        "Max output",
+        setup.provider?.target.id === "ChatGPT" ? "Output reserve" : "Max output",
         setup.review.maxOutputTokens.toLocaleString(),
-        "tokens per request",
+        setup.provider?.target.id === "ChatGPT" ? "context planning · not an API cap" : "tokens per request",
       ],
       [
         "Theme",

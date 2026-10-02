@@ -24,7 +24,7 @@ test.each(["save", "retry", "pending", "review-cancel", "cli-cancel"])("setup PT
     if (scenario === "cli-cancel") send("\x03");
     else {
       await until("Found 0 local servers");
-      send("\x1b[A\x1b[A\r");
+      send("\x1b[A\x1b[A\x1b[A\r");
       if (scenario === "pending") { await until("Could not open the browser"); send("\x03"); }
       else {
         if (scenario === "retry") { await until("Sign-in did not complete"); send("r"); }

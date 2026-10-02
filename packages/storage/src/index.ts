@@ -101,6 +101,7 @@ interface ProviderCallRow {
 }
 
 interface ModelMessageRow {
+  responses_json: string | null;
   image_artifact_ids_json: string | null;
   id: number;
   turn_id: string;
@@ -525,8 +526,8 @@ export class DemesneStore {
       ? JSON.stringify(message.toolCalls)
       : null;
     const result = this.database.query(`
-      INSERT INTO model_messages (session_id, turn_id, role, content, tool_call_id, tool_calls_json, created_at, image_artifact_ids_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO model_messages (session_id, turn_id, role, content, tool_call_id, tool_calls_json, created_at, image_artifact_ids_json, responses_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       turn.sessionId,
       turnId,
@@ -536,6 +537,7 @@ export class DemesneStore {
       toolCallsJson,
       new Date().toISOString(),
       message.role === "tool" && message.imageArtifactIds?.length ? JSON.stringify(message.imageArtifactIds) : null,
+      message.role === "assistant" && message.responses ? JSON.stringify(message.responses) : null,
     );
     return { id: Number(result.lastInsertRowid), turnId, message };
   }
@@ -554,7 +556,7 @@ export class DemesneStore {
     const session = this.getSessionOrThrow(sessionId);
     const rows = this.database.query(`
       SELECT model_messages.id, model_messages.turn_id, model_messages.role, model_messages.content,
-              model_messages.tool_call_id, model_messages.tool_calls_json, model_messages.image_artifact_ids_json
+              model_messages.tool_call_id, model_messages.tool_calls_json, model_messages.image_artifact_ids_json, model_messages.responses_json
       FROM model_messages
       JOIN turns ON turns.id = model_messages.turn_id
       JOIN sessions ON sessions.id = model_messages.session_id
@@ -1468,6 +1470,9 @@ export class DemesneStore {
       CREATE INDEX IF NOT EXISTS tool_calls_turn ON tool_calls(turn_id, created_at);
       CREATE INDEX IF NOT EXISTS model_messages_session ON model_messages(session_id, id);
     `);
+    if (!this.hasColumn("model_messages", "responses_json")) {
+      this.database.run("ALTER TABLE model_messages ADD COLUMN responses_json TEXT");
+    }
     if (!this.hasColumn("model_messages", "image_artifact_ids_json")) {
       this.database.run("ALTER TABLE model_messages ADD COLUMN image_artifact_ids_json TEXT");
     }
@@ -1817,6 +1822,7 @@ function mapModelMessage(row: ModelMessageRow): StoredModelMessage {
       role: "assistant",
       content: row.content,
       ...(toolCalls?.length ? { toolCalls } : {}),
+      ...(row.responses_json ? { responses: JSON.parse(row.responses_json) as import("@demesne/protocol").ResponsesState } : {}),
     },
   };
 }

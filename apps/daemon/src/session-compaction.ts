@@ -141,7 +141,7 @@ export class SessionCompactor {
         else if (event.type === "finish") {
           if (finishReason !== undefined) throw new Error("Provider emitted multiple finish reasons");
           finishReason = event.reason;
-        } else {
+        } else if (event.type === "usage") {
           if (usageReceived) throw new Error("Provider emitted multiple usage events");
           usageReceived = true; outputTokens = event.usage.outputTokens;
           this.store.recordProviderUsage(providerCallId, event.usage);

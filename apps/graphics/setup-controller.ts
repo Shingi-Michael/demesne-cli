@@ -1,8 +1,10 @@
+import { chatGPTAuthForConfig, connectChatGPT } from "../cli/src/chatgpt-auth.ts";
 import { assertProviderUrl } from "@demesne/config";
 import {
   initialWizard,
   reduceWizard,
   wizardAuthenticated,
+  wizardChatGPTConnected,
   wizardCustomProbed,
   wizardProbed,
   wizardSaved,
@@ -30,6 +32,7 @@ export type SetupSnapshot = WizardState & {
 };
 export class GraphicsSetup {
   private state: WizardState;
+  private chatgpt: ReturnType<typeof chatGPTAuthForConfig>;
   private apiKey: string | undefined;
   private login: ReturnType<typeof beginOpenRouterLogin> | undefined;
   private loginAbort: AbortController | undefined;
@@ -43,6 +46,7 @@ export class GraphicsSetup {
   constructor(
     private options: {
       configPath: string;
+      dataDirectory?: string;
       changed: () => void;
       copy: (text: string) => Promise<void>;
       open: (url: string) => Promise<void>;
@@ -52,6 +56,7 @@ export class GraphicsSetup {
     },
   ) {
     this.state = initialWizard(options.configPath);
+    this.chatgpt = chatGPTAuthForConfig(options.configPath, options);
   }
   snapshot(): SetupSnapshot {
     return {
@@ -88,6 +93,7 @@ export class GraphicsSetup {
         this.state.editing.text = args.value;
     }
     if (Number.isSafeInteger(args.index) && Number(args.index) >= 0) {
+      if (this.state.step === "accounts") this.state.accountIndex = Math.min(this.state.accounts?.length ?? 0, Number(args.index));
       if (this.state.step === "provider")
         this.state.providerIndex = Number(args.index);
       if (this.state.step === "model")
@@ -163,6 +169,24 @@ export class GraphicsSetup {
     if (effect.kind === "cancel-login") {
       this.stopLogin();
     }
+    if (effect.kind === "accounts" || effect.kind === "logout-chatgpt") {
+      try {
+        if (effect.kind === "logout-chatgpt" && this.state.accountId) {
+          const result = await this.chatgpt.logout(this.state.accountId);
+          this.state.error = result.revoked ? null : "Signed out locally. Remove Demesne in ChatGPT settings to confirm remote revocation.";
+        }
+        const accounts = await this.chatgpt.accounts();
+        if (!this.closed && this.state.step === "accounts") { this.state.accounts = accounts; this.publish(); }
+      } catch (error) { this.state.error = error instanceof Error ? error.message : "Could not load ChatGPT accounts."; this.publish(); }
+    }
+    if (effect.kind === "acknowledge-plan" && this.state.chatgptAccount && this.state.provider) {
+      try {
+        await this.chatgpt.acknowledge(this.state.chatgptAccount.id);
+        if (!this.closed && this.state.step === "plan") this.state = wizardChatGPTConnected(this.state, { ...this.state.chatgptAccount, acknowledged: true }, this.state.provider);
+      } catch (error) { this.state.error = error instanceof Error ? error.message : "Could not save plan acknowledgement."; }
+      this.publish();
+    }
+    if (effect.kind === "chatgpt-connect") void this.authenticateChatGPT();
     if (effect.kind === "login") void this.authenticate();
     if (effect.kind === "copy") await this.options.copy(effect.url);
     if (effect.kind === "open") await this.options.open(effect.url);
@@ -180,6 +204,7 @@ export class GraphicsSetup {
             providerId: this.state.provider!.target.id,
             model: selectedModel(this.state),
             ...this.state.review,
+            ...(this.state.provider?.target.id === "ChatGPT" ? { authProfile: this.state.chatgptAccount!.id } : {}),
           },
           this.state.provider?.target.url === OPENROUTER_URL
             ? this.apiKey
@@ -203,7 +228,25 @@ export class GraphicsSetup {
     this.login = undefined;
     this.apiKey = undefined;
   }
+  private async authenticateChatGPT(reauthorize = false) {
+    this.stopLogin();
+    const epoch = this.epoch, controller = this.loginAbort = new AbortController();
+    const current = () => epoch === this.epoch && !this.closed && !controller.signal.aborted && this.state.step === "auth";
+    try {
+      const result = await connectChatGPT({ auth: this.chatgpt, accountId: this.state.accountId, reauthorize, fetch: this.options.fetch, signal: controller.signal,
+        onAccount: account => { if (current()) this.state.accountId = account.id; },
+        onLogin: async url => {
+          if (!current()) return;
+          this.state.auth = { url, status: "waiting", expiresAt: Date.now() + 600_000, message: "Finish signing in with ChatGPT, then return here." }; this.publish();
+          try { await this.options.open(url); } catch { if (current()) { this.state.auth.message = "Open the sign-in link below to continue."; this.publish(); } }
+        } });
+      if (current()) { this.state = wizardChatGPTConnected(this.state, result.account, result.provider); this.publish(); }
+    } catch (error) {
+      if (current()) { this.state.auth = { url: "", status: "failed", message: error instanceof Error ? error.message : "ChatGPT connection failed." }; this.publish(); }
+    }
+  }
   private async authenticate() {
+    if (this.state.authProvider === "chatgpt") return this.authenticateChatGPT(true);
     this.stopLogin();
     const epoch = this.epoch,
       controller = (this.loginAbort = new AbortController());

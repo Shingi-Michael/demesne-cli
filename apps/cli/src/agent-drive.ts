@@ -651,7 +651,12 @@ export class AgentDrive {
       if (protection) { this.protectionStop(protection, protection.startsWith("Mission") ? "budget" : "loop"); return; }
       validateDriveDecisionContext(decision, request);
       const confirmed = decision.evidence;
-      Object.assign(state, { notes: decision.notes, completed: state.ledger!.tasks.filter(task=>task.status === "completed").map(task=>task.title.slice(0,1000)).slice(-32), remaining: decision.remaining, model: `${response.provider} / ${response.model}`, activity: decision.note });
+      // Planner progress includes finished subtasks of the still-active task.
+      // Keep it between decisions without allowing it to erase verified ledger
+      // completions (or to mark a ledger task complete without evidence).
+      const completedTasks = state.ledger!.tasks.filter(task => task.status === "completed").map(task => task.title.slice(0, 1000)).slice(-32);
+      const completed = [...new Set([...completedTasks, ...decision.completed])].slice(0, 32);
+      Object.assign(state, { notes: decision.notes, completed, remaining: decision.remaining, model: `${response.provider} / ${response.model}`, activity: decision.note });
       state.evidence = [...new Map([...state.evidence, ...confirmed].map((item) => [JSON.stringify(item), item])).values()].slice(-32);
       const signature = JSON.stringify({ action: decision.action, surface: observation.surface, scrollRegions: observation.scrollRegions,
         screen: (observation.evidenceRows ?? observation.rows).join("\n").replace(/\b\d{2}:\d{2}:\d{2}\b|\+\d{2}:\d{2}/g, "clock") });

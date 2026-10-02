@@ -112,6 +112,7 @@ import {
 import { formatDoctorReport, runDoctor } from "./doctor.ts";
 import { runSetup } from "./setup.ts";
 import { isPlaceholderTitle, titleFromRequest } from "./session-title.ts";
+import { runChatGPTAuthCommand } from "./chatgpt-auth.ts";
 import { beginOpenRouterLogin, configureOpenRouter } from "./openrouter-auth.ts";
 import { renderHarnessDiff, renderHarnessHelp, renderHarnessStatus } from "./harness-panels.ts";
 import { replaySession } from "./workbench/history.ts";
@@ -594,7 +595,21 @@ async function run(command: string[]): Promise<void> {
   }
 
   if (command[0] === "auth") {
-    if (command[1] !== "login" || command[2] !== "openrouter") throw new Error("Usage: demesne auth login openrouter [--model <id>] [--no-browser]");
+    if (["chatgpt", "openai"].includes(command[2] ?? "")) {
+      await runChatGPTAuthCommand(command, { configPath: settings.configPath, dataDirectory: settings.dataDirectory,
+        open: async url => { try { return await Bun.spawn(process.platform === "darwin" ? ["open", url] : process.platform === "win32" ? ["rundll32.exe", "url.dll,FileProtocolHandler", url] : ["xdg-open", url], { stdout: "ignore", stderr: "ignore" }).exited === 0; } catch { return false; } },
+        acknowledge: async () => {
+          if (!process.stdin.isTTY) return false;
+          const { createInterface } = await import("node:readline/promises");
+          const input = createInterface({ input: process.stdin, output: process.stdout });
+          try { return /^(?:y|yes)$/i.test((await input.question("Got it — continue using your ChatGPT plan? [y/N] ")).trim()); }
+          finally { input.close(); }
+        },
+      });
+      return;
+    }
+
+    if (command[1] !== "login" || command[2] !== "openrouter") throw new Error("Usage: demesne auth login <chatgpt|openrouter> [--model <id>] [--no-browser]");
     const model = takeOption(command, "--model");
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -1416,7 +1431,7 @@ async function runChat(command: string[]): Promise<void> {
         const current = models.findIndex((model) => model.id === activeModel.id);
         const index = await workbench.choose(
           "Switch model",
-          models.map((model) => model.id),
+          models.map((model) => model.displayName ?? model.id),
           Math.max(0, current),
           {
             subtitle: `current: ${activeModel.id}`,
@@ -2636,7 +2651,9 @@ function printUsage(): void {
   demesne [chat] [initial message] [--no-tui]
   demesne graphics [--workspace <path>] [--session <id>] [--scale auto|0.5-3] [--setup]
   demesne setup [--provider-url <url> --model <id>] [--context-window <n>] [--max-output-tokens <n>] [--theme auto|dark|light] [--yes]
-  demesne auth login openrouter [--model <id>] [--no-browser]
+  demesne auth login <chatgpt|openrouter> [--model <id>] [--no-browser]
+  demesne auth accounts|status|use|logout chatgpt [--account <id>]
+  demesne auth login chatgpt [--account <id> | --new-account] [--consent] [--accept-plan-usage]
   demesne doctor [--json]
   demesne daemon start|stop|status|logs
   demesne ps [--watch] [--json]

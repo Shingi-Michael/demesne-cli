@@ -30,6 +30,18 @@ snapshot.setup = {
   checkedAt: null,
   saving: false,
 };
+const chatgptScene = process.argv[3];
+if (chatgptScene?.startsWith("chatgpt")) {
+  snapshot.setup.authProvider = "chatgpt";
+  snapshot.setup.chatgptAccount = { id: "fixture-account", label: "person@example.test · fixture", email: "person@example.test", signedIn: true, planEnabled: true, acknowledged: false };
+  if (chatgptScene === "chatgpt-plan") snapshot.setup.step = "plan";
+  else if (chatgptScene === "chatgpt-accounts") {
+    snapshot.setup.step = "accounts";
+    snapshot.setup.accounts = [snapshot.setup.chatgptAccount];
+    snapshot.setup.accountIndex = 0;
+  } else if (chatgptScene === "chatgpt-provider") snapshot.setup.step = "provider";
+  else snapshot.setup.auth.url = "https://auth.openai.com/api/accounts/authorize?client_id=dynamic_agent_client&agent_name_hint=Demesne";
+}
 const cache = mkdtempSync(join(tmpdir(), "graphics-scene-")),
   root = import.meta.dir;
 const bundle = await Bun.build({

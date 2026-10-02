@@ -7,6 +7,7 @@
     "@demesne/protocol": "workspace:*",
     "@demesne/providers": "workspace:*",
     "@demesne/storage": "workspace:*",
-    "sharp": "^0.35.4"
+    "sharp": "^0.35.4",
+    "@demesne/chatgpt-auth": "workspace:*"
   }
 }

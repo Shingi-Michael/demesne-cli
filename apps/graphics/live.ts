@@ -336,7 +336,7 @@ function renderStatus() {
         (state.provider.metrics.durationMs / 1000)
       : null);
   el("status").innerHTML =
-    `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span><span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}</span>${state.model.provider === "ChatGPT" ? `<span title="${h(state.chatgptAccount?.label ?? "ChatGPT")}">Using ChatGPT plan${state.chatgptAccount?.email ? ` · ${h(state.chatgptAccount.email)}` : ""}</span>${btn("open-link", "Manage usage", { url: "https://chatgpt.com/settings/usage" }, "key-action")}` : ""}${state.runs.length ? `<span class="speed">${speed == null ? "—" : speed.toFixed(1)} tok/s</span>` : ""}${btn("panel", `<div class="context"><div class="meter"><i style="--usage:${Math.min(100, c.percentage ?? 0)}%"></i></div><span>${c.estimated ? "~" : ""}${num(c.used)} / ${num(c.capacity)}${c.percentage == null ? "" : ` · ${c.percentage}%`}</span></div>`, { name: "context" })}<div class="spacer"></div>${state.runs.length ? btn("panel", `${k("Ctrl+B")} log`, { name: "log" }, "key-action", true) + btn("follow", `${k("Ctrl+G")} live`, {}, "key-action", true) : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
+    `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}">${state.activeTurnId && !["approval", "waiting", "failed"].includes(phase) ? spinner() : `<img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">`}${h(phase)}</span><span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}</span>${state.model.provider === "ChatGPT" ? `<span title="${h(state.chatgptAccount?.label ?? "ChatGPT")}">Using ChatGPT plan${state.chatgptAccount?.email ? ` · ${h(state.chatgptAccount.email)}` : ""}</span>${btn("open-link", "Manage usage", { url: "https://chatgpt.com/settings/usage" }, "key-action")}` : ""}${state.runs.length ? `<span class="speed">${speed == null ? "—" : speed.toFixed(1)} tok/s</span>` : ""}${btn("panel", `<div class="context"><div class="meter"><i style="--usage:${Math.min(100, c.percentage ?? 0)}%"></i></div><span>${c.estimated ? "~" : ""}${num(c.used)} / ${num(c.capacity)}${c.percentage == null ? "" : ` · ${c.percentage}%`}</span></div>`, { name: "context" })}<div class="spacer"></div>${state.runs.length ? btn("panel", `${k("Ctrl+B")} log`, { name: "log" }, "key-action", true) + btn("follow", `${k("Ctrl+G")} live`, {}, "key-action", true) : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   const workspace = state.workspace.replace(/^.*\/projects\//, "projects/");
   el("header").innerHTML =
     `<div class="identity"><strong>demesne</strong>${pane === "changes" && state.session ? `<span class="session-title">${h(state.session.title)}</span>` : ""}<span title="${h(state.workspace)}">${pane === "changes" ? "" : "· "}${h(workspace)}</span></div><div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}${state.runs.length ? `<span class="age">${pane === "changes" ? clock(Date.now()).slice(0, 5) : `· ${duration(Date.now() - Date.parse(state.session!.createdAt))}`}</span>` : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true)}</div>`;
@@ -362,6 +362,11 @@ function totals(run: GraphicsRun, tool: ToolEntry) {
 }
 const counts = (value: { added: number; removed: number }) =>
   `<span class="counts"><span class="plus">+${value.added}</span><span class="minus">−${value.removed}</span></span>`;
+/// The same braille spinner as the terminal's thinking presence. Spans are
+/// advanced in place by one timer, so only the glyphs repaint.
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const spinnerFrame = () => SPINNER[Math.floor(Date.now() / 90) % SPINNER.length]!;
+const spinner = () => `<span class="spin" aria-hidden="true">${spinnerFrame()}</span>`;
 /// A sub-agent's target: its task, then its latest real step, or while it
 /// thinks between steps a cycling phrase (updated in place by a timer).
 function toolTarget(run: GraphicsRun, tool: ToolEntry) {
@@ -397,7 +402,7 @@ function toolRow(run: GraphicsRun, tool: ToolEntry) {
                 : tool.state;
   return btn(
     "tool",
-    `<span class="${tone(tool.state)}">${h(mark(tool.state))}</span><span class="verb">${h(verb(tool))}</span><span class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</span><span class="result ${tool.phase === "change" && tool.state === "done" ? "success" : "muted"}">${h(result)}</span>${tool.phase === "change" ? counts(totals(run, tool)) : ""}<span class="time">${tool.phase === "change" ? "open ▸" : duration(tool.durationMs)}</span>`,
+    `<span class="${tone(tool.state)}">${tool.state === "running" ? spinner() : h(mark(tool.state))}</span><span class="verb">${h(verb(tool))}</span><span class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</span><span class="result ${tool.phase === "change" && tool.state === "done" ? "success" : "muted"}">${h(result)}</span>${tool.phase === "change" ? counts(totals(run, tool)) : ""}<span class="time">${tool.phase === "change" ? "open ▸" : duration(tool.durationMs)}</span>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""}`,
     true,
@@ -442,7 +447,7 @@ function runHTML(run: GraphicsRun, index: number) {
       body += `<div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div>`;
     if (entry.type === "reasoning") {
       const live = active(run) && i === run.entries.length - 1;
-      body += `<details class="thinking ${live ? "live" : ""}" data-detail="${key}"${(live && !detailsClosed.has(key)) || detailsOpen.has(key) ? " open" : ""}><summary>◇ ${live ? "Thinking" : "Thought"}${live ? '<img src="assets/thinking-dots.svg" alt="">' : ""} <span class="muted">${duration(entry.durationMs)}</span></summary><pre>${h(entry.raw)}</pre></details>`;
+      body += `<details class="thinking ${live ? "live" : ""}" data-detail="${key}"${(live && !detailsClosed.has(key)) || detailsOpen.has(key) ? " open" : ""}><summary>${live ? spinner() : "◇"} ${live ? "Thinking" : "Thought"} <span class="muted">${duration(entry.durationMs)}</span></summary><pre>${h(entry.raw)}</pre></details>`;
     }
     if (entry.type === "tool") {
       const group: ToolEntry[] = [entry];
@@ -517,7 +522,7 @@ function runHTML(run: GraphicsRun, index: number) {
             ? `${verb(latestTool)} `
             : "Thinking";
   const activity = active(run)
-    ? `<div class="live-activity"><img src="assets/activity-dot.svg" width="8" height="8" alt="">${h(phase + (latestTool?.detail ?? "") + (latestTool ? "…" : "…"))}</div>`
+    ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.detail ?? "") + (latestTool ? "…" : "…"))}</div>`
     : "";
   return `<div class="request"><span class="mark">▶</span><span class="text">${h(run.content)}</span><time>${clock(run.createdAt).slice(0, 5)}</time></div><div class="response ${active(run) ? "running" : run.status === "failed" ? "failed" : ""}"><div class="speaker"><span>demesne</span><time>${clock(run.entries.find((e) => e.type === "assistant")?.type === "assistant" ? (run.entries.find((e) => e.type === "assistant") as any).at : run.createdAt)}${active(run) ? " · live" : ""}</time></div>${body}${footer}${activity}</div>`;
 }
@@ -3258,8 +3263,13 @@ void window.demesne
     notice(String(error));
     window.demesne.ready();
   });
-// Thinking sub-agents' phrases advance in place; the DOM (and so the
-// terminal's tiles) only changes when a phrase does.
+// Spinners and thinking sub-agents' phrases advance in place; the DOM (and
+// so the terminal's tiles) only changes when a glyph or phrase does.
+setInterval(() => {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const frame = spinnerFrame();
+  for (const span of document.querySelectorAll<HTMLElement>(".spin")) if (span.textContent !== frame) span.textContent = frame;
+}, 90);
 setInterval(() => {
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   for (const span of document.querySelectorAll<HTMLElement>("[data-subagent-phrase]")) {

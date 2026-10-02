@@ -99,6 +99,57 @@ test("a rejected completion is available to the planner on resume and after jour
   } finally { drive.dispose(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("completed subtask memory reaches the next decision and survives journal restore", async () => {
+  const root = mkdtempSync(join(tmpdir(), "drive-progress-")), path = join(root, "mission.json");
+  const requests: DriveRequest[] = [];
+  const services = { path, observe: observation, changed() {}, perform: async () => "Opened log", delayMs: 60_000,
+    decide: async (request: DriveRequest) => {
+      requests.push(structuredClone(request));
+      return response(decision({ kind: "key", key: "ctrl+b" }, {
+        notes: "Implementation finished; inspect recorded checks next.",
+        completed: ["Parser implementation finished"], remaining: ["Inspect recorded checks"],
+      }));
+    } };
+  const drive = new AgentDrive(services);
+  let restored: AgentDrive | undefined;
+  try {
+    drive.start("Implement and verify parser");
+    await drive.step();
+    expect(drive.state?.completed).toEqual(["Parser implementation finished"]);
+    expect(drive.state?.ledger?.tasks[0]?.status).toBe("active");
+    await drive.step();
+    expect(requests[1]?.memory.completed).toEqual(["Parser implementation finished"]);
+    expect(requests[1]?.memory.remaining).toEqual(["Inspect recorded checks"]);
+    expect(requests[1]?.memory.steps.at(-1)?.result).toBe("Opened log");
+    drive.control("pause");
+    restored = new AgentDrive(services);
+    restored.control("resume");
+    await restored.step();
+    expect(requests[2]?.memory.completed).toEqual(["Parser implementation finished"]);
+    expect(requests[2]?.memory.notes).toBe("Implementation finished; inspect recorded checks next.");
+  } finally { restored?.dispose(); drive.dispose(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("planner progress cannot erase or replace verified ledger completions", async () => {
+  const drive = new AgentDrive({ observe: observation, changed() {}, perform: async () => "Opened log", delayMs: 60_000,
+    decide: async () => response(decision({ kind: "key", key: "ctrl+b" }, {
+      completed: Array.from({ length: 32 }, (_, index) => `Subtask ${index}`),
+    })) });
+  try {
+    drive.start("Verify current task");
+    const ledger = drive.state!.ledger!;
+    const prior = structuredClone(ledger.tasks[0]!);
+    prior.id = "prior-task"; prior.title = "Previously verified task"; prior.status = "completed";
+    ledger.tasks.unshift(prior);
+    await drive.step();
+    expect(drive.state?.completed).toHaveLength(32);
+    expect(drive.state?.completed[0]).toBe("Previously verified task");
+    expect(drive.state?.completed[1]).toBe("Subtask 0");
+    expect(ledger.tasks[0]?.status).toBe("completed");
+    expect(ledger.tasks[1]?.status).toBe("active");
+  } finally { drive.dispose(); }
+});
+
 test("journal restores paused, holds a single writer, and does not replay prepared submissions", async () => {
   const root = mkdtempSync(join(tmpdir(), "demesne-drive-")); const path = join(root, "drive.json");
   let performs = 0;
@@ -603,4 +654,32 @@ test("Drive is told why alt+enter outside a Diff, and inspecting before any turn
   expect(() => validateDriveDecisionContext(decision({ kind: "key", key: "alt+enter" }), request({ panes: [{ surface: "diff", row: 0, column: 60, width: 40, height: 30 }] }))).not.toThrow();
   expect(() => validateDriveDecisionContext(decision({ kind: "inspect", target: "log" }), request({}))).toThrow("no turn to inspect yet");
   expect(() => validateDriveDecisionContext(decision({ kind: "inspect", target: "log" }), request({ navigation: { ...navigation, turn: "3" } }))).not.toThrow();
+});
+
+test("clicking and navigating the workbench never pauses Drive; writing in the composer does", async () => {
+  let drive: AgentDrive;
+  const { ui, internals } = workbench({ intervene: () => drive.intervene(), control: (control) => drive.control(control) });
+  const mouse = ui as unknown as { handleMouse(event: MouseEvent): void; drivePanelBounds: { column: number; width: number; height: number } };
+  drive = new AgentDrive({ observe: () => ui.observeDrive(), changed: (state) => ui.setDrive(state), perform: (action, screen, signal) => ui.performDrive(action, screen, signal),
+    decide: async () => response(decision({ kind: "wait" })), delayMs: 60_000 });
+  try {
+    ui.beginTurn({ userText: "Review", at: "now" }); ui.assistantDelta("Ready to review.\n".repeat(40)); ui.finishTurn("completed", "Done");
+    void ui.readPrompt({ history: [], commands: SLASH_COMMANDS, mentions: [] }); ui.frame(120, 30); drive.start("Review the recorded results");
+    internals.onKeypress("", { name: "j", meta: true }); ui.frame(120, 30);
+    const panel = mouse.drivePanelBounds;
+    for (let row = 0; row < panel.height; row += 3) mouse.handleMouse({ kind: "press", button: 0, row, col: panel.column + 1 });
+    mouse.handleMouse({ kind: "press", button: 0, row: panel.height - 1, col: panel.column - 1 });
+    mouse.handleMouse({ kind: "press", button: 0, row: 5, col: 10 });
+    for (const key of [{ name: "b", ctrl: true }, { name: "d", meta: true }, { name: "escape" }, { name: "up" }, { name: "pagedown" }, { name: "tab" }]) {
+      internals.onKeypress("", key); ui.frame(120, 30);
+    }
+    expect(drive.state?.status).toBe("running");
+    // A click above opened the session picker; typing in its search is not
+    // writing in the composer either.
+    internals.onKeypress("x", {}); expect(drive.state?.status).toBe("running");
+    internals.onKeypress("", { name: "escape" });
+    (ui as unknown as { sessionView: SessionView }).sessionView.focusInput();
+    internals.onKeypress("a", {});
+    expect(drive.state?.status).toBe("paused"); expect(ui.observeDrive().draft).toBe("a");
+  } finally { drive.dispose(); }
 });

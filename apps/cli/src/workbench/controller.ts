@@ -172,7 +172,6 @@ export interface ChooseOptions {
 
 export interface InputZone {
   driveAllowed?: boolean;
-  driveControl?: boolean;
   identity?: string;
   row: number;
   column?: number;
@@ -985,19 +984,21 @@ export class Workbench {
     key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; sequence?: string },
     fromScroll = false,
   ): void => {
-    if (!this.driveDispatch && !fromScroll) {
-      this.inputRevision++;
-      // Opening or reading Drive's own progress panel is observation, not a
-      // takeover of the conversation. Still invalidate stale UI targets.
-      const driveShortcut = this.driveShortcut(text, key);
-      const drivePanelKey = this.options.drive && (driveShortcut !== null || key.meta && key.name === "j" && this.mode !== "dialog"
-        || this.sessionView.driveOpen && !key.ctrl && !key.meta
-          && (key.name === "escape" || this.sessionView.focused && ["up", "down", "pageup", "pagedown", "home", "end"].includes(key.name ?? ""))
-        || this.sessionView.driveOpen && key.ctrl && key.name === "g");
-      const resumeReading = this.driveReadingHeld && key.ctrl && key.name === "g" && !this.sessionView.panelOpen && !this.preview?.open
-        && (this.mode === "input" || this.mode === "streaming");
-      if (this.mode !== "approval" && !drivePanelKey && !resumeReading) this.options.drive?.intervene();
-    }
+    const person = !this.driveDispatch && !fromScroll;
+    // Any key invalidates Drive's view of the screen, so it re-observes
+    // before acting. Only writing in the composer pauses it: reading,
+    // navigating and opening panels leave the mission running.
+    if (person) this.inputRevision++;
+    const approval = this.mode === "approval", draft = this.composerText();
+    this.handleKeypress(text, key);
+    if (person && !approval && this.composerText() !== draft) this.options.drive?.intervene();
+  };
+
+  /// The draft a person is writing: the composer, or the queued message while
+  /// a turn streams. Submitting clears it, which also counts as writing.
+  private composerText(): string { return `${this.mode === "streaming" ? "queued" : "draft"}\0${this.mode === "streaming" ? this.options.queue.get() : this.editor.value}`; }
+
+  private handleKeypress(text: string, key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; sequence?: string }): void {
     // Readline emits the terminal's Ctrl+_ / Ctrl+/ byte without a key name.
     if (text === "\x1f") key = { ...key, name: "_", ctrl: true };
     if (this.handleModalKey(text, key)) return;
@@ -1179,7 +1180,7 @@ export class Workbench {
       mentions: this.promptContext.mentions,
     });
     this.applyEditorResult(result);
-  };
+  }
 
   private handleModalKey(text: string, key: PromptEditorKey): boolean {
     if (this.mode === "approval" && this.question) {
@@ -1360,13 +1361,9 @@ export class Workbench {
     // Drive notes are excluded from observations, and their scrolling leaves
     // actionable panes and fixed controls in place.
     if (!this.driveDispatch && event.kind === "wheel" && !readingDrive) this.scrollRevision++;
-    if (!this.driveDispatch && event.kind === "press") {
-      this.inputRevision++;
-      const control = this.mouseZones.find((zone) => zone.row === event.row && event.col >= (zone.column ?? 0) && event.col < (zone.column ?? 0) + (zone.width ?? this.layout.width));
-      const panel = this.drivePanelBounds;
-      const overDrive = panel && event.row >= 0 && event.row < panel.height && event.col >= panel.column && event.col < panel.column + panel.width;
-      if (this.mode !== "approval" && !control?.driveControl && !overDrive) this.options.drive?.intervene();
-    }
+    // A click never pauses Drive; it re-observes before its next action.
+    // Writing in the composer is what takes over (see onKeypress).
+    if (!this.driveDispatch && event.kind === "press") this.inputRevision++;
     if (event.kind === "move" || event.kind === "drag") {
       const hovered = this.railZones.find((zone) => event.row >= zone.row && event.row < zone.row + zone.height && event.col >= zone.column && event.col < zone.column + zone.width)?.action ?? null;
       if (hovered !== this.railHovered) { this.railHovered = hovered; this.requestRender(); }
@@ -2085,7 +2082,7 @@ export class Workbench {
     }
     this.mouseZones = (modal ? [] : zones).map((zone) => ({ ...zone,
       driveAllowed: !["settings", "workspace", "drive-control", "drive-open", "drive-follow", "drive-trace-toggle"].includes(zone.action.kind),
-      driveControl: zone.action.kind.startsWith("drive-") || this.driveReadingHeld && zone.action.kind === "follow", identity: JSON.stringify(zone.action), run: () => {
+      identity: JSON.stringify(zone.action), run: () => {
       if (zone.action.kind === "drive-control") { this.options.drive?.control(zone.action.control); return; }
       if (zone.action.kind === "workspace") { this.showWorkspace(); this.requestRender(); return; }
       if (zone.action.kind === "context") { this.showContext(); this.requestRender(); return; }
@@ -2121,7 +2118,7 @@ export class Workbench {
         const lines = wrapDisplayText(sanitizeTerminalLine(preview.slice(-4000).replace(/\s+/g, " ")), Math.max(1, workspaceWidth - 2)).slice(-(cardHeight - 1));
         for (let row = 1; row < cardHeight; row++) canvas.put(top + row, inset, paint.text(`▎ ${lines[row - 1] ?? ""}`, "secondary"), workspaceWidth, "thinkingSurface");
       }
-      for (let row = top; row < layout.input.row; row++) this.mouseZones.push({ row, column: inset, width: workspaceWidth, driveControl: true, run: () => this.showDrive() });
+      for (let row = top; row < layout.input.row; row++) this.mouseZones.push({ row, column: inset, width: workspaceWidth, run: () => this.showDrive() });
     }
     for (let row = 0; row < layout.input.height; row++) canvas.put(layout.input.row + row, 0, input.lines[row] ?? "", width, "surface");
     for (const zone of input.zones) this.mouseZones.push({ ...zone, row: layout.input.row + 1 + zone.row });
@@ -2158,7 +2155,7 @@ export class Workbench {
     // Replace the former single-toggle hit target with the three real actions.
     this.mouseZones = this.mouseZones.filter((zone) => (zone.column ?? 0) < column);
     for (const zone of this.railZones) for (let row = zone.row; row < zone.row + zone.height; row++) {
-      this.mouseZones.push({ row, column: zone.column, width: zone.width, driveAllowed: zone.action !== "drive", driveControl: zone.action === "drive", identity: `rail:${zone.action}`, run: () => this.openRailAction(zone.action) });
+      this.mouseZones.push({ row, column: zone.column, width: zone.width, driveAllowed: zone.action !== "drive", identity: `rail:${zone.action}`, run: () => this.openRailAction(zone.action) });
     }
   }
 

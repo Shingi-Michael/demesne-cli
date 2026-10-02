@@ -21,6 +21,19 @@ export function matchModel(models: readonly ModelDescriptor[], query: string): M
   return { error: `Ambiguous model "${trimmed}": ${matches.map((model) => model.id).join(", ")}` };
 }
 
+/// A model by what a person calls it: exact ID, ID prefix, part of the ID
+/// ("astra" → gpt-6-astra), or its provider ("chatgpt", "qwen on pc").
+export function findModel<T extends { id: string; provider: string }>(models: readonly T[], query: string): { model: T } | { error: string } {
+  const wanted = query.trim().toLowerCase();
+  for (const test of [(model: T) => model.id.toLowerCase() === wanted, (model: T) => model.id.toLowerCase().startsWith(wanted),
+    (model: T) => model.id.toLowerCase().includes(wanted), (model: T) => model.provider.toLowerCase().includes(wanted)]) {
+    const matches = models.filter(test);
+    if (matches.length === 1) return { model: matches[0]! };
+    if (matches.length > 1) return { error: `"${query.trim()}" matches ${matches.map((model) => model.id).join(", ")}; be more specific.` };
+  }
+  return { error: `No model matches "${query.trim()}". Available: ${models.map((model) => model.id).join(", ")}` };
+}
+
 export async function selectModelInteractive(
   models: readonly ModelDescriptor[],
   currentId: string | undefined,

@@ -149,7 +149,7 @@ function buildPainter(enabled: boolean, initial: Theme): Painter {
 }
 
 export type SlashCommandId =
-  | "new" | "sessions" | "resume" | "rename" | "delete" | "model" | "export" | "plan"
+  | "new" | "sessions" | "resume" | "rename" | "delete" | "model" | "subagent" | "export" | "plan"
   | "status" | "context" | "diff" | "undo" | "compact" | "drive" | "clear" | "help" | "theme" | "exit"
   | `custom:${string}`;
 export type SlashCommandArgument = "none" | "optional" | "required";
@@ -183,6 +183,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: "rename", name: "/rename", aliases: [], argument: "required", argumentLabel: "title", description: "Rename the current session", section: "session" },
   { id: "delete", name: "/delete", aliases: ["/archive"], argument: "none", description: "Archive the current session", section: "session" },
   { id: "model", name: "/model", aliases: [], argument: "optional", argumentLabel: "id", description: "Switch the active model", section: "session" },
+  { id: "subagent", name: "/subagent", aliases: [], argument: "optional", argumentLabel: "model", description: "Choose the model sub-agents run on", section: "session" },
   { id: "theme", name: "/theme", aliases: [], argument: "optional", argumentLabel: "name", description: "Change the color theme", section: "session" },
   { id: "status", name: "/status", aliases: [], argument: "none", description: "Show session and runtime status", section: "inspect" },
   { id: "context", name: "/context", aliases: [], argument: "none", description: "Show context and run details", section: "inspect" },

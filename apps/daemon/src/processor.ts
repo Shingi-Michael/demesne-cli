@@ -28,6 +28,8 @@ export interface TurnProcessor {
   readonly preservesPromptCache?: boolean;
   createTurnInference?(thinkingEnabled: boolean | undefined, overrides?: InferenceOverrides): TurnInference;
   setModel?(modelId: string): void;
+  /// Every model this processor can route a call to, with its provider.
+  availableModels?(): { id: string; provider: string }[];
   runtimeStatus?(): RuntimeProfileStatus;
   listModels(signal?: AbortSignal): Promise<ModelDescriptor[]>;
   stream(

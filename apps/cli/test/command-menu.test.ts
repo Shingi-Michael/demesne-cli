@@ -126,8 +126,8 @@ test("the slash menu follows Figma 14:9: group counts, argument hints, aliases, 
   const { type, screen } = fixture();
   type("/");
   const text = screen(120, 32);
-  expect(text).toMatch(/SESSION +7/);
+  expect(text).toMatch(/SESSION +8/);
   expect(text).toMatch(/\/new \[title\] +Start a fresh session +↵/);
   expect(text).toMatch(/\/resume <id> +Switch to a session +\/switch/);
-  expect(text).toMatch(/↑↓ select {2}↵ run {2}Tab complete {2}Esc close +18 commands · \d+ more below ↓/);
+  expect(text).toMatch(/↑↓ select {2}↵ run {2}Tab complete {2}Esc close +19 commands · \d+ more below ↓/);
 });

@@ -335,7 +335,7 @@ export function renderSessionFlow(options: {
           const candidate = run.entries[cursor]!;
           if (candidate.type === "reasoning" && group.length && !candidate.streaming && candidate !== liveReasoning) { pending.push(candidate); continue; }
           if (candidate.type !== "tool" || candidate.state !== "done" || candidate.waiting || failed(candidate)
-            || candidate.phase !== "inspect" || candidate.name === "run_command") break;
+            || candidate.phase !== "inspect" || candidate.name === "run_command" || candidate.name === "subagent") break;
           group.push(candidate);
           thoughts.push(...pending); pending = [];
           span = cursor - index + 1;

@@ -53,3 +53,22 @@ test("a thinking sub-agent's card cycles phrases; real steps replace them; finis
     expect(card()).toMatch(/Agent +Find restore(?! ·)/);
   } finally { Date.now = real; }
 });
+
+test("the phrase reads apart from the task: dim separator, then blue italic", () => {
+  const real = Date.now, fixed = 1_000_000_001_000;
+  Date.now = () => fixed;
+  try {
+  const paint = createPainter(true);
+  const ui = new Workbench({ paint, contextRail: new CliContextRail({ id: "t", provider: "t" }, "/project"), sessionTitle: "S", version: "t",
+    onExit() {}, onInterrupt() {}, queue: { get: () => "", set() {} } });
+  (ui as unknown as { sessionId: string }).sessionId = "home";
+  ui.beginTurn({ userText: "Investigate", at: "now" });
+  ui.toolRequested({ toolCallId: "a", name: "subagent", arguments: { description: "Find restore", prompt: "x" } });
+  ui.toolProgress({ toolCallId: "a", text: "starting" });
+  const row = ui.frame(120, 20).rows.find((line) => stripVTControlCharacters(line).includes("Find restore"))!;
+  const phrase = subagentPhrase(0, fixed, "");
+  expect(row).toContain(paint.italic(phrase, "electric"));
+  expect(row).toContain(paint.text(" · ", "muted"));
+  expect(row).not.toContain(paint.text(`Find restore · ${phrase}`, "paper"));
+  } finally { Date.now = real; }
+});

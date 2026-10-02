@@ -377,7 +377,7 @@ function toolTarget(run: GraphicsRun, tool: ToolEntry) {
   const slot = run.entries.filter((entry) => entry.type === "tool" && entry.name === "subagent").indexOf(tool);
   const model = /^([^·]+) · /.exec(tool.trace?.find((segment) => segment.kind === "step")?.text ?? "")?.[1]?.trim() ?? state!.model.id;
   const phrase = matchMedia("(prefers-reduced-motion: reduce)").matches ? "thinking" : subagentPhrase(slot, Date.now(), model);
-  return `${h(base)} · <span data-subagent-phrase data-slot="${slot}" data-model="${h(model)}">${h(phrase)}</span>`;
+  return `${h(base)}<span class="muted"> · </span><span class="phrase" data-subagent-phrase data-slot="${slot}" data-model="${h(model)}">${h(phrase)}</span>`;
 }
 function toolRow(run: GraphicsRun, tool: ToolEntry) {
   const result =

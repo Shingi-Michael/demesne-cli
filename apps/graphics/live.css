@@ -2199,3 +2199,8 @@ button:disabled {
   color: var(--electric);
   font-family: JetBrains Mono, monospace;
 }
+/* A thinking sub-agent's phrase, set apart from its white task name. */
+.phrase {
+  color: var(--electric);
+  font-style: italic;
+}

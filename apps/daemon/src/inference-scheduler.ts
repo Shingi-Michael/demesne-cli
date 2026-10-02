@@ -18,14 +18,12 @@ export interface InferenceContinuationDrainRequest {
 }
 
 export interface InferenceBoundaryHook {
-  (
-    snapshot: InferenceBoundarySnapshot,
-    signal: AbortSignal,
-  ): Promise<void | InferenceContinuationDrainRequest>;
+  (snapshot: InferenceBoundarySnapshot, signal: AbortSignal): Promise<void | InferenceContinuationDrainRequest>;
   supportsContinuationDrain?: boolean;
 }
 
 interface Waiter {
+  /// Set on a Drive check-in: the worker turn it reviews.
   reviewFor?: string;
   turnId: string;
   enqueuedAt: number;
@@ -38,6 +36,7 @@ interface Waiter {
 export class InferenceScheduler {
   readonly capacity: number;
   private active = 0;
+  /// One queued or active review per worker turn.
   private readonly reviewOwners = new Map<string, string>();
   private lastGrantWasReview = false;
   private readonly waiters: Waiter[] = [];
@@ -60,9 +59,7 @@ export class InferenceScheduler {
     private readonly beforeNextGrant?: InferenceBoundaryHook,
   ) {
     if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 1024) {
-      throw new Error(
-        "Inference scheduler capacity must be an integer between 1 and 1024",
-      );
+      throw new Error("Inference scheduler capacity must be an integer between 1 and 1024");
     }
     if (beforeNextGrant && capacity !== 1) {
       throw new Error("Inference scheduler boundary hooks require capacity 1");
@@ -74,10 +71,10 @@ export class InferenceScheduler {
     return this.active;
   }
 
+  /// 1-based position the turn would be granted at, or null when not queued.
   queuePosition(turnId: string): number | null {
     const pending = [...this.waiters];
-    let lastReview = this.lastGrantWasReview,
-      position = 0;
+    let lastReview = this.lastGrantWasReview, position = 0;
     while (pending.length) {
       const next = this.nextWaiterIndex(pending, lastReview);
       const [waiter] = pending.splice(next < 0 ? 0 : next, 1);
@@ -92,24 +89,11 @@ export class InferenceScheduler {
     return this.waiters.length;
   }
 
-  acquire(
-    turnId: string,
-    signal: AbortSignal,
-    options: { reviewFor?: string } = {},
-  ): Promise<InferenceLease> {
-    if (!turnId)
-      return Promise.reject(
-        new Error("Inference scheduler turn ID cannot be empty"),
-      );
-    if (signal.aborted)
-      return Promise.reject(
-        signal.reason ?? new DOMException("Aborted", "AbortError"),
-      );
+  acquire(turnId: string, signal: AbortSignal, options: { reviewFor?: string } = {}): Promise<InferenceLease> {
+    if (!turnId) return Promise.reject(new Error("Inference scheduler turn ID cannot be empty"));
+    if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
     if (this.terminal) return Promise.reject(this.terminalReason);
-    if (options.reviewFor && this.reviewOwners.has(options.reviewFor))
-      return Promise.reject(
-        new Error("A review for this worker is already queued or running"),
-      );
+    if (options.reviewFor && this.reviewOwners.has(options.reviewFor)) return Promise.reject(new Error("A review for this worker is already queued or running"));
     if (options.reviewFor) this.reviewOwners.set(options.reviewFor, turnId);
     return new Promise<InferenceLease>((resolve, reject) => {
       const waiter: Waiter = {
@@ -134,12 +118,7 @@ export class InferenceScheduler {
     });
   }
 
-  async close(
-    reason: unknown = new DOMException(
-      "Inference scheduler closed",
-      "AbortError",
-    ),
-  ): Promise<void> {
+  async close(reason: unknown = new DOMException("Inference scheduler closed", "AbortError")): Promise<void> {
     if (!this.terminal) this.fail(reason);
     await this.pumpTask;
   }
@@ -160,34 +139,24 @@ export class InferenceScheduler {
       while (this.active < this.capacity && !this.terminal) {
         this.removeAbortedWaiters();
         if (this.waiters.length === 0) return;
-        const canEvaluatePendingContinuations =
-          this.beforeNextGrant?.supportsContinuationDrain === true;
-        const shouldEvaluateBoundary =
-          this.beforeNextGrant &&
-          !this.boundaryDisabled &&
-          this.active === 0 &&
-          (this.continuationDrainActive
+        const canEvaluatePendingContinuations = this.beforeNextGrant?.supportsContinuationDrain === true;
+        const shouldEvaluateBoundary = this.beforeNextGrant && !this.boundaryDisabled && this.active === 0 && (
+          this.continuationDrainActive
             ? this.pendingContinuationTurns.size === 0
-            : this.settledLeaseCount > this.lastBoundaryLeaseCount &&
-              (this.pendingContinuationTurns.size === 0 ||
-                canEvaluatePendingContinuations));
+            : this.settledLeaseCount > this.lastBoundaryLeaseCount
+              && (this.pendingContinuationTurns.size === 0 || canEvaluatePendingContinuations)
+        );
         if (shouldEvaluateBoundary) {
-          if (!this.continuationDrainActive)
-            this.lastBoundaryLeaseCount = this.settledLeaseCount;
-          const result = await this.beforeNextGrant!(
-            {
-              activeCount: 0,
-              queuedCount: this.waiters.length,
-              settledLeaseCount: this.settledLeaseCount,
-              pendingContinuationTurnCount: this.pendingContinuationTurns.size,
-              continuationDrainActive: this.continuationDrainActive,
-            },
-            this.lifecycle.signal,
-          );
-          if (result?.action === "drain_continuations")
-            this.startContinuationDrain(result);
-          else if (this.continuationDrainActive)
-            this.stopContinuationDrain(false);
+          if (!this.continuationDrainActive) this.lastBoundaryLeaseCount = this.settledLeaseCount;
+          const result = await this.beforeNextGrant!({
+            activeCount: 0,
+            queuedCount: this.waiters.length,
+            settledLeaseCount: this.settledLeaseCount,
+            pendingContinuationTurnCount: this.pendingContinuationTurns.size,
+            continuationDrainActive: this.continuationDrainActive,
+          }, this.lifecycle.signal);
+          if (result?.action === "drain_continuations") this.startContinuationDrain(result);
+          else if (this.continuationDrainActive) this.stopContinuationDrain(false);
           this.removeAbortedWaiters();
           if (this.waiters.length === 0) return;
         }
@@ -198,9 +167,7 @@ export class InferenceScheduler {
         waiter.signal.removeEventListener("abort", waiter.onAbort);
         if (waiter.signal.aborted) {
           if (waiter.reviewFor) this.reviewOwners.delete(waiter.reviewFor);
-          waiter.reject(
-            waiter.signal.reason ?? new DOMException("Aborted", "AbortError"),
-          );
+          waiter.reject(waiter.signal.reason ?? new DOMException("Aborted", "AbortError"));
           continue;
         }
         this.active += 1;
@@ -226,57 +193,34 @@ export class InferenceScheduler {
     } finally {
       this.pumping = false;
       this.pumpTask = undefined;
-      if (
-        !this.terminal &&
-        this.active < this.capacity &&
-        this.hasGrantableWaiter()
-      ) {
+      if (!this.terminal && this.active < this.capacity && this.hasGrantableWaiter()) {
         this.requestDrain();
       }
     }
   }
 
-  private nextWaiterIndex(
-    waiters = this.waiters,
-    lastReview = this.lastGrantWasReview,
-  ): number {
-    // Strict runtime continuation drains retain their existing ordering.
-    if (this.continuationDrainActive)
-      return waiters.findIndex((waiter) =>
-        this.pendingContinuationTurns.has(waiter.turnId),
-      );
+  /// Drive reviews take the next slot, alternating with normal work so neither
+  /// starves. Strict runtime continuation drains keep their own ordering.
+  private nextWaiterIndex(waiters = this.waiters, lastReview = this.lastGrantWasReview): number {
+    if (this.continuationDrainActive) return waiters.findIndex((waiter) => this.pendingContinuationTurns.has(waiter.turnId));
     const review = waiters.findIndex((waiter) => Boolean(waiter.reviewFor));
     const normal = waiters.findIndex((waiter) => !waiter.reviewFor);
     if (review >= 0 && (!lastReview || normal < 0)) return review;
     return normal >= 0 ? normal : 0;
   }
+
   private hasGrantableWaiter(): boolean {
-    return (
-      this.waiters.length > 0 &&
-      (!this.continuationDrainActive ||
-        this.pendingContinuationTurns.size === 0 ||
-        this.waiters.some((waiter) =>
-          this.pendingContinuationTurns.has(waiter.turnId),
-        ))
-    );
+    return this.waiters.length > 0 && (!this.continuationDrainActive
+      || this.pendingContinuationTurns.size === 0
+      || this.waiters.some((waiter) => this.pendingContinuationTurns.has(waiter.turnId)));
   }
 
-  private startContinuationDrain(
-    request: InferenceContinuationDrainRequest,
-  ): void {
-    if (
-      !Number.isSafeInteger(request.timeoutMs) ||
-      request.timeoutMs < 1 ||
-      request.timeoutMs > 10 * 60_000
-    ) {
-      throw new Error(
-        "Inference continuation drain timeout must be an integer between 1 and 600000",
-      );
+  private startContinuationDrain(request: InferenceContinuationDrainRequest): void {
+    if (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 1 || request.timeoutMs > 10 * 60_000) {
+      throw new Error("Inference continuation drain timeout must be an integer between 1 and 600000");
     }
     if (this.pendingContinuationTurns.size === 0) {
-      throw new Error(
-        "Inference continuation drain requires a pending turn continuation",
-      );
+      throw new Error("Inference continuation drain requires a pending turn continuation");
     }
     if (this.continuationDrainActive) return;
     this.continuationDrainActive = true;
@@ -291,9 +235,7 @@ export class InferenceScheduler {
   private stopContinuationDrain(disableBoundary: boolean): void {
     if (this.continuationDrainTimer) clearTimeout(this.continuationDrainTimer);
     this.continuationDrainTimer = undefined;
-    const onTimeout = disableBoundary
-      ? this.continuationDrainTimeoutCallback
-      : undefined;
+    const onTimeout = disableBoundary ? this.continuationDrainTimeoutCallback : undefined;
     this.continuationDrainTimeoutCallback = undefined;
     this.continuationDrainActive = false;
     if (disableBoundary) this.boundaryDisabled = true;
@@ -307,9 +249,7 @@ export class InferenceScheduler {
       this.waiters.splice(index, 1);
       waiter.signal.removeEventListener("abort", waiter.onAbort);
       if (waiter.reviewFor) this.reviewOwners.delete(waiter.reviewFor);
-      waiter.reject(
-        waiter.signal.reason ?? new DOMException("Aborted", "AbortError"),
-      );
+      waiter.reject(waiter.signal.reason ?? new DOMException("Aborted", "AbortError"));
     }
   }
 

@@ -202,7 +202,10 @@ export function createDaemonApp(options: {
     const workspaceRoot = store.getSession(sessionId)?.workspace?.root;
     if (!workspaceRoot) return apiError("invalid_state", "Session has no workspace", 409);
 
-    if(store.getSession(sessionId)?.turns.some(turn=>turn.status==="running"||turn.status==="queued")||commands.runningInWorkspace(workspaceRoot))return apiError("invalid_state","Wait for running work before undoing changes",409);
+    // Work that can edit files must settle first; summarizing the conversation
+    // edits nothing, and an undo during it invalidates the stale checkpoint.
+    const editing = store.getSession(sessionId)?.turns.some((turn) => turn.kind !== "compaction" && (turn.status === "running" || turn.status === "queued"));
+    if (editing || commands.runningInWorkspace(workspaceRoot)) return apiError("invalid_state", "Wait for running work before undoing changes", 409);
     const requested = request.paths ? new Set(request.paths) : null;
     if (requested) {
       const known = new Set(target.files.map((file) => file.path));

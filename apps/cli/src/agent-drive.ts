@@ -178,7 +178,15 @@ export class AgentDrive {
     if (control === "resume") {
       const reason = this.state.protection?.trip?.reason ?? driveBudgetReason(this.state.protection!);
       if (reason) { this.protectionStop(reason); throw new Error(this.state.activity); }
+      // Resuming a blocked mission is the person saying the blocker may be
+      // gone (a tool, setting or permission changed). Without this, Drive
+      // re-reads the same answer that reported the blocker and blocks again.
+      const unblocking = this.state.status === "blocked";
       this.halt(); this.journal?.acquire(); this.allowance = 256;
+      if (unblocking) {
+        this.state.feedback = "You resumed this mission after it was blocked: treat that as the person saying the blocker may now be resolved (a tool, setting or permission may have changed since). Do not re-decide from the earlier answer that reported the blocker. Retry the blocked step once with a fresh request to the coding agent, and block again only if that fresh attempt fails the same way.";
+        this.lastSubmission = ""; this.duplicateSubmissions = 0;
+      }
       if (this.state.status === "idle" && this.state.autonomy) this.state.autonomy.consulted = false;
       this.repeated = { signature: "", count: 0 };
       this.state.status = "running"; this.state.activity = "Resuming from the current UI; completed actions will not be replayed.";

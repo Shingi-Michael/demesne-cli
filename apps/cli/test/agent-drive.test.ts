@@ -737,3 +737,19 @@ test("finished sub-agents keep their own cards instead of folding into Explored"
   expect(frame).not.toContain("Explored");
   for (const name of ["First", "Second", "Third"]) expect(frame).toContain(`${name} question`);
 });
+
+test("resuming a blocked mission tells Drive to retry the blocked step instead of re-reading the old answer", async () => {
+  const requests: DriveRequest[] = [];
+  let calls = 0;
+  const drive = new AgentDrive({ observe: observation, perform: async () => "Sent through the visible composer: retry", changed() {}, delayMs: 60_000,
+    decide: async (request) => { requests.push(structuredClone(request)); return response(decision(++calls === 1 ? { kind: "blocked" } : { kind: "wait" })); } });
+  try {
+    drive.start("Send an astra sub-agent to look at the UI"); await drive.step();
+    expect(drive.state?.status).toBe("blocked");
+    drive.control("resume"); await drive.step();
+    expect(requests[1]!.memory.feedback).toContain("Retry the blocked step once with a fresh request");
+    // A pause is not a block: resuming it carries no such instruction.
+    drive.control("pause"); drive.control("resume"); await drive.step();
+    expect(requests[2]!.memory.feedback ?? "").not.toContain("Retry the blocked step");
+  } finally { drive.dispose(); }
+});

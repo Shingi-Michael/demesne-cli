@@ -1,13 +1,15 @@
-import { formatFooterLine, formatTokenCount, sanitizeTerminalLine, visibleLength, wrapDisplayText, type Painter, type PaletteColor } from "@demesne/brand";
+import { formatFooterLine, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, wrapDisplayText, type Painter, type PaletteColor } from "@demesne/brand";
 import type { DriveState, DriveTrace } from "@demesne/protocol";
 import type { DriveControl } from "../agent-drive.ts";
 import { traceActive } from "../drive-trace.ts";
 import { Canvas } from "./canvas.ts";
 import { driveTraceLabel, driveTraceLines } from "./drive-trace-view.ts";
+import { driveSince, driveStepLine, driveTaskList } from "./drive-timeline.ts";
 import { keycap } from "./session-chrome.ts";
 import { surface } from "./surface.ts";
 
-export type DriveSection = "reasoning" | "raw" | "constraints";
+/// The panel's one fold: everything long (answer, reasoning, output, mission, budget).
+export type DriveSection = "details";
 export type DrivePanelAction = { kind: "drive-open" } | { kind: "drive-control"; control: DriveControl }
   | { kind: "drive-follow" } | { kind: "drive-trace-toggle"; id: string } | { kind: "drive-section-toggle"; section: DriveSection };
 
@@ -56,13 +58,12 @@ function verdict(state: DriveState, trace: DriveTrace | undefined, now: number):
   return { mark: "◇", label: "Reviewing", tone: "secondary", surface: "raised", reason: note };
 }
 
-const ago = (iso: string, now: number): string => {
-  const seconds = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
-  if (!Number.isFinite(seconds)) return "";
-  return seconds < 90 ? `${seconds}s ago` : seconds < 5400 ? `${Math.round(seconds / 60)}m ago` : `${Math.round(seconds / 3600)}h ago`;
-};
 const minutes = (ms: number): string => ms < 3_600_000 ? `${Math.round(ms / 60_000)}m` : `${Math.floor(ms / 3_600_000)}h ${Math.round(ms % 3_600_000 / 60_000)}m`;
 
+/// Figma 85:697, simplified: a status line and one short sentence, a
+/// timeline of what Drive did, a plain task checklist and one stats line.
+/// Everything long (the full note or answer, reasoning, raw output, the
+/// mission, budget) stays folded under Details.
 export function renderDrivePanel(width: number, height: number, paint: Painter, state: DriveState | null, offset: number,
   options: { follow?: boolean; followStep?: number; snapshot?: { state: DriveState; now: number }; collapsed?: ReadonlySet<string>; sections?: ReadonlySet<DriveSection>; now?: number } = {}) {
   const canvas = new Canvas(width, height, paint);
@@ -74,6 +75,15 @@ export function renderDrivePanel(width: number, height: number, paint: Painter, 
   const add = (text: string, tone: PaletteColor = "secondary") => {
     for (const line of text.split("\n")) content.push(...wrapDisplayText(sanitizeTerminalLine(line), inner).map((row) => paint.text(row, tone)));
   };
+  // At most `lines` rows; a longer text ends in an ellipsis (the whole of it is under Details).
+  const clip = (text: string, tone: PaletteColor, lines = 2, indent = "") => {
+    const rows = wrapDisplayText(sanitizeTerminalLine(text.replace(/\s+/g, " ").trim()), Math.max(1, inner - indent.length));
+    const kept = rows.slice(0, lines);
+    if (rows.length > lines) kept[lines - 1] = truncateText(`${kept[lines - 1]!} ${rows[lines]!}`, Math.max(1, inner - indent.length));
+    content.push(...kept.map((row, index) => (index ? indent : "") + paint.text(row, tone)));
+    return rows.length > lines;
+  };
+  const heading = (label: string) => content.push(paint.text(label, "muted"));
   const control = (text: string, action: DrivePanelAction, column = 0) => { controls.push({ row: content.length, column, width: visibleLength(text), action }); content.push(text); };
   const footer = height >= 4 ? 1 : 0;
   const footerHints: { key: string; label: string; action?: DrivePanelAction }[] = [];
@@ -82,14 +92,11 @@ export function renderDrivePanel(width: number, height: number, paint: Painter, 
     const live = state;
     // The body can be held for reading; controls and the footer stay current.
     state = options.snapshot?.state ?? state;
+    const at = options.snapshot?.now ?? now;
     const trace = state.traces?.at(-1);
-    const card = verdict(state, trace, options.snapshot?.now ?? now);
-    const cardWidth = inner;
-    content.push(paint.text(`╭${"─".repeat(Math.max(0, cardWidth - 2))}╮`, card.tone));
-    const cardRow = (text: string) => content.push(paint.text("│", card.tone) + surface(` ${text}`, Math.max(0, cardWidth - 2), paint, card.surface) + paint.text("│", card.tone));
-    cardRow(paint.text(`${card.mark} ${card.label}`, card.tone));
-    for (const line of wrapDisplayText(sanitizeTerminalLine(card.reason || " "), Math.max(1, cardWidth - 4))) cardRow(paint.text(line, card.reasonTone ?? "paper"));
-    content.push(paint.text(`╰${"─".repeat(Math.max(0, cardWidth - 2))}╯`, card.tone));
+    const card = verdict(state, trace, at);
+    content.push(paint.bold(`${card.mark} ${card.label}`, card.tone));
+    const clipped = card.reason ? clip(card.reason, "paper") : false;
     // Resume and Stop buttons where Drive is holding for you.
     const resumable = !live.protection?.trip && (["paused", "blocked", "stopped", "idle"].includes(live.status));
     const active = live.status === "running" || live.status === "waiting";
@@ -98,38 +105,6 @@ export function renderDrivePanel(width: number, height: number, paint: Painter, 
       controls.push({ row: content.length, column: 0, width: visibleLength(resume), action: { kind: "drive-control", control: "resume" } });
       if (!["stopped", "completed"].includes(live.status)) controls.push({ row: content.length, column: visibleLength(resume) + 2, width: visibleLength(stop), action: { kind: "drive-control", control: "stop" } });
       content.push(resume + (["stopped", "completed"].includes(live.status) ? "" : "  " + stop));
-    }
-    content.push("");
-    // Tasks while working through a mission; a summary once it is complete.
-    const finished = state.autonomy?.history.map((item) => item.task) ?? state.completed;
-    if (state.status === "completed") {
-      add("SUMMARY", "muted");
-      const used = state.protection?.used;
-      const row = (label: string, value: string, tone: PaletteColor = "paper") => content.push(paint.text(label.padEnd(10), "muted") + paint.text(value, tone));
-      if (finished.length) row("tasks", `${finished.length} done`, "citron");
-      row("steps", String(state.step));
-      if (used) { row("time", minutes(used.activeMs)); row("tokens", formatTokenCount(used.planningTokens + used.workerTokens)); }
-      content.push("");
-    } else if (!state.ledger && (finished.length || state.autonomy?.task || state.remaining.length)) {
-      add("TASKS", "muted");
-      for (const item of finished.slice(-4)) add(`✓ ${item}`, "secondary");
-      if (state.autonomy?.task) add(`◌ ${state.autonomy.task}`, "paper");
-      for (const item of state.remaining.slice(0, 4)) add(`· ${item}`, "muted");
-      content.push("");
-    }
-    add(state.mode === "continuous" ? "Continuous · select unfinished work, then idle" : "Bounded · finish after verification", "muted");
-    if (Array.isArray(state.ledger?.tasks)) {
-      for (const task of state.ledger!.tasks.filter(task=>task && typeof task.id === "string" && Array.isArray(task.criteria) && Array.isArray(task.completions)).slice(-6)) {
-        add(`${task.status === "completed" ? "✓" : "◌"} ${task.id.slice(0,8)} · ${task.title}`, "secondary");
-        if (task.id === state.ledger!.currentTaskId) {
-          for (const criterion of task.criteria) add(`  · ${criterion}`, "muted");
-          if (task.reopened) add(`Reopened: ${task.reopened.reason}`, "thinking");
-          const completion=task.completions.at(-1);
-          if (completion) add(`Recorded ${completion.files.length} files · ${completion.checks.length} checks · ${completion.turnId?.slice(0,8) ?? "legacy record"}`, "muted");
-        }
-      }
-      if (state.ledger!.tasks.some(task=>task.status === "completed")) add("Reopen: /drive reopen <task-id> <reason>", "muted");
-      content.push("");
     }
     // A limit stop shows the resource that ran out.
     if (state.protection?.trip) {
@@ -144,73 +119,98 @@ export function renderDrivePanel(width: number, height: number, paint: Painter, 
       content.push(paint.text(name, "muted") + " " + paint.text(`${format(value)} / ${format(limit)} · ${Math.round(ratio * 100)}%`, "signal"));
       content.push(paint.text("━".repeat(filled), "signal") + paint.text("━".repeat(bar - filled), "rule"));
       add("Start /drive <revised mission> to continue; Resume cannot clear a limit stop.", "muted");
+    }
+    content.push("");
+    // What Drive did, newest last, then what it is doing now.
+    const steps = state.steps.slice(-5);
+    const working = trace && traceActive(trace) ? "Deciding the next step" : live.status === "waiting" ? "Waiting for the coder" : "";
+    if (steps.length || working) {
+      heading("TIMELINE");
+      const entry = (mark: string, text: string, tone: PaletteColor, when: string) => {
+        const right = when ? paint.text(when, "muted") : "";
+        const room = Math.max(4, inner - visibleLength(when) - 3);
+        const rows = wrapDisplayText(`${mark} ${text}`, room);
+        content.push(formatFooterLine(paint.text(rows[0] ?? "", tone), right, inner));
+        if (rows.length > 1) content.push("  " + paint.text(truncateText(rows.slice(1).join(" ").replace(/^\s+/, ""), Math.max(1, inner - 2)), tone));
+      };
+      for (const step of steps) { const line = driveStepLine(step); entry(line.mark, line.text, line.tone, driveSince(step.at, at)); }
+      if (working) entry(trace && traceActive(trace) ? "◇" : "◌", working, "thinking", "now");
       content.push("");
     }
-    // Step and time, then who planned it and what it used.
-    const meta = [`Step ${state.step}`, state.protection && lastAction(state).kind === "redirect" ? `redirect ${state.protection.used.redirects} of ${state.protection.limits.maxRedirects}` : "",
-      state.recovery ? `attempt ${state.recovery.attempt} of ${state.recovery.limit}` : "", ago(state.updatedAt, options.snapshot?.now ?? now)].filter(Boolean).join(" · ");
-    add(meta, "muted");
-    const planner = trace?.source === "controller" ? "Local controller" : state.model ?? "Selected model";
-    add([planner, state.protection ? `${state.protection.used.planningTokens.toLocaleString()} tokens` : ""].filter(Boolean).join(" · "), "muted");
-    content.push("");
-    // Details stay folded until asked for.
-    const open = options.sections ?? new Set<DriveSection>();
-    const section = (name: DriveSection, label: string, body: () => void) => {
-      control(paint.text(`${open.has(name) ? "▾" : "▸"} ${label}`, "secondary"), { kind: "drive-section-toggle", section: name });
-      if (open.has(name)) { body(); content.push(""); }
-    };
-    section("reasoning", "Show reasoning", () => {
-      const settled = (state!.traces ?? []).filter((item) => !traceActive(item));
-      if (!settled.length) add("No finished steps yet.", "muted");
+    // Tasks as a plain checklist, without record IDs or criteria.
+    const ledger = Array.isArray(state.ledger?.tasks) ? state.ledger!.tasks.filter((item) => item && typeof item.title === "string") : [];
+    const tasks = driveTaskList(state);
+    if (tasks.length) {
+      heading("TASKS");
+      for (const item of tasks) content.push(paint.text(truncateText(`${item.mark} ${item.text}`, inner), item.tone));
+      content.push("");
+    }
+    // One line of numbers: step, time, tokens, and who planned the last step.
+    const used = state.protection?.used;
+    const planner = trace?.source === "controller" ? "Local controller" : (state.model ?? "").split("/").at(-1)?.trim() || "";
+    add([`step ${state.step}`, used ? minutes(used.activeMs) : "", used ? `${formatTokenCount(used.planningTokens + used.workerTokens)} tokens` : "", planner,
+      state.recovery ? `attempt ${state.recovery.attempt} of ${state.recovery.limit}` : "",
+      state.protection && lastAction(state).kind === "redirect" ? `redirect ${state.protection.used.redirects} of ${state.protection.limits.maxRedirects}` : ""]
+      .filter(Boolean).join(" · "), "muted");
+    // Everything long stays folded until asked for.
+    const open = options.sections?.has("details") ?? false;
+    control(paint.text(`${open ? "▾" : "▸"} Details`, "secondary"), { kind: "drive-section-toggle", section: "details" });
+    if (open) {
+      content.push("");
+      if (state.answer) { heading("ANSWER"); add(state.answer, "paper"); content.push(""); }
+      else if (clipped) { heading("NOTE"); add(card.reason, "paper"); content.push(""); }
+      heading("REASONING");
+      const settled = (state.traces ?? []).filter((item) => !traceActive(item));
+      if (!settled.length && !(trace && traceActive(trace))) add("No finished steps yet.", "muted");
       for (const item of settled.slice(-6)) {
-        const rendered = driveTraceLines(item, inner, paint, !options.collapsed?.has(item.id), options.snapshot?.now ?? now);
+        const rendered = driveTraceLines(item, inner, paint, !options.collapsed?.has(item.id), at);
         if (item.source !== "controller") controls.push({ row: content.length + rendered.thinkingRow, column: 0, width: inner, action: { kind: "drive-trace-toggle", id: item.id } });
         content.push(...rendered.rows, "");
       }
-    });
-    section("raw", "Raw output", () => {
-      if (!trace) { add("No model output yet.", "muted"); return; }
-      if (trace.text) add(trace.text, "paper");
-      if (trace.action) add(trace.action, "secondary");
-      if (trace.result) add(trace.result, trace.status === "failed" ? "signal" : "muted");
-      if (!trace.text && !trace.action && !trace.result) add("The model returned no text.", "muted");
-    });
-    section("constraints", "Constraints carried", () => {
-      add("MISSION", "muted"); add(state!.mission, "paper");
-      if (state!.notes) { add("NOTES", "muted"); add(state!.notes); }
-      if (state!.evidence.length) { add("EVIDENCE", "muted"); for (const item of state!.evidence.slice(-5)) add(`“${item.quote}”`); }
-      if (state!.protection) {
-        const { used, limits, migrated } = state!.protection;
-        add("BUDGET", "muted");
-        add(`${Math.floor(used.activeMs / 60_000)}/${limits.maxActiveMinutes} active min · ${used.cycles}/${limits.maxCycles} cycles`);
-        add(`${used.tasks}/${limits.maxTasks} tasks · ${used.workerRequests}/${limits.maxWorkerRequests} coder requests`);
-        add(`${used.checkIns}/${limits.maxCheckIns} check-ins · ${used.redirects}/${limits.maxRedirects} redirects`, "muted");
-        add(`${(used.planningTokens + used.workerTokens).toLocaleString()}/${limits.maxTokens.toLocaleString()} tokens`, "muted");
+      // While Drive plans, its live stream follows the finished steps.
+      if (trace && traceActive(trace)) {
+        const rendered = driveTraceLines(trace, inner, paint, !options.collapsed?.has(trace.id), at);
+        if (trace.source !== "controller") controls.push({ row: content.length + rendered.thinkingRow, column: 0, width: inner, action: { kind: "drive-trace-toggle", id: trace.id } });
+        streamLabel = content.length;
+        content.push(paint.text(`${driveTraceLabel(trace)} · step ${trace.step}`, "thinking"));
+        content.push(...rendered.rows.slice(2));
+        if (!options.follow) controls.push({ row: content.length, column: 0, width: 13, action: { kind: "drive-follow" } }), content.push(paint.text("↓ Follow live", "electric"));
+        content.push("");
+      }
+      if (trace && (trace.text || trace.action || trace.result)) {
+        heading("OUTPUT");
+        if (trace.text) add(trace.text, "paper");
+        if (trace.action) add(trace.action, "secondary");
+        if (trace.result) add(trace.result, trace.status === "failed" ? "signal" : "muted");
+        content.push("");
+      }
+      heading("MISSION"); add(state.mission, "paper");
+      add(state.mode === "continuous" ? "Continuous: finishes each task, chooses worthwhile next work, then goes idle." : "Bounded: finishes after one verified task.", "muted");
+      if (state.notes) { content.push(""); heading("NOTES"); add(state.notes); }
+      if (state.evidence.length) { content.push(""); heading("EVIDENCE"); for (const item of state.evidence.slice(-5)) add(`“${item.quote}”`); }
+      if (state.protection) {
+        const { used: spent, limits, migrated } = state.protection;
+        content.push(""); heading("BUDGET");
+        add(`${Math.floor(spent.activeMs / 60_000)}/${limits.maxActiveMinutes} active min · ${spent.cycles}/${limits.maxCycles} cycles`);
+        add(`${spent.tasks}/${limits.maxTasks} tasks · ${spent.workerRequests}/${limits.maxWorkerRequests} coder requests`);
+        add(`${spent.checkIns}/${limits.maxCheckIns} check-ins · ${spent.redirects}/${limits.maxRedirects} redirects`, "muted");
+        add(`${(spent.planningTokens + spent.workerTokens).toLocaleString()}/${limits.maxTokens.toLocaleString()} tokens`, "muted");
         if (migrated) add("Earlier mission usage is only partially available.", "muted");
       }
-    });
-    // While Drive plans, its live stream follows below the details.
-    if (trace && traceActive(trace)) {
-      content.push("");
-      const rendered = driveTraceLines(trace, inner, paint, !options.collapsed?.has(trace.id), options.snapshot?.now ?? now);
-      if (trace.source !== "controller") controls.push({ row: content.length + rendered.thinkingRow, column: 0, width: inner, action: { kind: "drive-trace-toggle", id: trace.id } });
-      streamLabel = content.length;
-      content.push(paint.text(`${driveTraceLabel(trace)} · step ${trace.step}`, "thinking"));
-      content.push(...rendered.rows.slice(2));
-      if (!options.follow) controls.push({ row: content.length, column: 0, width: 13, action: { kind: "drive-follow" } }), content.push(paint.text("↓ Follow live", "electric"));
+      if (ledger.some((item) => item.status === "completed")) { content.push(""); add("Reopen a finished task: /drive reopen <task-id> <reason>", "muted"); for (const item of ledger.filter((entry) => entry.status === "completed").slice(-4)) add(`${item.id.slice(0, 8)} · ${item.title}`, "muted"); }
     }
     if (active) footerHints.push({ key: "P", label: "pause", action: { kind: "drive-control", control: "pause" } });
     else if (resumable) footerHints.push({ key: "P", label: "resume", action: { kind: "drive-control", control: "resume" } });
     if (!["stopped", "completed"].includes(live.status) && !live.protection?.trip) footerHints.push({ key: "S", label: "stop", action: { kind: "drive-control", control: "stop" } });
   } else {
     add("Give Drive a mission", "paper"); add(""); add("/drive <what you want finished>", "electric"); add("");
-    add("Drive reads history, directs coding work, reviews results, then asks the coding agent about useful next improvements and continues.");
-    add(""); add("Your input pauses Drive. Existing tool approvals remain yours.", "muted");
+    add("Drive directs the coding agent through your workbench, reviews what it did, and keeps choosing worthwhile next work until nothing is left.");
+    add(""); add("Typing in the composer pauses Drive. Tool approvals stay yours.", "muted");
   }
   footerHints.push({ key: "Alt+J", label: "hide", action: { kind: "drive-open" } });
   const top = 2, room = Math.max(0, height - top - footer);
   const maximum = Math.max(0, content.length - room);
-  const streaming = !!state?.traces?.length && traceActive(state.traces.at(-1)!);
+  const streaming = !!state?.traces?.length && traceActive(state.traces.at(-1)!) && (options.sections?.has("details") ?? false);
   offset = options.follow && streaming ? Math.min(maximum, options.followStep === undefined ? maximum : offset + options.followStep) : Math.max(0, Math.min(offset, maximum));
   for (let row = 0; row < room; row++) canvas.put(top + row, 1, content[offset + row] ?? "", inner, "surface");
   // A long live stream keeps its label pinned at the top as it scrolls.
@@ -230,4 +230,3 @@ export function renderDrivePanel(width: number, height: number, paint: Painter, 
   }
   return { rows: canvas.rows, zones, offset, maximum };
 }
-

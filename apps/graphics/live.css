@@ -1208,52 +1208,71 @@
   font-size: 13px;
   line-height: 20px;
 }
-.verdict {
-  background: #0f2a1e;
-  border: 1px solid #1f5a3e;
-  border-radius: 8px;
-  padding: 10px 12px;
+/* Drive panel: status + timeline. One status line and a short sentence,
+   what Drive did, a plain checklist, one stats line; the rest under Details. */
+.drive-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.drive-status strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.drive-summary {
+  color: var(--paper);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.drive-heading {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  margin-bottom: 2px;
+}
+.drive-timeline,
+.drive-tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.drive-timeline li {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 6px;
+  align-items: baseline;
+}
+.drive-step {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.drive-timeline time {
+  color: var(--muted);
+  font-size: 12px;
+}
+.drive-tasks li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drive-details {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  margin-top: 8px;
 }
-.verdict h3 {
-  font-size: 15px;
-  line-height: 22px;
-  color: var(--citron);
-  margin: 0;
-  font-weight: 500;
-}
-.verdict p {
-  color: #a9c5b6;
-}
-.verdict.paused,
-.verdict.waiting,
-.verdict.idle,
-.verdict.stopped {
-  background: var(--surface);
-  border-color: var(--borderBright);
-}
-.verdict.paused h3,
-.verdict.waiting h3,
-.verdict.idle h3,
-.verdict.stopped h3 {
-  color: var(--secondary);
-}
-.verdict.blocked {
-  background: var(--errorSurface);
-  border-color: var(--composerStoppedBorder);
-}
-.verdict.blocked h3 {
-  color: var(--signal);
-}
-.verdict.retrying {
-  background: var(--thinkingSurface);
-  border-color: var(--composerQueuedBorder);
-}
-.verdict.retrying h3 {
-  color: var(--thinking);
-}
+.tone-electric { color: var(--electric); }
+.tone-secondary { color: var(--secondary); }
+.tone-muted { color: var(--muted); }
+.tone-citron { color: var(--citron); }
+.tone-thinking { color: var(--thinking); }
+.tone-signal { color: var(--signal); }
+.tone-paper { color: var(--paper); }
 .drive-content details summary {
   cursor: pointer;
   color: var(--secondary);

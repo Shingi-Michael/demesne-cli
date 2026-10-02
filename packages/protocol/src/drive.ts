@@ -55,6 +55,9 @@ export interface DriveObservation {
 export interface DriveEvidence { observationId: string; quote: string }
 export interface DriveDecision {
   action: DriveAction; note: string; notes: string; completed: string[]; remaining: string[]; evidence: DriveEvidence[];
+  /// A question's full answer, when completing with basis: answer. `note`
+  /// stays a one-line status for the panel.
+  answer?: string;
 }
 export interface DriveStep { step: number; action: string; note: string; result: string; at: string }
 export interface DriveMemory { notes: string; completed: string[]; remaining: string[]; evidence: DriveEvidence[]; steps: DriveStep[]; feedback?: string }
@@ -135,6 +138,8 @@ export interface DriveState extends DriveMemory {
   activity: string; step: number; model: string | null; updatedAt: string;
   /** Operator-visible provider output. Never sent back as planning memory. */
   traces?: DriveTrace[];
+  /** The answer a completed question mission delivered (shown under Details). */
+  answer?: string;
   autonomy?: DriveAutonomy;
   recovery?: { kind: DriveRecovery; attempt: number; limit: number; retryAt: number; message: string };
   protection?: DriveProtection;
@@ -226,7 +231,8 @@ export function parseDriveDecision(value: unknown): DriveDecision {
     action = { kind: "redirect", text: content };
   } else if (raw.kind === "blocked" || raw.kind === "wait" || raw.kind === "idle" || raw.kind === "keep_working") action = { kind: raw.kind };
   else invalid("action.kind", "expected click, key, compose, scroll, inspect, complete, next_task, idle, blocked, wait, keep_working, or redirect");
-  return { action, note: text(value.note, 2000, "note"), notes: text(value.notes, 8000, "notes", true), completed: list(value.completed, "completed"), remaining: list(value.remaining, "remaining"), evidence: evidence(value.evidence, "evidence") };
+  return { ...(typeof value.answer === "string" && value.answer.trim() ? { answer: text(value.answer, 16_000, "answer") } : {}),
+    action, note: text(value.note, 2000, "note"), notes: text(value.notes, 8000, "notes", true), completed: list(value.completed, "completed"), remaining: list(value.remaining, "remaining"), evidence: evidence(value.evidence, "evidence") };
 }
 export function driveComposerAllowed(value: string): boolean {
   const command = value.trim().split(/\s/, 1)[0]!;

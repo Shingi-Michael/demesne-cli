@@ -173,7 +173,7 @@ The originals stay in History and exports.
 
 ### Agent Drive
 
-`/drive <mission>` lets Demesne direct the work through the same composer you use: it finishes and verifies each task, decides for itself what is worth doing next within your mission, and goes idle when nothing worthwhile is left. Completed tasks keep their evidence and cannot silently restart. Use `/drive --bounded <mission>` to stop after one verified task, or `/drive reopen <task-id> <reason>` to revisit completed work. Alt+J opens its panel: a card shows what Drive decided (keep working, redirected, next task, blocked…), and with the panel focused and an empty draft, P pauses or resumes and S stops. See [Agent Drive](docs/agent-drive.md).
+`/drive <mission>` lets Demesne direct the work through the same composer you use: it finishes and verifies each task, decides for itself what is worth doing next within your mission, and goes idle when nothing worthwhile is left. Completed tasks keep their evidence and cannot silently restart. Use `/drive --bounded <mission>` to stop after one verified task, or `/drive reopen <task-id> <reason>` to revisit completed work. Alt+J opens its panel: a status line with one short sentence, a timeline of what Drive did, a plain task checklist and one stats line, with the full answer, reasoning, mission and budget folded under Details. With the panel focused and an empty draft, P pauses or resumes and S stops. See [Agent Drive](docs/agent-drive.md).
 
 ## Themes
 

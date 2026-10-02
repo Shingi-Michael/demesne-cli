@@ -94,6 +94,7 @@ export class AgentDrive {
   private repeated = { signature: "", count: 0 };
   private lastSubmission = "";
   private duplicateSubmissions = 0;
+  private staleDraftChecks = 0;
   private recoveryAttempts = 0;
   private nextAttemptAt = 0;
   private skipped = 0;
@@ -569,7 +570,18 @@ export class AgentDrive {
       if (state.activity !== activity || state.status !== "waiting") { state.status = "waiting"; state.activity = activity; this.publish(); }
       this.schedule(); return;
     }
-    if (observation.draft.trim()) { this.block("There is an existing composer draft. Submit or clear it, then Resume Drive."); return; }
+    if (observation.draft.trim()) {
+      // Drive's own just-sent message can linger in an observation taken
+      // before the composer cleared (the graphics app reports asynchronously).
+      // That is not your draft: look again shortly instead of blocking.
+      const own = this.lastSubmission !== "" && this.lastSubmission.startsWith(observation.draft.trim());
+      if (own && this.staleDraftChecks++ < 20) {
+        if (state.status !== "waiting") { state.status = "waiting"; state.activity = "Waiting for the composer to clear after sending."; this.publish(); }
+        this.schedule(); return;
+      }
+      this.block("There is an existing composer draft. Submit or clear it, then Resume Drive."); return;
+    }
+    this.staleDraftChecks = 0;
     if (this.pendingCorrection) { await this.sendCorrection(observation); return; }
     if (this.inspection && (this.inspection.document !== observation.navigation?.document || this.inspection.turn !== observation.navigation?.turn || this.inspection.sessionId !== observation.sessionId)) this.inspection = undefined;
     if (this.pendingInspection && (observation.mode !== "input" || this.pendingInspection.sessionId !== observation.sessionId
@@ -705,6 +717,7 @@ export class AgentDrive {
       }
       if (decision.action.kind === "complete" || decision.action.kind === "blocked") {
         state.status = decision.action.kind === "complete" ? "completed" : "blocked"; record.result = decision.note;
+        if (decision.action.kind === "complete" && decision.action.basis === "answer") state.answer = decision.answer ?? decision.note;
         settleDriveTrace(state, decision.action.kind === "complete" ? "completed" : "failed", decision.note);
         // An answered question (basis: answer) ends the mission; finished work
         // (verified-work) moves on to finding the next useful task.

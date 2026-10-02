@@ -3,6 +3,7 @@ import { sourceLocations } from "./file-navigation.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "../cli/src/workbench/change-diff.ts";
+import { driveSince, driveStepLine, driveTaskList } from "../cli/src/workbench/drive-timeline.ts";
 import type { GraphicsHost } from "./host.ts";
 import type { GraphicsRun, GraphicsChange } from "./session-model.ts";
 import type {
@@ -1062,42 +1063,43 @@ function driveBody() {
   const drive = state!.drive;
   if (!drive)
     return `<div class="drive-content"><h3>Give Drive a mission</h3><p class="muted">Drive reads the session, directs work, and reviews the results. Tool approvals remain yours.</p><form id="drive-form"><input name="mission" placeholder="What should Drive finish?" aria-label="Drive mission" required><label class="drive-mode"><input type="checkbox" name="continuous" checked> Keep choosing improvements</label><button type="submit" class="chip">Start Drive</button></form></div>`;
-  const retry = drive.recovery && drive.recovery.retryAt > Date.now(),
-    label = retry
-      ? `↻ Retrying in ${Math.ceil((drive.recovery!.retryAt - Date.now()) / 1000)}s`
-      : drive.protection?.trip
-        ? "■ Stopped at a limit"
-        : drive.status === "paused"
-          ? "‖ Paused by you"
-          : drive.status === "blocked"
-            ? "× Blocked · needs you"
-            : drive.status === "completed"
-              ? "✓ Mission complete"
-              : drive.status === "waiting"
-                ? "◌ Coder is working"
-                : drive.status === "stopped"
-                  ? "■ Stopped"
-                  : drive.status === "idle"
-                    ? "Idle"
-                    : "✓ Keep working";
-  const trace = drive.traces?.at(-1);
-  const taskRecords = Array.isArray(drive.ledger?.tasks)
-    ? drive.ledger.tasks.filter(
-        (task) =>
-          task &&
-          typeof task.id === "string" &&
-          Array.isArray(task.criteria) &&
-          Array.isArray(task.completions),
-      )
-    : [];
-  const ledger =
-    taskRecords
-      .map(
-        (task) =>
-          `<details data-detail="drive-task-${h(task.id)}"${detailsOpen.has(`drive-task-${task.id}`) ? " open" : ""}><summary>${task.status === "completed" ? "✓" : "◌"} ${h(task.id.slice(0, 8))} · ${h(task.title)}</summary><div class="panel-note">${task.criteria.map((criterion) => `· ${h(criterion)}`).join("<br>")}${task.reopened ? `<br>Reopened: ${h(task.reopened.reason)}` : ""}${task.completions.at(-1) ? `<br>${h(task.completions.at(-1)!.summary)}<br>${task.completions.at(-1)!.files.length} files · ${task.completions.at(-1)!.checks.length} checks recorded` : ""}</div></details>`,
-      )
-      .join("") ?? "";
-  return `<div class="drive-content"><div class="verdict ${retry ? "retrying" : drive.status}"><h3>${h(label)}</h3><p>${h(drive.protection?.trip?.reason ?? drive.activity)}</p></div><div class="panel-note">${drive.mode === "continuous" ? "Continuous · select unfinished work, then idle" : "Bounded · finish after verification"}</div>${ledger ? `<div><div class="muted">RECORDED TASKS</div>${ledger}<div class="panel-note">Reopen with /drive reopen &lt;task-id&gt; &lt;reason&gt;</div></div>` : ""}${!ledger && (drive.remaining.length || drive.completed.length) ? `<div><div class="muted">TASKS</div>${drive.completed.map((item) => `<div>✓ ${h(item)}</div>`).join("")}${drive.remaining.map((item) => `<div class="muted">· ${h(item)}</div>`).join("")}</div>` : ""}<div class="drive-meta">Step ${drive.step} · ${age(drive.updatedAt)}<br>${h(drive.model ?? state!.model.id)}${trace?.usage?.totalTokens != null ? ` · ${num(trace.usage.totalTokens)} tokens` : ""}</div><details data-detail="drive-reasoning"${detailsOpen.has("drive-reasoning") ? " open" : ""}><summary>Show reasoning</summary><pre>${h(trace?.reasoning || "No reasoning recorded.")}</pre></details><details data-detail="drive-raw"${detailsOpen.has("drive-raw") ? " open" : ""}><summary>Raw output</summary><pre>${h(trace?.text || trace?.action || "No output recorded.")}</pre></details><details data-detail="drive-constraints"${detailsOpen.has("drive-constraints") ? " open" : ""}><summary>Constraints carried</summary><pre>${h(drive.mission + "\n\n" + drive.notes)}</pre></details></div>`;
+  // Status + timeline: one status line and short sentence, what Drive did,
+  // a plain checklist, one stats line. Everything long sits under Details.
+  const now = Date.now(), trace = drive.traces?.at(-1);
+  const deciding = Boolean(trace && ["queued", "thinking", "drafting", "acting"].includes(trace.status));
+  const [mark, label, tone] = drive.recovery && drive.recovery.retryAt > now
+    ? ["↻", `Retrying in ${Math.ceil((drive.recovery.retryAt - now) / 1000)}s`, "thinking"]
+    : drive.protection?.trip ? ["■", "Stopped at a limit", "signal"]
+    : drive.status === "paused" ? ["‖", "Paused", "secondary"]
+    : drive.status === "blocked" ? ["×", "Blocked · needs you", "signal"]
+    : drive.status === "completed" ? ["✓", "Mission complete", "citron"]
+    : drive.status === "waiting" ? ["◌", "Coder is working", "secondary"]
+    : drive.status === "stopped" ? ["■", "Stopped", "secondary"]
+    : drive.status === "idle" ? ["·", "Idle · nothing worthwhile left", "secondary"]
+    : deciding ? ["◇", "Deciding…", "thinking"] : ["●", "Live", "citron"];
+  const summary = drive.protection?.trip?.reason ?? drive.steps.at(-1)?.note ?? drive.activity;
+  const steps = drive.steps.slice(-5).map((step) => ({ ...driveStepLine(step), when: driveSince(step.at, now) }));
+  if (deciding) steps.push({ mark: "◇", text: "Deciding the next step", tone: "thinking", when: "now" });
+  else if (drive.status === "waiting") steps.push({ mark: "◌", text: "Waiting for the coder", tone: "thinking", when: "now" });
+  const tasks = driveTaskList(drive);
+  const used = drive.protection?.used;
+  const active = used ? (used.activeMs < 3_600_000 ? `${Math.round(used.activeMs / 60_000)}m` : `${Math.floor(used.activeMs / 3_600_000)}h ${Math.round((used.activeMs % 3_600_000) / 60_000)}m`) : "";
+  const planner = trace?.source === "controller" ? "Local controller" : (drive.model ?? state!.model.id).split("/").at(-1)!.trim();
+  const stats = [`step ${drive.step}`, active, used ? `${num(used.planningTokens + used.workerTokens)} tokens` : "", planner].filter(Boolean).join(" · ");
+  const ledger = Array.isArray(drive.ledger?.tasks) ? drive.ledger.tasks.filter((task) => task && typeof task.id === "string") : [];
+  const section = (title: string, body: string) => body ? `<div class="drive-heading">${title}</div>${body}` : "";
+  const details = [
+    drive.answer ? section("ANSWER", `<p>${h(drive.answer)}</p>`) : section("NOTE", `<p>${h(summary)}</p>`),
+    section("REASONING", trace?.reasoning ? `<pre>${h(trace.reasoning)}</pre>` : `<p class="muted">No reasoning recorded.</p>`),
+    trace?.text || trace?.action ? section("OUTPUT", `<pre>${h(trace.text || trace.action)}</pre>`) : "",
+    section("MISSION", `<p>${h(drive.mission)}</p><p class="muted">${drive.mode === "continuous" ? "Continuous: finishes each task, chooses worthwhile next work, then goes idle." : "Bounded: finishes after one verified task."}</p>`),
+    drive.notes ? section("NOTES", `<pre>${h(drive.notes)}</pre>`) : "",
+    drive.protection ? section("BUDGET", `<p class="muted">${Math.floor(drive.protection.used.activeMs / 60_000)}/${drive.protection.limits.maxActiveMinutes} active min · ${drive.protection.used.cycles}/${drive.protection.limits.maxCycles} cycles · ${drive.protection.used.workerRequests}/${drive.protection.limits.maxWorkerRequests} coder requests</p>`) : "",
+    ledger.some((task) => task.status === "completed") ? `<p class="muted">Reopen a finished task: /drive reopen &lt;task-id&gt; &lt;reason&gt;<br>${ledger.filter((task) => task.status === "completed").slice(-4).map((task) => `${h(task.id.slice(0, 8))} · ${h(task.title)}`).join("<br>")}</p>` : "",
+  ].join("");
+  return `<div class="drive-content"><div class="drive-status"><strong class="tone-${tone}">${mark} ${h(label)}</strong>${summary ? `<p class="drive-summary">${h(summary)}</p>` : ""}</div>${
+    steps.length ? section("TIMELINE", `<ol class="drive-timeline">${steps.map((step) => `<li class="tone-${step.tone}"><span>${h(step.mark)}</span><span class="drive-step">${h(step.text)}</span><time>${h(step.when)}</time></li>`).join("")}</ol>`) : ""}${
+    tasks.length ? section("TASKS", `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>`) : ""}<div class="drive-meta">${h(stats)}</div><details data-detail="drive-details"${detailsOpen.has("drive-details") ? " open" : ""}><summary>Details</summary><div class="drive-details">${details}</div></details></div>`;
 }
 function processError() {
   return state?.processesError

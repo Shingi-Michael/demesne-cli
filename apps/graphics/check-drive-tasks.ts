@@ -197,11 +197,11 @@ async function capture(name: string) {
 try {
   await app.after(0);
   await state((s) => s.live?.connection === "online");
-  app.paste("/drive Verify the fixture check");
+  app.paste("/drive --bounded Verify the fixture check");
   await key("\r");
   await state((s) => s.live.approvals === 1, "Drive worker approval");
+  // Approving the tool is not a takeover: Drive keeps running on its own.
   await click("permission", { decision: "allow_once" });
-  await click("drive-control", { control: "resume" });
   await eventually(()=>journal()?.status === "completed",20000);
   await key("\x1bj");
   await state(
@@ -240,7 +240,6 @@ try {
   await state((s) => s.live.approvals === 1, "Reopened worker approval");
   await click("permission", { decision: "allow_once" });
   await key("\x1bj");
-  await click("drive-control", { control: "resume" });
   await eventually(()=>journal()?.status === "completed" && journal()?.ledger.tasks[0].completions.length === 2,20000);
   await key("\x1bj");
   await capture("explicit-reopen-history");

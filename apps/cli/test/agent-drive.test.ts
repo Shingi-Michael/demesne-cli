@@ -753,3 +753,34 @@ test("resuming a blocked mission tells Drive to retry the blocked step instead o
     expect(requests[2]!.memory.feedback ?? "").not.toContain("Retry the blocked step");
   } finally { drive.dispose(); }
 });
+
+test("a question's full answer is kept apart from Drive's one-line note", async () => {
+  const screen = { ...observation(), surface: "response", rows: ["The parser lives in src/parser.ts"], answerRows: ["The parser lives in src/parser.ts"] };
+  const drive = new AgentDrive({ observe: () => screen, perform: async () => "", changed() {}, delayMs: 60_000, continuous: false,
+    decide: async () => response({ ...decision({ kind: "complete", basis: "answer" }, { note: "Answered where the parser lives.", remaining: [],
+      evidence: [{ observationId: screen.id, quote: "src/parser.ts" }] }), answer: "The parser is in src/parser.ts; its entry point is parse()." }) });
+  try {
+    drive.start("Where is the parser?"); await drive.step();
+    expect(drive.state?.status).toBe("completed");
+    expect(drive.state?.activity).toBe("Answered where the parser lives.");
+    expect(drive.state?.answer).toBe("The parser is in src/parser.ts; its entry point is parse().");
+  } finally { drive.dispose(); }
+  expect(parseDriveDecision({ action: { kind: "complete", basis: "answer" }, note: "Answered.", notes: "", completed: [], remaining: [], evidence: [], answer: "Full text." }).answer).toBe("Full text.");
+  expect(parseDriveDecision({ action: { kind: "wait" }, note: "Waiting.", notes: "", completed: [], remaining: [], evidence: [] }).answer).toBeUndefined();
+});
+
+test("Drive's own just-sent text lingering in a stale observation is waited out; a real draft still blocks", async () => {
+  let draft = "";
+  const drive = new AgentDrive({ observe: () => ({ ...observation(), draft }), changed() {}, delayMs: 60_000,
+    perform: async (action) => action.kind === "compose" ? `Sent through the visible composer: ${action.text}` : "",
+    decide: async () => response(decision({ kind: "compose", text: "Run the fixture check and report its result" })) });
+  try {
+    drive.start("Verify the fixture check"); await drive.step();
+    draft = "Run the fixture check and report";
+    await drive.step();
+    expect(drive.state?.status).toBe("waiting");
+    draft = "my own idea";
+    await drive.step();
+    expect(drive.state?.status).toBe("blocked");
+  } finally { drive.dispose(); }
+});

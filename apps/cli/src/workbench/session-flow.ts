@@ -140,16 +140,18 @@ export function renderSessionFlow(options: {
     // real steps replace it as they happen. Reduced motion keeps it plain.
     const thinking = tool.name === "subagent" && running && tool.thinkingSince !== undefined
       ? options.reducedMotion ? "thinking" : subagentPhrase(run.tools.filter((item) => item.name === "subagent").indexOf(tool), options.now, tool.subagentModel ?? run.request?.model ?? "") : "";
-    const detail = [safe(tool.detail ?? "").replace(/^\$\s*/, ""), thinking].filter(Boolean).join(" · ");
+    const detail = safe(tool.detail ?? "").replace(/^\$\s*/, "");
     const verb = tool.name === "run_command" ? tool.phase === "verify" ? "Check" : "Run" : safe(toolName(tool));
     const target = detail && detail !== tool.name ? detail : "";
-    const label = `${verb}${target ? ` ${target}` : ""}`;
+    const label = `${verb}${target ? ` ${target}` : ""}${thinking ? ` · ${thinking}` : ""}`;
     // Figma rows: a verb column (Search, Read, Edit, Run) in blue, the target
     // in the main text color, the outcome after it, and timing flush right.
     // Rows inside an expanded Explored group trade the ✓ for a guide line.
     const grouped = parents.some((parent) => parent.startsWith("tools:"));
     const verbCell = verb.padEnd(Math.max(6, verb.length));
-    const styledLabel = paint.text(verbCell, failed(tool) ? "signal" : operation) + (target ? ` ${paint.text(target, failed(tool) ? "signal" : "paper")}` : "");
+    // The phrase reads apart from the task: a dim separator, then blue italic.
+    const styledLabel = paint.text(verbCell, failed(tool) ? "signal" : operation) + (target ? ` ${paint.text(target, failed(tool) ? "signal" : "paper")}` : "")
+      + (thinking ? paint.text(" · ", "muted") + paint.italic(thinking, "electric") : "");
     const state = tool.phase === "change" ? changeState(tool).toLowerCase() : "";
     const stateTone: PaletteColor = state === "applied" ? "citron" : state === "failed" || state === "denied" || state === "approval" ? "signal" : state === "drafting" ? "electric" : "muted";
     const totals = tool.phase === "change" ? changeTotals(tool) : "";

@@ -36,7 +36,7 @@ export const artifactRecords = (run: SessionRun, kind: ArtifactKind): ToolEntry[
   : kind === "verification" ? tool.phase === "verify" && tool.name === "run_command" : failed(tool));
 export const toolName = (tool: ToolEntry): string => ({ read_file: "Read", read_files: "Read", edit_file: "Edit", write_file: "Write",
   search_files: "Search", list_files: "List", git_status: "Git status", git_diff: "Git diff", move_path: "Move", delete_path: "Delete",
-  web_search: "Web search", command_logs: "Command output", command_stop: "Stop command", ask_user: "Ask" })[tool.name] ?? tool.name.replaceAll("_", " ");
+  web_search: "Web search", command_logs: "Command output", command_stop: "Stop command", ask_user: "Ask", subagent: "Agent" })[tool.name] ?? tool.name.replaceAll("_", " ");
 
 /// The official design's chronological request bands and assistant cards.
 /// Thinking and tool disclosures share its scroll position; evidence links

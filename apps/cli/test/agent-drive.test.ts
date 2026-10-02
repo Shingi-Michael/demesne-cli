@@ -632,3 +632,16 @@ test("clicking and navigating the workbench never pauses Drive; writing in the c
     expect(drive.state?.status).toBe("paused"); expect(ui.observeDrive().draft).toBe("a");
   } finally { drive.dispose(); }
 });
+
+test("a sub-agent card shows its task and live step, then just the task when done", () => {
+  const { ui } = workbench();
+  ui.beginTurn({ userText: "Where is session restore?", at: "now" });
+  ui.toolRequested({ toolCallId: "delegate", name: "subagent", arguments: { description: "Find session restore", prompt: "Where is it?" } });
+  ui.toolProgress({ toolCallId: "delegate", text: "read apps/cli/src/workbench/history.ts" });
+  const live = ui.frame(140, 36).rows.join("\n");
+  expect(live).toContain("Find session restore · read apps/cli/src/workbench/history.ts");
+  ui.toolFinished({ toolCallId: "delegate", name: "subagent", state: "done" });
+  const done = ui.frame(140, 36).rows.join("\n");
+  expect(done).toContain("Find session restore");
+  expect(done).not.toContain("· read apps/cli");
+});

@@ -13,6 +13,7 @@ import { recordedToolChanges } from "./tool-change-preview.ts";
 import { PermissionBroker } from "./permissions.ts";
 import type { QuestionBroker } from "./questions.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
+import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinition } from "./subagent.ts";
 import { InferenceScheduler } from "./inference-scheduler.ts";
 import { composeSystemPrompt, loadProjectInstructions } from "./instructions.ts";
 import {
@@ -72,7 +73,7 @@ export class AgentEngine {
     // `ask_user` needs someone to answer: not in non-interactive turns.
     const canAsk = Boolean(this.options.questions) && turn.permissionMode !== "deny";
     const definitions = session.workspace
-      ? planModeDefinitions(selectToolsForTurn(this.tools.definitions(), turn.content), turn.planOnly === true)
+      ? planModeDefinitions(selectToolsForTurn([...this.tools.definitions(), subagentDefinition], turn.content), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : [];
     const systemPrompt = agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
@@ -299,6 +300,7 @@ export class AgentEngine {
       }
 
       const allReadOnly = callRecords.every(({ call }) => {
+        if (call.name === SUBAGENT_TOOL) return true;
         const tool = this.tools.get(call.name);
         if (!tool) return false;
         try {
@@ -313,7 +315,7 @@ export class AgentEngine {
         const results = await Promise.all(
           callRecords.map(async ({ call, toolCallId }) => {
             const imageArtifactIds: string[] = [];
-            const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal, turn.planOnly === true, imageArtifactIds);
+            const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal, turn.planOnly === true, imageArtifactIds, inference);
             return { call, result, imageArtifactIds };
           }),
         );
@@ -326,7 +328,7 @@ export class AgentEngine {
       } else {
         for (const { call, toolCallId } of callRecords) {
           const imageArtifactIds: string[] = [];
-          const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal, turn.planOnly === true, imageArtifactIds);
+          const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal, turn.planOnly === true, imageArtifactIds, inference);
           totalToolResultBytes += Buffer.byteLength(result);
           const toolMessage = { role: "tool" as const, toolCallId: call.id, content: result, ...(imageArtifactIds.length ? { imageArtifactIds } : {}) };
           currentMessages.push(toolMessage);
@@ -398,6 +400,31 @@ export class AgentEngine {
     }
   }
 
+  /// A sub-agent reads and searches only, so it runs without an approval; its
+  /// report is the tool result and its steps stream as progress on the card.
+  private async executeSubagent(toolCallId: string, input: unknown, workspaceRoot: string, turnId: string, sessionId: string,
+    inference: TurnInference, signal: AbortSignal): Promise<string> {
+    let prompt: string;
+    try { ({ prompt } = parseSubagentInput(input)); }
+    catch (error) {
+      const result = `Error: ${error instanceof Error ? error.message : "invalid subagent input"}`;
+      this.store.settleToolCall(toolCallId, "failed", result);
+      return result;
+    }
+    this.store.startToolCall(toolCallId);
+    try {
+      const result = await runSubagent({ prompt, workspaceRoot, sessionId, turnId, tools: this.tools, inference, scheduler: this.scheduler, signal,
+        limits: this.options, progress: (text) => this.store.appendToolProgress(turnId, toolCallId, text) });
+      this.store.settleToolCall(toolCallId, "completed", result);
+      return result;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      const result = `Error: sub-agent failed: ${error instanceof Error ? error.message : "unknown error"}`;
+      this.store.settleToolCall(toolCallId, "failed", result);
+      return result;
+    }
+  }
+
   private async executeTool(
     toolCallId: string,
     call: AssembledToolCall,
@@ -408,6 +435,7 @@ export class AgentEngine {
     signal: AbortSignal,
     planOnly: boolean,
     imageArtifactIds: string[] = [],
+    inference?: TurnInference,
   ): Promise<string> {
     if (!workspaceRoot) {
       const result = "Error: this session is not bound to a workspace";
@@ -422,6 +450,7 @@ export class AgentEngine {
       this.store.settleToolCall(toolCallId, "failed", result);
       return result;
     }
+    if (call.name === SUBAGENT_TOOL && inference) return this.executeSubagent(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
     const tool = this.tools.get(call.name);
     if (!tool) {
       const result = `Error: unknown tool ${call.name}`;
@@ -637,6 +666,9 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
   "git_status",
   "git_diff",
   "ask_user",
+  // Read-only. A literal: subagent.ts imports this module, so its constant
+  // may not be initialised yet while this set is built.
+  "subagent",
 ]);
 
 export function planModeDefinitions(

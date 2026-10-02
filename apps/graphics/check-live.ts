@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import sharp from "sharp";
-import { TerminalHarness } from "../../experiments/ghostty-ui/test/terminal-harness.ts";
+import { TerminalHarness } from "./test/terminal-harness.ts";
 import { fixture, eventually } from "./test/fixture.ts";
 
 const directory = resolve(

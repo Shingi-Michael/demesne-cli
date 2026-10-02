@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { TerminalHarness } from "../../experiments/ghostty-ui/test/terminal-harness.ts";
+import { TerminalHarness } from "./test/terminal-harness.ts";
 import { fixture, eventually } from "./test/fixture.ts";
 const f = await fixture(),
   directory = mkdtempSync(join(tmpdir(), "graphics-benchmark-")),

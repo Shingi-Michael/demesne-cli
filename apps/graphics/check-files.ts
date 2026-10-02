@@ -9,7 +9,7 @@ import {
 import { join, resolve } from "node:path";
 import sharp from "sharp";
 import { fixture, eventually } from "./test/fixture.ts";
-import { TerminalHarness } from "../../experiments/ghostty-ui/test/terminal-harness.ts";
+import { TerminalHarness } from "./test/terminal-harness.ts";
 const output = resolve(process.argv[2] ?? "/tmp/demesne-files-check");
 mkdirSync(output, { recursive: true });
 const density = process.argv.includes("--retina") ? 2 : 1;

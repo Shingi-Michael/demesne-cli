@@ -56,7 +56,7 @@ Keep `dist/graphics` beside `dist/demesne`, and keep the daemon and its image de
 
 ```sh
 bun run typecheck
-bun test apps/graphics/test experiments/ghostty-ui/test/rendering.test.ts
+bun test apps/graphics/test
 bun run graphics:check
 bun apps/graphics/check-auth-scene.ts
 bun apps/graphics/check-display-scale.ts
@@ -70,7 +70,7 @@ bun apps/graphics/benchmark-live.ts 240 60
 
 `check-display-scale.ts` verifies standard and Retina-sized cells, both mouse coordinate modes, terminal font changes (including an unchanged physical window size), explicit zoom overrides, and decoded pixel equality.
 
-The checked-in benchmark JSON files measure input to decoded terminal pixels in the connected app, including test-harness PNG decoding. They exclude Ghostty decoding, GPU presentation, and display latency. The original proof of concept and before/after rendering measurements are retained in `experiments/ghostty-ui`.
+The checked-in benchmark JSON files measure input to decoded terminal pixels in the connected app, including test-harness PNG decoding. They exclude Ghostty decoding, GPU presentation, and display latency.
 
 `check-streaming.ts` checks partial Markdown against complete parsing at every character boundary, preserves finished block nodes across streaming and tool transitions, checks inactive/active Drive observation scheduling, and profiles short and long conversations. Pass `--baseline=/path/to/earlier/apps/graphics` to compare render timings and screenshots with an earlier checkout. Recorded results are in `streaming-benchmark.json`; these are synthetic frontend measurements, not Ghostty presentation latency.
 

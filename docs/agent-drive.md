@@ -1,16 +1,19 @@
 # Agent Drive
 
 Agent Drive is a separate planning context that operates Demesne’s text or graphics
-workbench. Missions are bounded by default: finish the requested work, inspect the
-results, record completion, and stop. Give it a mission in the work session:
+workbench. By default it is your ongoing delegate: it finishes and verifies the
+requested work, then decides for itself what is worth doing next within your
+mission, and goes idle when nothing worthwhile is left. Give it a mission in the
+work session:
 
 ```text
 /drive Finish the parser changes discussed earlier, then review the diff and test results.
 ```
 
-For ongoing improvement, explicitly use `/drive --continuous <mission>` (or check
-**Keep choosing improvements** in the graphics panel). `/drive --bounded <mission>`
-selects the default explicitly. A saved mission retains its original mode.
+For one finished piece of work and no follow-on, use `/drive --bounded <mission>`
+(or untick **Keep choosing improvements** in the graphics panel). A question
+("tell me about…") ends once it is answered either way. `/drive --continuous
+<mission>` selects the default explicitly. A saved mission retains its original mode.
 
 `/drive` or **Alt+J** opens the Drive panel. The `▷` rail button opens it too.
 The panel shows the mission, current task/cycle, finished tasks, current action, completed and remaining items,

@@ -17,6 +17,9 @@ export interface DriveServices {
   facts?(sessionId: string, turnId: string | undefined, paths: string[], signal: AbortSignal): Promise<DriveFacts>;
   path?: string;
   delayMs?: number;
+  /// Drive's default for a new /drive: true (unset) keeps choosing worthwhile
+  /// next work and goes idle when none is left; false makes missions bounded.
+  /// Either way /drive --continuous or --bounded picks per mission.
   continuous?: boolean;
   retryDelaysMs?: readonly number[];
   limits?: Partial<DriveLimits>;
@@ -138,7 +141,7 @@ export class AgentDrive {
   }
 
   start(mission: string): void {
-    const parsed=parseDriveStart(mission,this.services.continuous ? "continuous":"bounded");
+    const parsed=parseDriveStart(mission,this.services.continuous === false ? "bounded" : "continuous");
     mission=parsed.mission;
     if (!mission || mission.length > 8000) throw new Error("Use /drive <mission> (up to 8,000 characters).");
     const observed = this.services.observe();

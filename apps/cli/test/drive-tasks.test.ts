@@ -113,7 +113,7 @@ test("bounded missions record completion once, preserve it after restart and can
   const h = harness({ path });
   let restored: AgentDrive | undefined;
   try {
-    h.drive.start("Fix parser.ts empty input");
+    h.drive.start("--bounded Fix parser.ts empty input");
     h.action = {
       kind: "set_criteria",
       criteria: [
@@ -179,7 +179,7 @@ test("continuous mode is explicit and cannot erase or relabel completed work", a
 test("reworded requests and fresh prose cannot reset unchanged-outcome attempts", async () => {
   const h = harness();
   try {
-    h.drive.start("Implement parser error handling");
+    h.drive.start("--bounded Implement parser error handling");
     for (const text of [
       "Make empty input safe",
       "Return a descriptive validation error",

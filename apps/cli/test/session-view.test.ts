@@ -1852,7 +1852,10 @@ test("the status bar stays quiet: model and usage, a state only when it needs at
   const base = { paint, state: "COMPLETE", context, model: "qwen3.8-27b", presence: "idle" as never, tokensPerSecond: 31.4 };
   const wide = sessionStatus({ ...base, width: 140 });
   const plain = stripVTControlCharacters(wide.text);
-  expect(plain).toMatch(/^qwen3\.8-27b {2}━{10} 120\.8k · 46% *$/);
+  // Unrelated groups sit apart: the model on the left, usage on the right edge.
+  expect(plain).toMatch(/^qwen3\.8-27b {20,}━{10} 120\.8k · 46%$/);
+  const usageZone = wide.zones.find((zone) => zone.action === "context")!;
+  expect(plain.slice(usageZone.column, usageZone.column + usageZone.width)).toBe("━━━━━━━━━━ 120.8k · 46%");
   expect(plain).not.toMatch(/ready|tok\/s|Ctrl\+B|Ctrl\+G|Esc/);
   expect(wide.zones.map((zone) => zone.action)).toEqual(["context"]);
   // States that need attention keep their word; working shows in the composer.
@@ -1860,7 +1863,7 @@ test("the status bar stays quiet: model and usage, a state only when it needs at
   expect(stripVTControlCharacters(sessionStatus({ ...base, width: 140, state: "WORKING" }).text)).toMatch(/^qwen3\.8-27b/);
   // Scrolled away from live output, the right edge points back to it.
   const paused = sessionStatus({ ...base, width: 140, paused: true });
-  expect(stripVTControlCharacters(paused.text).trimEnd()).toEndWith("live ↓");
+  expect(stripVTControlCharacters(paused.text)).toEndWith("120.8k · 46%   live ↓");
   expect(paused.zones.map((zone) => zone.action)).toEqual(["context", "follow"]);
   // The model, then the bar's track give way before the numbers do.
   const tiny = stripVTControlCharacters(sessionStatus({ ...base, width: 20 }).text);

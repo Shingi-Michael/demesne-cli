@@ -1,0 +1,12 @@
+{
+  "viewport": "1200x720",
+  "samples": 24,
+  "inputToTextPixelsMs": {
+    "median": 13.8,
+    "p95": 29.9
+  },
+  "bytesPerKey": 10801,
+  "idleFrames": 0,
+  "idleBytes": 0,
+  "scope": "Connected UI, synthetic PTY input to decoded terminal pixels. Excludes Ghostty decoding and display. Includes harness PNG decoding."
+}

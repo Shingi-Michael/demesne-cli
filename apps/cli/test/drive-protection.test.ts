@@ -64,7 +64,7 @@ test("rephrased completed tasks are blocked across task transitions; distinct ta
     drive.start("Repair parser blank input handling"); await drive.step();
     drive.state!.autonomy!.consulted = true;
     current = { ...current, rows: current.latestAnswerRows }; next = { kind: "next_task", task: "Fix the parser empty-input handling" }; await drive.step();
-    expect(drive.state?.protection?.trip?.kind).toBe("loop"); expect(drive.state?.activity).toContain("revisits completed work");
+    expect(drive.state?.recovery?.kind).toBe("decision"); expect(drive.state?.feedback).toContain("already complete");
     expect(drive.state?.autonomy?.cycle).toBe(1);
   } finally { drive.dispose(); }
 });

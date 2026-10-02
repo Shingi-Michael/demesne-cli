@@ -309,3 +309,27 @@ describe("InferenceScheduler", () => {
     expect(timedOut).toBe(0);
   });
 });
+
+test("checkpoint reviews get the next slot without interrupting active work or starving normal work",async()=>{
+  const scheduler=new InferenceScheduler(1),signal=new AbortController().signal,order:string[]=[];
+  const active=await scheduler.acquire("active",signal);
+  const worker=scheduler.acquire("worker",signal).then(lease=>{order.push("worker");return lease;});
+  const first=scheduler.acquire("review-a",signal,{reviewFor:"active"}).then(lease=>{order.push("review-a");return lease;});
+  const second=scheduler.acquire("review-b",signal,{reviewFor:"other"}).then(lease=>{order.push("review-b");return lease;});
+  expect(scheduler.activeCount).toBe(1);expect(order).toEqual([]);
+  expect(scheduler.queuePosition("review-a")).toBe(1);expect(scheduler.queuePosition("worker")).toBe(2);
+  active.release({turnContinues:true});const review=await first;expect(order).toEqual(["review-a"]);
+  review.release({turnContinues:false});const coding=await worker;expect(order).toEqual(["review-a","worker"]);
+  coding.release({turnContinues:false});(await second).release({turnContinues:false});expect(scheduler.activeCount).toBe(0);await scheduler.close();
+});
+
+test("a worker has at most one queued or active review and cancellation releases the reservation",async()=>{
+  const scheduler=new InferenceScheduler(1),signal=new AbortController().signal,abort=new AbortController();
+  const active=await scheduler.acquire("worker",signal);
+  const pending=scheduler.acquire("review",abort.signal,{reviewFor:"worker"});
+  await expect(scheduler.acquire("duplicate",signal,{reviewFor:"worker"})).rejects.toThrow("already queued");
+  abort.abort();await expect(pending).rejects.toThrow();
+  const next=scheduler.acquire("retry",signal,{reviewFor:"worker"});active.release({turnContinues:true});const review=await next;
+  await expect(scheduler.acquire("duplicate-active",signal,{reviewFor:"worker"})).rejects.toThrow("already queued");
+  review.release({turnContinues:false});(await scheduler.acquire("last",signal,{reviewFor:"worker"})).release({turnContinues:false});await scheduler.close();
+});

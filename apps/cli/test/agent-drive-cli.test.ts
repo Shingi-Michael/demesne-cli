@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { DriveRequest, DriveResponse, DriveState, SessionStateResponse } from "@demesne/protocol";
 
-test.each(["stopped", "completed"] as const)("the real CLI resumes a %s saved mission and visibly navigates History through the planner endpoint", async (status) => {
+test.each(["stopped", "completed"] as const)("the real CLI restores %s missions without reopening completed work", async (status) => {
   const root = mkdtempSync(join(tmpdir(), "demesne-drive-cli-"));
   const preload = join(root, "tty.ts");
   // The production CLI's own input loop and timers run in a child process.
@@ -32,6 +32,7 @@ test.each(["stopped", "completed"] as const)("the real CLI resumes a %s saved mi
     if (url.pathname === "/v1/sessions/mission-home") return Response.json(session);
     if (url.pathname.endsWith("/files")) return Response.json({ files: [] });
     if (url.pathname.endsWith("/artifacts")) return Response.json({ artifacts: [], nextCursor: null });
+    if (url.pathname.endsWith("/drive/facts")) return Response.json({sessionId:"mission-home",workspace:root,capturedAt:at,latestTurn:{id:"turn",status:"completed"},selectedTurn:{id:"turn",status:"completed"},workspaceRevision:"same",files:[],changedFiles:[],checks:[],progress:"same"});
     if (url.pathname === "/v1/drive/decide") {
       const body = await request.json() as DriveRequest; decisions.push(body); changed?.();
       const result: DriveResponse = { provider: "test", model: "planner", imageInspected: false, decision: {
@@ -69,15 +70,20 @@ test.each(["stopped", "completed"] as const)("the real CLI resumes a %s saved mi
     await until(() => output.includes("\x1b[?2026l"));
     expect(decisions).toHaveLength(0); // Saved missions never restart on launch.
     child.stdin.write("\x1b[200~/drive status\x1b[201~\r");
-    await until(() => stripVTControlCharacters(output).includes(status === "stopped" ? "■ Stopped" : "✓ Mission complete") && stripVTControlCharacters(output).includes("Resume"));
+    await until(() => stripVTControlCharacters(output).includes(status === "stopped" ? "■ Stopped" : "✓ Mission complete") && (status === "completed" || stripVTControlCharacters(output).includes("Resume")));
     expect(decisions).toHaveLength(0);
     child.stdin.write("\x1b[200~/drive resume\x1b[201~\r");
+    if (status === "completed") {
+      await until(() => stripVTControlCharacters(output).includes("This Drive mission is complete"));
+      expect(decisions).toHaveLength(0); expect(submittedTurns).toBe(0);
+      return;
+    }
     await until(() => stripVTControlCharacters(output).includes("CLI control check finished"));
     expect(decisions).toHaveLength(2);
     expect(decisions[0]!.memory.notes).toBe(saved.notes);
     expect(decisions[0]!.memory.completed).toEqual(saved.completed);
-    expect(decisions[0]!.autonomy?.phase).toBe(status === "completed" ? "discovering" : "working");
-    expect(decisions[0]!.autonomy?.history).toHaveLength(status === "completed" ? 1 : 0);
+    expect(decisions[0]!.mode).toBe("bounded");
+    expect(decisions[0]!.autonomy).toBeUndefined();
     expect(decisions[1]!.observation.surface).toBe("history");
     expect(decisions[1]!.observation.rows.join("\n")).toContain("Original UI requirement");
     expect(stripVTControlCharacters(output)).toContain("DRIVE · Key · alt+h");

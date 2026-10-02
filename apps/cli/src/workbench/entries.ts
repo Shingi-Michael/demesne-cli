@@ -1,7 +1,7 @@
 import type { ToolPhaseName } from "@demesne/brand";
 
 export type ToolState = "running" | "done" | "failed" | "denied" | "stopped";
-export interface UserEntry { id: number; type: "user"; text: string; at: string; startedAt?: number; model?: string; planOnly?: boolean; compaction?: boolean }
+export interface UserEntry { turnId?: string; id: number; type: "user"; text: string; at: string; startedAt?: number; model?: string; planOnly?: boolean; compaction?: boolean }
 export interface ContextReceipt { used: number | null; capacity: number | null; estimated: boolean }
 export interface ResponseReceipt { mode: "Build" | "Plan" | "Compact"; model: string; durationMs: number | null; tokensPerSecond: number | null; context?: ContextReceipt }
 export interface AssistantEntry { id: number; type: "assistant"; raw: string; streaming: boolean; revision: number; at?: string; receipt?: ResponseReceipt }

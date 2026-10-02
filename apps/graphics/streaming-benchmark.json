@@ -1,0 +1,96 @@
+{
+  "results": [
+    {
+      "name": "baseline",
+      "markdownCases": 0,
+      "dormantScans": 1,
+      "profiles": [
+        {
+          "turns": 1,
+          "currentResponseChars": 10000,
+          "unchangedRender": {
+            "medianMs": 0.2,
+            "p95Ms": 0.7
+          },
+          "streamingRender": {
+            "medianMs": 2,
+            "p95Ms": 3.2
+          }
+        },
+        {
+          "turns": 100,
+          "currentResponseChars": 10000,
+          "unchangedRender": {
+            "medianMs": 1,
+            "p95Ms": 1.4
+          },
+          "streamingRender": {
+            "medianMs": 2.1,
+            "p95Ms": 2.7
+          }
+        },
+        {
+          "turns": 100,
+          "currentResponseChars": 100000,
+          "unchangedRender": {
+            "medianMs": 0.9,
+            "p95Ms": 1.1
+          },
+          "streamingRender": {
+            "medianMs": 15.2,
+            "p95Ms": 20.6
+          }
+        }
+      ],
+      "scope": "Synthetic conversations in the actual Chromium frontend; synchronous render/layout only, excluding terminal transmission and Ghostty presentation."
+    },
+    {
+      "name": "optimized",
+      "markdownCases": 538,
+      "dormantScans": 0,
+      "profiles": [
+        {
+          "turns": 1,
+          "currentResponseChars": 10000,
+          "unchangedRender": {
+            "medianMs": 0,
+            "p95Ms": 0.3
+          },
+          "streamingRender": {
+            "medianMs": 0.3,
+            "p95Ms": 0.4
+          }
+        },
+        {
+          "turns": 100,
+          "currentResponseChars": 10000,
+          "unchangedRender": {
+            "medianMs": 0,
+            "p95Ms": 0.1
+          },
+          "streamingRender": {
+            "medianMs": 0.4,
+            "p95Ms": 1.4
+          }
+        },
+        {
+          "turns": 100,
+          "currentResponseChars": 100000,
+          "unchangedRender": {
+            "medianMs": 0,
+            "p95Ms": 0.1
+          },
+          "streamingRender": {
+            "medianMs": 2.9,
+            "p95Ms": 3.1
+          }
+        }
+      ],
+      "scope": "Synthetic conversations in the actual Chromium frontend; synchronous render/layout only, excluding terminal transmission and Ghostty presentation."
+    }
+  ],
+  "transfer": {
+    "snapshotBytes": 1033098,
+    "updateBytes": 247
+  }
+}

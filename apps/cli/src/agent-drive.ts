@@ -1,6 +1,8 @@
+import { recordDriveCheckpoint, acknowledgeCheckpoint, checkpointDue, CHECKPOINT_COOLDOWN_MS } from "./drive-checkpoints.ts";
+import { newDriveTask, driveTaskScope, currentDriveTask, restoreDriveLedger, completedOverlap, taskTrackedPaths, completionRecord, reopenDriveTask, parseDriveStart, driveReopenReason } from "./drive-tasks.ts";
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { driveFailureKind, DrivePlanningError, isRecord, parseDriveAutonomy, parseDriveDecision, validateDriveDecisionContext, type DriveAction, type DriveInspectAction, type DriveInspection, type DriveLimits, type DriveObservation, type DriveProgress, type DriveRequest, type DriveResponse, type DriveState, type ReplayEvent, type SessionStateResponse } from "@demesne/protocol";
+import { driveFailureKind, DrivePlanningError, isRecord, parseDriveAutonomy, parseDriveDecision, validateDriveDecisionContext, type DriveReview, type DriveCheckpointReason, type DriveFacts, type DriveMode, type DriveAction, type DriveInspectAction, type DriveInspection, type DriveLimits, type DriveObservation, type DriveProgress, type DriveRequest, type DriveResponse, type DriveState, type ReplayEvent, type SessionStateResponse } from "@demesne/protocol";
 import { beginDriveTrace, restoreDriveTraces, settleDriveTrace, updateDriveTrace } from "./drive-trace.ts";
 import { chargeDriveTokens, driveBudgetReason, driveIntent, driveResultRows, fingerprint, newDriveProtection, newTokenMeter, observeDriveProgress, protectDriveDecision, restoreDriveProtection, similarIntent, workerText } from "./drive-protection.ts";
 
@@ -10,13 +12,16 @@ export interface DriveServices {
   perform(action: DriveAction, observation: DriveObservation, signal: AbortSignal): Promise<string>;
   decide(request: DriveRequest, signal: AbortSignal, progress: (event: DriveProgress) => void): Promise<DriveResponse>;
   changed(state: DriveState | null): void;
+  checkpointReviews?: boolean;
+  normalizeWorker?(text: string): string;
+  facts?(sessionId: string, turnId: string | undefined, paths: string[], signal: AbortSignal): Promise<DriveFacts>;
   path?: string;
   delayMs?: number;
   continuous?: boolean;
   retryDelaysMs?: readonly number[];
   limits?: Partial<DriveLimits>;
   now?: () => number;
-  cancelWorker?(turnId: string, signal: AbortSignal): Promise<boolean>;
+  cancelWorker?(turnId: string, signal: AbortSignal, review?: DriveReview): Promise<boolean>;
   inspect?(action: DriveInspectAction, observation: DriveObservation, signal: AbortSignal, activity: (text: string) => void): Promise<DriveInspection>;
 }
 
@@ -98,18 +103,19 @@ export class AgentDrive {
   private inspectionRetries = 0;
   private guardTimer: ReturnType<typeof setTimeout> | null = null;
   private guardAt: number | null = null;
+  private checkingTurn: string | null = null;
+  private applyingReview=false;
+  private reviewModelStarted=false;
   private pendingCorrection: { turnId: string; text: string } | undefined;
 
   constructor(private services: DriveServices) {
     this.journal = services.path ? new DriveJournal(services.path) : undefined;
     this.state = this.journal?.load() ?? null;
-    if (this.state && services.continuous && !this.state.autonomy) {
-      const finished = this.state.status === "completed";
-      this.state.autonomy = { phase: finished ? "discovering" : "working", task: this.state.mission, cycle: 1, consulted: false,
-        history: finished ? [{ task: this.state.mission, summary: this.state.activity, at: this.state.updatedAt }] : [] };
-    }
     if (this.state) {
       this.state.protection = restoreDriveProtection(this.state, services.limits);
+      this.state.mode ??= this.state.autonomy ? "continuous" : "bounded";
+      try { this.state.ledger=restoreDriveLedger(this.state); }
+      catch { this.state.protection.trip={kind:"journal",at:Date.now(),reason:"Saved completion records are invalid. They were preserved; inspect the journal before starting another mission."}; }
       if (this.state.protection.trip) { this.state.status = "blocked"; this.state.activity = this.protectionMessage(this.state.protection.trip.reason); }
     }
     services.changed(this.state);
@@ -132,21 +138,38 @@ export class AgentDrive {
   }
 
   start(mission: string): void {
-    mission = mission.trim();
+    const parsed=parseDriveStart(mission,this.services.continuous ? "continuous":"bounded");
+    mission=parsed.mission;
     if (!mission || mission.length > 8000) throw new Error("Use /drive <mission> (up to 8,000 characters).");
     const observed = this.services.observe();
     if (!observed.workspace || !observed.sessionId) throw new Error("Open a workspace session before starting Drive.");
     this.halt(); this.journal?.acquire();
     this.lastSubmission = ""; this.duplicateSubmissions = 0; this.repeated = { signature: "", count: 0 }; this.allowance = 256; this.judged.clear();
-    this.state = { id: crypto.randomUUID(), mission, homeSessionId: observed.sessionId, workspace: observed.workspace, status: "running",
+    const task=newDriveTask(mission);
+    this.state = { mode:parsed.mode, ledger:{version:1,currentTaskId:task.id,tasks:[task]}, id: crypto.randomUUID(), mission, homeSessionId: observed.sessionId, workspace: observed.workspace, status: "running",
       activity: "Recovering the mission from the visible conversation.", step: 0, model: null, updatedAt: new Date().toISOString(),
       notes: "", completed: [], remaining: [mission.slice(0, 1000)], evidence: [], steps: [], protection: newDriveProtection(this.services.limits),
-      ...(this.services.continuous ? { autonomy: { phase: "working", task: mission, cycle: 1, consulted: false, history: [] } as const } : {}) };
+      ...(parsed.mode === "continuous" ? { autonomy: { phase: "working", task: mission, cycle: 1, consulted: false, history: [] } as const } : {}) };
+    this.startGuardClock(); this.publish(); this.schedule();
+  }
+  reopen(taskId: string, reason: string): void {
+    if (!this.state || !reason.trim()) throw new Error("Use /drive reopen <task-id> <reason>.");
+    const matches=this.state.ledger?.tasks.filter(task=>task.id.startsWith(taskId)) ?? [];
+    if (matches.length!==1) throw new Error("Specify one completed task ID from the Drive panel.");
+    if (this.state.protection?.trip) throw new Error("Resolve the mission protection stop before reopening work.");
+    const task=matches[0]!;
+    if (task.status !== "completed" || currentDriveTask(this.state)?.status === "active") throw new Error("Finish the active task or start a new mission with the revised goal.");
+    if (task.completions.length>=16) throw new Error("This task reached its saved revision limit. Start an explicit new mission.");
+    this.halt(); this.journal?.acquire();
+    try { reopenDriveTask(this.state,matches[0]!,reason.trim().slice(0,2000),"user"); }
+    catch(error) { this.journal?.release(); throw error; }
+    this.lastSubmission=""; this.duplicateSubmissions=0; this.allowance=256; this.repeated={signature:"",count:0};
+    this.state.status="running"; this.state.activity=`Reopened by you: ${reason}`;
     this.startGuardClock(); this.publish(); this.schedule();
   }
   control(control: DriveControl): void {
     if (!this.state) throw new Error("No saved Drive mission. Start one with /drive <mission>.");
-    if (this.state.status === "completed" && !this.state.autonomy) throw new Error("This Drive mission is complete. Start another with /drive <mission>.");
+    if (this.state.status === "completed") throw new Error("This Drive mission is complete. Start another with /drive <mission>.");
     if (this.state.status === "stopped" && control !== "resume") return;
     this.journal?.acquire();
     if (control === "resume") {
@@ -180,7 +203,7 @@ export class AgentDrive {
     if (this.saveTimer) clearTimeout(this.saveTimer); this.saveTimer = null;
     this.recoveryAttempts = 0; this.nextAttemptAt = 0; this.skipped = 0;
     this.inspection = undefined; this.pendingInspection = undefined; this.autoInspectedTurn = ""; this.inspectionRetries = 0;
-    this.pendingCorrection = undefined;
+    this.pendingCorrection = undefined; this.checkingTurn=null;this.applyingReview=false;this.reviewModelStarted=false;
     if (this.state) this.state.recovery = undefined;
   }
   private publish(persist = true): void {
@@ -304,6 +327,9 @@ export class AgentDrive {
   workerStarted(sessionId: string, content: string, turnId: string): void {
     const guard = this.state?.protection, pending = guard?.pendingWorker;
     if (!guard || !pending || pending.sessionId !== sessionId || pending.hash !== fingerprint(content.trim())) return;
+    const task=this.state && currentDriveTask(this.state);
+    if (this.state?.autonomy?.phase === "discovering") this.state.autonomy.consultationTurnId=turnId;
+    else if (task && !task.workerTurns.includes(turnId)) task.workerTurns.push(turnId);
     guard.worker = { sessionId, turnId, cursor: 0, meter: newTokenMeter(pending.inputEstimate), checks: 0, checkCursor: 0,
       nextCheckAt: this.now() + guard.limits.checkInIntervalSeconds * 1000, settled: false }; guard.pendingWorker = undefined;
     if (this.active) this.publish();
@@ -312,7 +338,15 @@ export class AgentDrive {
     const guard = this.state?.protection, worker = guard?.worker;
     if (!guard || !worker || event.sessionId !== worker.sessionId || event.turnId !== worker.turnId || event.eventId <= worker.cursor) return;
     worker.cursor = event.throughEventId ?? event.eventId;
-    if (/^turn\.(completed|cancelled|failed|interrupted)$/.test(event.type)) worker.settled = true;
+    if (/^turn\.(completed|cancelled|failed|interrupted)$/.test(event.type)) {
+      worker.settled = true;
+      if(this.checkingTurn===worker.turnId && this.reviewModelStarted && !this.applyingReview)this.pending?.abort(new DOMException("Worker settled before check-in finished","AbortError"));
+    }
+    const checkpoint=this.services.checkpointReviews && recordDriveCheckpoint(worker,event);
+    if(checkpoint && !replay && this.active && !this.pending && this.services.delayMs===undefined){
+      if(this.timer)clearTimeout(this.timer);
+      this.timer=setTimeout(()=>{this.timer=null;void this.step();},Math.max(0,(worker.checkpointReadyAt??0)-this.now()));this.timer.unref();
+    }
     if (event.type === "model.request_started") {
       const plan = event.payload.contextPlan;
       const estimate = isRecord(plan) && Number.isSafeInteger(plan.estimatedInputTokens) && Number(plan.estimatedInputTokens) >= 0 ? Number(plan.estimatedInputTokens) : worker.meter.inputEstimate;
@@ -330,7 +364,7 @@ export class AgentDrive {
     }
     // A paused CLI has released the journal lock. Keep live accounting in memory;
     // durable event cursors let a new owner recover it without double charging.
-    if (!replay && this.active && (chars || event.type === "model.usage" || event.type === "model.request_started")) this.publish(false);
+    if (!replay && this.active && (chars || event.type === "model.usage" || event.type === "model.request_started" || checkpoint)) this.publish(false);
   }
   reconcileWorker(snapshot: SessionStateResponse, events: readonly ReplayEvent[]): void {
     const pending = this.state?.protection?.pendingWorker;
@@ -343,25 +377,39 @@ export class AgentDrive {
   }
 
   private reserveWorker(text: string, screen: DriveObservation): void {
-    const guard = this.state!.protection!, intent = driveIntent(workerText(text)!);
-    if (!guard.submissions.some(prior => similarIntent(prior, intent))) { guard.stalledCycles = 0; guard.navigation = []; }
+    const guard = this.state!.protection!, intent = {...driveIntent(workerText(text)!),scope:driveTaskScope(this.state!)};
+    const task=currentDriveTask(this.state!);
+    if (task && this.state!.facts && this.state!.autonomy?.phase !== "discovering") {
+      const progress=this.state!.facts.progress;
+      task.attempts={progress,requests:(task.attempts?.progress===progress ? task.attempts.requests : 0)+1};
+    }
+    if (!this.services.facts && !guard.submissions.some(prior => similarIntent(prior, intent))) { guard.stalledCycles = 0; guard.navigation = []; }
     guard.submissions.push(intent); guard.used.workerRequests++;
-    guard.pendingWorker = { sessionId: screen.sessionId, hash: fingerprint(workerText(text)!), at: this.now(), inputEstimate: Math.ceil(text.length / 4) };
+    if (this.state!.autonomy?.phase === "discovering") this.state!.autonomy.consultationTurnId=undefined;
+    guard.pendingWorker = { sessionId: screen.sessionId, hash: fingerprint(this.services.normalizeWorker?.(workerText(text)!) ?? workerText(text)!), at: this.now(), inputEstimate: Math.ceil(text.length / 4) };
   }
-  private async checkIn(observation: DriveObservation): Promise<void> {
+  private async checkIn(observation: DriveObservation, reason:DriveCheckpointReason="interval"): Promise<void> {
     const state = this.state!, guard = state.protection!, worker = guard.worker!;
     if (guard.used.checkIns >= guard.limits.maxCheckIns) { this.protectionStop(`Mission check-in limit reached (${guard.limits.maxCheckIns} reviews).`); return; }
     if (!this.guardCycle()) return;
     const epoch = this.epoch, controller = this.pending = new AbortController();
     guard.used.checkIns++; worker.checks++; worker.checkCursor = worker.cursor; worker.nextCheckAt = this.now() + guard.limits.checkInIntervalSeconds * 1000;
-    const trace = beginDriveTrace(state); trace.note = "Checking the coder's live direction; leave aligned work running.";
+    this.checkingTurn=worker.turnId;this.applyingReview=false;this.reviewModelStarted=false;
+    worker.checkpoint=undefined; worker.editBatch=0; worker.checkpointReadyAt=this.now()+CHECKPOINT_COOLDOWN_MS;
+    const trace = beginDriveTrace(state); trace.note = `Checkpoint: ${reason.replaceAll("_"," ")}; leave aligned work running.`;
     state.status = "running"; state.activity = "Checking in on the coder; review uses the next available model slot."; this.publish();
     let cancellationStarted = false;
     try {
       if (!this.active || controller.signal.aborted) return;
       observation = this.services.observe();
       if (observation.mode !== "streaming" || observation.sessionId !== state.homeSessionId || worker.settled) return;
-      const request: DriveRequest = { mission: state.mission, homeSessionId: state.homeSessionId, observation, checkIn: { turnId: worker.turnId, cursor: worker.cursor }, thinking: false,
+      if (this.services.facts) {
+        const facts=await this.services.facts(state.homeSessionId,observation.sessionId === state.homeSessionId ? observation.navigation?.turn || undefined : undefined,taskTrackedPaths(state),controller.signal);
+        if (epoch!==this.epoch || controller.signal.aborted) return;
+        if (state.facts?.progress !== facts.progress) { state.protection!.stalledCycles=0; state.protection!.navigation=[]; }
+        state.facts=facts;
+      }
+      const request: DriveRequest = { mode:state.mode, ledger:structuredClone(state.ledger), facts:state.facts, mission: state.mission, homeSessionId: state.homeSessionId, observation, checkIn: { turnId: worker.turnId, cursor: worker.cursor, ...(this.services.checkpointReviews ? {freshEvidence:true,reason} : {}) }, thinking: false,
         ...(state.autonomy ? { autonomy: structuredClone(state.autonomy) } : {}), memory: { notes: state.notes, completed: state.completed, remaining: state.remaining,
           evidence: [], steps: state.steps.slice(-6), ...(state.feedback ? { feedback: state.feedback } : {}) } };
       guard.planning = newTokenMeter(Math.ceil(JSON.stringify(request).length / 4)); chargeDriveTokens(guard, guard.planning, "planningTokens");
@@ -370,10 +418,24 @@ export class AgentDrive {
       const response = await this.services.decide(request, controller.signal, event => {
         if (epoch !== this.epoch || controller.signal.aborted || !this.active) return;
         updateDriveTrace(state, event);
+        if(event.type==="attempt")this.reviewModelStarted=true;
+        if(event.type==="review.ready"){
+          request.review=event.review;
+          state.activity=`Reviewing ${event.review.reason.replaceAll("_"," ")} · fresh results after ${(event.review.queueMs/1000).toFixed(1)}s in the model queue.`;
+        }
         if (this.planningProgress(event)) this.publish(false);
       });
       if (epoch !== this.epoch || controller.signal.aborted || !this.active) return;
-      if (!this.finishPlanning(response)) return;
+      this.applyingReview=true;
+      if (!response.skipped && !this.finishPlanning(response)) return;
+      if(response.skipped){
+        if(guard.planning){guard.used.planningTokens=Math.max(0,guard.used.planningTokens-guard.planning.charged);guard.planning=undefined;}
+        guard.used.checkIns=Math.max(0,guard.used.checkIns-1);worker.checks=Math.max(0,worker.checks-1);
+        trace.source="controller";trace.model=null;state.activity=response.skipped;
+        settleDriveTrace(state,"completed",response.skipped);this.publish();return;
+      }
+      if(response.review){request.review=response.review;acknowledgeCheckpoint(worker,response.review.cursor);}
+      if(this.services.checkpointReviews && !request.review)throw new Error("The daemon did not provide fresh checkpoint evidence. Restart the matching rebuilt daemon.");
       const decision = parseDriveDecision(response.decision); validateDriveDecisionContext(decision, request);
       const current = this.services.observe();
       const record = { step: ++state.step, action: JSON.stringify(decision.action), note: decision.note, result: "", at: new Date().toISOString() };
@@ -382,11 +444,11 @@ export class AgentDrive {
       if (worker !== guard.worker || worker.settled || current.mode !== "streaming" || current.sessionId !== observation.sessionId) record.result = "Coder activity settled or changed during check-in; no interruption performed.";
       else if (decision.action.kind === "keep_working") record.result = "Check-in agrees with the coder's direction. Work continues without interruption.";
       else if (decision.action.kind === "redirect") {
-        const live = current.evidenceRows ?? current.rows;
+        const live = request.review?.rows ?? current.evidenceRows ?? current.rows;
         if (!decision.evidence.some(item => live.some(row => row.includes(item.quote)))) record.result = "The cited activity is no longer visible. Stale redirection discarded; coder continues.";
         else {
           if (guard.used.redirects >= guard.limits.maxRedirects) { this.protectionStop(`Mission correction limit reached (${guard.limits.maxRedirects} coder interruptions).`, "loop"); return; }
-          const reason = protectDriveDecision(guard, { ...decision, action: { kind: "compose", text: decision.action.text } }, current, false);
+          const reason = protectDriveDecision(guard, { ...decision, action: { kind: "compose", text: decision.action.text } }, current, false, this.services.facts ? driveTaskScope(state) : undefined);
           if (reason) { this.protectionStop(reason, "loop"); return; }
           guard.used.redirects++;
           record.result = `Prepared interruption of ${worker.turnId}; correction will be sent only after cancellation and settlement.`;
@@ -394,14 +456,15 @@ export class AgentDrive {
           this.publish();
           if (!this.active || controller.signal.aborted) return;
           cancellationStarted = true;
-          const cancelled = await this.services.cancelWorker!(worker.turnId, controller.signal);
+          const cancelled = await this.services.cancelWorker!(worker.turnId, controller.signal, request.review);
           if (epoch !== this.epoch || controller.signal.aborted) return;
           if (cancelled) {
             this.pendingCorrection = { turnId: worker.turnId, text: decision.action.text };
             record.result = "Coder cancellation acknowledged. Waiting for the turn to settle before typing the targeted correction.";
-          } else record.result = "Coder already settled; no correction automatically submitted.";
+          } else { guard.used.redirects=Math.max(0,guard.used.redirects-1); record.result = "Coder settled, evidence changed, or human input is pending; no correction automatically submitted."; }
         }
       }
+      if(request.review)record.result+=` Queue ${(request.review.queueMs/1000).toFixed(1)}s · review ${((request.review.modelMs??0)/1000).toFixed(1)}s.`;
       state.activity = record.result; settleDriveTrace(state, "completed", record.result); this.publish();
     } catch (error) {
       if (epoch !== this.epoch || controller.signal.aborted) return;
@@ -413,7 +476,8 @@ export class AgentDrive {
         state.feedback = message; this.publish();
       }
     } finally {
-      if (epoch === this.epoch && state.traces?.at(-1)?.status === "queued") settleDriveTrace(state, "stopped", "Coder settled before the check-in began.");
+      if (epoch === this.epoch && (state.traces?.at(-1)?.status === "queued" || controller.signal.aborted && worker.settled)) settleDriveTrace(state, "stopped", "Coder settled before the check-in began.");
+      if(this.checkingTurn===worker.turnId){this.checkingTurn=null;this.applyingReview=false;this.reviewModelStarted=false;}
       if (this.pending === controller) this.pending = null; this.schedule();
     }
   }
@@ -424,7 +488,7 @@ export class AgentDrive {
     }
     if (!this.guardCycle()) return;
     const action = { kind: "compose" as const, text: correction.text };
-    const reason = protectDriveDecision(state.protection!, { action, note: "Check-in correction", notes: "", completed: [], remaining: [], evidence: [] }, observation, false);
+    const reason = protectDriveDecision(state.protection!, { action, note: "Check-in correction", notes: "", completed: [], remaining: [], evidence: [] }, observation, false, this.services.facts ? driveTaskScope(state) : undefined);
     if (reason) { this.protectionStop(reason, "loop"); return; }
     const epoch = this.epoch, controller = this.pending = new AbortController();
     this.pendingCorrection = undefined;
@@ -458,7 +522,7 @@ export class AgentDrive {
       });
       if (epoch !== this.epoch || controller.signal.aborted) return;
       record.result = packet.result; this.pendingInspection = undefined;
-      observeDriveProgress(state.protection!, packet.pages.flatMap(page => page.rows));
+      if (!this.services.facts) observeDriveProgress(state.protection!, packet.pages.flatMap(page => page.rows));
       if (packet.pages.length) { this.inspection = packet; this.inspectionRetries = 0; state.feedback = undefined; }
       else {
         this.inspection = undefined; state.feedback = packet.result;
@@ -480,14 +544,15 @@ export class AgentDrive {
     if (Date.now() < this.nextAttemptAt) { this.schedule(); return; }
     const state = this.state, epoch = this.epoch;
     let observation = this.services.observe();
-    observeDriveProgress(state.protection!, driveResultRows(observation));
+    if (!this.services.facts) observeDriveProgress(state.protection!, driveResultRows(observation));
     if (observation.workspace !== state.workspace) { this.block("Returned to a different workspace. Return to the mission workspace and Resume."); return; }
     if (observation.mode === "streaming" || observation.mode === "approval" || !observation.ready) {
       const worker = state.protection!.worker;
       if (this.services.cancelWorker && !this.pendingCorrection && observation.mode === "streaming" && observation.sessionId === state.homeSessionId
         && !observation.navigation?.readingHeld && !observation.draft && worker && !worker.settled && worker.checks < 3 && worker.cursor > worker.checkCursor
-        && this.now() >= worker.nextCheckAt && (observation.evidenceRows ?? observation.rows).some(row => row.trim().length >= 40)) {
-        await this.checkIn(observation); return;
+        && ((this.services.checkpointReviews && checkpointDue(worker,this.now())) || this.now() >= worker.nextCheckAt)
+        && (this.services.checkpointReviews || (observation.evidenceRows ?? observation.rows).some(row => row.trim().length >= 40))) {
+        await this.checkIn(observation,checkpointDue(worker,this.now()) ? worker.checkpoint!.reason : "interval"); return;
       }
       const activity = observation.mode === "approval" ? "Waiting for your existing tool approval." : observation.mode === "streaming" ? "Watching the coding agent; review follows when the turn settles." : "Waiting for the workbench to finish loading.";
       if (state.activity !== activity || state.status !== "waiting") { state.status = "waiting"; state.activity = activity; this.publish(); }
@@ -529,7 +594,13 @@ export class AgentDrive {
       // The first trace adds the activity card. Observe after it is rendered so
       // Drive's own status update cannot move controls beneath its decision.
       observation = this.services.observe();
-      const request: DriveRequest = { mission: state.mission, homeSessionId: state.homeSessionId,
+      if (this.services.facts) {
+        const facts=await this.services.facts(state.homeSessionId,observation.sessionId === state.homeSessionId ? observation.navigation?.turn || undefined : undefined,taskTrackedPaths(state),controller.signal);
+        if (epoch!==this.epoch || controller.signal.aborted) return;
+        if (state.facts?.progress !== facts.progress) { state.protection!.stalledCycles=0; state.protection!.navigation=[]; }
+        state.facts=facts;
+      }
+      const request: DriveRequest = { mode:state.mode, ledger:structuredClone(state.ledger), facts:state.facts, mission: state.mission, homeSessionId: state.homeSessionId,
         ...(state.autonomy ? { autonomy: structuredClone(state.autonomy) } : {}),
         ...(this.inspection ? { inspection: this.inspection } : {}),
         memory: { notes: state.notes, completed: state.completed, remaining: state.remaining, evidence: state.evidence, steps: state.steps.slice(-12), ...(state.feedback ? { feedback: state.feedback } : {}) }, observation,
@@ -550,6 +621,10 @@ export class AgentDrive {
       if (epoch !== this.epoch || controller.signal.aborted || !this.active) return;
       if (!this.finishPlanning(response)) return;
       const decision = parseDriveDecision(response.decision);
+      if (this.services.facts && state.autonomy?.phase === "discovering" && decision.action.kind === "compose" && !decision.action.text.trimStart().startsWith("/")) {
+        if (decision.action.text.length>15994) throw new DrivePlanningError("Shorten the read-only consultation to fit the composer.","decision");
+        decision.action={kind:"compose",text:`/plan ${decision.action.text}`};
+      }
       const trace = state.traces!.at(-1)!;
       trace.action = JSON.stringify(decision.action); trace.note = decision.note; trace.model = `${response.provider} / ${response.model}`; trace.status = "acting";
       if (["complete", "next_task", "idle", "inspect"].includes(decision.action.kind) && observation.navigation) {
@@ -558,11 +633,25 @@ export class AgentDrive {
           || current.navigation?.document !== observation.navigation.document || current.navigation.turn !== observation.navigation.turn)
           throw new DrivePlanningError("The session changed while judging the result. Reinspect current evidence before completing or selecting next work.", "decision");
       }
-      const protection = protectDriveDecision(state.protection!, decision, observation, state.autonomy?.phase === "discovering");
+      if (this.services.facts && ["complete","next_task","reopen_task","compose"].includes(decision.action.kind)) {
+        const fresh=await this.services.facts(state.homeSessionId,observation.sessionId === state.homeSessionId ? observation.navigation?.turn || undefined : undefined,taskTrackedPaths(state),controller.signal);
+        if (epoch!==this.epoch || controller.signal.aborted) return;
+        if (fresh.progress!==request.facts?.progress || fresh.latestTurn?.id!==request.facts?.latestTurn?.id) throw new DrivePlanningError("Recorded results changed while planning. Reinspect the current task before acting.","decision");
+        state.facts=fresh; request.facts=fresh;
+      }
+      if (decision.action.kind === "next_task" || decision.action.kind === "compose" && state.autonomy?.phase !== "discovering") {
+        const text=decision.action.kind === "next_task" ? decision.action.task : workerText(decision.action.text);
+        const completed=text && completedOverlap(state,text);
+        if (completed) throw new DrivePlanningError(`Task ${completed.id} is already complete: ${completed.title}. Use reopen_task only with changed recorded evidence; otherwise choose unfinished work or idle.`,"decision");
+      }
+      if (decision.action.kind === "compose" && state.autonomy?.phase === "discovering" && (state.autonomy.consultations ?? 0)>=2) throw new DrivePlanningError("Two next-work consultations are already recorded. Select an unfinished task from those answers or become idle; do not ask again.","decision");
+      const attempt=currentDriveTask(state)?.attempts;
+      if (decision.action.kind === "compose" && workerText(decision.action.text) !== undefined && state.autonomy?.phase !== "discovering" && attempt && attempt.progress===state.facts?.progress && attempt.requests>=2) throw new DrivePlanningError("Two worker requests left repository and check outcomes unchanged. Reconcile the saved criteria and completion records; inspect the missing evidence, complete the task if satisfied, or state the concrete blocker. Do not send a rephrased request.","decision");
+      const protection = protectDriveDecision(state.protection!, decision, observation, state.autonomy?.phase === "discovering", this.services.facts ? driveTaskScope(state) : undefined);
       if (protection) { this.protectionStop(protection, protection.startsWith("Mission") ? "budget" : "loop"); return; }
       validateDriveDecisionContext(decision, request);
       const confirmed = decision.evidence;
-      Object.assign(state, { notes: decision.notes, completed: decision.completed, remaining: decision.remaining, model: `${response.provider} / ${response.model}`, activity: decision.note });
+      Object.assign(state, { notes: decision.notes, completed: state.ledger!.tasks.filter(task=>task.status === "completed").map(task=>task.title.slice(0,1000)).slice(-32), remaining: decision.remaining, model: `${response.provider} / ${response.model}`, activity: decision.note });
       state.evidence = [...new Map([...state.evidence, ...confirmed].map((item) => [JSON.stringify(item), item])).values()].slice(-32);
       const signature = JSON.stringify({ action: decision.action, surface: observation.surface, scrollRegions: observation.scrollRegions,
         screen: (observation.evidenceRows ?? observation.rows).join("\n").replace(/\b\d{2}:\d{2}:\d{2}\b|\+\d{2}:\d{2}/g, "clock") });
@@ -581,6 +670,17 @@ export class AgentDrive {
       // replays an ambiguous Enter/click that may already have taken effect.
       this.publish();
       if (!this.active || controller.signal.aborted) return;
+      if (decision.action.kind === "set_criteria") {
+        currentDriveTask(state)!.criteria=[...decision.action.criteria];
+        record.result="Acceptance criteria recorded."; settleDriveTrace(state,"completed",record.result); this.publish(); return;
+      }
+      if (decision.action.kind === "reopen_task") {
+        const taskId=decision.action.taskId;
+        const task=state.ledger!.tasks.find(task=>task.id===taskId)!;
+        reopenDriveTask(state,task,`${decision.action.reason} (${driveReopenReason(task,state.facts)})`,"changed-evidence");
+        this.lastSubmission=""; this.duplicateSubmissions=0; this.allowance=256; this.repeated={signature:"",count:0};
+        record.result=`Reopened task ${task.id}: ${task.reopened!.reason}`; settleDriveTrace(state,"completed",record.result); this.publish(); return;
+      }
       if (decision.action.kind === "inspect") {
         if (!this.services.inspect) throw new Error("Controller inspection is unavailable in this client.");
         this.pendingInspection = { action: decision.action, sessionId: observation.sessionId, document: observation.navigation!.document, turn: observation.navigation!.turn };
@@ -595,11 +695,15 @@ export class AgentDrive {
         if (decision.action.kind === "complete" && state.autonomy && decision.action.basis !== "answer") {
           const autonomy = state.autonomy;
           autonomy.history = [...autonomy.history, { task: autonomy.task, summary: decision.note, at: new Date().toISOString() }].slice(-8);
-          autonomy.phase = "discovering"; autonomy.consulted = false;
+          autonomy.phase = "discovering"; autonomy.consulted = false; autonomy.consultationTurnId=undefined; autonomy.consultations=0;
           state.status = "running"; state.activity = "Task finished and reviewed. Asking the coding agent what is worth doing next.";
           this.allowance = 256; this.repeated = { signature: "", count: 0 };
         }
         if (decision.action.kind === "complete") {
+          const task=currentDriveTask(state)!;
+          task.completions.push(completionRecord(task,decision,state.facts)); task.status="completed";
+          state.completed=state.ledger!.tasks.filter(task=>task.status==="completed").map(task=>task.title.slice(0,1000)).slice(-32);
+          state.remaining=[]; state.protection!.stalledCycles=0; state.protection!.navigation=[];
           state.protection!.used.tasks++; state.protection!.tasks.push(driveIntent(state.autonomy?.task ?? state.mission));
         }
         this.recoveryAttempts = 0; this.nextAttemptAt = 0;
@@ -607,8 +711,10 @@ export class AgentDrive {
       }
       if (decision.action.kind === "next_task" || decision.action.kind === "idle") {
         if (decision.action.kind === "next_task") {
-          Object.assign(state.autonomy!, { phase: "working", task: decision.action.task, cycle: state.autonomy!.cycle + 1, consulted: false });
-          state.completed = []; state.remaining = [decision.action.task.slice(0, 1000)]; state.evidence = [];
+          if (state.ledger!.tasks.length>=64) throw new Error("Task record limit reached. Start an explicit new mission.");
+          const task=newDriveTask(decision.action.task); state.ledger!.tasks.push(task); state.ledger!.currentTaskId=task.id;
+          Object.assign(state.autonomy!, { consultationTurnId:undefined, consultations:0, phase: "working", task: decision.action.task, cycle: state.autonomy!.cycle + 1, consulted: false });
+          state.remaining = [decision.action.task.slice(0, 1000)]; state.evidence = [];
           this.allowance = 256; this.lastSubmission = ""; this.duplicateSubmissions = 0;
           record.result = `Next task selected: ${decision.action.task}`.slice(0, 2000);
         } else { state.status = "idle"; record.result = decision.note; }
@@ -636,7 +742,7 @@ export class AgentDrive {
         if (!content.startsWith("/")) {
           this.duplicateSubmissions = content === this.lastSubmission ? this.duplicateSubmissions + 1 : 0; this.lastSubmission = content;
         }
-        if (state.autonomy?.phase === "discovering" && (!content.startsWith("/") || /^\/plan\s+\S/.test(content))) state.autonomy.consulted = true;
+        if (state.autonomy?.phase === "discovering" && (!content.startsWith("/") || /^\/plan\s+\S/.test(content))) { state.autonomy.consulted = true; state.autonomy.consultations=(state.autonomy.consultations ?? 0)+1; }
       }
       settleDriveTrace(state, "completed", record.result);
       this.publish();

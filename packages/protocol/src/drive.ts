@@ -1,3 +1,5 @@
+import { DRIVE_CHECKPOINTS, parseDriveReview, type DriveReview, type DriveCheckpointReason } from "./drive-review.ts";
+import { parseDriveFacts, parseDriveLedger, driveReopenReason, type DriveFacts, type DriveLedger, type DriveMode } from "./drive-tasks.ts";
 import { isRecord, ProtocolValidationError, type TokenUsage } from "./index.ts";
 
 export const DRIVE_KEYS = ["up", "down", "left", "right", "pageup", "pagedown", "home", "end", "return", "escape", "tab", "shift+tab",
@@ -7,6 +9,7 @@ export const DRIVE_INSPECTIONS = ["answer", "diff", "checks", "log"] as const;
 export type DriveInspectAction = { kind: "inspect"; target: typeof DRIVE_INSPECTIONS[number]; item?: string; position?: "start" | "continue" | "end" };
 export type DriveAction = { kind: "click"; target: string } | { kind: "key"; key: DriveKey }
   | { kind: "compose"; text: string } | { kind: "scroll"; row: number; column: number; amount: number }
+  | { kind: "set_criteria"; criteria: string[] } | { kind: "reopen_task"; taskId: string; reason: string }
   | DriveInspectAction | { kind: "complete"; basis?: "answer" | "verified-work" } | { kind: "next_task"; task: string } | { kind: "redirect"; text: string } | { kind: "blocked" | "wait" | "idle" | "keep_working" };
 export interface DriveNavigation {
   document: string; turn: string; latest: boolean; answer: boolean; readingHeld: boolean;
@@ -56,20 +59,23 @@ export interface DriveDecision {
 export interface DriveStep { step: number; action: string; note: string; result: string; at: string }
 export interface DriveMemory { notes: string; completed: string[]; remaining: string[]; evidence: DriveEvidence[]; steps: DriveStep[]; feedback?: string }
 export interface DriveAutonomy {
+  consultationTurnId?: string; consultations?: number;
   phase: "working" | "discovering"; task: string; cycle: number; consulted: boolean;
   history: { task: string; summary: string; at: string }[];
 }
 export interface DriveRequest {
+  mode?: DriveMode; ledger?: DriveLedger; facts?: DriveFacts;
   mission: string; homeSessionId: string; memory: DriveMemory; observation: DriveObservation;
   autonomy?: DriveAutonomy;
   inspection?: DriveInspection;
-  checkIn?: { turnId: string; cursor: number };
+  review?: DriveReview;
+  checkIn?: { turnId: string; cursor: number; freshEvidence?: boolean; reason?: DriveCheckpointReason };
   /// Whether the model thinks for this decision. The client decides: judging
   /// a finished turn does; navigation, waiting and check-ins don't.
   thinking?: boolean;
 }
-export interface DriveResponse { decision: DriveDecision; model: string; provider: string; imageInspected: boolean }
-export type DriveProgress = { type: "queued" }
+export interface DriveResponse { review?: DriveReview; skipped?: string; decision: DriveDecision; model: string; provider: string; imageInspected: boolean }
+export type DriveProgress = { type: "review.ready"; review: DriveReview } | { type: "queued" }
   | { type: "attempt"; attempt: number; model: string; provider: string; thinking?: boolean }
   | { type: "reasoning.delta" | "text.delta" | "action.delta"; delta: string }
   | { type: "usage"; usage: TokenUsage }
@@ -107,7 +113,7 @@ export interface DriveLimits {
 }
 export const DEFAULT_DRIVE_LIMITS: DriveLimits = { maxActiveMinutes: 240, maxCycles: 512, maxTasks: 16, maxWorkerRequests: 48, maxTokens: 2_000_000, maxStalledCycles: 24,
   checkInIntervalSeconds: 120, maxCheckIns: 24, maxRedirects: 3 };
-export interface DriveIntent { text: string; words: string[]; targets: string[]; intent: string }
+export interface DriveIntent { scope?: string; text: string; words: string[]; targets: string[]; intent: string }
 export interface DriveTokenMeter { inputEstimate: number; characters: number; input: number | null; output: number | null; total: number | null; charged: number; attempt: number }
 export interface DriveProtection {
   version: 1; limits: DriveLimits;
@@ -117,10 +123,14 @@ export interface DriveProtection {
   migrated: boolean;
   planning?: DriveTokenMeter;
   pendingWorker?: { sessionId: string; hash: string; at: number; inputEstimate: number };
-  worker?: { sessionId: string; turnId: string; cursor: number; meter: DriveTokenMeter; checks: number; checkCursor: number; nextCheckAt: number; settled: boolean };
+  worker?: { sessionId: string; turnId: string; cursor: number; meter: DriveTokenMeter; checks: number; checkCursor: number; nextCheckAt: number; settled: boolean;
+    checkpoint?: {reason:DriveCheckpointReason;cursor:number}; checkpointReadyAt?:number; editBatch?:number;
+    recentTools?: {id:string;key:string;check:boolean}[];
+  };
   trip?: { kind: "budget" | "loop" | "journal"; reason: string; at: number };
 }
 export interface DriveState extends DriveMemory {
+  mode?: DriveMode; ledger?: DriveLedger; facts?: DriveFacts;
   id: string; mission: string; homeSessionId: string; workspace: string; status: DriveStatus;
   activity: string; step: number; model: string | null; updatedAt: string;
   /** Operator-visible provider output. Never sent back as planning memory. */
@@ -132,6 +142,7 @@ export interface DriveState extends DriveMemory {
 
 export function parseDriveStreamEvent(value: unknown): DriveStreamEvent {
   if (!isRecord(value)) invalid("stream", "expected an event object");
+  if (value.type === "review.ready") return {type:"review.ready",review:parseDriveReview(value.review)};
   if (value.type === "queued") return { type: "queued" };
   if (value.type === "attempt") return { type: "attempt", attempt: coordinate(value.attempt, 3, "stream.attempt"),
     model: text(value.model, 1000, "stream.model"), provider: text(value.provider, 1000, "stream.provider") };
@@ -150,6 +161,8 @@ export function parseDriveStreamEvent(value: unknown): DriveStreamEvent {
   }
   if (value.type === "result" && isRecord(value.response) && typeof value.response.imageInspected === "boolean") return { type: "result", response: {
     decision: parseDriveDecision(value.response.decision), model: text(value.response.model, 1000, "stream.model"),
+    ...(value.response.review !== undefined ? {review:parseDriveReview(value.response.review)} : {}),
+    ...(typeof value.response.skipped === "string" ? {skipped:text(value.response.skipped,2000,"stream.skipped")} : {}),
     provider: text(value.response.provider, 1000, "stream.provider"), imageInspected: value.response.imageInspected,
   } };
   invalid("stream.type", "expected a Drive progress, result, or error event");
@@ -197,6 +210,11 @@ export function parseDriveDecision(value: unknown): DriveDecision {
     if (!Number.isSafeInteger(raw.amount) || raw.amount === 0 || Math.abs(raw.amount as number) > 12) invalid("action.amount", "expected a non-zero integer from -12 to 12");
     action = { kind: "scroll", row: coordinate(raw.row, 250, "action.row"), column: coordinate(raw.column, 500, "action.column"), amount: raw.amount as number };
   }
+  else if (raw.kind === "set_criteria") {
+    const criteria = list(raw.criteria, "action.criteria");
+    if (!criteria.length) invalid("action.criteria", "specify at least one acceptance criterion");
+    action = { kind: "set_criteria", criteria };
+  } else if (raw.kind === "reopen_task") action = { kind: "reopen_task", taskId: text(raw.taskId,100,"action.taskId"), reason: text(raw.reason,2000,"action.reason") };
   else if (raw.kind === "complete") {
     if (raw.basis !== undefined && raw.basis !== "answer" && raw.basis !== "verified-work") invalid("action.basis", "expected answer or verified-work");
     action = { kind: "complete", ...(raw.basis !== undefined ? { basis: raw.basis } : {}) };
@@ -219,7 +237,7 @@ export function parseDriveAutonomy(value: unknown): DriveAutonomy {
     || !Array.isArray(value.history) || value.history.length > 8) invalid("autonomy", "expected a working/discovering phase, consulted flag, and at most 8 completed tasks");
   const cycle = coordinate(value.cycle, Number.MAX_SAFE_INTEGER, "autonomy.cycle");
   if (!cycle) invalid("autonomy.cycle", "expected a positive cycle number");
-  return { phase: value.phase as DriveAutonomy["phase"], task: text(value.task, 8000, "autonomy.task"), cycle, consulted: value.consulted,
+  return { ...(value.consultations !== undefined ? { consultations: coordinate(value.consultations, 3, "autonomy.consultations") } : {}), ...(value.consultationTurnId !== undefined ? { consultationTurnId: text(value.consultationTurnId,100,"autonomy.consultationTurnId") } : {}), phase: value.phase as DriveAutonomy["phase"], task: text(value.task, 8000, "autonomy.task"), cycle, consulted: value.consulted,
     history: value.history.map((item, index) => {
       if (!isRecord(item)) invalid(`autonomy.history[${index}]`, "expected a completed task");
       return { task: text(item.task, 8000, `autonomy.history[${index}].task`), summary: text(item.summary, 2000, `autonomy.history[${index}].summary`), at: text(item.at, 100, `autonomy.history[${index}].at`) };
@@ -234,7 +252,9 @@ export function validateDriveDecisionContext(decision: DriveDecision, request: D
     if (screen.mode !== "streaming" || screen.sessionId !== request.homeSessionId) invalid("checkIn", "check-ins observe a running coder turn in the home session");
     if (action.kind !== "keep_working" && action.kind !== "redirect") invalid("checkIn.action", "use keep_working or redirect; running work cannot be completed or navigated by a check-in");
     if (action.kind === "redirect" && !decision.evidence.length) invalid("checkIn.evidence", "quote concrete visible activity that contradicts the task before interrupting");
-    for (const item of decision.evidence) if (item.observationId !== screen.id || !rows.some(row => row.includes(item.quote))) invalid("checkIn.evidence", "quote an exact substring from the current visible coder activity; history and Drive notes cannot justify interruption");
+    const reviewed=request.review;
+    if (reviewed && (reviewed.turnId !== request.checkIn.turnId || reviewed.sessionId !== request.homeSessionId || reviewed.status !== "running" || reviewed.waitingForHuman)) invalid("checkIn.review", "review no longer describes an eligible running worker");
+    for (const item of decision.evidence) if (item.observationId !== (reviewed?.id ?? screen.id) || !(reviewed?.rows ?? rows).some(row => row.includes(item.quote))) invalid("checkIn.evidence", "quote an exact substring from the fresh review rows (when supplied), otherwise current visible coder activity; history and Drive notes cannot justify interruption");
     return;
   }
   if (action.kind === "keep_working" || action.kind === "redirect") invalid("action.kind", "keep_working and redirect are only available during a live check-in");
@@ -261,7 +281,22 @@ export function validateDriveDecisionContext(decision: DriveDecision, request: D
       || inspectedQuote(item) || request.memory.evidence.some((saved) => saved.observationId === item.observationId && saved.quote === item.quote)) continue;
     invalid(`evidence[${index}]`, `rejected quote ${JSON.stringify(item.quote).slice(0, 220)}. Copy an exact substring from ONE current eligible result row, with observationId ${screen.id}, or use verified memory.evidence. Drive's own panel is not evidence. Use [] while navigating.`);
   }
+  const task = request.ledger?.tasks.find(task => task.id === request.ledger!.currentTaskId);
+  if (request.facts && (request.facts.sessionId !== request.homeSessionId || request.facts.workspace !== screen.workspace)) invalid("facts", "recorded facts belong to a different session or workspace");
+  if (action.kind === "set_criteria") {
+    if (!task || task.status !== "active" || task.workerTurns.length || task.attempts?.requests || task.completions.length) invalid("action.set_criteria", "acceptance criteria can only be set before the task's first worker turn");
+    return;
+  }
+  if (action.kind === "reopen_task") {
+    const target = request.ledger?.tasks.find(task => task.id === action.taskId);
+    if (!target || target.status !== "completed" || !driveReopenReason(target,request.facts)) invalid("action.reopen_task", "completed work needs a relevant changed file, a new current failed check, or an explicit human reopen command; rewording the goal is not evidence");
+    if (task?.status === "active") invalid("action.reopen_task", "finish the active task before reopening another");
+    return;
+  }
+  if (action.kind === "compose" && task?.status === "completed" && request.autonomy?.phase !== "discovering") invalid("action.compose", "this task is already complete; do not send more work without reopening it");
   if (action.kind === "next_task" || action.kind === "idle") {
+    if (request.mode === "bounded") invalid("action.next_task", "bounded missions finish after verification; continuous discovery was not requested");
+    if (request.facts && (!request.autonomy?.consultationTurnId || request.facts.latestTurn?.id !== request.autonomy.consultationTurnId || request.facts.latestTurn?.status !== "completed")) invalid("consultation", "inspect the specific completed consultation turn before selecting more work");
     if (request.autonomy?.phase !== "discovering" || !request.autonomy.consulted)
       invalid(`action.${action.kind}`, "finish the current task, then visibly compose a focused question to the coding agent about useful next work and inspect its answer first");
     if (screen.sessionId !== request.homeSessionId || screen.mode !== "input" || !screen.ready)
@@ -274,6 +309,12 @@ export function validateDriveDecisionContext(decision: DriveDecision, request: D
     return;
   }
   if (action.kind !== "complete") return;
+  if (task?.status === "completed") invalid("action.complete", "this task is already complete; choose unfinished work or become idle");
+  if (request.facts) {
+    const turn = request.facts.selectedTurn;
+    if (!turn || turn.status !== "completed" || (task?.workerTurns.length && !task.workerTurns.includes(turn.id))) invalid("action.complete", "inspect a completed worker turn for this task; a cancelled, failed or unrelated turn is not completion");
+    if (action.basis !== "answer" && request.facts.checks.some(check => check.turnId === turn.id && (check.status !== "completed" || check.freshness !== "current"))) invalid("action.complete", "this turn has failed, running or outdated checks; inspect the current results before finishing");
+  }
   if (request.autonomy?.phase === "discovering") invalid("action.complete", "the previous task is already finished. Ask the coding agent about next improvements, inspect its answer, then use next_task or idle");
   if (decision.remaining.length) invalid("action.complete", "remaining must be empty before finishing; inspect or finish the outstanding items first");
   if (screen.sessionId !== request.homeSessionId) invalid("action.complete", `return to /resume ${request.homeSessionId} and inspect the result before finishing`);
@@ -365,9 +406,11 @@ export function parseDriveRequest(value: unknown): DriveRequest {
       ...(nav.item !== undefined ? { item: text(nav.item, 4096, "navigation.item") } : {}) };
   }
   if (!Array.isArray(memory.steps) || memory.steps.length > 64) invalid("memory.steps", "expected at most 64 steps");
-  return { mission: text(value.mission, 8000, "mission"), homeSessionId: text(value.homeSessionId, 100, "homeSessionId"), observation,
+  if (value.mode !== undefined && !["bounded","continuous"].includes(String(value.mode))) invalid("mode", "expected bounded or continuous");
+  return { ...(value.mode !== undefined ? { mode: value.mode as DriveMode } : {}), ...(value.ledger !== undefined ? { ledger: parseDriveLedger(value.ledger) } : {}), ...(value.facts !== undefined ? { facts: parseDriveFacts(value.facts) } : {}), mission: text(value.mission, 8000, "mission"), homeSessionId: text(value.homeSessionId, 100, "homeSessionId"), observation,
     ...(value.autonomy !== undefined ? { autonomy: parseDriveAutonomy(value.autonomy) } : {}),
     ...(value.inspection !== undefined ? { inspection: parseDriveInspection(value.inspection) } : {}),
+    ...(value.review !== undefined ? {review:parseDriveReview(value.review)} : {}),
     ...(value.checkIn !== undefined ? { checkIn: parseDriveCheckIn(value.checkIn) } : {}),
     ...(typeof value.thinking === "boolean" ? { thinking: value.thinking } : {}),
     memory: { notes: text(memory.notes, 8000, "memory.notes", true), completed: list(memory.completed, "memory.completed"), remaining: list(memory.remaining, "memory.remaining"), evidence: evidence(memory.evidence, "memory.evidence"),
@@ -380,5 +423,7 @@ export function parseDriveRequest(value: unknown): DriveRequest {
 }
 function parseDriveCheckIn(value: unknown): NonNullable<DriveRequest["checkIn"]> {
   if (!isRecord(value)) invalid("checkIn", "expected a turn and event cursor");
-  return { turnId: text(value.turnId, 100, "checkIn.turnId"), cursor: coordinate(value.cursor, Number.MAX_SAFE_INTEGER, "checkIn.cursor") };
+  if(value.freshEvidence !== undefined && typeof value.freshEvidence !== "boolean") invalid("checkIn.freshEvidence","expected boolean");
+  if(value.reason !== undefined && !DRIVE_CHECKPOINTS.includes(value.reason as DriveCheckpointReason)) invalid("checkIn.reason","unknown checkpoint");
+  return { turnId: text(value.turnId, 100, "checkIn.turnId"), cursor: coordinate(value.cursor, Number.MAX_SAFE_INTEGER, "checkIn.cursor"), ...(value.freshEvidence !== undefined ? {freshEvidence:value.freshEvidence as boolean}:{}), ...(value.reason !== undefined?{reason:value.reason as DriveCheckpointReason}:{}) };
 }

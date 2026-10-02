@@ -40,6 +40,17 @@ demesne auth login openrouter
 
 Demesne works in the folder you start it from. Each session is bound to that workspace, and the agent's tools cannot reach outside it.
 
+## Web-rendered UI inside Ghostty
+
+The Figma-based interface can run as pixels inside Ghostty, connected to the same daemon:
+
+```sh
+bun run graphics:setup  # install the optional Chromium runtime once
+bun run graphics
+```
+
+Use `bun run demesne graphics --session <id>` to resume a session, or add `--setup` for provider setup. For the compiled CLI, run `bun run build:graphics` after the normal build, then `dist/demesne graphics`. Ctrl+Q exits; Esc twice stops a turn. See [the graphics UI guide](apps/graphics/README.md) for controls, packaging, and measured performance.
+
 ## The workbench
 
 **Start screen.** A new session opens on "What are we working on?", with the composer, your model and context size, and **Start from** cards: Explore, Debug, Build and Learn. Clicking a card fills in an editable prompt; Enter sends it. **Recent** lists your last three sessions that have turns; click one to resume it.
@@ -156,7 +167,7 @@ The originals stay in History and exports.
 
 ### Agent Drive
 
-`/drive <mission>` lets Demesne direct a longer piece of work through the same composer you use. It reviews each task's diff and checks, picks the next task, and keeps going within budgets that stop runaway loops. Alt+J opens its panel: a card shows what Drive decided (keep working, redirected, next task, blocked…), and with the panel focused and an empty draft, P pauses or resumes and S stops. See [Agent Drive](docs/agent-drive.md).
+`/drive <mission>` lets Demesne finish and verify a bounded piece of work through the same composer you use. Completed tasks keep their evidence and cannot silently restart. Use `/drive --continuous <mission>` to explicitly enable follow-on improvements, or `/drive reopen <task-id> <reason>` to revisit completed work. Alt+J opens its panel: a card shows what Drive decided (keep working, redirected, next task, blocked…), and with the panel focused and an empty draft, P pauses or resumes and S stops. See [Agent Drive](docs/agent-drive.md).
 
 ## Themes
 

@@ -1,11 +1,16 @@
 # Agent Drive
 
-Agent Drive is a separate planning context that operates Demesne's visible native
-workbench. Give it a mission in the session where you want the work performed:
+Agent Drive is a separate planning context that operates Demesne’s text or graphics
+workbench. Missions are bounded by default: finish the requested work, inspect the
+results, record completion, and stop. Give it a mission in the work session:
 
 ```text
 /drive Finish the parser changes discussed earlier, then review the diff and test results.
 ```
+
+For ongoing improvement, explicitly use `/drive --continuous <mission>` (or check
+**Keep choosing improvements** in the graphics panel). `/drive --bounded <mission>`
+selects the default explicitly. A saved mission retains its original mode.
 
 `/drive` or **Alt+J** opens the Drive panel. The `▷` rail button opens it too.
 The panel shows the mission, current task/cycle, finished tasks, current action, completed and remaining items,
@@ -51,10 +56,10 @@ output allowance.
    verification output, or image Preview.
 5. Send a targeted correction, continue inspecting, report a blocker, or finish
     with quoted evidence from inspected results.
-6. Ask the **coding agent** a focused question about useful next improvements,
+6. **Continuous mode only:** ask the **coding agent** a focused question about useful next improvements,
    based on the finished work and your earlier goals. Read its answer, judge the
    suggestions, choose a concrete next task, and submit it through the composer.
-7. Repeat the work/review/consultation cycle. If a fresh assessment finds no
+7. In continuous mode, repeat the work/review/consultation cycle. If a fresh assessment finds no
    worthwhile work within your direction, become **idle** with an explanation.
 
 ### Hybrid controller and context
@@ -90,34 +95,52 @@ paging no longer requires repeated planner inference.
 
 ### Live coder check-ins
 
-Drive can also review a coder turn **while it is working**. For turns submitted by
-Drive, a check-in becomes eligible after two minutes, provided new activity is
-available and you are not holding scrollback or answering an approval. It uses
-the current rendered coder activity and the mission/current-task constraints.
+Drive can review a coder turn **while it is working**, using the same loaded
+model and inference slot. New text and graphics clients enqueue a review when a
+recorded check finishes, two edit operations complete, or the same tool arguments
+recur three times within the recent twelve calls. Quick events coalesce into one
+pending checkpoint. Checkpoint reviews have a 15-second cooldown; the configured
+`check_in_interval_seconds` (120 by default) remains a fallback for new activity.
+Each worker turn permits at most three check-ins, within the existing mission
+check-in and redirection limits.
 
-- `keep_working` leaves the turn running. Uncertainty or a slow response alone is
-  not a reason to interrupt.
-- `redirect` must quote concrete visible activity that contradicts the task and
-  supply a specific corrective instruction. Drive rechecks the exact worker turn
-  and the quoted activity before cancelling it. After cancellation is acknowledged
-  and the UI settles, the controller types the correction through the normal
-  composer. An approval, changed session, settled turn, stale quote, human draft,
-  or Pause prevents a stale intervention.
-- A check-in never approves a tool, marks a task complete, or treats partial
-  reasoning as a verified result. Its reasoning, verdict and action receipt appear
-  in the normal Drive trace.
+A queued check-in gets priority at the next available inference boundary. It never
+preempts a model response already generating. If coding work is queued, two
+reviews cannot run consecutively; ordinary work retains FIFO ordering. Only one
+queued or active review is allowed per worker. Strict runtime continuation-drain
+hooks retain their existing ordering. Tools execute outside the inference lease,
+so they can continue while Drive reviews. This does not create a second model
+instance or increase the configured inference-slot count.
 
-Check-ins share the inference scheduler. A single-slot Qwen runtime finishes its
-current model call before the review can run; the review can occupy the slot
-between coder model calls, delaying the coder's next call. It cannot independently
-judge an indefinitely running model call in that same slot. Mission time limits
-still run during the wait. Each worker turn allows at most three check-ins, and
-mission-wide check-in/correction allowances prevent an interrupt/restart loop.
-An ambiguous cancellation is never retried automatically. Pause/restart discards
-any pending automatic correction and retains the proposed guidance as feedback.
+After acquiring the slot, the daemon replaces the old screen excerpt with a fresh,
+bounded packet of recorded tool actions, result excerpts, check outcomes and file
+changes. The packet has a worker/session identity, event cursor and revision. The
+planner sees current task criteria and compact recent context, rather than an old
+screen captured before a long queue wait. If the worker has already settled, is
+waiting on human input, or has no eligible tool activity, the review is skipped
+without a model call. The trace reports queue time and model-review duration.
 
-Drive acts as your ongoing delegate: it asks the coding agent what is worth doing
-next rather than requiring you to name every task or explain routine navigation.
+- `keep_working` leaves aligned or inconclusive work running. A temporarily failing
+  test or missing detail alone is not grounds for interruption.
+- `redirect` must quote the fresh packet and provide a specific correction. The
+  client checks its current session, worker and UI state. The daemon then compares
+  the reviewed revision with current tool/source/check state immediately before
+  cancelling that exact worker. Changed evidence or pending human input rejects the
+  interruption. Only an acknowledged cancellation can lead to a correction through
+  the visible composer, and Pause prevents it from being replayed later.
+- A check-in never approves a tool, marks a task complete, or treats partial work
+  as a verified result. Reading holds, drafts and approvals prevent new check-ins.
+
+Reviews still consume model time and can displace the worker's prompt cache.
+A single slot cannot inspect through another indefinitely running model call;
+mission limits and provider timeouts remain active. This implementation prioritizes
+safe handoffs, not simultaneous inference. The isolated regression tests use fake
+providers and real daemon/tool execution; no additional PC model is loaded.
+
+In explicit continuous mode, Drive asks the coding agent what is worth doing next
+within your mission. Consultations use the read-only `/plan` path, with at most one
+focused clarification per completed task. The controller records the exact
+consultation turn; an unrelated later answer cannot authorize follow-on work.
 The original mission and recovered constraints (including audit-only requests or
 no-commit instructions) continue to govern later tasks. Each task is reviewed
 before the next-work phase. The last eight finished tasks remain in its journal.
@@ -209,8 +232,8 @@ Drive attempts a different route after skipped or no-progress actions. Persisten
 no-progress/repeated identical work requests, unavailable capabilities, or 256 UI
 decisions within a task/discovery phase block with saved progress. Finishing a
 task, selecting the next task, or explicit Resume grants a fresh allowance.
-Stopped and idle missions can be resumed. Older completed missions reopen with
-Resume available to begin the next-work consultation. Starting `/drive <mission>`
+Stopped and idle missions can be resumed. Completed missions cannot be resumed
+or silently converted into continuous missions. Starting `/drive <mission>`
 sets a new direction. Resuming without a saved mission shows an explanation.
 
 ## Mission-wide loop protection
@@ -224,7 +247,7 @@ The controller enforces budgets across **all** working/discovery phases. Default
 | Completed tasks | 16 |
 | Reserved worker submissions, including consultations/corrections | 48 |
 | Accounted planning + tracked worker input/output tokens | 2,000,000 |
-| Cycles without new result evidence or a distinct work request | 24 |
+| Cycles without new recorded outcomes or verified completion | 24 |
 | Model check-ins | 24 |
 | Check-in redirections | 3 |
 
@@ -243,11 +266,21 @@ Worker accounting applies to turns submitted by this mission, including `/plan`;
 unrelated human turns are excluded. Durable event cursors recover missed worker
 usage when a session is reopened.
 
+The text and graphics clients fetch recorded facts from the daemon before planning
+and recheck them before completion or a worker submission. Facts include selected
+and latest turn IDs/statuses, bounded file revisions, and the latest outcome of
+each recorded check. The daemon refreshes facts again after acquiring the model
+slot. Assistant summaries, clocks, and new IDs for an unchanged passing check do
+not reset progress. Two worker requests with unchanged repository/check outcomes
+require reconciliation with saved criteria; another rephrased request is refused.
+The planner gets bounded correction opportunities to inspect, finish, or explain
+an actual blocker.
+
 Drive also detects three repetitions of a two-to-six-action navigation cycle,
 repeated/reworded worker requests, and proposed tasks overlapping completed task
 goals. Task comparison normalizes wording and common synonyms, and distinguishes
 different file targets and work phases such as implementation versus testing.
-It is an overlap heuristic, not perfect semantic understanding; mission budgets
+It remains an overlap heuristic, not perfect semantic understanding; mission budgets
 remain the backstop for paraphrases it does not recognize. All completed task
 fingerprints remain within the mission's bounded history, beyond the eight tasks
 shown in planning context. Changing notes, observation IDs, or completing/selecting
@@ -279,6 +312,37 @@ Values must be positive integers; task and submission histories support up to 64
 tasks and 256 worker requests. A saved mission retains its original limits when
 config changes. Model reasoning settings and maximum output allowance are not
 lowered by these controller protections.
+
+## Durable tasks and reopening
+
+Drive owns a versioned task ledger. Each task has a stable ID, a goal, acceptance
+criteria, worker turn IDs, and immutable completion revisions. The planner can set
+criteria before the first worker submission; it cannot redefine them afterward.
+A completion records those criteria, inspected quotes, the worker turn, relevant
+file revisions and recorded checks. Free-form `completed`/`remaining` suggestions
+cannot erase this record. Meaningful acceptance still requires model judgment;
+passing checks do not automatically prove every requirement.
+
+A completed goal includes its verification. Rephrasing it, changing “implement”
+to “review,” or requesting another summary does not create a new task. Automatic
+reopening requires a relevant changed file or a newly failing current check that
+previously passed, plus a recorded reason. Unrelated edits do not qualify. To
+explicitly request another pass yourself, use the task ID shown in the panel:
+
+```text
+/drive reopen <task-id-or-unique-prefix> <reason>
+```
+
+Reopening keeps earlier completion evidence. Resume cannot reopen completed work.
+The ledger survives restart; malformed records block resumption rather than being
+silently discarded. Up to 64 tasks and 16 completion revisions per task are retained
+within a mission. Legacy completed records retain their summaries, but missing
+historical file/check fingerprints are not invented. Starting a new mission is an
+explicit new instruction, not an automatic continuation of a completed goal.
+
+These clients need the matching daemon’s `/v1/sessions/:id/drive/facts` endpoint.
+An older daemon produces an actionable restart message. Restart after active work
+finishes; merely rebuilding does not update an already running process.
 
 ## Verification and scope
 

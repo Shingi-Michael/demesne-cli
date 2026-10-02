@@ -41,7 +41,7 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
   for (const turn of [...state.session.turns].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
     const recorded = byTurn.get(turn.id) ?? [];
     const model = recorded.find((event) => event.type === "model.request_started" && typeof event.payload.model === "string")?.payload.model;
-    const request = { id: id++, type: "user" as const, text: turn.content, at: new Date(turn.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), startedAt: Date.parse(turn.createdAt), model: typeof model === "string" ? model : "Model not recorded", planOnly: turn.planOnly ?? false, compaction: turn.kind === "compaction" };
+    const request = { turnId:turn.id, id: id++, type: "user" as const, text: turn.content, at: new Date(turn.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), startedAt: Date.parse(turn.createdAt), model: typeof model === "string" ? model : "Model not recorded", planOnly: turn.planOnly ?? false, compaction: turn.kind === "compaction" };
     entries.push(request);
     const throughput = new TurnThroughputTracker();
     const tools = new Map<string, ToolEntry>();

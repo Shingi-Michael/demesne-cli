@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'"><title>Demesne — Ghostty rendering prototype</title><link rel="stylesheet" href="ui.css"></head>
+<body><div class="app" data-node-id="8:268">
+  <div class="status"><span class="state"><img src="assets/ready-dot.svg" alt="" width="8" height="8">ready</span><span>qwen3.8-27b</span><div class="context"><div class="meter"><i></i></div><span>0 / 262.1k · 0%</span></div><div class="spacer"></div><button class="key-action" data-note="Settings"><kbd>Tab</kbd> settings</button><button class="key-action" data-note="Commands"><kbd>Ctrl+K</kbd> commands</button></div>
+  <main><header><div class="identity"><strong>demesne</strong><span>· projects/demesne-cli</span></div><div class="header-right"><span>⎇ main</span><button class="key-action" data-note="History"><kbd>Alt+H</kbd> history</button></div></header>
+  <section class="stage"><div class="hero" data-node-id="8:281">
+    <div class="intro"><h1>What are we working on?</h1><p>qwen3.8-27b · ctx 262k · Build mode</p></div>
+    <form class="composer" data-node-id="8:285"><textarea aria-label="Message" spellcheck="false" rows="1" placeholder="Describe what you want to build, fix, or explore…"></textarea><div class="composer-bar"><div class="hints"><button type="button" data-insert="/"><kbd>/</kbd> commands</button><button type="button" data-insert="@"><kbd>@</kbd> files</button><button type="button" id="newline"><kbd>⇧↵</kbd> newline</button></div><button type="submit" class="send"><span id="tokens">~0 tok</span><kbd>↵</kbd><span>send</span></button></div></form>
+    <section class="operations"><h2>START FROM</h2><div class="grid">
+      <button class="operation selected" data-prompt="Trace a call flow end to end"><span>1</span><b>Explore</b><small>Trace a call flow end to end</small></button>
+      <button class="operation" data-prompt="Find and fix a failing behavior"><span>2</span><b>Debug</b><small>Find and fix a failing behavior</small></button>
+      <button class="operation" data-prompt="Implement a feature with tests"><span>3</span><b>Build</b><small>Implement a feature with tests</small></button>
+      <button class="operation" data-prompt="Map the architecture"><span>4</span><b>Learn</b><small>Map the architecture</small></button>
+    </div></section>
+    <section class="recent"><h2>RECENT</h2><div class="list">
+      <button data-note="Unicode identifiers"><span class="green">✓</span><b>Unicode identifiers</b><span class="meta">12 turns · 3 files changed</span><small>2h ago</small></button>
+      <button data-note="Durable compaction"><span class="amber">‖</span><b>Durable compaction</b><span class="meta">31 turns · drive paused</span><small>yesterday</small></button>
+      <button data-note="Image preview panel"><span class="red">×</span><b>Image preview panel</b><span class="meta">8 turns · 1 failed check</span><small>Sep 26</small></button>
+    </div><p class="recent-footer">Alt+H all sessions &nbsp;·&nbsp; /resume &lt;name&gt;</p></section>
+  </div></section></main></div><div role="status" id="notice" hidden></div><script src="ui.js"></script></body></html>

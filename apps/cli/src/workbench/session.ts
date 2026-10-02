@@ -292,7 +292,7 @@ export class SessionView {
   get latest(): SessionRun | undefined { return this.runs.at(-1); }
   get driveNavigation() {
     const run = this.current;
-    return { turn: String(run?.id ?? 0), latest: run === this.latest, answer: run?.status === "COMPLETE" && !!run.answer,
+    return { turn: run?.request?.turnId ?? String(run?.id ?? 0), latest: run === this.latest, answer: run?.status === "COMPLETE" && !!run.answer,
       files: changeFiles(run?.tools.filter((tool) => tool.phase === "change") ?? []).map((file) => file.path).slice(0, 128),
       checks: run ? artifactRecords(run, "verification").map((tool) => String(tool.id)).slice(0, 128) : [],
       ...(this.diffOpen && this.diffPanel.selected ? { item: this.diffPanel.selected.path } : this.artifact ? { item: String(this.artifact.recordId) }

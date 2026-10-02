@@ -1,3 +1,4 @@
+import type { CommandMonitor } from "./command-monitor.ts";
 import { isRecord, type StoredModelMessage, type UserQuestion } from "@demesne/protocol";
 import { DEFAULT_AGENT_LIMITS, type AgentConfig } from "@demesne/config";
 import { ingestImage } from "./artifacts.ts";
@@ -36,6 +37,7 @@ interface HistoryTurn {
 }
 
 interface AgentEngineOptions extends AgentConfig {
+  commands?: CommandMonitor;
   /// Lets `ask_user` wait on the person at the terminal. Without it the tool
   /// is not offered, as in non-interactive (`deny`) turns.
   questions?: QuestionBroker;
@@ -462,6 +464,7 @@ export class AgentEngine {
     try {
       const questions = permissionMode === "deny" ? undefined : this.options.questions;
       const output = await (tool.executeWithArtifacts ?? tool.execute)(input, { workspaceRoot, signal, sessionId,
+        commands:this.options.commands?.reporter(sessionId,turnId,toolCallId,workspaceRoot),
         ...(questions ? { ask: async (asked: UserQuestion[]) => {
           const { questionId } = this.store.requestQuestions(toolCallId, asked);
           const answers = await questions.wait(questionId, turnId, asked.length, signal);
@@ -478,6 +481,7 @@ export class AgentEngine {
         }
       }
       result = result.slice(0, 256 * 1024);
+      this.options.commands?.invalidate(workspaceRoot);
       this.captureSnapshotPostState(turnId, sessionId, workspaceRoot, snapshotTargets.map((file) => file.path));
       this.store.settleToolCall(toolCallId, "completed", result, recordedToolChanges(workspaceRoot, snapshotTargets));
       return result;

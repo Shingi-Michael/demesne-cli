@@ -1,3 +1,5 @@
+import type { CommandReporter } from "./command-monitor.ts";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -23,6 +25,7 @@ import type { StructuredToolResult } from "./artifacts.ts";
 const LIST_FILES_PATH_BUDGET_BYTES = 28 * 1024;
 
 export interface ToolContext {
+  commands?: CommandReporter;
   sessionId?: string;
   workspaceRoot: string;
   signal: AbortSignal;
@@ -336,7 +339,7 @@ export const VIEWER_BYTE_LIMIT = 2 * 1024 * 1024;
 
 /// A workspace file's text for the file viewer, under read_file's rules:
 /// inside the workspace, no symlinks, secrets stay protected, text only.
-export function readWorkspaceText(workspaceRoot: string, path: string): { path: string; content: string | null; byteLength: number | null; reason?: string } {
+export function readWorkspaceText(workspaceRoot: string, path: string): import("@demesne/protocol").WorkspaceFileText {
   const refuse = (reason: string, byteLength: number | null = null) => ({ path, content: null, byteLength, reason });
   if (isSensitivePath(path)) return refuse("protected: secrets and key material are never shown");
   let absolute: string;
@@ -347,7 +350,8 @@ export function readWorkspaceText(workspaceRoot: string, path: string): { path: 
   if (stat.size > VIEWER_BYTE_LIMIT) return refuse("too large to show", stat.size);
   const bytes = readFileSync(absolute);
   if (bytes.includes(0)) return refuse("binary file", stat.size);
-  try { return { path, content: new TextDecoder("utf-8", { fatal: true }).decode(bytes), byteLength: stat.size }; }
+  try { return { path, content: new TextDecoder("utf-8", { fatal: true }).decode(bytes), byteLength: bytes.length,
+    revision: createHash("sha256").update(bytes).digest("hex"), modifiedAt: stat.mtime.toISOString() }; }
   catch { return refuse("not valid UTF-8", stat.size); }
 }
 
@@ -1068,23 +1072,27 @@ function runCommandTool(): AgentTool {
       if (!statSync(cwd).isDirectory()) throw new Error("cwd is not a directory");
 
       if (value.background === true) {
+        const observer=context.commands?.begin(argv,cwd,true);
         try {
-          const spawned = backgroundProcesses.spawn(argv, cwd, backgroundEnv());
+          const spawned = backgroundProcesses.spawn(argv, cwd, backgroundEnv(),observer);
           return JSON.stringify({ handle: spawned.handle, pid: spawned.pid, running: true });
         } catch (error) {
+          observer?.finished(null,false,String(error));
           throw error instanceof Error ? error : new Error("background launch failed");
         }
       }
 
       const timeoutMs = boundedInteger(value.timeoutMs, "timeoutMs", 100, 120_000, 30_000);
-      const child = Bun.spawn(argv, {
+      const observer=context.commands?.begin(argv,cwd,false);
+      let child: ReturnType<typeof Bun.spawn<"ignore","pipe","pipe">>;
+      try { child = Bun.spawn(argv, {
         cwd,
         detached: true,
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
         env: backgroundEnv(),
-      });
+      }); }catch(error){observer?.finished(null,false,String(error));throw error;}
       let timedOut = false;
       let killTimer: ReturnType<typeof setTimeout> | undefined;
       const terminate = () => {
@@ -1093,6 +1101,7 @@ function runCommandTool(): AgentTool {
           try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
         }, 2_000);
       };
+      observer?.started(child.pid,terminate);
       const abort = () => terminate();
       context.signal.addEventListener("abort", abort, { once: true });
       const timer = setTimeout(() => {
@@ -1101,10 +1110,11 @@ function runCommandTool(): AgentTool {
       }, timeoutMs);
       try {
         const [stdout, stderr, exitCode] = await Promise.all([
-          readCommandOutput(child.stdout, 16 * 1024),
-          readCommandOutput(child.stderr, 16 * 1024),
+          readCommandOutput(child.stdout, 16 * 1024,text=>observer?.output("stdout",text)),
+          readCommandOutput(child.stderr, 16 * 1024,text=>observer?.output("stderr",text)),
           child.exited,
         ]);
+        observer?.finished(exitCode,timedOut,context.signal.aborted?"Turn cancelled":undefined);
         if (context.signal.aborted) throw context.signal.reason;
         return JSON.stringify({
           exitCode,
@@ -1114,7 +1124,7 @@ function runCommandTool(): AgentTool {
           ...(stdout.truncated ? { stdoutTruncated: true, stdoutBytes: stdout.totalBytes } : {}),
           ...(stderr.truncated ? { stderrTruncated: true, stderrBytes: stderr.totalBytes } : {}),
         });
-      } finally {
+      } catch(error){observer?.finished(null,timedOut,String(error));throw error;} finally {
         clearTimeout(timer);
         if (killTimer) clearTimeout(killTimer);
         context.signal.removeEventListener("abort", abort);
@@ -1264,7 +1274,7 @@ function walkFiles(
   }
 }
 
-function isSensitivePath(path: string): boolean {
+export function isSensitivePath(path: string): boolean {
   const parts = path.split(/[\\/]/).map((part) => part.toLowerCase());
   const name = parts.at(-1) ?? "";
   const protectedDirectories = new Set([".git", ".ssh", ".aws", ".gnupg", ".docker"]);
@@ -1394,7 +1404,9 @@ async function readProcessOutput(stream: ReadableStream<Uint8Array>, limit: numb
 async function readCommandOutput(
   stream: ReadableStream<Uint8Array>,
   limit: number,
+  onText?: (text:string)=>void,
 ): Promise<{ content: string; totalBytes: number; truncated: boolean }> {
+  const decoder=new TextDecoder();
   const reader = stream.getReader();
   const headLimit = Math.ceil(limit / 2);
   const tailLimit = limit - headLimit;
@@ -1407,6 +1419,7 @@ async function readCommandOutput(
     const { done, value } = await reader.read();
     if (done) break;
     totalBytes += value.byteLength;
+    onText?.(decoder.decode(value,{stream:true}));
     let remainder = value;
     if (headBytes < headLimit) {
       const retained = remainder.slice(0, headLimit - headBytes);
@@ -1420,6 +1433,7 @@ async function readCommandOutput(
     }
   }
 
+  onText?.(decoder.decode());
   const headBuffer = Buffer.concat(head.map((chunk) => Buffer.from(chunk)), headBytes);
   if (totalBytes <= limit) {
     return { content: Buffer.concat([headBuffer, tail]).toString("utf8"), totalBytes, truncated: false };

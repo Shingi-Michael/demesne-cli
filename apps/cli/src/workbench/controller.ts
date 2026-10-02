@@ -709,6 +709,10 @@ export class Workbench {
     this.requestRender();
   }
 
+  bindTurnId(turnId: string): void {
+    const request=this.entries.findLast(entry=>entry.type === "user");
+    if (request?.type === "user") { request.turnId=turnId; this.requestRender(); }
+  }
   beginTurn(options: { userText: string; at: string; planOnly?: boolean; compaction?: boolean }): void {
     this.driveDocumentRevision++;
     this.mode = "streaming";

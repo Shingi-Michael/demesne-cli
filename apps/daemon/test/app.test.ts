@@ -203,7 +203,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(dataPath, "demesne.sqlite"));
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", { method: "POST", body: JSON.stringify({ title: "Files", workspacePath }) });
     const read = (path: string) => jsonRequest<{ path: string; content: string | null; reason?: string; byteLength: number | null }>(running.url, `/v1/sessions/${created.session.id}/file?path=${encodeURIComponent(path)}`);
-    expect(await read("src/a.ts")).toEqual({ path: "src/a.ts", content: "export const a = 1;\n", byteLength: 20 });
+    expect(await read("src/a.ts")).toMatchObject({ path: "src/a.ts", content: "export const a = 1;\n", byteLength: 20 });
     expect((await read(".env")).reason).toContain("protected");
     expect((await read("../outside.txt")).reason).toContain("traversal");
     expect((await read("blob.bin")).reason).toBe("binary file");

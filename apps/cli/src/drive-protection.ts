@@ -65,6 +65,12 @@ export function restoreDriveProtection(state: DriveState, limits?: Partial<Drive
       || saved.worker !== undefined && (!isRecord(saved.worker) || typeof saved.worker.sessionId !== "string" || typeof saved.worker.turnId !== "string" || !count(saved.worker.cursor) || !meterValid(saved.worker.meter)
         || !count(saved.worker.checks) || !count(saved.worker.checkCursor) || !count(saved.worker.nextCheckAt) || typeof saved.worker.settled !== "boolean")
       || saved.trip !== undefined && (!isRecord(saved.trip) || !["budget", "loop", "journal"].includes(String(saved.trip.kind)) || typeof saved.trip.reason !== "string" || saved.trip.reason.length > 2000 || !count(saved.trip.at))) throw new Error();
+    if(saved.worker){
+      const w=saved.worker;
+      if(w.checkpointReadyAt!==undefined&&!count(w.checkpointReadyAt) || w.editBatch!==undefined&&(!count(w.editBatch)||w.editBatch>12)
+        || w.checkpoint!==undefined&&(!isRecord(w.checkpoint)||!count(w.checkpoint.cursor)||!["check_completed","edit_batch","repeated_tools","interval"].includes(String(w.checkpoint.reason)))
+        || w.recentTools!==undefined&&(!Array.isArray(w.recentTools)||w.recentTools.length>12||w.recentTools.some(c=>!isRecord(c)||typeof c.id!=="string"||c.id.length>100||typeof c.key!=="string"||c.key.length!==64||typeof c.check!=="boolean")))throw new Error();
+    }
     newDriveProtection(saved.limits);
     return structuredClone(saved) as DriveProtection;
   } catch {
@@ -83,7 +89,7 @@ export function driveBudgetReason(guard: DriveProtection, admission = true): str
 }
 export const workerText = (text: string): string | undefined => text.trim().startsWith("/plan ") ? text.trim().slice(6).trim() : text.trim().startsWith("/") ? undefined : text.trim();
 
-export function protectDriveDecision(guard: DriveProtection, decision: DriveDecision, screen: DriveObservation, discovering: boolean): string | undefined {
+export function protectDriveDecision(guard: DriveProtection, decision: DriveDecision, screen: DriveObservation, discovering: boolean, scope?: string): string | undefined {
   const action = decision.action;
   if (action.kind === "next_task") {
     const intent = driveIntent(action.task), match = guard.tasks.find(task => similarIntent(task, intent));
@@ -92,7 +98,7 @@ export function protectDriveDecision(guard: DriveProtection, decision: DriveDeci
   if (action.kind === "compose" && workerText(action.text) !== undefined) {
     if (guard.used.workerRequests >= guard.limits.maxWorkerRequests) return `Mission worker-request limit reached (${guard.limits.maxWorkerRequests} reserved submissions).`;
     const intent = driveIntent(workerText(action.text)!);
-    if (!discovering && guard.submissions.filter(prior => similarIntent(prior, intent)).length >= 2) return `Repeated worker goal despite rewording or intervening tasks: “${intent.text}”. Two similar requests were already reserved.`;
+    if (!discovering && guard.submissions.filter(prior => (!scope || prior.scope === scope) && similarIntent(prior, intent)).length >= 2) return `Repeated worker goal despite rewording or intervening tasks: “${intent.text}”. Two similar requests were already reserved.`;
   }
   // Match repeated navigation paths, not observation IDs, clocks or model notes.
   if (["key", "click", "scroll", "inspect", "wait"].includes(action.kind)) {

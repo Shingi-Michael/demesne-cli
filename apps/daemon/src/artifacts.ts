@@ -12,7 +12,7 @@ const nativeRequire = createRequire(import.meta.path.startsWith("/$bunfs/")
 const sharp: typeof import("sharp").default = nativeRequire(import.meta.path.startsWith("/$bunfs/")
   ? join(dirname(process.execPath), "node_modules/sharp/dist/index.cjs") : "sharp");
 
-export interface ImageOutput { data: Uint8Array; mimeType: string; filename?: string; modelId?: string; revisionOf?: string }
+export interface ImageOutput { data: Uint8Array; mimeType: string; filename?: string; modelId?: string; revisionOf?: string; viewport?:ImageArtifact["viewport"] }
 export interface StructuredToolResult { text: string; images: ImageOutput[] }
 const memoryRoots = new WeakMap<DemesneStore, string>();
 export function artifactRoot(store: DemesneStore): string {
@@ -45,7 +45,7 @@ export async function ingestImage(store: DemesneStore, image: ImageOutput,
     filename: image.filename ?? `image-${index + 1}.${info.format === "jpeg" ? "jpg" : info.format}`,
     mimeType: mime, width: info.autoOrient.width, height: info.autoOrient.height, byteLength: image.data.byteLength, sha256: hash,
     source: { kind: origin.name.startsWith("mcp__") ? "mcp" : "tool", name: origin.name, modelId: image.modelId ?? null },
-    revisionOf: revision?.id ?? null }, `${origin.toolCallId}:${index}`);
+    revisionOf: revision?.id ?? null, ...(image.viewport?{viewport:image.viewport}:{}) }, `${origin.toolCallId}:${index}`);
 }
 
 export function readArtifact(store: DemesneStore, artifact: ImageArtifact, preview: boolean): Promise<Buffer> {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -34,7 +34,17 @@ interface FakeState {
   health: DaemonHealth | null;
   pendingHealth: DaemonHealth | null;
   alive: boolean;
+  /// Processes alive independently of the spawned child, with their command lines.
+  others: Map<number, string>;
   command: string[] | null;
+}
+
+function writeLockOwner(dataDirectory: string, pid: number): void {
+  mkdirSync(join(dataDirectory, "daemon.lock"), { recursive: true });
+  writeFileSync(
+    join(dataDirectory, "daemon.lock", "owner.json"),
+    JSON.stringify({ pid, nonce: "test", acquiredAt: new Date().toISOString() }),
+  );
 }
 
 function createFakeDependencies(dataDirectory: string): FakeState {
@@ -45,6 +55,7 @@ function createFakeDependencies(dataDirectory: string): FakeState {
     health: null,
     pendingHealth: null,
     alive: false,
+    others: new Map(),
     command: ["demesned"],
     deps: undefined as unknown as DaemonControlDependencies,
   };
@@ -74,8 +85,10 @@ function createFakeDependencies(dataDirectory: string): FakeState {
       state.killed.push(pid);
       state.health = null;
       state.alive = false;
+      state.others.delete(pid);
     },
-    isProcessAlive: () => state.alive,
+    isProcessAlive: (pid) => state.others.has(pid) || state.alive,
+    processCommand: (pid) => state.others.get(pid) ?? null,
     resolveCommand: () => state.command,
   };
   return state;
@@ -156,9 +169,76 @@ describe("startDaemon", () => {
     expect(result.message).toContain("exited during startup");
     expect(existsSync(join(directory, "daemon.pid"))).toBe(false);
   });
+
+  test("a start that loses the lock leaves the running daemon's pid file intact", async () => {
+    const directory = temporaryDirectory();
+    const state = createFakeDependencies(directory);
+    // The running daemon is not answering health checks, and its lock owner
+    // file is unreadable, so the start goes ahead and the child exits.
+    state.others.set(10492, "/usr/local/bin/demesned");
+    writeFileSync(join(directory, "daemon.pid"), "10492\n");
+    state.deps.spawn = (command) => {
+      state.spawned.push(command);
+      return { pid: 4242, unref: () => {} };
+    };
+    const result = await startDaemon(state.deps);
+    expect(result.started).toBe(false);
+    expect(result.message).toContain("exited during startup");
+    expect(readFileSync(join(directory, "daemon.pid"), "utf8").trim()).toBe("10492");
+  });
+
+  test("does not spawn while a live daemon holds the data directory lock", async () => {
+    const directory = temporaryDirectory();
+    const state = createFakeDependencies(directory);
+    state.others.set(10492, "/usr/local/bin/demesned");
+    writeLockOwner(directory, 10492);
+    writeFileSync(join(directory, "daemon.pid"), "10492\n");
+    const result = await startDaemon(state.deps);
+    expect(result.started).toBe(false);
+    expect(result.pid).toBe(10492);
+    expect(result.message).toContain("pid 10492");
+    expect(state.spawned).toEqual([]);
+    expect(readFileSync(join(directory, "daemon.pid"), "utf8").trim()).toBe("10492");
+  });
 });
 
 describe("stopDaemon", () => {
+  test("falls back to the lock owner when the pid file is missing", async () => {
+    const directory = temporaryDirectory();
+    const state = createFakeDependencies(directory);
+    state.health = { status: "ok", provider: "p", model: "m" };
+    state.others.set(10492, "bun /src/demesne-cli/apps/daemon/src/main.ts");
+    writeLockOwner(directory, 10492);
+    const result = await stopDaemon(state.deps);
+    expect(result.stopped).toBe(true);
+    expect(state.killed).toEqual([10492]);
+    expect(result.message).toContain("10492");
+  });
+
+  test("falls back to the lock owner when the pid file is stale", async () => {
+    const directory = temporaryDirectory();
+    const state = createFakeDependencies(directory);
+    state.health = { status: "ok", provider: "p", model: "m" };
+    state.others.set(10492, "/usr/local/bin/demesned");
+    writeLockOwner(directory, 10492);
+    writeFileSync(join(directory, "daemon.pid"), "4242\n");
+    const result = await stopDaemon(state.deps);
+    expect(result.stopped).toBe(true);
+    expect(state.killed).toEqual([10492]);
+    expect(existsSync(join(directory, "daemon.pid"))).toBe(false);
+  });
+
+  test("does not signal a lock owner pid that is not a demesne daemon", async () => {
+    const directory = temporaryDirectory();
+    const state = createFakeDependencies(directory);
+    state.health = { status: "ok", provider: "p", model: "m" };
+    state.others.set(10492, "/Applications/Safari.app/Contents/MacOS/Safari");
+    writeLockOwner(directory, 10492);
+    const result = await stopDaemon(state.deps, { timeoutMs: 20 });
+    expect(result.stopped).toBe(false);
+    expect(state.killed).toEqual([]);
+  });
+
   test("signals the recorded pid and clears the pid file", async () => {
     const directory = temporaryDirectory();
     const state = createFakeDependencies(directory);

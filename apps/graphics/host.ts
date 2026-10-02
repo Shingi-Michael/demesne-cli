@@ -699,23 +699,10 @@ export class GraphicsHost {
       return;
     }
     const driven = this.drive?.authorize(method, args);
-    if (
-      !driven &&
-      ![
-        "bootstrap",
-        "draft",
-        "observe",
-        "ui-result",
-        "artifact",
-        "files",
-        "read-file",
-        "file-status",
-        "models",
-        "changes",
-        "drive",
-        "drive-control",
-      ].includes(method)
-    ) {
+    // Only the person writing or sending a message takes over from Drive
+    // ("manual" is the renderer's signal that the composer draft changed).
+    // Clicking, navigating, opening panels and reading leave it running.
+    if (!driven && ["manual", "submit", "plan-submit"].includes(method)) {
       this.onManual?.();
       this.drive?.agent.intervene();
     }

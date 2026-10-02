@@ -23,7 +23,6 @@ type Callbacks = {
   attach(text: string): void;
   insert(path: string): void;
   changed(): void;
-  manual(): void;
   error(message: string): void;
 };
 
@@ -62,7 +61,6 @@ export class FilesView {
       );
       if (!target) return;
       event.stopPropagation();
-      this.callbacks.manual();
       void this.action(
         target.dataset.fileAction!,
         JSON.parse(target.dataset.args ?? "{}"),
@@ -489,7 +487,6 @@ export class FilesView {
     } else handled = false;
     if (handled) {
       event.preventDefault();
-      this.callbacks.manual();
     }
     return handled;
   }

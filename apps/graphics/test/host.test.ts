@@ -160,3 +160,23 @@ test("remote addresses do not receive local daemon credentials", () => {
     daemonCredential("https://remote.example", "/missing", {}),
   ).toBeUndefined();
 });
+test("clicking around the graphics UI never pauses Drive; writing or sending does", async () => {
+  const f = await fixture();
+  const host = hostFor(f);
+  let takeovers = 0;
+  host.drive = { authorize: () => false, agent: { intervene: () => takeovers++ }, handle: async () => {}, dispose() {} } as unknown as typeof host.drive;
+  const send = async (method: string, args: Record<string, unknown> = {}) => { try { await host.handle(method, args); } catch { /* only the takeover matters here */ } };
+  try {
+    for (const method of ["panel-width", "panel-watch", "processes", "copy", "files", "read-file", "changes", "open-artifact", "theme", "select-session", "rerun-checks"])
+      await send(method);
+    expect(takeovers).toBe(0);
+    await send("manual");
+    expect(takeovers).toBe(1);
+    await send("submit", { text: "Do it" });
+    expect(takeovers).toBe(2);
+  } finally {
+    host.drive = undefined;
+    host.dispose();
+    await f.close();
+  }
+});

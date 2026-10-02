@@ -103,6 +103,8 @@ export function createDaemonApp(options: {
   providerEventLimit?: number;
   providerVision?: boolean;
   agent?: AgentConfig;
+  /// Persists the sub-agent default chosen at runtime (null clears it).
+  saveSubagentModel?: (model: string | null) => void;
 }): DaemonApp {
   if (options.images && Object.values(options.images).some((value) => value !== undefined)
     && (!options.images.url || !options.images.model)) throw new Error("Image generation requires both images.url and images.model");
@@ -123,6 +125,7 @@ export function createDaemonApp(options: {
     store.close();
     throw new Error(`The ${runtimeProfile} runtime profile requires one inference slot`);
   }
+  const subagentModels = () => processor.availableModels?.() ?? [{ id: processor.modelId, provider: processor.providerId }];
   const scheduler = new InferenceSchedulers(new InferenceScheduler(inferenceSlots, undefined, options.inferenceBoundaryHook), processor.providerId);
   const tools = new ToolRegistry();
   if (options.providerVision || options.images?.model || Object.keys(options.mcpServers ?? {}).length) {
@@ -155,6 +158,7 @@ export function createDaemonApp(options: {
       questions,
       commands,
       inferenceFor: (model, thinkingEnabled) => snapshotTurnInference(processor, thinkingEnabled, { model }),
+      subagentModels: () => subagentModels(),
       ...options.agent,
     },
   );
@@ -402,6 +406,24 @@ export function createDaemonApp(options: {
           })),
         };
         return json(response);
+      }
+
+      // The model sub-agents run on when the agent doesn't name one; null means
+      // the conversation's own model. Applies to the next sub-agent and is saved.
+      if (url.pathname === "/v1/subagent-model" && (request.method === "GET" || request.method === "POST")) {
+        if (request.method === "POST") {
+          const body = await readJson(request);
+          if (!isRecord(body) || !(body.model === null || typeof body.model === "string" && body.model.trim()))
+            return apiError("invalid_request", "model must be a model id or null", 400);
+          const model = typeof body.model === "string" ? body.model.trim() : null;
+          if (model && !subagentModels().some((available) => available.id === model))
+            return apiError("invalid_request", `Unknown model: ${model}. Available: ${subagentModels().map((available) => available.id).join(", ")}`, 400);
+          engine.setSubagentModel(model ?? undefined);
+          let saved = true;
+          try { options.saveSubagentModel?.(model); } catch { saved = false; }
+          return json({ model, models: subagentModels(), saved });
+        }
+        return json({ model: engine.subagentModel ?? null, models: subagentModels() });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/model") {

@@ -66,12 +66,12 @@ describe("command menu layout", () => {
   test("the window opens on a section label without losing the selection", () => {
     // /plan is the first control command: its label fits a seven-row window
     // that keeps the selection, so the label leads the window.
-    const rows = layoutCommandMenu(SLASH_COMMANDS, 7, 11);
+    const rows = layoutCommandMenu(SLASH_COMMANDS, 7, 12);
     expect(rows).toHaveLength(7);
     expect(rows[0]!.kind).toBe("more");
     expect(rows[1]!.kind).toBe("section");
     expect(rows[1]!.section).toBe("control");
-    expect(rows.filter((row) => row.kind === "command").map((row) => row.index)).toEqual([11, 12, 13, 14]);
+    expect(rows.filter((row) => row.kind === "command").map((row) => row.index)).toEqual([12, 13, 14, 15]);
     expect(rows[rows.length - 1]!.kind).toBe("more");
   });
 
@@ -79,11 +79,11 @@ describe("command menu layout", () => {
     // /help sits near the end of the control section: opening on its label
     // would overflow a seven-row window, so the window leads with `…` and
     // keeps the selection with the rest of the section around it.
-    const rows = layoutCommandMenu(SLASH_COMMANDS, 7, 15);
+    const rows = layoutCommandMenu(SLASH_COMMANDS, 7, 16);
     expect(rows).toHaveLength(7);
     expect(rows[0]!.kind).toBe("more");
     expect(rows[1]!.kind).toBe("command");
-    expect(rows.filter((row) => row.kind === "command").map((row) => row.index)).toEqual([11, 12, 13, 14, 15]);
+    expect(rows.filter((row) => row.kind === "command").map((row) => row.index)).toEqual([12, 13, 14, 15, 16]);
     expect(rows[rows.length - 1]!.kind).toBe("more");
   });
 

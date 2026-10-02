@@ -2605,23 +2605,28 @@ export class Workbench {
   /// Figma 49:560: what this session uses, each with its current value and
   /// the command that also changes it, grouped as Session, Appearance and
   /// Navigate. Enter changes the selected one.
+  /// The sub-agent default as last read from the daemon (null: the
+  /// conversation's model; undefined: not known yet). Shown in Settings.
+  subagentModel: string | null | undefined;
+
   private openSettings(): void {
     if (this.mode !== "input") return;
     const commands = this.promptContext.commands;
     const paint = this.options.paint;
     const sessions = this.recentSessions.filter((session) => session.id !== this.sessionId).length;
-    const items = ["Mode", "Model", "Theme", "Sessions", "All commands"];
+    const items = ["Mode", "Model", "Sub-agents", "Theme", "Sessions", "All commands"];
     void this.choose("Settings", items, 0, {
       subtitle: "this session",
-      groups: ["Session", "Session", "Appearance", "Navigate", "Navigate"],
+      groups: ["Session", "Session", "Session", "Appearance", "Navigate", "Navigate"],
       details: [this.planMode ? "Plan · read-only" : "Build · edits allowed", this.options.contextRail.modelId,
+        this.subagentModel === undefined ? "choose their model" : this.subagentModel ?? "same as the conversation",
         `${paint.themeName} · ${paint.theme}`, sessions ? `${sessions} recent` : "recent and saved sessions", `${commands.length} commands`],
-      hints: [this.planMode ? "to Build" : "to Plan", "/model", "/theme", "/sessions", "/"],
+      hints: [this.planMode ? "to Build" : "to Plan", "/model", "/subagent", "/theme", "/sessions", "/"],
       action: "change", noun: "settings", note: "Tab or Ctrl+K opens this",
     }).then((index) => {
       if (index === null) return;
       if (index === 0) { this.planMode = !this.planMode; this.requestRender(); }
-      else if (index <= 3) this.runCommand(["", "/model", "/theme", "/sessions"][index]!);
+      else if (index <= 4) this.runCommand(["", "/model", "/subagent", "/theme", "/sessions"][index]!);
       else { this.editor = setPromptValue(this.editor, "/"); this.requestRender(); }
     });
   }

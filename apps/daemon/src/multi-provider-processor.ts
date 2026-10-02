@@ -36,6 +36,10 @@ export class MultiProviderProcessor implements TurnProcessor {
     };
   }
 
+  availableModels() {
+    return [...this.routes.entries()].map(([id, processor]) => ({ id, provider: processor.providerId }));
+  }
+
   setModel(id: string) {
     const processor = this.routes.get(id);
     if (!processor) throw new Error(`Unknown model: ${id}`);

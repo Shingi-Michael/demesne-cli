@@ -78,7 +78,7 @@ import { TurnActivityLedger, isValidationCommand, type TurnPhase } from "./turn-
 import { TerminalTextPacer } from "./terminal-text-pacer.ts";
 import { loadRecentSessions } from "./recent-sessions.ts";
 import { selectSessionInteractive, sessionListItem } from "./session-picker.ts";
-import { matchModel, selectModelInteractive } from "./model-picker.ts";
+import { findModel, matchModel, selectModelInteractive } from "./model-picker.ts";
 import { reducedMotionEnabled } from "./motion.ts";
 import { DemesneClient, isStalePermissionResolution } from "@demesne/client";
 import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } from "./approval-selection.ts";
@@ -1414,6 +1414,34 @@ async function runChat(command: string[]): Promise<void> {
       else if (!selected) say("Session selection cancelled.");
     },
     resume: activateSession,
+    // The default model for sub-agents (the agent can still pick another when
+    // you name one). Applies immediately and is saved to your config.
+    subagent: async (argument) => {
+      const current = await request<{ model: string | null; models: { id: string; provider: string }[] }>("/v1/subagent-model");
+      if (workbench) workbench.subagentModel = current.model;
+      const query = argument.trim();
+      let model: string | null;
+      if (/^(off|same|default|none|conversation)$/i.test(query)) model = null;
+      else if (query) {
+        const match = findModel(current.models, query);
+        if ("error" in match) { say(match.error, "error"); return; }
+        model = match.model.id;
+      } else if (workbench) {
+        const choices = [{ id: null, provider: "Default" }, ...[...current.models].sort((a, b) => a.provider.localeCompare(b.provider))];
+        const index = await workbench.choose("Sub-agent model", choices.map((choice) => choice.id ?? "Same as the conversation"),
+          Math.max(0, choices.findIndex((choice) => choice.id === current.model)), {
+            subtitle: `current: ${current.model ?? "same as the conversation"}`, groups: choices.map((choice) => choice.provider),
+            currentIndex: Math.max(0, choices.findIndex((choice) => choice.id === current.model)), action: "use", noun: "models" });
+        if (index === null || !choices[index]) { say("Sub-agent model unchanged."); return; }
+        model = choices[index]!.id;
+      } else {
+        say(`Sub-agents run on ${current.model ?? "the conversation's model"}. Use /subagent <model> or /subagent same.`);
+        return;
+      }
+      const result = await request<{ model: string | null; saved: boolean }>("/v1/subagent-model", { method: "POST", body: JSON.stringify({ model }) });
+      if (workbench) workbench.subagentModel = result.model;
+      say(`${result.model ? `Sub-agents now run on ${sanitizeTerminalLine(result.model)}` : "Sub-agents now use the conversation's model"}${result.saved ? "" : " (could not save to your config)"}.`, "success");
+    },
     model: async (argument) => {
       const discovered = await request<{ models: ModelDescriptor[] }>("/v1/models");
       const query = argument.trim();

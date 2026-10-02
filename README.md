@@ -224,7 +224,7 @@ demesne --version               # also checks for a newer release once a day
 | `subagent` | Hand a read-only investigation to a sub-agent with its own context; only its report comes back | No |
 
 - **Sub-agents read, never write.** A sub-agent gets a fresh context and the read-only tools above, so it needs no approvals and several can run at once (on a single model slot their model calls take turns). Its card shows its task and current step; its tool calls stay out of the main conversation, which receives only the report.
-- **Sub-agents can use a different model.** Set `subagent_model` under `[agent]` to any configured model, for example a local Qwen while the main conversation uses ChatGPT, so reading and searching don't spend your plan. Each provider has its own model slots, so the local model never waits behind the cloud one. Cards and reports name the sub-agent's model.
+- **Sub-agents can use a different model.** `/subagent` (or **Sub-agents** in Tab settings) picks the default, for example a local Qwen while the main conversation uses ChatGPT, so reading and searching don't spend your plan. It applies immediately and is saved as `subagent_model` under `[agent]`; `/subagent same` goes back to the conversation's model. Name a model in your request ("use an astra sub-agent", "have Qwen check") and the agent runs that sub-agent on it instead. Each provider has its own model slots, so the local model never waits behind the cloud one. Cards and reports name the sub-agent's model.
 - **Commands aren't sandboxed.** `run_command` runs on your machine as your user. It starts in the workspace with a filtered environment and process limits.
 - **Secrets stay out of reach.** Sensitive files are never read or searched automatically, including `.env`, `.git`, `.ssh`, `.aws`, credential files and private keys.
 - **Saved approvals.** They live in `[permissions] allow`, for example `"edit_file:src"` or `"run_command:git status"`. A saved command rule matches that exact command only; end it with ` *` (`"run_command:git status *"`) to also allow further arguments.
@@ -250,7 +250,7 @@ max_output_tokens = 4096
 [agent]
 max_model_rounds = 64
 max_tool_calls = 256
-# subagent_model = "qwen3.8-27b"    # run sub-agents on another configured model
+# subagent_model = "qwen3.8-27b"    # sub-agents' default model; /subagent changes it
 
 [permissions]
 allow = []

@@ -2200,8 +2200,9 @@ test("Settings follows Figma 49:560: grouped settings with their values and comm
   void ui.readPrompt({ history: [], mentions: [], commands: SLASH_COMMANDS });
   state.onKeypress("", { name: "tab" });
   const text = screen(120, 30);
-  expect(text).toMatch(/Settings {2}this session +5 settings/);
-  expect(text).toMatch(/SESSION +2/);
+  expect(text).toMatch(/Settings {2}this session +6 settings/);
+  expect(text).toMatch(/SESSION +3/);
+  expect(text).toMatch(/Sub-agents +choose their model +\/subagent/);
   expect(text).toMatch(/Mode +Build · edits allowed +to Plan ↵/);
   expect(text).toMatch(/Theme +\S+ · (dark|light) +\/theme/);
   expect(text).toMatch(/All commands +\d+ commands +\//);

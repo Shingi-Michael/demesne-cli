@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { ConfigError, loadConfig, userConfigPath, type ProviderConfig } from "@demesne/config";
+import { ConfigError, loadConfig, updateUserConfig, userConfigPath, type ProviderConfig } from "@demesne/config";
 import { MultiProviderProcessor } from "./multi-provider-processor.ts";
 import { ChatGPTAuth } from "@demesne/chatgpt-auth";
 import { ChatGPTProvider, OpenAICompatibleProvider } from "@demesne/providers";
@@ -74,6 +74,8 @@ try {
     images: config.images,
     providerVision: config.provider.vision,
     agent: config.agent,
+    // /subagent saves its choice where the rest of the user's settings live.
+    saveSubagentModel: (model) => { updateUserConfig(process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(), { agent: { subagent_model: model } }); },
     providerFirstEventTimeoutMs,
     // Let each turn's output budget determine the default streaming deadline.
     providerRequestTimeoutMs: config.provider.requestTimeoutMs,

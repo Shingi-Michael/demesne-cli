@@ -34,13 +34,27 @@ export const subagentDefinition: ProviderToolDefinition = {
   },
 };
 
-export function parseSubagentInput(input: unknown): { description: string; prompt: string } {
+export interface SubagentModel { id: string; provider: string }
+
+/// The tool as offered to one turn. With more than one model configured it
+/// gains `model`, listing each with its provider, so naming a model or
+/// provider ("use Qwen", "an astra sub-agent") maps onto a real ID.
+export function subagentDefinitionFor(models: readonly SubagentModel[], defaultModel: string): ProviderToolDefinition {
+  if (models.length < 2) return subagentDefinition;
+  const schema = subagentDefinition.inputSchema as { properties: Record<string, unknown> };
+  return { ...subagentDefinition, inputSchema: { ...subagentDefinition.inputSchema, properties: { ...schema.properties,
+    model: { type: "string", enum: models.map((model) => model.id),
+      description: `Optional: the model this sub-agent runs on. When the user names a model or provider for sub-agents, pass the matching id; otherwise omit it to use the default, ${defaultModel}. Available: ${models.map((model) => `${model.id} (${model.provider})`).join(", ")}.` } } } };
+}
+
+export function parseSubagentInput(input: unknown): { description: string; prompt: string; model?: string } {
   if (!isRecord(input) || typeof input.description !== "string" || typeof input.prompt !== "string")
     throw new Error("subagent needs a description and a prompt");
   const description = input.description.trim(), prompt = input.prompt.trim();
   if (!description || description.length > 80) throw new Error("description must be 1–80 characters");
   if (!prompt || prompt.length > 16_000) throw new Error("prompt must be 1–16,000 characters");
-  return { description, prompt };
+  if (input.model !== undefined && (typeof input.model !== "string" || !input.model.trim() || input.model.length > 200)) throw new Error("model must be a configured model id");
+  return { description, prompt, ...(typeof input.model === "string" ? { model: input.model.trim() } : {}) };
 }
 
 const instructions = (workspaceRoot: string) => `You are a Demesne sub-agent: a focused, read-only researcher working for the main coding agent in ${workspaceRoot}.

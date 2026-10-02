@@ -228,3 +228,90 @@ test("a sub-agent's thinking streams to its card in slices, and is withheld when
     });
   }
 });
+
+async function twoProviders(agent: AgentConfig, parent: (messages: ProviderMessage[]) => ProviderStreamEvent[], run: (value: {
+  client: DemesneClient; session: string; calls: { provider: string; model: string; subagent: boolean; tools: string[] }[]; saved: (string | null)[];
+  request: (path: string, init?: RequestInit) => Promise<Response>; send: (content: string) => Promise<EventEnvelope[]>; parentTools: () => ProviderToolDefinition[];
+}) => Promise<void>) {
+  const { MultiProviderProcessor } = await import("../src/multi-provider-processor.ts");
+  const { ProviderTurnProcessor } = await import("../src/provider-processor.ts");
+  const calls: { provider: string; model: string; subagent: boolean; tools: string[] }[] = [];
+  let parentTools: ProviderToolDefinition[] = [];
+  const provider = (id: string, model: string) => new ProviderTurnProcessor({
+    id,
+    async listModels() { return [{ id: model, provider: id, contextWindow: 262144 }]; },
+    async *stream(request) {
+      const sub = isSubagent(request.messages);
+      calls.push({ provider: id, model: request.model, subagent: sub, tools: (request.tools ?? []).map((tool) => tool.name) });
+      if (!sub) { parentTools = request.tools ?? []; yield* parent(request.messages); return; }
+      yield { type: "text_delta", delta: `report from ${request.model}` }; yield { type: "finish", reason: "stop" };
+    },
+  }, model, { maxOutputTokens: 1024 }, undefined, 262144, [model]);
+  const root = mkdtempSync(join(tmpdir(), "demesne-subagent-choice-"));
+  mkdirSync(join(root, "workspace")); mkdirSync(join(root, "data"));
+  const saved: (string | null)[] = [];
+  const app = createDaemonApp({ databasePath: join(root, "data/state.sqlite"), processor: new MultiProviderProcessor([provider("ChatGPT", "gpt-6-astra"), provider("Qwen on PC", "qwen3.8-27b")], []),
+    agent, saveSubagentModel: (model) => { saved.push(model); } });
+  const request = (path: string, init?: RequestInit) => Promise.resolve(app.fetch(new Request(new URL(path, "http://localhost"),
+    { ...init, headers: { "Content-Type": "application/json", ...init?.headers } })));
+  const client = new DemesneClient({ server: "http://localhost", fetch: ((input: string | URL | Request, init?: RequestInit) =>
+    Promise.resolve(app.fetch(new Request(input, init)))) as typeof fetch });
+  try {
+    const { session } = await client.createSession({ title: "Sub-agent choice", workspacePath: join(root, "workspace") });
+    const send = async (content: string) => {
+      const submitted = await client.submitTurn(session.id, { content });
+      const events: EventEnvelope[] = [];
+      for await (const event of client.streamEvents(session.id, submitted.eventId, AbortSignal.timeout(5000))) {
+        if (event.turnId !== submitted.turn.id) continue;
+        events.push(event);
+        if (/^turn\.(completed|failed|cancelled|interrupted)$/.test(event.type)) break;
+      }
+      return events;
+    };
+    await run({ client, session: session.id, calls, saved, request, send, parentTools: () => parentTools });
+  } finally { await app.close(); rmSync(root, { recursive: true, force: true }); }
+}
+
+const delegate = (args: Record<string, unknown>) => (messages: ProviderMessage[]): ProviderStreamEvent[] => toolResults(messages).length
+  ? [{ type: "text_delta", delta: toolResults(messages)[0]! }, { type: "finish", reason: "stop" }]
+  : [call("delegate", "subagent", { description: "Look", prompt: "Look", ...args }), { type: "finish", reason: "tool_calls" }];
+
+test("naming a model lets the agent pick it over the default; the tool lists each model with its provider", async () => {
+  await twoProviders({ subagentModel: "qwen3.8-27b" }, delegate({ model: "gpt-6-astra" }), async ({ calls, send, parentTools }) => {
+    const events = await send("Use an astra sub-agent to look");
+    expect(events.at(-1)?.type).toBe("turn.completed");
+    const tool = parentTools().find((definition) => definition.name === "subagent")!;
+    const model = (tool.inputSchema as { properties: Record<string, { enum: string[]; description: string }> }).properties.model!;
+    expect(model.enum.sort()).toEqual(["gpt-6-astra", "qwen3.8-27b"]);
+    expect(model.description).toContain("gpt-6-astra (ChatGPT)");
+    expect(model.description).toContain("qwen3.8-27b (Qwen on PC)");
+    expect(model.description).toContain("default, qwen3.8-27b");
+    expect(calls.filter((call) => call.subagent).map((call) => call.model)).toEqual(["gpt-6-astra"]);
+  });
+});
+
+test("a model the agent names that isn't configured fails the delegation clearly", async () => {
+  await twoProviders({}, delegate({ model: "gpt-5" }), async ({ calls, send }) => {
+    const events = await send("Delegate");
+    expect(events.at(-1)?.type).toBe("turn.completed");
+    expect(calls.some((call) => call.subagent)).toBe(false);
+    expect(events.some((event) => event.type === "message.delta" && String(event.payload.delta).includes("unknown sub-agent model gpt-5"))).toBe(true);
+  });
+});
+
+test("/v1/subagent-model changes the default at runtime, saves it, and refuses unknown models", async () => {
+  await twoProviders({ subagentModel: "qwen3.8-27b" }, delegate({}), async ({ calls, saved, request, send }) => {
+    const current = await (await request("/v1/subagent-model")).json() as { model: string | null; models: { id: string; provider: string }[] };
+    expect(current.model).toBe("qwen3.8-27b");
+    expect(current.models).toContainEqual({ id: "gpt-6-astra", provider: "ChatGPT" });
+
+    const changed = await request("/v1/subagent-model", { method: "POST", body: JSON.stringify({ model: "gpt-6-astra" }) });
+    expect(await changed.json()).toMatchObject({ model: "gpt-6-astra", saved: true });
+    await send("Delegate");
+    expect(calls.filter((call) => call.subagent).map((call) => call.model)).toEqual(["gpt-6-astra"]);
+
+    expect((await request("/v1/subagent-model", { method: "POST", body: JSON.stringify({ model: "nope" }) })).status).toBe(400);
+    expect(await (await request("/v1/subagent-model", { method: "POST", body: JSON.stringify({ model: null }) })).json()).toMatchObject({ model: null });
+    expect(saved).toEqual(["gpt-6-astra", null]);
+  });
+});

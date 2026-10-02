@@ -13,7 +13,7 @@ import { recordedToolChanges } from "./tool-change-preview.ts";
 import { PermissionBroker } from "./permissions.ts";
 import type { QuestionBroker } from "./questions.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
-import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinition } from "./subagent.ts";
+import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinitionFor, type SubagentModel } from "./subagent.ts";
 import type { InferenceSchedulers } from "./inference-scheduler.ts";
 import { composeSystemPrompt, loadProjectInstructions } from "./instructions.ts";
 import {
@@ -48,6 +48,8 @@ interface AgentEngineOptions extends AgentConfig {
   providerEventLimit?: number;
   /// Another configured model's call, for sub-agents on `subagentModel`.
   inferenceFor?: (model: string, thinkingEnabled: boolean | undefined) => TurnInference;
+  /// Models a sub-agent may be asked to run on, offered to the agent by name.
+  subagentModels?: () => SubagentModel[];
 }
 
 export class AgentEngine {
@@ -60,6 +62,11 @@ export class AgentEngine {
     private readonly contextPlanner?: ContextPlanner,
     private readonly options: AgentEngineOptions = {},
   ) {}
+
+  /// The model sub-agents use when the agent doesn't name one; undefined
+  /// means the turn's own model. Changed at runtime by /subagent.
+  get subagentModel(): string | undefined { return this.options.subagentModel; }
+  setSubagentModel(model: string | undefined): void { this.options.subagentModel = model; }
 
   async run(turnId: string, inference: TurnInference, signal: AbortSignal): Promise<void> {
     const turn = this.store.getTurn(turnId);
@@ -75,7 +82,8 @@ export class AgentEngine {
     // `ask_user` needs someone to answer: not in non-interactive turns.
     const canAsk = Boolean(this.options.questions) && turn.permissionMode !== "deny";
     const definitions = session.workspace
-      ? planModeDefinitions(selectToolsForTurn([...this.tools.definitions(), subagentDefinition], turn.content), turn.planOnly === true)
+      ? planModeDefinitions(selectToolsForTurn([...this.tools.definitions(),
+        subagentDefinitionFor(this.options.subagentModels?.() ?? [], this.options.subagentModel ?? inference.modelId)], turn.content), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : [];
     const systemPrompt = agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
@@ -410,23 +418,28 @@ export class AgentEngine {
   /// report is the tool result and its steps stream as progress on the card.
   private async executeSubagent(toolCallId: string, input: unknown, workspaceRoot: string, turnId: string, sessionId: string,
     inference: TurnInference, signal: AbortSignal): Promise<string> {
-    let prompt: string;
-    try { ({ prompt } = parseSubagentInput(input)); }
+    let prompt: string, requested: string | undefined;
+    try {
+      ({ prompt, model: requested } = parseSubagentInput(input));
+      const models = this.options.subagentModels?.() ?? [];
+      if (requested && !models.some((model) => model.id === requested))
+        throw new Error(`unknown sub-agent model ${requested}. Available: ${models.map((model) => model.id).join(", ") || "none"}`);
+    }
     catch (error) {
       const result = `Error: ${error instanceof Error ? error.message : "invalid subagent input"}`;
       this.store.settleToolCall(toolCallId, "failed", result);
       return result;
     }
-    // `[agent] subagent_model` runs sub-agents on another model (say a local
-    // one while the main turn uses a cloud plan); otherwise they share the turn's.
-    const model = this.options.subagentModel;
+    // The model the agent named (the user asked for it), else the default
+    // from /subagent or `[agent] subagent_model`, else the turn's own.
+    const model = requested ?? this.options.subagentModel;
     let delegate = inference;
     if (model && model !== inference.modelId) {
       try {
         if (!this.options.inferenceFor) throw new Error("this daemon cannot route to another model");
         delegate = this.options.inferenceFor(model, inference.thinkingEnabled);
       } catch (error) {
-        const result = `Error: sub-agent model ${model} is unavailable (${error instanceof Error ? error.message : "unknown error"}). Check [agent] subagent_model.`;
+        const result = `Error: sub-agent model ${model} is unavailable (${error instanceof Error ? error.message : "unknown error"}). Choose another with /subagent.`;
         this.store.settleToolCall(toolCallId, "failed", result);
         return result;
       }

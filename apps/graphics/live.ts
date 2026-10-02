@@ -747,10 +747,6 @@ const filesView = new FilesView({
     void dispatch("insert-file", { path });
   },
   changed: () => reportObservation(),
-  manual: () => {
-    if (state?.drive && ["running", "waiting"].includes(state.drive.status))
-      void api("manual");
-  },
   error: notice,
 });
 function outputHTML(text: string, cwd?: string) {
@@ -2013,6 +2009,8 @@ function renderCompletion() {
     ?.scrollIntoView({ block: "nearest" });
 }
 function changedDraft() {
+  // Writing in the composer is what takes over from Drive; clicking,
+  // navigating and reading panels leave it running.
   if (state?.drive && ["running", "waiting"].includes(state.drive.status))
     void api("manual");
   completionDismissed = false;
@@ -2697,8 +2695,6 @@ document.addEventListener("click", (event) => {
       detailsOpen.add(id);
     }
   }
-  if (state?.drive && ["running", "waiting"].includes(state.drive.status))
-    void api("manual");
   const target = (event.target as Element).closest<HTMLElement>(
     "[data-action]",
   );
@@ -2836,12 +2832,6 @@ document.addEventListener("keydown", (event) => {
     event.target instanceof HTMLTextAreaElement;
   const key = event.key.toLowerCase(),
     ctrl = event.ctrlKey || event.metaKey;
-  if (
-    state.drive &&
-    ["running", "waiting"].includes(state.drive.status) &&
-    !["shift", "control", "alt", "meta"].includes(key)
-  )
-    void api("manual");
   const run = (task: () => Promise<unknown> | void) => {
     event.preventDefault();
     void act(async () => task());

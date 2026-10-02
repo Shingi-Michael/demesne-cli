@@ -25,7 +25,7 @@ export interface DaemonControlDependencies {
   fetch: typeof fetch;
   spawn: (
     command: string[],
-    options: { env: Record<string, string | undefined>; stdout: number; stderr: number; stdin: "ignore" },
+    options: { env: Record<string, string | undefined>; stdout: number; stderr: number; stdin: "ignore"; detached: true },
   ) => SpawnedDaemon;
   sleep: (ms: number) => Promise<void>;
   kill: (pid: number, signal: NodeJS.Signals) => void;
@@ -137,6 +137,9 @@ export async function startDaemon(
       stdout: logFd,
       stderr: logFd,
       stdin: "ignore",
+      // Its own session: closing the terminal that ran `demesne daemon start`
+      // (or that auto-started it) must not take the daemon down with it.
+      detached: true,
     });
   } finally {
     closeSync(logFd);

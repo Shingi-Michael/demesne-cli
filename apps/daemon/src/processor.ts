@@ -39,8 +39,9 @@ export interface TurnProcessor {
   ): AsyncIterable<ProviderStreamEvent>;
 }
 
-/// Per-call adjustments, e.g. Drive's cap on a single decision's output.
-export interface InferenceOverrides { maxOutputTokens?: number }
+/// Per-call adjustments: Drive's cap on a single decision's output, or the
+/// model a sub-agent runs on (any configured provider's model).
+export interface InferenceOverrides { maxOutputTokens?: number; model?: string }
 
 export function snapshotTurnInference(
   processor: TurnProcessor,
@@ -49,6 +50,8 @@ export function snapshotTurnInference(
 ): TurnInference {
   const inference = processor.createTurnInference?.(thinkingEnabled, overrides);
   if (inference) return inference;
+  // A fixed-model processor serves only its own model: never substitute it.
+  if (overrides?.model && overrides.model !== processor.modelId) throw new Error(`Unknown model: ${overrides.model}`);
   if (processor.setModel) {
     throw new Error("A model-switching turn processor must implement createTurnInference");
   }

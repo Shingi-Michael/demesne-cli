@@ -87,7 +87,8 @@ export class ProviderTurnProcessor implements TurnProcessor {
   }
 
   createTurnInference(thinkingEnabled: boolean | undefined, overrides?: InferenceOverrides): TurnInference {
-    const model = this.currentModelId;
+    const model = overrides?.model ?? this.currentModelId;
+    if (this.allowedModelIds && !this.allowedModelIds.has(model)) throw new Error(`Model is not allowed by this daemon: ${model}`);
     const modelGeneration = this.modelGeneration;
     const profile = this.runtimeVerifier?.status().profile ?? null;
     const requestDefaults = { ...this.requestDefaults };

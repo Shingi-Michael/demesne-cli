@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { InferenceScheduler, type InferenceBoundaryHook } from "../src/inference-scheduler.ts";
+import { InferenceScheduler, InferenceSchedulers, type InferenceBoundaryHook } from "../src/inference-scheduler.ts";
 
 describe("InferenceScheduler", () => {
   test("grants one slot in strict FIFO order", async () => {
@@ -332,4 +332,20 @@ test("a worker has at most one queued or active review and cancellation releases
   const next=scheduler.acquire("retry",signal,{reviewFor:"worker"});active.release({turnContinues:true});const review=await next;
   await expect(scheduler.acquire("duplicate-active",signal,{reviewFor:"worker"})).rejects.toThrow("already queued");
   review.release({turnContinues:false});(await scheduler.acquire("last",signal,{reviewFor:"worker"})).release({turnContinues:false});await scheduler.close();
+});
+
+test("each provider has its own slots, so one model server never waits behind another", async () => {
+  const schedulers = new InferenceSchedulers(new InferenceScheduler(1), "cloud");
+  const signal = new AbortController().signal;
+  expect(schedulers.for("cloud")).toBe(schedulers.primary);
+  expect(schedulers.for("pc")).toBe(schedulers.for("pc"));
+  const cloud = await schedulers.for("cloud").acquire("turn", signal);
+  const queued = schedulers.for("cloud").acquire("other", signal);
+  // The cloud slot is busy, yet the local provider grants immediately.
+  const local = await schedulers.for("pc").acquire("turn", signal);
+  expect([schedulers.activeCount, schedulers.queuedCount, schedulers.queuePosition("other")]).toEqual([2, 1, 1]);
+  local.release({ turnContinues: true }); cloud.release({ turnContinues: false });
+  (await queued).release({ turnContinues: false });
+  schedulers.finishTurn("turn");
+  await schedulers.close();
 });

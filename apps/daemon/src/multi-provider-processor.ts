@@ -1,6 +1,6 @@
 import type { ModelDescriptor } from "@demesne/protocol";
 import type { ProviderMessage, ProviderToolDefinition } from "@demesne/providers";
-import { snapshotTurnInference, type TurnProcessor } from "./processor.ts";
+import { snapshotTurnInference, type InferenceOverrides, type TurnProcessor } from "./processor.ts";
 
 /** Routes model selection while keeping each queued turn bound to its original provider. */
 export class MultiProviderProcessor implements TurnProcessor {
@@ -63,8 +63,13 @@ export class MultiProviderProcessor implements TurnProcessor {
     return models;
   }
 
-  createTurnInference(thinkingEnabled: boolean | undefined) {
-    return snapshotTurnInference(this.selected, thinkingEnabled);
+  /// The selected model's call, or with `overrides.model` another configured
+  /// model's, on whichever provider serves it. Overrides (such as Drive's
+  /// output cap) pass through to that provider.
+  createTurnInference(thinkingEnabled: boolean | undefined, overrides?: InferenceOverrides) {
+    const processor = overrides?.model ? this.routes.get(overrides.model) : this.selected;
+    if (!processor) throw new Error(`Unknown model: ${overrides!.model}`);
+    return snapshotTurnInference(processor, thinkingEnabled, overrides);
   }
 
   async *stream(messages: ProviderMessage[], tools: ProviderToolDefinition[], signal: AbortSignal,

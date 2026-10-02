@@ -3,7 +3,7 @@ import type { ProviderMessage } from "@demesne/providers";
 import { DemesneStore, NotFoundError } from "@demesne/storage";
 import { agentSystemPrompt, assertModelResponseComplete, groupHistory, withProviderDeadlines } from "./engine.ts";
 import { planRawContextRequest } from "./context-planner.ts";
-import { InferenceScheduler } from "./inference-scheduler.ts";
+import type { InferenceSchedulers } from "./inference-scheduler.ts";
 import type { TurnInference } from "./processor.ts";
 import { providerStreamLimits } from "./provider-limits.ts";
 import { buildSummaryCheckpointPrompt, parseSummaryCheckpoint, renderSummaryCheckpoint, type SummaryCheckpointContentV1 } from "./summary-checkpoint.ts";
@@ -21,7 +21,7 @@ interface SummarySource {
 /** Manual compaction is a cancellable, tool-free turn. Only a validated,
  * smaller checkpoint is committed; its cursor and completion share one transaction. */
 export class SessionCompactor {
-  constructor(private readonly store: DemesneStore, private readonly scheduler: InferenceScheduler,
+  constructor(private readonly store: DemesneStore, private readonly scheduler: InferenceSchedulers,
     private readonly tools: ToolRegistry, private readonly options: { systemPrompt?: string; providerVision?: boolean;
       providerFirstEventTimeoutMs?: number; providerRequestTimeoutMs?: number; providerEventLimit?: number } = {}) {}
 
@@ -109,7 +109,7 @@ export class SessionCompactor {
 
   private async summarize(turnId: string, inference: TurnInference, messages: ProviderMessage[], contextPlan: ContextPlan,
     signal: AbortSignal, turnContinues: boolean): Promise<SummaryCheckpointContentV1> {
-    const lease = await this.scheduler.acquire(turnId, signal);
+    const lease = await this.scheduler.for(inference.providerId).acquire(turnId, signal);
     const controller = new AbortController();
     const abort = () => controller.abort(signal.reason);
     signal.addEventListener("abort", abort, { once: true });

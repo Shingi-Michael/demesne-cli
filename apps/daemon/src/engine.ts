@@ -14,7 +14,7 @@ import { PermissionBroker } from "./permissions.ts";
 import type { QuestionBroker } from "./questions.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinition } from "./subagent.ts";
-import { InferenceScheduler } from "./inference-scheduler.ts";
+import type { InferenceSchedulers } from "./inference-scheduler.ts";
 import { composeSystemPrompt, loadProjectInstructions } from "./instructions.ts";
 import {
   planCacheAwareContextRequest,
@@ -46,6 +46,8 @@ interface AgentEngineOptions extends AgentConfig {
   providerFirstEventTimeoutMs?: number;
   providerRequestTimeoutMs?: number;
   providerEventLimit?: number;
+  /// Another configured model's call, for sub-agents on `subagentModel`.
+  inferenceFor?: (model: string, thinkingEnabled: boolean | undefined) => TurnInference;
 }
 
 export class AgentEngine {
@@ -53,7 +55,7 @@ export class AgentEngine {
     private readonly store: DemesneStore,
     private readonly tools: ToolRegistry,
     private readonly permissions: PermissionBroker,
-    private readonly scheduler: InferenceScheduler,
+    private readonly scheduler: InferenceSchedulers,
     private readonly configuredSystemPrompt?: string,
     private readonly contextPlanner?: ContextPlanner,
     private readonly options: AgentEngineOptions = {},
@@ -131,7 +133,7 @@ export class AgentEngine {
       let outputTokens: number | null = null;
       let receivedModelOutput = false;
       let firstTokenAt: number | null = null;
-      const lease = await this.scheduler.acquire(turnId, signal);
+      const lease = await this.scheduler.for(inference.providerId).acquire(turnId, signal);
       let turnContinues = false;
       let providerCallId: string;
       let requestStartedAt: number;
@@ -415,10 +417,26 @@ export class AgentEngine {
       this.store.settleToolCall(toolCallId, "failed", result);
       return result;
     }
+    // `[agent] subagent_model` runs sub-agents on another model (say a local
+    // one while the main turn uses a cloud plan); otherwise they share the turn's.
+    const model = this.options.subagentModel;
+    let delegate = inference;
+    if (model && model !== inference.modelId) {
+      try {
+        if (!this.options.inferenceFor) throw new Error("this daemon cannot route to another model");
+        delegate = this.options.inferenceFor(model, inference.thinkingEnabled);
+      } catch (error) {
+        const result = `Error: sub-agent model ${model} is unavailable (${error instanceof Error ? error.message : "unknown error"}). Check [agent] subagent_model.`;
+        this.store.settleToolCall(toolCallId, "failed", result);
+        return result;
+      }
+    }
+    const label = delegate.modelId === inference.modelId ? "" : `${delegate.modelId} · `;
     this.store.startToolCall(toolCallId);
     try {
-      const result = await runSubagent({ prompt, workspaceRoot, sessionId, turnId, tools: this.tools, inference, scheduler: this.scheduler, signal,
-        limits: this.options, progress: (text) => this.store.appendToolProgress(turnId, toolCallId, text) });
+      const result = await runSubagent({ prompt, workspaceRoot, sessionId, turnId, tools: this.tools, inference: delegate,
+        scheduler: this.scheduler.for(delegate.providerId), signal, limits: this.options,
+        progress: (text) => this.store.appendToolProgress(turnId, toolCallId, label + text) });
       this.store.settleToolCall(toolCallId, "completed", result);
       return result;
     } catch (error) {

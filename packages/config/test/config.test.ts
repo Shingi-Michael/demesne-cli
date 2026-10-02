@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -62,6 +62,16 @@ describe("loadConfig", () => {
     for (const invalid of [[42], [""], ["bad slug"]]) {
       expect(() => validateConfigDocument({ provider: { openrouter_ignore: invalid } })).toThrow();
     }
+  });
+
+  test("subagent_model is read from config or environment and round-trips through TOML", () => {
+    const path = writeConfig(temporaryDirectory(), renderUserConfig({ agent: { subagentModel: "qwen3.8-27b" } }));
+    expect(readFileSync(path, "utf8")).toContain('subagent_model = "qwen3.8-27b"');
+    expect(loadConfig({ userConfigPath: path, env: {} }).config.agent).toEqual({ subagentModel: "qwen3.8-27b" });
+    const overridden = loadConfig({ userConfigPath: path, env: { DEMESNE_SUBAGENT_MODEL: "local-small" } });
+    expect(overridden.config.agent?.subagentModel).toBe("local-small");
+    expect(overridden.sources["agent.subagentModel"]).toBe("env");
+    expect(() => validateConfigDocument({ agent: { subagent_model: 5 } })).toThrow();
   });
 
   test("agent allowances merge with environment precedence and round-trip through TOML", () => {

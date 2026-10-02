@@ -725,3 +725,15 @@ test("an open sub-agent card shows its thinking and steps, then its report", () 
     expect(frame).toContain(text);
   expect(frame.indexOf("I will read")).toBeLessThan(frame.indexOf("Restore is restoreSessionEntries"));
 });
+
+test("finished sub-agents keep their own cards instead of folding into Explored", () => {
+  const { ui } = workbench();
+  ui.beginTurn({ userText: "Investigate three things", at: "now" });
+  for (const name of ["First", "Second", "Third"]) {
+    ui.toolRequested({ toolCallId: name, name: "subagent", arguments: { description: `${name} question`, prompt: name } });
+    ui.toolFinished({ toolCallId: name, name: "subagent", state: "done", message: `${name} report` });
+  }
+  const frame = ui.frame(140, 40).rows.join("\n");
+  expect(frame).not.toContain("Explored");
+  for (const name of ["First", "Second", "Third"]) expect(frame).toContain(`${name} question`);
+});

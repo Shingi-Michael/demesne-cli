@@ -388,6 +388,17 @@ function toolRow(run: GraphicsRun, tool: ToolEntry) {
     true,
   );
 }
+/// A sub-agent's thinking and steps under its row: open while it works,
+/// collapsible like a thinking block afterwards.
+function subagentTrace(run: GraphicsRun, tool: ToolEntry, key: string) {
+  if (tool.name !== "subagent" || !tool.trace?.length) return "";
+  const live = tool.state === "running";
+  const steps = tool.trace.filter((segment) => segment.kind === "step").length;
+  const body = tool.trace.map((segment) => segment.kind === "step"
+    ? `<div class="muted">→ ${h(segment.text)}</div>`
+    : `<p>${h(segment.text.trim())}</p>`).join("");
+  return `<details class="thinking ${live ? "live" : ""}" data-detail="${key}:trace"${(live && !detailsClosed.has(`${key}:trace`)) || detailsOpen.has(`${key}:trace`) ? " open" : ""}><summary>◇ Sub-agent trace · ${steps} step${steps === 1 ? "" : "s"}</summary><div>${body}</div></details>`;
+}
 function runHTML(run: GraphicsRun, index: number) {
   const items = tools(run),
     files = new Set(
@@ -421,14 +432,16 @@ function runHTML(run: GraphicsRun, index: number) {
     if (entry.type === "tool") {
       const group: ToolEntry[] = [entry];
       let j = i + 1;
-      if (entry.phase === "inspect" && entry.state === "done" && !entry.waiting)
+      // A sub-agent stands alone: its card carries a report and a trace.
+      if (entry.phase === "inspect" && entry.state === "done" && !entry.waiting && entry.name !== "subagent")
         while (j < run.entries.length) {
           const next = run.entries[j];
           if (
             next?.type !== "tool" ||
             next.phase !== "inspect" ||
             next.state !== "done" ||
-            next.waiting
+            next.waiting ||
+            next.name === "subagent"
           )
             break;
           group.push(next);
@@ -438,7 +451,7 @@ function runHTML(run: GraphicsRun, index: number) {
         const sum = group.reduce((n, t) => n + (t.durationMs ?? 0), 0);
         body += `<details class="explored" data-detail="${key}"${detailsOpen.has(key) ? " open" : ""}><summary>Explored · ${group.length} reads · ${duration(sum)}</summary><div>${group.map((tool) => toolRow(run, tool)).join("")}</div></details>`;
         i = j - 1;
-      } else body += toolRow(run, entry);
+      } else body += toolRow(run, entry) + subagentTrace(run, entry, key);
     }
     if (entry.type === "notice" && !entry.closesTurn)
       body += `<div class="system-band"><b>system</b><span>${h(entry.text)}</span></div>`;

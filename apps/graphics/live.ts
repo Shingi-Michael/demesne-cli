@@ -4,6 +4,7 @@ import { markdown, MarkdownView } from "./markdown.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "../cli/src/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "../cli/src/workbench/drive-timeline.ts";
+import { subagentPhrase } from "../cli/src/workbench/subagent-phrases.ts";
 import type { GraphicsHost } from "./host.ts";
 import type { GraphicsRun, GraphicsChange } from "./session-model.ts";
 import type {
@@ -157,6 +158,7 @@ const verb = (tool: ToolEntry) =>
     delete_path: "Delete",
     git_diff: "Diff",
     git_status: "Git",
+    subagent: "Agent",
   })[tool.name] ?? tool.name.replaceAll("_", " ");
 const tools = (run: GraphicsRun) =>
   run.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
@@ -360,6 +362,18 @@ function totals(run: GraphicsRun, tool: ToolEntry) {
 }
 const counts = (value: { added: number; removed: number }) =>
   `<span class="counts"><span class="plus">+${value.added}</span><span class="minus">−${value.removed}</span></span>`;
+/// A sub-agent's target: its task, then its latest real step, or while it
+/// thinks between steps a cycling phrase (updated in place by a timer).
+function toolTarget(run: GraphicsRun, tool: ToolEntry) {
+  const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
+  if (tool.name !== "subagent" || tool.state !== "running") return h(base);
+  const last = tool.trace?.at(-1);
+  if (last?.kind === "step") return `${h(base)} · ${h(last.text)}`;
+  const slot = run.entries.filter((entry) => entry.type === "tool" && entry.name === "subagent").indexOf(tool);
+  const model = /^([^·]+) · /.exec(tool.trace?.find((segment) => segment.kind === "step")?.text ?? "")?.[1]?.trim() ?? state!.model.id;
+  const phrase = matchMedia("(prefers-reduced-motion: reduce)").matches ? "thinking" : subagentPhrase(slot, Date.now(), model);
+  return `${h(base)} · <span data-subagent-phrase data-slot="${slot}" data-model="${h(model)}">${h(phrase)}</span>`;
+}
 function toolRow(run: GraphicsRun, tool: ToolEntry) {
   const result =
     tool.name === "run_command" &&
@@ -383,7 +397,7 @@ function toolRow(run: GraphicsRun, tool: ToolEntry) {
                 : tool.state;
   return btn(
     "tool",
-    `<span class="${tone(tool.state)}">${h(mark(tool.state))}</span><span class="verb">${h(verb(tool))}</span><span class="target" title="${h(tool.detail ?? tool.name)}">${h((tool.detail ?? tool.name).replace(/^\$\s*/, ""))}</span><span class="result ${tool.phase === "change" && tool.state === "done" ? "success" : "muted"}">${h(result)}</span>${tool.phase === "change" ? counts(totals(run, tool)) : ""}<span class="time">${tool.phase === "change" ? "open ▸" : duration(tool.durationMs)}</span>`,
+    `<span class="${tone(tool.state)}">${h(mark(tool.state))}</span><span class="verb">${h(verb(tool))}</span><span class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</span><span class="result ${tool.phase === "change" && tool.state === "done" ? "success" : "muted"}">${h(result)}</span>${tool.phase === "change" ? counts(totals(run, tool)) : ""}<span class="time">${tool.phase === "change" ? "open ▸" : duration(tool.durationMs)}</span>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""}`,
     true,
@@ -3244,6 +3258,15 @@ void window.demesne
     notice(String(error));
     window.demesne.ready();
   });
+// Thinking sub-agents' phrases advance in place; the DOM (and so the
+// terminal's tiles) only changes when a phrase does.
+setInterval(() => {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  for (const span of document.querySelectorAll<HTMLElement>("[data-subagent-phrase]")) {
+    const next = subagentPhrase(Number(span.dataset.slot), Date.now(), span.dataset.model ?? "");
+    if (span.textContent !== next) span.textContent = next;
+  }
+}, 300);
 setInterval(() => {
   if (state?.activeTurnId) renderStatus();
   if (pane === "log") commandClocks();

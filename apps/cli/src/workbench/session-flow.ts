@@ -1,6 +1,7 @@
 import { formatDiffPreview, formatFooterLine, renderPresence, sanitizeTerminalLine, truncateText, visibleLength, wrapDisplayText, type Painter, type PaletteColor, type PresenceState } from "@demesne/brand";
 import { sliceAnsi } from "bun";
 import type { AssistantEntry, ReasoningEntry, ToolEntry } from "./entries.ts";
+import { subagentPhrase } from "./subagent-phrases.ts";
 import { projectRunEvidence, toolFailed } from "./evidence.ts";
 import type { SessionRun } from "./session.ts";
 import { foldCells } from "./canvas.ts";
@@ -135,7 +136,11 @@ export function renderSessionFlow(options: {
     const outcome = failed(tool) || tool.waiting ? "signal" : stopped || unknown ? "secondary" : running ? operation : "citron";
     const background = running || tool.waiting ? "toolActive" : "toolSurface";
     const mark = tool.waiting ? "!" : stopped ? "■" : failed(tool) ? "×" : running ? renderPresence("thinking", options.now, paint) : unknown ? "·" : "✓";
-    const detail = safe(tool.detail ?? "").replace(/^\$\s*/, "");
+    // A thinking sub-agent's card cycles a phrase ("Licking the semicolons");
+    // real steps replace it as they happen. Reduced motion keeps it plain.
+    const thinking = tool.name === "subagent" && running && tool.thinkingSince !== undefined
+      ? options.reducedMotion ? "thinking" : subagentPhrase(run.tools.filter((item) => item.name === "subagent").indexOf(tool), options.now, tool.subagentModel ?? run.request?.model ?? "") : "";
+    const detail = [safe(tool.detail ?? "").replace(/^\$\s*/, ""), thinking].filter(Boolean).join(" · ");
     const verb = tool.name === "run_command" ? tool.phase === "verify" ? "Check" : "Run" : safe(toolName(tool));
     const target = detail && detail !== tool.name ? detail : "";
     const label = `${verb}${target ? ` ${target}` : ""}`;

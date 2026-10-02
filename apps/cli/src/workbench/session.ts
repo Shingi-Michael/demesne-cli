@@ -1456,6 +1456,14 @@ export class SessionView {
     lines.push(paint.wash(` ${status} `, surface, tone === "citron" ? "citron" : tone === "signal" ? "signal" : "secondary") + (timing ? paint.text(`  ${timing}`, "muted") : ""), "");
     if (entry.diff) lines.push(paint.text(entry.state === "done" ? "CHANGE" : "PROPOSED CHANGE", "muted"),
       ...formatDiffPreview(entry.diff.oldText, entry.diff.newText, 10_000, paint).flatMap((line) => foldCells(line, width)), "");
+    if (entry.trace?.length) {
+      lines.push(paint.text("SUB-AGENT TRACE", "muted"));
+      for (const segment of entry.trace) {
+        if (segment.kind === "step") lines.push(...foldCells(`→ ${safe(segment.text)}`, width).map((line) => paint.text(line, "muted")));
+        else lines.push(paint.text("◇ Thinking", "secondary"), ...wrap(segment.text.trim()).map((line) => paint.text(line, "secondary")));
+      }
+      lines.push("");
+    }
     if (entry.message) {
       const output = entry.message.replace(/\n+$/, "").split("\n");
       lines.push(formatFooterLine(paint.text("OUTPUT", "muted"), paint.text(`${output.length} line${output.length === 1 ? "" : "s"}`, "muted"), width));

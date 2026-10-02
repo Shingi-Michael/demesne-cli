@@ -60,7 +60,8 @@ export async function runSubagent(options: {
   inference: TurnInference;
   scheduler: InferenceScheduler;
   signal: AbortSignal;
-  progress: (text: string) => void;
+  /// A step (`text`) or a slice of the sub-agent's thinking, for its card's trace.
+  progress: (update: { text?: string; thinking?: string }) => void;
   limits?: ProviderStreamLimits;
 }): Promise<string> {
   const { inference, signal } = options;
@@ -68,7 +69,7 @@ export async function runSubagent(options: {
   const streamLimits = providerStreamLimits(inference.maxOutputTokens, options.limits);
   const messages: ProviderMessage[] = [{ role: "system", content: instructions(options.workspaceRoot) }, { role: "user", content: options.prompt }];
   const used = new Map<string, number>();
-  let toolCalls = 0;
+  let toolCalls = 0, reasoning = 0;
   for (let round = 0; round <= SUBAGENT_LIMITS.rounds; round++) {
     signal.throwIfAborted();
     const finalizing = round === SUBAGENT_LIMITS.rounds || toolCalls >= SUBAGENT_LIMITS.toolCalls;
@@ -77,10 +78,13 @@ export async function runSubagent(options: {
       ? [...messages, { role: "user", content: "Your tool budget is spent. Write your report now from what you have found, and say what remains unknown." }]
       : messages;
     const { messages: planned } = planContextRequest({ messages: request, tools, historicalTurns: [], capacityTokens: inference.contextCapacity, outputReserveTokens: inference.maxOutputTokens });
-    options.progress(round === 0 ? "starting" : finalizing ? "writing report" : `thinking · ${toolCalls} tool call${toolCalls === 1 ? "" : "s"}`);
+    options.progress({ text: round === 0 ? "starting" : finalizing ? "writing report" : `thinking · ${toolCalls} tool call${toolCalls === 1 ? "" : "s"}` });
     const lease = await options.scheduler.acquire(options.turnId, signal);
     const calls = new Map<number, ProviderToolCall>();
     let text = "", hasReasoning = false, finishReason: string | undefined, outputTokens: number | null = null;
+    // Thinking reaches the card in slices, not per token, to keep the event log small.
+    let thinking = "", thinkingAt = Date.now();
+    const flushThinking = () => { if (thinking) options.progress({ thinking }); thinking = ""; thinkingAt = Date.now(); };
     let responses: import("@demesne/protocol").ResponsesState | undefined;
     const controller = new AbortController();
     const forward = () => controller.abort(signal.reason);
@@ -90,7 +94,14 @@ export async function runSubagent(options: {
       for await (const event of withProviderDeadlines(inference.stream(planned, tools, controller.signal), controller, streamLimits.firstEventTimeoutMs, streamLimits.requestTimeoutMs)) {
         if (++events > streamLimits.eventLimit) throw new Error("Sub-agent stream exceeded the event limit");
         if (event.type === "text_delta") text += event.delta;
-        else if (event.type === "reasoning_delta") hasReasoning ||= event.delta.length > 0;
+        else if (event.type === "reasoning_delta") {
+          hasReasoning ||= event.delta.length > 0;
+          if (inference.thinkingEnabled === false) continue;
+          reasoning += event.delta.length;
+          if (reasoning > streamLimits.turnCharacterLimit) throw new Error("Sub-agent reasoning exceeded the turn limit");
+          thinking += event.delta;
+          if (thinking.length >= 2000 || Date.now() - thinkingAt >= 250) flushThinking();
+        }
         else if (event.type === "finish") finishReason = event.reason;
         else if (event.type === "usage") outputTokens = event.usage.outputTokens;
         // Provider continuation state (the Responses API) rides on the assistant message.
@@ -104,6 +115,7 @@ export async function runSubagent(options: {
         }
         if (text.length > streamLimits.turnCharacterLimit) throw new Error("Sub-agent output exceeded the turn limit");
       }
+      flushThinking();
       assertModelResponseComplete({ finishReason, outputTokens, maxOutputTokens: inference.maxOutputTokens, provider: inference.providerId,
         text, hasReasoning, hasToolCalls: calls.size > 0 });
     } finally {
@@ -127,7 +139,8 @@ export async function runSubagent(options: {
   throw new Error("Sub-agent could not produce a report");
 }
 
-async function runReadOnlyTool(call: ProviderToolCall, options: { workspaceRoot: string; sessionId: string; tools: ToolRegistry; signal: AbortSignal; progress: (text: string) => void }): Promise<string> {
+async function runReadOnlyTool(call: ProviderToolCall, options: { workspaceRoot: string; sessionId: string; tools: ToolRegistry; signal: AbortSignal;
+  progress: (update: { text?: string }) => void }): Promise<string> {
   const tool = SUBAGENT_TOOLS.has(call.name) ? options.tools.get(call.name) : undefined;
   if (!tool) return `Error: ${call.name} is not available to a sub-agent; use ${[...SUBAGENT_TOOLS].join(", ")}`;
   let input: unknown;
@@ -135,7 +148,7 @@ async function runReadOnlyTool(call: ProviderToolCall, options: { workspaceRoot:
   try {
     // Defence in depth: never run anything that would need an approval.
     if (tool.permission(input) !== null) return `Error: ${call.name} needs approval and is not available to a sub-agent`;
-    options.progress(describeCall(call.name, input));
+    options.progress({ text: describeCall(call.name, input) });
     return await tool.execute(input, { workspaceRoot: options.workspaceRoot, sessionId: options.sessionId, signal: options.signal });
   } catch (error) {
     if (options.signal.aborted) throw error;

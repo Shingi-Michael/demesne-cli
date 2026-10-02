@@ -198,3 +198,33 @@ test("an unknown subagent_model fails the delegation clearly instead of falling 
     expect(toolResults(requests.at(-1)!.messages)[0]).toContain("sub-agent model no-such-model is unavailable");
   }, { subagentModel: "no-such-model" });
 });
+
+test("a sub-agent's thinking streams to its card in slices, and is withheld when thinking is off", async () => {
+  for (const thinkingEnabled of [true, false]) {
+    await fixture(async function* ({ messages }) {
+      if (isSubagent(messages)) {
+        if (!toolResults(messages).length) {
+          for (const word of "I should read the notes file first.".split(" ")) yield { type: "reasoning_delta", delta: `${word} ` };
+          yield call("sub-read", "read_file", { path: "notes.txt" }); yield { type: "finish", reason: "tool_calls" }; return;
+        }
+        yield { type: "reasoning_delta", delta: "The notes answer it." };
+        yield { type: "text_delta", delta: "history.ts" }; yield { type: "finish", reason: "stop" }; return;
+      }
+      if (!toolResults(messages).length) { yield call("delegate", "subagent", { description: "Find it", prompt: "Where?" }); yield { type: "finish", reason: "tool_calls" }; return; }
+      yield { type: "text_delta", delta: "Done." }; yield { type: "finish", reason: "stop" };
+    }, async ({ client, id, consume }) => {
+      const events = await consume(await client.submitTurn(id, { content: "Where?", thinkingEnabled }));
+      expect(events.at(-1)?.type).toBe("turn.completed");
+      const progress = events.filter((event) => event.type === "tool.call_progress").map((event) => event.payload);
+      const thinking = progress.flatMap((payload) => typeof payload.thinking === "string" ? [payload.thinking] : []);
+      if (thinkingEnabled) {
+        expect(thinking.join("")).toBe("I should read the notes file first. The notes answer it.");
+        // Batched: far fewer events than reasoning deltas.
+        expect(thinking.length).toBeLessThan(5);
+        // Order is preserved: the first slice of thinking precedes the read step.
+        const read = progress.findIndex((payload) => payload.text === "read notes.txt");
+        expect(progress.findIndex((payload) => typeof payload.thinking === "string")).toBeLessThan(read);
+      } else expect(thinking).toEqual([]);
+    });
+  }
+});

@@ -708,3 +708,20 @@ test("/drive keeps choosing worthwhile work by default; --bounded or a bounded w
     } finally { drive.dispose(); }
   }
 });
+
+test("an open sub-agent card shows its thinking and steps, then its report", () => {
+  const { ui } = workbench();
+  ui.beginTurn({ userText: "Where is session restore?", at: "now" });
+  ui.toolRequested({ toolCallId: "delegate", name: "subagent", arguments: { description: "Find session restore", prompt: "Where is it?" } });
+  ui.toolProgress({ toolCallId: "delegate", thinking: "I will read the history module first." });
+  ui.toolProgress({ toolCallId: "delegate", text: "read apps/cli/src/workbench/history.ts" });
+  ui.toolFinished({ toolCallId: "delegate", name: "subagent", state: "done", message: "Restore is restoreSessionEntries in history.ts." });
+  const view = (ui as unknown as { sessionView: SessionView }).sessionView;
+  ui.frame(140, 40);
+  const run = view.latest!;
+  view.act({ kind: "toggle", runId: run.id, key: `entry:${run.tools[0]!.id}` });
+  const frame = ui.frame(140, 40).rows.join("\n");
+  for (const text of ["◇ Thinking", "I will read the history module first.", "→ read apps/cli/src/workbench/history.ts", "Report", "Restore is restoreSessionEntries"])
+    expect(frame).toContain(text);
+  expect(frame.indexOf("I will read")).toBeLessThan(frame.indexOf("Restore is restoreSessionEntries"));
+});

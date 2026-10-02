@@ -1836,7 +1836,9 @@ async function runWorkbenchTurn(options: {
         const name = String(event.payload.name ?? "tool");
         presence = presenceForTool(name, false);
       } else if (event.type === "tool.call_progress") {
-        options.workbench.toolProgress({ toolCallId: String(event.payload.toolCallId ?? ""), text: String(event.payload.text ?? "") });
+        options.workbench.toolProgress({ toolCallId: String(event.payload.toolCallId ?? ""),
+          ...(typeof event.payload.text === "string" ? { text: event.payload.text } : {}),
+          ...(typeof event.payload.thinking === "string" ? { thinking: event.payload.thinking } : {}) });
       } else if (["tool.call_completed", "tool.call_failed", "tool.call_denied", "tool.call_cancelled", "tool.call_interrupted"].includes(event.type)) {
         options.workbench.toolFinished(toolCompletion(event));
         presence = "thinking";

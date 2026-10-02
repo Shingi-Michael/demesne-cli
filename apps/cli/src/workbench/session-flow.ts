@@ -183,8 +183,16 @@ export function renderSessionFlow(options: {
       lines.push(paint.text(tool.state === "done" ? "Recorded change" : "Proposed change", "secondary"),
         ...formatDiffPreview(tool.diff.oldText, tool.diff.newText, 10_000, paint));
     }
+    // A sub-agent's own thinking and steps, live while it runs, then its report.
+    if (tool.trace?.length) {
+      for (const segment of tool.trace) {
+        if (segment.kind === "step") lines.push(paint.text(`→ ${safe(segment.text)}`, "muted"));
+        else lines.push(paint.text("◇ Thinking", "secondary"), ...output(segment.text.trim()).map((line) => paint.text(line, "secondary")));
+      }
+      if (tool.message && !unsuccessful) lines.push("", paint.text("Report", "paper"));
+    }
     if (tool.message && !unsuccessful) lines.push(...output(tool.message));
-    if (!tool.message && !tool.diff && !running) lines.push(paint.text("No output recorded.", "secondary"));
+    if (!tool.message && !tool.diff && !running && !tool.trace?.length) lines.push(paint.text("No output recorded.", "secondary"));
     for (const line of lines.flatMap((line) => fold(line, Math.max(1, inner - 2)))) {
       detailRow(`${key}:detail`, line);
     }

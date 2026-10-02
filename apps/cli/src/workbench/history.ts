@@ -1,7 +1,7 @@
 import type { EventEnvelope, ReplayEvent, SessionReplayPage, SessionStateResponse } from "@demesne/protocol";
 import { ApiRequestError } from "@demesne/client";
 import { classifyTurnPhase } from "../turn-activity.ts";
-import type { AssistantEntry, ContextReceipt, ReasoningEntry, ResponseReceipt, ToolEntry, WorkbenchEntry } from "./entries.ts";
+import { applyToolProgress, type AssistantEntry, type ContextReceipt, type ReasoningEntry, type ResponseReceipt, type ToolEntry, type WorkbenchEntry } from "./entries.ts";
 import { toolCompletion } from "./tool-result.ts";
 import { TurnThroughputTracker } from "../turn-throughput.ts";
 import { applyToolDraft, proposedDiff } from "./tool-preview.ts";
@@ -96,6 +96,10 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
           ...(draft ? { draftId: draft.draftId, drafting: false, draftArguments: undefined, startedAt: draft.startedAt } : {}) };
         if (draft) Object.assign(draft, tool); else entries.push(tool);
         tools.set(tool.toolCallId, draft ?? tool);
+      }
+      if (event.type === "tool.call_progress") {
+        const tool = tools.get(String(payload.toolCallId ?? ""));
+        if (tool) applyToolProgress(tool, payload);
       }
       if (/^tool\.call_(completed|failed|denied|cancelled|interrupted)$/.test(event.type)) {
         const tool = tools.get(String(payload.toolCallId ?? ""));

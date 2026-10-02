@@ -51,7 +51,7 @@ import { graphicsProbe, TerminalGraphics, type TerminalImage } from "../terminal
 import type { ImageArtifact } from "@demesne/protocol";
 import { StartScreen, startScreenLayout, START_OPERATIONS, type StartAction, type StartLayout } from "./start-screen.ts";
 import type { RecentSession } from "../recent-sessions.ts";
-import type { WorkbenchEntry, AssistantEntry, ReasoningEntry, ToolEntry, NoticeEntry, ToolState, ResponseReceipt } from "./entries.ts";
+import { applyToolProgress, type WorkbenchEntry, type AssistantEntry, type ReasoningEntry, type ToolEntry, type NoticeEntry, type ToolState, type ResponseReceipt } from "./entries.ts";
 export type { ToolState } from "./entries.ts";
 import { responseCard, userCard } from "./conversation.ts";
 import { inspectorPanel, INSPECTOR_TABS, type InspectorTab } from "./inspector.ts";
@@ -821,10 +821,11 @@ export class Workbench {
 
   /// A running tool's live status, such as the step a sub-agent is on,
   /// follows its label until it finishes.
-  toolProgress(input: { toolCallId: string; text: string }): void {
+  toolProgress(input: { toolCallId: string; text?: string; thinking?: string }): void {
     const entry = this.entries.findLast((candidate): candidate is ToolEntry => candidate.type === "tool" && candidate.toolCallId === input.toolCallId);
     if (!entry || entry.state !== "running") return;
-    entry.detail = `${toolDetail(entry.name, entry.input) ?? toolVerb(entry.name)} · ${input.text}`;
+    if (input.text) entry.detail = `${toolDetail(entry.name, entry.input) ?? toolVerb(entry.name)} · ${input.text}`;
+    applyToolProgress(entry, input);
     this.requestRender();
   }
 

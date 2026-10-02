@@ -78,8 +78,8 @@ export function usageLabel(context: ContextReceipt | undefined): string {
   return `${context?.estimated ? "~" : ""}${formatTokenCount(context!.used!)} / ${formatTokenCount(context!.capacity!)} · ${percentage}%`;
 }
 
-/// The status bar, kept quiet: a state only when it needs attention, then the
-/// model and context usage; `live ↓` on the right once scrolled away.
+/// The status bar, kept quiet: a state only when it needs attention and the
+/// model on the left; context usage (and `live ↓` once scrolled away) on the right.
 /// Optional fields drop first as width runs out.
 export function sessionStatus(options: {
   width: number; paint: Painter; state: string; context: ContextReceipt; model?: string;
@@ -103,27 +103,29 @@ export function sessionStatus(options: {
   const model = options.model ? paint.text(truncateText(sanitizeTerminalLine(options.model), 28), "secondary") : "";
   // Ctrl+B and Ctrl+G still work; the footer only points back to live output
   // once the reader has scrolled away from it.
-  const right = options.paused ? paint.text("live ↓", "muted") : "";
-  // Speed lives in each response's receipt, not here. Drop the model, then
-  // the bar's track; state and usage numbers always stay.
-  const fits = (parts: string[]) => visibleLength(parts.filter(Boolean).join("  ")) + visibleLength(right) + 3 <= width;
+  const live = options.paused ? paint.text("live ↓", "muted") : "";
+  // Unrelated groups sit apart: who is answering (state, model) on the left,
+  // context usage (and live ↓ once scrolled away) on the right. Speed lives in
+  // each response's receipt. Drop the model, then the bar's track; state and
+  // usage numbers always stay.
   let show = { model: Boolean(model), bar: Boolean(bar) };
-  const build = () => [phase, show.model ? model : "", (show.bar && bar ? `${bar} ` : "") + usage];
+  const build = () => {
+    const usagePart = (show.bar && bar ? `${bar} ` : "") + usage;
+    return { left: [phase, show.model ? model : ""].filter(Boolean).join("  "), usagePart, right: [usagePart, live].filter(Boolean).join("   ") };
+  };
   for (const drop of ["model", "bar"] as const) {
-    if (fits(build())) break;
+    const { left, right } = build();
+    if (visibleLength(left) + visibleLength(right) + (left ? 4 : 0) <= width) break;
     show = { ...show, [drop]: false };
   }
-  const parts = build().filter(Boolean);
-  const left = truncateText(parts.join("  "), Math.max(0, width - visibleLength(right) - 2));
+  const { left: leftText, usagePart, right } = build();
+  const left = truncateText(leftText, Math.max(0, width - visibleLength(right) - 2));
   const zones: { column: number; width: number; action: "context" | "response-start" | "follow" | "log" }[] = [];
-  const usageIndex = parts.findIndex((part) => part.endsWith(usage));
-  if (usageIndex >= 0) {
-    const usageColumn = visibleLength(parts.slice(0, usageIndex).join("  ")) + (usageIndex > 0 ? 2 : 0);
-    if (usageColumn < visibleLength(left)) zones.push({ column: usageColumn, width: Math.min(visibleLength(parts[usageIndex]!), visibleLength(left) - usageColumn), action: "context" });
-  }
-  if (right) zones.push({ column: width - visibleLength(right), width: visibleLength(right), action: "follow" });
+  const rightColumn = Math.max(0, width - visibleLength(right));
+  zones.push({ column: rightColumn, width: Math.min(width, visibleLength(usagePart)), action: "context" });
+  if (live) zones.push({ column: width - visibleLength(live), width: visibleLength(live), action: "follow" });
   // The first item (state, else model) jumps to the start of the answer.
   const lead = phase || (show.model ? model : "");
-  if (options.hasResponse && lead) zones.push({ column: 0, width: visibleLength(lead), action: "response-start" });
+  if (options.hasResponse && lead && visibleLength(left)) zones.push({ column: 0, width: Math.min(visibleLength(lead), visibleLength(left)), action: "response-start" });
   return { text: formatFooterLine(left, right, width), zones };
 }

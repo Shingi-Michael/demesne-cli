@@ -81,6 +81,7 @@ export async function runSubagent(options: {
     const lease = await options.scheduler.acquire(options.turnId, signal);
     const calls = new Map<number, ProviderToolCall>();
     let text = "", hasReasoning = false, finishReason: string | undefined, outputTokens: number | null = null;
+    let responses: import("@demesne/protocol").ResponsesState | undefined;
     const controller = new AbortController();
     const forward = () => controller.abort(signal.reason);
     signal.addEventListener("abort", forward, { once: true });
@@ -92,6 +93,8 @@ export async function runSubagent(options: {
         else if (event.type === "reasoning_delta") hasReasoning ||= event.delta.length > 0;
         else if (event.type === "finish") finishReason = event.reason;
         else if (event.type === "usage") outputTokens = event.usage.outputTokens;
+        // Provider continuation state (the Responses API) rides on the assistant message.
+        else if (event.type === "response_state") responses = event.state;
         else {
           if (event.index >= 8) throw new Error("Sub-agent requested too many tools in one round");
           const call = calls.get(event.index) ?? { id: "", name: "", arguments: "" };
@@ -113,7 +116,7 @@ export async function runSubagent(options: {
     if (finalizing) return report(text || "The sub-agent ran out of budget before writing a report.", used);
     const ordered = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
     if (ordered.some((call) => !call.id || !call.name)) throw new Error("Sub-agent returned an incomplete tool call");
-    messages.push({ role: "assistant", content: text || null, toolCalls: ordered });
+    messages.push({ role: "assistant", content: text || null, toolCalls: ordered, ...(responses ? { responses } : {}) });
     toolCalls += ordered.length;
     const results = await Promise.all(ordered.map(async (call) => {
       used.set(call.name, (used.get(call.name) ?? 0) + 1);

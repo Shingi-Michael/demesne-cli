@@ -436,7 +436,7 @@ export class AgentEngine {
     try {
       const result = await runSubagent({ prompt, workspaceRoot, sessionId, turnId, tools: this.tools, inference: delegate,
         scheduler: this.scheduler.for(delegate.providerId), signal, limits: this.options,
-        progress: (text) => this.store.appendToolProgress(turnId, toolCallId, label + text) });
+        progress: (update) => this.store.appendToolProgress(turnId, toolCallId, update.text === undefined ? update : { ...update, text: label + update.text }) });
       this.store.settleToolCall(toolCallId, "completed", result);
       return result;
     } catch (error) {

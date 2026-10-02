@@ -1041,12 +1041,15 @@ export class DemesneStore {
     this.eventSink?.(event);
   }
 
-  /// A running tool's live status line, such as what a sub-agent is reading.
-  /// Transient: replay and history show the finished result instead.
-  appendToolProgress(turnId: string, toolCallId: string, text: string): void {
+  /// A running tool's live progress: a status line (`text`, such as what a
+  /// sub-agent is reading) and/or a slice of its `thinking`. History replays
+  /// these into the sub-agent's trace.
+  appendToolProgress(turnId: string, toolCallId: string, update: { text?: string; thinking?: string }): void {
     const turn = this.getTurnOrThrow(turnId);
     if (turn.status !== "running") return;
-    const event = this.insertEvent("tool.call_progress", turn.sessionId, turnId, { toolCallId, text: text.slice(0, 500) }, new Date().toISOString());
+    const event = this.insertEvent("tool.call_progress", turn.sessionId, turnId, { toolCallId,
+      ...(update.text !== undefined ? { text: update.text.slice(0, 500) } : {}),
+      ...(update.thinking ? { thinking: update.thinking.slice(0, 8000) } : {}) }, new Date().toISOString());
     this.eventSink?.(event);
   }
 

@@ -168,3 +168,24 @@ test("replay clears resolved approvals and preserves interrupted tools without c
     expect(projectRunEvidence(restoreSessionEntries(stopped, recorded))).toMatchObject({ verification: "stopped", failedOrDenied: 0 });
   }
 });
+
+test("a sub-agent's thinking and steps replay into its trace; status-only lines stay off it", () => {
+  const recorded = [
+    event(1, "tool.call_requested", { toolCallId: "agent", name: "subagent", arguments: JSON.stringify({ description: "Find restore", prompt: "Where?" }) }),
+    event(2, "tool.call_progress", { toolCallId: "agent", text: "qwen3.8-27b · starting" }),
+    event(3, "tool.call_progress", { toolCallId: "agent", thinking: "I should read " }),
+    event(4, "tool.call_progress", { toolCallId: "agent", thinking: "the notes." }),
+    event(5, "tool.call_progress", { toolCallId: "agent", text: "qwen3.8-27b · read notes.txt" }),
+    event(6, "tool.call_progress", { toolCallId: "agent", text: "qwen3.8-27b · thinking · 1 tool call" }),
+    event(7, "tool.call_progress", { toolCallId: "agent", thinking: "Found it." }),
+    event(8, "tool.call_completed", { toolCallId: "agent", name: "subagent", result: "history.ts" }),
+    event(9, "turn.completed"),
+  ];
+  const tool = planRuns(restoreSessionEntries(state, recorded))[0]!.tools[0]!;
+  expect(tool.trace).toEqual([
+    { kind: "thinking", text: "I should read the notes." },
+    { kind: "step", text: "qwen3.8-27b · read notes.txt" },
+    { kind: "thinking", text: "Found it." },
+  ]);
+  expect(tool.detail).toBe("Find restore");
+});

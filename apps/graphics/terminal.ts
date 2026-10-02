@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { emitKeypressEvents, createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { deflateSync } from "node:zlib";
 import { dirname, join, resolve } from "node:path";
 import { GraphicsHost } from "./host.ts";
 import { StateEncoder, type GraphicsSnapshot } from "./state-wire.ts";
@@ -80,6 +81,8 @@ const rendererEnv = Object.fromEntries(
     "DISPLAY",
     "WAYLAND_DISPLAY",
     "XDG_RUNTIME_DIR",
+    "DEMESNE_GRAPHICS_TRACE",
+    "DEMESNE_GRAPHICS_GPU",
   ].flatMap((key) => (process.env[key] ? [[key, process.env[key]!]] : [])),
 );
 const child = spawn(electronPath, [join(root, "renderer.cjs")], {
@@ -98,7 +101,8 @@ let errorLog = "",
   supported = false;
 let cell: { width: number; height: number } | undefined;
 let pixelMouse = false,
-  epoch = 0;
+  epoch = 0,
+  wheelAt = 0;
 const transport = new TileTransport();
 const stateEncoder = new StateEncoder();
 const inputQueue = new InputQueue();
@@ -108,11 +112,26 @@ const metrics = {
   batches: 0,
   tiles: 0,
   terminalBytes: 0,
-  pngBytes: 0,
+  imageBytes: 0,
+  // Wheel input to the frame showing it written for the terminal: everything
+  // Demesne does (host, Chromium, encoding); excludes the terminal's decode.
+  scrollFrames: 0,
+  scrollToOutputMs: 0,
   renderer: {} as Record<string, number>,
 };
 let requested = { width: 1200, height: 720 };
 const probeId = 140000;
+// Asks whether the terminal can read image files from a private directory
+// (it can when it runs on this machine); if so, tiles go by path, not base64.
+const fileProbeId = 139999;
+let imageDirectory: string | undefined;
+function fileProbe(): string {
+  if (process.env.DEMESNE_GRAPHICS_FILES === "0") return "";
+  imageDirectory = mkdtempSync(join(tmpdir(), "demesne-graphics-"));
+  const path = join(imageDirectory, "tty-graphics-protocol-probe");
+  writeFileSync(path, deflateSync(Buffer.from([0, 0, 0])), { mode: 0o600 });
+  return `\x1b_Ga=q,t=t,f=24,o=z,s=1,v=1,i=${fileProbeId};${Buffer.from(path).toString("base64")}\x1b\\`;
+}
 const send = (value: any) => {
   if (closing || !child.stdin.writable) return;
   // Drain acknowledgements bypass input coalescing and never wait for a hover burst.
@@ -199,6 +218,8 @@ function draw(batch: TileBatch) {
     batch.width !== requested.width ||
     batch.height !== requested.height
   ) {
+    // A stale batch is never shown: remove any files its tiles were written to.
+    for (const tile of batch.tiles) if (tile.file) rmSync(tile.file, { force: true });
     send({ kind: "ack", serial: batch.serial });
     return;
   }
@@ -206,15 +227,14 @@ function draw(batch: TileBatch) {
   metrics.batches++;
   metrics.tiles += batch.tiles.length;
   metrics.terminalBytes += Buffer.byteLength(output);
-  metrics.pngBytes += batch.tiles.reduce(
-    (total, tile) =>
-      total +
-      (tile.png.length * 3) / 4 -
-      (tile.png.endsWith("==") ? 2 : tile.png.endsWith("=") ? 1 : 0),
-    0,
-  );
+  metrics.imageBytes += batch.tiles.reduce((total, tile) => total + (tile.bytes ?? 0), 0);
   if (batch.metrics) metrics.renderer = batch.metrics;
+  const scrolled = wheelAt;
+  wheelAt = 0;
+  const traceDraw = process.env.DEMESNE_GRAPHICS_TRACE, drawStart = performance.timeOrigin + performance.now();
   process.stdout.write(output, () => {
+    if (scrolled) { metrics.scrollFrames++; metrics.scrollToOutputMs += performance.now() - scrolled; }
+    if (traceDraw) appendFileSync(traceDraw, JSON.stringify({ at: "terminal", stage: "draw", serial: batch.serial, start: drawStart, end: performance.timeOrigin + performance.now(), bytes: Buffer.byteLength(output) }) + "\n");
     send({ kind: "ack", serial: batch.serial });
     const capture = option("capture-dir");
     if (capture)
@@ -227,6 +247,7 @@ function finish(message = "", code = 0) {
   host?.dispose();
   clearTimeout(probeTimer);
   clearTimeout(escapeTimer);
+  if (imageDirectory) rmSync(imageDirectory, { recursive: true, force: true });
   if (attached) {
     process.stdin.setRawMode(wasRaw);
     process.stdin.pause();
@@ -244,6 +265,7 @@ function finish(message = "", code = 0) {
       JSON.stringify(
         {
           ...metrics,
+          imageTransfer: transport.filesEnabled ? "files" : "inline",
           coalescedInputs: inputQueue.coalesced,
           maxPendingInputs: inputQueue.maximum,
         },
@@ -439,11 +461,20 @@ if (snapshot) {
     "\x1b[?1049h\x1b[2J\x1b[?25l\x1b[?1003;1006h" +
       PASTE_ENABLE +
       graphicsProbe(probeId) +
+      fileProbe() +
       "\x1b[?1016$p",
   );
   process.stdin.on("data", (chunk: string) => {
     for (const input of decoder.push(chunk)) {
       if (
+        input.kind === "graphics-reply" &&
+        input.header.split(",").includes(`i=${fileProbeId}`)
+      ) {
+        if (input.message === "OK" && imageDirectory) {
+          transport.useFiles(imageDirectory);
+          send({ kind: "image-files", directory: imageDirectory });
+        }
+      } else if (
         input.kind === "graphics-reply" &&
         input.header.split(",").includes(`i=${probeId}`)
       ) {
@@ -486,7 +517,9 @@ if (snapshot) {
         );
         const button =
           (["left", "middle", "right"] as const)[event.button] ?? "left";
-        if (event.kind === "wheel")
+        if (event.kind === "wheel") {
+          wheelAt ||= performance.now();
+          if (process.env.DEMESNE_GRAPHICS_TRACE) appendFileSync(process.env.DEMESNE_GRAPHICS_TRACE, JSON.stringify({ at: "terminal", stage: "wheel", start: performance.timeOrigin + performance.now() }) + "\n");
           send({
             kind: "input",
             event: {
@@ -508,7 +541,7 @@ if (snapshot) {
               canScroll: true,
             },
           });
-        else
+        } else
           send({
             kind: "input",
             event: {

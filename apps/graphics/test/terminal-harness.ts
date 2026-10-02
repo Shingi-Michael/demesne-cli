@@ -1,4 +1,6 @@
 import { resolve } from "node:path";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { inflateSync } from "node:zlib";
 import sharp from "sharp";
 
 export class TerminalHarness {
@@ -10,6 +12,10 @@ export class TerminalHarness {
   batches = 0;
   bytes = 0;
   images = new Map<number, Buffer>();
+  /// How each image was sent: Kitty f/o/s/v fields, and whether by file (t=t).
+  formats = new Map<number, { f: string; o?: string; s: number; v: number }>();
+  fileTransfers = 0;
+  private transferFormat = { f: "100", s: 0, v: 0 } as { f: string; o?: string; s: number; v: number };
   placements = new Map<number, { x: number; y: number; width: number; height: number; z: number }>();
   maxImages = 0;
   restored = false;
@@ -46,9 +52,21 @@ export class TerminalHarness {
         const [header, payload = ""] = command.split(";");
         const fields = Object.fromEntries(header!.split(",").map(pair => pair.split("=")));
         const id = Number(fields.i);
-        if (fields.a === "q") { reply(`\x1b_Gi=${id};OK\x1b\\`); continue; }
-        if (fields.a === "t") { this.transfer = id; this.chunks = ""; }
-        if (fields.m !== undefined) {
+        if (fields.a === "q") {
+          // Like Ghostty: a file transfer is OK only if the file is readable.
+          const ok = fields.t !== "t" || existsSync(Buffer.from(payload, "base64").toString());
+          reply(`\x1b_Gi=${id};${ok ? "OK" : "EINVAL: invalid data"}\x1b\\`); continue;
+        }
+        if (fields.a === "t") {
+          this.transfer = id; this.chunks = "";
+          this.transferFormat = { f: fields.f ?? "32", ...(fields.o ? { o: fields.o } : {}), s: Number(fields.s ?? 0), v: Number(fields.v ?? 0) };
+          this.formats.set(id, this.transferFormat);
+        }
+        if (fields.a === "t" && fields.t === "t") {
+          // A temporary file: read it, then delete it as the terminal would.
+          const path = Buffer.from(payload, "base64").toString();
+          this.images.set(id, readFileSync(path)); rmSync(path, { force: true }); this.decoding.delete(id); this.fileTransfers++;
+        } else if (fields.m !== undefined) {
           this.chunks += payload;
           if (fields.m === "0") { this.images.set(this.transfer, Buffer.from(this.chunks, "base64")); this.decoding.delete(this.transfer); }
         }
@@ -93,8 +111,19 @@ export class TerminalHarness {
   private decoded(id: number) {
     let item = this.decoding.get(id);
     if (!item) {
-      item = sharp(this.images.get(id)!).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
-        .then(({ data, info }) => ({ data, width: info.width, height: info.height }));
+      const format = this.formats.get(id), bytes = this.images.get(id)!;
+      item = format?.f === "24" || format?.f === "32"
+        ? Promise.resolve((() => {
+          const pixels = format.o === "z" ? inflateSync(bytes) : bytes, channels = format.f === "24" ? 3 : 4;
+          if (pixels.length !== format.s * format.v * channels) throw new Error(`Image ${id} has ${pixels.length} bytes for ${format.s}x${format.v}`);
+          const data = Buffer.alloc(format.s * format.v * 4);
+          for (let from = 0, to = 0; from < pixels.length; from += channels, to += 4) {
+            data[to] = pixels[from]!; data[to + 1] = pixels[from + 1]!; data[to + 2] = pixels[from + 2]!; data[to + 3] = channels === 4 ? pixels[from + 3]! : 255;
+          }
+          return { data, width: format.s, height: format.v };
+        })())
+        : sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+          .then(({ data, info }) => ({ data, width: info.width, height: info.height }));
       this.decoding.set(id, item);
     }
     return item;

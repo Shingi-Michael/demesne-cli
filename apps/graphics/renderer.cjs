@@ -1,11 +1,25 @@
 // Chromium renders offscreen; only changed tiles cross the terminal bridge.
-const { app, BrowserWindow, nativeImage, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain } = require("electron");
 const { createInterface } = require("node:readline");
 const { join } = require("node:path");
-const { writeFileSync } = require("node:fs");
+const { writeFileSync, appendFileSync } = require("node:fs");
+// DEMESNE_GRAPHICS_TRACE=<file>: one JSON line per frame with its stage
+// timestamps (performance.timeOrigin-based ms), for diagnosing frame cost.
+const tracePath = process.env.DEMESNE_GRAPHICS_TRACE;
+const trace = (record) => { if (tracePath) appendFileSync(tracePath, JSON.stringify({ at: "renderer", ...record }) + "\n"); };
+const now = () => performance.timeOrigin + performance.now();
 const { TileFrame } = require("./tiles.cjs");
 const { InputQueue } = require("./input-queue.cjs");
-app.disableHardwareAcceleration(); // Software output avoids GPU-to-CPU readback for this 2D UI.
+const { TileEncoder } = require("./tile-encoder.cjs");
+const encoder = new TileEncoder();
+// Set when the terminal reads image files: workers write tiles here directly.
+let imageDirectory = null,
+  imageFiles = 0;
+// GPU rasterization is enabled: at Retina sizes, software raster made a
+// scrolled frame's paint ~24 ms on Apple Silicon versus 10-16 ms on the GPU,
+// readback included (benchmark-scroll.ts). DEMESNE_GRAPHICS_GPU=0 forces
+// software rendering; Chromium also falls back to it where no GPU is usable.
+if (process.env.DEMESNE_GRAPHICS_GPU === "0") app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("force-device-scale-factor", "1");
 app.setPath("userData", process.env.DEMESNE_PIXEL_CACHE);
 app.whenReady().then(() => app.dock?.hide());
@@ -20,7 +34,16 @@ const metrics = {
   encodeMs: 0,
   inputReceived: 0,
   inputProcessed: 0,
+  // Where a frame's time goes: input dispatched → Chromium paints it, and
+  // paint → tiles leave (bitmap copy, diff, encode).
+  inputToPaintMs: 0,
+  paintToSendMs: 0,
+  timedFrames: 0,
+  diffMs: 0,
+  drainMs: 0,
 };
+let inputAt = 0,
+  paintAt = 0;
 let uiReady,
   latestState,
   requestSerial = 0;
@@ -64,29 +87,45 @@ function appState(state) {
   latestState = state;
   if (win && !win.isDestroyed()) win.webContents.send("demesne:update", state);
 }
-function flush() {
+async function flush() {
   scheduled = false;
   if (!ready || inFlight || !frame.dirty?.size) return;
   const start = performance.now();
-  const batch = frame.drain((data, width, height) =>
-    nativeImage
-      .createFromBitmap(data, { width, height })
-      .toPNG()
-      .toString("base64"),
-  );
-  if (!batch.tiles.length) return;
+  const drainStart = performance.now(), traceStart = now();
+  const drained = frame.drain();
+  metrics.drainMs += performance.now() - drainStart;
+  const drainedAt = now();
+  if (!drained.tiles.length) return;
+  // Reserve the in-flight slot before encoding: paints during the encode
+  // merge into the retained bitmap and leave with the next batch.
+  inFlight = ++serial;
+  // Worker threads convert and compress tiles in parallel, so a full-screen
+  // scroll never encodes its tiles one after another on this thread.
+  let tiles;
+  try {
+    tiles = await Promise.all(drained.tiles.map(async ({ data, ...tile }) => ({
+      ...tile, format: "rgba-zlib",
+      ...(await encoder.encode(data, imageDirectory && join(imageDirectory, `tty-graphics-protocol-${++imageFiles}`))) })));
+  } catch (error) {
+    // Never leave a tile marked as shown when it wasn't: resend it next time.
+    for (const tile of drained.tiles) { frame.previous.delete(tile.id); frame.dirty.add(tile.id); }
+    inFlight = 0;
+    throw error;
+  }
+  const batch = { ...drained, tiles };
+  if (tracePath) trace({ stage: "flush", serial: inFlight, start: traceStart, drained: drainedAt, end: now(), tiles: tiles.length });
   metrics.encodeMs += performance.now() - start;
+  if (paintAt) { metrics.paintToSendMs += performance.now() - paintAt; metrics.timedFrames++; paintAt = 0; }
   metrics.encodedTiles += batch.tiles.length;
   metrics.encodedPixels += batch.tiles.reduce(
     (sum, tile) => sum + tile.width * tile.height,
     0,
   );
-  inFlight = ++serial;
   // One batch is allowed in flight. Later paints merge into the retained bitmap
   // until stdout has drained; no dropped delta can leave a stale tile behind.
   send({
     kind: "tiles",
-    serial,
+    serial: inFlight,
     ...batch,
     ...(config.metrics
       ? {
@@ -102,11 +141,13 @@ function flush() {
 function schedule() {
   if (!scheduled && !inFlight) {
     scheduled = true;
-    setImmediate(flush);
+    setImmediate(() => void flush().catch((error) => send({ kind: "error", message: String(error) })));
   }
 }
 function paint(_event, dirty, image) {
   metrics.paintEvents++;
+  if (!paintAt) paintAt = performance.now();
+  if (inputAt) { metrics.inputToPaintMs += performance.now() - inputAt; inputAt = 0; }
   const size = image.getSize();
   if (
     resizePaint &&
@@ -124,8 +165,11 @@ function paint(_event, dirty, image) {
     return;
   }
   if (!ready) return;
-  if (frame.update(image.toBitmap(), size.width, size.height, dirty))
-    schedule();
+  const diffStart = performance.now();
+  const changed = frame.update(image.toBitmap(), size.width, size.height, dirty);
+  metrics.diffMs += performance.now() - diffStart;
+  if (tracePath) trace({ stage: "paint", start: now() - (performance.now() - diffStart), end: now(), changed, dirty });
+  if (changed) schedule();
 }
 function seed(image) {
   const size = image.getSize();
@@ -384,7 +428,12 @@ async function processQueue() {
         await win.webContents.debugger.sendCommand("Input.insertText", {
           text: msg.text,
         });
-      else if (ready && msg.kind === "input") await input(msg.event);
+      else if (ready && msg.kind === "input") {
+        inputAt = performance.now();
+        if (tracePath) trace({ stage: "input", type: msg.event.type, start: now() });
+        await input(msg.event);
+        if (tracePath) trace({ stage: "dispatched", type: msg.event.type, end: now() });
+      }
       else if (ready && msg.kind === "copy") win.webContents.copy();
       diagnostic();
     }
@@ -410,6 +459,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     }
     if (msg.kind === "ui-command") {
       win?.webContents.send("demesne:command", msg.command);
+      return;
+    }
+    if (msg.kind === "image-files") {
+      imageDirectory = typeof msg.directory === "string" ? msg.directory : null;
       return;
     }
     if (msg.kind === "app-state") {

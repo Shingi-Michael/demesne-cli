@@ -78,7 +78,15 @@ The checked-in benchmark JSON files measure input to decoded terminal pixels in 
 
 `host.ts` owns authenticated daemon requests, config, filesystem operations, and credentials. The sandboxed renderer receives public snapshots through a narrow preload bridge; it has no daemon token, Node access, network connection, or arbitrary shell API. Markdown is sanitized before rendering. Drive actions carry short-lived capabilities for the exact composer text and reject stale sessions and observations.
 
-`renderer.cjs`, `tiles.cjs`, and `transport.ts` retain dirty pixels and send only changed tiles. One frame batch waits for terminal-output drain before the next can leave, so a slow terminal does not accumulate obsolete frames. Resize starts a new tile generation; exit deletes the UI's images and restores terminal modes. The start-screen prototype is kept separate from this live application.
+`renderer.cjs`, `tiles.cjs`, and `transport.ts` retain dirty pixels and send only changed tiles. One frame batch waits for terminal-output drain before the next can leave, so a slow terminal does not accumulate obsolete frames.
+
+Scrolling changes every tile, so per-frame cost decides how it feels. Tiles leave as RGBA compressed with fast zlib (Kitty `f=32,o=z`) rather than PNG, encoded in parallel by a small worker pool (`tile-encoder.cjs`). When the terminal confirms at startup that it can read files here (a Kitty `t=t` query, so not over SSH), workers write each tile to a private temporary directory and only its path crosses the terminal, which reads and deletes it; otherwise tiles travel inline. Chromium rasterizes on the GPU. Measured at 3456×2160 (Retina), one scroll step went from ~119 ms and ~718 KB through the terminal to ~38 ms and ~10 KB:
+
+```sh
+bun apps/graphics/benchmark-scroll.ts 2 files 216 60   # scale, files|inline, columns, rows
+```
+
+`DEMESNE_GRAPHICS_FILES=0` forces inline tiles, `DEMESNE_GRAPHICS_GPU=0` forces software rendering, and `DEMESNE_GRAPHICS_TRACE=<file>` writes one JSON line per frame stage (input, paint, flush, draw) for diagnosing frame cost. Resize starts a new tile generation; exit deletes the UI's images and restores terminal modes. The start-screen prototype is kept separate from this live application.
 
 `state-wire.ts` sends changed fields, changed turns, and appended text. The browser retains unchanged history locally. Revision and text-offset checks reject incomplete updates, buffer updates that overtake a bootstrap response, and request an authoritative snapshot before continuing. `markdown.ts` re-lexes the complete reply for Markdown correctness but only sanitizes, highlights, and replaces changed blocks; unchanged blocks retain their DOM nodes. Folded turns release those nodes, and static Markdown caching has a 2 MiB byte budget. Drive observes on demand when started/resumed and at a bounded cadence while active; inactive or paused missions do not scan the page.
 

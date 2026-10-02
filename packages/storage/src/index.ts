@@ -1,3 +1,4 @@
+import type { CommandRecord } from "@demesne/protocol";
 import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -158,6 +159,13 @@ export class DemesneStore {
       }
     }
     this.migrate();
+    this.database.run(`      CREATE TABLE IF NOT EXISTS command_runs (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        turn_id TEXT NOT NULL REFERENCES turns(id), created_at TEXT NOT NULL, data_json TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS command_runs_session ON command_runs(session_id, created_at);
+
+    `);
     this.database.run(`CREATE TABLE IF NOT EXISTS image_artifacts (
       sequence INTEGER PRIMARY KEY AUTOINCREMENT,
       id TEXT NOT NULL UNIQUE,
@@ -1219,6 +1227,33 @@ export class DemesneStore {
     })();
     this.eventSink?.(event);
     return event;
+  }
+
+  saveCommand(command: CommandRecord): void {
+    const turn=this.getTurnOrThrow(command.turnId);
+    if(turn.sessionId!==command.sessionId)throw new InvalidStateError("Command session does not match its turn");
+    this.database.query("INSERT INTO command_runs (id, session_id, turn_id, created_at, data_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data_json=excluded.data_json")
+      .run(command.id,command.sessionId,command.turnId,command.startedAt,JSON.stringify(command));
+    const event=this.insertEvent("command.changed",command.sessionId,command.turnId,{id:command.id,status:command.status},new Date().toISOString());
+    this.eventSink?.(event);
+  }
+  commandsForSession(sessionId: string): CommandRecord[] {
+    this.requireSession(sessionId);
+    return (this.database.query("SELECT data_json FROM command_runs WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 200").all(sessionId) as {data_json:string}[]).map(row=>JSON.parse(row.data_json));
+  }
+  driveReviewSnapshot(sessionId: string, turnId: string) {
+    const turn=this.getTurn(turnId);
+    if(!turn || turn.sessionId!==sessionId)throw new NotFoundError("Drive worker turn not found in session");
+    const calls=this.database.query("SELECT id,name,arguments_json,status,substr(result_text,1,1600) AS result_text FROM tool_calls WHERE turn_id=? ORDER BY rowid DESC LIMIT 12").all(turnId) as Pick<ToolCallRow,"id"|"name"|"arguments_json"|"status"|"result_text">[];
+    const cursor=(this.database.query("SELECT COALESCE(MAX(id),0) AS id FROM events WHERE session_id=? AND turn_id=? AND type IN ('tool.call_requested','tool.call_started','tool.call_completed','tool.call_failed','tool.call_denied','permission.requested','permission.resolved','question.requested','question.resolved','command.changed','turn.reverted','turn.cancelled','turn.completed','turn.failed','turn.interrupted')").get(sessionId,turnId) as {id:number}).id;
+    const waiting=(this.database.query("SELECT COUNT(*) AS count FROM tool_calls WHERE turn_id=? AND (permission_status='pending' OR (name='ask_user' AND status IN ('pending','running')))").get(turnId) as {count:number}).count;
+    return {turn,cursor,waitingForHuman:waiting>0,calls:calls.reverse()};
+  }
+
+  reviewEvents(sessionId: string, turnId?: string): EventEnvelope[] {
+    this.requireSession(sessionId);
+    return (this.database.query("SELECT * FROM events WHERE session_id = ? AND (? IS NULL OR turn_id = ?) AND type IN ('tool.call_completed','turn.reverted') ORDER BY id LIMIT 10001")
+      .all(sessionId,turnId??null,turnId??null) as EventRow[]).map(mapEvent);
   }
 
   eventsAfter(sessionId: string, afterEventId: number, limit = 100): EventEnvelope[] {

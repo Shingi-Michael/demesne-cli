@@ -1,7 +1,9 @@
 export const PROTOCOL_VERSION = 1 as const;
 export * from "./drive.ts";
+export * from "./panels.ts";
 
 export type EventType =
+  | "command.changed"
   | "artifact.created"
   | "session.created"
   | "session.renamed"
@@ -66,6 +68,7 @@ export interface ImageArtifact {
   sha256: string;
   source: { kind: "mcp" | "tool"; name: string; modelId: string | null };
   revisionOf: string | null;
+  viewport?: {width:number;height:number;deviceScaleFactor?:number};
 }
 
 export interface ArtifactPage {
@@ -139,7 +142,8 @@ export interface ModelToolCall {
 export interface WorkspaceFileInfo { path: string; byteLength: number | null; status: string | null }
 /// A workspace file's text for the file viewer; `content` is null with a
 /// `reason` when it cannot be shown (protected, binary, too large, missing).
-export interface WorkspaceFileText { path: string; content: string | null; byteLength: number | null; reason?: string }
+export interface WorkspaceFileStatus { path: string; byteLength: number | null; revision?: string; modifiedAt?: string; reason?: string }
+export interface WorkspaceFileText extends WorkspaceFileStatus { content: string | null }
 
 export type ModelMessage =
   | { role: "system" | "user"; content: string }
@@ -690,3 +694,7 @@ function lineEndingLength(value: string, index: number, final: boolean): number 
   if (index + 1 < value.length || final) return 1;
   return 0;
 }
+
+export * from "./drive-tasks.ts";
+
+export * from "./drive-review.ts";

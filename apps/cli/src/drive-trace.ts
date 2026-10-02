@@ -27,6 +27,7 @@ export function updateDriveTrace(state: DriveState, event: DriveProgress): void 
     if (event.thinking !== undefined) trace.thinking = event.thinking;
   } else if (event.type === "queued") trace.status = "queued";
   else if (event.type === "correction") settleDriveTrace(state, "corrected", `Correcting decision: ${event.message}`);
+  else if (event.type === "review.ready") { trace.note=`Fresh ${event.review.reason.replaceAll("_"," ")} evidence · queued ${(event.review.queueMs/1000).toFixed(1)}s`; }
   else if (event.type === "usage") trace.usage = event.usage;
   else {
     const field = event.type === "reasoning.delta" ? "reasoning" : event.type === "text.delta" ? "text" : "actionDraft";

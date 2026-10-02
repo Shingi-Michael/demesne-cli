@@ -1,4 +1,9 @@
-import { readArtifact } from "./artifacts.ts";
+import { collectDriveReview } from "./drive-review.ts";
+import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
+import { CommandMonitor } from "./command-monitor.ts";
+import { workspaceReview } from "./workspace-review.ts";
+import type { ReviewScope } from "@demesne/protocol";
+import { readArtifact, ingestImage } from "./artifacts.ts";
 import {
   encodeServerSentEvent,
   isRecord,
@@ -134,6 +139,7 @@ export function createDaemonApp(options: {
         console.warn("MCP startup failed", error);
       })
     : Promise.resolve();
+  const commands=new CommandMonitor(store);
   const engine = new AgentEngine(
     store,
     tools,
@@ -147,6 +153,7 @@ export function createDaemonApp(options: {
       providerEventLimit: options.providerEventLimit,
       providerVision: options.providerVision,
       questions,
+      commands,
       ...options.agent,
     },
   );
@@ -195,6 +202,10 @@ export function createDaemonApp(options: {
     const workspaceRoot = store.getSession(sessionId)?.workspace?.root;
     if (!workspaceRoot) return apiError("invalid_state", "Session has no workspace", 409);
 
+    // Work that can edit files must settle first; summarizing the conversation
+    // edits nothing, and an undo during it invalidates the stale checkpoint.
+    const editing = store.getSession(sessionId)?.turns.some((turn) => turn.kind !== "compaction" && (turn.status === "running" || turn.status === "queued"));
+    if (editing || commands.runningInWorkspace(workspaceRoot)) return apiError("invalid_state", "Wait for running work before undoing changes", 409);
     const requested = request.paths ? new Set(request.paths) : null;
     if (requested) {
       const known = new Set(target.files.map((file) => file.path));
@@ -247,6 +258,7 @@ export function createDaemonApp(options: {
       return apiError("invalid_state", "Undo could not be completed", 409);
     }
     const reverted = prepared.map((entry) => entry.file.path);
+    commands.invalidate(workspaceRoot);
     const { event, complete } = store.markTurnReverted(sessionId, target.turnId, reverted);
     const response: UndoTurnResponse = { turnId: target.turnId, files: reverted, complete };
     return json({ ...response, eventId: event.eventId });
@@ -284,12 +296,39 @@ export function createDaemonApp(options: {
         }
       }
 
+      if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "sessions" && path[3] === "drive" && path[4] === "facts") {
+        const input = await readJson(request);
+        if (!isRecord(input) || input.turnId !== undefined && typeof input.turnId !== "string" || !Array.isArray(input.paths) || input.paths.length > 128 || input.paths.some(p => typeof p !== "string" || p.length > 4096)) return apiError("invalid_request", "Expected a turn ID and up to 128 workspace paths", 400);
+        return json(collectDriveFacts(store,commands,path[2]!,input.turnId as string | undefined,input.paths as string[]));
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/drive/check-in/cancel") {
+        const body=await readJson(request);
+        if(!isRecord(body)||typeof body.sessionId!=="string"||typeof body.turnId!=="string"||typeof body.revision!=="string"||!/^[a-f0-9]{64}$/.test(body.revision)) return apiError("invalid_request","Expected session, worker turn, and review revision",400);
+        const current=store.getTurn(body.turnId);
+        if(!current||current.sessionId!==body.sessionId)return apiError("not_found","Drive worker not found in session",404);
+        const controller=activeControllers.get(current.id);
+        if(!controller||current.status!=="running")return json({cancelled:false,reason:"Worker has already settled."});
+        const {review}=collectDriveReview(store,commands,body.sessionId,body.turnId);
+        if(review.waitingForHuman||review.revision!==body.revision)return json({cancelled:false,reason:"Recorded evidence changed or the worker is waiting for human input."});
+        // No await between this comparison and cancellation: tools cannot
+        // publish a new outcome in between the guard and the stop.
+        store.cancelTurn(current.id); controller.abort(new DOMException("Drive checkpoint correction","AbortError"));
+        permissions.cancelTurn(current.id,controller.signal.reason); questions.cancelTurn(current.id,controller.signal.reason);
+        return json({cancelled:true});
+      }
+
       if (request.method === "POST" && url.pathname === "/v1/drive/decide") {
         const body = parseDriveRequest(await readJson(request));
+        delete body.review; // Only the daemon may author handoff evidence.
         const home = store.getSession(body.homeSessionId), viewed = store.getSession(body.observation.sessionId);
         if (!home || !viewed) return apiError("not_found", "Drive session not found", 404);
         if (!home.workspace || home.workspace.root !== viewed.workspace?.root || home.workspace.root !== body.observation.workspace)
           return apiError("invalid_state", "Drive observations must belong to the mission's workspace", 409);
+        if (body.checkIn) {
+          const worker=store.getTurn(body.checkIn.turnId);
+          if(!worker || worker.sessionId!==body.homeSessionId) return apiError("invalid_request","Drive check-in must reference a worker in the home session",400);
+        }
         const signal = AbortSignal.any([request.signal, driveLifecycle.signal]);
         // Each attempt's model call: thinking on or off, under Drive's cap.
         const inferenceFor = (thinking: boolean | undefined) => snapshotTurnInference(processor, thinking,
@@ -297,14 +336,26 @@ export function createDaemonApp(options: {
         const decide = (signal: AbortSignal, progress?: Parameters<typeof planDrive>[5]) => {
           const planned = (async () => {
             const leaseId = `drive:${randomUUID()}`;
-            const lease = await scheduler.acquire(leaseId, signal);
+            const lease = await scheduler.acquire(leaseId, signal, body.checkIn ? {reviewFor:body.checkIn.turnId} : {});
             try {
+              if(body.checkIn?.freshEvidence) {
+                const packet=collectDriveReview(store,commands,body.homeSessionId,body.checkIn.turnId,body.checkIn.reason,lease.queueDurationMs);
+                body.review=packet.review; body.facts=packet.facts;
+                const skipped=packet.review.status!=="running" ? "Worker settled before the review acquired a model slot." : packet.review.waitingForHuman ? "Worker is waiting for human input; check-in skipped." : !packet.review.rows.length ? "No recorded tool activity is available for this check-in." : undefined;
+                if(skipped){const inference=inferenceFor(false);return {review:packet.review,skipped,provider:inference.providerId,model:inference.modelId,imageInspected:false,decision:{action:{kind:"keep_working" as const},note:skipped,notes:body.memory.notes,completed:body.memory.completed,remaining:body.memory.remaining,evidence:[]}};}
+                await progress?.({type:"review.ready",review:packet.review});
+              }
               let image: { id: string; url: string } | undefined;
-              if (options.providerVision && body.observation.surface === "preview" && body.observation.artifactId) {
+              if (!body.checkIn && options.providerVision && body.observation.surface === "preview" && body.observation.artifactId) {
                 const artifact = store.getImageArtifact(viewed.id, body.observation.artifactId);
                 if (artifact) { const bytes = await readArtifact(store, artifact, true); image = { id: artifact.id, url: `data:image/png;base64,${bytes.toString("base64")}` }; }
               }
-              return await planDrive(body, inferenceFor, signal, options, image, progress);
+              // Refresh after acquiring the model slot; never trust caller-supplied results.
+              if (!body.checkIn && body.ledger && body.facts) body.facts = collectDriveFacts(store,commands,body.homeSessionId,(body.observation.sessionId !== body.homeSessionId || ["0","start"].includes(body.observation.navigation?.turn ?? "") ? undefined : body.observation.navigation?.turn) || undefined,driveTrackedPaths(body.ledger));
+              const reviewStarted=performance.now();
+              const result=await planDrive(body, inferenceFor, signal, options, image, progress);
+              if(body.review)body.review.modelMs=Math.round(performance.now()-reviewStarted);
+              return {...result,...(body.review?{review:body.review}:{})};
             } finally { lease.release({ turnContinues: false }); scheduler.finishTurn(leaseId); }
           })();
           activeDriveDecisions.add(planned);
@@ -424,6 +475,17 @@ export function createDaemonApp(options: {
         });
       }
 
+      if(request.method==="POST"&&path.length===5&&path[0]==="v1"&&path[1]==="sessions"&&path[3]==="artifacts"&&path[4]==="import"){
+        const session=store.getSession(path[2]!);if(!session?.workspace)return apiError("not_found","Workspace session not found",404);
+        const turn=session.turns.at(-1);if(!turn)return apiError("invalid_state","Start a conversation before importing a reference",409);
+        const body=await readJson(request);if(!isRecord(body)||typeof body.path!=="string"||body.path.length>4096)return apiError("invalid_request","A workspace image path is required",400);
+        try{const output=await viewImageTool().executeWithArtifacts!({path:body.path},{workspaceRoot:session.workspace.root,sessionId:session.id,signal:request.signal});
+          if(typeof output==="string"||!output.images.length)return apiError("invalid_request","Image unavailable",400);
+          if(body.viewport!==undefined){const viewport=body.viewport;if(!isRecord(viewport)||![viewport.width,viewport.height].every(value=>Number.isSafeInteger(value)&&Number(value)>0&&Number(value)<=32768)||(viewport.deviceScaleFactor!==undefined&&(!(typeof viewport.deviceScaleFactor==="number")||viewport.deviceScaleFactor<=0||viewport.deviceScaleFactor>8)))return apiError("invalid_request","Invalid viewport dimensions",400);output.images[0]!.viewport={width:Number(viewport.width),height:Number(viewport.height),...(typeof viewport.deviceScaleFactor==="number"?{deviceScaleFactor:viewport.deviceScaleFactor}:{})};}
+          const artifact=await ingestImage(store,output.images[0]!,{sessionId:session.id,turnId:turn.id,toolCallId:randomUUID(),name:body.reference===true?"reference_import":"image_import"},0);return json(artifact,201);
+        }catch(error){return apiError("invalid_request",error instanceof Error?error.message:String(error),400);}
+      }
+
       if (request.method === "GET" && path[0] === "v1" && path[1] === "sessions" && path[3] === "artifacts") {
         const sessionId = path[2]!;
         if (!store.getSession(sessionId)) return apiError("not_found", "Session not found", 404);
@@ -454,7 +516,12 @@ export function createDaemonApp(options: {
         if (!session.workspace) return apiError("invalid_state", "Session has no workspace", 409);
         const target = url.searchParams.get("path");
         if (!target) return apiError("invalid_request", "path is required", 400);
-        return json(readWorkspaceText(session.workspace.root, target));
+        const file = readWorkspaceText(session.workspace.root, target);
+        if (url.searchParams.get("status") === "1") {
+          const { content, ...status } = file;
+          return json(status);
+        }
+        return json(file);
       }
 
       if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "files") {
@@ -563,6 +630,19 @@ export function createDaemonApp(options: {
         return undoSession(path[2]!, parseUndoSessionRequest(await readOptionalJson(request)));
       }
 
+      if(path[0]==="v1"&&path[1]==="sessions"&&path[2]&&["review","commands"].includes(path[3]??"")){
+        const session=store.getSession(path[2]);if(!session?.workspace)return apiError("not_found","Workspace session not found",404);
+        if(request.method==="GET"&&path[3]==="review"&&path.length===4){
+          const scope=url.searchParams.get("scope")??"turn";if(!["turn","session","workspace"].includes(scope))return apiError("invalid_request","Invalid review scope",400);
+          try{return json(workspaceReview(store,session.id,scope as ReviewScope,url.searchParams.get("turn")??session.turns.at(-1)?.id));}catch(error){return apiError("review_unavailable",error instanceof Error?error.message:String(error),400);}
+        }
+        if(request.method==="GET"&&path[3]==="commands"&&path.length===4){const active=session.turns.findLast(turn=>turn.status==="running"||turn.status==="queued");return json({...commands.list(session.id,session.workspace.root,url.searchParams.get("output")??"all"),queuePosition:active?scheduler.queuePosition(active.id):null});}
+        if(request.method==="POST"&&path[3]==="commands"&&path.length===6){
+          if(path[5]==="stop")return commands.stop(session.id,path[4]!)?json({stopping:true},202):apiError("not_found","No running command with this id in this session",404);
+          if(path[5]==="rerun"){try{return json({id:await commands.rerun(session.id,path[4]!,tools.get("run_command")!)},202);}catch(error){return apiError("invalid_state",error instanceof Error?error.message:String(error),409);}}
+        }
+      }
+
       if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "changes") {
         const sessionId = path[2]!;
         const session = store.getSession(sessionId);
@@ -656,6 +736,7 @@ export function createDaemonApp(options: {
       await Promise.allSettled(activeDriveDecisions);
       await mcpReady.catch(() => undefined);
       mcp.stop();
+      await commands.close();
       backgroundProcesses.shutdownAll();
       store.close();
   }

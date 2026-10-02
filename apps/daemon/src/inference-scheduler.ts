@@ -23,6 +23,8 @@ export interface InferenceBoundaryHook {
 }
 
 interface Waiter {
+  /// Set on a Drive check-in: the worker turn it reviews.
+  reviewFor?: string;
   turnId: string;
   enqueuedAt: number;
   signal: AbortSignal;
@@ -34,6 +36,9 @@ interface Waiter {
 export class InferenceScheduler {
   readonly capacity: number;
   private active = 0;
+  /// One queued or active review per worker turn.
+  private readonly reviewOwners = new Map<string, string>();
+  private lastGrantWasReview = false;
   private readonly waiters: Waiter[] = [];
   private readonly lifecycle = new AbortController();
   private pumping = false;
@@ -66,16 +71,33 @@ export class InferenceScheduler {
     return this.active;
   }
 
+  /// 1-based position the turn would be granted at, or null when not queued.
+  queuePosition(turnId: string): number | null {
+    const pending = [...this.waiters];
+    let lastReview = this.lastGrantWasReview, position = 0;
+    while (pending.length) {
+      const next = this.nextWaiterIndex(pending, lastReview);
+      const [waiter] = pending.splice(next < 0 ? 0 : next, 1);
+      position++;
+      if (waiter!.turnId === turnId) return position;
+      lastReview = Boolean(waiter!.reviewFor);
+    }
+    return null;
+  }
+
   get queuedCount(): number {
     return this.waiters.length;
   }
 
-  acquire(turnId: string, signal: AbortSignal): Promise<InferenceLease> {
+  acquire(turnId: string, signal: AbortSignal, options: { reviewFor?: string } = {}): Promise<InferenceLease> {
     if (!turnId) return Promise.reject(new Error("Inference scheduler turn ID cannot be empty"));
     if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
     if (this.terminal) return Promise.reject(this.terminalReason);
+    if (options.reviewFor && this.reviewOwners.has(options.reviewFor)) return Promise.reject(new Error("A review for this worker is already queued or running"));
+    if (options.reviewFor) this.reviewOwners.set(options.reviewFor, turnId);
     return new Promise<InferenceLease>((resolve, reject) => {
       const waiter: Waiter = {
+        reviewFor: options.reviewFor,
         turnId,
         enqueuedAt: this.now(),
         signal,
@@ -85,6 +107,7 @@ export class InferenceScheduler {
           const index = this.waiters.indexOf(waiter);
           if (index === -1) return;
           this.waiters.splice(index, 1);
+          if (waiter.reviewFor) this.reviewOwners.delete(waiter.reviewFor);
           signal.removeEventListener("abort", waiter.onAbort);
           reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
         },
@@ -137,18 +160,18 @@ export class InferenceScheduler {
           this.removeAbortedWaiters();
           if (this.waiters.length === 0) return;
         }
-        const waiterIndex = this.continuationDrainActive
-          ? this.waiters.findIndex((waiter) => this.pendingContinuationTurns.has(waiter.turnId))
-          : 0;
+        const waiterIndex = this.nextWaiterIndex();
         if (waiterIndex < 0) return;
         const [waiter] = this.waiters.splice(waiterIndex, 1);
         if (!waiter) return;
         waiter.signal.removeEventListener("abort", waiter.onAbort);
         if (waiter.signal.aborted) {
+          if (waiter.reviewFor) this.reviewOwners.delete(waiter.reviewFor);
           waiter.reject(waiter.signal.reason ?? new DOMException("Aborted", "AbortError"));
           continue;
         }
         this.active += 1;
+        this.lastGrantWasReview = Boolean(waiter.reviewFor);
         this.pendingContinuationTurns.delete(waiter.turnId);
         let released = false;
         waiter.resolve({
@@ -157,6 +180,7 @@ export class InferenceScheduler {
             if (released) return;
             released = true;
             this.active -= 1;
+            if (waiter.reviewFor) this.reviewOwners.delete(waiter.reviewFor);
             this.settledLeaseCount += 1;
             if (turnContinues) this.pendingContinuationTurns.add(waiter.turnId);
             else this.pendingContinuationTurns.delete(waiter.turnId);
@@ -173,6 +197,16 @@ export class InferenceScheduler {
         this.requestDrain();
       }
     }
+  }
+
+  /// Drive reviews take the next slot, alternating with normal work so neither
+  /// starves. Strict runtime continuation drains keep their own ordering.
+  private nextWaiterIndex(waiters = this.waiters, lastReview = this.lastGrantWasReview): number {
+    if (this.continuationDrainActive) return waiters.findIndex((waiter) => this.pendingContinuationTurns.has(waiter.turnId));
+    const review = waiters.findIndex((waiter) => Boolean(waiter.reviewFor));
+    const normal = waiters.findIndex((waiter) => !waiter.reviewFor);
+    if (review >= 0 && (!lastReview || normal < 0)) return review;
+    return normal >= 0 ? normal : 0;
   }
 
   private hasGrantableWaiter(): boolean {
@@ -214,6 +248,7 @@ export class InferenceScheduler {
       if (!waiter.signal.aborted) continue;
       this.waiters.splice(index, 1);
       waiter.signal.removeEventListener("abort", waiter.onAbort);
+      if (waiter.reviewFor) this.reviewOwners.delete(waiter.reviewFor);
       waiter.reject(waiter.signal.reason ?? new DOMException("Aborted", "AbortError"));
     }
   }
@@ -226,6 +261,7 @@ export class InferenceScheduler {
     this.lifecycle.abort(reason);
     for (const waiter of this.waiters.splice(0)) {
       waiter.signal.removeEventListener("abort", waiter.onAbort);
+      if (waiter.reviewFor) this.reviewOwners.delete(waiter.reviewFor);
       waiter.reject(reason);
     }
   }

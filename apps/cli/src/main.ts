@@ -119,6 +119,7 @@ import { toolCompletion } from "./workbench/tool-result.ts";
 import { narrateTurnEnd, sentence } from "./voice.ts";
 import { updateUserConfig } from "@demesne/config";
 import { createInterface } from "node:readline/promises";
+import { runGraphics } from "./graphics-launcher.ts";
 
 const args = process.argv.slice(2);
 const settings = loadSettings();
@@ -500,7 +501,11 @@ try {
   const chatFlags = first !== undefined
     && first.startsWith("--")
     && !["--version", "--help"].includes(first);
-  if (args.length === 0 || first === "chat" || chatFlags) {
+  if (first === "graphics" || args.includes("--graphics")) {
+    const graphicsArgs = process.argv.slice(2);
+    if (first === "graphics") graphicsArgs.splice(graphicsArgs.indexOf("graphics"), 1);
+    process.exitCode = await runGraphics(graphicsArgs.filter(arg => arg !== "--graphics"));
+  } else if (args.length === 0 || first === "chat" || chatFlags) {
     await runChat(first === "chat" ? args.slice(1) : args);
   } else {
     await run(args);
@@ -926,9 +931,12 @@ async function runChat(command: string[]): Promise<void> {
     if (!workbench) return;
     drive?.dispose();
     drive = new AgentDrive({
-      continuous: true,
+      checkpointReviews:true,
+      normalizeWorker: text => expandMentions(text,mentionFiles),
+      facts: (sessionId,turnId,paths,signal) => client.driveFacts(sessionId,turnId === "0" ? undefined : turnId,paths,signal),
       limits: settings.loaded.config.drive,
-      cancelWorker: async (turnId, signal) => {
+      cancelWorker: async (turnId, signal, review) => {
+        if(review)return client.cancelDriveReview(review,signal);
         signal.throwIfAborted();
         const result = await client.request<import("@demesne/protocol").CancelTurnResponse>(`/v1/turns/${turnId}/cancel`, { method: "POST", body: "{}", signal });
         return result.turn.status === "cancelled";
@@ -1173,7 +1181,9 @@ async function runChat(command: string[]): Promise<void> {
       try {
         const value = argument.trim();
         if (value === "pause" || value === "resume" || value === "stop") controlDrive(value);
-        else if (value && value !== "status") drive.start(value);
+        else if (value.startsWith("reopen ")) {
+          const [,id,...reason]=value.split(/\s+/); drive.reopen(id ?? "",reason.join(" "));
+        } else if (value && value !== "status") drive.start(value);
         workbench.showDrive();
       } catch (error) { say(error instanceof Error ? error.message : "Drive could not start.", "error"); }
     },
@@ -1710,6 +1720,7 @@ async function runWorkbenchTurn(options: {
     }),
   });
 
+  options.workbench.bindTurnId(submitted.turn.id);
   options.workerStarted?.(options.content, submitted.turn.id);
   const controller = new AbortController();
   let interrupted = false;
@@ -2621,6 +2632,7 @@ async function runCommandCapture(command: string[]): Promise<{ code: number; std
 function printUsage(): void {
   console.log(`Usage:
   demesne [chat] [initial message] [--no-tui]
+  demesne graphics [--workspace <path>] [--session <id>] [--scale auto|0.5-3] [--setup]
   demesne setup [--provider-url <url> --model <id>] [--context-window <n>] [--max-output-tokens <n>] [--theme auto|dark|light] [--yes]
   demesne auth login openrouter [--model <id>] [--no-browser]
   demesne doctor [--json]

@@ -1,3 +1,4 @@
+import type { CommandObserver } from "./command-monitor.ts";
 import { randomUUID } from "node:crypto";
 
 const STREAM_LIMIT_BYTES = 256 * 1024;
@@ -18,7 +19,7 @@ interface BackgroundEntry {
 export class BackgroundProcesses {
   private readonly entries = new Map<string, BackgroundEntry>();
 
-  spawn(argv: string[], cwd: string, env: Record<string, string>): { handle: string; pid: number } {
+  spawn(argv: string[], cwd: string, env: Record<string, string>, observer?:CommandObserver): { handle: string; pid: number } {
     if (this.entries.size >= MAX_PROCESSES) {
       for (const [handle, entry] of [...this.entries]) {
         if (!entry.running) this.entries.delete(handle);
@@ -28,7 +29,8 @@ export class BackgroundProcesses {
       const error = new Error("[TOO_MANY_BACKGROUND] 16 processes already running. Hint: command_stop one first.");
       throw error;
     }
-    const child = Bun.spawn(argv, { cwd, detached: true, stdin: "ignore", stdout: "pipe", stderr: "pipe", env });
+    let child: Bun.Subprocess<"ignore","pipe","pipe">;
+    try{child=Bun.spawn(argv, { cwd, detached: true, stdin: "ignore", stdout: "pipe", stderr: "pipe", env });}catch(error){observer?.finished(null,false,String(error));throw error;}
     const handle = randomUUID().slice(0, 12);
     const entry: BackgroundEntry = {
       pid: child.pid,
@@ -39,13 +41,16 @@ export class BackgroundProcesses {
       err: { text: "", dropped: 0, decoder: new TextDecoder() },
     };
     this.entries.set(handle, entry);
-    void this.pump(child, child.stdout, entry.out);
-    void this.pump(child, child.stderr, entry.err);
-    void child.exited.then((code) => {
+    observer?.started(child.pid,()=>this.stop(handle));
+    const output=this.pump(child, child.stdout, entry.out,text=>observer?.output("stdout",text));
+    const errors=this.pump(child, child.stderr, entry.err,text=>observer?.output("stderr",text));
+    void Promise.all([child.exited,output,errors]).then(([code]) => {
       entry.running = false;
       entry.exitCode = code;
-    }).catch(() => {
+      observer?.finished(code,entry.timedOut);
+    }).catch((error) => {
       entry.running = false;
+      observer?.finished(null,false,String(error));
     });
     return { handle, pid: child.pid };
   }
@@ -113,18 +118,20 @@ export class BackgroundProcesses {
     child: Bun.Subprocess<"ignore", "pipe", "pipe">,
     stream: ReadableStream<Uint8Array>,
     sink: { text: string; dropped: number; decoder: TextDecoder },
+    onText?:(text:string)=>void,
   ): Promise<void> {
     const reader = stream.getReader();
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      sink.text += sink.decoder.decode(value, { stream: true });
+      const text=sink.decoder.decode(value,{stream:true});sink.text+=text;onText?.(text);
       if (sink.text.length > STREAM_LIMIT_BYTES) {
         const drop = sink.text.length - STREAM_LIMIT_BYTES;
         sink.dropped += drop;
         sink.text = sink.text.slice(drop);
       }
     }
+    const tail=sink.decoder.decode();sink.text+=tail;if(tail)onText?.(tail);
     void child;
   }
 }

@@ -203,7 +203,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(dataPath, "demesne.sqlite"));
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", { method: "POST", body: JSON.stringify({ title: "Files", workspacePath }) });
     const read = (path: string) => jsonRequest<{ path: string; content: string | null; reason?: string; byteLength: number | null }>(running.url, `/v1/sessions/${created.session.id}/file?path=${encodeURIComponent(path)}`);
-    expect(await read("src/a.ts")).toEqual({ path: "src/a.ts", content: "export const a = 1;\n", byteLength: 20 });
+    expect(await read("src/a.ts")).toMatchObject({ path: "src/a.ts", content: "export const a = 1;\n", byteLength: 20 });
     expect((await read(".env")).reason).toContain("protected");
     expect((await read("../outside.txt")).reason).toContain("traversal");
     expect((await read("blob.bin")).reason).toBe("binary file");
@@ -1525,6 +1525,50 @@ describe("Demesne daemon", () => {
 
     await expect(fetch(new URL(`/v1/sessions/${created.session.id}/undo`, running.url), { method: "POST" }))
       .resolves.toMatchObject({ status: 404 });
+  });
+
+  test("undo waits for a running coding turn instead of racing its edits", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws"), dataPath = join(directory, "data");
+    mkdirSync(workspacePath); mkdirSync(dataPath);
+    let round = 0;
+    const gate = Promise.withResolvers<void>(), streaming = Promise.withResolvers<void>();
+    const processor: TurnProcessor = {
+      providerId: "undo-provider",
+      modelId: "undo-model",
+      async listModels() { return [{ id: this.modelId, provider: this.providerId }]; },
+      async *stream() {
+        const call = round++;
+        if (call === 0) {
+          yield { type: "tool_call_delta" as const, index: 0, idDelta: "call-w", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "created.txt", content: "new\n" }) };
+          return;
+        }
+        if (call === 2) { streaming.resolve(); await gate.promise; }
+        yield { type: "text_delta" as const, delta: "done" };
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Undo while running", workspacePath }),
+    });
+    const first = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "write", permissionMode: "ask" }) });
+    for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${created.session.id}&after=${first.eventId}`, running.url)))) {
+      if (event.type === "permission.requested") {
+        await jsonRequest(running.url, `/v1/permissions/${event.payload.permissionId}`, { method: "POST", body: JSON.stringify({ decision: "allow_once" }) });
+      }
+      if (event.type === "turn.completed") break;
+    }
+    await jsonRequest(running.url, `/v1/sessions/${created.session.id}/turns`, { method: "POST", body: JSON.stringify({ content: "keep going" }) });
+    await streaming.promise;
+    try {
+      const refused = await fetch(new URL(`/v1/sessions/${created.session.id}/undo`, running.url), { method: "POST" });
+      const body = await refused.json();
+      expect([refused.status, JSON.stringify(body)]).toEqual([409, expect.stringContaining("Wait for running work")]);
+      expect(readFileSync(join(workspacePath, "created.txt"), "utf8")).toBe("new\n");
+    } finally { gate.resolve(); }
   });
 
   test("undo restores both sides of an overwritten file move", async () => {

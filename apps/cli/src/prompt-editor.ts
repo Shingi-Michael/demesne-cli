@@ -524,9 +524,24 @@ export function resolveMention(name: string, files: readonly string[]): string |
 /// `@name` tokens in a draft that resolve to workspace files, with where each
 /// token (including `@`) sits in the text.
 export function draftMentions(value: string, files: readonly string[]): { start: number; length: number; path: string }[] {
+  // Fenced source attachments are literal code, including @decorators or paths.
+  const code: [number, number][] = [];
+  let fence: { character: string; length: number; start: number } | undefined;
+  for (const line of value.matchAll(/^.*(?:\n|$)/gm)) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)/.exec(line[0]);
+    if (!marker) continue;
+    if (!fence) fence = { character: marker[1]![0]!, length: marker[1]!.length, start: line.index! };
+    else if (marker[1]![0] === fence.character && marker[1]!.length >= fence.length && !marker[2]!.trim()) {
+      code.push([fence.start, line.index! + line[0].length]);
+      fence = undefined;
+    }
+  }
+  if (fence) code.push([fence.start, value.length]);
   return [...value.matchAll(/(^|\s)@([^\s@]+)/g)].flatMap((match) => {
+    const start = match.index! + match[1]!.length;
+    if (code.some(([from, through]) => start >= from && start < through)) return [];
     const path = resolveMention(match[2]!, files);
-    return path ? [{ start: match.index! + match[1]!.length, length: match[2]!.length + 1, path }] : [];
+    return path ? [{ start, length: match[2]!.length + 1, path }] : [];
   });
 }
 

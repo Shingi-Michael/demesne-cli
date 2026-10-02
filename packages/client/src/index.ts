@@ -1,3 +1,4 @@
+import type {ReviewScope, ReviewResponse, CommandsResponse} from "@demesne/protocol";
 import {
   type ImageArtifact,
   type ArtifactPage,
@@ -28,6 +29,7 @@ import {
   type DriveResponse,
   type DriveProgress,
   parseDriveStreamEvent,
+  parseDriveFacts,
   DrivePlanningError,
 } from "@demesne/protocol";
 
@@ -70,6 +72,10 @@ export interface HealthResponse {
 
 export class DemesneClient {
   readonly server: string;
+  async driveFacts(sessionId: string, turnId: string | undefined, paths: string[], signal?: AbortSignal): Promise<import("@demesne/protocol").DriveFacts> {
+    try { return parseDriveFacts(await this.request(`/v1/sessions/${sessionId}/drive/facts`, { method: "POST", body: JSON.stringify({turnId,paths}), signal })); }
+    catch(error) { if (error instanceof ApiRequestError && error.status === 404) throw new Error("Drive needs the updated daemon for recorded task facts. Restart the rebuilt daemon after current work finishes."); throw error; }
+  }
   async decideDrive(request: DriveRequest, signal?: AbortSignal, progress?: (event: DriveProgress) => void): Promise<DriveResponse> {
     if (!progress) return this.request("/v1/drive/decide", { method: "POST", body: JSON.stringify(request), signal });
     const response = await this.fetchImpl(new URL("/v1/drive/decide", this.server), { method: "POST", body: JSON.stringify(request), signal,
@@ -164,6 +170,16 @@ export class DemesneClient {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/replay?after=${after}&through=${through}`, { signal });
   }
 
+  async review(sessionId:string,scope:ReviewScope,turnId?:string):Promise<ReviewResponse>{
+    const query=new URLSearchParams({scope});if(turnId)query.set("turn",turnId);
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/review?${query}`);
+  }
+  async commands(sessionId:string,output="all"):Promise<CommandsResponse>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands?output=${encodeURIComponent(output)}`);}
+  async stopCommand(sessionId:string,id:string):Promise<{stopping:boolean}>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(id)}/stop`,{method:"POST",body:"{}"});}
+  async rerunCommand(sessionId:string,id:string):Promise<{id:string}>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(id)}/rerun`,{method:"POST",body:"{}"});}
+
+  async importImage(sessionId:string,path:string,reference=true,viewport?:ImageArtifact["viewport"]):Promise<ImageArtifact>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/artifacts/import`,{method:"POST",body:JSON.stringify({path,reference,viewport})});}
+
   async listArtifacts(sessionId: string, after = 0): Promise<ArtifactPage> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/artifacts?after=${after}&limit=100`);
   }
@@ -218,6 +234,10 @@ export class DemesneClient {
     return this.request(`/v1/sessions/${sessionId}/file?path=${encodeURIComponent(path)}`);
   }
 
+  async workspaceFileStatus(sessionId: string, path: string): Promise<import("@demesne/protocol").WorkspaceFileStatus> {
+    return this.request(`/v1/sessions/${sessionId}/file?path=${encodeURIComponent(path)}&status=1`);
+  }
+
   async exportSession(sessionId: string, format: "md" | "json" = "md"): Promise<string> {
     const response = await this.fetchImpl(
       new URL(`/v1/sessions/${sessionId}/export?format=${format}`, this.server),
@@ -241,6 +261,10 @@ export class DemesneClient {
     });
   }
 
+  async cancelDriveReview(review: import("@demesne/protocol").DriveReview, signal?: AbortSignal): Promise<boolean> {
+    const result=await this.request<{cancelled:boolean}>("/v1/drive/check-in/cancel",{method:"POST",body:JSON.stringify({sessionId:review.sessionId,turnId:review.turnId,revision:review.revision}),signal});
+    return result.cancelled;
+  }
   async cancelTurn(turnId: string): Promise<CancelTurnResponse> {
     return this.request<CancelTurnResponse>(`/v1/turns/${turnId}/cancel`, {
       method: "POST",

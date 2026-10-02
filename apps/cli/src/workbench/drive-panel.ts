@@ -91,7 +91,7 @@ export function renderDrivePanel(width: number, height: number, paint: Painter, 
     for (const line of wrapDisplayText(sanitizeTerminalLine(card.reason || " "), Math.max(1, cardWidth - 4))) cardRow(paint.text(line, card.reasonTone ?? "paper"));
     content.push(paint.text(`╰${"─".repeat(Math.max(0, cardWidth - 2))}╯`, card.tone));
     // Resume and Stop buttons where Drive is holding for you.
-    const resumable = !live.protection?.trip && (["paused", "blocked", "stopped", "idle"].includes(live.status) || live.status === "completed" && !!live.autonomy);
+    const resumable = !live.protection?.trip && (["paused", "blocked", "stopped", "idle"].includes(live.status));
     const active = live.status === "running" || live.status === "waiting";
     if (resumable) {
       const resume = paint.wash(" p  Resume ", "diffAddedSurface", "citron"), stop = paint.wash(" s  Stop ", "raised", "paper");
@@ -110,11 +110,25 @@ export function renderDrivePanel(width: number, height: number, paint: Painter, 
       row("steps", String(state.step));
       if (used) { row("time", minutes(used.activeMs)); row("tokens", formatTokenCount(used.planningTokens + used.workerTokens)); }
       content.push("");
-    } else if (finished.length || state.autonomy?.task || state.remaining.length) {
+    } else if (!state.ledger && (finished.length || state.autonomy?.task || state.remaining.length)) {
       add("TASKS", "muted");
       for (const item of finished.slice(-4)) add(`✓ ${item}`, "secondary");
       if (state.autonomy?.task) add(`◌ ${state.autonomy.task}`, "paper");
       for (const item of state.remaining.slice(0, 4)) add(`· ${item}`, "muted");
+      content.push("");
+    }
+    add(state.mode === "continuous" ? "Continuous · select unfinished work, then idle" : "Bounded · finish after verification", "muted");
+    if (Array.isArray(state.ledger?.tasks)) {
+      for (const task of state.ledger!.tasks.filter(task=>task && typeof task.id === "string" && Array.isArray(task.criteria) && Array.isArray(task.completions)).slice(-6)) {
+        add(`${task.status === "completed" ? "✓" : "◌"} ${task.id.slice(0,8)} · ${task.title}`, "secondary");
+        if (task.id === state.ledger!.currentTaskId) {
+          for (const criterion of task.criteria) add(`  · ${criterion}`, "muted");
+          if (task.reopened) add(`Reopened: ${task.reopened.reason}`, "thinking");
+          const completion=task.completions.at(-1);
+          if (completion) add(`Recorded ${completion.files.length} files · ${completion.checks.length} checks · ${completion.turnId?.slice(0,8) ?? "legacy record"}`, "muted");
+        }
+      }
+      if (state.ledger!.tasks.some(task=>task.status === "completed")) add("Reopen: /drive reopen <task-id> <reason>", "muted");
       content.push("");
     }
     // A limit stop shows the resource that ran out.

@@ -1053,6 +1053,7 @@ export function humanToolTitle(name: string): string {
     case "command_logs": return "Command Logs";
     case "command_stop": return "Command Stop";
     case "web_search": return "Web Search";
+    case "subagent": return "Sub-agent";
     default: return safeName.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
 }
@@ -1096,6 +1097,8 @@ export function toolKindBadge(name: string): ToolBadge {
       return { chip: "STOP", color: "signal", title: "Command Stop", beaconActivity: "tool" };
     case "web_search":
       return { chip: "WEB", color: "citron", title: "Web Search", beaconActivity: "loading" };
+    case "subagent":
+      return { chip: "AGENT", color: "electric", title: "Sub-agent", beaconActivity: "loading" };
     default:
       return {
         chip: "TOOL",

@@ -26,6 +26,7 @@ export type EventType =
   | "question.requested"
   | "question.resolved"
   | "tool.call_started"
+  | "tool.call_progress"
   | "tool.call_completed"
   | "tool.call_failed"
   | "tool.call_denied"

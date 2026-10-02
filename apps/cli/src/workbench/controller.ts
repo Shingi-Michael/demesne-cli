@@ -141,6 +141,7 @@ const TOOL_VERBS: Record<string, string> = {
   run_command: "run",
   command_logs: "logs",
   command_stop: "stop",
+  subagent: "agent",
 };
 
 /// A click target within the composer area, addressed by content row (zero is
@@ -818,6 +819,15 @@ export class Workbench {
     this.requestRender();
   }
 
+  /// A running tool's live status, such as the step a sub-agent is on,
+  /// follows its label until it finishes.
+  toolProgress(input: { toolCallId: string; text: string }): void {
+    const entry = this.entries.findLast((candidate): candidate is ToolEntry => candidate.type === "tool" && candidate.toolCallId === input.toolCallId);
+    if (!entry || entry.state !== "running") return;
+    entry.detail = `${toolDetail(entry.name, entry.input) ?? toolVerb(entry.name)} · ${input.text}`;
+    this.requestRender();
+  }
+
   private hasChanges(): boolean {
     return this.currentEntries().some((entry) => entry.type === "tool" && entry.phase === "change");
   }
@@ -839,6 +849,7 @@ export class Workbench {
     if (!entry) return;
     entry.state = input.state;
     entry.waiting = false;
+    if (entry.name === "subagent") entry.detail = toolDetail(entry.name, entry.input);
     entry.durationMs = input.durationMs ?? Math.max(0, Date.now() - entry.startedAt);
     if (input.message) entry.message = input.message;
     if (input.exitCode !== undefined) entry.exitCode = input.exitCode;
@@ -2865,6 +2876,7 @@ function parseArguments(value: unknown): Record<string, unknown> {
 }
 
 function toolDetail(name: string, input: Record<string, unknown>): string | undefined {
+  if (name === "subagent") return typeof input.description === "string" ? input.description : undefined;
   if (name === "ask_user") {
     const questions = Array.isArray(input.questions) ? input.questions : [];
     const first = questions[0] && typeof questions[0] === "object" && typeof (questions[0] as { question?: unknown }).question === "string" ? (questions[0] as { question: string }).question : "";

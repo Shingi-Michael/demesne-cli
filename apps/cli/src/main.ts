@@ -1820,6 +1820,8 @@ async function runWorkbenchTurn(options: {
       } else if (event.type === "tool.call_started") {
         const name = String(event.payload.name ?? "tool");
         presence = presenceForTool(name, false);
+      } else if (event.type === "tool.call_progress") {
+        options.workbench.toolProgress({ toolCallId: String(event.payload.toolCallId ?? ""), text: String(event.payload.text ?? "") });
       } else if (["tool.call_completed", "tool.call_failed", "tool.call_denied", "tool.call_cancelled", "tool.call_interrupted"].includes(event.type)) {
         options.workbench.toolFinished(toolCompletion(event));
         presence = "thinking";

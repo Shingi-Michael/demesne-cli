@@ -1039,6 +1039,15 @@ export class DemesneStore {
     this.eventSink?.(event);
   }
 
+  /// A running tool's live status line, such as what a sub-agent is reading.
+  /// Transient: replay and history show the finished result instead.
+  appendToolProgress(turnId: string, toolCallId: string, text: string): void {
+    const turn = this.getTurnOrThrow(turnId);
+    if (turn.status !== "running") return;
+    const event = this.insertEvent("tool.call_progress", turn.sessionId, turnId, { toolCallId, text: text.slice(0, 500) }, new Date().toISOString());
+    this.eventSink?.(event);
+  }
+
   recordToolCall(
     turnId: string,
     providerCallId: string,

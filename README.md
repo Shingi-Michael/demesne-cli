@@ -215,7 +215,9 @@ demesne --version               # also checks for a newer release once a day
 | `edit_file`, `write_file`, `move_path`, `delete_path` | Change files | Yes |
 | `run_command` | Run a command (optionally in the background) | Yes |
 | `command_logs`, `command_stop` | Read or stop a background command | No |
+| `subagent` | Hand a read-only investigation to a sub-agent with its own context; only its report comes back | No |
 
+- **Sub-agents read, never write.** A sub-agent gets a fresh context and the read-only tools above, so it needs no approvals and several can run at once (on a single model slot their model calls take turns). Its card shows its task and current step; its tool calls stay out of the main conversation, which receives only the report.
 - **Commands aren't sandboxed.** `run_command` runs on your machine as your user. It starts in the workspace with a filtered environment and process limits.
 - **Secrets stay out of reach.** Sensitive files are never read or searched automatically, including `.env`, `.git`, `.ssh`, `.aws`, credential files and private keys.
 - **Saved approvals.** They live in `[permissions] allow`, for example `"edit_file:src"` or `"run_command:git status"`. A saved command rule matches that exact command only; end it with ` *` (`"run_command:git status *"`) to also allow further arguments.

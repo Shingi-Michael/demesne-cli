@@ -1,5 +1,7 @@
 import type { ToolPhaseName } from "@demesne/brand";
 
+import { subagentStatus } from "./subagent-phrases.ts";
+
 export interface TraceSegment { kind: "thinking" | "step"; text: string }
 const TRACE_LIMIT = 64 * 1024;
 
@@ -15,7 +17,7 @@ export function applyToolProgress(tool: { trace?: TraceSegment[] }, payload: Rec
     const last = trace.at(-1);
     if (last?.kind === "thinking") last.text += room(payload.thinking); else trace.push({ kind: "thinking", text: room(payload.thinking) });
   }
-  if (typeof payload.text === "string" && payload.text && !/^(?:[^·]+ · )?(?:starting|writing report|thinking · \d+ tool calls?)$/.test(payload.text))
+  if (typeof payload.text === "string" && payload.text && !subagentStatus(payload.text))
     trace.push({ kind: "step", text: room(payload.text) });
 }
 
@@ -34,6 +36,9 @@ export interface ToolEntry {
   changes?: import("@demesne/protocol").ToolFileChange[];
   /// A sub-agent's thinking and steps, in order, for its card.
   trace?: TraceSegment[];
+  /// While a sub-agent thinks between steps: when it started (its card cycles
+  /// a phrase meanwhile) and the model it reported running on.
+  thinkingSince?: number; subagentModel?: string;
 }
 export interface NoticeEntry { id: number; type: "notice"; text: string; tone: "info" | "success" | "error"; closesTurn?: boolean; receipt?: ResponseReceipt }
 export interface BlockEntry { id: number; type: "block"; lines: string[] }

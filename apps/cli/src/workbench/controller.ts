@@ -51,6 +51,7 @@ import { graphicsProbe, TerminalGraphics, type TerminalImage } from "../terminal
 import type { ImageArtifact } from "@demesne/protocol";
 import { StartScreen, startScreenLayout, START_OPERATIONS, type StartAction, type StartLayout } from "./start-screen.ts";
 import type { RecentSession } from "../recent-sessions.ts";
+import { subagentStatus } from "./subagent-phrases.ts";
 import { applyToolProgress, type WorkbenchEntry, type AssistantEntry, type ReasoningEntry, type ToolEntry, type NoticeEntry, type ToolState, type ResponseReceipt } from "./entries.ts";
 export type { ToolState } from "./entries.ts";
 import { responseCard, userCard } from "./conversation.ts";
@@ -824,7 +825,14 @@ export class Workbench {
   toolProgress(input: { toolCallId: string; text?: string; thinking?: string }): void {
     const entry = this.entries.findLast((candidate): candidate is ToolEntry => candidate.type === "tool" && candidate.toolCallId === input.toolCallId);
     if (!entry || entry.state !== "running") return;
-    if (input.text) entry.detail = `${toolDetail(entry.name, entry.input) ?? toolVerb(entry.name)} · ${input.text}`;
+    const base = toolDetail(entry.name, entry.input) ?? toolVerb(entry.name);
+    const status = input.text ? subagentStatus(input.text) : null;
+    if (input.text && !status) { entry.detail = `${base} · ${input.text}`; entry.thinkingSince = undefined; }
+    else if (status || input.thinking) {
+      // Between steps: the card cycles a phrase until the next real step.
+      entry.detail = base; entry.thinkingSince ??= Date.now();
+      if (status?.model) entry.subagentModel = status.model;
+    }
     applyToolProgress(entry, input);
     this.requestRender();
   }
@@ -850,7 +858,7 @@ export class Workbench {
     if (!entry) return;
     entry.state = input.state;
     entry.waiting = false;
-    if (entry.name === "subagent") entry.detail = toolDetail(entry.name, entry.input);
+    if (entry.name === "subagent") { entry.detail = toolDetail(entry.name, entry.input); entry.thinkingSince = undefined; }
     entry.durationMs = input.durationMs ?? Math.max(0, Date.now() - entry.startedAt);
     if (input.message) entry.message = input.message;
     if (input.exitCode !== undefined) entry.exitCode = input.exitCode;

@@ -29,6 +29,7 @@ afterEach(() => {
 interface FakeState {
   deps: DaemonControlDependencies;
   spawned: string[][];
+  spawnOptions: Parameters<DaemonControlDependencies["spawn"]>[1][];
   killed: number[];
   health: DaemonHealth | null;
   pendingHealth: DaemonHealth | null;
@@ -39,6 +40,7 @@ interface FakeState {
 function createFakeDependencies(dataDirectory: string): FakeState {
   const state: FakeState = {
     spawned: [],
+    spawnOptions: [],
     killed: [],
     health: null,
     pendingHealth: null,
@@ -56,8 +58,9 @@ function createFakeDependencies(dataDirectory: string): FakeState {
       }
       return new Response("not found", { status: 404 });
     }) as unknown as typeof fetch,
-    spawn: (command) => {
+    spawn: (command, options) => {
       state.spawned.push(command);
+      state.spawnOptions.push(options);
       state.alive = true;
       return { pid: 4242, unref: () => {} };
     },
@@ -134,6 +137,8 @@ describe("startDaemon", () => {
     expect(result.started).toBe(true);
     expect(result.pid).toBe(4242);
     expect(state.spawned).toEqual([["demesned"]]);
+    // Its own session, so closing the terminal that started it can't stop it.
+    expect(state.spawnOptions[0]?.detached).toBe(true);
     expect(readFileSync(join(dataDirectory, "daemon.pid"), "utf8").trim()).toBe("4242");
     expect(existsSync(join(dataDirectory, "daemon.log"))).toBe(true);
   });

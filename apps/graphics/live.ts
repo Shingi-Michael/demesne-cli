@@ -337,6 +337,8 @@ function renderStatus() {
   const signature = JSON.stringify([
     phase,
     state.model.id,
+    // The footer shows the thinking level next to the model.
+    state.reasoning,
     c,
     last?.receipt?.tokensPerSecond,
     state.provider?.usage,
@@ -2207,6 +2209,7 @@ async function submitText(value = editor.value) {
         notice("Usage: /plan <prompt>");
         return;
       }
+      followLatest();
       await api("plan-submit", { text: argument });
       clear();
       return;
@@ -2245,7 +2248,16 @@ async function submitText(value = editor.value) {
       return;
     }
   }
+  followLatest();
   await api("submit", { text: value });
+}
+/// Sending a message follows its reply from the bottom, even after the
+/// reader scrolled up earlier in the session.
+function followLatest() {
+  follow = true;
+  readingHeld = false;
+  const stage = el("stage");
+  stage.scrollTop = stage.scrollHeight;
 }
 async function dispatch(
   action: string,
@@ -2898,20 +2910,29 @@ document.addEventListener(
   },
   true,
 );
+// Following the newest text is sticky: only the reader scrolling UP stops
+// it (wheel, keys, scrollbar), and reaching the bottom by any means resumes
+// it. Content growing, wheel ticks that land at the bottom, and the app's own
+// jumps to the bottom never turn it off.
+let lastStageTop = 0;
 el("stage").addEventListener(
   "wheel",
-  () => {
+  (event) => {
+    if (event.deltaY >= 0) return;
     readingHeld = true;
     follow = false;
   },
   { passive: true },
 );
 el("stage").addEventListener("scroll", () => {
+  const stage = el("stage");
   if (!driveNavigating) {
-    const stage = el("stage");
-    follow = stage.scrollHeight - stage.clientHeight - stage.scrollTop < 24;
-    if (follow) readingHeld = false;
+    if (stage.scrollHeight - stage.clientHeight - stage.scrollTop < 48) {
+      follow = true;
+      readingHeld = false;
+    } else if (stage.scrollTop < lastStageTop - 2) follow = false;
   }
+  lastStageTop = stage.scrollTop;
   reportObservation();
 });
 document.addEventListener("scroll", () => reportObservation(), true);
@@ -3189,6 +3210,8 @@ document.addEventListener("keydown", (event) => {
   }
 });
 window.demesneInspect = () => ({
+  // Whether the conversation follows new text, and where it is scrolled.
+  stage: { follow, top: Math.round(el("stage").scrollTop), bottom: Math.round(el("stage").scrollHeight - el("stage").clientHeight) },
   controls: [
     ...document.querySelectorAll<HTMLElement>(
       "button,input,textarea,[role=separator],.preview-canvas",
@@ -3875,6 +3898,7 @@ window.demesne.commands(async (command) => {
         throw new Error(
           "Only requests or /plan prompts can be composed by Drive.",
         );
+      followLatest();
       await api(plan ? "plan-submit" : "submit", {
         text: action.text,
         driveCommand: command.id,

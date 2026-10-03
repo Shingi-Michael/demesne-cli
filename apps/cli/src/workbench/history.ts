@@ -4,7 +4,7 @@ import { classifyTurnPhase } from "../turn-activity.ts";
 import { applyToolProgress, type AssistantEntry, type ContextReceipt, type ReasoningEntry, type ResponseReceipt, type ToolEntry, type WorkbenchEntry } from "./entries.ts";
 import { toolCompletion } from "./tool-result.ts";
 import { TurnThroughputTracker } from "../turn-throughput.ts";
-import { applyToolDraft, proposedDiff } from "./tool-preview.ts";
+import { applyToolDraft, FILE_CHANGE_TOOLS, proposedDiff } from "./tool-preview.ts";
 
 export function toolArguments(value: unknown): Record<string, unknown> {
   if (typeof value === "string") { try { return toolArguments(JSON.parse(value)); } catch { return {}; } }
@@ -83,7 +83,11 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
       }
       if (event.type === "tool.call_draft") {
         assistant = undefined;
-        applyToolDraft(entries, payload, () => id++, Date.parse(event.occurredAt));
+        const tool = applyToolDraft(entries, payload, () => id++, Date.parse(event.occurredAt));
+        if (tool && !FILE_CHANGE_TOOLS.includes(tool.name)) {
+          tool.detail = toolTarget(tool.name, tool.input);
+          tool.phase = classifyTurnPhase(tool.name, tool.input, [...tools.values()].some((item) => item.phase === "change"));
+        }
       }
       if (event.type === "tool.call_requested") {
         assistant = undefined;

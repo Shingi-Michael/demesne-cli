@@ -77,6 +77,8 @@ export async function runSubagent(options: {
   /// A step (`text`) or a slice of the sub-agent's thinking, for its card's trace.
   progress: (update: { text?: string; thinking?: string }) => void;
   limits?: ProviderStreamLimits;
+  /// Stable for this run, so its rounds can reuse the provider's prompt cache.
+  cacheKey?: string;
 }): Promise<string> {
   const { inference, signal } = options;
   const definitions = options.tools.definitions().filter((definition) => SUBAGENT_TOOLS.has(definition.name));
@@ -105,7 +107,7 @@ export async function runSubagent(options: {
     signal.addEventListener("abort", forward, { once: true });
     try {
       let events = 0;
-      for await (const event of withProviderDeadlines(inference.stream(planned, tools, controller.signal), controller, streamLimits.firstEventTimeoutMs, streamLimits.requestTimeoutMs)) {
+      for await (const event of withProviderDeadlines(inference.stream(planned, tools, controller.signal, { cacheKey: options.cacheKey }), controller, streamLimits.firstEventTimeoutMs, streamLimits.requestTimeoutMs)) {
         if (++events > streamLimits.eventLimit) throw new Error("Sub-agent stream exceeded the event limit");
         if (event.type === "text_delta") text += event.delta;
         else if (event.type === "reasoning_delta") {

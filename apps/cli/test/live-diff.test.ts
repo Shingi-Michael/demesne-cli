@@ -17,6 +17,18 @@ test("partial JSON renders streamed escaped code and multi-hunk edits without in
   expect(entries[1]).toMatchObject({ drafting: true, state: "running", input: args, diff: { oldText: "const a = 1;\n…\nb" } });
 });
 
+test("every tool call drafts while the model writes it; only file tools preview a change", () => {
+  const entries: WorkbenchEntry[] = [user()]; let id = 2;
+  for (const delta of ['{"description":"Read the par', 'ser","prompt":"Read src/parser.ts'])
+    applyToolDraft(entries, { draftId: "round:0", name: "subagent", delta }, () => id++, 0);
+  expect(entries).toHaveLength(2);
+  expect(entries[1]).toMatchObject({ name: "subagent", drafting: true, state: "running", input: { description: "Read the parser", prompt: "Read src/parser.ts" } });
+  expect(entries[1]).not.toHaveProperty("diff");
+  // A draft without a tool name yet waits for it.
+  applyToolDraft(entries, { draftId: "round:1", name: "", delta: "{" }, () => id++, 0);
+  expect(entries).toHaveLength(2);
+});
+
 test("line diffs retain true line numbers and separate distant changes, including newline-only changes", () => {
   const before = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`);
   const after = [...before]; after[2] = "replaced"; after.splice(30, 0, "inserted");

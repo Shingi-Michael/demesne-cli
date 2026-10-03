@@ -162,7 +162,7 @@ export class AgentEngine {
           let usageEventCount = 0;
           const visualMessages = this.options.providerVision
             ? await hydrateImageInputs(this.store, session.id, messages, providerController.signal) : messages;
-          const stream = inference.stream(visualMessages, requestDefinitions, providerController.signal);
+          const stream = inference.stream(visualMessages, requestDefinitions, providerController.signal, { cacheKey: session.id });
           for await (const event of withProviderDeadlines(
             stream,
             providerController,
@@ -355,7 +355,9 @@ export class AgentEngine {
   }
 
   private flushToolDraft(turnId: string, call: AssembledToolCall, force = false): void {
-    if (!call.draftId || !["edit_file", "write_file", "move_path", "delete_path"].includes(call.name)) return;
+    // Every tool call shows while the model writes it (a sub-agent's prompt can
+    // take many seconds); file tools also preview their change.
+    if (!call.draftId || !call.name) return;
     const now = performance.now();
     if (!force && call.draftAt !== undefined && now - call.draftAt < 60) return;
     const delta = call.arguments.slice(call.draftSent ?? 0);
@@ -447,7 +449,7 @@ export class AgentEngine {
     const label = delegate.modelId === inference.modelId ? "" : `${delegate.modelId} · `;
     this.store.startToolCall(toolCallId);
     try {
-      const result = await runSubagent({ prompt, workspaceRoot, sessionId, turnId, tools: this.tools, inference: delegate,
+      const result = await runSubagent({ prompt, workspaceRoot, sessionId, turnId, tools: this.tools, inference: delegate, cacheKey: `${sessionId}:${toolCallId}`,
         scheduler: this.scheduler.for(delegate.providerId), signal, limits: this.options,
         progress: (update) => this.store.appendToolProgress(turnId, toolCallId, update.text === undefined ? update : { ...update, text: label + update.text }) });
       this.store.settleToolCall(toolCallId, "completed", result);

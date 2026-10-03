@@ -23,6 +23,9 @@ export interface ProviderRequest {
   maxOutputTokens?: number;
   temperature?: number;
   seed?: number;
+  /// Stable per conversation (a session, or one sub-agent run), so the
+  /// provider can reuse its cached prompt across tool rounds.
+  cacheKey?: string;
 }
 
 export type ProviderStreamEvent =

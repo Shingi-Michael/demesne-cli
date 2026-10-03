@@ -15,8 +15,12 @@ export interface TurnInference {
     messages: ProviderMessage[],
     tools: ProviderToolDefinition[],
     signal: AbortSignal,
+    options?: StreamOptions,
   ): AsyncIterable<ProviderStreamEvent>;
 }
+
+/// Per-request details that do not change the model's settings.
+export interface StreamOptions { cacheKey?: string }
 
 export interface TurnProcessor {
   readonly providerId: string;

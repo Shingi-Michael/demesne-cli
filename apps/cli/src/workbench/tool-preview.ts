@@ -72,9 +72,13 @@ export function proposedDiff(name: string, input: Record<string, unknown>): Tool
   return undefined;
 }
 
-export function applyToolDraft(entries: WorkbenchEntry[], payload: Record<string, unknown>, nextId: () => number, at: number): void {
-  if (typeof payload.draftId !== "string" || typeof payload.delta !== "string" || typeof payload.name !== "string"
-    || !["edit_file", "write_file", "move_path", "delete_path"].includes(payload.name)) return;
+export const FILE_CHANGE_TOOLS = ["edit_file", "write_file", "move_path", "delete_path"];
+
+/// Grows the drafting card for a tool call the model is still writing, and
+/// returns it. File tools also get their partial path and diff; other tools'
+/// targets are set by the caller.
+export function applyToolDraft(entries: WorkbenchEntry[], payload: Record<string, unknown>, nextId: () => number, at: number): ToolEntry | undefined {
+  if (typeof payload.draftId !== "string" || typeof payload.delta !== "string" || typeof payload.name !== "string" || !payload.name) return;
   let tool = entries.findLast((entry): entry is ToolEntry => entry.type === "tool" && entry.draftId === payload.draftId);
   if (tool && !tool.drafting) return;
   if (!tool) {
@@ -84,7 +88,9 @@ export function applyToolDraft(entries: WorkbenchEntry[], payload: Record<string
   }
   tool.draftArguments = ((tool.draftArguments ?? "") + payload.delta).slice(0, 128 * 1024);
   tool.input = partialToolArguments(tool.draftArguments);
+  if (!FILE_CHANGE_TOOLS.includes(tool.name)) return tool;
   tool.detail = typeof tool.input.path === "string" ? tool.input.path
     : typeof tool.input.from === "string" ? `${tool.input.from} → ${tool.input.to ?? "…"}` : "Waiting for file path…";
   tool.diff = proposedDiff(tool.name, tool.input);
+  return tool;
 }

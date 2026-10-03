@@ -1,0 +1,374 @@
+{
+  "outcome": "Three concurrent requests verified with one loaded Qwen model on one R9700.",
+  "model": "qwen3.8-27b",
+  "contextPerSlot": 32768,
+  "totalContextForThreeSlots": 98304,
+  "loader": "--load-mode none",
+  "test": "Synthetic prompts of 5026 tokens; 128 output-token cap; reasoning disabled for throughput measurement.",
+  "measurements": [
+    {
+      "profile": "mmap",
+      "samples": 21,
+      "minFreeRamGiB": 2.57,
+      "maxGpuGiB": 18.94,
+      "maxCommitGiB": 43.08
+    },
+    {
+      "profile": "two-slot",
+      "samples": 43,
+      "minFreeRamGiB": 16.15,
+      "maxGpuGiB": 24.13,
+      "maxCommitGiB": 52.17
+    },
+    {
+      "profile": "three-slot",
+      "samples": 95,
+      "minFreeRamGiB": 12.87,
+      "maxGpuGiB": 25.91,
+      "maxCommitGiB": 57.13
+    }
+  ],
+  "warmAggregateThroughputRatio": 1.4460976979225155,
+  "ratioNote": "Ratio compares a three-request batch against three times the measured single-request latency; not a measured serial three-request batch.",
+  "trials": [
+    {
+      "label": "baseline",
+      "requests": 1,
+      "serverSlots": 1,
+      "serverContext": 262144,
+      "wallMs": 11549,
+      "maxProcessing": 1,
+      "pollFailures": 0,
+      "results": [
+        {
+          "worker": 1,
+          "startMs": 2,
+          "firstTokenMs": 7236,
+          "endMs": 11523,
+          "ttftMs": 7234,
+          "inputTokens": 5026,
+          "outputTokens": 128,
+          "finish": "length",
+          "chars": 513,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 5026,
+            "prompt_ms": 6806.675,
+            "prompt_per_token_ms": 1.3542926780740152,
+            "prompt_per_second": 738.3928276287614,
+            "predicted_n": 128,
+            "predicted_ms": 4253.311,
+            "predicted_per_token_ms": 33.49063779527559,
+            "predicted_per_second": 29.859090952907042,
+            "draft_n": 134,
+            "draft_n_accepted": 81
+          }
+        }
+      ]
+    },
+    {
+      "label": "buffered-baseline",
+      "requests": 1,
+      "serverSlots": 1,
+      "serverContext": 262144,
+      "wallMs": 9975,
+      "maxProcessing": 1,
+      "pollFailures": 0,
+      "results": [
+        {
+          "worker": 1,
+          "startMs": 0,
+          "firstTokenMs": 7083,
+          "endMs": 9818,
+          "ttftMs": 7082,
+          "inputTokens": 5026,
+          "outputTokens": 128,
+          "finish": "length",
+          "chars": 513,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 5026,
+            "prompt_ms": 6932.135,
+            "prompt_per_token_ms": 1.3792548746518107,
+            "prompt_per_second": 725.0291576837438,
+            "predicted_n": 128,
+            "predicted_ms": 2732.727,
+            "predicted_per_token_ms": 21.517535433070865,
+            "predicted_per_second": 46.47372386630644,
+            "draft_n": 134,
+            "draft_n_accepted": 81
+          }
+        }
+      ]
+    },
+    {
+      "label": "two-slots",
+      "requests": 2,
+      "serverSlots": 2,
+      "serverContext": 32768,
+      "wallMs": 21661,
+      "maxProcessing": 2,
+      "pollFailures": 0,
+      "results": [
+        {
+          "worker": 1,
+          "startMs": 0,
+          "firstTokenMs": 15977,
+          "endMs": 21472,
+          "ttftMs": 15976,
+          "inputTokens": 5026,
+          "outputTokens": 128,
+          "finish": "length",
+          "chars": 513,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 5026,
+            "prompt_ms": 15858.05,
+            "prompt_per_token_ms": 3.155202944687624,
+            "prompt_per_second": 316.9368238843994,
+            "predicted_n": 128,
+            "predicted_ms": 5500.671,
+            "predicted_per_token_ms": 43.31237007874016,
+            "predicted_per_second": 23.088092343643165,
+            "draft_n": 134,
+            "draft_n_accepted": 81
+          }
+        },
+        {
+          "worker": 2,
+          "startMs": 0,
+          "firstTokenMs": 9266,
+          "endMs": 20964,
+          "ttftMs": 9266,
+          "inputTokens": 5026,
+          "outputTokens": 128,
+          "finish": "length",
+          "chars": 513,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 5026,
+            "prompt_ms": 8418.303,
+            "prompt_per_token_ms": 1.674950855551134,
+            "prompt_per_second": 597.032442286765,
+            "predicted_n": 128,
+            "predicted_ms": 11693.357,
+            "predicted_per_token_ms": 92.07367716535433,
+            "predicted_per_second": 10.860867413865838,
+            "draft_n": 134,
+            "draft_n_accepted": 81
+          }
+        }
+      ]
+    },
+    {
+      "label": "three-slots",
+      "requests": 3,
+      "serverSlots": 3,
+      "serverContext": 32768,
+      "wallMs": 29448,
+      "maxProcessing": 3,
+      "pollFailures": 0,
+      "results": [
+        {
+          "worker": 1,
+          "startMs": 0,
+          "firstTokenMs": 8837,
+          "endMs": 27485,
+          "ttftMs": 8837,
+          "inputTokens": 5026,
+          "outputTokens": 128,
+          "finish": "length",
+          "chars": 513,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 5026,
+            "prompt_ms": 7955.867,
+            "prompt_per_token_ms": 1.5829421010744131,
+            "prompt_per_second": 631.7350453445238,
+            "predicted_n": 128,
+            "predicted_ms": 18646.444,
+            "predicted_per_token_ms": 146.8223937007874,
+            "predicted_per_second": 6.8109501200336116,
+            "draft_n": 136,
+            "draft_n_accepted": 81
+          }
+        },
+        {
+          "worker": 2,
+          "startMs": 1,
+          "firstTokenMs": 24098,
+          "endMs": 29445,
+          "ttftMs": 24098,
+          "inputTokens": 5026,
+          "outputTokens": 128,
+          "finish": "length",
+          "chars": 513,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 5026,
+            "prompt_ms": 23940.787,
+            "prompt_per_token_ms": 4.763387783525666,
+            "prompt_per_second": 209.93461910838604,
+            "predicted_n": 128,
+            "predicted_ms": 5333.588,
+            "predicted_per_token_ms": 41.99675590551181,
+            "predicted_per_second": 23.811363007416396,
+            "draft_n": 133,
+            "draft_n_accepted": 82
+          }
+        },
+        {
+          "worker": 3,
+          "startMs": 1,
+          "firstTokenMs": 17313,
+          "endMs": 28962,
+          "ttftMs": 17313,
+          "inputTokens": 5026,
+          "outputTokens": 128,
+          "finish": "length",
+          "chars": 513,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 5026,
+            "prompt_ms": 11022.926,
+            "prompt_per_token_ms": 2.1931806605650617,
+            "prompt_per_second": 455.95878988936335,
+            "predicted_n": 128,
+            "predicted_ms": 11651.38,
+            "predicted_per_token_ms": 91.74314960629921,
+            "predicted_per_second": 10.899996395276784,
+            "draft_n": 138,
+            "draft_n_accepted": 80
+          }
+        }
+      ]
+    },
+    {
+      "label": "three-slots-warm",
+      "requests": 3,
+      "serverSlots": 3,
+      "serverContext": 32768,
+      "wallMs": 7124,
+      "maxProcessing": 3,
+      "pollFailures": 0,
+      "results": [
+        {
+          "worker": 1,
+          "startMs": 0,
+          "firstTokenMs": 1193,
+          "endMs": 6895,
+          "ttftMs": 1193,
+          "inputTokens": 5026,
+          "outputTokens": 128,
+          "finish": "length",
+          "chars": 513,
+          "timings": {
+            "cache_n": 5022,
+            "prompt_n": 4,
+            "prompt_ms": 600.41,
+            "prompt_per_token_ms": 150.1025,
+            "prompt_per_second": 6.662114221948336,
+            "predicted_n": 128,
+            "predicted_ms": 5694.561,
+            "predicted_per_token_ms": 44.83906299212598,
+            "predicted_per_second": 22.30198254088419,
+            "draft_n": 129,
+            "draft_n_accepted": 83
+          }
+        },
+        {
+          "worker": 2,
+          "startMs": 1,
+          "firstTokenMs": 1193,
+          "endMs": 7001,
+          "ttftMs": 1193,
+          "inputTokens": 5026,
+          "outputTokens": 128,
+          "finish": "length",
+          "chars": 504,
+          "timings": {
+            "cache_n": 5022,
+            "prompt_n": 4,
+            "prompt_ms": 285.853,
+            "prompt_per_token_ms": 71.46325,
+            "prompt_per_second": 13.993206298342155,
+            "predicted_n": 128,
+            "predicted_ms": 5809.191,
+            "predicted_per_token_ms": 45.74166141732283,
+            "predicted_per_second": 21.861908138327696,
+            "draft_n": 135,
+            "draft_n_accepted": 82
+          }
+        },
+        {
+          "worker": 3,
+          "startMs": 1,
+          "firstTokenMs": 1193,
+          "endMs": 7000,
+          "ttftMs": 1193,
+          "inputTokens": 5026,
+          "outputTokens": 128,
+          "finish": "length",
+          "chars": 514,
+          "timings": {
+            "cache_n": 5022,
+            "prompt_n": 4,
+            "prompt_ms": 443.579,
+            "prompt_per_token_ms": 110.89475,
+            "prompt_per_second": 9.01755944262465,
+            "predicted_n": 128,
+            "predicted_ms": 5807.942,
+            "predicted_per_token_ms": 45.731826771653544,
+            "predicted_per_second": 21.86660954947553,
+            "draft_n": 133,
+            "draft_n_accepted": 82
+          }
+        }
+      ]
+    },
+    {
+      "label": "single-slot-warm",
+      "requests": 1,
+      "serverSlots": 3,
+      "serverContext": 32768,
+      "wallMs": 3434,
+      "maxProcessing": 1,
+      "pollFailures": 0,
+      "results": [
+        {
+          "worker": 1,
+          "startMs": 1,
+          "firstTokenMs": 773,
+          "endMs": 3432,
+          "ttftMs": 772,
+          "inputTokens": 5026,
+          "outputTokens": 128,
+          "finish": "length",
+          "chars": 513,
+          "timings": {
+            "cache_n": 5022,
+            "prompt_n": 4,
+            "prompt_ms": 220.529,
+            "prompt_per_token_ms": 55.13225,
+            "prompt_per_second": 18.13820404572641,
+            "predicted_n": 128,
+            "predicted_ms": 2665.743,
+            "predicted_per_token_ms": 20.990102362204723,
+            "predicted_per_second": 47.6415018251947,
+            "draft_n": 131,
+            "draft_n_accepted": 82
+          }
+        }
+      ]
+    }
+  ],
+  "finalState": {
+    "pcHealthy": true,
+    "slots": 1,
+    "context": 262144,
+    "demesneSlots": 1,
+    "runningLoader": "--load-mode none",
+    "originalLaunchScriptChanged": false,
+    "temporaryScheduledTasksRemoved": true
+  }
+}

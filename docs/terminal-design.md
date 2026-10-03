@@ -1,225 +1,62 @@
 # Terminal design contract
 
-The visual source of truth is [demesne UI redesign](https://www.figma.com/design/uR068XYXtxAz8gaNL2O9tr/demesne-UI-redesign): **00 · Surface inventory**, **01 · Components**, **02 · Foundations**, and **Explorations**. The older Figma Make versions are historical references, not the current visual specification.
+[Documentation index](README.md) · [Graphics implementation](../apps/graphics/README.md) · [Keyboard reference](cli-reference.md#keyboard-and-focus)
 
-The start screen was directly inspected through Figma desktop on 2026-09-29:
-frame **8:268**, hero **8:281**, composer **8:285**, operation grid **8:305**,
-and Recent **8:322**. Its screenshot and variable definitions were retrieved,
-rather than inferred from previously merged code. The terminal adaptation uses
-an 86-cell maximum column (720px at 14px mono), single-cell strokes, and fewer
-card/list rows on small screens. Heading, composer, cards and Recent form one
-centered group. No action rail appears on this empty-session screen.
+The visual reference is [demesne UI redesign](https://www.figma.com/design/uR068XYXtxAz8gaNL2O9tr/demesne-UI-redesign). This document describes the **implemented graphics interface**, audited on 2026-10-03. It is not a new claim that every screen is pixel-identical to Figma. Earlier ANSI/cell-based adaptations and their `ui:session` preview commands have been removed.
 
-Live Thinking and the running Send control use the same shared `thinkingDots` renderer, including spacing, amber color and pulse timing. Per the subsequent user refinement, the bottom footer omits running/thinking labels, pulsing dots, elapsed time and token speed, retaining context and navigation. Live cards use an amber `[` and the same agent-label/timestamp header and geometry as settled cards; successful settlement restores cyan and failure uses red.
+## Rendering contract
 
-## Palette
+The interface is HTML/CSS rendered offscreen by Electron/Chromium and transported into Ghostty as Kitty image tiles. Layout, typography, rounded corners, syntax highlighting, Markdown and math are browser pixels. The terminal forwards input; it does not approximate the UI using text-box characters.
 
-| Reference token | Native role | Dark value |
-| --- | --- | --- |
-| `--bg-app` | `ink` | `#0B1218` |
-| `--bg-chrome` | `surface`, `toolSurface` | `#0E161D` |
-| `--bg-tab-active` | `raised`, `toolActive` | `#182530` |
-| `--border-default` | `rule` | `#1E2C38` |
-| `--border-strong` | `borderBright` | `#2F4150` |
-| `--accent-blue` | `electric` | `#5AA9E6` |
-| `--accent-amber` | `thinking` | `#E5A93C` |
-| `--accent-green` | `citron` | `#4CC38A` |
-| `--accent-red` | `signal` | `#E5534B` |
-| `--text-primary` | `paper` | `#C5D2DC` |
-| `--text-strong` | `strong` | `#E6EEF4` |
-| `--text-secondary` | `secondary` | `#8FA1AF` |
-| `--text-dim` | `muted` | `#6B7D8B` |
-| accent wash over chrome | `menuSelection` | `#172835` |
-| 45% amber over chrome | `composerQueuedBorder` | `#6F582B` |
-| 60% red over chrome | `composerStoppedBorder` | `#8F3B39` |
-| 40% blue over chrome | `composerRestoredBorder` | `#2C516D` |
-| `syntax/keyword` | `syntaxKeyword` | `#C49CE6` |
-| `syntax/string` | `syntaxString` | `#9CCF8D` |
-| `syntax/number` | `syntaxNumber` | `#E5A93C` |
-| `syntax/comment` | `syntaxComment` | `#5F7280` |
-| `syntax/type` | `syntaxType` | `#6FC2D6` |
-| `syntax/function` | `syntaxFunction` | `#5AA9E6` |
+- [live.html](../apps/graphics/live.html) defines the application structure; [live.ts](../apps/graphics/live.ts) projects recorded daemon state and handles interaction.
+- [ui.css](../apps/graphics/ui.css) and [live.css](../apps/graphics/live.css) define geometry and responsive behavior.
+- [theme.ts](../packages/brand/src/theme.ts) supplies shared semantic colors. The renderer maps them into CSS variables.
+- [display-scale.ts](../apps/graphics/display-scale.ts) reconciles cell size, physical pixels and browser scale. Automatic scale follows terminal font changes and Retina density; `--scale 0.5-3` is an explicit override.
 
-Syntax roles come from the redesign's Foundations page. Demesne Light uses
-darker values with at least 4.5:1 contrast (comments excepted, which recede by
-design); named themes derive them from their own accents. Diff `+`/`−` markers
-keep `citron`/`signal`, since they mean added/removed rather than syntax.
+Do not apply old fixed-cell geometry or ANSI redraw rules to this renderer. Verify the live screen and the decoded tile output at both normal and Retina density when changing layout.
 
-Translucent cyan, amber, and red surfaces are composited into theme tokens for terminal backgrounds. Failed card borders blend red at 35% over the card surface. Named and light themes use the same semantic roles. Status glyphs and labels carry meaning in plain output.
+## Surfaces and behavior
 
-## Layout and components
+| Surface | Current behavior |
+| --- | --- |
+| Start screen | Centered hero/composer, starter actions, recent sessions and top Drive proposals; action rail hidden while the session is empty |
+| Conversation | User requests, reasoning, prose, tools, approvals and errors project real session events; unknown usage remains explicit |
+| Composer | Multiline draft, command/file completion, send/stop actions and queued follow-ups; settings through empty Tab or Ctrl+K |
+| Header/status | Workspace/session identity, state and context; detailed execution evidence belongs in the relevant panel |
+| Rail/panels | Files, Changes, Preview, Drive, Verification, Context, History and Log have distinct navigation; panels can expand and resize |
+| Settings/model picker | Theme, model and supported reasoning choices; metadata determines available reasoning levels |
+| Setup | Provider, model and review steps, including ChatGPT and OpenRouter browser sign-in; see [credential persistence](authentication.md) |
 
-- **Start screen (8:268):** top ready/model/context strip and settings/commands controls; workspace/branch/history header; one centered column with heading, model/context/mode, bordered composer, Start From cards (two columns only when every title fits whole, otherwise one column, so titles are never clipped), and a bordered Recent list with all-sessions link. Composer hints, draft token count and inline `↵ send` sit inside its bottom row. Operation cards fill an undoable draft; Enter sends it. Recent lists up to three other sessions that have at least one turn (the current session is always empty on this screen, and untouched launches would only add "0 turns" rows), with recorded turns and context, since file-change/Drive summaries are not present in the lightweight session listing. Unknown usage remains explicit.
-- **Header (redesign):** `demesne` (bold accent) · session title · workspace path on the left; `⎇ branch`, a status pill, the clock with session elapsed time, and `history` on the right. The pill appears only while something needs attention: green `running`, amber `approval`, red `failed`, neutral `stopped`. Narrow terminals drop the branch, then the clock, then the title; the path (a click target for the project folder), brand, status and history stay.
-- **Status bar (redesign):** a colored `●` with a lowercase state (`ready`, `approval`, `failed`, `stopped`; no running label), then context usage with its hairline meter when it fits, and `Ctrl+G live`.
-- **Request:** cyan `▶`, cyan left edge, tinted band. Expanded requests expose original attribution.
-- **Assistant card:** rectangular quiet border, one cyan `[` at the upper-left. FAILED uses a red marker and subdued red border. There is one `demesne` / right-aligned timestamp row before the entire chronological stream, including failed runs without prose.
-- **Thinking:** amber mark and label; dim duration and `▸/▾` controls for recorded traces. Finished traces start closed. Live traces have three amber dots and a blinking cursor. Trace details use an amber left rule and tinted background.
-- **Tool:** one compact line containing status, cyan tool name, secondary target, dim timing and disclosure. Failure changes the mark/name to red. Output and arguments expand underneath, with an inset left rule. Approval, interruption and unknown exit status retain explicit production labels.
-- **Error:** red text and an error mark on a subtly red-tinted block with one red left rule.
-- **Footer:** `Build/Plan/Compact · model · elapsed N.Ns · speed N.N tok/s · ctx used/total ────── N%`, followed by lowercase `copy` and a right-aligned bracketed status. Copy appears on hover or keyboard selection only when text exists. Its feedback is `copied`. Context fill is green, amber above 50%, red above 80%; safe context values are secondary and safe percentages dim.
-- **Conversation composer (40:105):** directly inspected current Components frame. A compact inset box holds the state glyph, draft and right-aligned send/commands/files controls. A running composer keeps its stop action and double-Escape hint; the first Escape shows the reference's red warning for the actual 1.5-second interrupt window. Queued and restored drafts add one labelled row with Clear. Long drafts grow to a bounded height and keep their caret visible; the token estimate and newline hint occupy the bottom border. The shared live dots remain as an existing motion refinement. Popups align with the composer's inset border.
-- **Action rail (redesign):** the six-cell rail keeps the state pip (green idle, amber running), a short divider, Files `≡`, Diff `╪`, Preview `▣` and Drive `▷`, and `[ ]` at the bottom. The vertical `PANEL` label is gone. Hover lifts the cell onto the raised surface and brightens the icon; active Drive work stays amber. Files loads the workspace listing, Diff opens recorded changes, and Preview opens image artifacts; an open panel docks in the rail's place. Compact terminals use three cells. Settings is available through Tab / Ctrl+K; Execution log remains Ctrl+B.
-- **Setup wizard (redesign):** `demesne setup` in a terminal runs a full-screen three-step wizard — Provider (local servers found first, unreachable ones dimmed, `r` rescans, Custom URL with the HTTPS rule, OpenRouter browser sign-in), Model (largest context recommended, or a typed id when none are listed), Review (detected values; `e` edits context/output, cycles theme) — then writes the config and shows where it went. Esc or Ctrl+C cancels without writing. `--provider-url`/`--model` with `--yes`, or no terminal, keeps the non-interactive path.
+Panels preserve navigation within a session; changing sessions clears session-specific selection. Panel width persists separately in private UI preferences. Responsive layouts reduce optional chrome and change panel geometry as space shrinks. User drafts and selected evidence must survive resize.
 
-## Data and motion
+## Semantic colors and content
 
-### Context usage stack
+Use theme roles such as `paper`, `secondary`, `muted`, `rule`, `electric`, `thinking`, `citron` and `signal`. Blue identifies primary interaction, amber ongoing reasoning/attention, green successful evidence and red failure. Preserve text labels and icons so color is not the only signal. Source syntax colors remain distinct from added/removed diff markings.
 
-The Context panel uses a capacity-scaled stacked bar for **Messages**, **Tool
-definitions**, **Reserved** (output + tool results + safety), and **Available**.
-These are the components actually present in the recorded context plan; no
-system/history split is invented. Counts and the bar remain explicitly estimated,
-separate from provider-reported last-request usage below. Unknown capacity or
-incomplete reserves show an unavailable stack, not implied free space. Overflow
-saturates the bar and reports the amount over capacity. In plain terminals the
-segments use M/T/R/· with the same labels. Colors are semantic `context*` roles in
-the theme; renderers contain no color values. Preview with `--context`.
+Markdown is sanitized; code fences use syntax highlighting and math uses KaTeX. In-progress Markdown is reparsed for correctness while unchanged rendered blocks retain their nodes. Code attached from Files remains literal, including `@` characters. Recorded file changes use immutable before/after evidence; the Files viewer explicitly shows current workspace contents.
 
-### Setup browser sign-in
+A check’s success is separate from its freshness. Verification labels outdated, stopped, unverified and incomplete evidence rather than treating every historical green result as current. See [panel behavior](../apps/graphics/README.md#review-panel-upgrades).
 
-The redesign's Provider step now offers **OpenRouter** alongside local servers
-and Custom URL. It opens the existing PKCE browser flow in place, then moves to
-Model and Review. Esc returns to Provider; Ctrl+C cancels. Decline/failure offers
-retry, and an unavailable browser opener leaves the full authorization URL visible.
-The key stays in runner memory, outside rendered/reducer state, until Review writes
-the private config. Cancelling before that writes nothing. Model context/output
-limits come from the authenticated catalog. `demesne auth login openrouter` also
-remains available as a standalone command.
+## Interaction, follow and motion
 
-The three-step layout and semantic palette follow the merged redesign components.
-The browser-wait/error view is an in-step terminal adaptation, including a wrapped
-URL for terminals without a browser opener.
+Keyboard, mouse, wheel, paste, selection and resize travel through the terminal bridge. Browser selection can be copied with Ctrl+Y. Manual conversation reading pauses follow; Ctrl+G returns to live. Menus and panels consume Escape before the two-press turn cancellation gesture.
 
-### Agent Drive
+CSS uses `prefers-reduced-motion`. The plain-output `DEMESNE_REDUCED_MOTION` environment variable is not a general browser motion switch. Avoid introducing motion that obscures recorded state or moves a reader’s selected content unexpectedly.
 
-**Alt+J**, `/drive`, and the `▷` rail action open the mission panel. It follows the
-existing dock/overlay geometry, uses the semantic palette and square controls,
-and keeps Pause/Resume/Stop fixed above scrollable mission notes. Drive activity
-stays in this panel and the rail; the bottom footer remains free of telemetry.
-See [Agent Drive](agent-drive.md) for the visible UI loop and recovery behavior.
+Drive’s default control path uses daemon APIs. The displayed panel is a view of mission state, task criteria, evidence, proposals and controls; it is not the worker’s only means of observing progress. [Drive](agent-drive.md) documents continuous versus bounded missions and the optional DOM-control compatibility path.
 
-### Slash menu · Version 21
+## Visual acceptance
 
-The redesign's **@ file suggestions** use the same above-composer overlay: a quiet
-Files heading, accent left edge and selection wash, filename first and muted
-directory. It is capped at 12 rows and the available space; small screens omit
-the heading before hiding the selected item. Up/Down, Page Up/Down, hover, wheel,
-Enter/Tab and a single click select through the normal editor. Escape dismisses
-without clearing the draft; editing reopens it. Reverse search, approvals and
-running turns suppress the popup. The composer and held reading anchor remain
-fixed; accepted file chips still support removal. Preview with `--mentions=src/`.
+```sh
+bun run graphics:check
+bun apps/graphics/check-display-scale.ts
+bun apps/graphics/check-panels.ts
+bun apps/graphics/check-files.ts
+bun apps/graphics/check-drive-tasks.ts
+bun apps/graphics/check-drive-next.ts
+bun apps/graphics/check-auth-scene.ts
+```
 
-The menu overlays the transcript immediately above the composer, spanning its
-width and stopping before the action rail or docked panel. Its square top and
-side borders join the composer separator. Opening, filtering and dismissal keep
-the composer and conversation reading anchor in place.
+These harnesses compare independently decoded terminal tiles with Chromium captures and exercise actual interactions. This verifies transport fidelity and application behavior; a comparison to Figma is a separate design review. Do not hide a compositor mismatch by masking content or relaxing tolerances. The NEXT/composer rounded-border mismatch was resolved with a stable compositor layer, without widening the pixel allowance.
 
-Dark section strips use small uppercase labels. Command names occupy a fixed
-12-cell column (the reference uses 90px), followed by muted descriptions. The
-selected row has an 8% accent wash, a narrow cyan left edge and cyan command
-text. Selection remains identifiable without color. The popup is capped at
-12 terminal rows, reduced to the space available above the composer, and scrolls
-internally without a visible scrollbar.
-
-`/` opens the menu; typing filters command names and aliases. Up/Down wrap the
-selection, Page Up/Down move through the list, and the mouse wheel navigates
-inside the popup. Hover selects and a single click accepts. Enter or Tab runs an
-argument-free command or inserts an argument-taking command for completion.
-Escape dismisses the menu while preserving the query and caret; editing opens it
-again. Section strips and borders never activate the transcript underneath.
-
-The groups use the available native commands: Session, Model, Context, Tools,
-Control, and Custom. Custom commands remain reachable beyond the initial viewport.
-Preview with `bun run ui:session --state=complete --commands=/`, or use
-`--commands=/mo` for the filtered Model group.
-
-### Live changes panel
-
-The Diff rail action (or **Alt+D**) opens a turn's file changes. Selecting an edit
-row in chat opens its recorded revision. Chat keeps a compact path, outcome and
-`+added −removed` receipt; code lives in the panel. **Expand / Restore** or
-**Alt+Enter** switches between the dock and a wide overlay, preserving the draft.
-
-For native `write_file`, `edit_file`, `move_path` and `delete_path` operations,
-`tool.call_draft` carries bounded argument fragments while the model generates
-them. Partial JSON is decoded for display only. **Drafting**, **Pending** and
-**Approval** are proposals; only a successful tool result becomes **Applied**.
-Failed, denied and stopped proposals retain their outcome. Original arguments
-and recorded results remain available in the execution log.
-
-Successful operations record immutable before/after file evidence in the event
-journal, including creations, deletions and both sides of moves. Contiguous
-operations on a file accumulate within the selected turn. External changes
-between operations are labelled as separate recorded segments. Historical
-rendering never reads today's file from disk. Binary/oversized files explicitly
-report unavailable text; textual previews are bounded to 1 MiB per side and
-10,000 diff rows. Older journals fall back to labelled input fragments.
-
-**Follow edits** tracks the latest file and turn. Selecting a file or scrolling
-pauses it and keeps a labelled snapshot, even through settlement or new edits.
-**Live / Ctrl+G** resumes following. **←/→** selects files; **↑/↓**, Page Up/Down,
-Home/End and the wheel navigate code. The file-list height is reserved so new
-files cannot shift the code viewport. Code uses filename-based syntax highlighting
-for TypeScript/JavaScript, Python, Rust, Go, JSON, YAML and shell files. Keywords,
-strings, numbers and comments retain their syntax colors on both sides; green/red
-gutter markers and subtle themed row backgrounds identify additions/removals.
-Old/new lexical state is independent and includes hidden hunk context. Wrapped
-code stays aligned beneath its source line and carries a quiet `↪` continuation
-marker. Line numbers remain muted, and no scrollbar is drawn.
-
-Preview with `bun run ui:session --live-diff` (demonstration data), optionally
-`--expand-diff` or `--snapshot=120x36 --plain`.
-
-### Conversation rendering
-
-Cards project actual `UserEntry`, `ReasoningEntry`, `AssistantEntry`, `ToolEntry`, and turn-closing `NoticeEntry` records. `ResponseReceipt` owns the original mode, model, duration, throughput and context. Unknown values remain explicit. Card timestamps use the first activity's recorded time; the clock is separate live telemetry.
-
-Startup and session switching use local daemon metadata. Provider model discovery
-is deferred until `/model`; workspace suggestions and artifact metadata load
-independently of prompt readiness.
-
-Saved history uses `/v1/sessions/:id/replay?after=N&through=M`, pinned to the
-session snapshot's cursor. Pages scan at most 20,000 original events and coalesce
-consecutive nonempty text deltas into merged chunks of at most 65,536 UTF-16 code units.
-The first timestamp/ID, final cursor and delta count retain response timestamps,
-reasoning durations and revisions; tool, permission and model-round boundaries
-stay explicit. An LRU cache retains at most 128 serialized pages / 32 MiB, keyed
-by session and snapshot. The durable journal and live SSE retain every original
-event. Older daemons use the original SSE replay path.
-
-`/compact [instructions]` uses the same cancellable turn and response card, with
-**Compact** mode and a before/after context estimate. Its validated summary is
-readable in the answer and the full original conversation remains in History.
-The committed post-compaction estimate survives replay; summarizer token usage
-stays available in `/context` as provider-reported request usage.
-
-The source uses a 1.4s dot pulse with 180ms staggering, a 1.1s cursor blink, and approximately 150ms hover fades. Reduced motion settles animation while the clock continues to tick. Disclosures use the reference's fixed closed/open glyphs.
-
-Live prose follows a response-relative reading window. When burst output exceeds
-the viewport, automatic scrolling advances one terminal row per redraw (at least
-16ms apart), including remaining catch-up after completion. Manual scrolling
-pauses it immediately; Ctrl+G jumps directly to live. Resize, static snapshots,
-and reduced-motion mode resolve the viewport directly without catch-up animation.
-
-At narrow cell widths, whole footer fields wrap, optional spacing contracts, and the context meter can reduce to its percentage. Drafts, selected controls, original receipts, and reading anchors survive resizing. Keyboard and mouse hit targets are derived from the rendered geometry.
-
-## Verification
-
-Conversation and inspection panes have no visible scrollbar. Streaming follow
-advances only by newly overflowing rows, rather than jumping by viewport-sized
-blocks. Manual reading anchors and boundary clamping remain in effect.
-
-Horizontal trackpad wheel events are decoded separately and ignored by vertical
-panes. Mixed-axis gestures at the bottom of a finished transcript must not move it.
-
-Use `bun run ui:session --state=round-limit` for a tool-only failed run, `--state=thinking-answer` for live reasoning, and `--state=start` for the start screen. Compare the rendered layout with the reference at normal and compact sizes. Check Copy, disclosure hit targets, draft caret positioning, queue interruption, and saved-session replay whenever geometry or record projection changes.
-
-## Image preview panel
-
-The [artifact preview plan](artifact-preview-plan.md) and its
-[implementation document](artifact-preview-implementation.md) define the next
-panel roadmap. The initial image pipeline, persistent artifacts, pinning/history,
-expanded viewing and Kitty graphics placements are implemented. Alt+V opens
-Preview; Changes, Verification, Context and Execution log retain their existing
-entry points. See the implementation progress section for remaining acceptance work.
+For changes affecting shipping assets, repeat the relevant check with the packaged renderer, using the arguments documented by its check script. See [graphics verification](../apps/graphics/README.md#verification) and [contribution workflow](../CONTRIBUTING.md).

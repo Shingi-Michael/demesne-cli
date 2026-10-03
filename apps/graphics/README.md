@@ -1,6 +1,8 @@
 # Graphics terminal UI
 
-This is the daemon-connected HTML/CSS interface for Ghostty. Chromium renders offscreen; changed image tiles are delivered inside the terminal through Kitty graphics. The normal `demesne` text workbench remains available.
+This is the daemon-connected HTML/CSS interface for Ghostty. Chromium renders offscreen; changed image tiles are delivered inside the terminal through Kitty graphics. This is the default interactive `demesne` interface; non-interactive commands use the plain streaming CLI.
+
+[Documentation index](../../docs/README.md) · [Commands and keyboard](../../docs/cli-reference.md) · [Design contract](../../docs/terminal-design.md)
 
 ## Run
 
@@ -40,7 +42,7 @@ The interface uses your existing config, daemon, models, workspace tools, sessio
 | Alt+Enter | Expand or restore a panel |
 | y / n | Allow once / deny a pending approval |
 
-Mouse clicks, scrolling, selection, paste, and resizing are forwarded to the hidden browser. Ctrl+Y copies a browser selection. Drive operates authored controls and the composer using clipped, visible DOM observations; it cannot answer permissions or questions. Your input pauses it.
+Mouse clicks, scrolling, selection, paste, and resizing are forwarded to the hidden browser. Ctrl+Y copies a browser selection. Drive uses direct daemon operations and recorded evidence by default. `DEMESNE_DRIVE_CONTROL=ui` selects its compatibility DOM-control path. Drive cannot answer permissions or questions; user intervention pauses it. See [Agent Drive](../../docs/agent-drive.md).
 
 ## Package
 
@@ -52,7 +54,7 @@ bun run build:graphics
 
 Keep `dist/graphics` beside `dist/demesne`, and keep the daemon and its image dependencies from the normal build. The graphics directory includes the compiled host, Chromium runtime, fonts, renderer, and local Figma SVG assets. Its macOS framework links must remain relative when copying or archiving it. The optional runtime is large, so the ordinary CLI build does not include it automatically.
 
-## Verify
+## Verification
 
 ```sh
 bun run typecheck
@@ -76,7 +78,7 @@ The checked-in benchmark JSON files measure input to decoded terminal pixels in 
 
 ## Boundaries
 
-`host.ts` owns authenticated daemon requests, config, filesystem operations, and credentials. The sandboxed renderer receives public snapshots through a narrow preload bridge; it has no daemon token, Node access, network connection, or arbitrary shell API. Markdown is sanitized before rendering. Drive actions carry short-lived capabilities for the exact composer text and reject stale sessions and observations.
+`host.ts` owns authenticated daemon requests, config, filesystem operations, and credentials. The sandboxed renderer receives public snapshots through a narrow preload bridge; it has no daemon token, Node access, network connection, or arbitrary shell API. Markdown is sanitized before rendering. The compatibility UI-control path uses short-lived capabilities for exact composer text. Direct Drive operations validate the session and recorded evidence; live corrections also reject stale worker state.
 
 `renderer.cjs`, `tiles.cjs`, and `transport.ts` retain dirty pixels and send only changed tiles. One frame batch waits for terminal-output drain before the next can leave, so a slow terminal does not accumulate obsolete frames.
 
@@ -88,7 +90,7 @@ bun apps/graphics/benchmark-scroll.ts 2 files 216 60   # scale, files|inline, co
 
 `DEMESNE_GRAPHICS_FILES=0` forces inline tiles, `DEMESNE_GRAPHICS_GPU=0` forces software rendering, and `DEMESNE_GRAPHICS_TRACE=<file>` writes one JSON line per frame stage (input, paint, flush, draw) for diagnosing frame cost. Resize starts a new tile generation; exit deletes the UI's images and restores terminal modes. The start-screen prototype is kept separate from this live application.
 
-`state-wire.ts` sends changed fields, changed turns, and appended text. The browser retains unchanged history locally. Revision and text-offset checks reject incomplete updates, buffer updates that overtake a bootstrap response, and request an authoritative snapshot before continuing. `markdown.ts` re-lexes the complete reply for Markdown correctness but only sanitizes, highlights, and replaces changed blocks; unchanged blocks retain their DOM nodes. Folded turns release those nodes, and static Markdown caching has a 2 MiB byte budget. Drive observes on demand when started/resumed and at a bounded cadence while active; inactive or paused missions do not scan the page.
+`state-wire.ts` sends changed fields, changed turns, and appended text. The browser retains unchanged history locally. Revision and text-offset checks reject incomplete updates, buffer updates that overtake a bootstrap response, and request an authoritative snapshot before continuing. `markdown.ts` re-lexes the complete reply for Markdown correctness but only sanitizes, highlights, and replaces changed blocks; unchanged blocks retain their DOM nodes. Folded turns release those nodes, and static Markdown caching has a 2 MiB byte budget. The compatibility Drive path observes the page only on demand or at a bounded active cadence; the default direct path reads recorded daemon state.
 
 ## Review panel upgrades
 
@@ -113,8 +115,9 @@ bun run graphics
 
 ## Drive completion
 
-`/drive <mission>` now finishes after verification. `/drive --continuous <mission>`
-or **Keep choosing improvements** explicitly enables ongoing discovery. The panel
+`/drive --bounded <mission>` finishes after verification. Plain `/drive <mission>`
+is continuous by default; `--continuous` makes that explicit. The mission form
+also exposes **Keep choosing improvements**, and NEXT’s **Run** starts a bounded mission. The panel
 shows stable task IDs, criteria, and retained completion evidence. Resume does not
 restart a completed task; `/drive reopen <task-id> <reason>` is an explicit request
 to revisit it. Automatic reopen requires relevant changed evidence. See
@@ -125,6 +128,20 @@ inspection, no automatic repetition, and explicit reopening through the real UI.
 Add `--retina` after the output directory to check 2× rendering.
 
 Live Drive reviews now react to completed checks, edit batches, and repeated tool
-calls. They share the current inference slot and read fresh recorded evidence when
-the slot becomes available. The trace shows queue/review time; stale corrections
+calls. They use the selected provider’s inference queue and read fresh recorded evidence
+when a slot becomes available. The trace shows queue/review time; stale corrections
 are refused by the daemon. See [live check-ins](../../docs/agent-drive.md#live-coder-check-ins).
+
+
+## Shutdown and broken pipes
+
+Closing the terminal or its host can disconnect Electron while a frame is being written. [pipe-writer.cjs](pipe-writer.cjs) handles asynchronous `EPIPE`, stream errors and closure, stops further writes/acknowledgements, and initiates renderer shutdown. Renderer EOF, SIGTERM and early startup shutdown follow the same cleanup path. The host restores terminal modes and removes graphics placements when it can still write to the terminal.
+
+These native-process checks complement unit tests and visual checks:
+
+```sh
+bun apps/graphics/check-disconnect.ts
+bun apps/graphics/check-subagent-shutdown.ts
+```
+
+The first exercises renderer pipe loss and startup/exit races; the second closes a UI while three mock subagents stream. Neither needs a real model. For a packaged renderer, `check-disconnect.ts` accepts renderer and Electron paths as its first two arguments. See [troubleshooting](../../docs/troubleshooting.md#epipe-or-an-electron-error-dialog) for replacing an older running renderer.

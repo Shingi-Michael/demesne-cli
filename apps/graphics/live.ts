@@ -379,6 +379,8 @@ const spinner = () => `<span class="spin" aria-hidden="true">${spinnerFrame()}</
 function toolTarget(run: GraphicsRun, tool: ToolEntry) {
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   if (tool.name !== "subagent" || tool.state !== "running") return h(base);
+  // Still being written by the model: not running yet.
+  if (tool.drafting) return `${h(base || "…")}<span class="muted"> · writing</span>`;
   const slot = run.entries.filter((entry) => entry.type === "tool" && entry.name === "subagent").indexOf(tool);
   const model = /^([^·]+) · /.exec(tool.trace?.find((segment) => segment.kind === "step")?.text ?? "")?.[1]?.trim() ?? state!.model.id;
   const phrase = matchMedia("(prefers-reduced-motion: reduce)").matches ? "thinking" : subagentPhrase(slot, Date.now(), model);

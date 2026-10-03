@@ -24,7 +24,10 @@ test.each(["full", "empty"] as const)("Responses request preserves streamed tool
   expect(events.filter(e => e.type === "tool_call_delta").map(e => e.index)).toEqual([0, 0]);
   expect(events.at(-1)).toEqual({ type: "finish", reason: "tool_calls" });
   const next: ProviderRequest = { ...request, messages: [...request.messages, { role: "assistant", content: null, toolCalls: [{ id: "call_1", name: "read_file", arguments: tool.arguments }], responses: state }, { role: "tool", toolCallId: "call_1", content: "file content" }] };
-  await collect(p, next);
+  expect(bodies[0]).not.toHaveProperty("prompt_cache_key");
+  // Tool rounds of one conversation share a cache key, so the prefix is reused.
+  await collect(p, { ...next, cacheKey: "session-1" });
+  expect(bodies[1].prompt_cache_key).toBe("session-1");
   expect(bodies[1].input).toContainEqual(reasoning); expect(bodies[1].input).toContainEqual(tool); expect(bodies[1].input.at(-1)).toEqual({ type: "function_call_output", call_id: "call_1", output: "file content" });
   await collect(p, { ...next, model: "other-model" }); expect(JSON.stringify(bodies[2])).not.toContain("opaque-reasoning");
   const other = new ChatGPTProvider({ accountId: "b", accessToken: async () => "other", fetch: (async (_url: string | URL | Request, init?: RequestInit) => { expect(String(init?.body)).not.toContain("opaque-reasoning"); return responseStream(); }) as unknown as typeof fetch });

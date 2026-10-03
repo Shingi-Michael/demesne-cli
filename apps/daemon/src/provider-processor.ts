@@ -7,7 +7,7 @@ import type {
 } from "@demesne/providers";
 import type { RuntimeProfileStatus } from "@demesne/protocol";
 import type { RuntimeProfileVerifier } from "./ollama-runtime.ts";
-import type { InferenceOverrides, TurnInference, TurnProcessor } from "./processor.ts";
+import type { InferenceOverrides, StreamOptions, TurnInference, TurnProcessor } from "./processor.ts";
 
 type ProviderRequestDefaults = Pick<ProviderRequest, "maxOutputTokens" | "temperature" | "seed">;
 
@@ -108,8 +108,8 @@ export class ProviderTurnProcessor implements TurnProcessor {
       maxOutputTokens: requestDefaults.maxOutputTokens,
       temperature: requestDefaults.temperature,
       seed: requestDefaults.seed,
-      stream: (messages: ProviderMessage[], tools: ProviderToolDefinition[], signal: AbortSignal) => (
-        this.streamModel(model, modelGeneration, requestDefaults, messages, tools, signal, thinkingEnabled)
+      stream: (messages: ProviderMessage[], tools: ProviderToolDefinition[], signal: AbortSignal, options?: StreamOptions) => (
+        this.streamModel(model, modelGeneration, requestDefaults, messages, tools, signal, thinkingEnabled, undefined, options?.cacheKey)
       ),
     });
   }
@@ -152,6 +152,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
     signal: AbortSignal,
     thinkingEnabled: boolean | undefined,
     onFirstProviderEvent?: () => void,
+    cacheKey?: string,
   ): AsyncGenerator<ProviderStreamEvent> {
     const runtimeBaseline = this.runtimeVerifier?.capture();
     const stream = this.provider.stream({
@@ -160,6 +161,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
       messages,
       tools,
       ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),
+      ...(cacheKey ? { cacheKey } : {}),
     }, signal);
     const iterator = stream[Symbol.asyncIterator]();
     try {

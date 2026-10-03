@@ -37,6 +37,9 @@ export class ChatGPTProvider implements ProviderAdapter {
     const names = new Map((request.tools ?? []).map(t => [wireName(t.name), t.name]));
     const response = await this.request("responses", { signal, method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       model: request.model, store: false, stream: true,
+      // Each tool round resends the conversation; the key lets the plan route
+      // reuse its cached prefix instead of reprocessing every token.
+      ...(request.cacheKey ? { prompt_cache_key: request.cacheKey } : {}),
       input: this.input(request.messages, request.model), include: ["reasoning.encrypted_content"],
       // The plan route forbids max_output_tokens, temperature and other Chat Completions knobs.
       ...(request.tools?.length ? { tools: [{ type: "namespace", name: "demesne", description: "Demesne workspace and agent tools.", tools: request.tools.map(t => ({ type: "function", name: wireName(t.name), description: t.description, parameters: t.inputSchema, strict: false })) }] } : {}),

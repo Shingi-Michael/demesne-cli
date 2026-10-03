@@ -68,7 +68,24 @@ export interface DriveAutonomy {
 }
 /// One line of a workspace's project memory: what you asked Drive to keep in
 /// mind (preference, decision) or what Drive learned (outcome, blocker).
-export interface DriveMemoryEntry { id: string; kind: "preference" | "decision" | "outcome" | "blocker"; text: string; source: "you" | "drive"; at: string }
+export interface DriveMemoryEntry { id: string; kind: "preference" | "decision" | "outcome" | "blocker" | "veto"; text: string; source: "you" | "drive"; at: string }
+
+/// A fact about the workspace that Drive's Next queue is built from. Proposals
+/// must cite signals by id.
+export interface DriveSignal { id: string; source: "checks" | "git" | "github" | "sessions" | "telemetry" | "code"; title: string; detail: string; urgent?: boolean }
+/// One ranked item in the Next queue.
+export interface DriveProposal {
+  id: string; kind: "fix" | "experiment" | "investigate" | "tidy";
+  title: string; why: string; evidence: string[];
+  minutes: number; coders: number; confidence: "high" | "medium" | "low"; value: number;
+  /// value × confidence ÷ cost, boosted when it cites an urgent signal.
+  score: number; urgent: boolean;
+}
+export interface DriveNextRequest { workspace: string; memory?: DriveMemoryEntry[]; force?: boolean }
+export interface DriveNextResponse {
+  workspace: string; proposals: DriveProposal[]; signals: DriveSignal[];
+  fingerprint: string; generatedAt: string; model: string | null; cached: boolean;
+}
 export interface DriveRequest {
   mode?: DriveMode; ledger?: DriveLedger; facts?: DriveFacts;
   /// The workspace's project memory, bounded: standing preferences and
@@ -434,11 +451,15 @@ export function parseDriveRequest(value: unknown): DriveRequest {
         return { step: coordinate(step.step, Number.MAX_SAFE_INTEGER, `${path}.step`), action: text(step.action, 20_000, `${path}.action`), note: text(step.note, 2000, `${path}.note`), result: text(step.result, 2000, `${path}.result`), at: text(step.at, 100, `${path}.at`) };
       }) } };
 }
+export function parseDriveNextRequest(value: unknown): DriveNextRequest {
+  if (!isRecord(value)) invalid("request", "expected an object");
+  return { workspace: text(value.workspace, 4096, "workspace"), ...(value.memory !== undefined ? { memory: parseProjectMemory(value.memory) } : {}), ...(value.force === true ? { force: true } : {}) };
+}
 function parseProjectMemory(value: unknown): DriveMemoryEntry[] {
   if (!Array.isArray(value) || value.length > 60) invalid("projectMemory", "expected at most 60 entries");
   const entries = value.map((item, index) => {
     const path = `projectMemory[${index}]`;
-    if (!isRecord(item) || !["preference", "decision", "outcome", "blocker"].includes(String(item.kind)) || !["you", "drive"].includes(String(item.source))) invalid(path, "expected a memory entry");
+    if (!isRecord(item) || !["preference", "decision", "outcome", "blocker", "veto"].includes(String(item.kind)) || !["you", "drive"].includes(String(item.source))) invalid(path, "expected a memory entry");
     return { id: text(item.id, 100, `${path}.id`), kind: item.kind as DriveMemoryEntry["kind"], text: text(item.text, 1000, `${path}.text`), source: item.source as DriveMemoryEntry["source"], at: text(item.at, 100, `${path}.at`) };
   });
   if (entries.reduce((sum, item) => sum + item.text.length, 0) > 8000) invalid("projectMemory", "memory exceeds 8,000 characters");

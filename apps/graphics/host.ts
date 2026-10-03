@@ -104,6 +104,18 @@ export class GraphicsHost {
   setup: GraphicsSetup | null = null;
   drive: GraphicsDrive | undefined;
   driveState: import("@demesne/protocol").DriveState | null = null;
+  /// Drive's Next queue for this workspace.
+  nextQueue: {
+    proposals: import("@demesne/protocol").DriveProposal[];
+    signals: import("@demesne/protocol").DriveSignal[];
+    generatedAt: string | null;
+    model: string | null;
+    loading: boolean;
+    error: string | null;
+  } = { proposals: [], signals: [], generatedAt: null, model: null, loading: false, error: null };
+  /// Proposals you hid: until a time (Not now, or while running) or for good.
+  private nextHidden: Record<string, number | "never"> = {};
+  private nextRequested = 0;
   private autoStarted = false;
   readonly workspace: string;
   private client: DemesneClient;
@@ -241,6 +253,13 @@ export class GraphicsHost {
       drive: this.driveState,
       // Drive's project memory for this workspace (shown in Session).
       driveMemory: this.drive?.memoryEntries ?? [],
+      driveNext: {
+        ...this.nextQueue,
+        proposals: this.nextQueue.proposals.filter((item) => {
+          const hidden = this.nextHidden[item.id];
+          return hidden === undefined || (hidden !== "never" && hidden < Date.now());
+        }),
+      },
       setup: this.setup?.snapshot() ?? null,
       processes: this.processes,
       queuePosition: this.queuePosition,
@@ -286,6 +305,8 @@ export class GraphicsHost {
       else await this.newSession();
       // Discovery across providers takes seconds; do it before /model asks.
       void this.models().catch(() => {});
+      this.loadNextHidden();
+      void this.refreshNext();
       await this.applyStartup();
     } catch (error) {
       if (!this.autoStarted && this.settings.autoStart === "always") {
@@ -416,6 +437,7 @@ export class GraphicsHost {
         if (
           /^turn\.(completed|failed|cancelled|interrupted)$/.test(event.type)
         ) {
+          if (Date.now() - this.nextRequested > 30 * 60_000) void this.refreshNext();
           const queued = this.queue;
           this.queue = "";
           if (queued.trim() && event.type === "turn.completed") {
@@ -584,6 +606,43 @@ export class GraphicsHost {
     await this.client.cancelTurn(turn.id);
     return true;
   }
+  /// Asks the daemon for the Next queue: cached unless the workspace's
+  /// signals changed; `force` regenerates it.
+  async refreshNext(force = false) {
+    if (this.nextQueue.loading) return;
+    this.nextRequested = Date.now();
+    this.nextQueue = { ...this.nextQueue, loading: true, error: null };
+    this.publish();
+    try {
+      const result = await this.client.driveNext({
+        workspace: this.workspace,
+        memory: this.drive?.memory.forPlanner() ?? [],
+        ...(force ? { force: true } : {}),
+      });
+      this.nextQueue = { proposals: result.proposals, signals: result.signals, generatedAt: result.generatedAt, model: result.model, loading: false, error: null };
+    } catch (error) {
+      this.nextQueue = { ...this.nextQueue, loading: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    this.publish();
+  }
+  private nextHiddenPath() {
+    return join(this.settings.dataDirectory, "drive", `${createHash("sha256").update(this.workspace).digest("hex").slice(0, 32)}.next-hidden.json`);
+  }
+  private loadNextHidden() {
+    try {
+      this.nextHidden = JSON.parse(readFileSync(this.nextHiddenPath(), "utf8"));
+    } catch {
+      this.nextHidden = {};
+    }
+  }
+  private hideNext(id: string, until: number | "never") {
+    this.nextHidden[id] = until;
+    try {
+      mkdirSync(dirname(this.nextHiddenPath()), { recursive: true, mode: 0o700 });
+      writeFileSync(this.nextHiddenPath(), JSON.stringify(this.nextHidden), { mode: 0o600 });
+    } catch { /* hiding still applies for this session */ }
+    this.publish();
+  }
   async refreshProcesses() {
     if (this.polling) return this.polling;
     const id = this.current?.session.id;
@@ -715,6 +774,22 @@ export class GraphicsHost {
         typeof args.command === "string" ? args.command : "none",
       );
       return;
+    }
+    // The Next queue: refresh, Run (a bounded Drive mission), Plan first
+    // (a read-only plan turn), Not now (a day), Never (a veto in memory).
+    if (method === "next-refresh") return this.refreshNext(true);
+    if (["next-run", "next-plan", "next-snooze", "next-never"].includes(method)) {
+      const item = this.nextQueue.proposals.find((proposal) => proposal.id === args.id);
+      if (!item) throw new Error("That proposal is no longer in the queue.");
+      if (method === "next-snooze") return this.hideNext(item.id, Date.now() + 24 * 3_600_000);
+      if (method === "next-never") {
+        this.drive?.addMemory({ kind: "veto", text: `${item.title}: ${item.why}`, source: "you" });
+        return this.hideNext(item.id, "never");
+      }
+      this.hideNext(item.id, Date.now() + 6 * 3_600_000);
+      if (method === "next-plan") return this.submit(`${item.title}. ${item.why}`, true);
+      if (!this.drive) throw new Error("Drive is unavailable here.");
+      return this.drive.handle("drive", { text: `--bounded ${item.title}. ${item.why}` });
     }
     if (method === "processes") {
       await this.refreshProcesses();

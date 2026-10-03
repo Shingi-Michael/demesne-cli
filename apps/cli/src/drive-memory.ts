@@ -54,7 +54,7 @@ export class ProjectMemory {
   /// recent outcomes and blockers, within a character budget.
   forPlanner(budget = 6000): DriveMemoryEntry[] {
     const all = this.list();
-    const standing = all.filter((item) => item.kind === "preference" || item.kind === "decision");
+    const standing = all.filter((item) => item.kind === "preference" || item.kind === "decision" || item.kind === "veto");
     const learned = all.filter((item) => item.kind === "outcome" || item.kind === "blocker").reverse();
     const chosen: DriveMemoryEntry[] = [];
     let used = 0;
@@ -72,7 +72,7 @@ export class ProjectMemory {
     if (lines.length <= MAX_LINES) return;
     // Compact: keep every standing entry and the newest learned ones.
     const all = this.list();
-    const keep = [...all.filter((item) => item.kind === "preference" || item.kind === "decision"),
+    const keep = [...all.filter((item) => item.kind === "preference" || item.kind === "decision" || item.kind === "veto"),
       ...all.filter((item) => item.kind === "outcome" || item.kind === "blocker").slice(-KEEP)];
     const temp = `${this.path}.${process.pid}.tmp`;
     writeFileSync(temp, keep.sort((a, b) => a.at.localeCompare(b.at)).map((item) => JSON.stringify(item)).join("\n") + "\n", { mode: 0o600 });
@@ -82,5 +82,5 @@ export class ProjectMemory {
 
 function isEntry(value: Record<string, unknown>): value is DriveMemoryEntry & Record<string, unknown> {
   return typeof value.id === "string" && typeof value.text === "string" && typeof value.at === "string"
-    && ["preference", "decision", "outcome", "blocker"].includes(String(value.kind)) && ["you", "drive"].includes(String(value.source));
+    && ["preference", "decision", "outcome", "blocker", "veto"].includes(String(value.kind)) && ["you", "drive"].includes(String(value.source));
 }

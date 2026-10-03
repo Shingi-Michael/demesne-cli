@@ -79,6 +79,11 @@ export class DemesneClient {
     try { return parseDriveFacts(await this.request(`/v1/sessions/${sessionId}/drive/facts`, { method: "POST", body: JSON.stringify({turnId,paths}), signal })); }
     catch(error) { if (error instanceof ApiRequestError && error.status === 404) throw new Error("Drive needs the updated daemon for recorded task facts. Restart the rebuilt daemon after current work finishes."); throw error; }
   }
+  /// Drive's Next queue for a workspace: cached unless its signals changed.
+  async driveNext(request: import("@demesne/protocol").DriveNextRequest, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveNextResponse> {
+    try { return await this.request("/v1/drive/next", { method: "POST", body: JSON.stringify(request), signal }); }
+    catch (error) { if (error instanceof ApiRequestError && error.status === 404 && /route|not found/i.test(error.message) && !/workspace/i.test(error.message)) throw new Error("Drive's Next queue needs the updated daemon. Restart it after current work finishes."); throw error; }
+  }
   async decideDrive(request: DriveRequest, signal?: AbortSignal, progress?: (event: DriveProgress) => void): Promise<DriveResponse> {
     if (!progress) return this.request("/v1/drive/decide", { method: "POST", body: JSON.stringify(request), signal });
     const response = await this.fetchImpl(new URL("/v1/drive/decide", this.server), { method: "POST", body: JSON.stringify(request), signal,

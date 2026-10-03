@@ -711,14 +711,16 @@ function renderComposer() {
     state.questions.length > 0;
   el("composer-slot").hidden =
     state.approvals.length > 0 || state.questions.length > 0;
-  // No stop hint while running (Esc Esc still stops); only the armed
-  // confirmation shows. Shortcut hints appear in an empty, idle composer.
+  // Like the terminal: no stop hint while running (Esc Esc still stops; only
+  // the armed confirmation shows). In a session, an empty composer shows
+  // / and @, and a draft shows ↵ send instead. The start screen keeps both.
   const armed = Date.now() < stopArmed;
+  const draft = Boolean(editor.value.trim()), session = state.runs.length > 0;
   el("send-label").innerHTML = state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : ""
     : "send";
-  form.querySelector<HTMLElement>(".send")!.hidden = Boolean(state.activeTurnId) && !armed;
-  form.querySelector<HTMLElement>(".hints")!.hidden = Boolean(state.activeTurnId || editor.value.trim());
+  form.querySelector<HTMLElement>(".send")!.hidden = state.activeTurnId ? !armed : session && !draft;
+  form.querySelector<HTMLElement>(".hints")!.hidden = Boolean(state.activeTurnId) || (session && draft);
   (form.querySelector(".send") as HTMLButtonElement).disabled =
     state.connection !== "online" || state.busy;
   form.querySelector<HTMLElement>(".send>kbd")!.hidden = Boolean(

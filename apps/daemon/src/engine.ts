@@ -737,5 +737,8 @@ function isQualitativeWorkspaceOverview(request: string): boolean {
     && /\b(?:folder|directory|repo|repository|codebase|project|workspace)\b/.test(normalized);
   const needsExecutionOrMeasurement = /\b(?:run|execute|test|build|fix|edit|change|implement|debug|diagnose|benchmark|count|lines?|loc|size|disk|measure|metrics?|statistics?)\b/.test(normalized)
     || /\bhow many\b/.test(normalized);
-  return asksForOverview && !needsExecutionOrMeasurement;
+  // Asking for sub-agents (Drive: "use subagents to read files … summarize")
+  // is a request for that tool, never a trimmed overview without it.
+  const asksForDelegation = /\bsub-?\s?agents?\b|\bdelegat/.test(normalized);
+  return asksForOverview && !needsExecutionOrMeasurement && !asksForDelegation;
 }

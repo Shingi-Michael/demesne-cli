@@ -91,5 +91,46 @@ test("/v1/drive/next: known workspaces only, cached until signals change, vetoes
     // Force asks again.
     expect((await post({ workspace, memory, force: true })).body.cached).toBe(false);
     expect(calls).toBe(2);
+    // A new veto invalidates a previously cached queue, without a forced refresh.
+    const vetoed = await post({ workspace, memory: [...memory, { id: "v2", kind: "veto", text: "Commit the draft: do not commit this work", source: "you", at: "later" }] });
+    expect(vetoed.body.proposals).toEqual([]);
+    expect(vetoed.body.cached).toBe(false);
+    expect(calls).toBe(3);
   } finally { server.stop(true); await app.close(); }
+});
+
+
+test("signals ignore superseded CI failures and report only the latest default-branch failure per workflow", async () => {
+  const root = scratch(), store = new DemesneStore(join(root, "state.sqlite"));
+  const runs = [
+    { workflowName: "CI", workflowDatabaseId: 1, headBranch: "trunk", conclusion: "success", status: "completed", displayTitle: "fixed", createdAt: "2026-10-03T12:00:00Z" },
+    { workflowName: "CI", workflowDatabaseId: 1, headBranch: "trunk", conclusion: "failure", status: "completed", displayTitle: "superseded", createdAt: "2026-10-02T12:00:00Z" },
+    { workflowName: "CI", workflowDatabaseId: 1, headBranch: "feature", conclusion: "failure", status: "completed", displayTitle: "other branch", createdAt: "2026-10-03T13:00:00Z" },
+  ];
+  const run = async (argv: string[]) => {
+    if (argv[0] === "git" && argv[1] === "status") return "";
+    if (argv[0] === "git" && argv[1] === "symbolic-ref") return "origin/trunk";
+    if (argv[0] === "gh" && argv[1] === "run") { expect(argv).toContain("trunk"); return JSON.stringify(runs); }
+    return null;
+  };
+  try {
+    expect((await collectDriveSignals(store.database, root, { run })).signals.some(s => s.id === "ci:failures")).toBe(false);
+    runs.unshift({ workflowName: "Lint", workflowDatabaseId: 2, headBranch: "trunk", conclusion: "failure", status: "completed", displayTitle: "current failure", createdAt: "2026-10-03T14:00:00Z" });
+    const signal = (await collectDriveSignals(store.database, root, { run })).signals.find(s => s.id === "ci:failures")!;
+    expect(signal.title).toBe("1 latest CI failure on trunk"); expect(signal.urgent).toBe(true);
+    expect(signal.detail).toContain("current failure"); expect(signal.detail).not.toContain("superseded");
+  } finally { store.close(); }
+});
+
+test("TODO discovery excludes protected files before searching their contents", async () => {
+  const root = scratch(), store = new DemesneStore(join(root, "state.sqlite"));
+  const searched: string[][] = [];
+  const result = await collectDriveSignals(store.database, root, { gh: false, run: async argv => {
+    if (argv[1] === "status") return "";
+    if (argv[1] === "ls-files") return "safe.ts\0.env\0nested/.env.local\0private.key\0.aws/credentials\0";
+    if (argv[1] === "grep") { searched.push(argv); return "safe.ts:1:// TODO: test this"; }
+    return null;
+  } });
+  expect(searched).toHaveLength(1); expect(searched[0]!.slice(searched[0]!.indexOf("--") + 1)).toEqual([":(literal)safe.ts"]);
+  expect(result.signals.find(s => s.source === "code")?.detail).toContain("safe.ts"); store.close();
 });

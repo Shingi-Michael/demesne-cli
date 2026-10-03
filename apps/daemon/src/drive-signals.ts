@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isSensitivePath } from "./tools.ts";
 import type { Database } from "bun:sqlite";
 import type { DriveSignal } from "@demesne/protocol";
 
@@ -18,15 +19,24 @@ interface CollectOptions {
 
 /// Runs a command with a deadline; null when it fails or is unavailable.
 async function run(argv: string[], cwd: string): Promise<string | null> {
+  let child: ReturnType<typeof Bun.spawn> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const child = Bun.spawn(argv, { cwd, stdout: "pipe", stderr: "ignore", stdin: "ignore" });
-    const timer = setTimeout(() => child.kill(), 8000);
-    const [code, out] = await Promise.all([child.exited, new Response(child.stdout).text()]);
-    clearTimeout(timer);
-    return code === 0 ? out : null;
-  } catch {
-    return null;
-  }
+    child = Bun.spawn(argv, { cwd, stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+    timer = setTimeout(() => child?.kill(), 8000);
+    const reader = (child.stdout as ReadableStream<Uint8Array>).getReader();
+    const chunks: Uint8Array[] = []; let bytes = 0;
+    try {
+      while (true) {
+        const { value, done } = await reader.read(); if (done) break;
+        bytes += value.byteLength;
+        if (bytes > 1024 * 1024) { child.kill(); return null; }
+        chunks.push(value);
+      }
+      return await child.exited === 0 ? Buffer.concat(chunks).toString("utf8") : null;
+    } finally { await reader.cancel().catch(() => {}); }
+  } catch { return null; }
+  finally { clearTimeout(timer); if (child) { if (child.exitCode === null) child.kill(); await child.exited; } }
 }
 
 const clip = (text: string, max = 300) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
@@ -100,19 +110,26 @@ export async function collectDriveSignals(database: Database, workspace: string,
   }
 
   // Git: uncommitted work, stale unmerged branches.
+  let defaultBranch = "main";
   const status = await exec(["git", "status", "--porcelain"], workspace);
   if (status !== null) {
     const changed = status.split("\n").filter(Boolean);
     if (changed.length) add({ id: "git:uncommitted", source: "git", title: `${changed.length} uncommitted change${changed.length === 1 ? "" : "s"}`, detail: changed.slice(0, 12).map((line) => line.trim()).join(", ") });
     const head = (await exec(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], workspace))?.trim().replace(/^origin\//, "") || "main";
+    defaultBranch = head;
     const branches = await exec(["git", "for-each-ref", "--format=%(refname:short)|%(committerdate:unix)", "--no-merged", head, "refs/heads"], workspace);
     const stale = (branches ?? "").split("\n").filter(Boolean).map((line) => line.split("|")).filter(([, at]) => now - Number(at) * 1000 > 7 * DAY);
     if (stale.length) add({ id: "git:stale-branches", source: "git", title: `${stale.length} unmerged branch${stale.length === 1 ? "" : "es"} older than a week`, detail: stale.slice(0, 10).map(([name]) => name).join(", ") });
 
     // TODO/FIXME notes in tracked code.
     // Whole words only (git's regex has no \\b).
-    const todos = await exec(["git", "grep", "-n", "-I", "-w", "-e", "TODO", "-e", "FIXME", "-e", "XXX", "--", ".", ":!*.md", ":!*.lock"], workspace);
-    const lines = (todos ?? "").split("\n").filter(Boolean);
+    const paths = ((await exec(["git", "ls-files", "-z"], workspace)) ?? "").split("\0")
+      .filter((path) => path && !isSensitivePath(path) && !/\.(?:md|lock)$/i.test(path)).slice(0, 1000);
+    const lines: string[] = [];
+    for (let i = 0; i < paths.length; i += 100) {
+      const todos = await exec(["git", "grep", "-n", "-I", "-w", "-e", "TODO", "-e", "FIXME", "-e", "XXX", "--", ...paths.slice(i, i + 100).map(path => `:(literal)${path}`)], workspace);
+      lines.push(...(todos ?? "").split("\n").filter(Boolean));
+    }
     if (lines.length) add({ id: "code:todos", source: "code", title: `${lines.length} TODO/FIXME note${lines.length === 1 ? "" : "s"} in code`, detail: lines.slice(0, 6).map((line) => clip(line.trim(), 140)).join(" | ") });
   }
 
@@ -125,10 +142,15 @@ export async function collectDriveSignals(database: Database, workspace: string,
         add({ id: `pr:${pr.number}`, source: "github", urgent: failing, title: `Open PR #${pr.number}${failing ? " with failing CI" : ""}${pr.isDraft ? " (draft)" : ""}`, detail: `${clip(pr.title, 160)} · updated ${pr.updatedAt.slice(0, 10)}` });
       }
     } catch { /* no GitHub repo or gh unavailable */ }
-    const ci = await exec(["gh", "run", "list", "--limit", "8", "--json", "conclusion,displayTitle,workflowName,headBranch,createdAt"], workspace);
+    const ci = await exec(["gh", "run", "list", "--branch", defaultBranch, "--limit", "30", "--json", "conclusion,displayTitle,workflowName,workflowDatabaseId,headBranch,createdAt,status"], workspace);
     try {
-      const red = (JSON.parse(ci ?? "[]") as { conclusion: string; displayTitle: string; workflowName: string; headBranch: string; createdAt: string }[]).filter((item) => item.conclusion === "failure");
-      if (red.length) add({ id: "ci:failures", source: "github", urgent: red.some((item) => item.headBranch === "main"), title: `${red.length} recent CI failure${red.length === 1 ? "" : "s"}`, detail: red.slice(0, 4).map((item) => `${item.workflowName} on ${item.headBranch}: ${clip(item.displayTitle, 80)} (${item.createdAt.slice(0, 10)})`).join(" | ") });
+      type Run = { conclusion: string; displayTitle: string; workflowName: string; workflowDatabaseId?: number; headBranch: string; createdAt: string; status?: string };
+      const runs = (JSON.parse(ci ?? "[]") as Run[]).filter(item => item.headBranch === defaultBranch)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const latest = new Map<string, Run>();
+      for (const run of runs) { const key = String(run.workflowDatabaseId ?? run.workflowName); if (!latest.has(key)) latest.set(key, run); }
+      const red = [...latest.values()].filter(item => item.conclusion === "failure" && (!item.status || item.status === "completed"));
+      if (red.length) add({ id: "ci:failures", source: "github", urgent: true, title: `${red.length} latest CI failure${red.length === 1 ? "" : "s"} on ${defaultBranch}`, detail: red.slice(0, 4).map(item => `${item.workflowName}: ${clip(item.displayTitle, 80)} (${item.createdAt.slice(0, 10)})`).join(" | ") });
     } catch { /* no runs */ }
   }
 

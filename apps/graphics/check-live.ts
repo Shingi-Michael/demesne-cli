@@ -391,7 +391,9 @@ try {
     (s) => s.live.setup?.step === "provider" && s.live.setup.probes !== null,
   );
   await capture("setup-provider");
-  await click("setup-action", { index: 4 });
+  const custom = current.live.controls.find((control: any) => control.action === "setup-action" && control.label.includes("Custom URL"));
+  assert(custom, "Custom URL option is visible");
+  await click("setup-action", { index: JSON.parse(custom.args).index });
   await key("\r");
   await state((s) => s.live.setup?.step === "custom");
   await capture("setup-custom");

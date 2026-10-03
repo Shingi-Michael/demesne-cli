@@ -335,18 +335,22 @@ export function createDaemonApp(options: {
         // git and gh run only in a workspace this daemon already knows.
         const known = store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace);
         if (!known) return apiError("not_found", "Unknown workspace", 404);
-        const pending = driveNextRuns.get(body.workspace);
+        const inference = snapshotTurnInference(processor, true, { maxOutputTokens: DRIVE_THOUGHT_TOKENS });
+        const contextKey = JSON.stringify([body.workspace, body.memory ?? [], inference.providerId, inference.modelId]);
+        const pendingKey = `${contextKey}:${Boolean(body.force)}`;
+        const pending = driveNextRuns.get(pendingKey);
         if (pending) return json(await pending);
         const run = (async () => {
-          const { signals, fingerprint } = await collectDriveSignals(store.database, body.workspace);
+          const collected = await collectDriveSignals(store.database, body.workspace);
+          const { signals } = collected;
+          const fingerprint = createHash("sha256").update(collected.fingerprint + contextKey).digest("hex").slice(0, 16);
           const cached = driveNextCache.read(body.workspace);
           const fresh = cached && cached.fingerprint === fingerprint && Date.now() - Date.parse(cached.generatedAt) < 12 * 3_600_000;
           if (cached && fresh && !body.force) return { workspace: body.workspace, ...cached, signals, cached: true };
           const vetoes = (body.memory ?? []).filter((item) => item.kind === "veto").map((item) => item.text.toLowerCase());
-          const leaseId = `drive-next:${randomUUID()}`, slots = scheduler.for(processor.providerId);
+          const leaseId = `drive-next:${randomUUID()}`, slots = scheduler.for(inference.providerId);
           const lease = await slots.acquire(leaseId, AbortSignal.any([request.signal, driveLifecycle.signal]), {});
           try {
-            const inference = snapshotTurnInference(processor, true, { maxOutputTokens: DRIVE_THOUGHT_TOKENS });
             const proposals = (await proposeNext(signals, body.memory ?? [], inference, AbortSignal.any([request.signal, driveLifecycle.signal])))
               // A vetoed proposal never returns, whatever the model says.
               .filter((item) => !vetoes.some((veto) => veto.includes(item.title.toLowerCase())));
@@ -355,10 +359,10 @@ export function createDaemonApp(options: {
             return { workspace: body.workspace, ...value, cached: false };
           } finally { lease.release({ turnContinues: false }); slots.finishTurn(leaseId); }
         })();
-        driveNextRuns.set(body.workspace, run);
+        driveNextRuns.set(pendingKey, run);
         try { return json(await run); }
         catch (error) { return apiError("provider_error", error instanceof Error ? error.message : "Could not propose next work", 502); }
-        finally { driveNextRuns.delete(body.workspace); }
+        finally { driveNextRuns.delete(pendingKey); }
       }
 
       if (request.method === "POST" && url.pathname === "/v1/drive/decide") {

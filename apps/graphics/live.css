@@ -2556,3 +2556,6 @@ button:disabled {
   border-radius: 6px;
   overflow: hidden;
 }
+
+/* Keep the rounded composer edge in one raster layer during adjacent panel updates. */
+.composer { transform: translateZ(0); }

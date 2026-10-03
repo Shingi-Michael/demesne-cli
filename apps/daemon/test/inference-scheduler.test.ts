@@ -349,3 +349,22 @@ test("each provider has its own slots, so one model server never waits behind an
   schedulers.finishTurn("turn");
   await schedulers.close();
 });
+
+test("provider-specific slots allow three Qwen requests while preserving single-slot peers", async () => {
+  const schedulers = new InferenceSchedulers(new InferenceScheduler(3), "qwen", { qwen: 3 }, 1);
+  const signal = new AbortController().signal;
+  const leases = await Promise.all([1, 2, 3].map(i => schedulers.for("qwen").acquire(`q${i}`, signal)));
+  const fourth = schedulers.for("qwen").acquire("q4", signal);
+  expect(schedulers.for("qwen").activeCount).toBe(3);
+  expect(schedulers.for("qwen").queuedCount).toBe(1);
+  const cloud = await schedulers.for("cloud").acquire("cloud", signal);
+  expect(schedulers.for("cloud").capacity).toBe(1);
+  expect(schedulers.capacities).toEqual({ qwen: 3, cloud: 1 });
+  leases[0]!.release({ turnContinues: false });
+  (await fourth).release({ turnContinues: false });
+  for (const lease of leases.slice(1)) lease.release({ turnContinues: false });
+  cloud.release({ turnContinues: false });
+  await schedulers.close();
+  expect(() => new InferenceSchedulers(new InferenceScheduler(1), "cloud", { qwen: 0 })).toThrow("between 1 and 1024");
+  expect(() => new InferenceSchedulers(new InferenceScheduler(1), "qwen", { qwen: 3 })).toThrow("Primary scheduler");
+});

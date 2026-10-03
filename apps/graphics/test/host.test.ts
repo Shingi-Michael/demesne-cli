@@ -180,3 +180,11 @@ test("clicking around the graphics UI never pauses Drive; writing or sending doe
     await f.close();
   }
 });
+
+test("the displayed context follows the active daemon model, not the primary provider's config", async () => {
+  const f = await fixture({ providerId: "cloud", modelId: "cloud-model", contextCapacity: 272000,
+    async listModels() { return []; }, async *stream() { yield { type: "text_delta", delta: "Ready" }; yield { type: "finish", reason: "stop" }; } });
+  const h = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
+  try { await h.connect(); expect(h.snapshot().model.contextWindow).toBe(272000); }
+  finally { h.dispose(); await f.close(); }
+});

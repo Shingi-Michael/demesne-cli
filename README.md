@@ -271,6 +271,7 @@ Restart the daemon after changing provider settings: `demesne daemon stop`, then
 - **Any endpoint.** Demesne talks to any OpenAI-compatible API. Set `api_key` (or `DEMESNE_API_KEY`) when the endpoint needs one.
 - **HTTPS rule.** Plain HTTP is allowed only on your own machine. A remote endpoint must use HTTPS, except a single Tailscale address you opt into with `allow_http_endpoint`.
 - **More than one provider.** Add endpoints under `[additional_providers.<name>]`, then use `/model` to switch between every model they offer.
+- **Concurrency per provider.** `inference_slots` at the top level remains the default. Set `inference_slots = 3` inside a particular provider table to allow three requests to that server while other providers keep their limits. Match it to the server's actual slot count and set `context_window` to the capacity of **each** slot. `/v1/status` reports `providerInferenceSlots`. For the tested Qwen setup, three 32,768-token slots use a 98,304-token total server context; the daemon uses an 8,192-token output reserve.
 
 **Per-turn limits.** Each request gets 64 model rounds and 256 tool calls by default. When a limit is reached, the model reports what it finished and what is left, and the turn is marked interrupted rather than complete.
 

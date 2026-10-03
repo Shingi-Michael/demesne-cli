@@ -401,6 +401,7 @@ export interface DaemonStatusResponse {
   provider: string;
   model: string;
   inferenceSlots: number;
+  providerInferenceSlots?: Record<string, number>;
   activeInferences: number;
   queuedInferences: number;
   active: ActiveSessionStatus[];

@@ -2402,3 +2402,11 @@ button:disabled {
   flex: 1;
   min-height: 0;
 }
+/* Drive memory rows in Session: the text takes the row, Forget sits at the edge. */
+.memory-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

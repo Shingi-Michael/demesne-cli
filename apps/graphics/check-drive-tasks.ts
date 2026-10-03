@@ -197,12 +197,23 @@ async function capture(name: string) {
 try {
   await app.after(0);
   await state((s) => s.live?.connection === "online");
+  // A standing note for Drive's project memory, shown in Session.
+  app.paste("/drive remember Keep the CLI clean");
+  await key("\r");
+  await state((s) => s.live.driveMemory?.some((item: any) => item.text === "Keep the CLI clean" && item.source === "you"), "remembered note");
   app.paste("/drive --bounded Verify the fixture check");
   await key("\r");
   await state((s) => s.live.approvals === 1, "Drive worker approval");
   // Approving the tool is not a takeover: Drive keeps running on its own.
   await click("permission", { decision: "allow_once" });
   await eventually(()=>journal()?.status === "completed",20000);
+  // The verified task is recorded in project memory for later missions.
+  await state((s) => s.live.driveMemory?.some((item: any) => item.kind === "outcome" && item.source === "drive"), "recorded outcome");
+  await key("\x1bj");
+  await click("panel", { name: "history" });
+  await state((s) => s.live.pane === "history");
+  await capture("session-memory");
+  await closePanel();
   await key("\x1bj");
   await state(
     (s) =>

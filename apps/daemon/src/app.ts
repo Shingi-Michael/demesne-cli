@@ -93,6 +93,7 @@ export function createDaemonApp(options: {
   authToken?: string;
   version?: string;
   inferenceSlots?: number;
+  providerInferenceSlots?: Record<string, number>;
   allowlistPath?: string;
   mcpServers?: Record<string, McpServerConfig>;
   images?: ImageGenerationConfig;
@@ -120,13 +121,14 @@ export function createDaemonApp(options: {
   const permissions = new PermissionBroker(allowlist);
   const questions = new QuestionBroker();
   const inferenceSlots = options.inferenceSlots ?? 1;
+  const primarySlots = options.providerInferenceSlots?.[processor.providerId] ?? inferenceSlots;
   const runtimeProfile = processor.runtimeStatus?.().profile;
-  if (runtimeProfileRequiresSingleInferenceSlot(runtimeProfile) && inferenceSlots !== 1) {
+  if (runtimeProfileRequiresSingleInferenceSlot(runtimeProfile) && primarySlots !== 1) {
     store.close();
     throw new Error(`The ${runtimeProfile} runtime profile requires one inference slot`);
   }
   const subagentModels = () => processor.availableModels?.() ?? [{ id: processor.modelId, provider: processor.providerId }];
-  const scheduler = new InferenceSchedulers(new InferenceScheduler(inferenceSlots, undefined, options.inferenceBoundaryHook), processor.providerId);
+  const scheduler = new InferenceSchedulers(new InferenceScheduler(primarySlots, undefined, options.inferenceBoundaryHook), processor.providerId, options.providerInferenceSlots, inferenceSlots);
   const tools = new ToolRegistry();
   if (options.providerVision || options.images?.model || Object.keys(options.mcpServers ?? {}).length) {
     tools.register(viewImageTool());
@@ -393,7 +395,8 @@ export function createDaemonApp(options: {
           ...(options.version ? { version: options.version } : {}),
           provider: processor.providerId,
           model: processor.modelId,
-          inferenceSlots,
+          inferenceSlots: scheduler.capacityFor(processor.providerId),
+          providerInferenceSlots: scheduler.capacities,
           activeInferences: scheduler.activeCount,
           queuedInferences: scheduler.queuedCount,
           active: store.listActiveTurns().map((entry) => ({

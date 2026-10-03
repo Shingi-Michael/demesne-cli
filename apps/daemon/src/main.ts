@@ -30,6 +30,14 @@ const { config, files: configFiles } = loadDaemonConfig();
 const host = parseHost(config.daemon.host ?? "127.0.0.1");
 const port = config.daemon.port ?? 7337;
 const inferenceSlots = config.inferenceSlots ?? 1;
+const providerInferenceSlots: Record<string, number> = {};
+for (const settings of [config.provider, ...Object.values(config.additionalProviders ?? {})]) {
+  const id = settings.auth === "chatgpt" ? "ChatGPT" : settings.id ?? "openai-compatible";
+  const slots = settings.inferenceSlots ?? inferenceSlots;
+  if (runtimeProfileRequiresSingleInferenceSlot(settings.runtimeProfile) && slots !== 1) throw new Error(`${id}'s runtime profile requires one inference slot`);
+  if (providerInferenceSlots[id] !== undefined && providerInferenceSlots[id] !== slots) throw new Error(`Conflicting inference slots for provider ${id}`);
+  providerInferenceSlots[id] = slots;
+}
 const configuredRuntimeProfile = config.provider.runtimeProfile;
 // A strict profile knows the context capacity it verifies, so it also knows the
 // cold prefill budget that capacity implies. Without this floor the 180,000 ms
@@ -54,7 +62,7 @@ if (
       + "Near-capacity requests may be aborted before the model emits its first event.",
   );
 }
-if (runtimeProfileRequiresSingleInferenceSlot(configuredRuntimeProfile) && inferenceSlots !== 1) {
+if (runtimeProfileRequiresSingleInferenceSlot(configuredRuntimeProfile) && (config.provider.inferenceSlots ?? inferenceSlots) !== 1) {
   throw new Error(`provider.runtime_profile=${configuredRuntimeProfile} requires inference_slots=1`);
 }
 const dataDirectory = prepareDataDirectory(config.dataDir);
@@ -69,6 +77,7 @@ try {
     authToken: loadDaemonToken(dataDirectory),
     version: VERSION,
     inferenceSlots,
+    providerInferenceSlots,
     allowlistPath: process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(),
     mcpServers: config.mcp.servers,
     images: config.images,

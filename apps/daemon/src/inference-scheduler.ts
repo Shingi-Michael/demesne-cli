@@ -270,18 +270,27 @@ export class InferenceScheduler {
 /// One scheduler per provider, so separate model servers never queue behind
 /// each other: a sub-agent on a local model can run while the main turn's
 /// cloud model is busy. The primary provider keeps the configured boundary
-/// hook (managed-runtime recycling); every other provider gets the same slot
+/// hook (managed-runtime recycling); each provider can override the default slot
 /// count. With a single provider this is exactly one scheduler.
 export class InferenceSchedulers {
   private readonly others = new Map<string, InferenceScheduler>();
   private closed = false;
 
-  constructor(readonly primary: InferenceScheduler, private readonly primaryProviderId: string) {}
+  constructor(readonly primary: InferenceScheduler, private readonly primaryProviderId: string,
+    private readonly overrides: Readonly<Record<string, number>> = {}, private readonly defaultCapacity = primary.capacity) {
+    for (const capacity of [defaultCapacity, ...Object.values(overrides)]) {
+      if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 1024) throw new Error("Provider inference slots must be between 1 and 1024");
+    }
+    if (overrides[primaryProviderId] !== undefined && overrides[primaryProviderId] !== primary.capacity) throw new Error("Primary scheduler capacity does not match its provider override");
+  }
+
+  capacityFor(providerId: string): number { return providerId === this.primaryProviderId ? this.primary.capacity : this.overrides[providerId] ?? this.defaultCapacity; }
+  get capacities(): Record<string, number> { return { ...this.overrides, [this.primaryProviderId]: this.primary.capacity, ...Object.fromEntries([...this.others].map(([id, scheduler]) => [id, scheduler.capacity])) }; }
 
   for(providerId: string): InferenceScheduler {
     if (providerId === this.primaryProviderId || this.closed) return this.primary;
     let scheduler = this.others.get(providerId);
-    if (!scheduler) this.others.set(providerId, scheduler = new InferenceScheduler(this.primary.capacity));
+    if (!scheduler) this.others.set(providerId, scheduler = new InferenceScheduler(this.capacityFor(providerId)));
     return scheduler;
   }
 

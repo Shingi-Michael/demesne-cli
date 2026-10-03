@@ -35,6 +35,12 @@ for (const weight of [400, 500])
     join(fontRoot, `jetbrains-mono-latin-${weight}-normal.woff2`),
     join(fontOut, `jetbrains-mono-latin-${weight}-normal.woff2`),
   );
+// KaTeX's stylesheet and fonts, at the path live.html links them from.
+const katexRoot = join(root, "node_modules/katex/dist"),
+  katexOut = join(out, "node_modules/katex/dist");
+mkdirSync(katexOut, { recursive: true });
+cpSync(join(katexRoot, "katex.min.css"), join(katexOut, "katex.min.css"));
+cpSync(join(katexRoot, "fonts"), join(katexOut, "fonts"), { recursive: true });
 const electronRoot = dirname(Bun.resolveSync("electron", root));
 rmSync(join(out, "runtime"), { recursive: true, force: true });
 cpSync(join(electronRoot, "dist"), join(out, "runtime"), {

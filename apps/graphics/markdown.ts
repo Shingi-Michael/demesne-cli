@@ -1,6 +1,7 @@
 import { marked, Renderer, type Token, type TokensList } from "marked";
 import DOMPurify from "dompurify";
 import hljs from "highlight.js/lib/common";
+import katex from "katex";
 
 const escape = (value: string) =>
   value.replace(
@@ -12,7 +13,48 @@ const escape = (value: string) =>
   );
 const renderer = new Renderer();
 renderer.html = (token) => escape(token.text);
-const options = { async: false as const, gfm: true, renderer };
+
+/// Math, the way models write it: $…$ and \(…\) inline, $$…$$ and \[…\]
+/// displayed. Parsed before Markdown can eat the backslashes, never inside
+/// code, and $ only pairs like TeX ($x$, not "$5 and $10"). The renderer
+/// leaves a placeholder; KaTeX fills it after sanitizing (see decorate).
+const mathPlaceholder = (tex: string, display: boolean) =>
+  `<span class="math" data-math="${escape(tex.trim())}"${display ? ' data-display="1"' : ""}></span>`;
+const INLINE_MATH = [
+  { pattern: /^\$\$([\s\S]+?)\$\$/, display: true },
+  { pattern: /^\\\[([\s\S]+?)\\\]/, display: true },
+  { pattern: /^\\\(([\s\S]+?)\\\)/, display: false },
+  { pattern: /^\$(?![\s$])((?:\\\$|[^$\n])+?)(?<!\s)\$(?!\d)/, display: false },
+];
+marked.use({
+  extensions: [
+    {
+      name: "mathBlock",
+      level: "block",
+      start: (src: string) => src.match(/^ {0,3}(?:\$\$|\\\[)/m)?.index,
+      tokenizer(src: string) {
+        const match = /^ {0,3}(?:\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\])[ \t]*(?:\n|$)/.exec(src);
+        if (match) return { type: "mathBlock", raw: match[0], text: match[1] ?? match[2] ?? "" };
+      },
+      renderer: (token) => `<p>${mathPlaceholder(String(token.text), true)}</p>`,
+    },
+    {
+      name: "mathInline",
+      level: "inline",
+      start: (src: string) => src.match(/\$|\\[([]/)?.index,
+      tokenizer(src: string) {
+        for (const { pattern, display } of INLINE_MATH) {
+          const match = pattern.exec(src);
+          if (match) return { type: "mathInline", raw: match[0], text: match[1]!, display };
+        }
+      },
+      renderer: (token) => mathPlaceholder(String(token.text), Boolean(token.display)),
+    },
+  ],
+});
+// From marked's defaults, which carry the math extensions registered above:
+// lexer() and parser() use exactly the options they are given.
+export const options = { ...marked.defaults, async: false as const, gfm: true, renderer };
 function decorate(parsed: string): string {
   const safe = DOMPurify.sanitize(parsed, {
     ALLOWED_TAGS: [
@@ -41,11 +83,22 @@ function decorate(parsed: string): string {
       "td",
       "a",
       "hr",
+      "span",
+      "input",
     ],
-    ALLOWED_ATTR: ["href", "title", "class", "start"],
+    ALLOWED_ATTR: ["href", "title", "class", "start", "data-math", "data-display", "type", "checked", "disabled"],
   });
   const wrapper = document.createElement("div");
   wrapper.innerHTML = safe;
+  // Task-list boxes are display-only.
+  for (const box of wrapper.querySelectorAll("input"))
+    if (box.type !== "checkbox") box.remove();
+    else box.disabled = true;
+  for (const element of wrapper.querySelectorAll<HTMLElement>("[data-math]")) {
+    const display = element.dataset.display === "1";
+    // A formula KaTeX cannot parse stays readable as its source.
+    katex.render(element.dataset.math ?? "", element, { displayMode: display, throwOnError: false, output: "html", strict: "ignore", trust: false });
+  }
   for (const block of wrapper.querySelectorAll("pre")) {
     const code = block.querySelector("code");
     if (!code) continue;

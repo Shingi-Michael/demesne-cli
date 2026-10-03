@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@demesne/brand": "workspace:*",
+    "@demesne/chatgpt-auth": "workspace:*",
     "@demesne/client": "workspace:*",
     "@demesne/config": "workspace:*",
     "@demesne/protocol": "workspace:*",
@@ -15,7 +16,7 @@
     "dompurify": "3.4.16",
     "electron": "44.5.1",
     "highlight.js": "11.12.0",
-    "marked": "18.0.14",
-    "@demesne/chatgpt-auth": "workspace:*"
+    "katex": "0.19.0",
+    "marked": "18.0.14"
   }
 }

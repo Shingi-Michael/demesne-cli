@@ -18,6 +18,8 @@ describe("probeProvider", () => {
       id: "qwen3.8-8k-b256",
       provider: "lmstudio",
       contextWindow: 8192,
+      reasoningLevels: ["off", "on"],
+      defaultReasoningLevel: "on",
     }]);
   });
 

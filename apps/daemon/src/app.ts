@@ -281,6 +281,7 @@ export function createDaemonApp(options: {
           status: "ok",
           provider: processor.providerId,
           model: processor.modelId,
+          ...(processor.reasoning ? { reasoning: processor.reasoning } : {}),
           // Reported so a client can show the configured window even when the
           // model server is down and /v1/models cannot be served.
           ...(processor.contextCapacity !== undefined ? { contextCapacity: processor.contextCapacity } : {}),
@@ -432,9 +433,13 @@ export function createDaemonApp(options: {
           return apiError("invalid_request", "model must be a non-empty string", 400);
         }
         const modelName = body.model.trim();
+        const reasoning = body.reasoning;
+        if (reasoning !== undefined && (typeof reasoning !== "string" || !/^[a-z]{1,16}$/.test(reasoning))) {
+          return apiError("invalid_request", "reasoning must be a thinking level such as off, low or high", 400);
+        }
         if (processor && typeof processor.setModel === "function") {
-          processor.setModel(modelName);
-          return json({ status: "ok", model: modelName });
+          processor.setModel(modelName, reasoning);
+          return json({ status: "ok", model: modelName, ...(reasoning ? { reasoning } : {}) });
         }
         return apiError("not_supported", "Model switching is not supported by this processor", 400);
       }

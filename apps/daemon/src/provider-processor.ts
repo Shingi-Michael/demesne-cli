@@ -9,11 +9,12 @@ import type { RuntimeProfileStatus } from "@demesne/protocol";
 import type { RuntimeProfileVerifier } from "./ollama-runtime.ts";
 import type { InferenceOverrides, StreamOptions, TurnInference, TurnProcessor } from "./processor.ts";
 
-type ProviderRequestDefaults = Pick<ProviderRequest, "maxOutputTokens" | "temperature" | "seed">;
+type ProviderRequestDefaults = Pick<ProviderRequest, "maxOutputTokens" | "temperature" | "seed" | "reasoningLevel">;
 
 export class ProviderTurnProcessor implements TurnProcessor {
   readonly providerId: string;
   private currentModelId: string;
+  private currentReasoning: string | undefined;
   private modelGeneration = 0;
   private readonly discoveredContextCapacities = new Map<string, number>();
   private readonly allowedModelIds: ReadonlySet<string> | undefined;
@@ -39,11 +40,16 @@ export class ProviderTurnProcessor implements TurnProcessor {
     return this.currentModelId;
   }
 
-  setModel(modelId: string): void {
+  get reasoning(): string | undefined {
+    return this.currentReasoning;
+  }
+
+  setModel(modelId: string, reasoning?: string): void {
     if (this.allowedModelIds && !this.allowedModelIds.has(modelId)) {
       throw new Error(`Model is not allowed by this daemon: ${modelId}`);
     }
     this.currentModelId = modelId;
+    this.currentReasoning = reasoning;
     this.modelGeneration += 1;
     this.runtimeVerifier?.reset();
   }
@@ -92,6 +98,9 @@ export class ProviderTurnProcessor implements TurnProcessor {
     const modelGeneration = this.modelGeneration;
     const profile = this.runtimeVerifier?.status().profile ?? null;
     const requestDefaults = { ...this.requestDefaults };
+    // The chosen thinking level belongs to the selected model; another model
+    // (a sub-agent's) runs at its own default.
+    if (model === this.currentModelId && this.currentReasoning) requestDefaults.reasoningLevel = this.currentReasoning;
     // A cap only ever lowers the configured output limit.
     if (overrides?.maxOutputTokens) requestDefaults.maxOutputTokens = Math.min(requestDefaults.maxOutputTokens ?? overrides.maxOutputTokens, overrides.maxOutputTokens);
     const contextCapacity = this.effectiveContextCapacity(model);
@@ -134,7 +143,8 @@ export class ProviderTurnProcessor implements TurnProcessor {
     yield* this.streamModel(
       inference.modelId,
       this.modelGeneration,
-      { maxOutputTokens: inference.maxOutputTokens, temperature: inference.temperature, seed: inference.seed },
+      { maxOutputTokens: inference.maxOutputTokens, temperature: inference.temperature, seed: inference.seed,
+        ...(this.currentReasoning ? { reasoningLevel: this.currentReasoning } : {}) },
       messages,
       tools,
       signal,

@@ -119,6 +119,8 @@ describe("OpenAICompatibleProvider", () => {
         id: "qwen3:14b",
         provider: "ollama",
         contextWindow: 8_192,
+        reasoningLevels: ["off", "on"],
+        defaultReasoningLevel: "on",
       }]);
       expect(showRequest).toBeUndefined();
     } finally {
@@ -143,6 +145,8 @@ describe("OpenAICompatibleProvider", () => {
       id: "qwen3:14b",
       provider: "ollama",
       contextWindow: 40_960,
+      reasoningLevels: ["off", "on"],
+      defaultReasoningLevel: "on",
     }]);
   });
 
@@ -288,6 +292,37 @@ describe("OpenAICompatibleProvider", () => {
     }
 
     expect(body?.reasoning_effort).toBe("low");
+  });
+
+  test("a chosen thinking level maps to each server's switch", async () => {
+    const send = async (baseUrl: string, reasoningLevel: string, providerId?: string) => {
+      let body: Record<string, unknown> = {};
+      const provider = new OpenAICompatibleProvider({ baseUrl, ...(providerId ? { providerId } : {}), fetch: (async (_input: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response("data: [DONE]\n\n");
+      }) as unknown as typeof fetch });
+      for await (const _event of provider.stream({ model: "qwen3.8-27b", messages: [{ role: "user", content: "Hi" }], reasoningLevel }, new AbortController().signal)) { /* consume */ }
+      return body;
+    };
+    // llama.cpp / LM Studio: Qwen's template switch.
+    expect((await send("http://localhost:8081/v1", "off")).chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect((await send("http://localhost:8081/v1", "on")).chat_template_kwargs).toEqual({ enable_thinking: true });
+    // Ollama: its think flag.
+    const ollama = await send("http://localhost:11434/v1", "off", "ollama");
+    expect(ollama.think).toBe(false); expect(ollama).not.toHaveProperty("chat_template_kwargs");
+    // OpenRouter: the effort, or reasoning off.
+    expect((await send("https://openrouter.ai/api/v1", "high")).reasoning).toEqual({ effort: "high" });
+    expect((await send("https://openrouter.ai/api/v1", "off")).reasoning).toEqual({ effort: "none" });
+  });
+
+  test("models list their thinking levels: Qwen-style off/on, OpenRouter efforts when it supports reasoning", async () => {
+    const list = async (baseUrl: string, data: unknown[]) => new OpenAICompatibleProvider({ baseUrl, fetch: (async () => Response.json({ data })) as unknown as typeof fetch }).listModels();
+    expect(await list("http://localhost:8081/v1", [{ id: "qwen3.8-27b" }, { id: "llama-3" }])).toEqual([
+      { id: "qwen3.8-27b", provider: "openai-compatible", reasoningLevels: ["off", "on"], defaultReasoningLevel: "on" },
+      { id: "llama-3", provider: "openai-compatible" },
+    ]);
+    const routed = await list("https://openrouter.ai/api/v1", [{ id: "a/think", supported_parameters: ["tools", "reasoning"] }, { id: "b/plain", supported_parameters: ["tools"] }]);
+    expect(routed.map((model) => [model.id, model.reasoningLevels])).toEqual([["a/think", ["off", "low", "medium", "high"]], ["b/plain", undefined]]);
   });
 
   test("rejects cleartext non-loopback endpoints", () => {

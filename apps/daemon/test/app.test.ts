@@ -1799,6 +1799,29 @@ describe("Demesne daemon", () => {
     expect(postHealth.model).toBe("qwen3:14b-fast");
   });
 
+  test("a thinking level travels with the model choice and is reported", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let currentModel = "initial-model", currentReasoning: string | undefined;
+    const processor: TurnProcessor = {
+      providerId: "test-provider",
+      get modelId() { return currentModel; },
+      get reasoning() { return currentReasoning; },
+      setModel(modelId: string, reasoning?: string) { currentModel = modelId; currentReasoning = reasoning; },
+      async listModels() { return [{ id: currentModel, provider: this.providerId }]; },
+      async *stream() { yield { type: "text_delta" as const, delta: "ok" }; },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    expect(await jsonRequest<Record<string, string>>(running.url, "/v1/model", { method: "POST", body: JSON.stringify({ model: "astra", reasoning: "high" }) }))
+      .toEqual({ status: "ok", model: "astra", reasoning: "high" });
+    expect(await jsonRequest<{ reasoning?: string }>(running.url, "/healthz")).toMatchObject({ model: "astra", reasoning: "high" });
+    // Switching without a level returns the model to its default.
+    await jsonRequest(running.url, "/v1/model", { method: "POST", body: JSON.stringify({ model: "astra" }) });
+    expect(await jsonRequest<{ reasoning?: string }>(running.url, "/healthz")).not.toHaveProperty("reasoning");
+    const rejected = await fetch(new URL("/v1/model", running.url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "astra", reasoning: "MAX!" }) });
+    expect(rejected.status).toBe(400);
+  });
+
   test("does not persist a turn when processor configuration cannot be snapshotted", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

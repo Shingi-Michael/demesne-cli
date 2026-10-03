@@ -302,9 +302,18 @@ try {
       await click("close-panel");
       await state((s) => !s.live.pane);
     }
+    // Drill-downs open from their place: Checks from Review, Image from
+    // Files; the step log also opens with Ctrl+B.
     if (pane === "log") await key("\x02");
     else if (pane === "verification") {
+      // Wait for Review before the next click: opening it reflows the page.
+      await click("panel", { name: "changes" });
+      await state((s) => s.live.pane === "changes");
       await click("panel", { name: "verification" });
+    } else if (pane === "preview") {
+      await click("panel", { name: "files" });
+      await state((s) => s.live.pane === "files");
+      await click("panel", { name: "preview" });
     } else await click("panel", { name: pane });
     await state((s) => s.live.pane === pane);
     if (pane === "changes")

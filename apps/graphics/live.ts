@@ -797,12 +797,26 @@ function selectedRun() {
   }
   return state?.runs.find((run) => run.id === paneTurn) ?? state?.runs.at(-1);
 }
-function panelHeader(label: string, subject = "", meta = "") {
-  return `<div class="panel-heading"><span class="label">${label}</span><span class="subject">${h(subject)}</span><span class="meta">${meta}</span>${btn("close-panel", "×", {}, "", true)}</div>`;
+/// Every view's header: its title, one line of subject, and ×. A drill-down
+/// (Checks, Steps, Image, Context) leads with a link back to its place.
+function panelHeader(title: string, subject = "", back?: { name: PaneName; label: string }) {
+  return `<div class="panel-heading">${back ? btn("panel", `‹ ${back.label}`, { name: back.name }, "back", true) : ""}<strong class="title">${h(title)}</strong><span class="subject">${h(subject)}</span>${btn("close-panel", "×", {}, "close", true)}</div>`;
 }
-function panelFooter(hints: string, extra = "") {
-  return `<div class="panel-footer">${hints}${btn("close-panel", `${k("Esc")} close`, {}, "", true)}<span class="right">${extra}</span></div>`;
-}
+/// The panel's four places. Each view belongs to one; the rail lights it.
+const RAIL_ICON = (path: string) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+const PLACES = [
+  { name: "changes", label: "Review", views: ["changes", "verification", "log"], icon: RAIL_ICON('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h11"/>') },
+  { name: "files", label: "Files", views: ["files", "preview"], icon: RAIL_ICON('<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/>') },
+  { name: "drive", label: "Drive", views: ["drive"], icon: RAIL_ICON('<path d="M7 5l11 7-11 7z"/>') },
+  { name: "history", label: "Session", views: ["history", "context"], icon: RAIL_ICON('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>') },
+] as const;
+/// `bun run check`, not `/opt/homebrew/Cellar/bun/1.4.0/bin/bun run check`.
+const commandLabel = (argv: readonly string[]) => [String(argv[0] ?? "").split("/").pop(), ...argv.slice(1)].join(" ");
+/// A path inside the workspace, relative to it.
+const workspacePath = (path: string) => {
+  const root = state!.workspace.replace(/\/$/, "");
+  return path === root ? "" : path.startsWith(root + "/") ? path.slice(root.length + 1) : path;
+};
 const filesView = new FilesView({
   request: api,
   attach: (text) =>
@@ -1374,24 +1388,11 @@ function renderPanels() {
   }
   renderStatus();
   el("panel").hidden = !pane;
-  el("rail").hidden =
-    Boolean(pane && pane !== "changes") || !inSession();
-  const railHTML = `<span class="rail-state ${state.activeTurnId ? "running" : ""}"></span><hr>${(
-    [
-      ["files", "≡", "Files"],
-      ["changes", "╪", "Changes"],
-      ["verification", "✓", "Verification"],
-      ["preview", "▣", "Preview"],
-      ["drive", "▷", "Agent Drive"],
-      ["history", "◷", "History"],
-      ["context", "◉", "Context"],
-    ] as const
-  )
-    .map(
-      ([name, icon, label]) =>
-        `<button type="button" class="${pane === name ? "active" : ""}" title="${label}" aria-label="${label}" data-action="panel" data-args="${h(JSON.stringify({ name }))}" data-drive="panel-${name}">${icon}${name === "drive" && state!.drive && ["running", "waiting", "blocked"].includes(state!.drive.status) ? '<img class="dot" src="assets/rail-badge.svg" alt="">' : ""}</button>`,
-    )
-    .join("")}`;
+  el("rail").hidden = !inSession();
+  const railHTML = `<span class="rail-state ${state.activeTurnId ? "running" : ""}"></span><hr>${PLACES.map(
+    (place) =>
+      `<button type="button" class="${(place.views as readonly string[]).includes(pane ?? "") ? "active" : ""}" title="${place.label}" aria-label="${place.label}" data-action="panel" data-args="${h(JSON.stringify({ name: place.name }))}" data-drive="panel-${place.name}">${place.icon}<span>${place.label}</span>${place.name === "drive" && state!.drive && ["running", "waiting", "blocked"].includes(state!.drive.status) ? '<img class="dot" src="assets/rail-badge.svg" alt="">' : ""}</button>`,
+  ).join("")}`;
   if (railHTML !== railSignature) {
     railSignature = railHTML;
     el("rail").innerHTML = railHTML;
@@ -1483,91 +1484,73 @@ function renderPanels() {
     body = "",
     footer = "";
   if (pane === "files") {
-    const changed = state.files.filter((file) => file.status?.trim());
+    const changed = state.files.filter((file) => file.status?.trim()),
+      images = state.artifacts.filter((image) => image.source.name !== "reference_import");
     header = panelHeader(
-      "FILES",
-      state.workspace,
-      `${state.files.length} files · ${changed.length} changed`,
+      "Files",
+      [state.workspace.split("/").pop(), `${state.files.length} files`, changed.length ? `${changed.length} changed` : ""].filter(Boolean).join(" · "),
     );
-    body = '<div id="files-mount"></div>';
-    footer = `<div class="panel-footer">${k("Ctrl+F")} find ${k("Ctrl+L")} line ${k("Esc")} back/close ${btn("close-panel", "Close", {}, "right", true)}</div>`;
+    body = (images.length ? `<div class="panel-actions">${btn("panel", `Images ${images.length} ›`, { name: "preview" }, "", true)}</div>` : "") + '<div id="files-mount"></div>';
   }
 
   if (pane === "history") {
-    header = panelHeader(
-      "HISTORY",
-      state.session?.title ?? "Sessions",
-      `${state.runs.length} turns`,
-    );
-    body = `<div class="panel-section">THIS SESSION <span>newest first</span></div>${[
-      ...state.runs,
-    ]
-      .reverse()
-      .map((item, index) =>
-        btn(
-          "jump-turn",
-          `<span class="muted">${item.number}</span><span class="${tone(item.status)}">${mark(item.status)}</span><span class="name">${h(item.content)}</span><span class="right">${active(item) ? "running" : duration(item.receipt?.durationMs)}</span>`,
-          { id: item.id, index },
-          `panel-row ${index === paneIndex ? "selected" : ""}`,
-          true,
-        ),
-      )
-      .join(
-        "",
-      )}<div class="panel-section">RECENT SESSIONS <span>/sessions for all</span></div>${state.sessions
-      .filter((item) => item.id !== state!.session?.id && item.turns > 0)
-      .slice(0, 12)
-      .map((item) =>
-        btn(
-          "select-session",
-          `<span class="muted">→</span><span class="name">${h(item.title)}</span><span class="right">${item.turns} turns &nbsp; ${age(item.updatedAt)}</span>`,
-          { id: item.id },
-          "panel-row",
-          true,
-        ),
-      )
-      .join("")}`;
-    footer = panelFooter(`${k("↑↓")} select ${k("Enter")} jump to turn`);
+    const c = context(),
+      usage = state.provider?.usage,
+      metrics = state.provider?.metrics,
+      rate = usage?.outputTokens != null && metrics?.durationMs ? usage.outputTokens / (metrics.durationMs / 1000) : null,
+      cached = usage?.cachedInputTokens != null && usage.inputTokens ? Math.round((100 * usage.cachedInputTokens) / usage.inputTokens) : null;
+    header = panelHeader("Session", state.session?.title ?? "");
+    body =
+      `<div class="panel-actions">${btn("overlay", "Rename", { name: "rename" })}${btn("compact", "Compact")}${btn("new-session", "New session")}</div>` +
+      `<div class="panel-section">CONTEXT ${btn("panel", "Details ›", { name: "context" }, "link", true)}</div><div class="session-context"><strong>${c.estimated ? "~" : ""}${num(c.used)}</strong><span class="muted"> of ${num(c.capacity)}${c.percentage == null ? "" : ` · ${c.percentage}%`}</span><div class="meter"><i style="--usage:${Math.min(100, c.percentage ?? 0)}%"></i></div></div>` +
+      `<div class="panel-section">MODEL ${btn("overlay", "Change", { name: "models" }, "link")}</div><div class="session-model"><span class="name">${h(state.model.displayName ?? state.model.id)}</span><span class="muted">${h(state.model.provider)}${state.reasoning ? ` · thinking ${h(state.reasoning)}` : ""}</span><small class="muted">${[rate != null ? `${rate.toFixed(1)} tok/s` : "", metrics?.timeToFirstTokenMs != null ? `first token ${(metrics.timeToFirstTokenMs / 1000).toFixed(1)}s` : "", cached != null ? `cached ${cached}%` : ""].filter(Boolean).join(" · ")}</small></div>` +
+      `<div class="panel-section">TURNS</div>${[...state.runs]
+        .reverse()
+        .map((item, index) =>
+          btn(
+            "jump-turn",
+            `<span class="muted">${item.number}</span><span class="${tone(item.status)}">${mark(item.status)}</span><span class="name">${h(item.content)}</span><span class="right">${active(item) ? "running" : duration(item.receipt?.durationMs)}</span>`,
+            { id: item.id, index },
+            `panel-row ${index === paneIndex ? "selected" : ""}`,
+            true,
+          ),
+        )
+        .join("")}` +
+      `<div class="panel-section">OTHER SESSIONS ${btn("overlay", "All ›", { name: "sessions" }, "link")}</div>${state.sessions
+        .filter((item) => item.id !== state!.session?.id && item.turns > 0)
+        .slice(0, 5)
+        .map((item) =>
+          btn(
+            "select-session",
+            `<span class="muted">→</span><span class="name">${h(item.title)}</span><span class="right">${age(item.updatedAt)}</span>`,
+            { id: item.id },
+            "panel-row",
+            true,
+          ),
+        )
+        .join("")}`;
   }
   if (pane === "context") {
-    header = panelHeader(
-      "CONTEXT",
-      `${state.model.id} · ${state.model.provider}`,
-      run ? `Turn ${run.number}` : "",
-    );
+    header = panelHeader("Context", `${state.model.id} · ${state.model.provider}`, { name: "history", label: "Session" });
     body = contextBody();
-    footer = panelFooter(
-      `${k("↑↓")} scroll`,
-      btn("compact", "/compact to free space"),
-    );
   }
   if (pane === "log") {
-    header = panelHeader(
-      "EXECUTION LOG",
-      run ? `Turn ${run.number}` : "",
-      run
-        ? `${logRecords(run).length} events · ${duration(run.receipt?.durationMs)}`
-        : "",
-    );
-    if (commandTab === "running")
-      header = panelHeader(
-        "COMMANDS",
-        state.session?.title ?? "Session",
-        `${state.processes.filter((command) => ["running", "stopping"].includes(command.status)).length} running`,
-      );
+    const running = state.processes.filter((command) => ["running", "stopping"].includes(command.status)).length;
+    header =
+      commandTab === "running"
+        ? panelHeader("Commands", `${running} running`, { name: "changes", label: "Review" })
+        : panelHeader("Steps", run ? `Turn ${run.number} · ${logRecords(run).length} steps · ${duration(run.receipt?.durationMs)}` : "", { name: "changes", label: "Review" });
     body =
-      `<div class="panel-tabs">${btn("command-tab", "Events", { tab: "events" }, commandTab === "events" ? "selected" : "")}${btn("command-tab", `Commands ${state.processes.filter((command) => ["running", "stopping"].includes(command.status)).length ? "●" : ""}`, { tab: "running" }, commandTab === "running" ? "selected" : "")}${btn("refresh-processes", "↻", {}, "right")}</div>` +
+      `<div class="panel-tabs">${btn("command-tab", "Steps", { tab: "events" }, commandTab === "events" ? "selected" : "")}${btn("command-tab", `Commands ${running ? "●" : ""}`, { tab: "running" }, commandTab === "running" ? "selected" : "")}${btn("refresh-processes", "↻", {}, "right")}</div>` +
       (commandTab === "running"
         ? commandsBody()
         : run
           ? logBody(run)
-          : '<div class="empty">No recorded events.</div>');
-    footer = panelFooter(`${k("↑↓")} select ${k("Enter")} open`);
+          : '<div class="empty">No recorded steps.</div>');
     if (commandTab === "events" && run && paneDetail !== null) {
       const all = logRecords(run),
         index = all.findIndex((entry) => entry.id === paneDetail);
-      header = `<div class="panel-heading">${btn("log-back", "‹ Log", {}, "electric", true)}<span class="muted">event ${index + 1} of ${all.length}</span><span class="meta">Turn ${run.number}</span></div>`;
-      footer = `<div class="panel-footer">${k("↑↓")} scroll ${btn("log-next", `${k("Tab")} next event`, {}, "", true)} ${btn("log-back", `${k("Esc")} back`, {}, "", true)}</div>`;
+      header = `<div class="panel-heading">${btn("log-back", "‹ Steps", {}, "back", true)}<strong class="title">Step ${index + 1} of ${all.length}</strong><span class="subject">Turn ${run.number}</span>${btn("log-next", "Next ›", {}, "link", true)}${btn("close-panel", "×", {}, "close", true)}</div>`;
     }
   }
   if (pane === "changes") {
@@ -1578,22 +1561,18 @@ function renderPanels() {
           removed: n.removed + f.removed,
         }),
         { added: 0, removed: 0 },
-      );
-    header = panelHeader(
-      "CHANGES",
-      reviewScope === "turn"
-        ? run
-          ? `Turn ${run.number}`
-          : ""
-        : reviewScope === "session"
-          ? "Whole session"
-          : "Workspace vs HEAD",
-      btn(
-        "expand-panel",
-        `${k("Alt+↵")} ${paneExpanded ? "restore" : "expand"}`,
       ),
+      checks = verificationChecks(),
+      busy = Boolean(state.activeTurnId || state.processes.some((c) => ["running", "stopping"].includes(c.status)));
+    header = panelHeader(
+      "Review",
+      [
+        reviewScope === "turn" ? (run ? `Turn ${run.number}` : "This turn") : reviewScope === "session" ? "Session" : "Workspace",
+        `${changes.length} ${changes.length === 1 ? "file" : "files"}`,
+        checks.length ? `checks ${verificationOverall(checks)}` : "",
+      ].filter(Boolean).join(" · "),
     );
-    const tabs = `<div class="panel-tabs">${(["turn", "session", "workspace"] as const).map((scope) => btn("review-scope", scope === "turn" ? "This turn" : scope === "session" ? "Session" : "Workspace", { scope }, scope === reviewScope ? "selected" : "")).join("")}${btn("refresh-review", "↻ Refresh", {}, "right")}</div>`;
+    const tabs = `<div class="panel-tabs">${(["turn", "session", "workspace"] as const).map((scope) => btn("review-scope", scope === "turn" ? "This turn" : scope === "session" ? "Session" : "Workspace", { scope }, scope === reviewScope ? "selected" : "")).join("")}${btn("refresh-review", reviewBusy ? "Refreshing…" : "↻", {}, "right")}</div>`;
     let code = "";
     if (file) {
       if (reviewMode !== "diff") {
@@ -1623,34 +1602,44 @@ function renderPanels() {
             .join("") || '<div class="empty">No textual changes.</div>';
       }
     }
+    const checksSection = `<div class="panel-section">CHECKS ${btn("panel", "Details ›", { name: "verification" }, "link", true)}</div>` + (checks.length
+      ? `${checks
+          .slice(0, 4)
+          .map((check, index) => {
+            const label = checkLabel(check);
+            return `<div class="check-row">${btn("open-check", `<span class="${label === "passed" ? "success" : label === "failed" ? "danger" : "amber"}">${label === "passed" ? "✓" : label === "failed" ? "×" : label === "running" ? "◌" : "·"}</span><span class="name">${h(commandLabel(check.argv))}</span><span class="muted">${label === "passed" ? "" : label}</span>`, { index }, "", true)}${check.id.startsWith("legacy:") ? "" : btn("rerun-check", "↻ Rerun", { id: check.id }, "link", false, busy)}</div>`;
+          })
+          .join("")}`
+      : '<div class="check-row muted">No checks run</div>');
     body =
       tabs +
       (reviewError
         ? `<div class="panel-error">${h(reviewError)} ${btn("refresh-review", "Retry")}</div>`
         : "") +
-      `<div class="summary-line"><span>${changes.length} files ${counts(total)}</span><span class="muted">${reviewBusy ? "Refreshing…" : reviewMeta ? `as of ${clock(reviewMeta.capturedAt)}` : ""}</span></div><div class="file-list">${changes.map((file, index) => btn("change-file", `<span class="${file.state === "applied" ? "success" : "muted"}">${file.state === "applied" ? "✓" : "·"}</span><span class="name">${pathHTML(file.path)}</span><span class="right">${h(file.state)}</span>${counts(file)}`, { index }, `panel-row ${index === paneIndex ? "selected" : ""}`, true)).join("")}</div>${file ? `<div class="file-header"><strong>${h(file.path)}</strong><span class="muted">${h(file.state)}</span>${counts(file)}</div><div class="panel-actions">${(["diff", "before", "after"] as const).map((mode) => btn("review-mode", mode === "diff" ? "Diff" : mode === "before" ? "Full before" : "Full after", { mode }, reviewMode === mode ? "selected" : "")).join("")}${btn("review-current", "Open current", { path: file.path })}${file.undo?.available ? btn("review-undo", "Undo file", { path: file.path, turnId: file.undo.turnId }, "danger") : ""}</div>${file.undo && !file.undo.available ? `<div class="panel-note">Undo unavailable: ${h(file.undo.reason)}</div>` : ""}<div class="diff-code">${file.unavailable && reviewMode === "diff" ? `<div class="empty">${h(file.unavailable)}</div>` : code}</div>` : '<div class="empty">No changes in this scope.</div>'}<div class="panel-note">${h(reviewMeta?.description ?? "")}${reviewMeta?.truncated ? " · Some diff content is omitted." : ""}</div>`;
-    footer = panelFooter(
-      `${k("←→")} files ${btn("hunk", `${k("[")} previous`, { direction: -1 })} ${btn("hunk", `${k("]")} next change`, { direction: 1 })}`,
-      btn("changes-live", `${k("Ctrl+G")} live`, {}, "", true),
-    );
+      checksSection +
+      `<div class="panel-section">FILES <span>${changes.length ? counts(total) : ""}</span></div><div class="file-list">${changes.map((file, index) => btn("change-file", `<span class="name">${pathHTML(file.path)}</span>${file.state === "applied" ? "" : `<span class="muted">${h(file.state)}</span>`}<span class="right"></span>${counts(file)}`, { index }, `panel-row ${index === paneIndex ? "selected" : ""}`, true)).join("")}</div>` +
+      (file
+        ? `<div class="panel-actions">${(["diff", "before", "after"] as const).map((mode) => btn("review-mode", mode === "diff" ? "Diff" : mode === "before" ? "Before" : "After", { mode }, reviewMode === mode ? "selected" : "")).join("")}${btn("review-current", "Open", { path: file.path })}${file.undo?.available ? btn("review-undo", "Undo file", { path: file.path, turnId: file.undo.turnId }, "danger right") : ""}</div>${file.undo && !file.undo.available ? `<div class="panel-note">Undo unavailable: ${h(file.undo.reason)}</div>` : ""}<div class="diff-code">${file.unavailable && reviewMode === "diff" ? `<div class="empty">${h(file.unavailable)}</div>` : code}</div>${reviewMeta?.truncated ? '<div class="panel-note">Some diff content is omitted.</div>' : ""}`
+        : '<div class="empty">No changes in this scope.</div>');
+    // The turn's step log, one row down; Ctrl+B opens it too.
+    footer = run
+      ? btn("panel", `▸ Steps <span class="muted">${logRecords(run).length} · ${duration(run.receipt?.durationMs)}</span>`, { name: "log" }, "panel-steps", true)
+      : "";
   }
   if (pane === "verification") {
     const checks = verificationChecks(),
       selected = checks[Math.min(paneIndex, Math.max(0, checks.length - 1))],
-      overall = verificationOverall(checks);
-    header = panelHeader(
-      "VERIFICATION",
-      paneTurn && run ? `Turn ${run.number}` : "Session checks",
-      `<span class="pill ${overall === "failed" ? "failed" : ""}">${overall}</span>`,
-    );
+      busy = Boolean(state.activeTurnId || state.processes.some((c) => ["running", "stopping"].includes(c.status)));
+    header = panelHeader("Checks", `${paneTurn && run ? `Turn ${run.number}` : "Session"} · ${verificationOverall(checks)}`, { name: "changes", label: "Review" });
+    const where = selected ? workspacePath(selected.cwd) : "";
     body =
       processError() +
-      `<div class="panel-actions">${btn("refresh-processes", "↻ Refresh")}${btn("rerun-failed", "Rerun failed", {}, "", false, Boolean(state.activeTurnId || state.processes.some((c) => ["running", "stopping"].includes(c.status)) || !checks.some((c) => c.status === "failed")))}<span class="muted">${state.checkQueue.length ? `${state.checkQueue.length} queued` : ""}</span></div>` +
+      `<div class="panel-actions">${btn("rerun-failed", "Rerun failed", {}, "", false, busy || !checks.some((c) => c.status === "failed"))}<span class="muted">${state.checkQueue.length ? `${state.checkQueue.length} queued` : ""}</span>${btn("refresh-processes", "↻", {}, "right")}</div>` +
       checks
         .map((check, index) =>
           btn(
             "check-select",
-            `<span class="${checkLabel(check) === "passed" ? "success" : checkLabel(check) === "failed" ? "danger" : "amber"}">${checkLabel(check) === "passed" ? "✓" : checkLabel(check) === "running" ? "◌" : "·"}</span><span class="name">${h(check.argv.join(" "))}</span><span class="right">${checkLabel(check)}</span>`,
+            `<span class="${checkLabel(check) === "passed" ? "success" : checkLabel(check) === "failed" ? "danger" : "amber"}">${checkLabel(check) === "passed" ? "✓" : checkLabel(check) === "failed" ? "×" : checkLabel(check) === "running" ? "◌" : "·"}</span><span class="name">${h(commandLabel(check.argv))}</span><span class="right">${checkLabel(check)}</span>`,
             { index },
             `panel-row ${index === paneIndex ? "selected" : ""}`,
             true,
@@ -1658,29 +1647,21 @@ function renderPanels() {
         )
         .join("") +
       (selected
-        ? `<div class="panel-detail"><div class="panel-note">${h(selected.cwd)}<br>${selected.completedAt ? `Ran ${clock(selected.completedAt)} · exit ${selected.exitCode ?? "—"}` : "Running…"}${selected.freshnessReason ? `<br>${h(selected.freshnessReason)}` : ""}</div><div class="panel-actions">${btn("command-open", "Open output", { id: selected.id }, "", true)}${selected.id.startsWith("legacy:") ? "" : btn("rerun-check", "Rerun this check", { id: selected.id }, "", false, Boolean(state.activeTurnId || state.processes.some((c) => ["running", "stopping"].includes(c.status))))}</div><pre class="output">${outputHTML((selected.stdout + "\n" + selected.stderr).trim().split("\n").slice(-20).join("\n") || (selected.outputLoaded === false ? "Loading recorded output…" : "No recorded output."), selected.cwd)}</pre>${selected.truncated ? '<small class="muted">Output is a bounded excerpt.</small>' : ""}</div>`
-        : '<div class="empty">Not run — no verification commands have been recorded.</div>') +
-      `<div class="panel-note">Freshness covers ${h(state.verificationFingerprint?.scope ?? "source files")}. ${state.verificationFingerprint?.reason ? h(state.verificationFingerprint.reason) : "Results become outdated when these files change."}</div>`;
-    footer = panelFooter(
-      `${k("↑↓")} select ${btn("check-output", `${k("Enter")} output`, {}, "", true)}`,
-    );
+        ? `<div class="panel-detail"><div class="panel-note">${where ? `${h(where)} · ` : ""}${selected.completedAt ? `ran ${clock(selected.completedAt)} · exit ${selected.exitCode ?? "—"}` : "running…"}${selected.freshness === "outdated" && selected.freshnessReason ? `<br>${h(selected.freshnessReason)}` : ""}</div><div class="panel-actions">${btn("command-open", "Open output", { id: selected.id }, "", true)}${selected.id.startsWith("legacy:") ? "" : btn("rerun-check", "Rerun", { id: selected.id }, "", false, busy)}</div><pre class="output">${outputHTML((selected.stdout + "\n" + selected.stderr).trim().split("\n").slice(-20).join("\n") || (selected.outputLoaded === false ? "Loading recorded output…" : "No recorded output."), selected.cwd)}</pre>${selected.truncated ? '<small class="muted">Output is a bounded excerpt.</small>' : ""}</div>`
+        : '<div class="empty">No checks have run.</div>');
   }
   if (pane === "preview") {
     const item = state.artifacts.find((image) => image.id === selectedImage),
       reference = state.artifacts.find((image) => image.id === referenceImage);
     header = panelHeader(
-      "PREVIEW",
-      previewPinned
-        ? "pinned"
-        : followImages
-          ? "following new images"
-          : "browsing history",
-      item ? `${item.width} × ${item.height} px` : "",
+      "Image",
+      [item?.filename, item ? `${item.width} × ${item.height}` : "", previewPinned ? "pinned" : followImages ? "following new" : ""].filter(Boolean).join(" · "),
+      { name: "files", label: "Files" },
     );
     body =
-      `<div class="panel-actions">${btn("preview-fit", "Fit", {}, previewFit ? "selected" : "")}${btn("preview-zoom", "100%", { zoom: 1 }, !previewFit && previewZoom === 1 ? "selected" : "")}${btn("preview-zoom", "−", { step: -0.25 })}${btn("preview-zoom", "+", { step: 0.25 })}${btn("preview-compare", previewCompare ? "Hide comparison" : "Compare", {}, previewCompare ? "selected" : "")}</div>` +
+      `<div class="panel-actions">${btn("follow-images", "Follow new", {}, followImages && !previewPinned ? "selected" : "")}${btn("preview-fit", "Fit", {}, previewFit ? "selected" : "")}${btn("preview-zoom", "100%", { zoom: 1 }, !previewFit && previewZoom === 1 ? "selected" : "")}${btn("preview-zoom", "−", { step: -0.25 })}${btn("preview-zoom", "+", { step: 0.25 })}${btn("preview-compare", previewCompare ? "Hide comparison" : "Compare", {}, previewCompare ? "selected" : "")}</div>` +
       (item
-        ? `<div class="panel-detail"><span>${h(item.filename)}</span><small class="muted">Recorded ${clock(item.createdAt)} · ${item.width} × ${item.height} image pixels · ${item.viewport ? `${item.viewport.width} × ${item.viewport.height} viewport` : "viewport not recorded"}</small></div><div class="preview-canvas" tabindex="0"><div class="preview-plane"><img class="preview-current" src="${h(previewData)}" alt="${h(item.filename)}" draggable="false">${previewCompare && referenceData ? `<img class="preview-reference" src="${h(referenceData)}" alt="Reference: ${h(reference?.filename)}" draggable="false">` : ""}</div></div>${previewCompare ? `<div class="compare-controls"><label>Reference opacity <input aria-label="Reference opacity" type="range" min="0" max="100" value="${previewOpacity}" id="reference-opacity"></label><span>${h(reference?.filename ?? "Choose a reference below")}${reference ? ` · ${reference.width} × ${reference.height} px · ${reference.viewport ? `${reference.viewport.width} × ${reference.viewport.height} viewport` : "viewport not recorded"}` : ""}</span></div>${reference && (reference.width !== item.width || reference.height !== item.height) ? '<div class="panel-note amber">Different image dimensions. Both are aligned at the top left; neither is stretched.</div>' : ""}` : ""}<div class="preview-actions">${btn("pin-image", previewPinned ? "Unpin" : "Pin")}${btn("expand-panel", paneExpanded ? "Restore" : "Expand")}${btn("open-image", "Open original")}</div>`
+        ? `<div class="preview-canvas" tabindex="0"><div class="preview-plane"><img class="preview-current" src="${h(previewData)}" alt="${h(item.filename)}" draggable="false">${previewCompare && referenceData ? `<img class="preview-reference" src="${h(referenceData)}" alt="Reference: ${h(reference?.filename)}" draggable="false">` : ""}</div></div>${previewCompare ? `<div class="compare-controls"><label>Reference opacity <input aria-label="Reference opacity" type="range" min="0" max="100" value="${previewOpacity}" id="reference-opacity"></label><span>${h(reference?.filename ?? "Choose a reference below")}${reference ? ` · ${reference.width} × ${reference.height} px · ${reference.viewport ? `${reference.viewport.width} × ${reference.viewport.height} viewport` : "viewport not recorded"}` : ""}</span></div>${reference && (reference.width !== item.width || reference.height !== item.height) ? '<div class="panel-note amber">Different image dimensions. Both are aligned at the top left; neither is stretched.</div>' : ""}` : ""}<div class="preview-actions">${btn("pin-image", previewPinned ? "Unpin" : "Pin")}${btn("expand-panel", paneExpanded ? "Restore" : "Expand")}${btn("open-image", "Open original")}</div>`
         : '<div class="empty">Images will appear here when a tool creates them.</div>') +
       `<details class="reference-picker"${!referenceImage ? " open" : ""}><summary>Reference ${reference ? `· ${h(reference.filename)}` : "image"}</summary><div class="preview-history">${state.artifacts
         .filter((image) => image.id !== selectedImage)
@@ -1706,26 +1687,15 @@ function renderPanels() {
           ),
         )
         .join("")}</div>`;
-    footer = panelFooter(
-      `${k("←→")} images · drag to pan`,
-      btn("follow-images", "Follow new images"),
-    );
+
   }
   if (pane === "drive") {
-    header = panelHeader(
-      "AGENT DRIVE",
-      "",
-      h(
-        state.drive?.status === "running"
-          ? "live"
-          : (state.drive?.status ?? "idle"),
-      ),
-    );
-    body = driveBody();
     const status = state.drive?.status;
-    footer = panelFooter(
-      `${state.drive && status !== "completed" && !state.drive.protection?.trip ? btn("drive-control", `${k("P")} ${status === "running" || status === "waiting" ? "pause" : "resume"}`, { control: status === "running" || status === "waiting" ? "pause" : "resume" }) + btn("drive-control", `${k("S")} stop`, { control: "stop" }) : ""}`,
-    );
+    header = panelHeader("Drive", status ? (status === "running" ? "live" : status) : "idle");
+    body =
+      (state.drive && status !== "completed" && !state.drive.protection?.trip
+        ? `<div class="panel-actions">${btn("drive-control", status === "running" || status === "waiting" ? "Pause" : "Resume", { control: status === "running" || status === "waiting" ? "pause" : "resume" })}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>`
+        : "") + driveBody();
   }
   const previewScroll =
       el("panel").querySelector<HTMLElement>(".preview-canvas"),
@@ -2441,6 +2411,16 @@ async function dispatch(
   }
   if (action === "operation") return setDraft(String(args.text));
   if (action === "panel") return openPanel(args.name, args.turnId ?? "");
+  // A check row in Review opens that check in Checks.
+  if (action === "open-check") {
+    const turn = paneTurn;
+    await openPanel("verification", turn);
+    paneIndex = Number(args.index) || 0;
+    paneSignature = "";
+    renderPanels();
+    return;
+  }
+  if (action === "new-session") return api("new-session", {});
   if (action === "overlay") return openOverlay(args.name, args.query ?? "");
   if (action === "close-overlay") {
     overlay = null;

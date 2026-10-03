@@ -2261,3 +2261,144 @@ button:disabled {
   color: var(--electric);
   font-style: italic;
 }
+
+/* Panel redesign: four places (Review, Files, Drive, Session), one layout:
+   title + subject + ×, one action row, content. Drill-downs lead with a
+   back link. The rail labels each place. */
+#rail {
+  width: 72px;
+  padding: 12px 6px;
+  gap: 6px;
+}
+#rail button {
+  width: 60px;
+  height: auto;
+  padding: 7px 0 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  line-height: 12px;
+  border: 1px solid transparent;
+}
+#rail button svg {
+  display: block;
+}
+#rail .dot {
+  right: 8px;
+  top: 6px;
+}
+.panel-heading {
+  font-size: 13px;
+  line-height: 20px;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+.panel-heading .title {
+  color: var(--strong);
+  font-weight: 600;
+  flex: none;
+}
+.panel-heading .subject {
+  flex: 1;
+  min-width: 0;
+}
+.panel-heading .back,
+.panel-heading .link,
+.panel-section .link,
+.check-row .link {
+  color: var(--electric);
+  font-size: 12px;
+  flex: none;
+}
+.panel-heading .close {
+  flex: none;
+  font-size: 15px;
+  color: var(--secondary);
+  margin-left: auto;
+}
+.panel-section {
+  align-items: center;
+  border-top: 1px solid var(--rule);
+  margin-top: 6px;
+  padding-top: 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.panel-section button {
+  letter-spacing: 0;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 16px;
+}
+.check-row > button:first-child {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: 12px;
+  color: var(--paper);
+}
+.check-row .name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.panel-actions .right,
+.panel-actions .danger.right {
+  margin-left: auto;
+}
+.panel-steps {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border-top: 1px solid var(--rule);
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--secondary);
+}
+.session-context,
+.session-model {
+  padding: 4px 16px 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 12px;
+}
+.session-context strong {
+  color: var(--strong);
+  font-size: 16px;
+  font-weight: 600;
+}
+.session-context .meter {
+  flex-basis: 100%;
+  width: 100%;
+}
+.session-model .name {
+  color: var(--strong);
+}
+.session-model small {
+  flex-basis: 100%;
+}
+/* The changed-file list takes the rows it has (it scrolls past eight). */
+.file-list {
+  min-height: 0;
+  max-height: 224px;
+  margin-bottom: 0;
+}
+/* Files: the Images link sits above the file browser, which fills the rest. */
+.files-pane > .panel-body {
+  flex-direction: column;
+}
+.files-pane > .panel-body > .files-view {
+  flex: 1;
+  min-height: 0;
+}

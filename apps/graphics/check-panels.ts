@@ -289,7 +289,8 @@ try {
   await state((s) => s.live.reviewMode === "before");
   await capture("full-before");
   await click("review-mode", { mode: "diff" });
-  await click("hunk", { direction: 1 });
+  // Hunk navigation is keyboard-only now (the key footer is gone).
+  await key("]");
   await click("review-scope", { scope: "workspace" });
   await state(
     (s) =>
@@ -309,6 +310,8 @@ try {
   assert.equal(readFileSync(join(f.workspace, "multi.ts"), "utf8"), original);
   await capture("file-undone");
   await closePanel();
+  // Images live under Files.
+  await click("panel", { name: "files" });
   await click("panel", { name: "preview" });
   await state(
     (s) => s.live.pane === "preview" && s.live.previewGeometry?.imageWidth > 0,

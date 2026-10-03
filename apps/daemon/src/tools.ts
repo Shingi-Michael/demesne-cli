@@ -246,7 +246,7 @@ function readFileTool(): AgentTool {
   return {
     definition: {
       name: "read_file",
-      description: "Read numbered UTF-8 lines. Defaults: offset 1, limit 160; max 500.",
+      description: "Read numbered UTF-8 lines. Files up to 600 lines come back whole; longer ones return at least 200 lines from offset (default limit 400, max 500). Read once; do not page in small slices.",
       inputSchema: {
         type: "object",
         properties: {
@@ -263,7 +263,7 @@ function readFileTool(): AgentTool {
       const value = objectInput(input);
       const path = requiredString(value.path, "path");
       const offset = boundedInteger(value.offset, "offset", 1, Number.MAX_SAFE_INTEGER, 1);
-      const limit = boundedInteger(value.limit, "limit", 1, 500, 160);
+      const limit = boundedInteger(value.limit, "limit", 1, 500, 400);
       return JSON.stringify(await readSingleFile(context.workspaceRoot, path, offset, limit));
     },
   };
@@ -273,7 +273,7 @@ function readFilesTool(): AgentTool {
   return {
     definition: {
       name: "read_files",
-      description: "Read 1-8 files. Each {path,offset?,limit?}; default limit 100, max 500. Per-file errors.",
+      description: "Read 1-8 files in one call. Each {path,offset?,limit?}; files up to 600 lines come back whole, longer ones at least 200 lines (default limit 200, max 500). Per-file errors.",
       inputSchema: {
         type: "object",
         properties: {
@@ -309,7 +309,7 @@ function readFilesTool(): AgentTool {
         if (!isRecord(entry)) throw toolError("BAD_FILES", "each file entry must be an object", 'use {"path": "..."}');
         const path = requiredString(entry.path, "path");
         const offset = boundedInteger(entry.offset, "offset", 1, Number.MAX_SAFE_INTEGER, 1);
-        const limit = boundedInteger(entry.limit, "limit", 1, 500, 100);
+        const limit = boundedInteger(entry.limit, "limit", 1, 500, 200);
         try {
           const result = await readSingleFile(context.workspaceRoot, path, offset, limit);
           const record = result as Record<string, unknown>;
@@ -355,6 +355,9 @@ export function readWorkspaceText(workspaceRoot: string, path: string): import("
   catch { return refuse("not valid UTF-8", stat.size); }
 }
 
+const WHOLE_FILE_LINES = 600;
+const MIN_READ_WINDOW = 200;
+
 async function readSingleFile(
   workspaceRoot: string,
   path: string,
@@ -387,6 +390,11 @@ async function readSingleFile(
   }
   const lines = text.split("\n");
   const totalLines = lines.length - (lines.at(-1) === "" ? 1 : 0);
+  // Small windows cost a model round each: local models read 20-120 lines
+  // after a search hit and come back for the next slice. A file that fits
+  // comes back whole; otherwise every read is at least MIN_READ_WINDOW lines.
+  if (totalLines <= WHOLE_FILE_LINES) { offset = 1; limit = Math.max(limit, totalLines); }
+  else limit = Math.max(limit, MIN_READ_WINDOW);
   const endLine = Math.min(offset - 1 + limit, totalLines);
   const selected = lines.slice(offset - 1, endLine);
   const content = selected.map((line, index) => `${offset + index}: ${line.slice(0, 16_384)}`).join("\n");

@@ -208,34 +208,37 @@ describe("built-in tools", () => {
       .rejects.toThrow("EMPTY_OLD_TEXT");
   });
 
-  test("read_file reports totals and ranges for token-frugal paging", async () => {
+  test("read_file returns a small file whole, so a model never pages through it", async () => {
     const root = workspace();
-    writeFileSync(join(root, "long.txt"), Array.from({ length: 30 }, (_, index) => `line ${index + 1}`).join("\n") + "\n");
+    writeFileSync(join(root, "short.txt"), Array.from({ length: 30 }, (_, index) => `line ${index + 1}`).join("\n") + "\n");
     const tools = new ToolRegistry();
     const context = { workspaceRoot: root, signal: new AbortController().signal };
 
-    const first = JSON.parse(await tools.get("read_file")!.execute({ path: "long.txt", offset: 28, limit: 10 }, context));
-    expect(first).toMatchObject({ totalLines: 30, range: { from: 28, to: 30 }, truncated: false, remainingLines: 0 });
-
-    const middle = JSON.parse(await tools.get("read_file")!.execute({ path: "long.txt", limit: 5 }, context));
-    expect(middle).toMatchObject({ range: { from: 1, to: 5 }, truncated: true, remainingLines: 25, nextOffset: 6 });
+    // A slice of a file that fits comes back as the whole file.
+    for (const input of [{ path: "short.txt", offset: 28, limit: 10 }, { path: "short.txt", limit: 5 }]) {
+      const read = JSON.parse(await tools.get("read_file")!.execute(input, context));
+      expect(read).toMatchObject({ totalLines: 30, range: { from: 1, to: 30 }, truncated: false, remainingLines: 0 });
+      expect(read).not.toHaveProperty("nextOffset");
+    }
   });
 
-  test("read defaults bound output while explicit limits remain available", async () => {
+  test("long files read in large windows: at least 200 lines, default 400 (read_files 200)", async () => {
     const root = workspace();
-    const content = Array.from({ length: 220 }, (_, index) => `line ${index + 1}`).join("\n") + "\n";
-    writeFileSync(join(root, "long.txt"), content);
+    writeFileSync(join(root, "long.txt"), Array.from({ length: 1000 }, (_, index) => `line ${index + 1}`).join("\n") + "\n");
     const tools = new ToolRegistry();
     const context = { workspaceRoot: root, signal: new AbortController().signal };
 
     const single = JSON.parse(await tools.get("read_file")!.execute({ path: "long.txt" }, context));
-    expect(single).toMatchObject({ range: { from: 1, to: 160 }, remainingLines: 60, nextOffset: 161 });
+    expect(single).toMatchObject({ range: { from: 1, to: 400 }, remainingLines: 600, nextOffset: 401 });
+
+    const slice = JSON.parse(await tools.get("read_file")!.execute({ path: "long.txt", offset: 500, limit: 20 }, context));
+    expect(slice).toMatchObject({ range: { from: 500, to: 699 }, nextOffset: 700 });
 
     const batched = JSON.parse(await tools.get("read_files")!.execute({ files: [{ path: "long.txt" }] }, context));
-    expect(batched.results[0]).toMatchObject({ range: { from: 1, to: 100 }, remainingLines: 120, nextOffset: 101 });
+    expect(batched.results[0]).toMatchObject({ range: { from: 1, to: 200 }, remainingLines: 800, nextOffset: 201 });
 
-    const explicit = JSON.parse(await tools.get("read_files")!.execute({ files: [{ path: "long.txt", limit: 220 }] }, context));
-    expect(explicit.results[0]).toMatchObject({ range: { from: 1, to: 220 }, truncated: false });
+    const explicit = JSON.parse(await tools.get("read_files")!.execute({ files: [{ path: "long.txt", offset: 601, limit: 500 }] }, context));
+    expect(explicit.results[0]).toMatchObject({ range: { from: 601, to: 1000 }, truncated: false });
     expect(explicit.results[0]).not.toHaveProperty("nextOffset");
   });
 

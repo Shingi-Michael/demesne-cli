@@ -557,7 +557,7 @@ test("terminal focus changes the prompt outline and caret while Unicode draft co
   // command/file controls alongside the draft, including in short terminals.
   const compact = screen(120, 10).split("\n").at(-2)!;
   expect(compact).toContain("~5 tok");
-  expect(compact).toContain("⇧↵ newline");
+  expect(compact).not.toContain("newline");
   // A draft shows ↵ send in place of the / and @ hints.
   expect(screen(120, 10)).not.toContain("/ commands  @ files");
   state.onKeypress("", { name: "return" });

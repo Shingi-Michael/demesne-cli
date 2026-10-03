@@ -85,8 +85,9 @@ test("Figma 8:268 keeps status above the workspace and Recent in the same center
     expect(rows[layout.input.row + layout.input.height - 2]).toContain("↵ send");
     expect(ui.frame(width!, height!).rows[0]).not.toContain("\x1b[1m");
   }
-  state.onKeypress("draft", {}); screen(); click("⇧↵ newline");
-  expect(state.editor.value).toBe("draft\n"); expect(state.mode).toBe("input");
+  // No newline hint (Shift+Enter still adds one); the / control still works.
+  state.onKeypress("draft", {}); expect(screen()).not.toContain("newline");
+  state.editor = { ...state.editor, value: "", cursor: 0 };
   screen(); click("/ commands"); expect(state.editor.value).toBe("/");
   screen(); expect(state.commandMenuFrame).not.toBeNull();
 });

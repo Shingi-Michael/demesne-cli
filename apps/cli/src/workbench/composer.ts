@@ -97,8 +97,8 @@ export function composeDraft(options: ComposeOptions): ComposerFrame {
     const end = width - 2 - 7 - 1;
     canvas.put(hintsRow, end - tokenLabel.length, paint.text(tokenLabel, "muted"), tokenLabel.length, "surface");
     const items: [string, ComposerAction][] = width >= 60
-      ? [["/ commands", { kind: "commands" }], ["@ files", { kind: "files" }], ["⇧↵ newline", { kind: "newline" }]]
-      : [["/", { kind: "commands" }], ["@", { kind: "files" }], ["⇧↵", { kind: "newline" }]];
+      ? [["/ commands", { kind: "commands" }], ["@ files", { kind: "files" }]]
+      : [["/", { kind: "commands" }], ["@", { kind: "files" }]];
     let column = 2;
     for (const [label, action] of items) {
       if (column + visibleLength(label) > end - tokenLabel.length - 2) break;
@@ -113,8 +113,8 @@ export function composeDraft(options: ComposeOptions): ComposerFrame {
     if (tokenLabel) canvas.put(counterRow, hintEnd - tokenLabel.length, paint.text(tokenLabel, "muted"), tokenLabel.length, "surface");
     const hintWidth = Math.max(0, hintEnd - inset - (tokenLabel ? tokenLabel.length + 2 : 0));
     const hints = options.streaming ? ["Type to queue a follow-up", "Type to queue"]
-      : options.hero ? ["↵ send · ⇧↵ newline · / commands · @ files", "↵ send · ⇧↵ newline · / cmds · @ files", "↵ send · ⇧↵ line · / @"]
-        : ["⇧↵ newline · / commands · @ files", "⇧↵ newline · / cmds · @ files", "⇧↵ line · / @"];
+      : options.hero ? ["↵ send · / commands · @ files", "↵ send · / cmds · @ files", "↵ send · / @"]
+        : ["/ commands · @ files", "/ cmds · @ files", "/ @"];
     const hint = hints.find((hint) => visibleLength(hint) <= hintWidth) ?? hints.at(-1)!;
     const styledHint = truncateText(hint, hintWidth).split(/([/@])/).map((part) => paint.text(part, part === "/" || part === "@" ? "electric" : "muted")).join("");
     canvas.put(hintsRow, inset, styledHint, hintWidth, "surface");
@@ -256,7 +256,6 @@ function composeSessionDraft(options: ComposeOptions): ComposerFrame {
   if (editor.value) {
     const counter = ` ~${formatTokenCount(draftTokens(editor.value))} tok `;
     canvas.put(height - 1, right - counter.length, paint.text(counter, "muted"), counter.length);
-    if (width >= 65) canvas.put(height - 1, inset + 2, " " + keycap(paint, "⇧↵") + paint.text(" newline ", "muted"), 12);
   }
   return { lines: canvas.rows, zones, cursor: { row: firstRow + visual.cursorLine - start, column: Math.min(textColumn + textWidth - 1, textColumn + visual.cursorCol) } };
 }

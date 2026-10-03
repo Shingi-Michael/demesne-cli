@@ -667,13 +667,25 @@ function renderHero() {
         (session) => session.turns > 0 && session.id !== state!.session?.id,
       )
       .slice(0, 3),
-    signature = JSON.stringify([recent, state.model, state.planOnly]);
+    signature = JSON.stringify([recent, state.model, state.planOnly, state.driveNext.proposals, state.driveNext.loading]);
   if (signature === heroSignature) return;
   heroSignature = signature;
   const composer = el("composer-slot");
   composer.remove();
   el("hero").innerHTML =
-    `<div class="intro"><h1>What are we working on?</h1><p>${h(state.model.id || "Choose a model")} · ctx ${num(state.model.contextWindow)} · ${state.planOnly ? "Plan" : "Build"} mode</p></div><div id="hero-composer"></div><section class="operations"><h2>START FROM</h2><div class="grid">${[
+    `<div class="intro"><h1>What are we working on?</h1><p>${h(state.model.id || "Choose a model")} · ctx ${num(state.model.contextWindow)} · ${state.planOnly ? "Plan" : "Build"} mode</p></div><div id="hero-composer"></div>${
+      // Drive's Next queue, ready when you open demesne: the top three, with
+      // the full queue in the Drive panel.
+      state.driveNext.proposals.length
+        ? `<section class="proposals"><h2>DRIVE PROPOSES ${btn("panel", "All in Drive ›", { name: "drive" }, "link", true)}</h2><div class="proposal-list">${state.driveNext.proposals
+            .slice(0, 3)
+            .map(
+              (item) =>
+                `<div class="proposal-row"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b title="${h(item.why)}">${h(item.title)}</b><small>~${item.minutes < 60 ? `${item.minutes} min` : `${Math.round(item.minutes / 6) / 10} h`}</small>${btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}</div>`,
+            )
+            .join("")}</div></section>`
+        : ""
+    }<section class="operations"><h2>START FROM</h2><div class="grid">${[
       ["Explore", "Trace a call flow end to end"],
       ["Debug", "Find and fix a failing behavior"],
       ["Build", "Implement a feature with tests"],
@@ -1125,10 +1137,28 @@ function contextBody() {
     })()}`,
   )}<div class="context-section">TURN</div>${kv("status", state!.activeTurnId ? `<span class="amber">◌ running · ${duration(Date.now() - Date.parse(state!.runs.at(-1)!.createdAt))}</span>` : h(state!.runs.at(-1)?.status ?? "ready"))}${kv("thinking", "provider default")}${state!.checkpoint ? kv("compaction", `~${num(state!.checkpoint.beforeTokens)} → ~${num(state!.checkpoint.afterTokens)}`) : ""}</div>`;
 }
+/// The Next queue: Drive's ranked proposals, each with its evidence and the
+/// four ways to answer it.
+function nextQueueHTML() {
+  const next = state!.driveNext;
+  const signal = new Map(next.signals.map((item) => [item.id, item]));
+  const updated = next.generatedAt ? `updated ${age(next.generatedAt)}` : "";
+  const items = next.proposals
+    .map(
+      (item, index) =>
+        `<div class="next-item${index === 0 ? " first" : ""}"><div class="next-top"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><span class="next-title">${h(item.title)}</span></div><p class="next-why">${h(item.why)}</p><div class="next-facts">${item.evidence.map((id) => `<span title="${h(signal.get(id)?.detail ?? "")}">${item.urgent && signal.get(id)?.urgent ? "! " : ""}${h(signal.get(id)?.title ?? id)}</span>`).join("")}<span>~${item.minutes < 60 ? `${item.minutes} min` : `${Math.round(item.minutes / 6) / 10} h`} · ${item.coders} coder${item.coders === 1 ? "" : "s"}</span><span class="confidence-${item.confidence}">confidence ${item.confidence}</span></div><div class="next-actions">${btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id })}${btn("next-never", "Never", { id: item.id })}</div></div>`,
+    )
+    .join("");
+  return `<div class="drive-heading next-heading"><span>NEXT</span><span class="muted">${next.loading ? "Reading the project…" : h(updated)}</span>${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${
+    next.error ? `<p class="next-error">${h(next.error)}</p>` : ""
+  }${items || (next.loading ? "" : '<p class="muted next-empty">Nothing worth proposing right now. Drive looks again after your next turn, or press ↻.</p>')}`;
+}
 function driveBody() {
   const drive = state!.drive;
+  const idle = !drive || ["completed", "stopped", "idle", "blocked", "paused"].includes(drive.status);
+  // With no mission running, Drive opens on what to do next.
   if (!drive)
-    return `<div class="drive-content"><h3>Give Drive a mission</h3><p class="muted">Drive reads the session, directs work, and reviews the results. Tool approvals remain yours.</p><form id="drive-form"><input name="mission" placeholder="What should Drive finish?" aria-label="Drive mission" required><label class="drive-mode"><input type="checkbox" name="continuous" checked> Keep choosing improvements</label><button type="submit" class="chip">Start Drive</button></form></div>`;
+    return `<div class="drive-content">${nextQueueHTML()}<details class="drive-own"${state!.driveNext.proposals.length ? "" : " open"}><summary>Give Drive a mission</summary><p class="muted">Drive reads the session, directs work, and reviews the results. Tool approvals remain yours.</p><form id="drive-form"><input name="mission" placeholder="What should Drive finish?" aria-label="Drive mission" required><label class="drive-mode"><input type="checkbox" name="continuous" checked> Keep choosing improvements</label><button type="submit" class="chip">Start Drive</button></form></details></div>`;
   // Status + timeline: one status line and short sentence, what Drive did,
   // a plain checklist, one stats line. Everything long sits under Details.
   const now = Date.now(), trace = drive.traces?.at(-1);
@@ -1163,9 +1193,9 @@ function driveBody() {
     drive.protection ? section("BUDGET", `<p class="muted">${Math.floor(drive.protection.used.activeMs / 60_000)}/${drive.protection.limits.maxActiveMinutes} active min · ${drive.protection.used.cycles}/${drive.protection.limits.maxCycles} cycles · ${drive.protection.used.workerRequests}/${drive.protection.limits.maxWorkerRequests} coder requests</p>`) : "",
     ledger.some((task) => task.status === "completed") ? `<p class="muted">Reopen a finished task: /drive reopen &lt;task-id&gt; &lt;reason&gt;<br>${ledger.filter((task) => task.status === "completed").slice(-4).map((task) => `${h(task.id.slice(0, 8))} · ${h(task.title)}`).join("<br>")}</p>` : "",
   ].join("");
-  return `<div class="drive-content"><div class="drive-status"><strong class="tone-${tone}">${mark} ${h(label)}</strong>${summary ? `<p class="drive-summary">${h(summary)}</p>` : ""}</div>${
+  return `<div class="drive-content">${idle ? nextQueueHTML() + '<div class="drive-heading">LAST MISSION</div>' : ""}<div class="drive-status"><strong class="tone-${tone}">${mark} ${h(label)}</strong>${summary ? `<p class="drive-summary">${h(summary)}</p>` : ""}</div>${
     steps.length ? section("TIMELINE", `<ol class="drive-timeline">${steps.map((step) => `<li class="tone-${step.tone}"><span>${h(step.mark)}</span><span class="drive-step">${h(step.text)}</span><time>${h(step.when)}</time></li>`).join("")}</ol>`) : ""}${
-    tasks.length ? section("TASKS", `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>`) : ""}<div class="drive-meta">${h(stats)}</div><details data-detail="drive-details"${detailsOpen.has("drive-details") ? " open" : ""}><summary>Details</summary><div class="drive-details">${details}</div></details></div>`;
+    tasks.length ? section("TASKS", `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>`) : ""}<div class="drive-meta">${h(stats)}</div><details data-detail="drive-details"${detailsOpen.has("drive-details") ? " open" : ""}><summary>Details</summary><div class="drive-details">${details}</div></details>${!idle && state!.driveNext.proposals.length ? `<div class="drive-meta">Next · ${state!.driveNext.proposals.length} proposed after this mission</div>` : ""}</div>`;
 }
 function processError() {
   return state?.processesError
@@ -1393,7 +1423,7 @@ function renderPanels() {
   el("rail").hidden = !inSession();
   const railHTML = `<span class="rail-state ${state.activeTurnId ? "running" : ""}"></span><hr>${PLACES.map(
     (place) =>
-      `<button type="button" class="${(place.views as readonly string[]).includes(pane ?? "") ? "active" : ""}" title="${place.label}" aria-label="${place.label}" data-action="panel" data-args="${h(JSON.stringify({ name: place.name }))}" data-drive="panel-${place.name}">${place.icon}<span>${place.label}</span>${place.name === "drive" && state!.drive && ["running", "waiting", "blocked"].includes(state!.drive.status) ? '<img class="dot" src="assets/rail-badge.svg" alt="">' : ""}</button>`,
+      `<button type="button" class="${(place.views as readonly string[]).includes(pane ?? "") ? "active" : ""}" title="${place.label}" aria-label="${place.label}" data-action="panel" data-args="${h(JSON.stringify({ name: place.name }))}" data-drive="panel-${place.name}">${place.icon}<span>${place.label}</span>${place.name === "drive" && state!.drive && ["running", "waiting", "blocked"].includes(state!.drive.status) ? '<img class="dot" src="assets/rail-badge.svg" alt="">' : place.name === "drive" && state!.driveNext.proposals.length ? `<b class="count" aria-label="${state!.driveNext.proposals.length} proposed">${state!.driveNext.proposals.length}</b>` : ""}</button>`,
   ).join("")}`;
   if (railHTML !== railSignature) {
     railSignature = railHTML;
@@ -1425,7 +1455,7 @@ function renderPanels() {
         : pane === "context"
           ? [state.provider, state.checkpoint, state.activeTurnId]
           : pane === "drive"
-            ? state.drive
+            ? [state.drive, state.driveNext]
             : pane === "preview"
               ? [
                   state.artifacts,
@@ -1706,7 +1736,8 @@ function renderPanels() {
   }
   if (pane === "drive") {
     const status = state.drive?.status;
-    header = panelHeader("Drive", status ? (status === "running" ? "live" : status) : "idle");
+    const proposed = state.driveNext.proposals.length;
+    header = panelHeader("Drive", [status ? (status === "running" ? "live" : status) : "", proposed ? `${proposed} proposed` : ""].filter(Boolean).join(" · ") || "idle");
     body =
       (state.drive && status !== "completed" && !state.drive.protection?.trip
         ? `<div class="panel-actions">${btn("drive-control", status === "running" || status === "waiting" ? "Pause" : "Resume", { control: status === "running" || status === "waiting" ? "pause" : "resume" })}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>`
@@ -2446,6 +2477,7 @@ async function dispatch(
     return;
   }
   if (action === "new-session") return api("new-session", {});
+  if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never"].includes(action)) return api(action, args);
   if (action === "drive-forget") return api("drive", { text: `forget ${args.id}` });
   if (action === "overlay") return openOverlay(args.name, args.query ?? "");
   if (action === "close-overlay") {
@@ -3316,6 +3348,7 @@ window.demesneInspect = () => ({
   driveMode: state?.drive?.mode,
   drivePhase: state?.drive?.autonomy?.phase,
   driveMemory: state?.driveMemory,
+  driveNext: state?.driveNext,
   driveTasks: state?.drive?.ledger?.tasks.map((task) => ({
     id: task.id,
     status: task.status,

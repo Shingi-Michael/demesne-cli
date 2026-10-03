@@ -15,7 +15,7 @@ import {
   parseUndoSessionRequest,
   parseUpdateSessionRequest,
   ProtocolValidationError,
-  parseDriveRequest,
+  parseDriveRequest, parseDriveNextRequest,
   type ApiErrorBody,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
@@ -43,6 +43,8 @@ import { detectGitBranch } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
 import { SessionReplay } from "./session-replay.ts";
 import { DRIVE_QUICK_TOKENS, DRIVE_THOUGHT_TOKENS, planDrive } from "./drive-planner.ts";
+import { collectDriveSignals } from "./drive-signals.ts";
+import { DriveNextCache, proposeNext } from "./drive-next.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
@@ -110,6 +112,8 @@ export function createDaemonApp(options: {
     && (!options.images.url || !options.images.model)) throw new Error("Image generation requires both images.url and images.model");
   const hub = new EventHub();
   const store = new DemesneStore(options.databasePath, (event) => hub.publish(event));
+  const driveNextCache = new DriveNextCache(join(dirname(options.databasePath), "drive-next"));
+  const driveNextRuns = new Map<string, Promise<unknown>>();
   const replay = new SessionReplay(store);
   const processor: TurnProcessor = options.processor ?? new PlaceholderTurnProcessor();
   const allowlist = new ConfigAllowlist(options.allowlistPath ?? null);
@@ -322,6 +326,39 @@ export function createDaemonApp(options: {
         store.cancelTurn(current.id); controller.abort(new DOMException("Drive checkpoint correction","AbortError"));
         permissions.cancelTurn(current.id,controller.signal.reason); questions.cancelTurn(current.id,controller.signal.reason);
         return json({cancelled:true});
+      }
+
+      // Drive's Next queue: ranked proposals from the workspace's signals,
+      // answered from cache unless the signals changed (or force).
+      if (request.method === "POST" && url.pathname === "/v1/drive/next") {
+        const body = parseDriveNextRequest(await readJson(request));
+        // git and gh run only in a workspace this daemon already knows.
+        const known = store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace);
+        if (!known) return apiError("not_found", "Unknown workspace", 404);
+        const pending = driveNextRuns.get(body.workspace);
+        if (pending) return json(await pending);
+        const run = (async () => {
+          const { signals, fingerprint } = await collectDriveSignals(store.database, body.workspace);
+          const cached = driveNextCache.read(body.workspace);
+          const fresh = cached && cached.fingerprint === fingerprint && Date.now() - Date.parse(cached.generatedAt) < 12 * 3_600_000;
+          if (cached && fresh && !body.force) return { workspace: body.workspace, ...cached, signals, cached: true };
+          const vetoes = (body.memory ?? []).filter((item) => item.kind === "veto").map((item) => item.text.toLowerCase());
+          const leaseId = `drive-next:${randomUUID()}`, slots = scheduler.for(processor.providerId);
+          const lease = await slots.acquire(leaseId, AbortSignal.any([request.signal, driveLifecycle.signal]), {});
+          try {
+            const inference = snapshotTurnInference(processor, true, { maxOutputTokens: DRIVE_THOUGHT_TOKENS });
+            const proposals = (await proposeNext(signals, body.memory ?? [], inference, AbortSignal.any([request.signal, driveLifecycle.signal])))
+              // A vetoed proposal never returns, whatever the model says.
+              .filter((item) => !vetoes.some((veto) => veto.includes(item.title.toLowerCase())));
+            const value = { fingerprint, generatedAt: new Date().toISOString(), model: `${inference.providerId} / ${inference.modelId}`, proposals, signals };
+            driveNextCache.write(body.workspace, value);
+            return { workspace: body.workspace, ...value, cached: false };
+          } finally { lease.release({ turnContinues: false }); slots.finishTurn(leaseId); }
+        })();
+        driveNextRuns.set(body.workspace, run);
+        try { return json(await run); }
+        catch (error) { return apiError("provider_error", error instanceof Error ? error.message : "Could not propose next work", 502); }
+        finally { driveNextRuns.delete(body.workspace); }
       }
 
       if (request.method === "POST" && url.pathname === "/v1/drive/decide") {

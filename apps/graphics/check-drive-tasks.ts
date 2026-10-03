@@ -22,6 +22,12 @@ const f = await fixture({
     return [];
   },
   async *stream(messages, tools) {
+    // The Next queue refreshes after turns settle; this fixture proposes nothing.
+    if (tools.some((tool) => tool.name === "propose_next")) {
+      yield { type: "tool_call_delta", index: 0, idDelta: "next", nameDelta: "propose_next", argumentsDelta: JSON.stringify({ proposals: [] }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
     if (tools.some((tool) => tool.name === "drive_ui")) {
       const input = JSON.parse(messages[1]!.content!),
         task = input.ledger.tasks.find(

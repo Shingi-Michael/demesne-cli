@@ -283,6 +283,12 @@ export class GraphicsDrive {
     }
     throw new Error(`Unsupported action: ${method}`);
   }
+  /// Adds to project memory and shows it.
+  addMemory(entry: Pick<DriveMemoryEntry, "kind" | "text" | "source">) {
+    const saved = this.memory.add(entry);
+    this.refreshMemory();
+    return saved;
+  }
   private refreshMemory(publish = true) {
     try {
       this.memoryEntries = this.memory.list();

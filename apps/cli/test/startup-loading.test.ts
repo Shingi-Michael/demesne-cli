@@ -48,7 +48,7 @@ test("the real CLI starts and resumes offline history while slow file/artifact d
   } });
   const child = Bun.spawn([process.execPath, "--preload", preload, join(import.meta.dir, "../src/main.ts"), "--server", server.url.href, "--session", "start"], {
     cwd: root,
-    env: { ...process.env, DEMESNE_DATA_DIR: root, DEMESNE_CONFIG_FILE: join(root, "config.toml"), NO_COLOR: "1", DEMESNE_REDUCED_MOTION: "1" },
+    env: { ...process.env, DEMESNE_DATA_DIR: root, DEMESNE_CONFIG_FILE: join(root, "config.toml"), NO_COLOR: "1", DEMESNE_REDUCED_MOTION: "1", DEMESNE_TEXT_UI: "1" },
     stdin: "pipe", stdout: "pipe", stderr: "pipe",
   });
   let output = "";

@@ -817,7 +817,9 @@
   left: 0;
   right: 0;
   bottom: calc(100% + 6px);
-  max-height: min(360px, 60vh);
+  /* About seven rows: the menu sits by the composer instead of climbing over
+     the conversation; the list scrolls and typing narrows it. */
+  max-height: min(260px, 40vh);
   display: flex;
   flex-direction: column;
 }

@@ -278,6 +278,8 @@ export class GraphicsHost {
       this.connection = "online";
       if (this.selectedSession) await this.select(this.selectedSession);
       else await this.newSession();
+      // Discovery across providers takes seconds; do it before /model asks.
+      void this.models().catch(() => {});
       await this.applyStartup();
     } catch (error) {
       if (!this.autoStarted && this.settings.autoStart === "always") {
@@ -433,6 +435,18 @@ export class GraphicsHost {
     } catch (error) {
       if (!controller.signal.aborted) this.fail(error);
     }
+  }
+  /// Every provider's models, cached: asking each provider (OpenRouter has
+  /// hundreds) takes seconds. A stale list is returned at once and refreshed
+  /// behind it.
+  private modelCache: { at: number; models: Promise<ModelDescriptor[]> } | null = null;
+  private models(): Promise<ModelDescriptor[]> {
+    const cache = this.modelCache;
+    if (cache && Date.now() - cache.at < 300_000) return cache.models;
+    const fresh = this.client.listModels();
+    this.modelCache = { at: Date.now(), models: fresh };
+    fresh.catch(() => { if (this.modelCache?.models === fresh) this.modelCache = cache; });
+    return cache ? cache.models.catch(() => fresh) : fresh;
   }
   private async applyStartup() {
     const startup = this.options.startup;
@@ -804,11 +818,11 @@ export class GraphicsHost {
       this.publish();
       return;
     }
-    if (method === "models") return this.client.listModels();
+    if (method === "models") return this.models();
     if (method === "model") {
       const id = string(args.id, "model", 1000);
       await this.client.setModel(id);
-      const models = await this.client.listModels();
+      const models = await this.models();
       this.model = models.find((model) => model.id === id) ?? {
         id,
         provider: this.model.provider,

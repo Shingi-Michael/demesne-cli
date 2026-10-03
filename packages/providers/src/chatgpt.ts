@@ -65,6 +65,7 @@ export class ChatGPTProvider implements ProviderAdapter {
     const finishedItems = new Map<number, Record<string, unknown>>();
     let finishedItemBytes = 0;
     let completed = false;
+    let summaryParts = 0;
     for await (const data of readEventData(response.body)) {
       let event: unknown;
       try { event = JSON.parse(data); } catch { throw new ProviderError("ChatGPT stream contained invalid JSON."); }
@@ -78,6 +79,9 @@ export class ChatGPTProvider implements ProviderAdapter {
       if (event.type === "response.output_text.delta" || event.type === "response.refusal.delta") {
         if (typeof event.delta === "string") yield { type: "text_delta", delta: event.delta };
       }
+      // Each summary part is its own short section ("**Checking the bound**"):
+      // start every part after the first on a new paragraph.
+      if (event.type === "response.reasoning_summary_part.added" && request.thinkingEnabled !== false && summaryParts++ > 0) yield { type: "reasoning_delta", delta: "\n\n" };
       if (event.type === "response.reasoning_summary_text.delta" && typeof event.delta === "string" && request.thinkingEnabled !== false) yield { type: "reasoning_delta", delta: event.delta };
       if (event.type === "response.output_item.added") {
         if (!Number.isSafeInteger(event.output_index) || Number(event.output_index) < 0 || !isRecord(event.item) || startedItems.has(Number(event.output_index))) throw new ProviderError("ChatGPT returned an invalid output item.");

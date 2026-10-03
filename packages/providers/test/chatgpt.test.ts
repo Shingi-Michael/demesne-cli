@@ -12,6 +12,21 @@ test("uses the account catalog's order, visibility, slugs and display names", as
   expect((await p.listModels()).map(m => [m.id, m.displayName])).toEqual([["first", "First"], ["second", "Second"]]);
 });
 
+test("reasoning summary parts stream as separate paragraphs of thinking", async () => {
+  const message = { id: "msg_1", type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Done.", annotations: [] }] };
+  const events = [
+    { type: "response.reasoning_summary_part.added", summary_index: 0 }, { type: "response.reasoning_summary_text.delta", delta: "**Enumerating candidates**" },
+    { type: "response.reasoning_summary_part.added", summary_index: 1 }, { type: "response.reasoning_summary_text.delta", delta: "**Checking the bound**" },
+    { type: "response.output_item.added", output_index: 0, item: { ...message, status: "in_progress", content: [] } },
+    { type: "response.output_text.delta", delta: "Done." }, { type: "response.output_item.done", output_index: 0, item: message },
+    { type: "response.completed", response: { status: "completed", output: [message], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } }];
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async () => new Response(events.map(e => `data: ${JSON.stringify(e)}\n\n`).join(""))) as unknown as typeof fetch });
+  const thinking = (await collect(p)).filter((e): e is Extract<ProviderStreamEvent, { type: "reasoning_delta" }> => e.type === "reasoning_delta").map(e => e.delta).join("");
+  expect(thinking).toBe("**Enumerating candidates**\n\n**Checking the bound**");
+  const hidden = await Array.fromAsync(p.stream({ ...request, thinkingEnabled: false }, new AbortController().signal));
+  expect(hidden.some(e => e.type === "reasoning_delta")).toBe(false);
+});
+
 test("the catalog's thinking levels are listed, and a chosen level is sent with a reasoning summary", async () => {
   const bodies: any[] = [];
   const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async (url: string | URL | Request, init?: RequestInit) => {

@@ -23,7 +23,10 @@ if (process.env.DEMESNE_GRAPHICS_GPU === "0") app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("force-device-scale-factor", "1");
 app.setPath("userData", process.env.DEMESNE_PIXEL_CACHE);
 app.whenReady().then(() => app.dock?.hide());
-const send = (value) => process.stdout.write(JSON.stringify(value) + "\n");
+const { PipeWriter, isDisconnect } = require("./pipe-writer.cjs");
+let closing = false;
+const output = new PipeWriter(process.stdout, error => shutdown(isDisconnect(error) ? 0 : 1));
+const send = (value, done) => !closing && output.write(JSON.stringify(value) + "\n", done);
 const frame = new TileFrame(),
   queue = new InputQueue();
 const metrics = {
@@ -63,7 +66,7 @@ let serial = 0,
   resizePaint = null;
 ipcMain.handle("demesne:request", (event, request) => {
   if (
-    !config.live ||
+    closing || !config?.live ||
     event.sender !== win?.webContents ||
     typeof request?.method !== "string" ||
     request.method.length > 80 ||
@@ -84,12 +87,13 @@ ipcMain.on("demesne:ready", (event) => {
   if (event.sender === win?.webContents) uiReady?.();
 });
 function appState(state) {
+  if (closing) return;
   latestState = state;
   if (win && !win.isDestroyed()) win.webContents.send("demesne:update", state);
 }
 async function flush() {
   scheduled = false;
-  if (!ready || inFlight || !frame.dirty?.size) return;
+  if (closing || !ready || inFlight || !frame.dirty?.size) return;
   const start = performance.now();
   const drainStart = performance.now(), traceStart = now();
   const drained = frame.drain();
@@ -112,6 +116,7 @@ async function flush() {
     inFlight = 0;
     throw error;
   }
+  if (closing) return;
   const batch = { ...drained, tiles };
   if (tracePath) trace({ stage: "flush", serial: inFlight, start: traceStart, drained: drainedAt, end: now(), tiles: tiles.length });
   metrics.encodeMs += performance.now() - start;
@@ -139,12 +144,13 @@ async function flush() {
   });
 }
 function schedule() {
-  if (!scheduled && !inFlight) {
+  if (!closing && !scheduled && !inFlight) {
     scheduled = true;
     setImmediate(() => void flush().catch((error) => send({ kind: "error", message: String(error) })));
   }
 }
 function paint(_event, dirty, image) {
+  if (closing) return;
   metrics.paintEvents++;
   if (!paintAt) paintAt = performance.now();
   if (inputAt) { metrics.inputToPaintMs += performance.now() - inputAt; inputAt = 0; }
@@ -195,7 +201,7 @@ async function capture() {
   return await win.webContents.capturePage();
 }
 function diagnostic() {
-  if (!config?.diagnostics || diagnosticScheduled) return;
+  if (closing || !config?.diagnostics || diagnosticScheduled) return;
   diagnosticScheduled = true;
   setImmediate(async () => {
     diagnosticScheduled = false;
@@ -214,6 +220,7 @@ async function start(options) {
   epoch = config.epoch ?? 0;
   config.cell ??= { width: 8, height: 18 };
   await app.whenReady();
+  if (closing) return;
   app.dock?.hide();
   win = new BrowserWindow({
     width,
@@ -274,10 +281,10 @@ async function start(options) {
     "document.fonts.ready.then(() => true)",
   );
   const initial = await capture();
+  if (closing) return;
   if (config.snapshot) {
     writeFileSync(config.snapshot, initial.toPNG());
-    send({ kind: "snapshot", path: config.snapshot });
-    app.quit();
+    send({ kind: "snapshot", path: config.snapshot }, () => shutdown());
     return;
   }
   if (!seed(initial))
@@ -405,13 +412,13 @@ async function input(event) {
   }
 }
 async function processQueue() {
-  if (processing) return;
+  if (closing || processing) return;
   processing = true;
   try {
-    for (let msg; (msg = queue.shift()); ) {
+    for (let msg; !closing && (msg = queue.shift()); ) {
       metrics.inputProcessed++;
       if (msg.kind === "init") await start(msg);
-      else if (msg.kind === "quit") app.quit();
+      else if (msg.kind === "quit") shutdown();
       else if (msg.kind === "inspect" && config.diagnostics) {
         diagnostic();
         if (msg.path && ready) await diagnosticCapture(msg.path);
@@ -447,7 +454,9 @@ async function processQueue() {
     processing = false;
   }
 }
-createInterface({ input: process.stdin }).on("line", (line) => {
+const lines = createInterface({ input: process.stdin });
+lines.on("line", (line) => {
+  if (closing) return;
   try {
     const msg = JSON.parse(line);
     if (msg.kind === "response") {
@@ -487,6 +496,28 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     send({ kind: "error", message: String(error) });
   }
 });
-process.stdin.on("end", () => app.quit());
-process.on("SIGTERM", () => app.quit());
-app.on("window-all-closed", () => app.quit());
+function shutdown(code = 0) {
+  if (closing) return;
+  closing = true;
+  ready = false;
+  output.close();
+  queue.items.length = 0;
+  for (const request of pendingRequests.values()) {
+    clearTimeout(request.timer);
+    request.reject(new Error("The terminal host disconnected."));
+  }
+  pendingRequests.clear();
+  // No UI can be recovered after its host pipe closes. Exit immediately so
+  // pending encodes and paint callbacks cannot produce an orphaned dialog.
+  if (app.isReady()) app.exit(code);
+  else void app.whenReady().then(() => app.exit(code));
+}
+lines.on("close", () => shutdown());
+process.stdin.on("end", () => shutdown());
+process.stdin.on("close", () => shutdown());
+process.stdin.on("error", error => shutdown(isDisconnect(error) ? 0 : 1));
+process.on("SIGTERM", () => shutdown());
+process.on("SIGINT", () => shutdown());
+process.on("SIGHUP", () => shutdown());
+app.on("before-quit", () => shutdown());
+app.on("window-all-closed", () => shutdown());

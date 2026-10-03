@@ -21,6 +21,7 @@ for (const file of [
   "tiles.cjs",
   "tile-encoder.cjs",
   "input-queue.cjs",
+  "pipe-writer.cjs",
   "live.html",
   "live.css",
   "ui.css",

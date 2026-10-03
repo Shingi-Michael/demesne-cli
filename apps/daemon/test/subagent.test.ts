@@ -315,3 +315,27 @@ test("/v1/subagent-model changes the default at runtime, saves it, and refuses u
     expect(saved).toEqual(["gpt-6-astra", null]);
   });
 });
+
+test("three sub-agents can generate concurrently under a provider override", async () => {
+  const root = mkdtempSync(join(tmpdir(), "demesne-three-subagents-"));
+  mkdirSync(join(root,"workspace"));mkdirSync(join(root,"data"));
+  const gate=Promise.withResolvers<void>();let running=0,peak=0;
+  const processor: TurnProcessor={providerId:"qwen",modelId:"qwen",contextCapacity:32768,maxOutputTokens:8192,async listModels(){return[];},async *stream(messages){
+    if(isSubagent(messages)){
+      running++;peak=Math.max(peak,running);if(running===3)gate.resolve();
+      try{await gate.promise;yield{type:"text_delta",delta:"Independent finding."};yield{type:"finish",reason:"stop"};}finally{running--;}
+    }else if(!toolResults(messages).length){
+      for(let index=0;index<3;index++)yield{type:"tool_call_delta",index,idDelta:`delegate-${index}`,nameDelta:"subagent",argumentsDelta:JSON.stringify({description:`Investigation ${index}`,prompt:`Report finding ${index}.`})};
+      yield{type:"finish",reason:"tool_calls"};
+    }else{yield{type:"text_delta",delta:"All three reports received."};yield{type:"finish",reason:"stop"};}
+  }};
+  const app=createDaemonApp({databasePath:join(root,"data/state.sqlite"),processor,inferenceSlots:1,providerInferenceSlots:{qwen:3}});
+  const client=new DemesneClient({server:"http://localhost",fetch:((url:string|URL|Request,init?:RequestInit)=>Promise.resolve(app.fetch(new Request(url,init)))) as typeof fetch});
+  try{
+    const {session}=await client.createSession({title:"Concurrent investigations",workspacePath:join(root,"workspace")});
+    const submitted=await client.submitTurn(session.id,{content:"Delegate three investigations."});
+    let terminal="";for await(const event of client.streamEvents(session.id,submitted.eventId,AbortSignal.timeout(5000))){if(/^turn\.(completed|failed)$/.test(event.type)){terminal=event.type;break;}}
+    expect(terminal).toBe("turn.completed");expect(peak).toBe(3);
+    expect(await client.status()).toMatchObject({inferenceSlots:3,providerInferenceSlots:{qwen:3},activeInferences:0});
+  }finally{gate.resolve();await app.close();rmSync(root,{recursive:true,force:true});}
+});

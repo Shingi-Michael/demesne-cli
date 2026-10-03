@@ -17,6 +17,8 @@ export type AutoStartPolicy = "prompt" | "always" | "never";
 export type ConfigSource = "env" | "user" | "project";
 
 export interface ProviderConfig {
+  /// Maximum concurrent requests to this provider; defaults to inference_slots.
+  inferenceSlots?: number;
   auth?: "api-key" | "chatgpt";
   authProfile?: string;
   allowHttpEndpoint?: string;
@@ -246,10 +248,15 @@ function applyDocument(
   if (document.provider !== undefined) {
     const provider = objectValue(document.provider, "provider");
     assertKnownKeys(provider, [
-      "auth", "auth_profile", "url", "id", "model", "allowed_models", "api_key", "context_window", "allow_http_endpoint",
+      "inference_slots", "auth", "auth_profile", "url", "id", "model", "allowed_models", "api_key", "context_window", "allow_http_endpoint",
       "max_output_tokens", "runtime_profile", "reasoning_effort", "openrouter_ignore",
       "include_usage", "system_prompt", "first_event_timeout_ms", "request_timeout_ms", "vision",
     ], `${path}.provider`);
+    assignInto(config.provider, "inferenceSlots", provider.inference_slots, source, sources, "provider.inferenceSlots", (value, key) => {
+      const slots = optionalPositiveInteger(value, key);
+      if (slots !== undefined && slots > 1024) throw new ConfigError(`${key} must be between 1 and 1024`);
+      return slots;
+    });
     assignInto(config.provider, "auth", provider.auth, source, sources, "provider.auth", (value, key) => optionalEnum(value, ["api-key", "chatgpt"], key));
     assignInto(config.provider, "authProfile", provider.auth_profile, source, sources, "provider.authProfile", optionalString);
     assignInto(config.provider, "allowHttpEndpoint", provider.allow_http_endpoint, source, sources, "provider.allowHttpEndpoint", optionalString);
@@ -516,6 +523,7 @@ export function renderUserConfig(settings: {
 
   const provider = settings.provider ?? {};
   const providerEntries: Array<[string, string]> = [];
+  if (provider.inferenceSlots !== undefined) providerEntries.push(["inference_slots", String(provider.inferenceSlots)]);
   if (provider.auth) providerEntries.push(["auth", tomlString(provider.auth)]);
   if (provider.authProfile) providerEntries.push(["auth_profile", tomlString(provider.authProfile)]);
   if (provider.vision !== undefined) providerEntries.push(["vision", String(provider.vision)]);

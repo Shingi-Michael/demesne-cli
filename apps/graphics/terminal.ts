@@ -15,6 +15,7 @@ import {
   PASTE_DISABLE,
 } from "../../apps/cli/src/workbench/terminal-input.ts";
 import { TileTransport, viewport, type TileBatch } from "./transport.ts";
+import { PipeWriter, isDisconnect } from "./pipe-writer.cjs";
 import { InputQueue } from "./input-queue.cjs";
 import { displayScale, parseDisplayScale } from "./display-scale.ts";
 
@@ -132,8 +133,13 @@ function fileProbe(): string {
   writeFileSync(path, deflateSync(Buffer.from([0, 0, 0])), { mode: 0o600 });
   return `\x1b_Ga=q,t=t,f=24,o=z,s=1,v=1,i=${fileProbeId};${Buffer.from(path).toString("base64")}\x1b\\`;
 }
+const rendererInput = new PipeWriter(child.stdin, error => {
+  if (!closing) finish(`Renderer connection closed${error ? `: ${error.message}` : "."}`, 1);
+});
+const terminalOutput = new PipeWriter(process.stdout, error => finish("", isDisconnect(error) ? 0 : 1));
+const diagnosticOutput = new PipeWriter(process.stderr, () => {});
 const send = (value: any) => {
-  if (closing || !child.stdin.writable) return;
+  if (closing || rendererInput.closed) return;
   // Drain acknowledgements bypass input coalescing and never wait for a hover burst.
   if (
     value.kind === "ack" ||
@@ -141,7 +147,7 @@ const send = (value: any) => {
     value.kind === "app-state" ||
     value.kind === "ui-command"
   ) {
-    child.stdin.write(JSON.stringify(value) + "\n");
+    rendererInput.write(JSON.stringify(value) + "\n");
     return;
   }
   inputQueue.push(value);
@@ -152,12 +158,12 @@ const send = (value: any) => {
 };
 function flushInputs() {
   inputScheduled = false;
-  if (closing || sending || !child.stdin.writable) return;
+  if (closing || sending || rendererInput.closed) return;
   const items = [];
   for (let value; (value = inputQueue.shift()); ) items.push(value);
   if (!items.length) return;
   sending = true;
-  child.stdin.write(
+  rendererInput.write(
     items.map((value) => JSON.stringify(value)).join("\n") + "\n",
     () => {
       sending = false;
@@ -233,7 +239,7 @@ function draw(batch: TileBatch) {
   const scrolled = wheelAt;
   wheelAt = 0;
   const traceDraw = process.env.DEMESNE_GRAPHICS_TRACE, drawStart = performance.timeOrigin + performance.now();
-  process.stdout.write(output, () => {
+  terminalOutput.write(output, () => {
     if (scrolled) { metrics.scrollFrames++; metrics.scrollToOutputMs += performance.now() - scrolled; }
     if (traceDraw) appendFileSync(traceDraw, JSON.stringify({ at: "terminal", stage: "draw", serial: batch.serial, start: drawStart, end: performance.timeOrigin + performance.now(), bytes: Buffer.byteLength(output) }) + "\n");
     send({ kind: "ack", serial: batch.serial });
@@ -245,14 +251,16 @@ function draw(batch: TileBatch) {
 function finish(message = "", code = 0) {
   if (closing) return;
   closing = true;
+  rendererInput.close();
+  inputQueue.items.length = 0;
   host?.dispose();
   clearTimeout(probeTimer);
   clearTimeout(escapeTimer);
   if (imageDirectory) rmSync(imageDirectory, { recursive: true, force: true });
   if (attached) {
-    process.stdin.setRawMode(wasRaw);
+    try { process.stdin.setRawMode(wasRaw); } catch { /* The terminal may already be gone. */ }
     process.stdin.pause();
-    process.stdout.write(
+    terminalOutput.write(
       transport.clear() +
         "\x1b[?1016;1000;1002;1003;1006l" +
         PASTE_DISABLE +
@@ -278,7 +286,7 @@ function finish(message = "", code = 0) {
   const forced = setTimeout(() => child.kill("SIGKILL"), 1500);
   forced.unref();
   process.exitCode = code;
-  if (message) process.stderr.write(message + "\n");
+  if (message) diagnosticOutput.write(message + "\n");
 }
 child.stderr.on("data", (chunk) => {
   errorLog = (errorLog + chunk.toString()).slice(-4000);
@@ -458,7 +466,7 @@ if (snapshot) {
   process.stdin.setRawMode(true);
   process.stdin.setEncoding("utf8");
   process.stdin.resume();
-  process.stdout.write(
+  terminalOutput.write(
     "\x1b[?1049h\x1b[2J\x1b[?25l\x1b[?1003;1006h" +
       PASTE_ENABLE +
       graphicsProbe(probeId) +
@@ -504,7 +512,7 @@ if (snapshot) {
         pixelMouse = /;[1234]\$y$/.test(
           input.kind === "text" ? input.text : input.sequence,
         );
-        if (pixelMouse) process.stdout.write("\x1b[?1016h");
+        if (pixelMouse) terminalOutput.write("\x1b[?1016h");
       } else if (input.kind === "text") keys.write(input.text);
       else if (input.kind === "escape") standaloneEscape(input.sequence);
       else if (input.kind === "paste") send({ kind: "text", text: input.text });
@@ -572,8 +580,12 @@ if (snapshot) {
   });
   process.stdout.on("resize", () => {
     resize();
-    process.stdout.write("\x1b[16t");
+    terminalOutput.write("\x1b[16t");
   });
 }
+process.stdin.on("end", () => finish());
+process.stdin.on("close", () => finish());
+process.stdin.on("error", error => finish(error.message, isDisconnect(error) ? 0 : 1));
+process.on("SIGHUP", () => finish());
 process.on("SIGTERM", () => finish());
 process.on("SIGINT", () => finish());

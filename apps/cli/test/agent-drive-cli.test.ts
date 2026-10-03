@@ -51,7 +51,7 @@ test.each(["stopped", "completed"] as const)("the real CLI restores %s missions 
     steps: [{ step: 1, action: '{"kind":"wait"}', note: "Earlier work", result: "Already performed", at }] };
   mkdirSync(join(root, "drive")); writeFileSync(journal, JSON.stringify(saved));
   const child = Bun.spawn([process.execPath, "--preload", preload, join(import.meta.dir, "../src/main.ts"), "--server", server.url.href, "--session", session.session.id], {
-    cwd: root, env: { ...process.env, DEMESNE_DATA_DIR: root, DEMESNE_CONFIG_FILE: join(root, "config.toml"), NO_COLOR: "1", DEMESNE_REDUCED_MOTION: "1" },
+    cwd: root, env: { ...process.env, DEMESNE_DATA_DIR: root, DEMESNE_CONFIG_FILE: join(root, "config.toml"), NO_COLOR: "1", DEMESNE_REDUCED_MOTION: "1", DEMESNE_TEXT_UI: "1" },
     stdin: "pipe", stdout: "pipe", stderr: "pipe",
   });
   let output = "";

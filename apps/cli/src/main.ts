@@ -507,7 +507,15 @@ try {
     if (first === "graphics") graphicsArgs.splice(graphicsArgs.indexOf("graphics"), 1);
     process.exitCode = await runGraphics(graphicsArgs.filter(arg => arg !== "--graphics"));
   } else if (args.length === 0 || first === "chat" || chatFlags) {
-    await runChat(first === "chat" ? args.slice(1) : args);
+    const chatArgs = first === "chat" ? args.slice(1) : args;
+    // The graphics UI is demesne. The text workbench is left only for what
+    // graphics can't take yet (an initial message, --model, --permission,
+    // --no-tui), non-interactive use, and tests (DEMESNE_TEXT_UI=1).
+    if (opensGraphics(chatArgs)) {
+      const graphicsArgs = process.argv.slice(2);
+      if (first === "chat") graphicsArgs.splice(graphicsArgs.indexOf("chat"), 1);
+      process.exitCode = await runGraphics(graphicsArgs);
+    } else await runChat(chatArgs);
   } else {
     await run(args);
   }
@@ -812,6 +820,20 @@ function leaveChat(): never {
   restoreTerminalState();
   console.error(`\n  ${paintLog.dim("Demesne line closed.")}\n`);
   process.exit(0);
+}
+
+/// Whether `demesne [chat] …` opens the graphics UI: an interactive terminal
+/// and only options graphics understands (--server is already taken out).
+function opensGraphics(command: string[]): boolean {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+  if (process.env.DEMESNE_TEXT_UI === "1" || process.env.DEMESNE_NO_TUI === "1") return false;
+  for (let index = 0; index < command.length; index++) {
+    const arg = command[index]!;
+    if (arg === "--setup") continue;
+    if (["--session", "--workspace", "--scale"].includes(arg) && command[index + 1] && !command[index + 1]!.startsWith("--")) { index++; continue; }
+    return false;
+  }
+  return true;
 }
 
 async function runChat(command: string[]): Promise<void> {
@@ -2678,8 +2700,9 @@ async function runCommandCapture(command: string[]): Promise<{ code: number; std
 
 function printUsage(): void {
   console.log(`Usage:
-  demesne [chat] [initial message] [--no-tui]
-  demesne graphics [--workspace <path>] [--session <id>] [--scale auto|0.5-3] [--setup]
+  demesne [--workspace <path>] [--session <id>] [--scale auto|0.5-3] [--setup]
+      Opens demesne in Ghostty (Kitty graphics). Same as demesne graphics.
+  demesne [chat] <initial message> [--model <id>] [--no-tui]
   demesne setup [--provider-url <url> --model <id>] [--context-window <n>] [--max-output-tokens <n>] [--theme auto|dark|light] [--yes]
   demesne auth login <chatgpt|openrouter> [--model <id>] [--no-browser]
   demesne auth accounts|status|use|logout chatgpt [--account <id>]

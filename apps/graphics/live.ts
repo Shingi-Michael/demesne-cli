@@ -70,6 +70,10 @@ const h = (value: unknown) =>
       ]!,
   );
 const k = (key: string) => `<kbd>${h(key)}</kbd>`;
+/// A session view, not the start screen: it has turns, or Drive is working
+/// it (Drive plans before its first turn).
+const inSession = (snapshot: Snapshot | null = state) =>
+  Boolean(snapshot && (snapshot.runs.length || (snapshot.drive && snapshot.drive.homeSessionId === snapshot.session?.id)));
 /// A provider with more models than this (OpenRouter) collapses in /model.
 const LARGE_CATALOG = 25;
 /// Menus draw at most this many rows; the filter narrows the rest.
@@ -331,6 +335,7 @@ function renderStatus() {
       ? Math.floor((Date.now() - Date.parse(state.session!.createdAt)) / 1000)
       : state.session?.createdAt,
     state.runs.length,
+    inSession(),
   ]);
   if (signature === statusSignature) return;
   statusSignature = signature;
@@ -338,7 +343,7 @@ function renderStatus() {
   // needs attention (failed, approval, offline…). "ready" says nothing.
   const working = Boolean(state.activeTurnId) && !["approval", "waiting", "failed"].includes(phase);
   el("status").innerHTML =
-    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${state.runs.length ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
+    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   const workspace = state.workspace.replace(/^.*\/projects\//, "projects/");
   el("header").innerHTML =
     `<div class="identity"><strong>demesne</strong>${pane === "changes" && state.session ? `<span class="session-title">${h(state.session.title)}</span>` : ""}<span title="${h(state.workspace)}">${pane === "changes" ? "" : "· "}${h(workspace)}</span></div><div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}${state.runs.length ? `<span class="age">${pane === "changes" ? clock(Date.now()).slice(0, 5) : `· ${duration(Date.now() - Date.parse(state.session!.createdAt))}`}</span>` : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true)}</div>`;
@@ -681,7 +686,7 @@ function renderComposer() {
     Boolean(state.activeTurnId),
     state.restored,
     Date.now() < stopArmed,
-    state.runs.length > 0,
+    inSession(),
     state.connection,
     state.busy,
     state.approvals.length,
@@ -704,7 +709,7 @@ function renderComposer() {
   el("queue-label").hidden = !queued && !state.restored;
   el("queue-label").innerHTML =
     `<span>${queued ? 'Queued <span class="muted">sends when this turn completes</span>' : 'Restored · not sent <span class="muted">the turn did not finish</span>'}</span>${btn("clear-queue", "Clear ×")}`;
-  editor.placeholder = state.runs.length
+  editor.placeholder = inSession()
     ? state.activeTurnId
       ? "Type to queue a follow-up…"
       : "Continue the conversation…"
@@ -720,7 +725,7 @@ function renderComposer() {
   // the armed confirmation shows). In a session, an empty composer shows
   // / and @, and a draft shows ↵ send instead. The start screen keeps both.
   const armed = Date.now() < stopArmed;
-  const draft = Boolean(editor.value.trim()), session = state.runs.length > 0;
+  const draft = Boolean(editor.value.trim()), session = inSession();
   el("send-label").innerHTML = state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : ""
     : "send";
@@ -1354,7 +1359,7 @@ function renderPanels() {
   renderStatus();
   el("panel").hidden = !pane;
   el("rail").hidden =
-    Boolean(pane && pane !== "changes") || state.runs.length === 0;
+    Boolean(pane && pane !== "changes") || !inSession();
   const railHTML = `<span class="rail-state ${state.activeTurnId ? "running" : ""}"></span><hr>${(
     [
       ["files", "≡", "Files"],
@@ -2727,7 +2732,9 @@ function renderState(next: Snapshot) {
       document.documentElement.style.setProperty(`--${name}`, color);
     renderedPalette = next.palette;
   }
-  const start = !next.runs.length;
+  // Drive working this session is a session, even before its first turn:
+  // the start screen would sit beside the Drive panel.
+  const start = !inSession(next);
   el("app").classList.toggle("start", start);
   el("hero").hidden = !start;
   el("conversation").hidden = start;

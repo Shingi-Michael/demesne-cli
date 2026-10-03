@@ -44,6 +44,14 @@
   width: 100%;
   padding-bottom: 10px;
 }
+/* Only Drive opens a session before its first turn. */
+#conversation:empty::before {
+  content: "Drive is choosing the first step…";
+  display: block;
+  padding: 18px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
 .workspace header {
   min-height: 35px;
 }
@@ -530,9 +538,6 @@
   line-height: 20px;
   height: 20px;
   min-height: 20px;
-}
-.live-app:not(.start) .hints button[data-action="newline"] {
-  display: none;
 }
 .live-app:not(.start) .send {
   order: -1;
@@ -1662,7 +1667,6 @@ button:disabled {
 .live-app:not(.start) .composer .hints {
   order: 2;
 }
-.live-app:not(.start) .composer .hints button:last-child,
 .live-app:not(.start) #tokens {
   display: none;
 }

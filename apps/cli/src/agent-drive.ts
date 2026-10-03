@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "
 import { dirname } from "node:path";
 import { driveFailureKind, DrivePlanningError, isRecord, parseDriveAutonomy, parseDriveDecision, validateDriveDecisionContext, type DriveReview, type DriveCheckpointReason, type DriveFacts, type DriveMode, type DriveAction, type DriveInspectAction, type DriveInspection, type DriveLimits, type DriveObservation, type DriveProgress, type DriveRequest, type DriveResponse, type DriveState, type ReplayEvent, type SessionStateResponse } from "@demesne/protocol";
 import { beginDriveTrace, restoreDriveTraces, settleDriveTrace, updateDriveTrace } from "./drive-trace.ts";
+import type { DriveMemoryEntry } from "@demesne/protocol";
 import { chargeDriveTokens, driveBudgetReason, driveIntent, driveResultRows, fingerprint, newDriveProtection, newTokenMeter, observeDriveProgress, protectDriveDecision, restoreDriveProtection, similarIntent, workerText } from "./drive-protection.ts";
 
 export type DriveControl = "pause" | "resume" | "stop";
@@ -29,6 +30,12 @@ export interface DriveServices {
   now?: () => number;
   cancelWorker?(turnId: string, signal: AbortSignal, review?: DriveReview): Promise<boolean>;
   inspect?(action: DriveInspectAction, observation: DriveObservation, signal: AbortSignal, activity: (text: string) => void): Promise<DriveInspection>;
+  /// The workspace's project memory: read before every decision, added to
+  /// when a task is verified or Drive is blocked.
+  memory?: {
+    forPlanner(): DriveMemoryEntry[];
+    add(entry: Pick<DriveMemoryEntry, "kind" | "text" | "source">): unknown;
+  };
 }
 
 /// A mission journal is private, atomically replaced and never automatically
@@ -267,6 +274,13 @@ export class AgentDrive {
   }
 
   private now(): number { return this.services.now?.() ?? Date.now(); }
+  private projectMemory(): { projectMemory?: DriveMemoryEntry[] } {
+    try { return this.services.memory ? { projectMemory: this.services.memory.forPlanner() } : {}; } catch { return {}; }
+  }
+  /// A failed memory write never stops a mission.
+  private remember(kind: "outcome" | "blocker", text: string): void {
+    try { this.services.memory?.add({ kind, text: text.slice(0, 1000), source: "drive" }); } catch { /* memory is best effort */ }
+  }
   private accountClock(): void {
     if (this.guardAt === null || !this.state?.protection) return;
     const now = this.now(); this.state.protection.used.activeMs += Math.max(0, now - this.guardAt); this.guardAt = now;
@@ -424,7 +438,7 @@ export class AgentDrive {
         if (state.facts?.progress !== facts.progress) { state.protection!.stalledCycles=0; state.protection!.navigation=[]; }
         state.facts=facts;
       }
-      const request: DriveRequest = { mode:state.mode, ledger:structuredClone(state.ledger), facts:state.facts, mission: state.mission, homeSessionId: state.homeSessionId, observation, checkIn: { turnId: worker.turnId, cursor: worker.cursor, ...(this.services.checkpointReviews ? {freshEvidence:true,reason} : {}) }, thinking: false,
+      const request: DriveRequest = { mode:state.mode, ledger:structuredClone(state.ledger), facts:state.facts, ...this.projectMemory(), mission: state.mission, homeSessionId: state.homeSessionId, observation, checkIn: { turnId: worker.turnId, cursor: worker.cursor, ...(this.services.checkpointReviews ? {freshEvidence:true,reason} : {}) }, thinking: false,
         ...(state.autonomy ? { autonomy: structuredClone(state.autonomy) } : {}), memory: { notes: state.notes, completed: state.completed, remaining: state.remaining,
           evidence: [], steps: state.steps.slice(-6), ...(state.feedback ? { feedback: state.feedback } : {}) } };
       guard.planning = newTokenMeter(Math.ceil(JSON.stringify(request).length / 4)); chargeDriveTokens(guard, guard.planning, "planningTokens");
@@ -626,7 +640,7 @@ export class AgentDrive {
         if (state.facts?.progress !== facts.progress) { state.protection!.stalledCycles=0; state.protection!.navigation=[]; }
         state.facts=facts;
       }
-      const request: DriveRequest = { mode:state.mode, ledger:structuredClone(state.ledger), facts:state.facts, mission: state.mission, homeSessionId: state.homeSessionId,
+      const request: DriveRequest = { mode:state.mode, ledger:structuredClone(state.ledger), facts:state.facts, ...this.projectMemory(), mission: state.mission, homeSessionId: state.homeSessionId,
         ...(state.autonomy ? { autonomy: structuredClone(state.autonomy) } : {}),
         ...(this.inspection ? { inspection: this.inspection } : {}),
         memory: { notes: state.notes, completed: state.completed, remaining: state.remaining, evidence: state.evidence, steps: state.steps.slice(-12), ...(state.feedback ? { feedback: state.feedback } : {}) }, observation,
@@ -720,6 +734,7 @@ export class AgentDrive {
       }
       if (decision.action.kind === "complete" || decision.action.kind === "blocked") {
         state.status = decision.action.kind === "complete" ? "completed" : "blocked"; record.result = decision.note;
+        if (decision.action.kind === "blocked") this.remember("blocker", `${currentDriveTask(state)?.title ?? state.mission}: ${decision.note}`);
         if (decision.action.kind === "complete" && decision.action.basis === "answer") state.answer = decision.answer ?? decision.note;
         settleDriveTrace(state, decision.action.kind === "complete" ? "completed" : "failed", decision.note);
         // An answered question (basis: answer) ends the mission; finished work
@@ -734,6 +749,7 @@ export class AgentDrive {
         if (decision.action.kind === "complete") {
           const task=currentDriveTask(state)!;
           task.completions.push(completionRecord(task,decision,state.facts)); task.status="completed";
+          if (decision.action.basis !== "answer") this.remember("outcome", `${task.title}: ${decision.note}`);
           state.completed=state.ledger!.tasks.filter(task=>task.status==="completed").map(task=>task.title.slice(0,1000)).slice(-32);
           state.remaining=[]; state.protection!.stalledCycles=0; state.protection!.navigation=[];
           state.protection!.used.tasks++; state.protection!.tasks.push(driveIntent(state.autonomy?.task ?? state.mission));

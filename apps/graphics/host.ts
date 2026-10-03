@@ -239,6 +239,8 @@ export class GraphicsHost {
       commands: SLASH_COMMANDS,
       workspace: this.current?.session.workspace?.root ?? this.workspace,
       drive: this.driveState,
+      // Drive's project memory for this workspace (shown in Session).
+      driveMemory: this.drive?.memoryEntries ?? [],
       setup: this.setup?.snapshot() ?? null,
       processes: this.processes,
       queuePosition: this.queuePosition,

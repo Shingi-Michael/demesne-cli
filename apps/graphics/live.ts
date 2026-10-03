@@ -1420,6 +1420,7 @@ function renderPanels() {
               run.receipt,
             ]),
             state.sessions,
+            state.driveMemory,
           ]
         : pane === "context"
           ? [state.provider, state.checkpoint, state.activeTurnId]
@@ -1518,6 +1519,18 @@ function renderPanels() {
           ),
         )
         .join("")}` +
+      `<div class="panel-section">DRIVE MEMORY <span>${state.driveMemory.length ? `${state.driveMemory.length}` : ""}</span></div>${
+        state.driveMemory.length
+          ? [...state.driveMemory]
+              .reverse()
+              .slice(0, 12)
+              .map(
+                (item) =>
+                  `<div class="check-row memory-row"><span class="${item.kind === "outcome" ? "success" : item.kind === "blocker" ? "danger" : "electric"}">${item.kind === "outcome" ? "✓" : item.kind === "blocker" ? "×" : "you"}</span><span class="name" title="${h(item.text)}">${h(item.text)}</span>${btn("drive-forget", "Forget", { id: item.id }, "link")}</div>`,
+              )
+              .join("")
+          : '<div class="check-row muted">Nothing yet. Drive records finished work here; add a standing note with /drive remember …</div>'
+      }` +
       `<div class="panel-section">OTHER SESSIONS ${btn("overlay", "All ›", { name: "sessions" }, "link")}</div>${state.sessions
         .filter((item) => item.id !== state!.session?.id && item.turns > 0)
         .slice(0, 5)
@@ -2433,6 +2446,7 @@ async function dispatch(
     return;
   }
   if (action === "new-session") return api("new-session", {});
+  if (action === "drive-forget") return api("drive", { text: `forget ${args.id}` });
   if (action === "overlay") return openOverlay(args.name, args.query ?? "");
   if (action === "close-overlay") {
     overlay = null;
@@ -3301,6 +3315,7 @@ window.demesneInspect = () => ({
   drive: state?.drive?.status,
   driveMode: state?.drive?.mode,
   drivePhase: state?.drive?.autonomy?.phase,
+  driveMemory: state?.driveMemory,
   driveTasks: state?.drive?.ledger?.tasks.map((task) => ({
     id: task.id,
     status: task.status,

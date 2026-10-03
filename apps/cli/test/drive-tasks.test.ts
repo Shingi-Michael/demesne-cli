@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentDrive, type DriveServices } from "../src/agent-drive.ts";
 import { currentDriveTask } from "../src/drive-tasks.ts";
+import { ProjectMemory } from "../src/drive-memory.ts";
 import {
   driveReopenReason,
   parseDriveRequest,
@@ -399,5 +400,38 @@ test("worker binding uses the actual normalized submission, including file menti
     );
   } finally {
     h.drive.dispose();
+  }
+});
+
+test("project memory: Drive plans with it, records verified outcomes, and keeps it across missions", async () => {
+  const root = mkdtempSync(join(tmpdir(), "drive-memory-"));
+  const memory = new ProjectMemory(join(root, "memory.jsonl"));
+  memory.add({ kind: "preference", text: "Merge solid fixes after CI passes", source: "you" });
+  const requests: unknown[] = [];
+  const h = harness({ memory });
+  const decide = h.services.decide;
+  h.services.decide = async (request, signal, progress) => { requests.push(request.projectMemory); return decide(request, signal, progress); };
+  try {
+    h.drive.start("--bounded Fix parser.ts empty input");
+    h.action = { kind: "complete" };
+    await h.drive.step();
+    expect(h.drive.state?.status).toBe("completed");
+    // The planner saw the standing preference…
+    expect(requests[0]).toEqual([expect.objectContaining({ kind: "preference", text: "Merge solid fixes after CI passes", source: "you" })]);
+    // …and the verified task was recorded as an outcome for later missions.
+    const outcome = memory.list().find((item) => item.kind === "outcome");
+    expect(outcome).toMatchObject({ source: "drive", text: "Fix parser.ts empty input: Reviewed criteria" });
+    // A new mission plans with both.
+    const next = harness({ memory });
+    const seen: unknown[] = [];
+    next.services.decide = async (request, signal, progress) => { seen.push(request.projectMemory); return decide(request, signal, progress); };
+    next.drive.start("--bounded Add a lexer test");
+    next.action = { kind: "wait" };
+    await next.drive.step();
+    expect((seen[0] as { kind: string }[]).map((item) => item.kind)).toEqual(["preference", "outcome"]);
+    next.drive.dispose();
+  } finally {
+    h.drive.dispose();
+    rmSync(root, { recursive: true, force: true });
   }
 });

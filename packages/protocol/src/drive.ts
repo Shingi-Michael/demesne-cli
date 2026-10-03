@@ -66,8 +66,14 @@ export interface DriveAutonomy {
   phase: "working" | "discovering"; task: string; cycle: number; consulted: boolean;
   history: { task: string; summary: string; at: string }[];
 }
+/// One line of a workspace's project memory: what you asked Drive to keep in
+/// mind (preference, decision) or what Drive learned (outcome, blocker).
+export interface DriveMemoryEntry { id: string; kind: "preference" | "decision" | "outcome" | "blocker"; text: string; source: "you" | "drive"; at: string }
 export interface DriveRequest {
   mode?: DriveMode; ledger?: DriveLedger; facts?: DriveFacts;
+  /// The workspace's project memory, bounded: standing preferences and
+  /// decisions first, then recent outcomes and blockers.
+  projectMemory?: DriveMemoryEntry[];
   mission: string; homeSessionId: string; memory: DriveMemory; observation: DriveObservation;
   autonomy?: DriveAutonomy;
   inspection?: DriveInspection;
@@ -417,6 +423,7 @@ export function parseDriveRequest(value: unknown): DriveRequest {
     ...(value.autonomy !== undefined ? { autonomy: parseDriveAutonomy(value.autonomy) } : {}),
     ...(value.inspection !== undefined ? { inspection: parseDriveInspection(value.inspection) } : {}),
     ...(value.review !== undefined ? {review:parseDriveReview(value.review)} : {}),
+    ...(value.projectMemory !== undefined ? { projectMemory: parseProjectMemory(value.projectMemory) } : {}),
     ...(value.checkIn !== undefined ? { checkIn: parseDriveCheckIn(value.checkIn) } : {}),
     ...(typeof value.thinking === "boolean" ? { thinking: value.thinking } : {}),
     memory: { notes: text(memory.notes, 8000, "memory.notes", true), completed: list(memory.completed, "memory.completed"), remaining: list(memory.remaining, "memory.remaining"), evidence: evidence(memory.evidence, "memory.evidence"),
@@ -426,6 +433,16 @@ export function parseDriveRequest(value: unknown): DriveRequest {
         if (!isRecord(step)) invalid(path, "expected an object");
         return { step: coordinate(step.step, Number.MAX_SAFE_INTEGER, `${path}.step`), action: text(step.action, 20_000, `${path}.action`), note: text(step.note, 2000, `${path}.note`), result: text(step.result, 2000, `${path}.result`), at: text(step.at, 100, `${path}.at`) };
       }) } };
+}
+function parseProjectMemory(value: unknown): DriveMemoryEntry[] {
+  if (!Array.isArray(value) || value.length > 60) invalid("projectMemory", "expected at most 60 entries");
+  const entries = value.map((item, index) => {
+    const path = `projectMemory[${index}]`;
+    if (!isRecord(item) || !["preference", "decision", "outcome", "blocker"].includes(String(item.kind)) || !["you", "drive"].includes(String(item.source))) invalid(path, "expected a memory entry");
+    return { id: text(item.id, 100, `${path}.id`), kind: item.kind as DriveMemoryEntry["kind"], text: text(item.text, 1000, `${path}.text`), source: item.source as DriveMemoryEntry["source"], at: text(item.at, 100, `${path}.at`) };
+  });
+  if (entries.reduce((sum, item) => sum + item.text.length, 0) > 8000) invalid("projectMemory", "memory exceeds 8,000 characters");
+  return entries;
 }
 function parseDriveCheckIn(value: unknown): NonNullable<DriveRequest["checkIn"]> {
   if (!isRecord(value)) invalid("checkIn", "expected a turn and event cursor");

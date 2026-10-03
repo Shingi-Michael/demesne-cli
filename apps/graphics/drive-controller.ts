@@ -3,9 +3,11 @@ import { join } from "node:path";
 import {
   parseDriveRequest,
   type DriveAction,
+  type DriveMemoryEntry,
   type DriveObservation,
 } from "@demesne/protocol";
 import { AgentDrive } from "../cli/src/agent-drive.ts";
+import { ProjectMemory } from "../cli/src/drive-memory.ts";
 import { inspectDrive } from "../cli/src/drive-inspection.ts";
 import { DirectDriveControl } from "./drive-direct.ts";
 import type { GraphicsHost } from "./host.ts";
@@ -21,6 +23,9 @@ export interface GraphicsUICommand {
  * controls. Either way it cannot approve permissions. */
 export class GraphicsDrive {
   readonly agent: AgentDrive;
+  /// This workspace's project memory, and its entries for the UI.
+  readonly memory: ProjectMemory;
+  memoryEntries: DriveMemoryEntry[] = [];
   private observed: DriveObservation | null = null;
   private pending = new Map<
     string,
@@ -36,6 +41,9 @@ export class GraphicsDrive {
     private host: GraphicsHost,
     private send: (command: GraphicsUICommand) => void,
   ) {
+    const key = createHash("sha256").update(`${host.api.server}\n${host.workspace}`).digest("hex");
+    this.memory = new ProjectMemory(join(host.settings.dataDirectory, "drive", `${key}.memory.jsonl`));
+    this.refreshMemory(false);
     const direct =
       process.env.DEMESNE_DRIVE_CONTROL === "ui"
         ? null
@@ -68,11 +76,15 @@ export class GraphicsDrive {
           signal,
         ),
       limits: host.settings.loaded.config.drive,
-      path: join(
-        host.settings.dataDirectory,
-        "drive",
-        `${createHash("sha256").update(`${host.api.server}\n${host.workspace}`).digest("hex")}.json`,
-      ),
+      path: join(host.settings.dataDirectory, "drive", `${key}.json`),
+      memory: {
+        forPlanner: () => this.memory.forPlanner(),
+        add: (entry) => {
+          const saved = this.memory.add(entry);
+          this.refreshMemory();
+          return saved;
+        },
+      },
       decide: (request, signal, progress) =>
         host.api.decideDrive(request, signal, progress),
       changed: (state) => {
@@ -248,6 +260,13 @@ export class GraphicsDrive {
       if (["pause", "resume", "stop"].includes(value)) {
         this.agent.control(value as "pause" | "resume" | "stop");
         if (value === "stop") await this.host.interrupt();
+      } else if (/^remember\s/.test(value)) {
+        // /drive remember <text>: a standing preference or decision.
+        this.memory.add({ kind: "preference", text: value.replace(/^remember\s+/, ""), source: "you" });
+        this.refreshMemory();
+      } else if (/^forget\s/.test(value)) {
+        this.memory.forget(value.replace(/^forget\s+/, ""));
+        this.refreshMemory();
       } else if (value.startsWith("reopen ")) {
         const [, id, ...reason] = value.split(/\s+/);
         this.agent.reopen(id ?? "", reason.join(" "));
@@ -263,6 +282,14 @@ export class GraphicsDrive {
       return;
     }
     throw new Error(`Unsupported action: ${method}`);
+  }
+  private refreshMemory(publish = true) {
+    try {
+      this.memoryEntries = this.memory.list();
+    } catch {
+      this.memoryEntries = [];
+    }
+    if (publish) this.host.publish();
   }
   dispose() {
     this.agent.dispose();

@@ -29,6 +29,11 @@ describe("built-in tools", () => {
     expect(turnToolGuidance("summarize this project and count its lines")).toBeNull();
     expect(selectToolsForTurn(definitions, "summarize this repository and fix the failing tests")).toEqual(definitions);
     expect(turnToolGuidance("summarize this repository and fix the failing tests")).toBeNull();
+    // Drive's real request: asking for sub-agents keeps every tool, subagent included.
+    const drive = "Use subagents to read files in the current workspace. First identify available project files, then delegate distinct files or small groups to subagents for read-only inspection. Have them report the paths actually read and concise findings; summarize those results.";
+    expect(selectToolsForTurn(definitions, drive)).toEqual(definitions);
+    expect(turnToolGuidance(drive)).toBeNull();
+    expect(selectToolsForTurn(definitions, "send a sub-agent to give me an overview of this project")).toEqual(definitions);
   });
 
   test("plan mode restricts tool definitions and explains the boundary", () => {

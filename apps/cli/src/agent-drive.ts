@@ -7,6 +7,9 @@ import { beginDriveTrace, restoreDriveTraces, settleDriveTrace, updateDriveTrace
 import { chargeDriveTokens, driveBudgetReason, driveIntent, driveResultRows, fingerprint, newDriveProtection, newTokenMeter, observeDriveProgress, protectDriveDecision, restoreDriveProtection, similarIntent, workerText } from "./drive-protection.ts";
 
 export type DriveControl = "pause" | "resume" | "stop";
+/// A perform() result that means the request reached the coder: through the
+/// visible composer (UI control) or the daemon API (direct control).
+const SENT = /^Sent (?:through the visible composer|to the coder):/;
 export interface DriveServices {
   observe(): DriveObservation;
   perform(action: DriveAction, observation: DriveObservation, signal: AbortSignal): Promise<string>;
@@ -151,7 +154,7 @@ export class AgentDrive {
     this.lastSubmission = ""; this.duplicateSubmissions = 0; this.repeated = { signature: "", count: 0 }; this.allowance = 256; this.judged.clear();
     const task=newDriveTask(mission);
     this.state = { mode:parsed.mode, ledger:{version:1,currentTaskId:task.id,tasks:[task]}, id: crypto.randomUUID(), mission, homeSessionId: observed.sessionId, workspace: observed.workspace, status: "running",
-      activity: "Recovering the mission from the visible conversation.", step: 0, model: null, updatedAt: new Date().toISOString(),
+      activity: "Recovering the mission from the conversation.", step: 0, model: null, updatedAt: new Date().toISOString(),
       notes: "", completed: [], remaining: [mission.slice(0, 1000)], evidence: [], steps: [], protection: newDriveProtection(this.services.limits),
       ...(parsed.mode === "continuous" ? { autonomy: { phase: "working", task: mission, cycle: 1, consulted: false, history: [] } as const } : {}) };
     this.startGuardClock(); this.publish(); this.schedule();
@@ -512,7 +515,7 @@ export class AgentDrive {
       if (!this.active || controller.signal.aborted) return;
       record.result = await this.services.perform(action, this.services.observe(), controller.signal);
       if (epoch !== this.epoch || controller.signal.aborted) return;
-      state.feedback = record.result.startsWith("Sent through the visible composer:") ? undefined : `Correction was not confirmed: ${record.result}. Inspect before trying again.`;
+      state.feedback = SENT.test(record.result) ? undefined : `Correction was not confirmed: ${record.result}. Inspect before trying again.`;
       if (/^(UI changed|Input changed)/.test(record.result)) state.protection!.pendingWorker = undefined;
       settleDriveTrace(state, "completed", record.result); this.publish();
     } catch (error) { if (epoch === this.epoch && !controller.signal.aborted) this.block(error instanceof Error ? error.message : "Correction could not be sent."); }
@@ -611,7 +614,7 @@ export class AgentDrive {
     beginDriveTrace(state);
     const recovering = state.recovery?.kind === "decision";
     state.recovery = undefined;
-    state.status = "running"; state.activity = state.autonomy?.phase === "discovering" ? "Finding useful next work with the coding agent." : "Reading the visible workbench and choosing the next action."; this.publish();
+    state.status = "running"; state.activity = state.autonomy?.phase === "discovering" ? "Finding useful next work with the coding agent." : "Choosing the next action."; this.publish();
     try {
       if (!this.active || controller.signal.aborted) return;
       // The first trace adds the activity card. Observe after it is rendered so
@@ -766,7 +769,7 @@ export class AgentDrive {
         state.feedback = `${record.result} No completed action should be inferred. ${this.skipped >= 3 ? "Several actions have been skipped; use fresh controls, keyboard navigation, or expand the pane rather than repeatedly reopening it." : "Observe the current screen and adapt the next action."}`;
         if (this.skipped >= 3) this.nextAttemptAt = Date.now() + 1000;
       } else this.skipped = 0;
-      if (decision.action.kind === "compose" && record.result.startsWith("Sent through the visible composer:")) {
+      if (decision.action.kind === "compose" && SENT.test(record.result)) {
         const content = decision.action.text.trim();
         if (!content.startsWith("/")) {
           this.duplicateSubmissions = content === this.lastSubmission ? this.duplicateSubmissions + 1 : 0; this.lastSubmission = content;

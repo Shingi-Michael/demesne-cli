@@ -7,6 +7,7 @@ import {
 } from "@demesne/protocol";
 import { AgentDrive } from "../cli/src/agent-drive.ts";
 import { inspectDrive } from "../cli/src/drive-inspection.ts";
+import { DirectDriveControl } from "./drive-direct.ts";
 import type { GraphicsHost } from "./host.ts";
 
 export interface GraphicsUICommand {
@@ -14,8 +15,10 @@ export interface GraphicsUICommand {
   observationId: string;
   action: DriveAction;
 }
-/** The controller receives clipped, visible DOM observations and operates only
- * authored UI controls. It cannot approve permissions or bypass the composer. */
+/** Drive works the daemon directly by default (recorded session state in,
+ * API submissions out); the UI only shows it. DEMESNE_DRIVE_CONTROL=ui keeps
+ * the original route: clipped, visible DOM observations and authored UI
+ * controls. Either way it cannot approve permissions. */
 export class GraphicsDrive {
   readonly agent: AgentDrive;
   private observed: DriveObservation | null = null;
@@ -33,14 +36,27 @@ export class GraphicsDrive {
     private host: GraphicsHost,
     private send: (command: GraphicsUICommand) => void,
   ) {
-    const ui = {
-      observe: () => this.observe(),
-      perform: (
-        action: DriveAction,
-        observation: DriveObservation,
-        signal: AbortSignal,
-      ) => this.perform(action, observation, signal),
-    };
+    const direct =
+      process.env.DEMESNE_DRIVE_CONTROL === "ui"
+        ? null
+        : new DirectDriveControl(host);
+    const ui = direct
+      ? {
+          observe: () => direct.observe(),
+          perform: (
+            action: DriveAction,
+            observation: DriveObservation,
+            signal: AbortSignal,
+          ) => direct.perform(action, observation, signal),
+        }
+      : {
+          observe: () => this.observe(),
+          perform: (
+            action: DriveAction,
+            observation: DriveObservation,
+            signal: AbortSignal,
+          ) => this.perform(action, observation, signal),
+        };
     this.agent = new AgentDrive({
       ...ui,
       checkpointReviews:true,
@@ -69,7 +85,9 @@ export class GraphicsDrive {
         return (await host.api.cancelTurn(turnId)).turn.status === "cancelled";
       },
       inspect: (action, observation, signal, activity) =>
-        inspectDrive(ui, action, observation, signal, activity),
+        direct
+          ? direct.inspect(action, observation, signal, activity)
+          : inspectDrive(ui, action, observation, signal, activity),
     });
   }
   report(raw: unknown) {

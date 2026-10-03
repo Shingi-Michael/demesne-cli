@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { EventEnvelope, SessionReplayPage, SessionStateResponse } from "@demesne/protocol";
 import { ApiRequestError } from "@demesne/client";
-import { replaySession } from "../src/workbench/history.ts";
+import { replaySession, toolTarget } from "../src/workbench/history.ts";
 import { toolCompletion } from "../src/workbench/tool-result.ts";
 
 const at = "2026-09-21T12:00:00Z";
@@ -54,4 +54,10 @@ test("command completion retains failure status, exit codes and both output stre
     state: "failed", exitCode: 1, message: "1 failed\nstderr:\ndiagnostic\n[Recorded output truncated]",
   });
   expect(toolCompletion(event(2, "tool.call_completed", { timedOut: true, exitCode: 0 })).state).toBe("failed");
+});
+
+test("a command's row names the program, not its install path; its arguments stay whole", () => {
+  expect(toolTarget("run_command", { argv: ["/opt/homebrew/Cellar/bun/1.4.0/bin/bun", "test", "src/a b.ts"] })).toBe("$ bun test src/a b.ts");
+  expect(toolTarget("run_command", { argv: ["git", "status"] })).toBe("$ git status");
+  expect(toolTarget("run_command", { argv: ["./scripts/build.sh", "/tmp/out"] })).toBe("$ build.sh /tmp/out");
 });

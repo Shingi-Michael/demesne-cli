@@ -70,6 +70,10 @@ const h = (value: unknown) =>
       ]!,
   );
 const k = (key: string) => `<kbd>${h(key)}</kbd>`;
+/// A provider with more models than this (OpenRouter) collapses in /model.
+const LARGE_CATALOG = 25;
+/// Menus draw at most this many rows; the filter narrows the rest.
+const MAX_MENU_ROWS = 60;
 const btn = (
   action: string,
   label: string,
@@ -173,6 +177,7 @@ let overlay: OverlayName | null = null,
   overlayQuery = "",
   overlayIndex = 0,
   models: ModelDescriptor[] = [],
+  modelsLoading = false,
   overlayRows: {
     label: string;
     value: string;
@@ -1752,10 +1757,13 @@ async function openOverlay(name: OverlayName, query = "") {
   el("completion").hidden = true;
   renderOverlay();
   if (name === "models") {
+    // Opens at once with the last list; the host answers from its cache.
+    modelsLoading = true;
     const result = await act(() => api<ModelDescriptor[]>("models"));
+    modelsLoading = false;
     if (Array.isArray(result)) models = result;
     overlaySignature = "";
-    renderOverlay();
+    if (overlay === "models") renderOverlay();
   }
   const input = el("overlay").querySelector<HTMLInputElement>("input");
   if (input) input.focus();
@@ -1863,7 +1871,7 @@ function renderOverlay() {
     subtitle = `current: ${state.model.id}`;
     noun = "models";
     footerNote = "Tab next group";
-    overlayRows = [...models]
+    const all = [...models]
       .sort((a, b) => a.provider.localeCompare(b.provider))
       .map((model) => ({
         label: model.displayName ?? model.id,
@@ -1880,6 +1888,16 @@ function renderOverlay() {
         data: { id: model.id },
         hint: model.id === state!.model.id ? "● current" : "",
       }));
+    // A large catalog (OpenRouter's hundreds) collapses to one row until a
+    // filter searches it; your own providers' models stay listed.
+    const sizes = new Map<string, number>();
+    for (const model of models) sizes.set(model.provider, (sizes.get(model.provider) ?? 0) + 1);
+    const large = [...sizes].filter(([, size]) => size > LARGE_CATALOG).map(([provider]) => provider.toUpperCase());
+    overlayRows = overlayQuery ? all : all.filter((row) => !large.includes(row.group!) || row.data.id === state!.model.id);
+    if (!overlayQuery)
+      for (const group of large)
+        overlayRows.push({ label: `All ${sizes.get(models.find((model) => model.provider.toUpperCase() === group)!.provider)} models`, value: "type to search", group, action: "focus-filter", data: {}, hint: "" });
+    if (!models.length && modelsLoading) footerNote = "Loading models…";
   } else if (overlay === "themes") {
     title = "Theme";
     subtitle = "this session";
@@ -1929,20 +1947,23 @@ function renderOverlay() {
       group: command.section.toUpperCase(),
     }));
   }
-  const allCount = overlayRows.length;
+  const allCount = overlay === "models" ? models.length : overlayRows.length;
   if (overlayQuery)
     overlayRows = overlayRows.filter((row) =>
-      `${row.label} ${row.value} ${row.group ?? ""}`
+      `${row.label} ${row.value} ${row.group ?? ""} ${row.action === "model" ? row.data.id : ""}`
         .toLowerCase()
         .includes(overlayQuery.toLowerCase()),
     );
+  // Never draw hundreds of rows: the filter narrows the rest.
+  const hidden = Math.max(0, overlayRows.length - MAX_MENU_ROWS);
+  if (hidden) overlayRows = overlayRows.slice(0, MAX_MENU_ROWS);
   overlayIndex = Math.min(overlayIndex, Math.max(0, overlayRows.length - 1));
   let lastGroup = "";
   const rows = overlayRows
     .map((row, index) => {
       const group =
         row.group && row.group !== lastGroup
-          ? `<div class="section-label">${h(row.group)}${overlay !== "settings" ? `<span>${overlayRows.filter((item) => item.group === row.group).length}</span>` : ""}</div>`
+          ? `<div class="section-label">${h(row.group)}${overlay !== "settings" ? `<span>${overlay === "models" ? models.filter((model) => model.provider.toUpperCase() === row.group).length : overlayRows.filter((item) => item.group === row.group).length}</span>` : ""}</div>`
           : "";
       lastGroup = row.group ?? "";
       return (
@@ -1958,7 +1979,7 @@ function renderOverlay() {
     })
     .join("");
   el("overlay").innerHTML =
-    `<div class="modal-title">${title} <span>${h(subtitle)}</span>${noun ? `<small>${overlayQuery ? `${overlayRows.length} of ` : ""}${allCount} ${noun}</small>` : ""}</div>${filter ? `<div class="filter-wrap"><input id="chooser-filter" placeholder="filter" aria-label="Filter ${title}" value="${h(overlayQuery)}" autocomplete="off"></div>` : ""}<div class="menu-list">${rows || '<div class="empty">No matches.</div>'}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} ${overlay === "models" ? "switch" : "change"} ${btn("close-overlay", `${k("Esc")} cancel`)}<span class="right">${footerNote}</span></div>`;
+    `<div class="modal-title">${title} <span>${h(subtitle)}</span>${noun ? `<small>${overlayQuery ? `${overlayRows.length} of ` : ""}${allCount} ${noun}</small>` : ""}</div>${filter ? `<div class="filter-wrap"><input id="chooser-filter" placeholder="filter" aria-label="Filter ${title}" value="${h(overlayQuery)}" autocomplete="off"></div>` : ""}<div class="menu-list">${rows || `<div class="empty">${overlay === "models" && modelsLoading && !models.length ? "Loading models…" : "No matches."}</div>`}${hidden ? `<div class="empty">${hidden} more · keep typing to narrow</div>` : ""}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} ${overlay === "models" ? "switch" : "change"} ${btn("close-overlay", `${k("Esc")} cancel`)}<span class="right">${footerNote}</span></div>`;
   if (hasFocus) {
     const input = el("overlay").querySelector<HTMLInputElement>("input");
     input?.focus({ preventScroll: true });
@@ -2472,6 +2493,10 @@ async function dispatch(
   if (action === "completion") return chooseCompletion(args.index);
   if (action === "choose-row") {
     const row = overlayRows[args.index];
+    if (row?.action === "focus-filter") {
+      el("overlay").querySelector<HTMLInputElement>("input")?.focus();
+      return;
+    }
     if (row) {
       overlay = null;
       renderOverlay();

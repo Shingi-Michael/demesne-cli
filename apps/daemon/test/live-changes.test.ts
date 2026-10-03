@@ -7,8 +7,10 @@ import { DemesneClient } from "../../../packages/client/src/index.ts";
 import { createDaemonApp } from "../src/app.ts";
 import type { TurnProcessor } from "../src/processor.ts";
 import { restoreSessionEntries, replaySession } from "../../cli/src/workbench/history.ts";
-import { planRuns } from "../../cli/src/workbench/session.ts";
-import { changeFiles } from "../../cli/src/workbench/diff-panel.ts";
+import type { WorkbenchEntry, ToolEntry } from "../../cli/src/workbench/entries.ts";
+
+// The turn's tool entries, in order (one turn per session here).
+const toolsOf = (entries: WorkbenchEntry[]) => entries.filter((entry): entry is ToolEntry => entry.type === "tool");
 
 test.each(["applied", "denied", "truncated", "cancelled"] as const)("streamed edits remain display-only until validated and approved: %s", async (outcome) => {
   const root = mkdtempSync(join(tmpdir(), "demesne-live-changes-"));
@@ -48,7 +50,7 @@ test.each(["applied", "denied", "truncated", "cancelled"] as const)("streamed ed
         expect(event.payload.delta).toContain("const a = ");
         const pending = await client.getSessionState(session.id);
         const packed = await replaySession(pending, (id, after, signal) => client.streamEvents(id, after, signal), (id, after, through, signal) => client.replayPage(id, after, through, signal));
-        expect(planRuns(restoreSessionEntries(pending, packed))[0]?.tools[0]).toMatchObject({ drafting: true, state: "running", diff: { newText: "const a = " } });
+        expect(toolsOf(restoreSessionEntries(pending, packed))[0]).toMatchObject({ drafting: true, state: "running", diff: { newText: "const a = " } });
         if (outcome === "cancelled") await client.cancelTurn(submitted.turn.id);
         gate.resolve();
       }
@@ -61,7 +63,7 @@ test.each(["applied", "denied", "truncated", "cancelled"] as const)("streamed ed
     expect(observedDraft).toBe(true);
     const snapshot = await client.getSessionState(session.id);
     const entries = restoreSessionEntries(snapshot, events);
-    const tools = planRuns(entries)[0]!.tools;
+    const tools = toolsOf(entries);
     expect(tools).toHaveLength(outcome === "applied" ? 4 : 1);
     if (outcome === "applied") {
       expect(events.filter((event) => event.type === "tool.call_completed")).toHaveLength(4);
@@ -72,7 +74,8 @@ test.each(["applied", "denied", "truncated", "cancelled"] as const)("streamed ed
         { path: "renamed.ts", before: null, after: "const a = 2;\n", beforeExists: false, afterExists: true },
       ]);
       expect(tools[3]?.changes?.[0]).toMatchObject({ before: "const a = 2;\n", after: null, afterExists: false });
-      expect(changeFiles(tools).map((file) => file.applied?.afterExists)).toEqual([false, false]);
+      expect(existsSync(join(workspace, "a.ts"))).toBe(false);
+      expect(existsSync(join(workspace, "renamed.ts"))).toBe(false);
       expect(JSON.stringify(requests)).not.toContain("draftSent");
       expect(JSON.stringify(requests)).not.toContain("draftId");
       // Replay is immutable even after unrelated changes on disk and restart.

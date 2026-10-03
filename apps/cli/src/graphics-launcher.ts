@@ -8,7 +8,7 @@ export async function runGraphics(args: string[]): Promise<number> {
   const values: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (["--server", "--workspace", "--session", "--scale"].includes(arg)) {
+    if (["--server", "--workspace", "--session", "--scale", "--model", "--prompt"].includes(arg)) {
       const value = args[++i];
       if (!value || value.startsWith("--"))
         throw new Error(`${arg} requires a value`);

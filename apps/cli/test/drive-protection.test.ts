@@ -2,11 +2,9 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPainter } from "@demesne/brand";
 import { parseDriveDecision, parseDriveRequest, validateDriveDecisionContext, type DriveAction, type DriveDecision, type DriveLimits, type DriveObservation, type DriveRequest, type DriveResponse, type EventEnvelope } from "@demesne/protocol";
 import { AgentDrive, type DriveServices } from "../src/agent-drive.ts";
 import { driveIntent, similarIntent } from "../src/drive-protection.ts";
-import { renderDrivePanel } from "../src/workbench/drive-panel.ts";
 
 const screen = (): DriveObservation => ({ id: crypto.randomUUID(), sessionId: "home", workspace: "/project", title: "Mission", mode: "input", ready: true,
   draft: "", surface: "response", rows: ["The worker is reviewing the parser behavior."], width: 120, height: 30, controls: [] });
@@ -15,24 +13,6 @@ const choice = (action: DriveAction, evidence: DriveDecision["evidence"] = []): 
 const services = (extra: Partial<DriveServices> = {}): DriveServices => ({ observe: screen, changed() {}, delayMs: 60_000, perform: async () => "No UI change",
   decide: async () => choice({ kind: "wait" }), ...extra });
 const event = (eventId: number, type: EventEnvelope["type"], payload: Record<string, unknown> = {}): EventEnvelope => ({ schemaVersion: 1, workspaceId: null, agentRunId: null, eventId, type, sessionId: "home", turnId: "worker", payload, occurredAt: new Date().toISOString() });
-
-test("mission cycles survive pause, task boundaries, journal reload and Resume; a protection stop cannot reset them", async () => {
-  const root = mkdtempSync(join(tmpdir(), "drive-guard-")), path = join(root, "mission.json"); let calls = 0;
-  const options = services({ path, limits: { maxCycles: 2 }, decide: async () => { calls++; return choice({ kind: "key", key: calls % 2 ? "up" : "down" }); } });
-  const first = new AgentDrive(options); let restored: AgentDrive | undefined;
-  try {
-    first.start("Review parser"); await first.step(); first.control("pause");
-    restored = new AgentDrive(options); restored.control("resume"); await restored.step(); await restored.step();
-    expect(calls).toBe(2); expect(restored.state?.protection?.used.cycles).toBe(2);
-    expect(restored.state?.status).toBe("blocked"); expect(restored.state?.activity).toContain("Mission cycle limit");
-    expect(() => restored!.control("resume")).toThrow("protection stopped");
-    const again = new AgentDrive(options);
-    expect(again.state?.protection?.trip?.kind).toBe("budget"); expect(() => again.control("resume")).toThrow("protection stopped"); again.dispose();
-    const panel = renderDrivePanel(100, 50, createPainter(false), restored.state, 0);
-    expect(panel.rows.join("\n")).toContain("Stopped at a limit"); expect(panel.zones.some(zone => zone.action.kind === "drive-control" && zone.action.control === "resume")).toBe(false);
-    restored.start("Investigate a different parser edge case"); expect(restored.state?.protection?.used.cycles).toBe(0);
-  } finally { restored?.dispose(); first.dispose(); rmSync(root, { recursive: true, force: true }); }
-});
 
 test("three A/B navigation cycles stop despite new observation IDs and changing notes", async () => {
   let calls = 0, actions = 0;

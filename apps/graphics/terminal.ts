@@ -173,6 +173,7 @@ function startHost() {
     server: option("server"),
     workspace: option("workspace"),
     sessionId: option("session"),
+    startup: { model: option("model"), prompt: option("prompt") },
     changed: (state) =>
       send({ kind: "app-state", state: stateEncoder.encode(state) }),
     command: (command) => send({ kind: "ui-command", command }),

@@ -51,6 +51,9 @@ export interface GraphicsHostOptions {
   client?: DemesneClient;
   command?: (command: GraphicsUICommand) => void;
   changed: (snapshot: ReturnType<GraphicsHost["snapshot"]>) => void;
+  /// Applied once, the first time the daemon is online: `demesne --model <id>`
+  /// and `demesne "<message>"`.
+  startup?: { model?: string; prompt?: string };
 }
 const string = (value: unknown, label: string, max = 128000) => {
   if (typeof value !== "string" || value.length > max)
@@ -275,6 +278,7 @@ export class GraphicsHost {
       this.connection = "online";
       if (this.selectedSession) await this.select(this.selectedSession);
       else await this.newSession();
+      await this.applyStartup();
     } catch (error) {
       if (!this.autoStarted && this.settings.autoStart === "always") {
         this.autoStarted = true;
@@ -428,6 +432,17 @@ export class GraphicsHost {
       }
     } catch (error) {
       if (!controller.signal.aborted) this.fail(error);
+    }
+  }
+  private async applyStartup() {
+    const startup = this.options.startup;
+    if (!startup) return;
+    this.options.startup = undefined;
+    try {
+      if (startup.model) await this.handle("model", { id: startup.model });
+      if (startup.prompt?.trim()) await this.submit(startup.prompt);
+    } catch (error) {
+      this.fail(error);
     }
   }
   private fail(error: unknown) {

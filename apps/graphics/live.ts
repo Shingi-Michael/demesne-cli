@@ -2118,7 +2118,10 @@ async function chooseCompletion(index = completionIndex) {
     const command = state!.commands.find(
       (command) => command.name === item.value,
     )!;
-    if (command.argument === "none") {
+    // Enter runs a command whose argument is optional (/model opens its
+    // menu); one that needs an argument completes so it can be typed. Tab
+    // always completes.
+    if (command.argument !== "required") {
       editor.value = "";
       completionDismissed = true;
       el("completion").hidden = true;

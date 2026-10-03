@@ -25,7 +25,10 @@ const f = await fixture({ providerId: "test", modelId: "next-fixture", contextCa
 });
 Bun.spawnSync(["git", "init", "-q"], { cwd: f.workspace });
 writeFileSync(join(f.workspace, "pending.ts"), "export const pending = true;\n");
-const app = new TerminalHarness({ env: f.env, entry: resolve(import.meta.dir, "terminal.ts"), args: ["--live", `--server=${f.server.url}`, `--workspace=${f.workspace}`, `--capture-dir=${output}`] });
+const packaged = process.argv.includes("--packaged");
+const entry = packaged ? join(f.root, "packaged-host.ts") : resolve(import.meta.dir, "terminal.ts");
+if (packaged) writeFileSync(entry, `const child=Bun.spawn([${JSON.stringify(resolve("dist/graphics/host"))},...process.argv.slice(2)],{stdin:"inherit",stdout:"inherit",stderr:"inherit",env:{...process.env,DEMESNE_GRAPHICS_ROOT:${JSON.stringify(resolve("dist/graphics"))}}});process.exit(await child.exited);`);
+const app = new TerminalHarness({ env: f.env, entry, args: ["--live", `--server=${f.server.url}`, `--workspace=${f.workspace}`, `--capture-dir=${output}`] });
 let state: any;
 async function wait(check: (s: any) => boolean) { await eventually(() => { try { state = JSON.parse(readFileSync(join(output, "state.json"), "utf8")); return check(state); } catch { return false; } }, 15000); }
 async function click(action: string, args: Record<string, unknown> = {}) {

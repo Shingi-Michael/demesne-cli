@@ -74,6 +74,14 @@ const k = (key: string) => `<kbd>${h(key)}</kbd>`;
 /// it (Drive plans before its first turn).
 const inSession = (snapshot: Snapshot | null = state) =>
   Boolean(snapshot && (snapshot.runs.length || (snapshot.drive && snapshot.drive.homeSessionId === snapshot.session?.id)));
+/// The thinking level each /model row would switch to: picked with ←→,
+/// else the current choice for the current model, else the model's default.
+const modelLevels = new Map<string, string>();
+function modelLevel(model: ModelDescriptor): string | undefined {
+  const levels = model.reasoningLevels;
+  if (!levels?.length) return undefined;
+  return modelLevels.get(model.id) ?? (model.id === state?.model.id ? state.reasoning : undefined) ?? model.defaultReasoningLevel ?? levels[0];
+}
 /// A provider with more models than this (OpenRouter) collapses in /model.
 const LARGE_CATALOG = 25;
 /// Menus draw at most this many rows; the filter narrows the rest.
@@ -343,7 +351,7 @@ function renderStatus() {
   // needs attention (failed, approval, offline…). "ready" says nothing.
   const working = Boolean(state.activeTurnId) && !["approval", "waiting", "failed"].includes(phase);
   el("status").innerHTML =
-    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
+    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   const workspace = state.workspace.replace(/^.*\/projects\//, "projects/");
   el("header").innerHTML =
     `<div class="identity"><strong>demesne</strong>${pane === "changes" && state.session ? `<span class="session-title">${h(state.session.title)}</span>` : ""}<span title="${h(state.workspace)}">${pane === "changes" ? "" : "· "}${h(workspace)}</span></div><div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}${state.runs.length ? `<span class="age">${pane === "changes" ? clock(Date.now()).slice(0, 5) : `· ${duration(Date.now() - Date.parse(state.session!.createdAt))}`}</span>` : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true)}</div>`;
@@ -1764,6 +1772,7 @@ async function openOverlay(name: OverlayName, query = "") {
   el("completion").hidden = true;
   renderOverlay();
   if (name === "models") {
+    modelLevels.clear();
     // Opens at once with the last list; the host answers from its cache.
     modelsLoading = true;
     const result = await act(() => api<ModelDescriptor[]>("models"));
@@ -1821,7 +1830,7 @@ function renderOverlay() {
       },
       {
         label: "Model",
-        value: state.model.id,
+        value: state.reasoning ? `${state.model.id} · thinking ${state.reasoning}` : state.model.id,
         group: "SESSION",
         action: "overlay",
         data: { name: "models" },
@@ -1880,21 +1889,26 @@ function renderOverlay() {
     footerNote = "Tab next group";
     const all = [...models]
       .sort((a, b) => a.provider.localeCompare(b.provider))
-      .map((model) => ({
+      .map((model) => {
+        const level = modelLevel(model);
+        const current = model.id === state!.model.id && (level ?? "") === (state!.reasoning ?? model.defaultReasoningLevel ?? level ?? "");
+        return {
         label: model.displayName ?? model.id,
         value: [
           model.contextWindow
             ? `${num(model.contextWindow)} ctx`
             : "context unknown",
           model.maxOutputTokens ? `${num(model.maxOutputTokens)} out` : "",
+          level ? `thinking ${level}` : "",
         ]
           .filter(Boolean)
           .join(" · "),
         group: model.provider.toUpperCase(),
         action: "model",
-        data: { id: model.id },
-        hint: model.id === state!.model.id ? "● current" : "",
-      }));
+        data: { id: model.id, ...(level ? { reasoning: level } : {}) },
+        hint: [model.reasoningLevels?.length ? "←→ thinking" : "", current ? "● current" : ""].filter(Boolean).join("  "),
+        };
+      });
     // A large catalog (OpenRouter's hundreds) collapses to one row until a
     // filter searches it; your own providers' models stay listed.
     const sizes = new Map<string, number>();
@@ -3019,6 +3033,21 @@ document.addEventListener("keydown", (event) => {
     }
   }
   if (overlay) {
+    // ←→ choose the highlighted model's thinking level (while the filter is
+    // empty; with text they move the caret).
+    if (overlay === "models" && (key === "arrowleft" || key === "arrowright") && !overlayQuery) {
+      const row = overlayRows[overlayIndex];
+      const model = row?.action === "model" ? models.find((item) => item.id === row.data.id) : undefined;
+      const levels = model?.reasoningLevels;
+      if (model && levels?.length) {
+        event.preventDefault();
+        const at = Math.max(0, levels.indexOf(modelLevel(model) ?? levels[0]!));
+        modelLevels.set(model.id, levels[(at + (key === "arrowright" ? 1 : -1) + levels.length) % levels.length]!);
+        overlaySignature = "";
+        renderOverlay();
+        return;
+      }
+    }
     if (key === "arrowdown" || key === "arrowup") {
       run(() => {
         overlayIndex =

@@ -24,6 +24,7 @@ export class MultiProviderProcessor implements TurnProcessor {
 
   get providerId() { return this.selected.providerId; }
   get modelId() { return this.selected.modelId; }
+  get reasoning() { return this.selected.reasoning; }
   get contextCapacity() { return this.selected.contextCapacity; }
   get maxOutputTokens() { return this.selected.maxOutputTokens; }
   get temperature() { return this.selected.temperature; }
@@ -40,10 +41,10 @@ export class MultiProviderProcessor implements TurnProcessor {
     return [...this.routes.entries()].map(([id, processor]) => ({ id, provider: processor.providerId }));
   }
 
-  setModel(id: string) {
+  setModel(id: string, reasoning?: string) {
     const processor = this.routes.get(id);
     if (!processor) throw new Error(`Unknown model: ${id}`);
-    processor.setModel?.(id);
+    processor.setModel?.(id, reasoning);
     this.selected = processor;
   }
 

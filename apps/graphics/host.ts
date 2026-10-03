@@ -109,6 +109,8 @@ export class GraphicsHost {
   private client: DemesneClient;
   chatgptAccount: ChatGPTAccount | null = null;
   model: ModelDescriptor = { id: "", provider: "" };
+  /// The model's chosen thinking level (none: the model's default).
+  reasoning: string | undefined;
   current: GraphicsSession | null = null;
   sessions: Session[] = [];
   files: WorkspaceFileInfo[] = [];
@@ -216,6 +218,7 @@ export class GraphicsHost {
       runs: this.current?.runs() ?? [],
       cursor: this.current?.cursor ?? 0,
       model: this.model,
+      reasoning: this.reasoning,
       chatgptAccount: this.model.provider === "ChatGPT" ? this.chatgptAccount : null,
       provider: this.current?.provider ?? null,
       checkpoint: this.current?.state.checkpoint ?? null,
@@ -261,13 +264,14 @@ export class GraphicsHost {
     this.publish();
     try {
       const health = await this.client.health();
+      const contextWindow = health.contextCapacity ?? [this.settings.loaded.config.provider, ...Object.values(this.settings.loaded.config.additionalProviders ?? {})]
+        .find(p => p.model === health.model)?.contextWindow;
+      this.reasoning = health.reasoning;
       this.model = {
         id: health.model,
         provider: health.provider,
-        ...(this.settings.loaded.config.provider.contextWindow
-          ? {
-              contextWindow: this.settings.loaded.config.provider.contextWindow,
-            }
+        ...(contextWindow
+          ? { contextWindow }
           : {}),
       };
       try {
@@ -821,7 +825,10 @@ export class GraphicsHost {
     if (method === "models") return this.models();
     if (method === "model") {
       const id = string(args.id, "model", 1000);
-      await this.client.setModel(id);
+      const reasoning = args.reasoning === undefined ? undefined : string(args.reasoning, "reasoning", 16);
+      if (reasoning !== undefined && !/^[a-z]{1,16}$/.test(reasoning)) throw new Error("Invalid reasoning");
+      await this.client.setModel(id, reasoning);
+      this.reasoning = reasoning;
       const models = await this.models();
       this.model = models.find((model) => model.id === id) ?? {
         id,

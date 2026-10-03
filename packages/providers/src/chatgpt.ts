@@ -12,6 +12,8 @@ function wireName(name: string): string { return /^[A-Za-z0-9_-]{1,64}$/.test(na
 export class ChatGPTProvider implements ProviderAdapter {
   readonly id = "ChatGPT";
   private readonly fetcher: typeof fetch;
+  /// Models whose catalog entry says they can stream reasoning summaries.
+  private readonly summaries = new Set<string>();
   constructor(private readonly options: {
     accountId: string;
     accessToken: (signal?: AbortSignal) => Promise<string>;
@@ -28,9 +30,15 @@ export class ChatGPTProvider implements ProviderAdapter {
     return body.models.flatMap((m): ModelDescriptor[] => {
       if (!isRecord(m) || m.visibility !== "list" || typeof m.slug !== "string" || !m.slug || seen.has(m.slug)) return [];
       seen.add(m.slug);
+      if (m.supports_reasoning_summaries === true) this.summaries.add(m.slug);
+      const levels = Array.isArray(m.supported_reasoning_levels)
+        ? m.supported_reasoning_levels.flatMap((level: unknown) => isRecord(level) && typeof level.effort === "string" && /^[a-z]{1,16}$/.test(level.effort) ? [level.effort] : [])
+        : [];
       return [{ id: m.slug, displayName: typeof m.display_name === "string" ? m.display_name : m.slug, provider: this.id,
         contextWindow: integer(m.context_window) ?? this.options.contextWindow,
-        maxOutputTokens: integer(m.max_output_tokens) }];
+        maxOutputTokens: integer(m.max_output_tokens),
+        ...(levels.length ? { reasoningLevels: levels } : {}),
+        ...(typeof m.default_reasoning_level === "string" && levels.includes(m.default_reasoning_level) ? { defaultReasoningLevel: m.default_reasoning_level } : {}) }];
     });
   }
   async *stream(request: ProviderRequest, signal: AbortSignal): AsyncGenerator<ProviderStreamEvent> {
@@ -40,6 +48,12 @@ export class ChatGPTProvider implements ProviderAdapter {
       // Each tool round resends the conversation; the key lets the plan route
       // reuse its cached prefix instead of reprocessing every token.
       ...(request.cacheKey ? { prompt_cache_key: request.cacheKey } : {}),
+      // The chosen effort, and a readable summary of the model's reasoning
+      // (shown as its thinking) when the model offers one.
+      ...(() => {
+        const summary = this.summaries.has(request.model) && request.thinkingEnabled !== false;
+        return request.reasoningLevel || summary ? { reasoning: { ...(request.reasoningLevel ? { effort: request.reasoningLevel } : {}), ...(summary ? { summary: "auto" } : {}) } } : {};
+      })(),
       input: this.input(request.messages, request.model), include: ["reasoning.encrypted_content"],
       // The plan route forbids max_output_tokens, temperature and other Chat Completions knobs.
       ...(request.tools?.length ? { tools: [{ type: "namespace", name: "demesne", description: "Demesne workspace and agent tools.", tools: request.tools.map(t => ({ type: "function", name: wireName(t.name), description: t.description, parameters: t.inputSchema, strict: false })) }] } : {}),

@@ -12,6 +12,25 @@ test("uses the account catalog's order, visibility, slugs and display names", as
   expect((await p.listModels()).map(m => [m.id, m.displayName])).toEqual([["first", "First"], ["second", "Second"]]);
 });
 
+test("the catalog's thinking levels are listed, and a chosen level is sent with a reasoning summary", async () => {
+  const bodies: any[] = [];
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith("/models")) return Response.json({ models: [
+      { slug: "astra", visibility: "list", supports_reasoning_summaries: true, default_reasoning_level: "medium", supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "high" }, { effort: "xhigh" }] },
+      { slug: "plain", visibility: "list" }] });
+    bodies.push(JSON.parse(String(init?.body))); return responseStream();
+  }) as unknown as typeof fetch });
+  const models = await p.listModels();
+  expect(models[0]).toMatchObject({ id: "astra", reasoningLevels: ["low", "medium", "high", "xhigh"], defaultReasoningLevel: "medium" });
+  expect(models[1]).not.toHaveProperty("reasoningLevels");
+  await collect(p, { ...request, model: "astra", reasoningLevel: "xhigh" });
+  expect(bodies[0].reasoning).toEqual({ effort: "xhigh", summary: "auto" });
+  await collect(p, { ...request, model: "astra" });
+  expect(bodies[1].reasoning).toEqual({ summary: "auto" });
+  await collect(p, { ...request, model: "plain" });
+  expect(bodies[2]).not.toHaveProperty("reasoning");
+});
+
 test.each(["full", "empty"] as const)("Responses request preserves streamed tools and reasoning with %s terminal output", async terminalOutput => {
   const bodies: any[] = [];
   const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async (url: string | URL | Request, init?: RequestInit) => {

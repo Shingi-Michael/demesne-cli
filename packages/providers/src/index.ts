@@ -26,7 +26,13 @@ export interface ProviderRequest {
   /// Stable per conversation (a session, or one sub-agent run), so the
   /// provider can reuse its cached prompt across tool rounds.
   cacheKey?: string;
+  /// The chosen thinking level: one of the model's `reasoningLevels`.
+  reasoningLevel?: string;
 }
+
+/// Local and open models whose chat template switches thinking on and off.
+const SWITCHABLE_THINKING = /qwen3|qwq|deepseek-r1/i;
+const EFFORTS = ["low", "medium", "high"];
 
 export type ProviderStreamEvent =
   | { type: "response_state"; state: import("@demesne/protocol").ResponsesState }
@@ -110,12 +116,16 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       seen.add(value.id);
       const contextWindow = readContextWindow(value);
       const maxOutputTokens = isRecord(value.top_provider) ? positiveInteger(value.top_provider.max_completion_tokens) : undefined;
+      const reasoningLevels = this.baseUrl.hostname === "openrouter.ai"
+        ? Array.isArray(value.supported_parameters) && value.supported_parameters.includes("reasoning") ? ["off", ...EFFORTS] : undefined
+        : SWITCHABLE_THINKING.test(value.id) ? ["off", "on"] : undefined;
       return [{
         id: value.id,
         provider: this.id,
         ...(typeof value.owned_by === "string" ? { ownedBy: value.owned_by } : {}),
         ...(contextWindow ? { contextWindow } : {}),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
+        ...(reasoningLevels ? { reasoningLevels, ...(reasoningLevels[1] === "on" ? { defaultReasoningLevel: "on" } : {}) } : {}),
       }];
     });
     if (this.id !== "ollama") return models.map((model) => this.withConfiguredContext(model));
@@ -129,11 +139,16 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
   }
 
   async *stream(request: ProviderRequest, signal: AbortSignal): AsyncGenerator<ProviderStreamEvent> {
-    const reasoningEffort = request.thinkingEnabled === false
+    // A chosen level wins over the turn's on/off and the configured effort.
+    const level = request.reasoningLevel;
+    const thinkingEnabled = level === "off" ? false : level ? true : request.thinkingEnabled;
+    const reasoningEffort = thinkingEnabled === false
       ? "none"
-      : request.thinkingEnabled === true && this.reasoningEffort === "none"
-        ? "low"
-        : this.reasoningEffort;
+      : level && EFFORTS.includes(level)
+        ? level as "low" | "medium" | "high"
+        : thinkingEnabled === true && this.reasoningEffort === "none"
+          ? "low"
+          : this.reasoningEffort;
     const openRouter = this.baseUrl.hostname === "openrouter.ai";
     const response = await this.fetchImplementation(new URL("chat/completions", this.baseUrl), {
       method: "POST",
@@ -145,10 +160,14 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
         ...(openRouter && this.openRouterIgnore.length ? { provider: { ignore: this.openRouterIgnore } } : {}),
         ...(openRouter
           ? (reasoningEffort ? { reasoning: { effort: reasoningEffort } }
-            : request.thinkingEnabled !== undefined ? { reasoning: { enabled: request.thinkingEnabled } } : {})
+            : thinkingEnabled !== undefined ? { reasoning: { enabled: thinkingEnabled } } : {})
           : reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-        ...(this.id === "ollama" && request.thinkingEnabled !== undefined
-          ? { think: request.thinkingEnabled }
+        ...(this.id === "ollama" && thinkingEnabled !== undefined
+          ? { think: thinkingEnabled }
+          : {}),
+        // llama.cpp and LM Studio switch Qwen-style thinking in the template.
+        ...(!openRouter && this.id !== "ollama" && (level === "off" || level === "on")
+          ? { chat_template_kwargs: { enable_thinking: level === "on" } }
           : {}),
         ...(request.maxOutputTokens !== undefined ? { max_tokens: request.maxOutputTokens } : {}),
         ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
@@ -190,7 +209,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       }
 
       const reasoningDelta = readReasoningDelta(value);
-      if (reasoningDelta && request.thinkingEnabled !== false) {
+      if (reasoningDelta && thinkingEnabled !== false) {
         yield { type: "reasoning_delta", delta: reasoningDelta };
       }
       const textDelta = readTextDelta(value);

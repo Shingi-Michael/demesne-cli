@@ -85,6 +85,10 @@ export interface ModelDescriptor {
   ownedBy?: string;
   contextWindow?: number;
   maxOutputTokens?: number;
+  /// Thinking levels the model offers, in order (e.g. off/on, or
+  /// low/medium/high/xhigh), and the one it uses when none is chosen.
+  reasoningLevels?: string[];
+  defaultReasoningLevel?: string;
 }
 
 export type RuntimeProfileState = "unconfigured" | "pending" | "verified" | "mismatch" | "unavailable";

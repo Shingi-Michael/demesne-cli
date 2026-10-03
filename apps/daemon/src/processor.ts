@@ -31,7 +31,9 @@ export interface TurnProcessor {
   readonly seed?: number;
   readonly preservesPromptCache?: boolean;
   createTurnInference?(thinkingEnabled: boolean | undefined, overrides?: InferenceOverrides): TurnInference;
-  setModel?(modelId: string): void;
+  /// The model's thinking level, chosen with the model (none: its default).
+  readonly reasoning?: string;
+  setModel?(modelId: string, reasoning?: string): void;
   /// Every model this processor can route a call to, with its provider.
   availableModels?(): { id: string; provider: string }[];
   runtimeStatus?(): RuntimeProfileStatus;

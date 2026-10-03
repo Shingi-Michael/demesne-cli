@@ -64,9 +64,12 @@ export interface DemesneClientOptions {
 }
 
 export interface HealthResponse {
+  contextCapacity?: number;
   status: string;
   provider: string;
   model: string;
+  /// The chosen thinking level, when one was picked.
+  reasoning?: string;
   version?: string;
 }
 
@@ -137,8 +140,8 @@ export class DemesneClient {
     return (await this.request<{ models: ModelDescriptor[] }>("/v1/models")).models;
   }
 
-  async setModel(model: string): Promise<void> {
-    await this.request("/v1/model", { method: "POST", body: JSON.stringify({ model }) });
+  async setModel(model: string, reasoning?: string): Promise<void> {
+    await this.request("/v1/model", { method: "POST", body: JSON.stringify({ model, ...(reasoning ? { reasoning } : {}) }) });
   }
 
   async runtimeStatus(): Promise<RuntimeProfileStatus> {

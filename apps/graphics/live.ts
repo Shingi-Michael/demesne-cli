@@ -82,6 +82,12 @@ function modelLevel(model: ModelDescriptor): string | undefined {
   if (!levels?.length) return undefined;
   return modelLevels.get(model.id) ?? (model.id === state?.model.id ? state.reasoning : undefined) ?? model.defaultReasoningLevel ?? levels[0];
 }
+/// Thinking reads as Markdown (ChatGPT's summaries are "**Checking the
+/// bound**" sections; local models write math), except a very long trace,
+/// which stays plain text so streaming it never reparses a novel.
+function thinkingBody(raw: string) {
+  return raw.length > 24_000 ? `<pre>${h(raw)}</pre>` : `<div class="markdown thinking-text">${markdown(raw)}</div>`;
+}
 /// A provider with more models than this (OpenRouter) collapses in /model.
 const LARGE_CATALOG = 25;
 /// Menus draw at most this many rows; the filter narrows the rest.
@@ -467,7 +473,7 @@ function runHTML(run: GraphicsRun, index: number) {
       body += `<div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div>`;
     if (entry.type === "reasoning") {
       const live = active(run) && i === run.entries.length - 1;
-      body += `<details class="thinking ${live ? "live" : ""}" data-detail="${key}"${(live && !detailsClosed.has(key)) || detailsOpen.has(key) ? " open" : ""}><summary>${live ? spinner() : "◇"} ${live ? "Thinking" : "Thought"} <span class="muted">${duration(entry.durationMs)}</span></summary><pre>${h(entry.raw)}</pre></details>`;
+      body += `<details class="thinking ${live ? "live" : ""}" data-detail="${key}"${(live && !detailsClosed.has(key)) || detailsOpen.has(key) ? " open" : ""}><summary>${live ? spinner() : "◇"} ${live ? "Thinking" : "Thought"} <span class="muted">${duration(entry.durationMs)}</span></summary>${thinkingBody(entry.raw)}</details>`;
     }
     if (entry.type === "tool") {
       const group: ToolEntry[] = [entry];

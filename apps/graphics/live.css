@@ -336,6 +336,20 @@
   color: var(--secondary);
   font: inherit;
 }
+.thinking > .thinking-text {
+  margin: 6px 0 0;
+  padding: 8px 12px;
+  border-left: 2px solid var(--electric);
+  background: var(--raised);
+  color: var(--secondary);
+}
+.thinking-text strong,
+.thinking-text .katex {
+  color: var(--paper);
+}
+.thinking-text > p {
+  margin: 0 0 6px;
+}
 .thinking.live summary {
   color: var(--electric);
 }
@@ -409,10 +423,47 @@
 .markdown h2,
 .markdown h3,
 .markdown h4 {
+  /* Explicit: ui.css styles a bare h2 as a muted caption. */
+  color: var(--strong);
   font-size: 14px;
   line-height: 22px;
-  font-weight: 500;
-  margin: 14px 0 8px;
+  font-weight: 600;
+  margin: 16px 0 8px;
+}
+.markdown h1 {
+  font-size: 16px;
+  line-height: 24px;
+}
+.markdown h2 {
+  font-size: 15px;
+}
+.markdown h4 {
+  color: var(--paper);
+}
+/* Task lists: the box replaces the bullet. */
+.markdown li:has(> input[type="checkbox"]) {
+  list-style: none;
+}
+.markdown input[type="checkbox"] {
+  accent-color: var(--electric);
+  /* Into the marker's place, so nested lists keep their indent. */
+  margin: 0 8px 0 -20px;
+  vertical-align: -2px;
+}
+/* KaTeX: text-sized formulas in the reading colour; displayed ones
+   centred, scrolling sideways instead of overflowing the column. */
+.markdown .katex {
+  font-size: 1.12em;
+  color: var(--paper);
+}
+.markdown .katex-display {
+  margin: 10px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+.markdown .katex-error {
+  color: var(--thinking);
 }
 .markdown h1:first-child,
 .markdown h2:first-child,

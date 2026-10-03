@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="430" viewBox="0 0 1280 430" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">demesne — An agent workspace. Inside your terminal.</title>
+  <desc id="desc">A midnight-blue banner with a layered geometric mark and pale blue typography.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="430" gradientUnits="userSpaceOnUse"><stop stop-color="#101e2a"/><stop offset="1" stop-color="#080f15"/></linearGradient>
+    <linearGradient id="sheet" x1="935" y1="73" x2="1100" y2="291" gradientUnits="userSpaceOnUse"><stop stop-color="#1d394d"/><stop offset="1" stop-color="#0f1d28"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" stroke="#264055" stroke-opacity=".22"/></pattern>
+  </defs>
+  <rect width="1280" height="430" rx="16" fill="url(#bg)"/>
+  <rect x="760" width="520" height="430" rx="16" fill="url(#grid)"/>
+  <rect x=".5" y=".5" width="1279" height="429" rx="15.5" stroke="#253746"/>
+  <path d="M56 54h18v18H56z" stroke="#72b8eb" stroke-width="2"/>
+  <path d="M61 63h8m-4-4v8" stroke="#72b8eb" stroke-width="1.5"/>
+  <text x="88" y="69" fill="#85bde4" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" letter-spacing="1">demesne</text>
+  <text x="56" y="170" fill="#edf4fa" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="57" font-weight="600" letter-spacing="-2">An agent workspace.</text>
+  <text x="56" y="238" fill="#edf4fa" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="57" font-weight="600" letter-spacing="-2">Inside your terminal.</text>
+  <text x="58" y="286" fill="#98aebe" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="21">Build with context. Inspect the changes. Keep moving.</text>
+  <path d="M56 337h1168" stroke="#263b4b"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.6" fill="#98aebe">
+    <text x="58" y="382">LOCAL + HOSTED MODELS</text><text x="405" y="382">DURABLE SESSIONS</text><text x="736" y="382">BUILT FOR GHOSTTY</text>
+  </g>
+  <circle cx="1183" cy="377" r="4" fill="#4cc38a"/>
+  <g stroke="#426780" stroke-width="1.4">
+    <path d="m903 100 182 32 72 128-182-32Z" fill="#101e2a"/>
+    <path d="m883 116 182 32 72 128-182-32Z" fill="#112230"/>
+    <path d="m863 132 182 32 72 128-182-32Z" fill="url(#sheet)"/>
+  </g>
+  <path d="m843 148 182 32 72 128-182-32Z" fill="#142938" stroke="#7abbeb" stroke-width="1.7"/>
+  <g stroke="#6f9bb9" stroke-width="2" stroke-linecap="round">
+    <path d="m884 180 15 3m19 3 15 3m19 3 15 3m19 3 15 3"/>
+    <path d="m897 204 15 3m19 3 15 3m19 3 15 3m19 3 15 3"/>
+    <path d="m910 228 15 3m19 3 15 3m19 3 15 3m19 3 15 3"/>
+    <path d="m923 252 15 3m19 3 15 3m19 3 15 3m19 3 15 3"/>
+  </g>
+  <path d="m952 192 15 3m-2 24 15 3m-2 24 15 3" stroke="#e5a93c" stroke-width="3" stroke-linecap="round"/>
+</svg>

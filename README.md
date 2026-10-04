@@ -59,7 +59,7 @@ Demesne brings the conversation, code, and evidence into one terminal workspace.
 
 ## Get started
 
-**You’ll need [Bun 1.4.0](https://bun.sh), [Ghostty](https://ghostty.org), and a model connection.** The graphics interface uses Electron/Chromium and Kitty graphics; the plain CLI supports headless workflows. Published release builds target macOS; Linux source setup and sandbox repair are covered in the [Linux guide](docs/linux.md).
+**You’ll need [Bun 1.4.0](https://bun.sh), [Ghostty](https://ghostty.org), and a model connection.** The graphics interface uses Electron/Chromium and Kitty graphics; the plain CLI supports headless workflows. Published release builds target macOS. **On Linux? [Jump to the Linux quick start and sandbox repair](#linux-quick-start).**
 
 ```sh
 git clone https://github.com/Shingi-Michael/demesne-cli.git
@@ -99,6 +99,32 @@ demesne
 For source development, use `bun run graphics:setup` and `bun run demesne`. [Graphics setup and packaging](apps/graphics/README.md) covers the details; [troubleshooting](docs/troubleshooting.md) covers older running processes and terminal capabilities. Rebuilds don’t replace a running daemon or UI.
 
 </details>
+
+### Linux quick start
+
+From the cloned repository, run these commands as your **normal user inside Ghostty** in a desktop session:
+
+```sh
+bun install --frozen-lockfile
+bun run demesne setup
+bun run demesne daemon start
+bun run graphics
+```
+
+No compiled build is needed for this source workflow. `bun run graphics` downloads a missing Electron runtime and checks that a sandboxed renderer can start before opening the UI.
+
+**Seeing “The SUID sandbox helper binary was found, but is not configured correctly”?** Run this explicit repair, then launch again:
+
+```sh
+bun run graphics:setup --install-sandbox
+bun run graphics
+```
+
+The repair requests administrator access **only for the sandbox helper**; the app stays unprivileged and sandboxing stays enabled.
+
+A **group-writable workspace error (mode `775`)** is separate. For a private project you own, `chmod go-w /path/to/project` removes group/other write access from that directory only. Use a private checkout if the shared permissions are intentional.
+
+Ubuntu 20.04 and 24.04 are checked in CI using virtual X11 displays and software rendering. See the [Linux guide](docs/linux.md) for system libraries, packaged installations, and the limits of that coverage.
 
 ## From an idea to a verified change
 

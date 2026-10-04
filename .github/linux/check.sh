@@ -1,8 +1,8 @@
 #!/bin/sh
-set -eu
-bun scripts/check-linux-graphics.ts
-bun scripts/capture-readme.ts /workspace/test-results/linux-graphics
-bun run build:graphics
+set -eux
+timeout 90s bun scripts/check-linux-graphics.ts
+timeout 120s bun scripts/capture-readme.ts /workspace/test-results/linux-graphics
+timeout 120s bun run build:graphics
 # A packaged bundle must carry a normal helper file, not the build machine's privileged link.
 test ! -L dist/graphics/runtime/chrome-sandbox
 test "$(stat -c %a dist/graphics/runtime/chrome-sandbox)" = 755

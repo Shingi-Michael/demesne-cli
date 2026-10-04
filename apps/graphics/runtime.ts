@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -66,25 +66,46 @@ export async function ensureGraphicsRuntime(root: string): Promise<string> {
   return electron;
 }
 
+/** File-backed diagnostics avoid hanging on pipes inherited by Chromium descendants. */
+export async function probeGraphicsRuntime(root: string, electron: string, options: {
+  env?: Record<string, string>; args?: string[]; timeoutMs?: number;
+} = {}): Promise<{ code: number; stdout: string; stderr: string; timedOut: boolean }> {
+  const cache = mkdtempSync(join(tmpdir(), "demesne-runtime-check-"));
+  const out = join(cache, "stdout"), err = join(cache, "stderr");
+  const stdout = openSync(out, "w", 0o600), stderr = openSync(err, "w", 0o600);
+  let child: ReturnType<typeof Bun.spawn> | undefined;
+  const stop = () => {
+    if (!child) return;
+    try { if (process.platform !== "win32") process.kill(-child.pid, "SIGKILL"); else child.kill("SIGKILL"); }
+    catch { /* The probe's isolated process group already exited. */ }
+  };
+  let timedOut = false;
+  try {
+    try {
+      child = Bun.spawn([electron, ...(options.args ?? []), join(root, "runtime-probe.cjs")], {
+        env: { ...(options.env ?? graphicsEnvironment()), DEMESNE_PIXEL_CACHE: cache },
+        stdin: "ignore", stdout, stderr, detached: process.platform !== "win32",
+      });
+    } finally { closeSync(stdout); closeSync(stderr); }
+    const timer = setTimeout(() => { timedOut = true; stop(); }, options.timeoutMs ?? 20000);
+    try {
+      const code = await child.exited;
+      stop();
+      return { code, stdout: readFileSync(out, "utf8"), stderr: readFileSync(err, "utf8"), timedOut };
+    } finally { clearTimeout(timer); }
+  } finally { stop(); rmSync(cache, { recursive: true, force: true }); }
+}
+
 /** Run before entering raw terminal mode. A binary on disk is not a working runtime. */
 export async function verifyGraphicsRuntime(root: string, electron: string, env = graphicsEnvironment()): Promise<void> {
   if (process.platform === "linux") {
     const problem = linuxSessionProblem(env, process.getuid?.());
     if (problem) throw new Error(problem);
   }
-  const cache = mkdtempSync(join(tmpdir(), "demesne-runtime-check-"));
-  try {
-    const child = Bun.spawn([electron, join(root, "runtime-probe.cjs")], {
-      env: { ...env, DEMESNE_PIXEL_CACHE: cache }, stdout: "pipe", stderr: "pipe",
-    });
-    const timer = setTimeout(() => child.kill("SIGKILL"), 20000);
-    try {
-      const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-      if (code !== 0 || !stdout.split(/\r?\n/).includes(RUNTIME_READY)) {
-        throw new Error(graphicsStartupProblem(stderr || stdout, electron, root));
-      }
-    } finally { clearTimeout(timer); }
-  } finally { rmSync(cache, { recursive: true, force: true }); }
+  const result = await probeGraphicsRuntime(root, electron, { env });
+  if (result.code !== 0 || result.timedOut || !result.stdout.split(/\r?\n/).includes(RUNTIME_READY)) {
+    throw new Error(graphicsStartupProblem((result.timedOut ? "Graphics startup check timed out after 20 seconds.\n" : "") + (result.stderr || result.stdout), electron, root));
+  }
 }
 
 /** Explicit opt-in. Never elevates Bun or the app, and never chmods the workspace. */

@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { emitKeypressEvents, createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { deflateSync } from "node:zlib";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { GraphicsHost } from "./host.ts";
 import { StateEncoder, type GraphicsSnapshot } from "./state-wire.ts";
 import { palette } from "../../packages/brand/src/theme.ts";
@@ -31,7 +31,7 @@ const option = (name: string) => {
     throw new Error(`--${name} requires a value`);
   return value;
 };
-const root = process.env.DEMESNE_GRAPHICS_ROOT ?? import.meta.dir;
+const root = process.env.DEMESNE_GRAPHICS_ROOT ?? (existsSync(join(import.meta.dir, "renderer.cjs")) ? import.meta.dir : dirname(process.execPath));
 const snapshot = option("snapshot");
 const live = args.includes("--live");
 if (live && (await Bun.file(join(root, "live.ts")).exists())) {

@@ -3,20 +3,19 @@ import assert from "node:assert/strict";
 import { lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { ensureGraphicsRuntime, graphicsEnvironment, graphicsStartupProblem, installSandboxHelper, verifyGraphicsRuntime } from "../apps/graphics/runtime.ts";
+import { ensureGraphicsRuntime, probeGraphicsRuntime, graphicsStartupProblem, installSandboxHelper, verifyGraphicsRuntime } from "../apps/graphics/runtime.ts";
 import { canonicalWorkspace } from "../apps/daemon/src/tools.ts";
 import { chmodSync } from "node:fs";
 const root = resolve(import.meta.dir, "../apps/graphics");
 assert.equal(process.platform, "linux"); assert.notEqual(process.getuid?.(), 0);
+console.log("Checking fresh Linux runtime download");
 const electron = await ensureGraphicsRuntime(root), helper = join(dirname(electron), "chrome-sandbox");
 const cache = mkdtempSync(join(tmpdir(), "demesne-linux-probe-"));
 try {
   // Force Chromium's SUID route to reproduce the report even on hosts with user namespaces.
-  const child = Bun.spawn([electron, "--disable-namespace-sandbox", join(root, "runtime-probe.cjs")], {
-    env: { ...graphicsEnvironment(), DEMESNE_PIXEL_CACHE: cache }, stdout: "pipe", stderr: "pipe",
-  });
-  const timer = setTimeout(() => child.kill("SIGKILL"), 20000);
-  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]); clearTimeout(timer);
+  console.log("Probing the unconfigured SUID route");
+  const { code, stderr } = await probeGraphicsRuntime(root, electron, { args: ["--disable-namespace-sandbox"] });
+  console.log(stderr.slice(-2500));
   assert.notEqual(code, 0);
   assert.match(stderr, /SUID sandbox helper binary was found/);
   assert.match(graphicsStartupProblem(stderr, electron, root), /--install-sandbox/);
@@ -26,11 +25,8 @@ try {
   assert(realpathSync(helper).startsWith("/usr/local/lib/demesne/sandbox/"));
   assert.equal(statSync(helper).uid, 0); assert.equal(statSync(helper).mode & 0o7777, 0o4755);
   // Verify the repaired SUID route specifically; normal startup may prefer user namespaces.
-  const fixed = Bun.spawn([electron, "--disable-namespace-sandbox", join(root, "runtime-probe.cjs")], {
-    env: { ...graphicsEnvironment(), DEMESNE_PIXEL_CACHE: cache }, stdout: "pipe", stderr: "pipe",
-  });
-  const fixedTimer = setTimeout(() => fixed.kill("SIGKILL"), 20000);
-  const [fixedCode, stdout, fixedError] = await Promise.all([fixed.exited, new Response(fixed.stdout).text(), new Response(fixed.stderr).text()]); clearTimeout(fixedTimer);
+  console.log("Probing the repaired SUID route");
+  const { code: fixedCode, stdout, stderr: fixedError } = await probeGraphicsRuntime(root, electron, { args: ["--disable-namespace-sandbox"] });
   assert.equal(fixedCode, 0, fixedError); assert.match(stdout, /DEMESNE_GRAPHICS_READY/);
   await verifyGraphicsRuntime(root, electron);
   console.log("PASS: repaired SUID and normal sandboxed renderer paths produce pixels");

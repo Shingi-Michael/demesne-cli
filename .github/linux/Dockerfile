@@ -15,6 +15,6 @@ COPY --chown=1001:1001 . .
 RUN chown 1001:1001 /workspace
 ENV HOME=/home/demo
 USER 1001:1001
-RUN bun install --frozen-lockfile && bun run graphics:setup --download-only
+RUN bun install --frozen-lockfile && rm -rf apps/graphics/node_modules/electron/dist
 ENV DEMESNE_GRAPHICS_GPU=0
 CMD ["xvfb-run", "-a", "sh", ".github/linux/check.sh"]

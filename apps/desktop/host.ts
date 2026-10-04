@@ -227,11 +227,18 @@ export class DesktopHost {
 }
 
 function option(args: string[], key: string) {
-  const index = args.indexOf(`--${key}`);
-  if (index < 0) return;
-  const value = args[index + 1];
-  if (!value || value.startsWith("--")) throw new Error(`Missing --${key} value`);
-  return value;
+  const flag = `--${key}`;
+  let result: string | undefined;
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index]!;
+    if (argument !== flag && !argument.startsWith(`${flag}=`)) continue;
+    if (result !== undefined) throw new Error(`Use ${flag} only once`);
+    const value = argument === flag ? args[index + 1] : argument.slice(flag.length + 1);
+    if (!value || !value.trim() || value.startsWith("--")) throw new Error(`Missing ${flag} value`);
+    result = value;
+    if (argument === flag) index++;
+  }
+  return result;
 }
 export function runDesktopHost(args = process.argv.slice(2)) {
   let closing = false, pendingWrites = 0, input = Buffer.alloc(0);

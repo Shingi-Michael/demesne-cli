@@ -16,7 +16,8 @@ class Sidecar {
     const command = process.env.DEMESNE_TEST_DESKTOP_HOST
       ? [process.env.DEMESNE_TEST_DESKTOP_HOST]
       : [process.execPath, resolve(import.meta.dir, "../host.ts")];
-    this.child = Bun.spawn([...command, "--server", f.server.url.href, ...args], {
+    const server = args.some(argument => argument === "--server" || argument.startsWith("--server=")) ? [] : ["--server", f.server.url.href];
+    this.child = Bun.spawn([...command, ...server, ...args], {
       cwd: f.workspace, env: f.env, stdin: "pipe", stdout: "pipe", stderr: "pipe",
     });
     void this.read();
@@ -250,4 +251,41 @@ test("desktop closing pauses and saves Drive without silently switching projects
     expect(bootstrap(await recovered.value("desktop-bootstrap")).snapshot!.drive!.status).toBe("paused");
     expect((await f.client.health()).model).toBe("qwen3.8-27b");
   } finally { await sidecar.close(); if (recovered) await recovered.close(); await f.close(); }
+});
+
+
+test("desktop inline CLI options select the fixture daemon, workspace, session, and private HOME", async () => {
+  const f = await fixture();
+  writeFileSync(f.settings.configPath, 'theme = "demesne-light"\n[daemon]\nauto_start = "never"\n');
+  const sessionId = (await f.client.createSession({ workspacePath: f.workspace, title: "Inline options restored session" })).session.id;
+  const sidecar = new Sidecar(f, [`--server=${f.server.url.href}`, `--workspace=${f.workspace}`, `--session=${sessionId}`]);
+  try {
+    const selected = bootstrap(await sidecar.value("desktop-bootstrap"));
+    expect(selected.workspace).toBe(f.workspace);
+    expect(selected.snapshot!.connection).toBe("online");
+    expect(selected.snapshot!.model.id).toBe("qwen3.8-27b");
+    expect(selected.snapshot!.session!.id).toBe(sessionId);
+    expect(selected.snapshot!.session!.title).toBe("Inline options restored session");
+    expect(selected.snapshot!.theme).toBe("demesne-light");
+    const privatePreferences = JSON.parse(readFileSync(join(f.home, ".demesne", "desktop-ui.json"), "utf8"));
+    expect(privatePreferences.lastWorkspace).toBe(f.workspace);
+    expect(Object.values(privatePreferences.lastSessions)).toEqual([sessionId]);
+    expect(await f.client.listSessions()).toHaveLength(1);
+  } finally { expect(await sidecar.close()).toBe(0); await f.close(); }
+});
+
+test("desktop CLI rejects missing and empty split or inline option values", async () => {
+  const f = await fixture();
+  try {
+    for (const args of [["--workspace"], ["--workspace", ""], ["--workspace="], ["--server="], ["--session="], ["--server", "--workspace", f.workspace], ["--workspace", f.workspace, `--workspace=${f.workspace}`]]) {
+      const sidecar = new Sidecar(f, args);
+      try {
+        expect(await sidecar.child.exited).toBe(1);
+        await eventually(() => sidecar.errors.length > 0);
+        expect(sidecar.errors).toMatch(/Missing --(?:workspace|server|session) value|Use --workspace only once/);
+        expect(sidecar.messages).toHaveLength(0);
+      } finally { await sidecar.close(); }
+    }
+    expect(await f.client.listSessions()).toHaveLength(0);
+  } finally { await f.close(); }
 });

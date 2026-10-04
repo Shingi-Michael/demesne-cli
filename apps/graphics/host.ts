@@ -116,6 +116,14 @@ export class GraphicsHost {
     loading: boolean;
     error: string | null;
   } = { proposals: [], signals: [], generatedAt: null, model: null, loading: false, error: null };
+  /// Drive experiments in this workspace, newest first, and one being designed.
+  experiments: {
+    items: import("@demesne/protocol").Experiment[];
+    draft: { proposalId: string; spec: import("@demesne/protocol").ExperimentSpec; model: string } | null;
+    designing: string | null;
+    error: string | null;
+  } = { items: [], draft: null, designing: null, error: null };
+  private experimentPoll: ReturnType<typeof setTimeout> | undefined;
   /// Proposals you hid: until a time (Not now, or while running) or for good.
   private nextHidden: Record<string, number | "never"> = {};
   private nextRequested = 0;
@@ -260,6 +268,7 @@ export class GraphicsHost {
       drive: this.driveState,
       // Drive's project memory for this workspace (shown in Session).
       driveMemory: this.drive?.memoryEntries ?? [],
+      experiments: this.experiments,
       driveNext: {
         ...this.nextQueue,
         proposals: this.nextQueue.proposals.filter((item) => {
@@ -321,6 +330,7 @@ export class GraphicsHost {
       void this.models().catch(() => {});
       this.loadNextHidden();
       void this.refreshNext();
+      void this.refreshExperiments();
       await this.applyStartup();
     } catch (error) {
       if (!this.autoStarted && this.settings.autoStart === "always") {
@@ -652,6 +662,41 @@ export class GraphicsHost {
     }
     this.publish();
   }
+  /// Reads this workspace's experiments; polls while one runs. A settled
+  /// experiment's verdict goes to project memory (once: memory keeps one copy
+  /// of the same text), so the next queue never retries a settled idea blindly.
+  async refreshExperiments() {
+    clearTimeout(this.experimentPoll);
+    try {
+      const items = await this.client.listExperiments(this.workspace);
+      this.experiments = { ...this.experiments, items: items.slice(0, 6), error: null };
+      for (const item of items) {
+        if (item.status === "running" || !item.verdict) continue;
+        this.drive?.addMemory({ kind: "outcome", source: "drive", text: `Experiment ${item.id}: ${item.spec.question} ${item.verdict.summary}${item.pullRequest?.url ? ` Draft PR: ${item.pullRequest.url}` : ""}` });
+      }
+      if (items.some((item) => item.status === "running")) this.experimentPoll = setTimeout(() => void this.refreshExperiments(), 4000);
+    } catch (error) {
+      this.experiments = { ...this.experiments, error: error instanceof Error ? error.message : String(error) };
+    }
+    this.publish();
+  }
+  /// Has Drive design an experiment for a proposal. Run starts it at once;
+  /// Plan first keeps it as a draft to read before starting.
+  private async designExperiment(item: import("@demesne/protocol").DriveProposal, start: boolean) {
+    this.experiments = { ...this.experiments, designing: item.id, error: null };
+    this.publish();
+    try {
+      const { spec, model } = await this.client.designExperiment({ workspace: this.workspace, proposal: item, memory: this.drive?.memory.forPlanner() ?? [] });
+      if (start) {
+        await this.client.startExperiment(spec);
+        this.experiments = { ...this.experiments, designing: null, draft: null };
+        await this.refreshExperiments();
+      } else this.experiments = { ...this.experiments, designing: null, draft: { proposalId: item.id, spec, model } };
+    } catch (error) {
+      this.experiments = { ...this.experiments, designing: null, error: error instanceof Error ? error.message : String(error) };
+    }
+    this.publish();
+  }
   private nextHiddenPath() {
     return join(this.settings.dataDirectory, "drive", `${createHash("sha256").update(this.workspace).digest("hex").slice(0, 32)}.next-hidden.json`);
   }
@@ -815,9 +860,23 @@ export class GraphicsHost {
         return this.hideNext(item.id, "never");
       }
       this.hideNext(item.id, Date.now() + 6 * 3_600_000);
+      // An experiment is designed (variants, metric, checks) rather than planned in chat.
+      if (item.kind === "experiment") return this.designExperiment(item, method === "next-run");
       if (method === "next-plan") return this.submit(`${item.title}. ${item.why}`, true);
       if (!this.drive) throw new Error("Drive is unavailable here.");
       return this.drive.handle("drive", { text: `--bounded ${item.title}. ${item.why}` });
+    }
+    if (method === "experiment-start") {
+      const draft = this.experiments.draft;
+      if (!draft) throw new Error("There is no designed experiment to start.");
+      await this.client.startExperiment(draft.spec);
+      this.experiments = { ...this.experiments, draft: null };
+      return this.refreshExperiments();
+    }
+    if (method === "experiment-discard") { this.experiments = { ...this.experiments, draft: null }; this.publish(); return; }
+    if (method === "experiment-stop") {
+      await this.client.stopExperiment(string(args.id, "experiment id", 100));
+      return this.refreshExperiments();
     }
     if (method === "processes") {
       await this.refreshProcesses();
@@ -1227,6 +1286,7 @@ export class GraphicsHost {
   }
   dispose() {
     this.batchGeneration++;
+    clearTimeout(this.experimentPoll);
     if (this.panelWatchTimer) clearInterval(this.panelWatchTimer);
     this.drive?.dispose();
     this.setup?.dispose();

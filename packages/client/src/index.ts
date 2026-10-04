@@ -90,6 +90,26 @@ export class DemesneClient {
     try { return await this.request("/v1/drive/next", { method: "POST", body: JSON.stringify(request), signal }); }
     catch (error) { if (error instanceof ApiRequestError && error.status === 404 && /route|not found/i.test(error.message) && !/workspace/i.test(error.message)) throw new Error("Drive's Next queue needs the updated daemon. Restart it after current work finishes."); throw error; }
   }
+  /// Drive designs an experiment for a proposal; nothing runs until it is started.
+  async designExperiment(request: import("@demesne/protocol").DriveExperimentDesignRequest, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveExperimentDesignResponse> {
+    try { return await this.request("/v1/drive/experiment", { method: "POST", body: JSON.stringify(request), signal }); }
+    catch (error) { if (error instanceof ApiRequestError && error.status === 404 && !/workspace/i.test(error.message)) throw new Error("Experiments need the updated daemon. Restart it after current work finishes."); throw error; }
+  }
+  /// Drive experiments: start one, list a workspace's, read or stop one.
+  async startExperiment(spec: import("@demesne/protocol").ExperimentSpec): Promise<import("@demesne/protocol").Experiment> {
+    try { return await this.request("/v1/experiments", { method: "POST", body: JSON.stringify(spec) }); }
+    catch (error) { if (error instanceof ApiRequestError && error.status === 404 && !/workspace/i.test(error.message)) throw new Error("Experiments need the updated daemon. Restart it after current work finishes."); throw error; }
+  }
+  async listExperiments(workspace?: string): Promise<import("@demesne/protocol").Experiment[]> {
+    try { return (await this.request<{ experiments: import("@demesne/protocol").Experiment[] }>(`/v1/experiments${workspace ? `?workspace=${encodeURIComponent(workspace)}` : ""}`)).experiments; }
+    catch (error) { if (error instanceof ApiRequestError && error.status === 404) return []; throw error; }
+  }
+  async getExperiment(id: string): Promise<import("@demesne/protocol").Experiment> {
+    return this.request(`/v1/experiments/${encodeURIComponent(id)}`);
+  }
+  async stopExperiment(id: string): Promise<import("@demesne/protocol").Experiment> {
+    return this.request(`/v1/experiments/${encodeURIComponent(id)}/stop`, { method: "POST", body: "{}" });
+  }
   async decideDrive(request: DriveRequest, signal?: AbortSignal, progress?: (event: DriveProgress) => void): Promise<DriveResponse> {
     if (!progress) return this.request("/v1/drive/decide", { method: "POST", body: JSON.stringify(request), signal });
     const response = await this.fetchImpl(new URL("/v1/drive/decide", this.server), { method: "POST", body: JSON.stringify(request), signal,

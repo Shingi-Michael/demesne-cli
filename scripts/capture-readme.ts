@@ -63,6 +63,8 @@ test("preserves the final error", async () => { const error = Error("offline"); 
 test("rejects an invalid allowance", async () => { await expect(retry(async () => 1, 0)).rejects.toThrow(RangeError); });
 `);
 Bun.spawnSync(["git", "init", "-q"], { cwd: workspace });
+// The fixture trusts only its own workspace; this capture uses its own folder.
+writeFileSync(join(f.root, "data", "trusted-workspaces.json"), JSON.stringify({ trusted: [f.workspace, workspace] }));
 const app = new TerminalHarness({ columns: 160, rows: 44, env: f.env, args: ["--live", `--server=${f.server.url}`, `--workspace=${workspace}`, `--capture-dir=${capture}`] });
 let state: any;
 async function wait(check: (s: any) => boolean) {

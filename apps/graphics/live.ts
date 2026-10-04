@@ -3258,6 +3258,8 @@ document.addEventListener("keydown", (event) => {
 window.demesneInspect = () => ({
   // Whether the conversation follows new text, and where it is scrolled.
   stage: { follow, top: Math.round(el("stage").scrollTop), bottom: Math.round(el("stage").scrollHeight - el("stage").clientHeight) },
+  selection: getSelection()?.toString() ?? "",
+  requests: [...document.querySelectorAll<HTMLElement>(".request .text")].map((e) => { const r = e.getBoundingClientRect(); return { text: e.textContent, x: r.x, y: r.y, width: r.width, height: r.height }; }),
   controls: [
     ...document.querySelectorAll<HTMLElement>(
       "button,input,textarea,[role=separator],.preview-canvas",
@@ -4165,6 +4167,28 @@ document.addEventListener("pointermove", (event) => {
       previewDrag.top + previewDrag.y - event.clientY;
   }
 });
+// Copy on select, like a terminal: a drag or a double/triple click that leaves
+// text highlighted puts it on the clipboard. The composer keeps the usual
+// behaviour so selecting text to replace it doesn't overwrite the clipboard.
+let selectFrom: { x: number; y: number } | null = null;
+document.addEventListener("mousedown", (event) => {
+  selectFrom = event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
+}, true);
+document.addEventListener("mouseup", (event) => {
+  const from = selectFrom;
+  selectFrom = null;
+  if (!from || (event.detail < 2 && Math.hypot(event.clientX - from.x, event.clientY - from.y) < 4)) return;
+  setTimeout(() => {
+    const selection = getSelection();
+    const text = (selection?.toString() ?? "").replace(/\s+$/, "");
+    const anchor = selection?.anchorNode instanceof Element ? selection.anchorNode : selection?.anchorNode?.parentElement;
+    if (!text.trim() || anchor?.closest("input, textarea, [contenteditable=true]")) return;
+    void act(async () => {
+      await api("copy", { text });
+      notice(`Copied ${text.length > 40 ? `${text.trim().split(/\s+/).length} words` : `“${text.trim()}”`}`);
+    });
+  });
+}, true);
 document.addEventListener("pointerup", () => {
   if (panelDrag) {
     panelDrag = null;

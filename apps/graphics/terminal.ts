@@ -87,6 +87,9 @@ let cell: { width: number; height: number } | undefined;
 let pixelMouse = false,
   epoch = 0,
   wheelAt = 0;
+// Terminals report single presses; repeated presses in place become double
+// and triple clicks, so the page selects a word or a line.
+let lastPress = { at: 0, x: -1, y: -1, count: 0 };
 const transport = new TileTransport();
 const stateEncoder = new StateEncoder();
 const inputQueue = new InputQueue();
@@ -533,7 +536,12 @@ if (snapshot) {
               canScroll: true,
             },
           });
-        } else
+        } else {
+          if (event.kind === "press" && button === "left") {
+            const now = performance.now();
+            const near = Math.abs(x - lastPress.x) <= 4 && Math.abs(y - lastPress.y) <= 4;
+            lastPress = { at: now, x, y, count: near && now - lastPress.at < 450 ? (lastPress.count % 3) + 1 : 1 };
+          }
           send({
             kind: "input",
             event: {
@@ -546,12 +554,13 @@ if (snapshot) {
               x,
               y,
               button,
-              clickCount: 1,
+              clickCount: event.kind === "press" || event.kind === "release" ? Math.max(1, lastPress.count) : 1,
               ...(event.kind === "drag"
                 ? { modifiers: [`${button}ButtonDown`] }
                 : {}),
             },
           });
+        }
       }
     }
     clearTimeout(escapeTimer);

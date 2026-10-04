@@ -9,6 +9,8 @@ import { ExperimentRunner, parseMetric, verdict } from "../src/experiments.ts";
 import type { TurnProcessor } from "../src/processor.ts";
 import { DemesneStore } from "../../../packages/storage/src/index.ts";
 
+// The runner commits the winner with the ambient git identity.
+Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "a@b", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "a@b" });
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const scratch = () => { const root = realpathSync(mkdtempSync(join(tmpdir(), "experiments-"))); roots.push(root); return root; };
@@ -137,5 +139,24 @@ test("/v1/drive/experiment designs from the workspace's kit and never authors co
       workspace, metric: { name: "points", argv: ["bun", "metric.ts"], minImprovement: 0.2 }, checks: [["bun", "check.ts"]], budgetMinutes: 60,
       variants: [{ label: "A", idea: "unchanged (baseline)" }, { label: "B", idea: "set value to 5" }],
     });
+  } finally { server.stop(true); await app.close(); }
+});
+
+test("when the winner cannot be committed, its worktree is kept so the change survives", async () => {
+  const root = scratch(), workspace = repository(root);
+  writeFileSync(join(workspace, ".git/hooks/pre-commit"), "#!/bin/sh\necho 'commits are blocked here' >&2\nexit 1\n", { mode: 0o755 });
+  const app = createDaemonApp({ databasePath: join(root, "data", "state.sqlite"), processor: coder, experimentWorktreeRoot: join(root, "worktrees") });
+  const server = Bun.serve({ port: 0, fetch: app.fetch });
+  const call = async (path: string, init?: RequestInit) => (await fetch(new URL(path, server.url), { headers: { "Content-Type": "application/json" }, ...init })).json() as Promise<any>;
+  try {
+    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace }) });
+    const two = spec(workspace); two.variants = two.variants.slice(0, 2);
+    let experiment: Experiment = await call("/v1/experiments", { method: "POST", body: JSON.stringify(two) });
+    for (let i = 0; i < 300 && experiment.status === "running"; i++) { await Bun.sleep(100); experiment = await call(`/v1/experiments/${experiment.id}`); }
+    expect(experiment.verdict?.winner).toBe("B");
+    expect(experiment.pullRequest?.error).toContain("commits are blocked here");
+    const kept = experiment.pullRequest!.keptWorktree!;
+    expect(readFileSync(join(kept, "value.ts"), "utf8")).toBe("export const value = 5;\n");
+    expect(existsSync(join(root, "worktrees", experiment.id, "a"))).toBe(false);
   } finally { server.stop(true); await app.close(); }
 });

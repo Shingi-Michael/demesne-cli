@@ -206,7 +206,13 @@ export class ExperimentRunner {
     ];
     for (const argv of steps) {
       const output = await this.run(argv, cwd, 120_000);
-      if (output.exitCode !== 0) { experiment.pullRequest.error = `${argv.filter((word) => !word.startsWith("-") && word !== "git").slice(0, 1).join(" ")} failed: ${tail(output.stderr, 300)}`; return; }
+      if (output.exitCode !== 0) {
+        const step = argv.filter((word) => !word.startsWith("-") && word !== "git")[0];
+        // Uncommitted, the change exists only in the worktree: keep it there.
+        if (step !== "push") experiment.pullRequest.keptWorktree = cwd;
+        experiment.pullRequest.error = `${step} failed: ${tail(output.stderr || output.stdout, 300)}${step !== "push" ? ` The winner's change is kept in ${cwd}.` : ""}`;
+        return;
+      }
     }
     if (!open) return;
     const created = await this.run(["gh", "pr", "create", "--draft", "--head", winner.branch, "--title", `Experiment: ${winner.idea}`, "--body", pullRequestBody(experiment)], cwd, 120_000);
@@ -216,12 +222,13 @@ export class ExperimentRunner {
 
   private async cleanup(experiment: Experiment, winner: ExperimentVariant | undefined) {
     for (const variant of experiment.variants) {
+      if (variant.worktree === experiment.pullRequest?.keptWorktree) continue;
       if (variant.worktree && existsSync(variant.worktree)) await this.run(["git", "worktree", "remove", "--force", variant.worktree], experiment.spec.workspace, 60_000);
       // The winner's branch is kept (for its pull request, or to open one by
       // hand); the others go.
       if (variant !== winner) await this.run(["git", "branch", "-D", variant.branch], experiment.spec.workspace, 30_000);
     }
-    rmSync(join(this.deps.worktreeRoot, experiment.id), { recursive: true, force: true });
+    if (!experiment.pullRequest?.keptWorktree) rmSync(join(this.deps.worktreeRoot, experiment.id), { recursive: true, force: true });
   }
 
   private save(experiment: Experiment) {

@@ -82,7 +82,7 @@ flowchart TD
 
 Coder turns run unattended in their own worktree: edits anywhere in it and the exact declared check commands are pre-approved, and every other command is denied. Worktrees live under `~/.cache/demesne/experiments` and are removed when the experiment settles; the winner's branch is kept (with `"pullRequest": false` in the kit it is committed but not pushed). A budget in minutes bounds the whole experiment; Stop ends it early. Records persist in the daemon's `experiments` directory, so verdicts survive closing the window; a daemon restart stops a running experiment rather than resuming it. The window writes each settled verdict to project memory once, so later proposals don't repeat a settled idea.
 
-This repository's kit measures **rounds per task** with [`scripts/bench-agent.ts`](../scripts/bench-agent.ts): eight read-only questions ([`bench/agent-tasks.json`](../bench/agent-tasks.json)) run against a pinned snapshot through a private daemon built from the variant's code, using only the `[provider]` table of your user config. It also reports correctness, tool calls, re-reads and input tokens.
+This repository's kit measures **rounds per task** with [`scripts/bench-agent.ts`](../scripts/bench-agent.ts): eight read-only questions ([`bench/agent-tasks.json`](../bench/agent-tasks.json)) run against a pinned snapshot through a private daemon built from the variant's code, using only the `[provider]` table of your user config. Its value is a 10%-trimmed mean, so one runaway turn can't decide an experiment, and a wrong answer counts as 20 rounds, so a variant can't win by answering badly. It also reports correctness, tool calls, re-reads and input tokens.
 
 ## Direct control is the default
 

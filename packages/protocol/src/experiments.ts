@@ -67,7 +67,9 @@ export interface Experiment {
   settledAt?: string;
   variants: ExperimentVariant[];
   verdict?: ExperimentVerdict;
-  pullRequest?: { url?: string; branch: string; error?: string };
+  /// The winner's branch, and its draft PR once pushed. When committing
+  /// fails, the worktree is kept so the change is not lost.
+  pullRequest?: { url?: string; branch: string; error?: string; keptWorktree?: string };
   error?: string;
 }
 

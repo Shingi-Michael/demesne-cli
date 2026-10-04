@@ -22,7 +22,7 @@
   "metrics": [
     {
       "name": "rounds per task",
-      "about": "Mean model rounds the coding agent needs to answer 8 read-only questions about this repo (bench/agent-tasks.json) with the configured provider model. Captures how efficiently the agent searches and reads. Also reports correctness, tool calls, re-reads and input tokens.",
+      "about": "Model rounds the coding agent needs per task to answer 8 read-only questions about this repo (bench/agent-tasks.json) with the configured provider model, twice each: a 10%-trimmed mean, with wrong answers scored as 20 rounds. Captures how efficiently the agent searches and reads. Also reports correctness, tool calls, re-reads and input tokens. Baseline on qwen3.8-27b at 4d20b9f: 4.07 (16/16 correct).",
       "direction": "lower",
       "argv": [
         "bun",

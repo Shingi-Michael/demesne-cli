@@ -9,7 +9,9 @@
 /// only the `[provider]` table of your user config, so nothing else from that
 /// file, and none of your sessions, are used. Questions run against a detached
 /// worktree of the pinned commit. The last stdout line is a JSON summary whose
-/// `value` is mean model rounds per task (lower is better).
+/// `value` is model rounds per task (lower is better): a 10%-trimmed mean, so
+/// one runaway turn can't decide an experiment, with each wrong or unfinished
+/// answer scored as WRONG_ROUNDS, so fewer rounds never wins by answering badly.
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,6 +21,7 @@ import { parseConfigFile, renderConfigDocument, userConfigPath } from "../packag
 import { DemesneClient } from "../packages/client/src/index.ts";
 
 const root = resolve(import.meta.dir, "..");
+const WRONG_ROUNDS = 20;
 const args = process.argv.slice(2);
 const option = (name: string) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : undefined; };
 const suite = JSON.parse(readFileSync(resolve(option("tasks") ?? join(root, "bench/agent-tasks.json")), "utf8")) as {
@@ -108,8 +111,10 @@ try {
   db.close();
 
   const mean = (values: number[]) => values.length ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 100) / 100 : 0;
+  const scored = rows.map((r) => (r.correct ? r.rounds : WRONG_ROUNDS)).sort((a, b) => a - b);
+  const trim = Math.floor(scored.length / 10);
   const summary = {
-    metric: "rounds per task", direction: "lower", value: mean(rows.map((r) => r.rounds)),
+    metric: "rounds per task", direction: "lower", value: mean(scored.slice(trim, scored.length - trim)), meanRounds: mean(rows.map((r) => r.rounds)),
     correct: rows.filter((r) => r.correct).length, total: rows.length,
     toolCalls: mean(rows.map((r) => r.toolCalls)), rereads: mean(rows.map((r) => r.rereads)),
     inputTokens: mean(rows.map((r) => r.inputTokens)), seconds: mean(rows.map((r) => r.seconds)),
@@ -117,7 +122,7 @@ try {
   };
   console.error("\n  task               rounds  tools  rereads  input tok  correct");
   for (const r of rows) console.error(`  ${`${r.id}#${r.attempt + 1}`.padEnd(18)} ${String(r.rounds).padStart(6)} ${String(r.toolCalls).padStart(6)} ${String(r.rereads).padStart(8)} ${String(r.inputTokens).padStart(10)}  ${r.correct ? "yes" : "no"}`);
-  console.error(`\n  mean rounds ${summary.value} · correct ${summary.correct}/${summary.total} · ${summary.model}`);
+  console.error(`\n  rounds per task ${summary.value} (trimmed; mean ${summary.meanRounds}) · correct ${summary.correct}/${summary.total} · ${summary.model}`);
   const out = option("json");
   if (out) writeFileSync(out, JSON.stringify(summary, null, 2));
   console.log(JSON.stringify({ ...summary, tasks: undefined }));

@@ -51,6 +51,12 @@ export class ApiRequestError extends Error {
   }
 }
 
+/// The daemon asks once per folder whether its files are trusted; retry the
+/// session with `trustWorkspace: true` after the user agrees.
+export function isWorkspaceUntrusted(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.status === 403 && error.code === "workspace_untrusted";
+}
+
 export function isStalePermissionResolution(error: unknown): boolean {
   return error instanceof ApiRequestError && error.status === 409 && error.code === "invalid_state";
 }

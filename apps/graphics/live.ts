@@ -2743,6 +2743,8 @@ async function dispatch(
       "compact",
       "connect",
       "start-daemon",
+      "trust-workspace",
+      "quit",
       "drive-control",
     ].includes(action)
   )
@@ -2822,15 +2824,21 @@ function renderState(next: Snapshot) {
     (editorFocused || document.activeElement === document.body)
   )
     editor.focus({ preventScroll: true });
-  const message =
-    next.error ??
-    (next.connection === "connecting" ? "Connecting to the daemon…" : "");
-  const bannerKey = JSON.stringify([message, next.connection]);
+  const trust = next.untrustedWorkspace;
+  const message = trust
+    ? `Do you trust the files in ${trust}? Demesne will follow its instructions and may run commands there.`
+    : next.error ??
+      (next.connection === "connecting" ? "Connecting to the daemon…" : "");
+  const bannerKey = JSON.stringify([message, next.connection, trust]);
   if (bannerKey !== bannerSignature) {
     bannerSignature = bannerKey;
     el("banner").hidden = !message;
-    el("banner").innerHTML =
-      `${h(message)}${next.connection === "offline" ? ` ${btn("connect", "Retry")} ${btn("start-daemon", "Start daemon")} ${btn("setup", "Setup")}` : ""}`;
+    const actions = trust
+      ? ` ${btn("trust-workspace", "Trust folder")} ${btn("quit", "Quit")}`
+      : next.connection === "offline"
+        ? ` ${btn("connect", "Retry")} ${btn("start-daemon", "Start daemon")} ${btn("setup", "Setup")}`
+        : "";
+    el("banner").innerHTML = `${h(message)}${actions}`;
   }
   reportObservation();
 }

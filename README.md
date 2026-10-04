@@ -138,8 +138,6 @@ bun run graphics
 
 The repair requests administrator access **only for the sandbox helper**; the app stays unprivileged and sandboxing stays enabled.
 
-A **group-writable workspace error (mode `775`)** is separate. For a private project you own, `chmod go-w /path/to/project` removes group/other write access from that directory only. Use a private checkout if the shared permissions are intentional.
-
 Ubuntu 20.04 and 24.04 are checked in CI using virtual X11 displays and software rendering. See the [Linux guide](docs/linux.md) for system libraries, packaged installations, and the limits of that coverage.
 
 ## From an idea to a verified change

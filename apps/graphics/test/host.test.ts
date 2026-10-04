@@ -188,3 +188,21 @@ test("the displayed context follows the active daemon model, not the primary pro
   try { await h.connect(); expect(h.snapshot().model.contextWindow).toBe(272000); }
   finally { h.dispose(); await f.close(); }
 });
+
+test("an untrusted workspace waits for Trust folder before creating a session", async () => {
+  const f = await fixture(undefined, { trusted: false });
+  const host = hostFor(f);
+  try {
+    await host.connect();
+    expect(host.connection).toBe("online");
+    expect(host.current).toBeNull();
+    expect(host.snapshot().untrustedWorkspace).toBe(f.workspace);
+    expect((await f.client.listSessions()).length).toBe(0);
+    await host.handle("trust-workspace", {});
+    expect(host.snapshot().untrustedWorkspace).toBeNull();
+    expect(host.current?.session.workspace?.root).toBe(f.workspace);
+  } finally {
+    host.dispose();
+    await f.close();
+  }
+});

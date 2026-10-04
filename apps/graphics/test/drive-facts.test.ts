@@ -13,7 +13,7 @@ test("daemon facts ignore summaries and clocks, track content revisions, protect
   const f = await fixture();
   try {
     const session = (
-      await f.client.createSession({ workspacePath: f.workspace })
+      await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true })
     ).session;
     const facts = () =>
       f.client.driveFacts(session.id, undefined, [
@@ -46,7 +46,7 @@ test("daemon facts ignore summaries and clocks, track content revisions, protect
     expect(changed.files[0]?.revision).not.toBe(second.files[0]?.revision);
     unlinkSync(join(f.workspace, "README.md"));
     expect((await facts()).files[0]?.revision).toBe("missing");
-    const other = (await f.client.createSession({ workspacePath: f.workspace }))
+    const other = (await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true }))
       .session;
     await expect(
       f.client.driveFacts(other.id, turn.turn.id, []),
@@ -210,7 +210,7 @@ test("planner replaces caller-provided facts with daemon records", async () => {
   });
   try {
     const session = (
-      await f.client.createSession({ workspacePath: f.workspace })
+      await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true })
     ).session;
     const facts = await f.client.driveFacts(session.id, undefined, []);
     const now = new Date().toISOString(),

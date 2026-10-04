@@ -152,7 +152,11 @@ test("desktop switching preserves drafts, canonicalizes projects, and restores p
     expect(await sidecar.request("desktop-open-project", { path: alias })).toMatchObject({ ok: false, error: "Send or clear your unsent drafts before changing projects" });
     expect(bootstrap(await sidecar.value("desktop-bootstrap")).workspace).toBe(f.workspace);
     await sidecar.value("draft", { sessionId, text: "" });
-    expect(bootstrap(await sidecar.value("desktop-open-project", { path: alias })).workspace).toBe(other);
+    const untrusted = bootstrap(await sidecar.value("desktop-open-project", { path: alias }));
+    expect(untrusted.workspace).toBe(other);
+    expect(untrusted.snapshot!.session).toBeNull();
+    expect(untrusted.snapshot!.untrustedWorkspace).toBe(other);
+    await sidecar.value("trust-workspace", {});
     const prefsPath = join(f.settings.dataDirectory, "desktop-ui.json");
     expect(statSync(prefsPath).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(prefsPath, "utf8"))).toMatchObject({ lastWorkspace: other, recentProjects: [other, f.workspace] });
@@ -160,14 +164,15 @@ test("desktop switching preserves drafts, canonicalizes projects, and restores p
     expect(await sidecar.request("desktop-open-project", { path: join(f.root, "missing") })).toMatchObject({ ok: false });
     chmodSync(f.workspace, 0o775);
     const groupWritable = await sidecar.request("desktop-open-project", { path: f.workspace });
-    expect(groupWritable.ok).toBe(false);
-    if (!groupWritable.ok) expect(groupWritable.error).toContain("chmod go-w");
+    expect(groupWritable.ok).toBe(true);
+    expect(statSync(f.workspace).mode & 0o777).toBe(0o775);
+    expect(bootstrap(await sidecar.value("desktop-open-project", { path: other })).workspace).toBe(other);
     await sidecar.close();
     restored = new Sidecar(f);
     const recovered = bootstrap(await restored.value("desktop-bootstrap"));
     expect(recovered.workspace).toBe(other);
     expect(recovered.snapshot!.session!.id).toBe(selectedOtherSession);
-    expect(bootstrap(await restored.value("desktop-bootstrap")).recentProjects).toEqual([other]);
+    expect(bootstrap(await restored.value("desktop-bootstrap")).recentProjects).toEqual([other, f.workspace]);
   } finally { await sidecar.close(); if (restored) await restored.close(); await f.close(); }
 });
 
@@ -257,7 +262,7 @@ test("desktop closing pauses and saves Drive without silently switching projects
 test("desktop inline CLI options select the fixture daemon, workspace, session, and private HOME", async () => {
   const f = await fixture();
   writeFileSync(f.settings.configPath, 'theme = "demesne-light"\n[daemon]\nauto_start = "never"\n');
-  const sessionId = (await f.client.createSession({ workspacePath: f.workspace, title: "Inline options restored session" })).session.id;
+  const sessionId = (await f.client.createSession({ workspacePath: f.workspace, title: "Inline options restored session", trustWorkspace: true })).session.id;
   const sidecar = new Sidecar(f, [`--server=${f.server.url.href}`, `--workspace=${f.workspace}`, `--session=${sessionId}`]);
   try {
     const selected = bootstrap(await sidecar.value("desktop-bootstrap"));

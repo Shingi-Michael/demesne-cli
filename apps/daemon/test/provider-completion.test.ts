@@ -62,7 +62,7 @@ async function fixture(rounds: Round[], verify: (result: {
       if (!response.ok) throw new Error(await response.text());
       return response.json();
     };
-    const { session } = await post("/v1/sessions", { title: "Completion regression", workspacePath });
+    const { session } = await post("/v1/sessions", { title: "Completion regression", workspacePath, trustWorkspace: true });
     const { turn, eventId } = await post(`/v1/sessions/${session.id}/turns`, { content: "Inspect input.txt and answer" });
     const collect = async () => {
       const response = await app.fetch(new Request(`http://localhost/v1/events?session_id=${session.id}&after=${eventId}`, { signal: AbortSignal.timeout(5000) }));

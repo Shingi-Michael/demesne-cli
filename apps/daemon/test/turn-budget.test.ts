@@ -31,7 +31,7 @@ async function fixture(stream: TurnProcessor["stream"], run: (value: {
   const client = new DemesneClient({ server: "http://localhost", fetch: ((input: string | URL | Request, init?: RequestInit) =>
     Promise.resolve(app.fetch(new Request(input, init)))) as typeof fetch });
   const db = new Database(options.databasePath, { readonly: true });
-  const { session } = await client.createSession({ title: "Turn budgets", workspacePath: join(root, "workspace") });
+  const { session } = await client.createSession({ title: "Turn budgets", workspacePath: join(root, "workspace"), trustWorkspace: true });
   const consume = async (submitted: SubmitTurnResponse) => {
     const events: EventEnvelope[] = [];
     for await (const event of client.streamEvents(session.id, submitted.eventId, AbortSignal.timeout(5000))) {

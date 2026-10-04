@@ -23,7 +23,7 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 | `demesne ps [--watch] [--json]` | Active turns, queues, and provider slot capacities |
 | `demesne models` | List provider model IDs |
 | `demesne session list` | List sessions |
-| `demesne session create [--workspace PATH] [title]` | Create a workspace-bound session |
+| `demesne session create [--workspace PATH] [title]` | Create a workspace-bound session (asks to trust a new folder) |
 | `demesne session show ID` | Print a session as JSON |
 | `demesne compact ID [instructions]` | Summarize older context |
 | `demesne cancel TURN_ID` | Cancel a turn |
@@ -44,6 +44,8 @@ demesne prompt --session SESSION_ID "Continue the investigation"
 ```
 
 `--output` accepts `text`, `json`, or `stream-json`. JSON contains the final status, response, usage, changes, validation results, and timing. Stream JSON emits events followed by a final result. Exit codes are 0 for completion, 1 for failure/interruption, and 130 for cancellation.
+
+A new session in a folder you haven't trusted yet asks "Do you trust the files in this folder?" on a terminal. Without one, the command fails; pass `--trust-workspace` to confirm trust for a scripted run. See [workspace trust](../SECURITY.md#workspace-trust).
 
 `--permission ask|deny` chooses the turn's permission mode. Without an interactive approval channel, requested approvals are denied rather than left waiting. Saved grants and workspace permissions remain subject to daemon policy; `ask` is not unattended blanket authorization.
 

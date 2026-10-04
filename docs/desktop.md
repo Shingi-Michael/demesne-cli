@@ -45,7 +45,7 @@ bun run desktop
 
 The desktop launcher prepares the shared frontend and Bun backend resources, then starts the Tauri development build. It does not need a separate Electron download.
 
-Use **Open project** to choose a workspace through the native folder picker. Existing workspace checks apply: the project root must belong to you and must not be writable by group or other users. Demesne reports the affected path and remedy; it does not recursively change permissions.
+Use **Open project** to choose a workspace through the native folder picker. The first time you open a folder, Demesne asks whether you trust its files, with **Trust folder** and **Quit**; see [workspace trust](../SECURITY.md#workspace-trust). Folder ownership and permissions aren't checked.
 
 Connect a provider through the setup interface or reuse an existing Demesne configuration. ChatGPT browser sign-in, OpenRouter, and local OpenAI-compatible providers use the existing [authentication](authentication.md) and [configuration](configuration.md) implementations.
 

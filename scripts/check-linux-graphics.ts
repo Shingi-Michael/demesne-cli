@@ -1,6 +1,6 @@
 /** Runs inside the disposable Linux CI image as an unprivileged user. */
 import assert from "node:assert/strict";
-import { lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ensureGraphicsRuntime, probeGraphicsRuntime, graphicsStartupProblem, installSandboxHelper, verifyGraphicsRuntime } from "../apps/graphics/runtime.ts";
@@ -20,6 +20,12 @@ try {
   assert.match(stderr, /SUID sandbox helper binary was found/);
   assert.match(graphicsStartupProblem(stderr, electron, root), /--install-sandbox/);
   console.log("PASS: reproduced the original SUID failure and classified it");
+  const badHash = "0".repeat(64);
+  const refused = Bun.spawnSync(["sudo", "--", "/bin/sh", "-c", readFileSync(join(root, "install-sandbox.sh"), "utf8"), "demesne-install-test", helper, badHash]);
+  assert.notEqual(refused.exitCode, 0);
+  assert.match(refused.stderr.toString(), /helper changed; installation refused/);
+  assert(!existsSync(`/usr/local/lib/demesne/sandbox/${badHash}/chrome-sandbox`));
+  console.log("PASS: a mismatched helper hash is rejected before setuid installation");
   await installSandboxHelper(root, electron);
   assert(lstatSync(helper).isSymbolicLink());
   assert(realpathSync(helper).startsWith("/usr/local/lib/demesne/sandbox/"));

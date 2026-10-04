@@ -1,7 +1,7 @@
 name: Linux graphics
 on:
   push:
-    branches: [main, codex/linux-graphics-startup]
+    branches: [main]
     paths: ['apps/**', 'packages/**', 'scripts/**', 'package.json', 'bun.lock', '.github/linux/**', '.github/workflows/graphics-linux.yml']
   pull_request:
     paths: ['apps/**', 'packages/**', 'scripts/**', 'package.json', 'bun.lock', '.github/linux/**', '.github/workflows/graphics-linux.yml']

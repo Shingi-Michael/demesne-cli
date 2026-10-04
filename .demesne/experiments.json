@@ -1,13 +1,35 @@
 {
   "about": "Commands Agent Drive may use in experiments on this repository. Drive's planner picks a metric and checks by name; it cannot run anything not listed here.",
-  "setup": [["bun", "install", "--frozen-lockfile"]],
-  "checks": [["bun", "run", "typecheck"], ["bun", "test"]],
+  "coderModel": "qwen3.8-27b",
+  "setup": [
+    [
+      "bun",
+      "install",
+      "--frozen-lockfile"
+    ]
+  ],
+  "checks": [
+    [
+      "bun",
+      "run",
+      "typecheck"
+    ],
+    [
+      "bun",
+      "test"
+    ]
+  ],
   "metrics": [
     {
       "name": "rounds per task",
       "about": "Mean model rounds the coding agent needs to answer 8 read-only questions about this repo (bench/agent-tasks.json) with the configured provider model. Captures how efficiently the agent searches and reads. Also reports correctness, tool calls, re-reads and input tokens.",
       "direction": "lower",
-      "argv": ["bun", "scripts/bench-agent.ts", "--repeat", "2"],
+      "argv": [
+        "bun",
+        "scripts/bench-agent.ts",
+        "--repeat",
+        "2"
+      ],
       "minImprovement": 0.15,
       "timeoutMinutes": 90
     }

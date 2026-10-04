@@ -1233,7 +1233,9 @@ function driveBody() {
   ].join("");
   return `<div class="drive-content">${idle ? experimentsHTML() + nextQueueHTML() + '<div class="drive-heading">LAST MISSION</div>' : ""}<div class="drive-status"><strong class="tone-${tone}">${mark} ${h(label)}</strong>${summary ? `<p class="drive-summary">${h(summary)}</p>` : ""}</div>${
     steps.length ? section("TIMELINE", `<ol class="drive-timeline">${steps.map((step) => `<li class="tone-${step.tone}"><span>${h(step.mark)}</span><span class="drive-step">${h(step.text)}</span><time>${h(step.when)}</time></li>`).join("")}</ol>`) : ""}${
-    tasks.length ? section("TASKS", `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>`) : ""}<div class="drive-meta">${h(stats)}</div><details data-detail="drive-details"${detailsOpen.has("drive-details") ? " open" : ""}><summary>Details</summary><div class="drive-details">${details}</div></details>${!idle && state!.driveNext.proposals.length ? `<div class="drive-meta">Next · ${state!.driveNext.proposals.length} proposed after this mission</div>` : ""}</div>`;
+    tasks.length ? section("TASKS", `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>`) : ""}<div class="drive-meta">${h(stats)}</div><details data-detail="drive-details"${detailsOpen.has("drive-details") ? " open" : ""}><summary>Details</summary><div class="drive-details">${details}</div></details>${!idle && state!.driveNext.proposals.length ? `<div class="drive-meta">Next · ${state!.driveNext.proposals.length} proposed after this mission</div>` : ""}${
+    // Experiments run on their own, so they stay visible under a live mission.
+    idle ? "" : experimentsHTML()}</div>`;
 }
 function processError() {
   return state?.processesError

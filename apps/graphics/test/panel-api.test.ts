@@ -69,7 +69,7 @@ test("live commands expose output before exit, persist results, detect external 
     expect(command.completedAt).toBeNull();
     expect(command.cwd).toBe(f.workspace);
     expect(command.check).toBe(true);
-    const other = (await f.client.createSession({ workspacePath: f.workspace }))
+    const other = (await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true }))
       .session;
     await expect(f.client.stopCommand(other.id, command.id)).rejects.toThrow(
       "No running command",
@@ -267,9 +267,9 @@ test("command panels report the actual model queue position", async () => {
     },
   });
   try {
-    const a = (await f.client.createSession({ workspacePath: f.workspace }))
+    const a = (await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true }))
         .session,
-      b = (await f.client.createSession({ workspacePath: f.workspace }))
+      b = (await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true }))
         .session;
     await f.client.submitTurn(a.id, {
       content: "Hold model slot",

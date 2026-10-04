@@ -14,11 +14,6 @@ export function desktopWorkspace(path: unknown): string {
   const workspace = realpathSync(path), stat = statSync(workspace);
   if (!stat.isDirectory()) throw new Error("The project must be a directory");
   if (workspace === sep || workspace === homedir()) throw new Error("Choose a project directory rather than your home or filesystem root");
-  if (typeof process.getuid === "function" && stat.uid !== process.getuid()) throw new Error("The project directory must be owned by your user");
-  if (stat.mode & 0o022) {
-    const quoted = "'" + workspace.replaceAll("'", "'\\''") + "'";
-    throw new Error(`The project directory is writable by group or other users: ${workspace} (mode ${(stat.mode & 0o777).toString(8)}). For a private project you own, run chmod go-w ${quoted}. Shared projects need an owner-private checkout.`);
-  }
   return workspace;
 }
 
@@ -211,6 +206,9 @@ export class DesktopHost {
     if (this.switching) throw new Error("Wait for the project to open");
     if (!this.host) throw new Error("Choose a project first");
     const result = await this.host.handle(request.method, request.args);
+    // A request can create a session (Trust folder, New session). Remember it
+    // now: a project switch can dispose this host before its batched update.
+    this.rememberSession(this.host.snapshot());
     if (request.method === "theme") this.explicitTheme = true;
     return result;
   }

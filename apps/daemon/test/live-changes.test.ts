@@ -38,7 +38,7 @@ test.each(["applied", "denied", "truncated", "cancelled"] as const)("streamed ed
   let app = createDaemonApp(options);
   const client = new DemesneClient({ server: "http://localhost", fetch: ((url: string | URL | Request, init?: RequestInit) => Promise.resolve(app.fetch(new Request(url, init)))) as typeof fetch });
   try {
-    const { session } = await client.createSession({ title: "Live diff", workspacePath: workspace });
+    const { session } = await client.createSession({ title: "Live diff", workspacePath: workspace, trustWorkspace: true });
     const submitted = await client.submitTurn(session.id, { content: "Create a.ts, edit it, rename it, then delete it", permissionMode: "ask" });
     const events: EventEnvelope[] = [];
     let observedDraft = false;

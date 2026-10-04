@@ -437,20 +437,11 @@ describe("built-in tools", () => {
     expect(existsSync(marker)).toBe(false);
   });
 
-  test("workspace permission error names the mode and quotes a non-recursive repair safely", () => {
-    const root = join(workspace(), "project's $(false)");
+  test("accepts a group-writable workspace without changing its mode", () => {
+    const root = join(workspace(), "shared");
     mkdirSync(root); chmodSync(root, 0o775);
-    let message = "";
-    try { canonicalWorkspace(root); } catch (error) { message = (error as Error).message; }
-    expect(message).toContain("mode 775");
-    expect(message).toContain(root);
-    expect(statSync(root).mode & 0o777).toBe(0o775);
-    const command = /run (chmod go-w .*?)\. This/.exec(message)?.[1];
-    expect(command).toBeDefined();
-    const fixed = Bun.spawnSync(["/bin/sh", "-c", command!]);
-    expect(fixed.exitCode).toBe(0);
-    expect(statSync(root).mode & 0o777).toBe(0o755);
     expect(canonicalWorkspace(root)).toBe(root);
+    expect(statSync(root).mode & 0o777).toBe(0o775);
   });
 
   test("rejects a workspace root replaced by a symlink", async () => {

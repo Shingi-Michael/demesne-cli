@@ -77,7 +77,7 @@ test("/v1/drive/next: known workspaces only, cached until signals change, vetoes
   const post = async (body: unknown) => { const response = await fetch(new URL("/v1/drive/next", server.url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return { status: response.status, body: await response.json() as DriveNextResponse }; };
   try {
     expect((await post({ workspace: "/etc" })).status).toBe(404);
-    expect((await fetch(new URL("/v1/sessions", server.url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "S", workspacePath: workspace }) })).status).toBe(201);
+    expect((await fetch(new URL("/v1/sessions", server.url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) })).status).toBe(201);
     const memory = [{ id: "v1", kind: "veto", text: "Delete the draft: draft.ts looks abandoned", source: "you", at: "now" }];
     const first = await post({ workspace, memory });
     expect(first.status).toBe(200);

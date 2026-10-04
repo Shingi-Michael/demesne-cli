@@ -63,15 +63,11 @@ Ubuntu 24.04 uses `libasound2t64` in place of `libasound2`. Package installation
 
 No `DISPLAY` or `WAYLAND_DISPLAY` means there is no configured graphical session. For a desktop, launch from Ghostty in the logged-in session. Over headless SSH, use `demesne prompt`; terminal graphics capability alone does not provide an Electron display server. Native window capture is currently macOS-only.
 
-## Workspace permissions are a separate check
+## Trusting a workspace
 
-Demesne rejects workspace roots writable by the group or other users, such as mode `775`. The error names the exact directory, its mode, and a quoted repair command. For a private project you own:
+The first time you open a folder, Demesne asks whether you trust its files. Its instruction files, project commands and config can steer the agent, which then reads, writes and runs commands there. The answer is recorded once per folder and covers its subfolders. See [workspace trust](../SECURITY.md#workspace-trust).
 
-```sh
-chmod go-w -- /path/to/project
-```
-
-This changes only the directory, not its contents. If group write access is intentional, use a separate private checkout; Demesne does not silently change a shared project’s access. Making a GitHub repository public does not alter local directory permissions.
+Directory ownership and mode bits aren't checked: a group-writable project (for example mode `775` under Ubuntu's default `umask 002`) opens normally.
 
 ## What CI verifies
 
@@ -79,7 +75,7 @@ This changes only the directory, not its contents. If group write access is inte
 
 - Force the SUID route to reproduce an incorrectly configured helper.
 - Install and verify the protected helper, then render with the sandbox enabled.
-- Distinguish `775` workspace rejection from sandbox failure.
+- Accept a group-writable (`775`) workspace without changing its mode.
 - Capture a coding turn, actual file edit, passing checks and Drive proposals through decoded terminal tiles.
 - Build the graphics bundle and verify its setup and startup checks independently.
 

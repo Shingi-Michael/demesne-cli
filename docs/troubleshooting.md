@@ -31,9 +31,9 @@ DEMESNE_DAEMON_BIN="$PWD/dist/demesned" bun run demesne daemon start
 
 Close existing graphics sessions and reopen them to replace their Electron renderer. A daemon restart alone does not refresh the UI. Conversely, exiting the UI does not stop daemon-owned work. A system service/launch agent may relaunch its configured binary; inspect that service’s executable path if the old version immediately returns. PATH may resolve an installed `demesned` before the source entry point, so use the explicit override when validating a build.
 
-## Linux sandbox or group-writable errors
+## Linux sandbox errors
 
-A SUID `chrome-sandbox` error and a workspace directory with mode `775` are different failures. Linux startup now probes a sandboxed renderer before opening the UI, identifies common display/library failures, and offers an explicit helper repair. See [Linux setup](linux.md) for the commands and administrator boundary.
+Linux startup probes a sandboxed renderer before opening the UI, identifies common display/library failures, and offers an explicit helper repair. See [Linux setup](linux.md) for the commands and administrator boundary.
 
 ## EPIPE or an Electron error dialog
 

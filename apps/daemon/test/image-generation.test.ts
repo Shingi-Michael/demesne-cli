@@ -124,7 +124,7 @@ test("normal agent loop advertises generate_image and publishes a retrievable ar
   const app = createDaemonApp({ databasePath: join(root, "data/state.sqlite"), processor, images: { url: `${imageServer.url}v1`, model: "image-model" } });
   const get = async (path: string, body?: unknown) => app.fetch(new Request(`http://localhost${path}`, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}));
   try {
-    const { session } = await (await get("/v1/sessions", { title: "Images", workspacePath: join(root, "workspace") })).json();
+    const { session } = await (await get("/v1/sessions", { title: "Images", workspacePath: join(root, "workspace"), trustWorkspace: true })).json();
     const submitted = await get(`/v1/sessions/${session.id}/turns`, { content: "Generate a logo" });
     expect(submitted.ok).toBe(true);
     await completed;

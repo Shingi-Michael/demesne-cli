@@ -16,7 +16,7 @@ import { graphicsEnvironment } from "../runtime.ts";
 
 export async function fixture(
   processor?: TurnProcessor,
-  options: { vision?: boolean } = {},
+  options: { vision?: boolean; trusted?: boolean } = {},
 ) {
   const root = realpathSync(
       mkdtempSync(join(tmpdir(), "demesne-graphics-test-")),
@@ -26,6 +26,9 @@ export async function fixture(
   mkdirSync(workspace);
   mkdirSync(join(home, ".demesne"), { recursive: true });
   writeFileSync(join(workspace, "README.md"), "# Isolated UI fixture\n");
+  mkdirSync(join(root, "data"));
+  if (options.trusted !== false)
+    writeFileSync(join(root, "data", "trusted-workspaces.json"), JSON.stringify({ trusted: [workspace] }));
   writeFileSync(
     join(home, ".demesne", "config.toml"),
     'theme = "dark"\n[daemon]\nauto_start = "never"\n[provider]\ncontext_window = 262144\n',

@@ -161,7 +161,7 @@ test("daemon authenticates Drive and aborts pending planning before shutting dow
   const client = new DemesneClient({ server: "http://localhost", token: "test-token", fetch: ((url: string | URL | Request, init?: RequestInit) => Promise.resolve(app.fetch(new Request(url, init)))) as typeof fetch });
   try {
     expect((await app.fetch(new Request("http://localhost/v1/drive/decide", { method: "POST" }))).status).toBe(401);
-    const session = (await client.createSession({ title: "Mission", workspacePath: join(root, "project") })).session;
+    const session = (await client.createSession({ title: "Mission", workspacePath: join(root, "project"), trustWorkspace: true })).session;
     const body = request(); body.homeSessionId = session.id; body.observation.sessionId = session.id; body.observation.workspace = session.workspace!.root;
     const pending = client.decideDrive(body).catch((error) => error);
     await entered.promise; await app.close(); await pending; expect(aborted).toBe(true);

@@ -11,6 +11,12 @@ app.whenReady().then(async () => {
     offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false,
     preload: join(__dirname, "runtime-probe-preload.cjs"),
   } });
+  // On Linux, capturePage can reject with UnknownVizError before the offscreen
+  // compositor has presented a surface; the first full paint is then the frame.
+  const firstPaint = new Promise(resolve => win.webContents.on("paint", (_event, _dirty, image) => {
+    const size = image.getSize();
+    if (size.width === 64 && size.height === 64) resolve(image);
+  }));
   const sandboxed = new Promise(resolve => ipcMain.once("demesne-runtime-probe", (event, value) => {
     resolve(event.sender === win.webContents && value?.sandboxed === true);
   }));
@@ -19,7 +25,7 @@ app.whenReady().then(async () => {
       await win.webContents.executeJavaScript('typeof process !== "undefined" || typeof require !== "undefined"')) {
     throw new Error("Renderer sandbox verification failed");
   }
-  const frame = await win.webContents.capturePage();
+  const frame = await win.webContents.capturePage().catch(() => firstPaint);
   if (frame.isEmpty()) throw new Error("Renderer produced no pixels");
   clearTimeout(timer);
   process.stdout.write('DEMESNE_GRAPHICS_READY\n', () => app.exit(0));

@@ -466,6 +466,13 @@ fn main() {
                 request_exit(app, &format!("exit requested by the system or app menu (code {code:?})"));
             }
         }
+        // Every way out ends here, including a system Quit that skips
+        // ExitRequested; log it unless request_exit already did.
+        tauri::RunEvent::Exit => {
+            if app.state::<Arc<Bridge>>().exit_phase.load(Ordering::SeqCst) == 0 {
+                log_event(app, "exit: application terminated (system Quit or app menu)");
+            }
+        }
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => {
             if let Some(window) = app.get_webview_window("main") {

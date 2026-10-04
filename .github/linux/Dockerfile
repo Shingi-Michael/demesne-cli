@@ -12,6 +12,8 @@ RUN curl -fsSL https://github.com/oven-sh/bun/releases/download/bun-v1.4.0/bun-l
 RUN useradd -m -u 1001 demo && echo 'demo ALL=(root) NOPASSWD: /bin/sh' > /etc/sudoers.d/demesne-fixture && chmod 440 /etc/sudoers.d/demesne-fixture
 WORKDIR /workspace
 COPY --chown=1001:1001 . .
+RUN chown 1001:1001 /workspace
+ENV HOME=/home/demo
 USER 1001:1001
 RUN bun install --frozen-lockfile && bun run graphics:setup --download-only
 ENV DEMESNE_GRAPHICS_GPU=0

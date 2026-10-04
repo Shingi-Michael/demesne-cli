@@ -10,9 +10,10 @@ From the repository:
 
 ```sh
 bun install --frozen-lockfile
-bun run graphics:setup
-bun run graphics
+bun run graphics  # downloads a missing Electron runtime automatically
 ```
+
+Linux verifies a real sandboxed renderer before opening the UI. `bun run graphics:setup` runs the check independently; `--download-only` prepares headless builds. For SUID helper errors, use the explicit `bun run graphics:setup --install-sandbox` repair described in the [Linux guide](../../docs/linux.md). Setup only reports readiness after a sandboxed renderer produces pixels.
 
 Or use the CLI entry point:
 

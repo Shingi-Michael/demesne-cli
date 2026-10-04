@@ -24,6 +24,8 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Fixed
 
+- Linux graphics startup now installs a missing source runtime, verifies sandboxed rendering, preserves desktop authentication variables, and diagnoses sandbox/display/library failures. Explicit helper repair uses a protected, verified copy; workspace permission errors name the folder and a non-recursive remedy. Linux graphics CI covers Ubuntu 20.04/24.04 userlands and packaged startup.
+
 - Responses streams with completed output items but empty terminal output no longer lose their tool calls. Truly incomplete or malformed tool calls are still rejected before execution.
 - Per-provider capacity no longer requires all configured backends to share one global inference allowance.
 - Drive reviews acquire a provider slot before reading fresh worker evidence and reject stale corrections; completed tasks require explicit or evidence-backed reopening.

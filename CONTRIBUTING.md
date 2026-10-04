@@ -62,7 +62,7 @@ Keep `dist/graphics` and the daemon’s native image dependencies with the CLI. 
 
 ## Verification
 
-All code PRs run `bun run typecheck` and `bun test`. [CI](.github/workflows/ci.yml) installs with the frozen lockfile and runs tests under a temporary home on Linux. Native Electron/Ghostty checks are separate; they are not covered by a green Linux unit-test job.
+All code PRs run `bun run typecheck` and `bun test`. [CI](.github/workflows/ci.yml) installs with the frozen lockfile and runs tests under a temporary home on Linux. [Linux graphics CI](.github/workflows/graphics-linux.yml) separately checks Ubuntu 20.04/24.04 userlands, sandbox-helper repair, decoded terminal captures, and packaged startup. This uses Xvfb and software rendering, not a manual Ghostty/GPU/Wayland test. Native macOS graphics checks remain separate.
 
 | Change | Additional relevant checks |
 | --- | --- |

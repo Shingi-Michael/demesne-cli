@@ -30,6 +30,8 @@ Session journals, command output, memory and image artifacts may contain project
 
 The graphics host owns daemon tokens, auth and filesystem operations. The Electron page is sandboxed and receives public state through a narrow preload bridge, without Node access or direct daemon/network access. Rendered Markdown is sanitized. Terminal tile transfer uses private temporary files when supported, with inline transfer as fallback. See [graphics architecture](apps/graphics/README.md#boundaries).
 
+Linux startup verifies sandboxed rendering. The explicit `--install-sandbox` repair requests administrator access only to install a hash-verified, root-owned helper under `/usr/local/lib/demesne/sandbox`; it does not run the application as root or disable its sandbox. See [Linux setup](docs/linux.md).
+
 These are defense boundaries, not a promise that untrusted generated code is safe to execute. Review requested actions and keep grants specific to the intended work.
 
 ## Reporting a vulnerability

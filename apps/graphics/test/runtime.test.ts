@@ -30,3 +30,36 @@ test("runtime suffixes and repair paths preserve platform and shell boundaries",
   expect(runtimeSuffix("win32")).toBe("electron.exe");
   expect(shellQuote("/tmp/a'b;$HOME")).toBe("'/tmp/a'\\''b;$HOME'");
 });
+
+test.skipIf(process.platform === "win32")("a failed probe returns even when a descendant inherits diagnostics", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { probeGraphicsRuntime } = await import("../runtime.ts");
+  const root = mkdtempSync(join(tmpdir(), "demesne-probe-test-"));
+  try {
+    writeFileSync(join(root, "runtime-probe.cjs"), `Bun.spawn([process.execPath, "-e", "setInterval(()=>{},1000)"], {stdout:"inherit",stderr:"inherit"}); console.error("sandbox failed"); process.exit(2);`);
+    const started = Date.now();
+    const result = await probeGraphicsRuntime(root, process.execPath, { timeoutMs: 2000 });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("sandbox failed");
+    expect(result.timedOut).toBe(false);
+    expect(Date.now() - started).toBeLessThan(2000);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a stuck renderer probe has a bounded timeout", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { probeGraphicsRuntime } = await import("../runtime.ts");
+  const root = mkdtempSync(join(tmpdir(), "demesne-probe-timeout-"));
+  try {
+    writeFileSync(join(root, "runtime-probe.cjs"), "setInterval(()=>{},1000);");
+    const started = Date.now();
+    const result = await probeGraphicsRuntime(root, process.execPath, { timeoutMs: 100 });
+    expect(result.timedOut).toBe(true);
+    expect(result.code).not.toBe(0);
+    expect(Date.now() - started).toBeLessThan(2000);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

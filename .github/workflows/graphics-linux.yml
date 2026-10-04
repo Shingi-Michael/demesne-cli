@@ -30,10 +30,12 @@ jobs:
       # PID/network namespaces. Chromium's own renderer sandbox remains enabled.
       # No host mounts, Docker socket, secrets, published ports or model requests.
       - name: Reproduce, repair and render
-        run: docker run --name demesne-linux-check --cpus=2 --memory=3g --pids-limit=512 --shm-size=256m --cap-add=SYS_ADMIN --security-opt seccomp=unconfined --security-opt apparmor=unconfined demesne-linux
+        run: timeout 300s docker run --init --name demesne-linux-check --cpus=2 --memory=3g --pids-limit=512 --shm-size=256m --cap-add=SYS_ADMIN --security-opt seccomp=unconfined --security-opt apparmor=unconfined demesne-linux
       - name: Collect captures
         if: always()
         run: |
+          docker top demesne-linux-check || true
+          docker logs demesne-linux-check || true
           docker cp demesne-linux-check:/workspace/test-results ./test-results || true
           docker rm -f demesne-linux-check || true
       - uses: actions/upload-artifact@v4

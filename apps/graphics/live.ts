@@ -4181,9 +4181,10 @@ document.addEventListener("pointermove", (event) => {
 // Copy on select, like a terminal: a drag or a double/triple click that leaves
 // text highlighted puts it on the clipboard. The composer keeps the usual
 // behaviour so selecting text to replace it doesn't overwrite the clipboard.
+// The desktop window uses the platform's own copy (⌘C / Ctrl+C) instead.
 let selectFrom: { x: number; y: number } | null = null;
 document.addEventListener("mousedown", (event) => {
-  selectFrom = event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
+  selectFrom = !desktop && event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
 }, true);
 document.addEventListener("mouseup", (event) => {
   const from = selectFrom;

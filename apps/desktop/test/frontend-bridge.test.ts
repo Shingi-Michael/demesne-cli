@@ -19,21 +19,25 @@ function fixture(reject = false) {
 }
 
 describe("desktop bridge", () => {
-  test("retains updates arriving before the shared UI subscribes", () => {
+  test("retains updates arriving before the shared UI subscribes in FIFO order", async () => {
     const transport = fixture(), received: StateUpdate[] = [];
     transport.update(snapshot(1));
     transport.update(snapshot(2));
     const unsubscribe = transport.bridge.subscribe((update) => received.push(update));
     transport.update(snapshot(3));
+    expect(received).toHaveLength(0);
+    await Promise.resolve();
     expect(received.map((update) => update.kind === "snapshot" && update.state.revision)).toEqual([1, 2, 3]);
     unsubscribe();
     transport.update(snapshot(4));
+    await Promise.resolve();
     expect(received).toHaveLength(3);
   });
-  test("bounds startup update buffering and keeps the newest packet", () => {
+  test("bounds startup update buffering and keeps the newest packet", async () => {
     const transport = fixture(), received: StateUpdate[] = [];
     for (let revision = 0; revision < 300; revision++) transport.update(snapshot(revision));
     transport.bridge.subscribe((update) => received.push(update));
+    await Promise.resolve();
     expect(received).toHaveLength(128);
     expect(received.at(-1)).toEqual(snapshot(299));
   });
@@ -69,15 +73,36 @@ describe("desktop bridge", () => {
     expect(transport.errors).toHaveLength(1);
     expect(String(transport.errors[0])).toContain("Sidecar stopped");
   });
-  test("isolates listener failures and removes listeners when a view unloads", () => {
+  test("isolates listener failures and removes listeners when a view unloads", async () => {
     const transport = fixture(), received: StateUpdate[] = [];
     transport.bridge.subscribe(() => { throw new Error("Broken view."); });
     transport.bridge.subscribe((update) => received.push(update));
     transport.update(snapshot(1));
+    await Promise.resolve();
     expect(transport.errors).toHaveLength(1);
     expect(received).toHaveLength(1);
     transport.dispose();
     transport.update(snapshot(2));
+    await Promise.resolve();
     expect(received).toHaveLength(1);
+  });
+  test("waits for subscriber module initialization before rendering queued packets", async () => {
+    const transport = fixture(), initialized: boolean[] = [];
+    let moduleInitialized = false;
+    transport.update(snapshot(1));
+    transport.bridge.subscribe(() => initialized.push(moduleInitialized));
+    transport.update(snapshot(2));
+    // Represents setupRoot and other late module-level assignments in live.ts.
+    moduleInitialized = true;
+    await Promise.resolve();
+    expect(initialized).toEqual([true, true]);
+  });
+  test("does not deliver a scheduled packet after disposal", async () => {
+    const transport = fixture(), received: StateUpdate[] = [];
+    transport.update(snapshot(1));
+    transport.bridge.subscribe((update) => received.push(update));
+    transport.dispose();
+    await Promise.resolve();
+    expect(received).toHaveLength(0);
   });
 });

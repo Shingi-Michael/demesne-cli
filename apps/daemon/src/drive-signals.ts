@@ -9,6 +9,8 @@ import type { DriveSignal } from "@demesne/protocol";
 /// bounded, deterministic fact with a stable id that proposals must cite.
 
 const DAY = 86_400_000;
+const COMMENT_NOTE = "(^|[[:space:]])(//+|#+|/\\*+|\\*|--|<!--|;+)[[:space:]]*(TODO|FIXME|XXX)([[:space:]:(]|$)";
+const TEST_PATH = /(^|\/)(tests?|__tests__|fixtures?|testdata)\/|\.(test|spec)\.[^/]+$/i;
 
 interface CollectOptions {
   /// Look up open PRs and CI runs with the GitHub CLI.
@@ -121,13 +123,15 @@ export async function collectDriveSignals(database: Database, workspace: string,
     const stale = (branches ?? "").split("\n").filter(Boolean).map((line) => line.split("|")).filter(([, at]) => now - Number(at) * 1000 > 7 * DAY);
     if (stale.length) add({ id: "git:stale-branches", source: "git", title: `${stale.length} unmerged branch${stale.length === 1 ? "" : "es"} older than a week`, detail: stale.slice(0, 10).map(([name]) => name).join(", ") });
 
-    // TODO/FIXME notes in tracked code.
-    // Whole words only (git's regex has no \\b).
+    // Notes left in comments of tracked code. Only a comment marker followed
+    // by the note counts, so code that merely mentions the words (this
+    // search, string literals) does not; tests and fixtures are skipped
+    // because their notes are usually sample data. git's regex has no \\b.
     const paths = ((await exec(["git", "ls-files", "-z"], workspace)) ?? "").split("\0")
-      .filter((path) => path && !isSensitivePath(path) && !/\.(?:md|lock)$/i.test(path)).slice(0, 1000);
+      .filter((path) => path && !isSensitivePath(path) && !/\.(?:md|lock)$/i.test(path) && !TEST_PATH.test(path)).slice(0, 1000);
     const lines: string[] = [];
     for (let i = 0; i < paths.length; i += 100) {
-      const todos = await exec(["git", "grep", "-n", "-I", "-w", "-e", "TODO", "-e", "FIXME", "-e", "XXX", "--", ...paths.slice(i, i + 100).map(path => `:(literal)${path}`)], workspace);
+      const todos = await exec(["git", "grep", "-n", "-I", "-E", "-e", COMMENT_NOTE, "--", ...paths.slice(i, i + 100).map(path => `:(literal)${path}`)], workspace);
       lines.push(...(todos ?? "").split("\n").filter(Boolean));
     }
     if (lines.length) add({ id: "code:todos", source: "code", title: `${lines.length} TODO/FIXME note${lines.length === 1 ? "" : "s"} in code`, detail: lines.slice(0, 6).map((line) => clip(line.trim(), 140)).join(" | ") });

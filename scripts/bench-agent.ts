@@ -1,6 +1,7 @@
 /// Agent benchmark: runs read-only questions about this repository through
 /// the daemon code in *this* checkout and measures how much work the model
-/// needs. It is the metric Drive experiments use to compare agent variants.
+/// needs, to compare agent changes before merging them. Meant for a local
+/// model: on a hosted one each run costs real tokens (~650k per --repeat 2).
 ///
 ///   bun scripts/bench-agent.ts [--tasks bench/agent-tasks.json] [--model id]
 ///     [--repeat 1] [--concurrency N] [--only id,id] [--json out.json]

@@ -98,7 +98,7 @@ try {
   assert(state.live.text.includes("checks passed"), "The real demo checks passed");
   await save("demesne-review.png");
   await click("panel", { name: "drive" });
-  await wait(s => s.live.pane === "drive" && s.live.text.includes("NEXT"));
+  await wait(s => s.live.pane === "drive" && s.live.controls.some((c: any) => c.action === "drive-tab"));
   await save("demesne-drive.png");
   app.write("\x11"); assert.equal(await app.child.exited, 0); assert(app.restored);
 } finally { app.kill(); await f.close(); rmSync(workspace, { recursive: true, force: true }); }

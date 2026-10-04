@@ -2245,18 +2245,6 @@ button:disabled {
   cursor: pointer;
 }
 
-.drive-mode {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 12px;
-  color: var(--secondary);
-  margin: 8px 0;
-}
-.drive-content .drive-mode input {
-  width: auto;
-  margin: 0;
-}
 /* The braille spinner shown wherever work is running (tool rows, thinking,
    the live activity line, the status bar). Fixed width so text never shifts. */
 .spin {
@@ -2428,13 +2416,16 @@ button:disabled {
   align-items: center;
   gap: 10px;
 }
+.next-heading {
+  font-size: 11.5px;
+  padding-top: 4px;
+}
 .next-heading .muted {
-  margin-left: auto;
-  letter-spacing: 0;
+  margin-right: auto;
 }
 .next-item {
-  padding: 10px 12px 12px;
-  margin: 0 -12px;
+  padding: 10px 16px 12px;
+  margin: 0 -16px;
   border-left: 2px solid transparent;
 }
 .next-item.first {
@@ -2496,10 +2487,110 @@ button:disabled {
 .next-error {
   color: var(--thinking);
 }
-.drive-own > summary {
-  cursor: pointer;
-  color: var(--secondary);
-  margin: 14px 0 8px;
+/* Drive panel: a pinned live mission, then Next and Done tabs. */
+.drive-pinned {
+  margin: 0 -16px;
+  padding: 12px 16px 14px;
+  background: var(--menuSelection);
+  border-left: 2px solid var(--citron);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.drive-pinned.tone-border-signal { border-left-color: var(--signal); }
+.drive-pinned.tone-border-secondary { border-left-color: var(--borderBright); }
+.drive-pinned.tone-border-thinking { border-left-color: var(--thinking); }
+.drive-pinned-title,
+.done-title {
+  color: var(--strong);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.drive-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 -8px;
+  border-bottom: 1px solid var(--rule);
+}
+.drive-tab {
+  padding: 6px 8px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.drive-tab.active {
+  color: var(--strong);
+  border-bottom-color: var(--electric);
+}
+.drive-tab .count {
+  color: var(--electric);
+}
+.drive-tab-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.next-row,
+.done-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.next-row-title {
+  text-align: left;
+  color: var(--strong);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.next-row-run {
+  border: 1px solid var(--borderBright);
+  border-radius: 4px;
+  padding: 0 8px;
+  color: var(--electric);
+}
+.next-actions button.quiet {
+  border-color: transparent;
+  color: var(--muted);
+}
+.done-item {
+  margin: 0 -16px;
+  padding: 10px 16px 12px;
+  background: var(--menuSelection);
+  border-left: 2px solid var(--electric);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.done-top {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.done-title {
+  min-width: 0;
+}
+.done-text {
+  min-width: 0;
+  color: var(--paper);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.done-row time {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.drive-foot {
+  margin: 4px 0 0;
+  font-size: 11.5px;
 }
 #rail .count {
   position: absolute;

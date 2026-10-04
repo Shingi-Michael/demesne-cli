@@ -120,6 +120,25 @@ export function createDaemonApp(options: {
   const hub = new EventHub();
   const store = new DemesneStore(options.databasePath, (event) => hub.publish(event));
   const driveNextCache = new DriveNextCache(join(dirname(options.databasePath), "drive-next"));
+  const experiments = new ExperimentRunner({
+    store,
+    directory: join(dirname(options.databasePath), "experiments"),
+    worktreeRoot: options.experimentWorktreeRoot ?? join(homedir(), ".cache", "demesne", "experiments"),
+    startTurn(sessionId, content, model) {
+      const inference = snapshotTurnInference(processor, undefined, model ? { model } : undefined);
+      const { turn } = store.createTurn(sessionId, content, "deny", undefined, false);
+      queueTurn(turn, inference);
+      return turn;
+    },
+    cancelTurn(turnId) {
+      const controller = activeControllers.get(turnId);
+      if (!controller) return;
+      store.cancelTurn(turnId);
+      controller.abort(new DOMException("Experiment stopped", "AbortError"));
+      permissions.cancelTurn(turnId, controller.signal.reason);
+    },
+    grant: (sessionId, rule) => permissions.grant(sessionId, rule),
+  });
   const workspaceTrust = new WorkspaceTrust(join(dirname(options.databasePath), "trusted-workspaces.json"));
   const driveNextRuns = new Map<string, Promise<unknown>>();
   const replay = new SessionReplay(store);
@@ -342,6 +361,7 @@ export function createDaemonApp(options: {
         const body = parseDriveExperimentDesignRequest(await readJson(request));
         const known = store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace);
         if (!known) return apiError("not_found", "Unknown workspace", 404);
+        if (!workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
         let kit;
         try { kit = readExperimentKit(body.workspace); }
         catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : "Invalid experiment kit", 400); }
@@ -364,6 +384,8 @@ export function createDaemonApp(options: {
         const spec = parseExperimentSpec(await readJson(request));
         const known = store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(spec.workspace);
         if (!known) return apiError("not_found", "Unknown workspace", 404);
+        // Variant worktrees are checkouts of this workspace, so they share its trust.
+        if (!workspaceTrust.isTrusted(spec.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${spec.workspace}?`, 403);
         if (spec.coderModel) {
           try { snapshotTurnInference(processor, undefined, { model: spec.coderModel }); }
           catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : "Unknown coder model", 400); }

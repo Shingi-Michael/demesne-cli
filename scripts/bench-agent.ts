@@ -72,7 +72,7 @@ try {
     while (next < jobs.length) {
       const { task, attempt } = jobs[next++]!;
       const started = performance.now();
-      const { session } = await client.createSession({ title: `bench ${task.id}`, workspacePath: target });
+      const { session } = await client.createSession({ title: `bench ${task.id}`, workspacePath: target, trustWorkspace: true });
       const { turn } = await client.submitTurn(session.id, { content: task.prompt, permissionMode: "deny" });
       let state = await client.getSessionState(session.id);
       const deadline = Date.now() + 15 * 60_000;

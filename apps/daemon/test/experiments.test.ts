@@ -60,7 +60,7 @@ test("an experiment builds variants in worktrees, stops failing ones, and keeps 
   const call = async (path: string, init?: RequestInit) => { const response = await fetch(new URL(path, server.url), { headers: { "Content-Type": "application/json" }, ...init }); return { status: response.status, body: await response.json() as any }; };
   try {
     expect((await call("/v1/experiments", { method: "POST", body: JSON.stringify(spec(workspace)) })).status).toBe(404);
-    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace }) });
+    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) });
     const started = await call("/v1/experiments", { method: "POST", body: JSON.stringify(spec(workspace)) });
     expect(started.status).toBe(201);
     let experiment: Experiment = started.body;
@@ -129,7 +129,7 @@ test("/v1/drive/experiment designs from the workspace's kit and never authors co
   const post = async (path: string, body: unknown) => { const response = await fetch(new URL(path, server.url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return { status: response.status, body: await response.json() as any }; };
   const request = { workspace, proposal: { title: "Try a smaller value", why: "Scores look high.", evidence: [] } };
   try {
-    await post("/v1/sessions", { title: "S", workspacePath: workspace });
+    await post("/v1/sessions", { title: "S", workspacePath: workspace, trustWorkspace: true });
     expect((await post("/v1/drive/experiment", request)).status).toBe(409);
     mkdirSync(join(workspace, ".demesne"));
     writeFileSync(join(workspace, ".demesne/experiments.json"), JSON.stringify({ setup: [], checks: [["bun", "check.ts"]], metrics: [{ name: "points", about: "The value.", direction: "lower", argv: ["bun", "metric.ts"], minImprovement: 0.2 }] }));
@@ -149,7 +149,7 @@ test("when the winner cannot be committed, its worktree is kept so the change su
   const server = Bun.serve({ port: 0, fetch: app.fetch });
   const call = async (path: string, init?: RequestInit) => (await fetch(new URL(path, server.url), { headers: { "Content-Type": "application/json" }, ...init })).json() as Promise<any>;
   try {
-    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace }) });
+    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) });
     const two = spec(workspace); two.variants = two.variants.slice(0, 2);
     let experiment: Experiment = await call("/v1/experiments", { method: "POST", body: JSON.stringify(two) });
     for (let i = 0; i < 300 && experiment.status === "running"; i++) { await Bun.sleep(100); experiment = await call(`/v1/experiments/${experiment.id}`); }

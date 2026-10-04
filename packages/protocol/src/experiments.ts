@@ -35,8 +35,6 @@ export interface ExperimentSpec {
   coderModel?: string;
   /// Wall-time budget for the whole experiment.
   budgetMinutes: number;
-  /// Open a draft pull request for the winner.
-  pullRequest?: boolean;
 }
 export type ExperimentVariantStatus = "pending" | "setup" | "building" | "checking" | "measuring" | "done" | "failed" | "stopped";
 export interface ExperimentCommandResult { argv: string[]; exitCode: number | null; passed: boolean; seconds: number; tail: string }
@@ -69,9 +67,10 @@ export interface Experiment {
   settledAt?: string;
   variants: ExperimentVariant[];
   verdict?: ExperimentVerdict;
-  /// The winner's branch, and its draft PR once pushed. When committing
-  /// fails, the worktree is kept so the change is not lost.
-  pullRequest?: { url?: string; branch: string; error?: string; keptWorktree?: string };
+  /// The winner, committed on a local branch of the workspace for you to
+  /// review; experiments never push. When committing fails, the worktree is
+  /// kept so the change is not lost.
+  kept?: { branch: string; error?: string; keptWorktree?: string };
   error?: string;
 }
 
@@ -124,6 +123,5 @@ export function parseExperimentSpec(value: unknown): ExperimentSpec {
     variants,
     ...(value.coderModel !== undefined ? { coderModel: text(value.coderModel, 200, "coderModel") } : {}),
     budgetMinutes: value.budgetMinutes as number,
-    ...(typeof value.pullRequest === "boolean" ? { pullRequest: value.pullRequest } : {}),
   };
 }

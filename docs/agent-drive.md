@@ -74,13 +74,13 @@ flowchart TD
     Checks -->|no| Stopped[Variant stopped: its metric does not count]
     Checks -->|yes| Measure[Metric, one variant at a time]
     Measure --> Verdict{Best variant beats the baseline by the required margin?}
-    Verdict -->|yes| Winner[Commit on its branch, push, draft PR]
+    Verdict -->|yes| Winner[Commit on a local branch for review]
     Verdict -->|no| NoWinner[No winner]
     Winner --> Memory[Verdict recorded in project memory]
     NoWinner --> Memory
 ```
 
-Coder turns run unattended in their own worktree: edits anywhere in it and the exact declared check commands are pre-approved, and every other command is denied. Worktrees live under `~/.cache/demesne/experiments` and are removed when the experiment settles; the winner's branch is kept (with `"pullRequest": false` in the kit it is committed but not pushed). A budget in minutes bounds the whole experiment; Stop ends it early. Records persist in the daemon's `experiments` directory, so verdicts survive closing the window; a daemon restart stops a running experiment rather than resuming it. The window writes each settled verdict to project memory once, so later proposals don't repeat a settled idea.
+Coder turns run unattended in their own worktree: edits anywhere in it and the exact declared check commands are pre-approved, and every other command is denied. Worktrees live under `~/.cache/demesne/experiments` and are removed when the experiment settles. The winner is committed on a local branch (`demesne/experiment-<id>-<label>`) for you to review; losing branches are deleted. Experiments never push or open pull requests. A budget in minutes bounds the whole experiment; Stop ends it early. Records persist in the daemon's `experiments` directory, so verdicts survive closing the window; a daemon restart stops a running experiment rather than resuming it. The window writes each settled verdict to project memory once, so later proposals don't repeat a settled idea.
 
 This repository's kit measures **rounds per task** with [`scripts/bench-agent.ts`](../scripts/bench-agent.ts): eight read-only questions ([`bench/agent-tasks.json`](../bench/agent-tasks.json)) run against a pinned snapshot through a private daemon built from the variant's code, using only the `[provider]` table of your user config. Its value is a 10%-trimmed mean, so one runaway turn can't decide an experiment, and a wrong answer counts as 20 rounds, so a variant can't win by answering badly. It also reports correctness, tool calls, re-reads and input tokens.
 

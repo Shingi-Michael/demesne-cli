@@ -44,7 +44,7 @@ writeFileSync(join(f.workspace, "value.ts"), "export const value = 10;\n");
 writeFileSync(join(f.workspace, "metric.ts"), 'import { value } from "./value.ts";\nconsole.log(JSON.stringify({ value }));\n');
 writeFileSync(join(f.workspace, "check.ts"), 'import { value } from "./value.ts";\nif (value < 0) process.exit(1);\n');
 mkdirSync(join(f.workspace, ".demesne"));
-writeFileSync(join(f.workspace, ".demesne/experiments.json"), JSON.stringify({ checks: [[process.execPath, "check.ts"]], pullRequest: false,
+writeFileSync(join(f.workspace, ".demesne/experiments.json"), JSON.stringify({ checks: [[process.execPath, "check.ts"]],
   metrics: [{ name: "points", about: "The number in value.ts.", direction: "lower", argv: [process.execPath, "metric.ts"], minImprovement: 0.2 }] }));
 git("add", "-A"); git("commit", "-qm", "init");
 writeFileSync(join(f.workspace, "draft.ts"), "export const draft = true;\n");
@@ -95,7 +95,8 @@ try {
   assert(state.live.text.includes("Does a smaller value score fewer points?"));
   const branch = git("show", `${experiment.variants[1].branch}:value.ts`).stdout.toString();
   assert.equal(branch, "export const value = 5;\n", "the winner is committed on its branch");
+  assert(state.live.text.includes(`Kept on local branch ${experiment.variants[1].branch}`), "the panel names the local branch");
   await capture("experiment-settled");
   app.write("\x11"); assert.equal(await app.child.exited, 0); assert(app.restored);
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["experiment proposal designs from the kit", "draft shows variants before starting", "running experiment visible during a mission", "variants built, checked and measured", "failing variant stopped", "winner kept on its branch", "verdict recorded in project memory"] }));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["experiment proposal designs from the kit", "draft shows variants before starting", "running experiment visible during a mission", "variants built, checked and measured", "failing variant stopped", "winner kept on a local branch, never pushed", "verdict recorded in project memory"] }));
 } finally { app.kill(); await f.close(); }

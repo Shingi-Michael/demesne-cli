@@ -672,7 +672,7 @@ export class GraphicsHost {
       this.experiments = { ...this.experiments, items: items.slice(0, 6), error: null };
       for (const item of items) {
         if (item.status === "running" || !item.verdict) continue;
-        this.drive?.addMemory({ kind: "outcome", source: "drive", text: `Experiment ${item.id}: ${item.spec.question} ${item.verdict.summary}${item.pullRequest?.url ? ` Draft PR: ${item.pullRequest.url}` : ""}` });
+        this.drive?.addMemory({ kind: "outcome", source: "drive", text: `Experiment ${item.id}: ${item.spec.question} ${item.verdict.summary}${item.kept && !item.kept.error ? ` Kept on local branch ${item.kept.branch}.` : ""}` });
       }
       if (items.some((item) => item.status === "running")) this.experimentPoll = setTimeout(() => void this.refreshExperiments(), 4000);
     } catch (error) {

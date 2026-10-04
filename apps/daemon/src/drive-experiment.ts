@@ -16,8 +16,6 @@ export interface ExperimentKit {
   checks: string[][];
   metrics: Array<{ name: string; about: string; direction: "lower" | "higher"; argv: string[]; minImprovement?: number; timeoutMinutes?: number }>;
   coderModel?: string;
-  /// Open a draft pull request for a winner (default true).
-  pullRequest?: boolean;
 }
 
 export const EXPERIMENT_KIT_PATH = ".demesne/experiments.json";
@@ -34,7 +32,7 @@ export function readExperimentKit(workspace: string): ExperimentKit | null {
       variants: [{ label: "A", idea: "baseline" }, { label: "B", idea: "variant", instruction: "x" }] });
     if (typeof metric.about !== "string" || !metric.about.trim()) throw new Error(`${EXPERIMENT_KIT_PATH}: metric ${metric.name} needs an about.`);
   }
-  return { setup: value.setup ?? [], checks: value.checks ?? [], metrics: value.metrics, ...(typeof value.coderModel === "string" ? { coderModel: value.coderModel } : {}), ...(typeof value.pullRequest === "boolean" ? { pullRequest: value.pullRequest } : {}) };
+  return { setup: value.setup ?? [], checks: value.checks ?? [], metrics: value.metrics, ...(typeof value.coderModel === "string" ? { coderModel: value.coderModel } : {}) };
 }
 
 const instructions = `You are Agent Drive's experiment designer for one software workspace. Turn the proposal into one experiment that settles a question by measurement.
@@ -107,7 +105,6 @@ export async function designExperiment(request: DriveExperimentDesignRequest, si
     setup: kit.setup, checks: kit.checks,
     variants: [{ label: "A", idea: "unchanged (baseline)" }, ...design.variants.slice(0, 3).map((variant, index) => ({ label: "BCD"[index]!, idea: variant.idea, instruction: variant.instruction }))],
     ...(kit.coderModel ? { coderModel: kit.coderModel } : {}),
-    ...(kit.pullRequest !== undefined ? { pullRequest: kit.pullRequest } : {}),
     budgetMinutes: Math.min(480, Math.max(15, Number.isInteger(design.budgetMinutes) ? design.budgetMinutes : 120)),
   });
 }

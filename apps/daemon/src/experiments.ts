@@ -7,8 +7,8 @@ import type { SessionRule } from "./permissions.ts";
 
 /// Drive experiments: each variant of an idea is built by a coder in its own
 /// git worktree, checked, and measured with a named metric; the best variant
-/// that beats the baseline by the required margin wins and becomes a draft
-/// pull request. Records persist as JSON, so results outlive the window and
+/// that beats the baseline by the required margin wins and is committed on a
+/// local branch for review (experiments never push). Records persist as JSON, so results outlive the window and
 /// a daemon restart (which stops a running experiment rather than resuming it).
 
 export interface CommandOutput { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }
@@ -135,7 +135,7 @@ export class ExperimentRunner {
     experiment.verdict = verdict(experiment);
     if (signal.aborted) experiment.error = signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
     const winner = experiment.variants.find((variant) => variant.label === experiment.verdict!.winner);
-    if (winner) await this.keepWinner(experiment, winner, spec.pullRequest !== false);
+    if (winner) await this.keepWinner(experiment, winner);
     await this.cleanup(experiment, winner);
     // Settled only once the worktrees are gone and the winner is kept.
     experiment.settledAt = new Date(this.now()).toISOString();
@@ -205,41 +205,30 @@ export class ExperimentRunner {
     }
   }
 
-  /// Commits the winner on its branch (so removing the worktree loses
-  /// nothing), then pushes it and opens a draft pull request when asked.
-  private async keepWinner(experiment: Experiment, winner: ExperimentVariant, open: boolean) {
+  /// Commits the winner on its local branch, so removing the worktree
+  /// loses nothing. Experiments never push: you review the branch locally.
+  private async keepWinner(experiment: Experiment, winner: ExperimentVariant) {
     const cwd = winner.worktree!, { spec } = experiment;
-    experiment.pullRequest = { branch: winner.branch };
-    const steps: string[][] = [
-      ["git", "add", "-A"],
-      ["git", "commit", "-q", "-m", `${winner.idea}\n\nExperiment ${experiment.id}: ${spec.question}\n${experiment.verdict!.summary}`],
-      ...(open ? [["git", "push", "-q", "-u", "origin", winner.branch]] : []),
-    ];
-    for (const argv of steps) {
+    experiment.kept = { branch: winner.branch };
+    for (const argv of [["git", "add", "-A"], ["git", "commit", "-q", "-m", `${winner.idea}\n\nExperiment ${experiment.id}: ${spec.question}\n${experiment.verdict!.summary}`]]) {
       const output = await this.run(argv, cwd, 120_000);
       if (output.exitCode !== 0) {
-        const step = argv.filter((word) => !word.startsWith("-") && word !== "git")[0];
         // Uncommitted, the change exists only in the worktree: keep it there.
-        if (step !== "push") experiment.pullRequest.keptWorktree = cwd;
-        experiment.pullRequest.error = `${step} failed: ${tail(output.stderr || output.stdout, 300)}${step !== "push" ? ` The winner's change is kept in ${cwd}.` : ""}`;
+        experiment.kept.keptWorktree = cwd;
+        experiment.kept.error = `git ${argv[1]} failed: ${tail(output.stderr || output.stdout, 300)} The winner's change is kept in ${cwd}.`;
         return;
       }
     }
-    if (!open) return;
-    const created = await this.run(["gh", "pr", "create", "--draft", "--head", winner.branch, "--title", `Experiment: ${winner.idea}`, "--body", pullRequestBody(experiment)], cwd, 120_000);
-    if (created.exitCode === 0) experiment.pullRequest.url = created.stdout.trim().split("\n").at(-1);
-    else experiment.pullRequest.error = `gh pr create failed: ${tail(created.stderr, 300)}`;
   }
 
   private async cleanup(experiment: Experiment, winner: ExperimentVariant | undefined) {
     for (const variant of experiment.variants) {
-      if (variant.worktree === experiment.pullRequest?.keptWorktree) continue;
+      if (variant.worktree === experiment.kept?.keptWorktree) continue;
       if (variant.worktree && existsSync(variant.worktree)) await this.run(["git", "worktree", "remove", "--force", variant.worktree], experiment.spec.workspace, 60_000);
-      // The winner's branch is kept (for its pull request, or to open one by
-      // hand); the others go.
+      // The winner's branch is kept for you to review; the others go.
       if (variant !== winner) await this.run(["git", "branch", "-D", variant.branch], experiment.spec.workspace, 30_000);
     }
-    if (!experiment.pullRequest?.keptWorktree) rmSync(join(this.deps.worktreeRoot, experiment.id), { recursive: true, force: true });
+    if (!experiment.kept?.keptWorktree) rmSync(join(this.deps.worktreeRoot, experiment.id), { recursive: true, force: true });
   }
 
   private save(experiment: Experiment) {
@@ -305,18 +294,6 @@ export function verdict(experiment: Pick<Experiment, "spec" | "variants">): Expe
   if (!best) return { summary: `No variant could be measured against the baseline's ${name} of ${format(base)}${failed.length ? `; ${others}` : ""}.` };
   if (best.gain < required) return { change: best.change, summary: `No winner: the best variant, ${best.variant.label} (${best.variant.idea}), changed ${name} by ${percent(best.change)} against a baseline of ${format(base)}; ${Math.round(required * 100)}% was required. ${others}.` };
   return { winner: best.variant.label, change: best.change, summary: `${best.variant.label} wins: ${best.variant.idea} changed ${name} from ${format(base)} to ${format(best.variant.metric!.value)} (${percent(best.change)}). ${others}.` };
-}
-
-function pullRequestBody(experiment: Experiment): string {
-  const { spec } = experiment;
-  const rows = experiment.variants.map((variant) => `| ${variant.label} | ${variant.idea} | ${variant.metric ? format(variant.metric.value) : "—"} | ${variant.status === "done" ? "measured" : variant.error ?? variant.status} |`);
-  return [
-    `**Question:** ${spec.question}`, "", `**Hypothesis:** ${spec.hypothesis}`, "",
-    `**Verdict:** ${experiment.verdict!.summary}`, "",
-    `| Variant | Idea | ${spec.metric.name} (${spec.metric.direction} is better) | Result |`, "|---|---|---|---|", ...rows, "",
-    `Checks: ${spec.checks.map((argv) => `\`${argv.join(" ")}\``).join(", ") || "none"}. Metric: \`${spec.metric.argv.join(" ")}\`. Base ${experiment.base.slice(0, 7)}.`, "",
-    `Opened by Agent Drive experiment ${experiment.id}. Review before merging.`,
-  ].join("\n");
 }
 
 const format = (value: number) => String(Math.round(value * 100) / 100);

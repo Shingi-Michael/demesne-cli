@@ -50,11 +50,14 @@ const spec = (workspace: string): ExperimentSpec => ({
     { label: "C", idea: "set value to 9.5", instruction: "Set value to 9.5." },
     { label: "D", idea: "set value to -1", instruction: "Set value to -1." },
   ],
-  budgetMinutes: 10, pullRequest: false,
+  budgetMinutes: 10,
 });
 
-test("an experiment builds variants in worktrees, stops failing ones, and keeps the winner on its branch", async () => {
+test("an experiment builds variants in worktrees, stops failing ones, and keeps the winner on a local branch", async () => {
   const root = scratch(), workspace = repository(root);
+  // A real remote: the winner must never be pushed to it.
+  git(root, "init", "-q", "--bare", "origin.git");
+  git(workspace, "remote", "add", "origin", join(root, "origin.git"));
   const app = createDaemonApp({ databasePath: join(root, "data", "state.sqlite"), processor: coder, experimentWorktreeRoot: join(root, "worktrees") });
   const server = Bun.serve({ port: 0, fetch: app.fetch });
   const call = async (path: string, init?: RequestInit) => { const response = await fetch(new URL(path, server.url), { headers: { "Content-Type": "application/json" }, ...init }); return { status: response.status, body: await response.json() as any }; };
@@ -79,6 +82,8 @@ test("an experiment builds variants in worktrees, stops failing ones, and keeps 
     expect(branches.sort()).toEqual([byLabel.B!.branch, "main"].sort());
     expect(Bun.spawnSync(["git", "show", `${byLabel.B!.branch}:value.ts`], { cwd: workspace }).stdout.toString()).toBe("export const value = 5;\n");
     expect(readFileSync(join(workspace, "value.ts"), "utf8")).toBe("export const value = 10;\n");
+    expect(experiment.kept).toEqual({ branch: byLabel.B!.branch });
+    expect(Bun.spawnSync(["git", "ls-remote", "origin"], { cwd: workspace }).stdout.toString()).toBe("");
     expect((await call(`/v1/experiments?workspace=${encodeURIComponent(workspace)}`)).body.experiments.map((item: Experiment) => item.id)).toEqual([experiment.id]);
   } finally { server.stop(true); await app.close(); }
 });
@@ -154,8 +159,8 @@ test("when the winner cannot be committed, its worktree is kept so the change su
     let experiment: Experiment = await call("/v1/experiments", { method: "POST", body: JSON.stringify(two) });
     for (let i = 0; i < 300 && experiment.status === "running"; i++) { await Bun.sleep(100); experiment = await call(`/v1/experiments/${experiment.id}`); }
     expect(experiment.verdict?.winner).toBe("B");
-    expect(experiment.pullRequest?.error).toContain("commits are blocked here");
-    const kept = experiment.pullRequest!.keptWorktree!;
+    expect(experiment.kept?.error).toContain("commits are blocked here");
+    const kept = experiment.kept!.keptWorktree!;
     expect(readFileSync(join(kept, "value.ts"), "utf8")).toBe("export const value = 5;\n");
     expect(existsSync(join(root, "worktrees", experiment.id, "a"))).toBe(false);
   } finally { server.stop(true); await app.close(); }

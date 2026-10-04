@@ -1166,7 +1166,7 @@ function experimentsHTML() {
     const won = Boolean(item.verdict?.winner), key = `experiment:${item.id}`;
     // The newest verdict opens by itself until you close it.
     const open = detailsOpen.has(key) || (index === 0 && !detailsClosed.has(key));
-    return `<details class="experiment settled" data-detail="${key}"${open ? " open" : ""}><summary><span class="${won ? "success" : "muted"}">${won ? "✓" : item.status === "failed" ? "×" : "·"}</span> ${h(item.spec.question)} <span class="muted">${age(item.settledAt ?? item.createdAt)}</span></summary><p class="next-why">${h(item.verdict?.summary ?? item.error ?? item.status)}</p>${variants(item)}${item.pullRequest?.url ? `<div class="next-actions">${btn("open-link", "Draft PR ›", { url: item.pullRequest.url }, "primary")}</div>` : item.pullRequest?.error ? `<p class="next-error">${h(item.pullRequest.error)} · branch ${h(item.pullRequest.branch)}</p>` : ""}</details>`;
+    return `<details class="experiment settled" data-detail="${key}"${open ? " open" : ""}><summary><span class="${won ? "success" : "muted"}">${won ? "✓" : item.status === "failed" ? "×" : "·"}</span> ${h(item.spec.question)} <span class="muted">${age(item.settledAt ?? item.createdAt)}</span></summary><p class="next-why">${h(item.verdict?.summary ?? item.error ?? item.status)}</p>${variants(item)}${item.kept ? `<p class="${item.kept.error ? "next-error" : "muted"}">${item.kept.error ? h(item.kept.error) : `Kept on local branch <code>${h(item.kept.branch)}</code> for you to review.`}</p>` : ""}</details>`;
   }).join("");
   const draft = experiments.draft ? (() => {
     const spec = experiments.draft.spec;

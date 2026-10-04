@@ -1154,7 +1154,7 @@ function experimentsHTML() {
     return `<div class="experiment-variants">${item.variants.map((v) => {
       const change = v.metric && base !== undefined && v.instruction && base !== 0 ? (v.metric.value - base) / Math.abs(base) : null;
       const result = v.metric ? `<b>${value(v.metric.value)}</b>${change !== null ? ` <span class="${(item.spec.metric.direction === "lower" ? -change : change) > 0 ? "success" : "muted"}">${change > 0 ? "+" : ""}${Math.round(change * 100)}%</span>` : ""}`
-        : v.status === "failed" ? `<span class="danger" title="${h(v.error ?? "")}">× ${h((v.error ?? "failed").split(":")[0]!)}</span>` : `<span class="muted">${status[v.status] ?? v.status}</span>`;
+        : v.status === "failed" ? `<span class="danger" title="${h(v.error ?? "")}">× ${h((v.error ?? "failed").split(":")[0]!)}</span>` : `<span class="muted">${status[v.status] ?? v.status}${v.status === "building" && (v.attempts ?? 1) > 1 ? ` · attempt ${v.attempts}` : ""}</span>`;
       return `<div class="experiment-variant${item.verdict?.winner === v.label ? " winner" : ""}"><span class="label">${h(v.label)}</span><span class="idea">${h(v.idea)}</span><span class="result">${result}</span></div>`;
     }).join("")}</div>`;
   };

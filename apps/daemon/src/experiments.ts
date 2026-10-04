@@ -29,6 +29,7 @@ export interface ExperimentDependencies {
 /// Tools a coder may use anywhere in its own worktree without asking.
 const EDIT_TOOLS = ["edit_file", "write_file", "move_path", "delete_path"];
 const TAIL = 2000;
+const CODER_ATTEMPTS = 2;
 
 export class ExperimentRunner {
   private readonly experiments = new Map<string, Experiment>();
@@ -115,6 +116,8 @@ export class ExperimentRunner {
         signal.throwIfAborted();
         this.save(experiment);
         const output = await this.run(spec.metric.argv, variant.worktree!, (spec.metric.timeoutMinutes ?? 60) * 60_000, signal);
+        // Stopped mid-measurement: not a metric failure.
+        if (signal.aborted) break;
         const metric = output.exitCode === 0 ? parseMetric(output.stdout) : null;
         if (metric) { variant.metric = metric; variant.status = "done"; }
         else { variant.status = "failed"; variant.error = output.timedOut ? "The metric timed out." : `The metric did not report a value: ${tail(output.stderr || output.stdout, 400)}`; }
@@ -149,15 +152,23 @@ export class ExperimentRunner {
       }
       if (variant.instruction) {
         variant.status = "building";
-        const { session } = this.deps.store.createSession(`Experiment ${experiment.id} · ${variant.label}: ${variant.idea}`, cwd);
-        variant.sessionId = session.id;
-        for (const tool of EDIT_TOOLS) this.deps.grant(session.id, { tool, pathPrefix: "" });
-        for (const argv of spec.checks) this.deps.grant(session.id, { tool: "run_command", pathPrefix: "", argv, cwd: "." });
-        const turn = this.deps.startTurn(session.id, coderPrompt(spec, variant), spec.coderModel);
-        variant.turnId = turn.id;
-        this.save(experiment);
-        const settled = await this.waitForTurn(turn.id, signal);
-        if (settled.status !== "completed") return this.fail(experiment, variant, `The coder's turn ${settled.status}.`);
+        // A coder turn that fails (often its context filled while reading)
+        // gets one more attempt in a fresh session, which starts with an
+        // empty context but keeps the partial edits already in the worktree.
+        let settled: Turn | undefined;
+        for (let attempt = 1; attempt <= CODER_ATTEMPTS; attempt++) {
+          const { session } = this.deps.store.createSession(`Experiment ${experiment.id} · ${variant.label}: ${variant.idea}${attempt > 1 ? ` (attempt ${attempt})` : ""}`, cwd);
+          variant.sessionId = session.id;
+          variant.attempts = attempt;
+          for (const tool of EDIT_TOOLS) this.deps.grant(session.id, { tool, pathPrefix: "" });
+          for (const argv of spec.checks) this.deps.grant(session.id, { tool: "run_command", pathPrefix: "", argv, cwd: "." });
+          const turn = this.deps.startTurn(session.id, coderPrompt(spec, variant, attempt > 1), spec.coderModel);
+          variant.turnId = turn.id;
+          this.save(experiment);
+          settled = await this.waitForTurn(turn.id, signal);
+          if (settled.status !== "failed") break;
+        }
+        if (settled!.status !== "completed") return this.fail(experiment, variant, `The coder's turn ${settled!.status}${variant.attempts! > 1 ? ` after ${variant.attempts} attempts` : ""}.`);
         const status = await this.run(["git", "status", "--porcelain"], cwd, 30_000, signal);
         variant.changedFiles = status.stdout.split("\n").filter(Boolean).map((line) => line.slice(3).trim()).slice(0, 200);
         if (!variant.changedFiles.length) return this.fail(experiment, variant, "The coder made no change.");
@@ -244,9 +255,10 @@ export class ExperimentRunner {
   }
 }
 
-export function coderPrompt(spec: ExperimentSpec, variant: ExperimentVariant): string {
+export function coderPrompt(spec: ExperimentSpec, variant: ExperimentVariant, retry = false): string {
   return [
     `You are building variant ${variant.label} of a Drive experiment, in an isolated git worktree of this repository.`,
+    ...(retry ? ["A previous attempt at this variant failed before finishing, usually because its context filled while reading. Any edits it made are already in this worktree: check git_status and git_diff first, then finish the change. Search before reading, and read only the line ranges you need."] : []),
     `Question: ${spec.question}`,
     `Hypothesis: ${spec.hypothesis}`,
     `Your idea: ${variant.idea}`,

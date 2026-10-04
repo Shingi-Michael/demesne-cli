@@ -160,3 +160,47 @@ test("when the winner cannot be committed, its worktree is kept so the change su
     expect(existsSync(join(root, "worktrees", experiment.id, "a"))).toBe(false);
   } finally { server.stop(true); await app.close(); }
 });
+
+test("a coder turn that fails gets one more attempt in a fresh session", async () => {
+  const root = scratch(), workspace = repository(root);
+  const prompts: string[] = [];
+  const flaky: TurnProcessor = { ...coder, async *stream(messages, tools, signal, thinking) {
+    const prompt = String(messages.findLast((message) => message.role === "user")?.content ?? "");
+    if (!messages.some((message) => message.role === "tool")) prompts.push(prompt);
+    if (!prompt.includes("A previous attempt")) throw new Error("request (32955 tokens) exceeds the available context size (32768 tokens)");
+    yield* coder.stream(messages, tools, signal, thinking);
+  } };
+  const app = createDaemonApp({ databasePath: join(root, "data", "state.sqlite"), processor: flaky, experimentWorktreeRoot: join(root, "worktrees") });
+  const server = Bun.serve({ port: 0, fetch: app.fetch });
+  const call = async (path: string, init?: RequestInit) => (await fetch(new URL(path, server.url), { headers: { "Content-Type": "application/json" }, ...init })).json() as Promise<any>;
+  try {
+    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) });
+    const two = spec(workspace); two.variants = two.variants.slice(0, 2);
+    let experiment: Experiment = await call("/v1/experiments", { method: "POST", body: JSON.stringify(two) });
+    for (let i = 0; i < 300 && experiment.status === "running"; i++) { await Bun.sleep(100); experiment = await call(`/v1/experiments/${experiment.id}`); }
+    const b = experiment.variants.find((variant) => variant.label === "B")!;
+    expect(b).toMatchObject({ status: "done", attempts: 2, metric: { value: 5 } });
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("check git_status and git_diff first");
+    expect(experiment.verdict?.winner).toBe("B");
+  } finally { server.stop(true); await app.close(); }
+});
+
+test("stopping during measurement marks the variant stopped, not failed", async () => {
+  const root = scratch(), workspace = repository(root);
+  const app = createDaemonApp({ databasePath: join(root, "data", "state.sqlite"), processor: coder, experimentWorktreeRoot: join(root, "worktrees") });
+  const server = Bun.serve({ port: 0, fetch: app.fetch });
+  const call = async (path: string, init?: RequestInit) => (await fetch(new URL(path, server.url), { headers: { "Content-Type": "application/json" }, ...init })).json() as Promise<any>;
+  try {
+    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) });
+    const slow = spec(workspace); slow.variants = slow.variants.slice(0, 2);
+    slow.metric = { ...slow.metric, argv: [process.execPath, "-e", "await Bun.sleep(30000)"] };
+    let experiment: Experiment = await call("/v1/experiments", { method: "POST", body: JSON.stringify(slow) });
+    for (let i = 0; i < 300 && !experiment.variants.every((variant) => variant.status === "measuring"); i++) { await Bun.sleep(100); experiment = await call(`/v1/experiments/${experiment.id}`); }
+    await Bun.sleep(300);
+    await call(`/v1/experiments/${experiment.id}/stop`, { method: "POST", body: "{}" });
+    for (let i = 0; i < 300 && experiment.status === "running"; i++) { await Bun.sleep(100); experiment = await call(`/v1/experiments/${experiment.id}`); }
+    expect(experiment.status).toBe("stopped");
+    expect(experiment.variants.map((variant) => [variant.label, variant.status, variant.error])).toEqual([["A", "stopped", undefined], ["B", "stopped", undefined]]);
+  } finally { server.stop(true); await app.close(); }
+});

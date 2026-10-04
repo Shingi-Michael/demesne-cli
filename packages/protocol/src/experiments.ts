@@ -44,8 +44,10 @@ export interface ExperimentVariant extends ExperimentVariantSpec {
   status: ExperimentVariantStatus;
   branch: string;
   worktree?: string;
+  /// The coder's latest session and turn, and how many attempts it took.
   sessionId?: string;
   turnId?: string;
+  attempts?: number;
   changedFiles?: string[];
   checks?: ExperimentCommandResult[];
   metric?: { value: number; detail?: Record<string, unknown> };

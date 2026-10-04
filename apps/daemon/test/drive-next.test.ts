@@ -122,6 +122,22 @@ test("signals ignore superseded CI failures and report only the latest default-b
   } finally { store.close(); }
 });
 
+test("TODO discovery counts comment notes, not code or tests that mention the words", async () => {
+  const root = scratch(), workspace = join(root, "ws");
+  Bun.spawnSync(["mkdir", "-p", join(workspace, "test")]); git(workspace, "init", "-q");
+  writeFileSync(join(workspace, "search.ts"), [
+    "// TODO: handle retries", "  /* FIXME(parser) empty input */", " * XXX", "# TODO", "-- TODO tidy",
+    "// TODO/FIXME notes in tracked code.", 'const pattern = ["TODO", "FIXME"];', 'write("// TODO: sample");', "const TODO_LIMIT = 3;",
+  ].join("\n") + "\n");
+  writeFileSync(join(workspace, "test", "lexer.ts"), "// TODO: fixture note\n");
+  writeFileSync(join(workspace, "parse.test.ts"), "// FIXME: sample\n");
+  git(workspace, "add", "-A"); git(workspace, "commit", "-qm", "init");
+  const store = new DemesneStore(join(root, "state.sqlite"));
+  const signal = (await collectDriveSignals(store.database, workspace, { gh: false })).signals.find(s => s.id === "code:todos");
+  expect(signal?.title).toBe("5 TODO/FIXME notes in code");
+  expect(signal?.detail).not.toContain("test/"); store.close();
+});
+
 test("TODO discovery excludes protected files before searching their contents", async () => {
   const root = scratch(), store = new DemesneStore(join(root, "state.sqlite"));
   const searched: string[][] = [];

@@ -11,6 +11,7 @@ These guides describe the implementation on `main`, audited on **2026-10-03**. E
 | [Configuration](configuration.md) | File precedence, providers, limits, environment variables |
 | [Authentication](authentication.md) | ChatGPT accounts, OpenRouter, API keys, credential ownership |
 | [Graphics interface](../apps/graphics/README.md) | Ghostty, panels, rendering, packaging, diagnostics |
+| [Linux setup](linux.md) | Automatic runtime setup, sandbox repair, desktop dependencies, test coverage |
 | [Subagents and concurrency](subagents.md) | Routing, read-only tools, provider slots, Qwen sizing |
 | [Agent Drive](agent-drive.md) | NEXT, missions, project memory, check-ins, loop protection |
 | [Image preview](artifact-preview-plan.md) | Supported producers, formats, controls, current limitations |

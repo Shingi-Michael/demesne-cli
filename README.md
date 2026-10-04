@@ -59,7 +59,7 @@ Demesne brings the conversation, code, and evidence into one terminal workspace.
 
 ## Get started
 
-**You’ll need [Bun 1.4.0](https://bun.sh), [Ghostty](https://ghostty.org), and a model connection.** The graphics interface uses Electron/Chromium and Kitty graphics; the plain CLI supports headless workflows. The current build workflow targets macOS.
+**You’ll need [Bun 1.4.0](https://bun.sh), [Ghostty](https://ghostty.org), and a model connection.** The graphics interface uses Electron/Chromium and Kitty graphics; the plain CLI supports headless workflows. Published release builds target macOS; Linux source setup and sandbox repair are covered in the [Linux guide](docs/linux.md).
 
 ```sh
 git clone https://github.com/Shingi-Michael/demesne-cli.git

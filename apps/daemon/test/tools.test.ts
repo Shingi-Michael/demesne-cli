@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalWorkspace, listWorkspaceFiles, ToolRegistry } from "../src/tools.ts";
@@ -435,6 +435,22 @@ describe("built-in tools", () => {
     await tools.get("git_status")!.execute({}, context);
     await tools.get("git_diff")!.execute({}, context);
     expect(existsSync(marker)).toBe(false);
+  });
+
+  test("workspace permission error names the mode and quotes a non-recursive repair safely", () => {
+    const root = join(workspace(), "project's $(false)");
+    mkdirSync(root); chmodSync(root, 0o775);
+    let message = "";
+    try { canonicalWorkspace(root); } catch (error) { message = (error as Error).message; }
+    expect(message).toContain("mode 775");
+    expect(message).toContain(root);
+    expect(statSync(root).mode & 0o777).toBe(0o775);
+    const command = /run (chmod go-w .*?)\. This/.exec(message)?.[1];
+    expect(command).toBeDefined();
+    const fixed = Bun.spawnSync(["/bin/sh", "-c", command!]);
+    expect(fixed.exitCode).toBe(0);
+    expect(statSync(root).mode & 0o777).toBe(0o755);
+    expect(canonicalWorkspace(root)).toBe(root);
   });
 
   test("rejects a workspace root replaced by a symlink", async () => {

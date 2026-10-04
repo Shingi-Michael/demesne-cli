@@ -17,7 +17,7 @@ export async function runGraphics(args: string[]): Promise<number> {
   }
   if (values.includes("--help")) {
     console.log(
-      "Usage: demesne graphics [--workspace <path>] [--session <id>] [--server <url>] [--scale auto|0.5-3] [--setup]\nRuns the web-rendered UI inside Ghostty using Kitty graphics. Scale follows terminal text size by default. Ctrl+Q exits; Esc twice stops a running turn.",
+      "Usage: demesne graphics [--workspace <path>] [--session <id>] [--server <url>] [--scale auto|0.5-3] [--setup] [--check-runtime] [--install-sandbox]\nRuns the web-rendered UI inside Ghostty using Kitty graphics. Scale follows terminal text size by default. Ctrl+Q exits; Esc twice stops a running turn.",
     );
     return 0;
   }

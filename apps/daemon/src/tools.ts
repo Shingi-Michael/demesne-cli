@@ -1225,7 +1225,10 @@ function assertWorkspaceRoot(root: string): void {
   if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
     throw new Error("workspace must be owned by the current user");
   }
-  if ((stat.mode & 0o022) !== 0) throw new Error("workspace must not be writable by group or other users");
+  if ((stat.mode & 0o022) !== 0) {
+    const quoted = "'" + root.replaceAll("'", "'\\''") + "'";
+    throw new Error(`workspace must not be writable by group or other users: ${root} (mode ${(stat.mode & 0o777).toString(8)}). For a private project you own, run chmod go-w ${quoted}. This changes only the directory, not its contents; shared projects need an owner-private checkout.`);
+  }
 }
 
 export function resolveWorkspacePath(root: string, input: string, allowMissingFinal: boolean, allowMissingParents = false): string {

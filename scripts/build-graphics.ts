@@ -1,9 +1,9 @@
-import { cpSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 const root = resolve(import.meta.dir, "../apps/graphics"),
   out = resolve(import.meta.dir, "../dist/graphics");
 const setup = Bun.spawn(
-  [process.execPath, join(import.meta.dir, "setup-graphics.ts")],
+  [process.execPath, join(import.meta.dir, "setup-graphics.ts"), "--download-only"],
   { stdout: "inherit", stderr: "inherit" },
 );
 if ((await setup.exited) !== 0) throw new Error("Runtime setup failed");
@@ -22,6 +22,9 @@ for (const file of [
   "tile-encoder.cjs",
   "input-queue.cjs",
   "pipe-writer.cjs",
+  "runtime-probe.cjs",
+  "runtime-probe-preload.cjs",
+  "install-sandbox.sh",
   "live.html",
   "live.css",
   "ui.css",
@@ -49,6 +52,14 @@ cpSync(join(electronRoot, "dist"), join(out, "runtime"), {
   dereference: false,
   verbatimSymlinks: true,
 });
+// A developer may have linked the helper to a protected, machine-local installation.
+// Ship its bytes, never an absolute link or a setuid file owned by the build user.
+if (process.platform === "linux") {
+  const helper = join(out, "runtime/chrome-sandbox");
+  rmSync(helper, { force: true });
+  cpSync(join(electronRoot, "dist/chrome-sandbox"), helper, { dereference: true });
+  chmodSync(helper, 0o755);
+}
 const host = Bun.spawn(
   [
     process.execPath,

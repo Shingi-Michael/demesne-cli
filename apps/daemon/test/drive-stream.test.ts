@@ -13,7 +13,7 @@ async function fixture(processor: TurnProcessor) {
   mkdirSync(join(root, "project")); mkdirSync(join(root, "data"));
   const app = createDaemonApp({ databasePath: join(root, "data/state.sqlite"), processor, authToken: "test-token" });
   const client = new DemesneClient({ server: "http://localhost", token: "test-token", fetch: ((url: string | URL | Request, init?: RequestInit) => Promise.resolve(app.fetch(new Request(url, init)))) as typeof fetch });
-  const session = (await client.createSession({ title: "Review", workspacePath: join(root, "project") })).session;
+  const session = (await client.createSession({ title: "Review", workspacePath: join(root, "project"), trustWorkspace: true })).session;
   const request: DriveRequest = { mission: "Review", homeSessionId: session.id, memory: { notes: "", completed: [], remaining: [], evidence: [], steps: [] },
     observation: { id: "screen", sessionId: session.id, workspace: session.workspace!.root, title: "Review", mode: "input", ready: true, draft: "", surface: "response", width: 100, height: 30, rows: ["Saved result"], controls: [] } };
   return { app, client, request, async close() { await app.close(); rmSync(root, { recursive: true, force: true }); } };

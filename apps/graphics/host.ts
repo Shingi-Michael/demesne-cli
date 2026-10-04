@@ -10,7 +10,7 @@ import type {
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
-import { DemesneClient, isStalePermissionResolution } from "@demesne/client";
+import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted } from "@demesne/client";
 import { updateUserConfig } from "@demesne/config";
 import {
   themeByName,
@@ -157,6 +157,9 @@ export class GraphicsHost {
   private checkBatchActive = false;
   connection: "connecting" | "online" | "offline" = "connecting";
   error: string | null = null;
+  /// The workspace waiting for the user's "Do you trust this folder?" answer.
+  untrustedWorkspace: string | null = null;
+  private trustWorkspace = false;
   planOnly = false;
   queue = "";
   draft = "";
@@ -221,6 +224,7 @@ export class GraphicsHost {
       revision: this.revision,
       connection: this.connection,
       error: this.error,
+      untrustedWorkspace: this.untrustedWorkspace,
       server: this.client.server,
       session: this.current
         ? {
@@ -314,7 +318,14 @@ export class GraphicsHost {
       this.sessions = await this.client.listSessions();
       this.connection = "online";
       if (this.selectedSession) await this.select(this.selectedSession);
-      else await this.newSession();
+      else {
+        try {
+          await this.newSession();
+        } catch (error) {
+          if (isWorkspaceUntrusted(error)) return;
+          throw error;
+        }
+      }
       // Discovery across providers takes seconds; do it before /model asks.
       void this.models().catch(() => {});
       this.loadNextHidden();
@@ -357,10 +368,23 @@ export class GraphicsHost {
     await this.connect();
   }
   async newSession(title?: string) {
-    const result = await this.client.createSession({
-      workspacePath: this.workspace,
-      title: title ?? `Session ${new Date().toLocaleTimeString()}`,
-    });
+    let result;
+    try {
+      result = await this.client.createSession({
+        workspacePath: this.workspace,
+        title: title ?? `Session ${new Date().toLocaleTimeString()}`,
+        ...(this.trustWorkspace ? { trustWorkspace: true } : {}),
+      });
+    } catch (error) {
+      // Every caller (startup, New session, the desktop's project switch)
+      // shows the same Trust folder question.
+      if (isWorkspaceUntrusted(error)) {
+        this.untrustedWorkspace = this.workspace;
+        this.publish();
+      }
+      throw error;
+    }
+    this.untrustedWorkspace = null;
     await this.select(result.session.id);
     return result.session.id;
   }
@@ -811,6 +835,7 @@ export class GraphicsHost {
       "start-daemon",
       "select-session",
       "new-session",
+      "trust-workspace",
       "setup",
       "setup-action",
     ]);
@@ -885,6 +910,11 @@ export class GraphicsHost {
     }
     if (method === "start-daemon") {
       await this.startDaemon();
+      return this.snapshot();
+    }
+    if (method === "trust-workspace") {
+      this.trustWorkspace = true;
+      await this.connect();
       return this.snapshot();
     }
     if (method === "new-session")

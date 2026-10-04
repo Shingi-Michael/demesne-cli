@@ -410,6 +410,8 @@ export interface DaemonStatusResponse {
 export interface CreateSessionRequest {
   title?: string;
   workspacePath?: string;
+  /// Records the workspace as trusted before creating the session.
+  trustWorkspace?: boolean;
 }
 
 export interface CreateSessionResponse {
@@ -495,7 +497,14 @@ export function parseCreateSessionRequest(value: unknown): CreateSessionRequest 
   if (workspacePath && workspacePath.length > 4_096) {
     throw new ProtocolValidationError("workspacePath must be at most 4096 characters");
   }
-  return { ...(title ? { title } : {}), ...(workspacePath ? { workspacePath } : {}) };
+  if (value.trustWorkspace !== undefined && typeof value.trustWorkspace !== "boolean") {
+    throw new ProtocolValidationError("trustWorkspace must be a boolean");
+  }
+  return {
+    ...(title ? { title } : {}),
+    ...(workspacePath ? { workspacePath } : {}),
+    ...(value.trustWorkspace === true ? { trustWorkspace: true } : {}),
+  };
 }
 
 export function parseUndoSessionRequest(value: unknown): UndoSessionRequest {

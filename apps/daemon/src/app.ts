@@ -38,6 +38,7 @@ import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
 import { QuestionBroker } from "./questions.ts";
 import { ConfigAllowlist } from "./allowlist.ts";
+import { WorkspaceTrust } from "./workspace-trust.ts";
 import { canonicalWorkspace, listWorkspaceFiles, readWorkspaceText, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
 import { detectGitBranch } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
@@ -119,25 +120,7 @@ export function createDaemonApp(options: {
   const hub = new EventHub();
   const store = new DemesneStore(options.databasePath, (event) => hub.publish(event));
   const driveNextCache = new DriveNextCache(join(dirname(options.databasePath), "drive-next"));
-  const experiments = new ExperimentRunner({
-    store,
-    directory: join(dirname(options.databasePath), "experiments"),
-    worktreeRoot: options.experimentWorktreeRoot ?? join(homedir(), ".cache", "demesne", "experiments"),
-    startTurn(sessionId, content, model) {
-      const inference = snapshotTurnInference(processor, undefined, model ? { model } : undefined);
-      const { turn } = store.createTurn(sessionId, content, "deny", undefined, false);
-      queueTurn(turn, inference);
-      return turn;
-    },
-    cancelTurn(turnId) {
-      const controller = activeControllers.get(turnId);
-      if (!controller) return;
-      store.cancelTurn(turnId);
-      controller.abort(new DOMException("Experiment stopped", "AbortError"));
-      permissions.cancelTurn(turnId, controller.signal.reason);
-    },
-    grant: (sessionId, rule) => permissions.grant(sessionId, rule),
-  });
+  const workspaceTrust = new WorkspaceTrust(join(dirname(options.databasePath), "trusted-workspaces.json"));
   const driveNextRuns = new Map<string, Promise<unknown>>();
   const replay = new SessionReplay(store);
   const processor: TurnProcessor = options.processor ?? new PlaceholderTurnProcessor();
@@ -571,6 +554,10 @@ export function createDaemonApp(options: {
           } catch (error) {
             const message = error instanceof Error ? error.message : "Invalid workspace";
             return apiError("invalid_workspace", message, 400);
+          }
+          if (body.trustWorkspace) workspaceTrust.trust(workspaceRoot);
+          else if (!workspaceTrust.isTrusted(workspaceRoot)) {
+            return apiError("workspace_untrusted", `Do you trust the files in ${workspaceRoot}?`, 403);
           }
         }
         const { session, event } = store.createSession(body.title, workspaceRoot);

@@ -26,7 +26,7 @@ for (const terminalOutput of ["full", "empty"] as const) for (const interrupted 
     return seen;
   };
   try {
-    const { session } = await post("/v1/sessions", { title: "ChatGPT", workspacePath: workspace });
+    const { session } = await post("/v1/sessions", { title: "ChatGPT", workspacePath: workspace, trustWorkspace: true });
     const { eventId } = await post(`/v1/sessions/${session.id}/turns`, { content: "Read input.txt" });
     const events = await finish(session.id, eventId);
     expect(events.at(-1)?.type).toBe(interrupted ? "turn.failed" : "turn.completed");

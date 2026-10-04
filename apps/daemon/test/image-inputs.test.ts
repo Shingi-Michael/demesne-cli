@@ -73,7 +73,7 @@ test("the agent receives screenshot pixels after a tool call and on replay", asy
   let app = createDaemonApp(options);
   const post = (path: string, body: unknown) => app.fetch(new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
   try {
-    const { session } = await (await post("/v1/sessions", { title: "Inspect", workspacePath: join(root, "workspace") })).json();
+    const { session } = await (await post("/v1/sessions", { title: "Inspect", workspacePath: join(root, "workspace"), trustWorkspace: true })).json();
     await post(`/v1/sessions/${session.id}/turns`, { content: "Inspect screen.png" });
     await completed;
     for (let i = 0; i < 100; i++) {

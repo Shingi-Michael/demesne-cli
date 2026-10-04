@@ -39,10 +39,9 @@ try {
   const workspace = mkdtempSync(join(tmpdir(), "demesne-mode-"));
   try {
     chmodSync(workspace, 0o775);
-    assert.throws(() => canonicalWorkspace(workspace), /mode 775.*chmod go-w/);
-    assert.equal(statSync(workspace).mode & 0o777, 0o775, "diagnosis does not mutate permissions");
-    chmodSync(workspace, 0o755); assert.equal(canonicalWorkspace(workspace), realpathSync(workspace));
+    assert.equal(canonicalWorkspace(workspace), realpathSync(workspace));
+    assert.equal(statSync(workspace).mode & 0o777, 0o775, "opening a workspace does not change its mode");
   } finally { rmSync(workspace, { recursive: true, force: true }); }
-  console.log("PASS: workspace 775 is diagnosed separately; 755 is accepted");
+  console.log("PASS: a group-writable (775) workspace is accepted unchanged");
   console.log(readFileSync("/etc/os-release", "utf8").split("\n").find(l => l.startsWith("PRETTY_NAME=")));
 } finally { rmSync(cache, { recursive: true, force: true }); }

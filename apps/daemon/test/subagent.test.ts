@@ -34,7 +34,7 @@ async function fixture(stream: (request: ModelRequest) => AsyncGenerator<Provide
   const app = createDaemonApp({ databasePath: join(root, "data/state.sqlite"), processor, agent });
   const client = new DemesneClient({ server: "http://localhost", fetch: ((input: string | URL | Request, init?: RequestInit) =>
     Promise.resolve(app.fetch(new Request(input, init)))) as typeof fetch });
-  const { session } = await client.createSession({ title: "Sub-agents", workspacePath: workspace });
+  const { session } = await client.createSession({ title: "Sub-agents", workspacePath: workspace, trustWorkspace: true });
   const consume = async (submitted: SubmitTurnResponse) => {
     const events: EventEnvelope[] = [];
     for await (const event of client.streamEvents(session.id, submitted.eventId, AbortSignal.timeout(5000))) {
@@ -168,7 +168,7 @@ test("with subagent_model set, sub-agents run on that model while the turn stays
   const client = new DemesneClient({ server: "http://localhost", fetch: ((input: string | URL | Request, init?: RequestInit) =>
     Promise.resolve(app.fetch(new Request(input, init)))) as typeof fetch });
   try {
-    const { session } = await client.createSession({ title: "Sub-agent model", workspacePath: workspace });
+    const { session } = await client.createSession({ title: "Sub-agent model", workspacePath: workspace, trustWorkspace: true });
     const submitted = await client.submitTurn(session.id, { content: "What do the notes say?" });
     const events: EventEnvelope[] = [];
     for await (const event of client.streamEvents(session.id, submitted.eventId, AbortSignal.timeout(5000))) {
@@ -257,7 +257,7 @@ async function twoProviders(agent: AgentConfig, parent: (messages: ProviderMessa
   const client = new DemesneClient({ server: "http://localhost", fetch: ((input: string | URL | Request, init?: RequestInit) =>
     Promise.resolve(app.fetch(new Request(input, init)))) as typeof fetch });
   try {
-    const { session } = await client.createSession({ title: "Sub-agent choice", workspacePath: join(root, "workspace") });
+    const { session } = await client.createSession({ title: "Sub-agent choice", workspacePath: join(root, "workspace"), trustWorkspace: true });
     const send = async (content: string) => {
       const submitted = await client.submitTurn(session.id, { content });
       const events: EventEnvelope[] = [];
@@ -332,7 +332,7 @@ test("three sub-agents can generate concurrently under a provider override", asy
   const app=createDaemonApp({databasePath:join(root,"data/state.sqlite"),processor,inferenceSlots:1,providerInferenceSlots:{qwen:3}});
   const client=new DemesneClient({server:"http://localhost",fetch:((url:string|URL|Request,init?:RequestInit)=>Promise.resolve(app.fetch(new Request(url,init)))) as typeof fetch});
   try{
-    const {session}=await client.createSession({title:"Concurrent investigations",workspacePath:join(root,"workspace")});
+    const {session}=await client.createSession({title:"Concurrent investigations",workspacePath:join(root,"workspace"),trustWorkspace:true});
     const submitted=await client.submitTurn(session.id,{content:"Delegate three investigations."});
     let terminal="";for await(const event of client.streamEvents(session.id,submitted.eventId,AbortSignal.timeout(5000))){if(/^turn\.(completed|failed)$/.test(event.type)){terminal=event.type;break;}}
     expect(terminal).toBe("turn.completed");expect(peak).toBe(3);

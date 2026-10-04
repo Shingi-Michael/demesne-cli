@@ -10,7 +10,7 @@ import { TurnThroughputTracker } from "./turn-throughput.ts";
 import { TurnActivityLedger, type TurnPhase } from "./turn-activity.ts";
 import { TerminalTextPacer } from "./terminal-text-pacer.ts";
 import { reducedMotionEnabled } from "./motion.ts";
-import { DemesneClient, isStalePermissionResolution } from "@demesne/client";
+import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted } from "@demesne/client";
 import { approvalOptions, formatApprovalSelection, reduceApprovalSelection } from "./approval-selection.ts";
 import { applyFooterScrollRegion, resetFooterScrollRegion } from "./terminal-control.ts";
 import { formatProcessView } from "./process-view.ts";
@@ -37,6 +37,9 @@ import { createInterface } from "node:readline/promises";
 import { runGraphics } from "./graphics-launcher.ts";
 
 const args = process.argv.slice(2);
+// Headless runs can't answer the trust question, so they confirm it up front.
+const trustWorkspaceFlag = args.includes("--trust-workspace");
+if (trustWorkspaceFlag) args.splice(args.indexOf("--trust-workspace"), 1);
 const settings = loadSettings();
 const server = validateServerUrl(settings.server);
 const daemonToken = loadDaemonToken(settings.dataDirectory);
@@ -199,10 +202,7 @@ async function run(command: string[]): Promise<void> {
   if (command[0] === "session" && command[1] === "create") {
     const workspacePath = takeOption(command, "--workspace") ?? process.cwd();
     const title = command.slice(2).join(" ").trim() || undefined;
-    const created = await request<CreateSessionResponse>("/v1/sessions", {
-      method: "POST",
-      body: JSON.stringify({ title, workspacePath }),
-    });
+    const created = await createSessionWithTrust({ title, workspacePath });
     console.log(created.session.id);
     return;
   }
@@ -425,10 +425,7 @@ async function run(command: string[]): Promise<void> {
 async function createAutomaticSession(command: string[], quiet = false): Promise<Session> {
   const content = command.slice(1).join(" ").trim();
   const title = content.slice(0, 80) || "New session";
-  const created = await request<CreateSessionResponse>("/v1/sessions", {
-    method: "POST",
-    body: JSON.stringify({ title, workspacePath: process.cwd() }),
-  });
+  const created = await createSessionWithTrust({ title, workspacePath: process.cwd() });
   if (!quiet) console.error(`Session ${created.session.id}`);
   return created.session;
 }
@@ -1180,6 +1177,31 @@ function promptApprovalSelection(
   });
 }
 
+async function createSessionWithTrust(body: { title?: string; workspacePath: string }): Promise<CreateSessionResponse> {
+  const create = (trustWorkspace: boolean) => request<CreateSessionResponse>("/v1/sessions", {
+    method: "POST",
+    body: JSON.stringify({ ...body, ...(trustWorkspace ? { trustWorkspace } : {}) }),
+  });
+  try {
+    return await create(trustWorkspaceFlag);
+  } catch (error) {
+    if (!isWorkspaceUntrusted(error)) throw error;
+    const path = resolve(body.workspacePath);
+    if (!process.stdin.isTTY || !process.stderr.isTTY) {
+      throw new Error(`${path} is not a trusted workspace. Run demesne there interactively to confirm, or pass --trust-workspace.`);
+    }
+    const input = createInterface({ input: process.stdin, output: process.stderr });
+    let answer: string;
+    try {
+      answer = await input.question(`Do you trust the files in ${path}?\nDemesne will follow its instructions and may run commands there. [y/N] `);
+    } finally {
+      input.close();
+    }
+    if (!/^(?:y|yes)$/i.test(answer.trim())) throw new Error("Workspace not trusted; no session was created.");
+    return await create(true);
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return client.request<T>(path, init);
 }
@@ -1264,7 +1286,8 @@ function printUsage(): void {
   demesne --version
 
 Options:
-  --server <url>  Daemon URL (default: http://127.0.0.1:7337)
+  --server <url>     Daemon URL (default: http://127.0.0.1:7337)
+  --trust-workspace  Trust the current workspace without asking (for scripted runs)
 
 Configuration:
   ~/.demesne/config.toml and <workspace>/.demesne/config.toml are merged with

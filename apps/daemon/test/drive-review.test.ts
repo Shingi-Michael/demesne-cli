@@ -92,7 +92,7 @@ test("a queued review receives fresh recorded activity after the slot handoff, n
   try {
     writeFileSync(join(f.workspace, "fresh.txt"), "CURRENT_SOURCE_EVIDENCE");
     const session = (
-      await f.client.createSession({ workspacePath: f.workspace })
+      await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true })
     ).session;
     const turn = await f.client.submitTurn(session.id, {
       content: "Read the file",
@@ -159,7 +159,7 @@ test("a worker that finishes while its check-in waits is skipped without a model
   });
   try {
     const session = (
-      await f.client.createSession({ workspacePath: f.workspace })
+      await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true })
     ).session;
     const turn = await f.client.submitTurn(session.id, {
       content: "Finish",
@@ -246,7 +246,7 @@ test.each([false, true])(
         "import{existsSync}from'node:fs';while(!existsSync('release'))await Bun.sleep(20);\n",
       );
       const session = (
-        await f.client.createSession({ workspacePath: f.workspace })
+        await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true })
       ).session;
       const turn = await f.client.submitTurn(session.id, {
         content: "Run check",
@@ -276,7 +276,7 @@ test.each([false, true])(
       expect(result.review?.rows.length).toBeGreaterThan(0);
       const review = result.review!;
       const other = (
-        await f.client.createSession({ workspacePath: f.workspace })
+        await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true })
       ).session;
       await expect(
         f.client.cancelDriveReview({ ...review, sessionId: other.id }),
@@ -386,7 +386,7 @@ test.each(["keep_working", "redirect", "stale_redirect"] as const)(
         }),
       );
       const session = (
-        await f.client.createSession({ workspacePath: f.workspace })
+        await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true })
       ).session;
       screen = { ...screen, sessionId: session.id, workspace: f.workspace };
       drive = new AgentDrive({

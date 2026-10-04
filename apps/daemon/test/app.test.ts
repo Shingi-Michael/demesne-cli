@@ -43,7 +43,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(directory, "demesne.sqlite"));
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "prompt", "Exercise the full path"],
+      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "Exercise the full path"],
       { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
     );
 
@@ -82,7 +82,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(directory, "demesne.sqlite"), processor);
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "prompt", "Wait for interrupt"],
+      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "Wait for interrupt"],
       { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
     );
 
@@ -201,7 +201,7 @@ describe("Demesne daemon", () => {
     writeFileSync(join(workspacePath, ".env"), "TOKEN=secret\n");
     writeFileSync(join(workspacePath, "blob.bin"), new Uint8Array([1, 0, 2]));
     const running = startApp(join(dataPath, "demesne.sqlite"));
-    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", { method: "POST", body: JSON.stringify({ title: "Files", workspacePath }) });
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", { method: "POST", body: JSON.stringify({ title: "Files", workspacePath, trustWorkspace: true }) });
     const read = (path: string) => jsonRequest<{ path: string; content: string | null; reason?: string; byteLength: number | null }>(running.url, `/v1/sessions/${created.session.id}/file?path=${encodeURIComponent(path)}`);
     expect(await read("src/a.ts")).toMatchObject({ path: "src/a.ts", content: "export const a = 1;\n", byteLength: 20 });
     expect((await read(".env")).reason).toContain("protected");
@@ -240,7 +240,7 @@ describe("Demesne daemon", () => {
     };
     const running = startApp(join(dataPath, "demesne.sqlite"), processor);
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
-      method: "POST", body: JSON.stringify({ title: "Questions", workspacePath }),
+      method: "POST", body: JSON.stringify({ title: "Questions", workspacePath, trustWorkspace: true }),
     });
     const submitted = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`,
       { method: "POST", body: JSON.stringify({ content: "Accept Unicode identifiers", permissionMode: "ask" }) });
@@ -563,7 +563,7 @@ describe("Demesne daemon", () => {
     const sessions = await Promise.all(["a", "b", "next"].map((title) => jsonRequest<CreateSessionResponse>(
       running.url,
       "/v1/sessions",
-      { method: "POST", body: JSON.stringify({ title, workspacePath }) },
+      { method: "POST", body: JSON.stringify({ title, workspacePath, trustWorkspace: true }) },
     )));
     const firstTurn = await jsonRequest<SubmitTurnResponse>(
       running.url,
@@ -687,7 +687,7 @@ describe("Demesne daemon", () => {
     for (const name of names) {
       sessions.set(name, await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
         method: "POST",
-        body: JSON.stringify({ title: name, workspacePath }),
+        body: JSON.stringify({ title: name, workspacePath, trustWorkspace: true }),
       }));
     }
     const submit = (name: typeof names[number], permissionMode: "ask" | "deny" = "deny") => {
@@ -839,15 +839,15 @@ describe("Demesne daemon", () => {
     const running = startApp(join(dataPath, "demesne.sqlite"), processor, controller.hook);
     const stalledSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Stalled", workspacePath }),
+      body: JSON.stringify({ title: "Stalled", workspacePath, trustWorkspace: true }),
     });
     const freshSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Fresh", workspacePath }),
+      body: JSON.stringify({ title: "Fresh", workspacePath, trustWorkspace: true }),
     });
     const nextSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Next", workspacePath }),
+      body: JSON.stringify({ title: "Next", workspacePath, trustWorkspace: true }),
     });
     const stalled = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${stalledSession.session.id}/turns`, {
       method: "POST",
@@ -978,7 +978,7 @@ describe("Demesne daemon", () => {
     const processor = new ProviderTurnProcessor(provider, "model-one");
     const running = startApp(join(dataPath, "demesne.sqlite"), processor);
     const firstSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
-      method: "POST", body: JSON.stringify({ title: "Edit", workspacePath }),
+      method: "POST", body: JSON.stringify({ title: "Edit", workspacePath, trustWorkspace: true }),
     });
     const secondSession = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST", body: JSON.stringify({ title: "Second" }),
@@ -1205,7 +1205,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(dataPath, "demesne.sqlite"), processor);
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Edit", workspacePath }),
+      body: JSON.stringify({ title: "Edit", workspacePath, trustWorkspace: true }),
     });
     expect(created.session.workspace?.root).toBe(realpathSync(workspacePath));
     const submitted = await jsonRequest<SubmitTurnResponse>(
@@ -1495,7 +1495,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(dataPath, "demesne.sqlite"), processor);
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Undo", workspacePath }),
+      body: JSON.stringify({ title: "Undo", workspacePath, trustWorkspace: true }),
     });
     const submitted = await jsonRequest<SubmitTurnResponse>(
       running.url,
@@ -1551,7 +1551,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(dataPath, "demesne.sqlite"), processor);
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Undo while running", workspacePath }),
+      body: JSON.stringify({ title: "Undo while running", workspacePath, trustWorkspace: true }),
     });
     const first = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`,
       { method: "POST", body: JSON.stringify({ content: "write", permissionMode: "ask" }) });
@@ -1602,7 +1602,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(dataPath, "demesne.sqlite"), processor);
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Undo move", workspacePath }),
+      body: JSON.stringify({ title: "Undo move", workspacePath, trustWorkspace: true }),
     });
     const submitted = await jsonRequest<SubmitTurnResponse>(
       running.url,
@@ -1662,7 +1662,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(dataPath, "demesne.sqlite"), processor);
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Undo conflict", workspacePath }),
+      body: JSON.stringify({ title: "Undo conflict", workspacePath, trustWorkspace: true }),
     });
     const submitted = await jsonRequest<SubmitTurnResponse>(
       running.url,
@@ -1947,7 +1947,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(directory, "demesne.sqlite"), processor);
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Instructions", workspacePath: workspace }),
+      body: JSON.stringify({ title: "Instructions", workspacePath: workspace, trustWorkspace: true }),
     });
     const submitted = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`, {
       method: "POST",
@@ -1971,7 +1971,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(directory, "demesne.sqlite"));
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Git", workspacePath: workspace }),
+      body: JSON.stringify({ title: "Git", workspacePath: workspace, trustWorkspace: true }),
     });
     const state = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${created.session.id}`);
     expect(state.session.workspace?.gitBranch).toBe("main");
@@ -1989,7 +1989,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(directory, "demesne.sqlite"));
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Files", workspacePath: workspace }),
+      body: JSON.stringify({ title: "Files", workspacePath: workspace, trustWorkspace: true }),
     });
     const listing = await jsonRequest<WorkspaceFilesResponse>(running.url, `/v1/sessions/${created.session.id}/files`);
     expect(listing.files).toEqual(["src/main.ts"]);
@@ -2031,7 +2031,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(dataPath, "demesne.sqlite"), processor, undefined, {}, configPath);
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Allowlist", workspacePath }),
+      body: JSON.stringify({ title: "Allowlist", workspacePath, trustWorkspace: true }),
     });
     const submitted = await jsonRequest<SubmitTurnResponse>(
       running.url,
@@ -2087,7 +2087,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(dataPath, "demesne.sqlite"), processor);
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Changes", workspacePath }),
+      body: JSON.stringify({ title: "Changes", workspacePath, trustWorkspace: true }),
     });
     const submitted = await jsonRequest<SubmitTurnResponse>(
       running.url,
@@ -2164,7 +2164,7 @@ describe("Demesne daemon", () => {
     const running = startApp(join(dataPath, "demesne.sqlite"), processor);
     const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "Plan", workspacePath }),
+      body: JSON.stringify({ title: "Plan", workspacePath, trustWorkspace: true }),
     });
     const submitted = await jsonRequest<SubmitTurnResponse>(
       running.url,
@@ -2326,7 +2326,7 @@ process.stdin.on("data", (chunk) => {
 
     const created = await jsonRequest<CreateSessionResponse>(server.url, "/v1/sessions", {
       method: "POST",
-      body: JSON.stringify({ title: "MCP", workspacePath }),
+      body: JSON.stringify({ title: "MCP", workspacePath, trustWorkspace: true }),
     });
     const submitted = await jsonRequest<SubmitTurnResponse>(
       server.url,
@@ -2361,7 +2361,7 @@ process.stdin.on("data", (chunk) => {
     const running = startApp(join(directory, "demesne.sqlite"), processor);
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "json", "Say done"],
+      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "--output", "json", "Say done"],
       { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
     );
     const [exitCode, stdout, stderr] = await Promise.all([
@@ -2377,6 +2377,23 @@ process.stdin.on("data", (chunk) => {
     expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 2, totalTokens: 7 });
     expect(result.sessionId).toMatch(/^[0-9a-f-]{36}$/);
     expect(stderr).not.toContain("Session ");
+  });
+
+  test("a headless prompt in an untrusted folder fails and names the trust flag", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspace = mkdtempSync(join(tmpdir(), "demesne-untrusted-"));
+    temporaryDirectories.push(workspace);
+    const running = startApp(join(directory, "demesne.sqlite"));
+    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
+    const child = Bun.spawn(
+      [process.execPath, cliPath, "--server", running.url.href, "prompt", "Say done"],
+      { cwd: workspace, env: isolatedCliEnv({ HOME: directory }), stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+    );
+    const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain(`${realpathSync(workspace)} is not a trusted workspace`);
+    expect(stderr).toContain("--trust-workspace");
   });
 
   test("streams event JSON lines and a final result", async () => {
@@ -2395,7 +2412,7 @@ process.stdin.on("data", (chunk) => {
     const running = startApp(join(directory, "demesne.sqlite"), processor);
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "stream-json", "Go"],
+      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "--output", "stream-json", "Go"],
       { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
     );
     const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
@@ -2414,7 +2431,7 @@ process.stdin.on("data", (chunk) => {
     const running = startApp(join(directory, "demesne.sqlite"));
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "json"],
+      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "--output", "json"],
       { env: isolatedCliEnv({ HOME: directory }), stdin: "pipe", stdout: "pipe", stderr: "pipe" },
     );
     child.stdin.write("Piped prompt");
@@ -2517,7 +2534,7 @@ process.stdin.on("data", (chunk) => {
     const running = startApp(join(directory, "demesne.sqlite"), processor);
     const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
     const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "prompt", "--output", "json", "Fail"],
+      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "--output", "json", "Fail"],
       { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
     );
     const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);

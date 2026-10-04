@@ -33,6 +33,7 @@ export async function fixture(
   const token = "graphics-test-token",
     app = createDaemonApp({
       databasePath: join(root, "data/state.sqlite"),
+      experimentWorktreeRoot: join(root, "worktrees"),
       authToken: token,
       providerVision: options.vision,
       processor: processor ?? {

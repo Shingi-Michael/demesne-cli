@@ -1,0 +1,73 @@
+{
+  "about": "Read-only questions about this repository, modelled on real past asks. Each runs against a snapshot at `pin`, so the answers stay fixed while the agent code under test changes. `expect` patterns are case-insensitive regular expressions that must all match the final answer.",
+  "pin": "4d20b9f",
+  "tasks": [
+    {
+      "id": "compaction",
+      "prompt": "Read-only question, no edits: does the daemon compact a session's conversation automatically? Say yes or no, name the HTTP route that starts compaction, and say how many of the most recent turns it keeps verbatim.",
+      "expect": [
+        "compact",
+        "\\b(2|two)\\b"
+      ]
+    },
+    {
+      "id": "search-tool",
+      "prompt": "Read-only question, no edits: which tool does the coding agent use to search file contents? Give its default and maximum number of matching lines, and the external program it prefers when available.",
+      "expect": [
+        "search_files",
+        "\\b50\\b",
+        "\\b500\\b",
+        "ripgrep|\\brg\\b"
+      ]
+    },
+    {
+      "id": "deny-policy",
+      "prompt": "Read-only question, no edits: in the daemon, what exact result text does a tool call receive when its turn's permission mode is deny and the call is not preapproved? Name the file where this happens.",
+      "expect": [
+        "Permission denied by session policy",
+        "engine\\.ts"
+      ]
+    },
+    {
+      "id": "next-cache",
+      "prompt": "Read-only question, no edits: how long does the daemon reuse a cached Drive Next queue for a workspace, and what makes it ask the model again before then?",
+      "expect": [
+        "12",
+        "fingerprint|signals? (change|changed)"
+      ]
+    },
+    {
+      "id": "model-route",
+      "prompt": "Read-only question, no edits: which daemon HTTP route switches the active model, and which request fields does it accept for the model and its thinking level?",
+      "expect": [
+        "/v1/model\\b",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "cache-key",
+      "prompt": "Read-only question, no edits: what prompt cache key does the daemon send to the provider for a main turn, and what does a sub-agent use instead? Name the provider file that writes prompt_cache_key into the request.",
+      "expect": [
+        "session",
+        "tool ?call",
+        "chatgpt\\.ts"
+      ]
+    },
+    {
+      "id": "subagent-history",
+      "prompt": "Read-only question, no edits: does a sub-agent see the parent conversation's history? Describe which messages a sub-agent starts with, and what it is told when its tool budget is spent. Name the file.",
+      "expect": [
+        "subagent\\.ts",
+        "report"
+      ]
+    },
+    {
+      "id": "drive-memory",
+      "prompt": "Read-only question, no edits: where does Agent Drive keep project memory on disk, in what file format, and how is an entry forgotten without rewriting earlier lines?",
+      "expect": [
+        "jsonl",
+        "forget"
+      ]
+    }
+  ]
+}

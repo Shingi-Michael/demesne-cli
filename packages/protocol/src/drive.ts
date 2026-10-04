@@ -455,6 +455,19 @@ export function parseDriveNextRequest(value: unknown): DriveNextRequest {
   if (!isRecord(value)) invalid("request", "expected an object");
   return { workspace: text(value.workspace, 4096, "workspace"), ...(value.memory !== undefined ? { memory: parseProjectMemory(value.memory) } : {}), ...(value.force === true ? { force: true } : {}) };
 }
+/// Asks Drive to design an experiment for a proposal: variants, metric and
+/// checks chosen from the workspace's declared experiment kit.
+export interface DriveExperimentDesignRequest { workspace: string; proposal: Pick<DriveProposal, "title" | "why" | "evidence">; memory?: DriveMemoryEntry[] }
+export interface DriveExperimentDesignResponse { spec: import("./experiments.ts").ExperimentSpec; model: string }
+export function parseDriveExperimentDesignRequest(value: unknown): DriveExperimentDesignRequest {
+  if (!isRecord(value) || !isRecord(value.proposal)) invalid("request", "expected a workspace and a proposal");
+  const proposal = value.proposal;
+  return {
+    workspace: text(value.workspace, 4096, "workspace"),
+    proposal: { title: text(proposal.title, 200, "proposal.title"), why: text(proposal.why, 1000, "proposal.why"), evidence: Array.isArray(proposal.evidence) ? proposal.evidence.slice(0, 8).map((item, index) => text(item, 200, `proposal.evidence[${index}]`)) : [] },
+    ...(value.memory !== undefined ? { memory: parseProjectMemory(value.memory) } : {}),
+  };
+}
 function parseProjectMemory(value: unknown): DriveMemoryEntry[] {
   if (!Array.isArray(value) || value.length > 60) invalid("projectMemory", "expected at most 60 entries");
   const entries = value.map((item, index) => {

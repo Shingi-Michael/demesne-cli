@@ -2559,3 +2559,60 @@ button:disabled {
 
 /* Keep the rounded composer edge in one raster layer during adjacent panel updates. */
 .composer { transform: translateZ(0); }
+
+/* Drive experiments: variants side by side with their metric. */
+.experiment {
+  padding: 10px 12px 12px;
+  margin: 0 -12px;
+  border-left: 2px solid transparent;
+}
+.experiment.running,
+.experiment.draft {
+  background: var(--menuSelection);
+  border-left-color: var(--electric);
+}
+.experiment.settled {
+  padding-block: 6px;
+}
+.experiment.settled > summary {
+  cursor: pointer;
+  color: var(--paper);
+}
+.experiment-variants {
+  display: grid;
+  gap: 2px;
+  margin-top: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.experiment-variant {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+}
+.experiment-variant .idea {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--secondary);
+}
+.experiment-variant.winner .idea,
+.experiment-variant.winner .label {
+  color: var(--citron);
+}
+.experiment-variant .label,
+.experiment-plan .label {
+  color: var(--electric);
+}
+.experiment-plan {
+  margin-top: 6px;
+}
+.experiment-plan > summary {
+  cursor: pointer;
+}
+.experiment-plan p {
+  margin: 4px 0 0 18px;
+  color: var(--secondary);
+  white-space: pre-wrap;
+}

@@ -15,7 +15,7 @@ import {
   parseUndoSessionRequest,
   parseUpdateSessionRequest,
   ProtocolValidationError,
-  parseDriveRequest, parseDriveNextRequest,
+  parseDriveRequest, parseDriveNextRequest, parseExperimentSpec, parseDriveExperimentDesignRequest,
   type ApiErrorBody,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
@@ -57,7 +57,10 @@ import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, InferenceSchedulers, type InferenceBoundaryHook } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
+import { ExperimentRunner } from "./experiments.ts";
+import { designExperiment, EXPERIMENT_KIT_PATH, readExperimentKit } from "./drive-experiment.ts";
 
 export { PlaceholderTurnProcessor, type TurnProcessor } from "./processor.ts";
 
@@ -90,6 +93,8 @@ export interface DaemonApp {
 
 export function createDaemonApp(options: {
   databasePath: string;
+  /// Where Drive experiments create variant worktrees (outside the data directory).
+  experimentWorktreeRoot?: string;
   processor?: TurnProcessor;
   systemPrompt?: string;
   authToken?: string;
@@ -114,6 +119,25 @@ export function createDaemonApp(options: {
   const hub = new EventHub();
   const store = new DemesneStore(options.databasePath, (event) => hub.publish(event));
   const driveNextCache = new DriveNextCache(join(dirname(options.databasePath), "drive-next"));
+  const experiments = new ExperimentRunner({
+    store,
+    directory: join(dirname(options.databasePath), "experiments"),
+    worktreeRoot: options.experimentWorktreeRoot ?? join(homedir(), ".cache", "demesne", "experiments"),
+    startTurn(sessionId, content, model) {
+      const inference = snapshotTurnInference(processor, undefined, model ? { model } : undefined);
+      const { turn } = store.createTurn(sessionId, content, "deny", undefined, false);
+      queueTurn(turn, inference);
+      return turn;
+    },
+    cancelTurn(turnId) {
+      const controller = activeControllers.get(turnId);
+      if (!controller) return;
+      store.cancelTurn(turnId);
+      controller.abort(new DOMException("Experiment stopped", "AbortError"));
+      permissions.cancelTurn(turnId, controller.signal.reason);
+    },
+    grant: (sessionId, rule) => permissions.grant(sessionId, rule),
+  });
   const driveNextRuns = new Map<string, Promise<unknown>>();
   const replay = new SessionReplay(store);
   const processor: TurnProcessor = options.processor ?? new PlaceholderTurnProcessor();
@@ -328,6 +352,52 @@ export function createDaemonApp(options: {
         store.cancelTurn(current.id); controller.abort(new DOMException("Drive checkpoint correction","AbortError"));
         permissions.cancelTurn(current.id,controller.signal.reason); questions.cancelTurn(current.id,controller.signal.reason);
         return json({cancelled:true});
+      }
+
+      // Drive designs an experiment for a proposal, from the workspace's kit.
+      if (request.method === "POST" && url.pathname === "/v1/drive/experiment") {
+        const body = parseDriveExperimentDesignRequest(await readJson(request));
+        const known = store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace);
+        if (!known) return apiError("not_found", "Unknown workspace", 404);
+        let kit;
+        try { kit = readExperimentKit(body.workspace); }
+        catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : "Invalid experiment kit", 400); }
+        if (!kit) return apiError("invalid_state", `This workspace declares no experiments: add ${EXPERIMENT_KIT_PATH} with its checks and metrics.`, 409);
+        const inference = snapshotTurnInference(processor, true, { maxOutputTokens: DRIVE_THOUGHT_TOKENS });
+        const leaseId = `drive-experiment:${randomUUID()}`, slots = scheduler.for(inference.providerId);
+        const signal = AbortSignal.any([request.signal, driveLifecycle.signal]);
+        const lease = await slots.acquire(leaseId, signal, {});
+        try {
+          const { signals } = await collectDriveSignals(store.database, body.workspace);
+          const spec = await designExperiment(body, signals, kit, inference, signal);
+          return json({ spec, model: `${inference.providerId} / ${inference.modelId}` });
+        } catch (error) {
+          return apiError("provider_error", error instanceof Error ? error.message : "Could not design the experiment", 502);
+        } finally { lease.release({ turnContinues: false }); slots.finishTurn(leaseId); }
+      }
+
+      // Drive experiments: variants built in worktrees, checked and measured.
+      if (url.pathname === "/v1/experiments" && request.method === "POST") {
+        const spec = parseExperimentSpec(await readJson(request));
+        const known = store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(spec.workspace);
+        if (!known) return apiError("not_found", "Unknown workspace", 404);
+        if (spec.coderModel) {
+          try { snapshotTurnInference(processor, undefined, { model: spec.coderModel }); }
+          catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : "Unknown coder model", 400); }
+        }
+        try { return json(await experiments.start(spec), 201); }
+        catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start the experiment", 409); }
+      }
+      if (url.pathname === "/v1/experiments" && request.method === "GET") {
+        return json({ experiments: experiments.list(url.searchParams.get("workspace") ?? undefined) });
+      }
+      if (path.length === 3 && path[0] === "v1" && path[1] === "experiments" && request.method === "GET") {
+        const experiment = experiments.get(path[2]!);
+        return experiment ? json(experiment) : apiError("not_found", "Experiment not found", 404);
+      }
+      if (path.length === 4 && path[0] === "v1" && path[1] === "experiments" && path[3] === "stop" && request.method === "POST") {
+        const experiment = experiments.stop(path[2]!);
+        return experiment ? json(experiment) : apiError("not_found", "Experiment not found", 404);
       }
 
       // Drive's Next queue: ranked proposals from the workspace's signals,
@@ -793,6 +863,7 @@ export function createDaemonApp(options: {
   async function closeApplication(): Promise<void> {
       closing = true;
       driveLifecycle.abort(new DOMException("Daemon shutting down", "AbortError"));
+      await experiments.close();
       for (const close of [...activeStreamClosers]) close();
       if (activeRequests > 0) {
         await new Promise<void>((resolve) => requestDrainWaiters.add(resolve));

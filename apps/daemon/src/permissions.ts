@@ -89,7 +89,7 @@ export class PermissionBroker {
     }
   }
 
-  private grant(sessionId: string, rule: SessionRule): void {
+  grant(sessionId: string, rule: SessionRule): void {
     const rules = this.grants.get(sessionId) ?? [];
     if (rules.some((existing) => existing.tool === rule.tool && existing.pathPrefix === rule.pathPrefix
       && sameArgv(existing.argv, rule.argv) && existing.cwd === rule.cwd)) return;

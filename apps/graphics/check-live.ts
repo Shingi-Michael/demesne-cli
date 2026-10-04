@@ -364,9 +364,10 @@ try {
   await state((s) => s.value === "");
   await click("panel", { name: "drive" });
   await state((s) => s.live.pane === "drive");
-  const mission = current.live.controls.find((c: any) => c.name === "mission");
-  app.click(Math.round(mission.x), Math.round(mission.y));
-  app.paste("Review this result");
+  // Missions start from the composer (the panel has no mission form).
+  const composer = current.live.controls.find((c: any) => c.tag === "TEXTAREA");
+  app.click(Math.round(composer.x), Math.round(composer.y));
+  app.paste("/drive --continuous Review this result");
   await key("\r");
   await state((s) => s.live.runs.length === 3, "Drive composer submission");
   await state(

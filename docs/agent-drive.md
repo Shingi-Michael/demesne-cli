@@ -15,7 +15,7 @@ Drive is a separate planning context that coordinates coding turns, inspects rec
 /drive reopen TASK_ID Explain what changed since completion
 ```
 
-**Plain `/drive MISSION` currently defaults to continuous mode.** Use `--bounded` for one verified task. The graphics mission form's **Keep choosing improvements** checkbox chooses the same distinction; a saved mission retains its mode. A question can finish when answered in either mode. `/drive` or Alt+J opens the panel.
+**Plain `/drive MISSION` currently defaults to continuous mode.** Use `--bounded` for one verified task. A saved mission retains its mode. A question can finish when answered in either mode. `/drive` or Alt+J opens the panel.
 
 - **Pause** stops planning; an already submitted coding turn can finish.
 - **Stop** also attempts to interrupt coding work in the mission session.
@@ -25,7 +25,7 @@ Drive is a separate planning context that coordinates coding turns, inspects rec
 
 ## NEXT: proposed work
 
-When idle, the Drive panel opens on **NEXT**. The start screen shows the top three proposals, and the rail shows the available proposal count.
+The Drive panel pins a live, paused or blocked mission at the top (status, tasks, stats, Pause/Resume, Stop, Details), with two tabs below it. **Next** is the ranked proposal queue as one-line rows; the top one, or the one you open, shows its reason, evidence, estimate and actions. **Done** shows the finished mission in full, then the outcomes and blockers Drive recorded in project memory, newest first. Missions start from `/drive` in the composer. The start screen shows the top three proposals, and the rail shows the available proposal count.
 
 | Action | Result |
 | --- | --- |

@@ -233,6 +233,12 @@ try {
     ),
   );
   await capture("bounded-completion");
+  // Done lists the finished mission first, then what Drive recorded.
+  await clickControl(byAction("drive-tab", { tab: "done" }));
+  await state((s) => /Mission complete|Review changes/.test(s.live.text) && s.live.controls.some(byAction("panel", { name: "changes" })), "Done tab");
+  assert(current.live.driveMemory.some((item: any) => item.kind === "outcome"), "the outcome is recorded");
+  await capture("drive-done");
+  await clickControl(byAction("drive-tab", { tab: "next" }));
   const id = current.live.driveTasks[0].id,
     session = current.live.sessionId;
   await Bun.sleep(2500);
@@ -272,7 +278,7 @@ try {
       result: "passed",
       screenshots: output,
       checked: [
-        "bounded mission completion",
+        "bounded mission completion", "Done tab lists the mission and outcomes",
         "acceptance criteria",
         "recorded check facts",
         "no automatic repeat",

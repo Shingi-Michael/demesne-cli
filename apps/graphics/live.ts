@@ -1142,28 +1142,33 @@ function contextBody() {
 }
 /// The Next queue: Drive's ranked proposals, each with its evidence and the
 /// four ways to answer it.
+/// The Drive panel: a live (or paused, or blocked) mission pinned on top,
+/// then two tabs. Next is the ranked queue as one-line rows, one expanded at
+/// a time; Done is the finished mission and what Drive recorded as outcomes
+/// and blockers. Missions start from /drive in the composer.
+let driveTab: "next" | "done" = "next";
+let nextOpen: string | null = null;
+const DRIVE_PINNED = ["running", "waiting", "paused", "blocked"];
 function nextQueueHTML() {
   const next = state!.driveNext;
   const signal = new Map(next.signals.map((item) => [item.id, item]));
-  const updated = next.generatedAt ? `updated ${age(next.generatedAt)}` : "";
-  const items = next.proposals
-    .map(
-      (item, index) =>
-        `<div class="next-item${index === 0 ? " first" : ""}"><div class="next-top"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><span class="next-title">${h(item.title)}</span></div><p class="next-why">${h(item.why)}</p><div class="next-facts">${item.evidence.map((id) => `<span title="${h(signal.get(id)?.detail ?? "")}">${item.urgent && signal.get(id)?.urgent ? "! " : ""}${h(signal.get(id)?.title ?? id)}</span>`).join("")}<span>~${item.minutes < 60 ? `${item.minutes} min` : `${Math.round(item.minutes / 6) / 10} h`} · ${item.coders} coder${item.coders === 1 ? "" : "s"}</span><span class="confidence-${item.confidence}">confidence ${item.confidence}</span></div><div class="next-actions">${btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id })}${btn("next-never", "Never", { id: item.id })}</div></div>`,
-    )
+  const open = next.proposals.some((item) => item.id === nextOpen) ? nextOpen : next.proposals[0]?.id;
+  const minutes = (value: number) => (value < 60 ? `${value} min` : `${Math.round(value / 6) / 10} h`);
+  const rows = next.proposals
+    .map((item) => {
+      const tag = `<span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span>`;
+      if (item.id !== open)
+        return `<div class="next-row">${tag}${btn("next-open", h(item.title), { id: item.id }, "next-row-title")}${btn("next-run", "▶", { id: item.id }, "next-row-run", true)}</div>`;
+      return `<div class="next-item first"><div class="next-top">${tag}<span class="next-title">${h(item.title)}</span></div><p class="next-why">${h(item.why)}</p><div class="next-facts">${item.evidence.map((id) => `<span title="${h(signal.get(id)?.detail ?? "")}">${item.urgent && signal.get(id)?.urgent ? "! " : ""}${h(signal.get(id)?.title ?? id)}</span>`).join("")}<span>~${minutes(item.minutes)} · ${item.coders} coder${item.coders === 1 ? "" : "s"}</span><span class="confidence-${item.confidence}">confidence ${item.confidence}</span></div><div class="next-actions">${btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id }, "quiet")}${btn("next-never", "Never", { id: item.id }, "quiet")}</div></div>`;
+    })
     .join("");
-  return `<div class="drive-heading next-heading"><span>NEXT</span><span class="muted">${next.loading ? "Reading the project…" : h(updated)}</span>${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${
+  return `<div class="next-heading" title="Ranked by value, confidence and cost"><span class="muted">${next.loading ? "Reading the project…" : next.generatedAt ? `updated ${age(next.generatedAt)}` : ""}</span>${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${
     next.error ? `<p class="next-error">${h(next.error)}</p>` : ""
-  }${items || (next.loading ? "" : '<p class="muted next-empty">Nothing worth proposing right now. Drive looks again after your next turn, or press ↻.</p>')}`;
+  }${rows || (next.loading ? "" : '<p class="muted next-empty">Nothing worth proposing right now. Drive looks again after your next turn, or press ↻.</p>')}`;
 }
-function driveBody() {
-  const drive = state!.drive;
-  const idle = !drive || ["completed", "stopped", "idle", "blocked", "paused"].includes(drive.status);
-  // With no mission running, Drive opens on what to do next.
-  if (!drive)
-    return `<div class="drive-content">${nextQueueHTML()}<details class="drive-own"${state!.driveNext.proposals.length ? "" : " open"}><summary>Give Drive a mission</summary><p class="muted">Drive reads the session, directs work, and reviews the results. Tool approvals remain yours.</p><form id="drive-form"><input name="mission" placeholder="What should Drive finish?" aria-label="Drive mission" required><label class="drive-mode"><input type="checkbox" name="continuous" checked> Keep choosing improvements</label><button type="submit" class="chip">Start Drive</button></form></details></div>`;
-  // Status + timeline: one status line and short sentence, what Drive did,
-  // a plain checklist, one stats line. Everything long sits under Details.
+/// The mission's status line, steps, tasks, stats and Details, shared by the
+/// pinned card and the finished mission at the top of Done.
+function missionParts(drive: NonNullable<Snapshot["drive"]>) {
   const now = Date.now(), trace = drive.traces?.at(-1);
   const deciding = Boolean(trace && ["queued", "thinking", "drafting", "acting"].includes(trace.status));
   const [mark, label, tone] = drive.recovery && drive.recovery.retryAt > now
@@ -1184,11 +1189,12 @@ function driveBody() {
   const used = drive.protection?.used;
   const active = used ? (used.activeMs < 3_600_000 ? `${Math.round(used.activeMs / 60_000)}m` : `${Math.floor(used.activeMs / 3_600_000)}h ${Math.round((used.activeMs % 3_600_000) / 60_000)}m`) : "";
   const planner = trace?.source === "controller" ? "Local controller" : (drive.model ?? state!.model.id).split("/").at(-1)!.trim();
-  const stats = [`step ${drive.step}`, active, used ? `${num(used.planningTokens + used.workerTokens)} tokens` : "", planner].filter(Boolean).join(" · ");
+  const stats = [`step ${drive.step}`, active, used ? `${num(used.planningTokens + used.workerTokens)} tokens` : "", drive.mode === "continuous" ? "continuous" : "bounded", planner].filter(Boolean).join(" · ");
   const ledger = Array.isArray(drive.ledger?.tasks) ? drive.ledger.tasks.filter((task) => task && typeof task.id === "string") : [];
   const section = (title: string, body: string) => body ? `<div class="drive-heading">${title}</div>${body}` : "";
   const details = [
     drive.answer ? section("ANSWER", `<p>${h(drive.answer)}</p>`) : section("NOTE", `<p>${h(summary)}</p>`),
+    steps.length ? section("TIMELINE", `<ol class="drive-timeline">${steps.map((step) => `<li class="tone-${step.tone}"><span>${h(step.mark)}</span><span class="drive-step">${h(step.text)}</span><time>${h(step.when)}</time></li>`).join("")}</ol>`) : "",
     section("REASONING", trace?.reasoning ? `<pre>${h(trace.reasoning)}</pre>` : `<p class="muted">No reasoning recorded.</p>`),
     trace?.text || trace?.action ? section("OUTPUT", `<pre>${h(trace.text || trace.action)}</pre>`) : "",
     section("MISSION", `<p>${h(drive.mission)}</p><p class="muted">${drive.mode === "continuous" ? "Continuous: finishes each task, chooses worthwhile next work, then goes idle." : "Bounded: finishes after one verified task."}</p>`),
@@ -1196,9 +1202,42 @@ function driveBody() {
     drive.protection ? section("BUDGET", `<p class="muted">${Math.floor(drive.protection.used.activeMs / 60_000)}/${drive.protection.limits.maxActiveMinutes} active min · ${drive.protection.used.cycles}/${drive.protection.limits.maxCycles} cycles · ${drive.protection.used.workerRequests}/${drive.protection.limits.maxWorkerRequests} coder requests</p>`) : "",
     ledger.some((task) => task.status === "completed") ? `<p class="muted">Reopen a finished task: /drive reopen &lt;task-id&gt; &lt;reason&gt;<br>${ledger.filter((task) => task.status === "completed").slice(-4).map((task) => `${h(task.id.slice(0, 8))} · ${h(task.title)}`).join("<br>")}</p>` : "",
   ].join("");
-  return `<div class="drive-content">${idle ? nextQueueHTML() + '<div class="drive-heading">LAST MISSION</div>' : ""}<div class="drive-status"><strong class="tone-${tone}">${mark} ${h(label)}</strong>${summary ? `<p class="drive-summary">${h(summary)}</p>` : ""}</div>${
-    steps.length ? section("TIMELINE", `<ol class="drive-timeline">${steps.map((step) => `<li class="tone-${step.tone}"><span>${h(step.mark)}</span><span class="drive-step">${h(step.text)}</span><time>${h(step.when)}</time></li>`).join("")}</ol>`) : ""}${
-    tasks.length ? section("TASKS", `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>`) : ""}<div class="drive-meta">${h(stats)}</div><details data-detail="drive-details"${detailsOpen.has("drive-details") ? " open" : ""}><summary>Details</summary><div class="drive-details">${details}</div></details>${!idle && state!.driveNext.proposals.length ? `<div class="drive-meta">Next · ${state!.driveNext.proposals.length} proposed after this mission</div>` : ""}</div>`;
+  const title = drive.mission.split("\n")[0]!.replace(/^--(bounded|continuous)\s+/, "");
+  return {
+    mark, label, tone, summary, title, stats,
+    tasks: tasks.length ? `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>` : "",
+    details: `<details data-detail="drive-details"${detailsOpen.has("drive-details") ? " open" : ""}><summary>Details</summary><div class="drive-details">${details}</div></details>`,
+  };
+}
+function driveBody() {
+  const drive = state!.drive;
+  const pinned = drive && DRIVE_PINNED.includes(drive.status) && !drive.protection?.trip ? drive : null;
+  const finished = drive && !pinned ? drive : null;
+  let card = "";
+  if (pinned) {
+    const parts = missionParts(pinned), live = pinned.status === "running" || pinned.status === "waiting";
+    card = `<section class="drive-pinned tone-border-${parts.tone}" aria-label="Live mission"><div class="drive-pinned-title">${h(parts.title)}</div><div class="drive-status"><strong class="tone-${parts.tone}">${parts.mark} ${h(parts.label)}</strong>${parts.summary ? `<span class="drive-summary">${h(parts.summary)}</span>` : ""}</div>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("drive-control", live ? "Pause" : "Resume", { control: live ? "pause" : "resume" })}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>${parts.details}</section>`;
+  }
+  // The finished mission is shown in full at the top of Done; its own
+  // outcome line in memory would only repeat it.
+  const finishedTitle = finished ? missionParts(finished).title.toLowerCase() : "";
+  const memory = state!.driveMemory.filter((entry) => entry.source === "drive" && (entry.kind === "outcome" || entry.kind === "blocker")
+    && !(finishedTitle && entry.text.toLowerCase().startsWith(finishedTitle))).slice().reverse();
+  const doneCount = memory.length + (finished ? 1 : 0);
+  const tab = (name: "next" | "done", label: string, count: number) => `<button type="button" role="tab" aria-selected="${driveTab === name}" class="drive-tab${driveTab === name ? " active" : ""}" data-action="drive-tab" data-args="${h(JSON.stringify({ tab: name }))}">${label}${count ? ` <span class="count">${count}</span>` : ""}</button>`;
+  const tabs = `<div class="drive-tabs" role="tablist">${tab("next", "Next", state!.driveNext.proposals.length)}${tab("done", "Done", doneCount)}</div>`;
+  let body: string;
+  if (driveTab === "next") body = nextQueueHTML();
+  else {
+    let top = "";
+    if (finished) {
+      const parts = missionParts(finished);
+      top = `<div class="done-item first"><div class="done-top"><span class="tone-${parts.tone}">${parts.mark}</span><span class="done-title">${h(parts.title)}</span></div><p class="next-why">${h(finished.answer ?? parts.summary ?? parts.label)}</p>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("panel", "Review changes", { name: "changes" }, "primary", true)}</div>${parts.details}</div>`;
+    }
+    const rows = memory.slice(0, 30).map((entry) => `<div class="done-row"><span class="${entry.kind === "blocker" ? "tone-thinking" : "tone-citron"}">${entry.kind === "blocker" ? "◌" : "✓"}</span><span class="done-text">${entry.kind === "blocker" ? '<b class="tone-thinking">Needs you:</b> ' : ""}${h(entry.text)}</span><time>${h(age(entry.at))}</time></div>`).join("");
+    body = top + rows || '<p class="muted next-empty">Finished missions and what Drive learned from them appear here.</p>';
+  }
+  return `<div class="drive-content">${card}${tabs}<div class="drive-tab-body">${body}</div><p class="drive-foot muted">Start your own mission: <code>/drive</code> in the composer</p></div>`;
 }
 function processError() {
   return state?.processesError
@@ -1460,7 +1499,7 @@ function renderPanels() {
         : pane === "context"
           ? [state.provider, state.checkpoint, state.activeTurnId]
           : pane === "drive"
-            ? [state.drive, state.driveNext]
+            ? [state.drive, state.driveNext, state.driveMemory, driveTab, nextOpen]
             : pane === "preview"
               ? [
                   state.artifacts,
@@ -1743,10 +1782,7 @@ function renderPanels() {
     const status = state.drive?.status;
     const proposed = state.driveNext.proposals.length;
     header = panelHeader("Drive", [status ? (status === "running" ? "live" : status) : "", proposed ? `${proposed} proposed` : ""].filter(Boolean).join(" · ") || "idle");
-    body =
-      (state.drive && status !== "completed" && !state.drive.protection?.trip
-        ? `<div class="panel-actions">${btn("drive-control", status === "running" || status === "waiting" ? "Pause" : "Resume", { control: status === "running" || status === "waiting" ? "pause" : "resume" })}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>`
-        : "") + driveBody();
+    body = driveBody();
   }
   const previewScroll =
       el("panel").querySelector<HTMLElement>(".preview-canvas"),
@@ -2517,6 +2553,16 @@ async function dispatch(
     editor.focus({ preventScroll: true });
     return;
   }
+  if (action === "drive-tab") {
+    driveTab = args.tab === "done" ? "done" : "next";
+    renderPanels();
+    return;
+  }
+  if (action === "next-open") {
+    nextOpen = args.id;
+    renderPanels();
+    return;
+  }
   if (action === "expand-turn") {
     expanded.has(args.id) ? expanded.delete(args.id) : expanded.add(args.id);
     follow = false;
@@ -2934,10 +2980,6 @@ document.addEventListener("submit", (event) => {
         })),
       });
     }
-    if (form.id === "drive-form")
-      await api("drive", {
-        text: `${(form.elements.namedItem("continuous") as HTMLInputElement)?.checked ? "--continuous " : "--bounded "}${(form.elements.namedItem("mission") as HTMLInputElement).value}`,
-      });
     if (form.id === "reference-form") {
       const path = (form.elements.namedItem("path") as HTMLInputElement).value;
       const width = (

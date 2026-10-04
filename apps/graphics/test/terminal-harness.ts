@@ -94,9 +94,20 @@ export class TerminalHarness {
   }
   write(value: string) { this.child.terminal!.write(value); }
   click(x: number, y: number) {
-    const column = this.pixelMouse ? x : Math.floor(x / this.cell.width);
-    const row = this.pixelMouse ? y : Math.floor(y / this.cell.height);
+    const column = this.pixelMouse ? Math.round(x) : Math.floor(x / this.cell.width);
+    const row = this.pixelMouse ? Math.round(y) : Math.floor(y / this.cell.height);
     this.write(`\x1b[<0;${column + 1};${row + 1}M\x1b[<0;${column + 1};${row + 1}m`);
+  }
+  drag(from: { x: number; y: number }, to: { x: number; y: number }, steps = 6) {
+    const at = (x: number, y: number) => this.pixelMouse ? [Math.round(x), Math.round(y)] : [Math.floor(x / this.cell.width), Math.floor(y / this.cell.height)];
+    const [c0, r0] = at(from.x, from.y);
+    this.write(`\x1b[<0;${c0! + 1};${r0! + 1}M`);
+    for (let i = 1; i <= steps; i++) {
+      const [c, r] = at(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
+      this.write(`\x1b[<32;${c! + 1};${r! + 1}M`);
+    }
+    const [c1, r1] = at(to.x, to.y);
+    this.write(`\x1b[<0;${c1! + 1};${r1! + 1}m`);
   }
   paste(value: string) { this.write(`\x1b[200~${value}\x1b[201~`); }
   resize(columns: number, rows: number) { this.columns = columns; this.rows = rows; this.child.terminal!.resize(columns, rows); }

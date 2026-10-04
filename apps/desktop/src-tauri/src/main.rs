@@ -158,6 +158,7 @@ impl Bridge {
         if self.generation.load(Ordering::SeqCst) != generation {
             return;
         }
+        log_event(app, &format!("backend: {message}"));
         if let Some(child) = self.child.lock().unwrap().take() {
             let _ = child.kill();
         }
@@ -291,7 +292,23 @@ fn native_action(app: &tauri::AppHandle, value: &Value) -> Result<(), String> {
         _ => Err("Unsupported native desktop action".into()),
     }
 }
-fn request_exit(app: &tauri::AppHandle) {
+/// Appends a line to the app's log (why it exited, or why its backend
+/// failed), so a window that "disappears" can be explained afterwards.
+fn log_event(app: &tauri::AppHandle, line: &str) {
+    use std::io::Write;
+    let Ok(dir) = app.path().app_log_dir() else { return };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("desktop.log")) {
+        let _ = writeln!(file, "{at} {line}");
+    }
+}
+fn request_exit(app: &tauri::AppHandle, reason: &str) {
     let bridge = Arc::clone(app.state::<Arc<Bridge>>().inner());
     if bridge
         .exit_phase
@@ -300,6 +317,7 @@ fn request_exit(app: &tauri::AppHandle) {
     {
         return;
     }
+    log_event(app, &format!("exit: {reason}"));
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let running = bridge.child.lock().unwrap().is_some();
@@ -336,7 +354,7 @@ async fn desktop_request(
             Ok(Value::Null)
         }
         "quit" | "desktop-quit" => {
-            request_exit(&app);
+            request_exit(&app, &format!("{method} requested by the interface"));
             Ok(Value::Null)
         }
         "desktop-select-project" => {
@@ -430,18 +448,32 @@ fn main() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                request_exit(window.app_handle());
+                // macOS keeps an app running when its window closes: hide it,
+                // and a Dock click brings it back. Elsewhere closing quits.
+                if cfg!(target_os = "macos") {
+                    let _ = window.hide();
+                } else {
+                    request_exit(window.app_handle(), "window closed");
+                }
             }
         })
         .build(tauri::generate_context!())
         .expect("Could not initialize Demesne desktop");
-    app.run(|app, event| {
-        if let tauri::RunEvent::ExitRequested { api, .. } = event {
+    app.run(|app, event| match event {
+        tauri::RunEvent::ExitRequested { api, code, .. } => {
             if app.state::<Arc<Bridge>>().exit_phase.load(Ordering::SeqCst) != 2 {
                 api.prevent_exit();
-                request_exit(app);
+                request_exit(app, &format!("exit requested by the system or app menu (code {code:?})"));
             }
         }
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { .. } => {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+        _ => {}
     });
 }
 #[cfg(test)]

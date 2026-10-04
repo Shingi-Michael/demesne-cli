@@ -244,12 +244,17 @@ fn validate_request(method: &str, args: &Value) -> Result<(), String> {
     Ok(())
 }
 fn local_app_url(url: &url::Url) -> bool {
-    url.username().is_empty()
-        && url.password().is_none()
-        && url.port().is_none()
-        && ((url.scheme() == "tauri" && url.host_str() == Some("localhost"))
-            || (matches!(url.scheme(), "http" | "https")
-                && url.host_str() == Some("tauri.localhost")))
+    allowed_app_url(url, cfg!(target_os = "windows"))
+}
+fn allowed_app_url(url: &url::Url, windows: bool) -> bool {
+    if !url.username().is_empty() || url.password().is_some() || url.port().is_some() {
+        return false;
+    }
+    if windows {
+        matches!(url.scheme(), "http" | "https") && url.host_str() == Some("tauri.localhost")
+    } else {
+        url.scheme() == "tauri" && url.host_str() == Some("localhost")
+    }
 }
 fn native_action(app: &tauri::AppHandle, value: &Value) -> Result<(), String> {
     match value["method"].as_str() {
@@ -444,21 +449,28 @@ mod tests {
     use super::*;
     #[test]
     fn only_authored_application_origins_can_access_the_bridge() {
-        for url in [
-            "tauri://localhost/",
+        assert!(allowed_app_url(
+            &url::Url::parse("tauri://localhost/").unwrap(),
+            false
+        ));
+        for value in [
             "http://tauri.localhost/",
             "https://tauri.localhost/index.html",
         ] {
-            assert!(local_app_url(&url::Url::parse(url).unwrap()));
+            let url = url::Url::parse(value).unwrap();
+            assert!(allowed_app_url(&url, true));
+            assert!(!allowed_app_url(&url, false));
         }
-        for url in [
+        for value in [
             "https://example.com/",
             "http://localhost/",
             "file:///tmp/app.html",
             "tauri://user@localhost/",
             "http://tauri.localhost:8080/",
         ] {
-            assert!(!local_app_url(&url::Url::parse(url).unwrap()));
+            let url = url::Url::parse(value).unwrap();
+            assert!(!allowed_app_url(&url, false));
+            assert!(!allowed_app_url(&url, true));
         }
     }
     #[test]

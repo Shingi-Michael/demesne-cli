@@ -1,16 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" rx="220" fill="#0b1218"/>
-  <g fill="#142938" stroke="#426780" stroke-width="15" stroke-linejoin="round">
-    <path d="m320 240 380 67 150 268-380-67Z"/>
-    <path d="m280 278 380 67 150 268-380-67Z"/>
-    <path d="m240 316 380 67 150 268-380-67Z"/>
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#13202b"/>
+      <stop offset="1" stop-color="#0a1117"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS icon grid: an 824 px rounded square centred on the 1024 canvas. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#ground)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="3"/>
+  <!-- The tensor mark: stacked transformer sheets, parameter dashes, one attention path. -->
+  <g transform="translate(512 512) scale(0.86) translate(-525 -464)">
+    <g fill="#142938" stroke="#426780" stroke-width="16" stroke-linejoin="round">
+      <path d="m320 240 380 67 150 268-380-67Z"/>
+      <path d="m280 278 380 67 150 268-380-67Z"/>
+      <path d="m240 316 380 67 150 268-380-67Z"/>
+    </g>
+    <path d="m200 354 380 67 150 268-380-67Z" fill="#162f41" stroke="#7abbeb" stroke-width="19" stroke-linejoin="round"/>
+    <g stroke="#6f9bb9" stroke-width="18" stroke-linecap="round">
+      <path d="m288 420 28 5m38 7 28 5m38 7 28 5m38 7 28 5"/>
+      <path d="m316 468 28 5m38 7 28 5m38 7 28 5m38 7 28 5"/>
+      <path d="m344 516 28 5m38 7 28 5m38 7 28 5m38 7 28 5"/>
+      <path d="m372 564 28 5m38 7 28 5m38 7 28 5m38 7 28 5"/>
+    </g>
+    <path d="m420 444 28 5m0 48 28 5m0 48 28 5" stroke="#e5a93c" stroke-width="23" stroke-linecap="round"/>
   </g>
-  <path d="m200 354 380 67 150 268-380-67Z" fill="#142938" stroke="#7abbeb" stroke-width="17" stroke-linejoin="round"/>
-  <g stroke="#6f9bb9" stroke-width="16" stroke-linecap="round">
-    <path d="m288 420 28 5m38 7 28 5m38 7 28 5m38 7 28 5"/>
-    <path d="m316 468 28 5m38 7 28 5m38 7 28 5m38 7 28 5"/>
-    <path d="m344 516 28 5m38 7 28 5m38 7 28 5m38 7 28 5"/>
-    <path d="m372 564 28 5m38 7 28 5m38 7 28 5m38 7 28 5"/>
-  </g>
-  <path d="m420 444 28 5m0 48 28 5m0 48 28 5" stroke="#e5a93c" stroke-width="21" stroke-linecap="round"/>
 </svg>

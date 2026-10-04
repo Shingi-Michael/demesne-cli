@@ -34,12 +34,24 @@ bun run build:graphics
 
 Keep `dist/graphics` and the daemon’s native image dependencies with the CLI. Rebuilding does not replace an already-running daemon or Electron process. See [rebuilds and running processes](docs/troubleshooting.md#rebuilds-and-running-processes).
 
+## Desktop development
+
+The desktop frontend shares the authored UI with the terminal interface and displays it directly in a Tauri system webview. Install [Rust and the platform dependencies](docs/desktop.md#prerequisites), then use:
+
+```sh
+bun run desktop
+bun run build:desktop
+```
+
+Keep the authenticated daemon client and credentials in the backend. Native dialogs, clipboard operations, and external opening must pass through validated desktop commands. Changes to shared UI code should be checked in both desktop and terminal clients. See the [desktop implementation guide](apps/desktop/README.md) for the process boundary and test commands.
+
 ## Repository map
 
 | Location | Responsibility |
 | --- | --- |
 | `apps/daemon/` | HTTP API, coding turns, tools, approvals, scheduling, reviews, proposals and artifact ingestion |
 | `apps/cli/` | Commands, headless client, setup and reusable Drive controller |
+| `apps/desktop/` | Tauri window, restricted native bridge, Bun host sidecar, desktop integration checks |
 | `apps/graphics/` | Browser UI, authenticated host, terminal input/tile bridge and visual fixtures |
 | `packages/protocol/` | API/event types, validation and Drive/panel contracts |
 | `packages/client/` | Typed authenticated HTTP/SSE client |
@@ -66,6 +78,7 @@ All code PRs run `bun run typecheck` and `bun test`. [CI](.github/workflows/ci.y
 
 | Change | Additional relevant checks |
 | --- | --- |
+| Desktop UI/bridge/lifecycle | `bun run desktop:check`; Rust tests and desktop bundle build; shared graphics fixtures when applicable |
 | Graphics behavior/layout | `bun run graphics:check`; focused panel/file/scale fixtures |
 | Drive | Controller/unit tests, `check-drive-tasks.ts`, `check-drive-next.ts` |
 | Renderer lifecycle | `check-disconnect.ts`, `check-subagent-shutdown.ts` |

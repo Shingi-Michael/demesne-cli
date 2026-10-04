@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <title>Demesne</title>
+  <link rel="stylesheet" href="node_modules/katex/dist/katex.min.css">
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="live.css">
+  <link rel="stylesheet" href="desktop.css">
+</head>
+<body class="desktop">
+  <div id="desktop-shell">
+    <div id="desktop-toolbar" hidden>
+      <span class="desktop-wordmark">demesne</span>
+      <span class="desktop-toolbar-rule" aria-hidden="true"></span>
+      <div class="desktop-project-control">
+        <button id="desktop-project-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="desktop-project-menu" title="Switch project">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7.5V5h6l2 2h10v12H3V7.5Z"/></svg>
+          <span id="desktop-project-name"></span>
+          <span class="desktop-project-caret" aria-hidden="true">⌄</span>
+        </button>
+        <div id="desktop-project-menu" class="desktop-project-menu" role="menu" aria-label="Projects" hidden></div>
+      </div>
+      <span id="desktop-project-path" class="desktop-project-path"></span>
+      <button id="desktop-open-button" type="button" class="desktop-toolbar-open" title="Open project">Open project <kbd id="desktop-open-shortcut">Ctrl+O</kbd></button>
+    </div>
+    <section id="desktop-home" class="desktop-home" aria-labelledby="desktop-home-title">
+      <div class="desktop-home-content">
+        <span class="desktop-home-wordmark">demesne</span>
+        <h1 id="desktop-home-title">A place to build.</h1>
+        <p id="desktop-home-description">Choose a project. Bring your model. Make something.</p>
+        <button id="desktop-choose-project" type="button" class="desktop-primary">Open a project <span aria-hidden="true">↗</span></button>
+        <p class="desktop-home-note">Your conversations, reviews, and agent work stay with the project.</p>
+        <section id="desktop-recent" class="desktop-recent" aria-labelledby="desktop-recent-title" hidden>
+          <h2 id="desktop-recent-title">RECENT PROJECTS</h2>
+          <div id="desktop-recent-list"></div>
+        </section>
+        <div id="desktop-start-status" role="status" class="desktop-start-status">Starting Demesne…</div>
+      </div>
+    </section>
+    <section id="desktop-error" class="desktop-error" aria-labelledby="desktop-error-title" hidden>
+      <div class="desktop-error-content">
+        <span class="desktop-home-wordmark">demesne</span>
+        <h1 id="desktop-error-title">Couldn’t open Demesne.</h1>
+        <p id="desktop-error-message" role="alert"></p>
+        <div class="desktop-error-actions">
+          <button id="desktop-retry" type="button" class="desktop-primary">Try again <span aria-hidden="true">↻</span></button>
+          <button id="desktop-error-choose" type="button" class="desktop-secondary">Choose another project</button>
+        </div>
+        <p class="desktop-home-note">Retry reconnects this window. Closing the app leaves daemon work running.</p>
+      </div>
+    </section>
+    <div class="app live-app" id="app" hidden><div class="status" id="status"></div><div class="workspace" id="workspace"><main id="main"><header id="header"></header><div id="banner" hidden></div><div class="stage" id="stage"><div id="hero" class="hero"></div><div id="conversation" hidden></div></div><div id="input-area"><div id="approval"></div><div id="question"></div><div id="composer-slot"><div id="completion" class="popover" hidden></div><form class="composer" id="composer"><div id="queue-label" hidden></div><textarea aria-label="Message" rows="1" spellcheck="false" placeholder="Describe what you want to build, fix, or explore…"></textarea><div id="mention-chips"></div><div class="composer-bar"><div class="hints"><button type="button" data-action="insert-command"><kbd>/</kbd> commands</button><button type="button" data-action="insert-mention"><kbd>@</kbd> files</button></div><button type="submit" class="send"><span id="tokens">~0 tok</span><kbd>↵</kbd><span id="send-label">send</span></button></div></form></div></div><div id="overlay" class="popover modal" hidden></div></main><nav id="rail" aria-label="Panels"></nav><aside id="panel" hidden></aside></div></div>
+  </div>
+  <div id="notice" role="status" hidden></div>
+  <script type="module" src="frontend.js"></script>
+</body>
+</html>

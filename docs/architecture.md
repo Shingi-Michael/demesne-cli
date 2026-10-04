@@ -24,6 +24,12 @@ The [CLI entry point](../apps/cli/src/main.ts) routes interactive chat to graphi
 
 The [daemon](../apps/daemon/src/app.ts) owns turns and background commands. Closing the UI does not stop daemon-owned coding work. Drive's orchestration loop is client-owned; its journal is saved and an unfinished mission resumes paused. The [store](../packages/storage/src/index.ts) marks interrupted daemon work on restart instead of replaying side effects.
 
+## Desktop process boundary
+
+The [Tauri desktop preview](desktop.md) displays the shared UI in the system webview. Its Rust core supplies native project selection, clipboard, and external opening, while a compiled Bun host owns the authenticated daemon client and Drive controller. Public state and named actions cross private process pipes and the restricted Tauri bridge; daemon/provider credentials stay outside the webview. Native commands check both the main-window label and local origin; remote navigation and new webviews are denied.
+
+Closing the window ends its host and Drive orchestration. Daemon-owned turns continue, and the project/session can be reopened. The terminal client retains its existing Electron and Kitty graphics path. See the [desktop implementation](../apps/desktop/README.md#process-boundary).
+
 ## One coding turn
 
 ```mermaid
@@ -89,6 +95,7 @@ The default data directory is `~/.demesne`, overridden by `data_dir` or `DEMESNE
 | ChatGPT tokens and issued registrations | `auth/chatgpt.json` |
 | Drive journals, project memory and dismissals | `drive/` |
 | Daemon proposal cache | `drive-next/` |
+| Desktop project/session preferences | `desktop-ui.json` |
 | Panel preferences | `graphics-ui.json` |
 | Open-original preview copies | `preview-cache/` |
 | Pixel transfers and browser cache | Private temporary directories |

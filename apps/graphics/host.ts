@@ -50,6 +50,9 @@ export interface GraphicsHostOptions {
   settings?: CliSettings;
   client?: DemesneClient;
   command?: (command: GraphicsUICommand) => void;
+  /// Desktop hosts use trusted native IPC instead of command-line OS utilities.
+  copy?: (text: string) => Promise<void>;
+  open?: (path: string) => Promise<void>;
   changed: (snapshot: ReturnType<GraphicsHost["snapshot"]>) => void;
   /// Applied once, the first time the daemon is online: `demesne --model <id>`
   /// and `demesne "<message>"`.
@@ -1165,6 +1168,7 @@ export class GraphicsHost {
     throw new Error(`Unsupported action: ${method}`);
   }
   private async copy(text: string) {
+    if (this.options.copy) return this.options.copy(text);
     const command =
       process.platform === "darwin"
         ? ["pbcopy"]
@@ -1179,11 +1183,17 @@ export class GraphicsHost {
     if ((await child.exited) !== 0) throw new Error("Clipboard unavailable");
   }
   private async open(path: string) {
+    if (this.options.open) return this.options.open(path);
     const child = Bun.spawn(
       [process.platform === "darwin" ? "open" : "xdg-open", path],
       { stdout: "ignore", stderr: "ignore" },
     );
     if ((await child.exited) !== 0) throw new Error("Could not open the item");
+  }
+  /// A project switch must not discard any draft held by this UI.
+  get hasUnsentDrafts() {
+    return Boolean(this.draft.trim() || this.queue.trim()) ||
+      [...this.drafts].some(([id, text]) => id !== this.current?.session.id && text.trim() && this.sessions.some(session => session.id === id));
   }
   dispose() {
     this.batchGeneration++;

@@ -14,7 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="#get-started"><strong>Get started</strong></a> ·
+  <a href="#desktop-app-preview"><strong>Desktop preview</strong></a> ·
+  <a href="#get-started"><strong>Terminal setup</strong></a> ·
   <a href="docs/README.md"><strong>Documentation</strong></a> ·
   <a href="docs/architecture.md"><strong>Architecture</strong></a> ·
   <a href="CONTRIBUTING.md"><strong>Contribute</strong></a>
@@ -56,6 +57,21 @@ Demesne brings the conversation, code, and evidence into one terminal workspace.
 </td>
 </tr>
 </table>
+
+## Desktop app (preview)
+
+Demesne can also run in its own **Tauri 2 desktop window**, using the same conversation, review panels, provider setup, and Drive. The desktop frontend uses the system webview; it does not launch Electron or send pixels through the terminal. The CLI and Ghostty interface remain available.
+
+From a source checkout with [Rust and platform prerequisites](docs/desktop.md#prerequisites) installed:
+
+```sh
+bun install --frozen-lockfile
+bun run desktop
+```
+
+Choose your project in the native folder picker, then connect a provider using setup. To build an application bundle, run `bun run build:desktop`.
+
+This is a development preview. macOS and Ubuntu 22.04/24.04 are the initial desktop targets; Ubuntu 20.04 remains covered by the terminal interface. Desktop builds are not yet signed/notarized releases, and automatic updates are not implemented. [Desktop setup, packaging, and verification →](docs/desktop.md)
 
 ## Get started
 

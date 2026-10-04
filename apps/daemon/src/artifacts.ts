@@ -8,9 +8,9 @@ import type { ImageArtifact } from "@demesne/protocol";
 // Native image codecs are shipped beside the compiled daemon. Loading through
 // its real executable directory avoids resolving native addons inside Bun's VFS.
 const nativeRequire = createRequire(import.meta.path.startsWith("/$bunfs/")
-  ? join(dirname(process.execPath), "native.cjs") : import.meta.url);
+  ? join(process.env.DEMESNE_NATIVE_RUNTIME_DIR ?? dirname(process.execPath), "native.cjs") : import.meta.url);
 const sharp: typeof import("sharp").default = nativeRequire(import.meta.path.startsWith("/$bunfs/")
-  ? join(dirname(process.execPath), "node_modules/sharp/dist/index.cjs") : "sharp");
+  ? join(process.env.DEMESNE_NATIVE_RUNTIME_DIR ?? dirname(process.execPath), "node_modules/sharp/dist/index.cjs") : "sharp");
 
 export interface ImageOutput { data: Uint8Array; mimeType: string; filename?: string; modelId?: string; revisionOf?: string; viewport?:ImageArtifact["viewport"] }
 export interface StructuredToolResult { text: string; images: ImageOutput[] }

@@ -25,9 +25,13 @@
     "graphics": "bun apps/graphics/terminal.ts --live",
     "graphics:setup": "bun scripts/setup-graphics.ts",
     "graphics:check": "bun apps/graphics/check-live.ts",
-    "build:graphics": "bun scripts/build-graphics.ts"
+    "build:graphics": "bun scripts/build-graphics.ts",
+    "desktop": "bun scripts/run-desktop.ts",
+    "build:desktop": "bun scripts/build-desktop.ts",
+    "desktop:check": "bun scripts/check-desktop.ts"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2",
     "@types/bun": "1.4.0",
     "sharp": "^0.35.4",
     "typescript": "7.0.2"

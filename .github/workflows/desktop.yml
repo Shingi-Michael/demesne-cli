@@ -1,0 +1,78 @@
+name: Desktop
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/**', 'packages/**', 'scripts/**', 'package.json', 'bun.lock', '.github/workflows/desktop.yml']
+  pull_request:
+    paths: ['apps/**', 'packages/**', 'scripts/**', 'package.json', 'bun.lock', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-check:
+    name: Tauri / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux build and WebDriver dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb dbus-x11 fonts-dejavu-core
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          cache-on-failure: true
+      # Approved workspace commands use a fixed system PATH; check fixtures call bun.
+      - name: Expose Bun for approved command fixtures
+        run: sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
+      - run: bun install --frozen-lockfile
+      - name: Build desktop test executable and sidecars
+        run: bun run build:desktop -- --debug --no-bundle
+      - name: Compiled host protocol and lifecycle tests
+        env:
+          DEMESNE_TEST_DESKTOP_HOST: ${{ github.workspace }}/apps/desktop/src-tauri/target/debug/demesne-desktop-host
+        run: bun test apps/desktop/test/host.test.ts
+      - name: Shipped daemon and native image runtime
+        run: bun scripts/check-desktop-backend.ts
+      - name: Rust boundary tests
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Install native WebDriver bridge
+        if: runner.os == 'Linux'
+        run: cargo install tauri-driver --locked
+      # Real WebKitGTK, private test config/workspace/provider, no production test API.
+      # No Chromium --no-sandbox flag or privileged container is involved here.
+      - name: Real desktop lifecycle and coding turn
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: dbus-run-session -- xvfb-run -a bun run desktop:check
+      - name: Build platform bundle
+        run: bun run build:desktop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/
+            test-results/desktop/
+          if-no-files-found: ignore
+          retention-days: 7

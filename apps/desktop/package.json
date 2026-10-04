@@ -1,0 +1,11 @@
+{
+  "name": "@demesne/desktop",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@demesne/brand": "workspace:*",
+    "@demesne/client": "workspace:*",
+    "@demesne/config": "workspace:*",
+    "@demesne/protocol": "workspace:*"
+  }
+}

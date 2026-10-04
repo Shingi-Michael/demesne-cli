@@ -10,6 +10,7 @@ These guides describe the implementation on `main`, audited on **2026-10-03**. E
 | [Commands and keyboard](cli-reference.md) | CLI, slash commands, headless output, current shortcuts |
 | [Configuration](configuration.md) | File precedence, providers, limits, environment variables |
 | [Authentication](authentication.md) | ChatGPT accounts, OpenRouter, API keys, credential ownership |
+| [Desktop app](desktop.md) | Tauri preview, native project picker, development, bundles, lifecycle |
 | [Graphics interface](../apps/graphics/README.md) | Ghostty, panels, rendering, packaging, diagnostics |
 | [Linux setup](linux.md) | Automatic runtime setup, sandbox repair, desktop dependencies, test coverage |
 | [Subagents and concurrency](subagents.md) | Routing, read-only tools, provider slots, Qwen sizing |
@@ -32,7 +33,7 @@ The two artifact-preview filenames are retained for existing links; they now doc
 
 When behavior is unclear, follow the linked implementation and tests:
 
-- Entry points: [CLI](../apps/cli/src/main.ts), [graphics launcher](../apps/cli/src/graphics-launcher.ts), [daemon](../apps/daemon/src/main.ts).
+- Entry points: [desktop](../apps/desktop/README.md), [CLI](../apps/cli/src/main.ts), [graphics launcher](../apps/cli/src/graphics-launcher.ts), [daemon](../apps/daemon/src/main.ts).
 - Configuration and defaults: [config package](../packages/config/src/index.ts).
 - Routes and shared types: [daemon API](../apps/daemon/src/app.ts), [protocol](../packages/protocol/src/index.ts), [typed client](../packages/client/src/index.ts).
 - Agent execution: [engine](../apps/daemon/src/engine.ts), [subagents](../apps/daemon/src/subagent.ts), [Drive controller](../apps/cli/src/agent-drive.ts).

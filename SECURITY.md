@@ -34,6 +34,14 @@ Linux startup verifies sandboxed rendering. The explicit `--install-sandbox` rep
 
 These are defense boundaries, not a promise that untrusted generated code is safe to execute. Review requested actions and keep grants specific to the intended work.
 
+## Desktop boundary
+
+The [Tauri desktop client](apps/desktop/README.md#process-boundary) loads local authored assets in the system webview and uses a restricted native bridge. Commands require the main-window label and local application origin; remote navigation and creation of new webviews are denied. The page only has backend event-subscription capabilities, without general shell/filesystem plugin permissions. Its compiled Bun host owns daemon credentials, configuration and Drive; the page receives public snapshots and named actions. It has no general shell/filesystem bridge or direct authenticated daemon HTTP access. External links open in the system browser, and rendered Markdown is sanitized.
+
+Native project selection validates the canonical directory and existing workspace ownership/write-permission rules. Choosing a project does not authorize commands or relax daemon tool approval. Closing the window ends its host without killing daemon-owned work. Linux WebKit/WebDriver integration tests use private fixture data and ordinary browser automation; no production test endpoint or renderer-side privileged testing API is added.
+
+System webviews receive platform security updates separately from Demesne. The desktop bundle does not yet provide signing/notarization or automatic updates. See [desktop prerequisites and limits](docs/desktop.md).
+
 ## Reporting a vulnerability
 
 Use the repository’s [private security advisory form](https://github.com/Shingi-Michael/demesne-cli/security/advisories/new), rather than a public issue. Include the impact, minimal reproduction, affected commit/version, platform and configuration. Remove tokens and private project contents from logs before sharing them.

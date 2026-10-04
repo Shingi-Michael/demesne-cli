@@ -18,6 +18,7 @@ import { TileTransport, viewport, type TileBatch } from "./transport.ts";
 import { PipeWriter, isDisconnect } from "./pipe-writer.cjs";
 import { InputQueue } from "./input-queue.cjs";
 import { displayScale, parseDisplayScale } from "./display-scale.ts";
+import { ensureGraphicsRuntime, graphicsEnvironment, graphicsStartupProblem, installSandboxHelper, verifyGraphicsRuntime } from "./runtime.ts";
 
 const args = process.argv.slice(2);
 const option = (name: string) => {
@@ -47,45 +48,27 @@ if (option("capture-dir"))
   mkdirSync(option("capture-dir")!, { recursive: true });
 const explicitScale = parseDisplayScale(option("scale"));
 let scale = explicitScale ?? 1;
-if (!snapshot && (!process.stdin.isTTY || !process.stdout.isTTY))
+if (!snapshot && !args.includes("--check-runtime") && !args.includes("--install-sandbox") && (!process.stdin.isTTY || !process.stdout.isTTY))
   throw new Error(
     "Run the graphics UI in Ghostty, or use --snapshot=/absolute/path.png",
   );
+let electronPath: string;
+try {
+  electronPath = await ensureGraphicsRuntime(root);
+  if (args.includes("--install-sandbox")) await installSandboxHelper(root, electronPath);
+  if (process.platform === "linux" || args.includes("--check-runtime") || args.includes("--install-sandbox")) {
+    await verifyGraphicsRuntime(root, electronPath);
+  }
+  if (args.includes("--check-runtime") || args.includes("--install-sandbox")) {
+    console.log("Graphics runtime verified: sandboxed renderer produced pixels.");
+    process.exit(0);
+  }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
 const cache = mkdtempSync(join(tmpdir(), "demesne-pixel-"));
-const packagedRuntime = join(root, "runtime");
-const electronRoot = (await Bun.file(join(root, "live.ts")).exists())
-  ? dirname(Bun.resolveSync("electron", root))
-  : root;
-const runtimeSuffix =
-  process.platform === "darwin"
-    ? "Electron.app/Contents/MacOS/Electron"
-    : "electron";
-let electronPath = (await Bun.file(
-  join(packagedRuntime, runtimeSuffix),
-).exists())
-  ? join(packagedRuntime, runtimeSuffix)
-  : join(electronRoot, "dist", runtimeSuffix);
-// Reuse the already-installed proof-of-concept runtime in a development checkout.
-if (!(await Bun.file(electronPath).exists()))
-  electronPath = join(
-    import.meta.dir,
-    "../../experiments/ghostty-ui/node_modules/electron/dist",
-    runtimeSuffix,
-  );
-const rendererEnv = Object.fromEntries(
-  [
-    "HOME",
-    "PATH",
-    "TMPDIR",
-    "LANG",
-    "LC_ALL",
-    "DISPLAY",
-    "WAYLAND_DISPLAY",
-    "XDG_RUNTIME_DIR",
-    "DEMESNE_GRAPHICS_TRACE",
-    "DEMESNE_GRAPHICS_GPU",
-  ].flatMap((key) => (process.env[key] ? [[key, process.env[key]!]] : [])),
-);
+const rendererEnv = graphicsEnvironment();
 const child = spawn(electronPath, [join(root, "renderer.cjs")], {
   stdio: ["pipe", "pipe", "pipe"],
   env: {
@@ -300,7 +283,7 @@ child.on("error", (error) =>
 child.on("exit", (code, signal) => {
   if (!closing)
     finish(
-      code || signal ? `Renderer exited (${signal ?? code}). ${errorLog}` : "",
+      code || signal ? (process.platform === "linux" && !ready ? graphicsStartupProblem(errorLog, electronPath, root) : `Renderer exited (${signal ?? code}). ${errorLog}`) : "",
       code ?? 1,
     );
 });

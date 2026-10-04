@@ -12,6 +12,7 @@ import { createDaemonApp } from "../../daemon/src/app.ts";
 import { serveDaemon } from "../../daemon/src/http-server.ts";
 import type { TurnProcessor } from "../../daemon/src/processor.ts";
 import { loadCliSettings } from "../../cli/src/cli-config.ts";
+import { graphicsEnvironment } from "../runtime.ts";
 
 export async function fixture(
   processor?: TurnProcessor,
@@ -65,6 +66,7 @@ export async function fixture(
     client,
     settings,
     env: {
+      ...graphicsEnvironment(),
       HOME: home,
       PATH: process.env.PATH!,
       TERM: "xterm-256color",

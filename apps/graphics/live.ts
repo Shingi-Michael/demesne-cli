@@ -1142,41 +1142,6 @@ function contextBody() {
 }
 /// The Next queue: Drive's ranked proposals, each with its evidence and the
 /// four ways to answer it.
-/// Drive experiments: the one being designed, a draft to read before
-/// starting, running ones with each variant's progress, and recent verdicts.
-function experimentsHTML() {
-  const experiments = state!.experiments;
-  if (!experiments) return "";
-  const status: Record<string, string> = { pending: "· waiting", setup: "◌ setting up", building: "◌ coder is building", checking: "◌ running checks", measuring: "◌ measuring", done: "", failed: "×", stopped: "■ stopped" };
-  const value = (v: number) => String(Math.round(v * 100) / 100);
-  const variants = (item: import("@demesne/protocol").Experiment) => {
-    const base = item.variants.find((v) => !v.instruction)?.metric?.value;
-    return `<div class="experiment-variants">${item.variants.map((v) => {
-      const change = v.metric && base !== undefined && v.instruction && base !== 0 ? (v.metric.value - base) / Math.abs(base) : null;
-      const result = v.metric ? `<b>${value(v.metric.value)}</b>${change !== null ? ` <span class="${(item.spec.metric.direction === "lower" ? -change : change) > 0 ? "success" : "muted"}">${change > 0 ? "+" : ""}${Math.round(change * 100)}%</span>` : ""}`
-        : v.status === "failed" ? `<span class="danger" title="${h(v.error ?? "")}">× ${h((v.error ?? "failed").split(":")[0]!)}</span>` : `<span class="muted">${status[v.status] ?? v.status}${v.status === "building" && (v.attempts ?? 1) > 1 ? ` · attempt ${v.attempts}` : ""}</span>`;
-      return `<div class="experiment-variant${item.verdict?.winner === v.label ? " winner" : ""}"><span class="label">${h(v.label)}</span><span class="idea">${h(v.idea)}</span><span class="result">${result}</span></div>`;
-    }).join("")}</div>`;
-  };
-  const running = experiments.items.filter((item) => item.status === "running").map((item) => {
-    const left = Math.max(0, Math.round((Date.parse(item.createdAt) + item.spec.budgetMinutes * 60_000 - Date.now()) / 60_000));
-    return `<div class="experiment running"><div class="next-top"><span class="next-kind kind-experiment">RUNNING</span><span class="next-title">${h(item.spec.question)}</span></div><div class="next-facts"><span>metric: ${h(item.spec.metric.name)} (${item.spec.metric.direction} is better)</span><span>${left} min left of ${item.spec.budgetMinutes}</span></div>${variants(item)}<div class="next-actions">${btn("experiment-stop", "Stop", { id: item.id })}</div></div>`;
-  }).join("");
-  const settled = experiments.items.filter((item) => item.status !== "running").slice(0, 3).map((item, index) => {
-    const won = Boolean(item.verdict?.winner), key = `experiment:${item.id}`;
-    // The newest verdict opens by itself until you close it.
-    const open = detailsOpen.has(key) || (index === 0 && !detailsClosed.has(key));
-    return `<details class="experiment settled" data-detail="${key}"${open ? " open" : ""}><summary><span class="${won ? "success" : "muted"}">${won ? "✓" : item.status === "failed" ? "×" : "·"}</span> ${h(item.spec.question)} <span class="muted">${age(item.settledAt ?? item.createdAt)}</span></summary><p class="next-why">${h(item.verdict?.summary ?? item.error ?? item.status)}</p>${variants(item)}${item.kept ? `<p class="${item.kept.error ? "next-error" : "muted"}">${item.kept.error ? h(item.kept.error) : `Kept on local branch <code>${h(item.kept.branch)}</code> for you to review.`}</p>` : ""}</details>`;
-  }).join("");
-  const draft = experiments.draft ? (() => {
-    const spec = experiments.draft.spec;
-    return `<div class="experiment draft"><div class="next-top"><span class="next-kind kind-experiment">DESIGNED</span><span class="next-title">${h(spec.question)}</span></div><p class="next-why">${h(spec.hypothesis)}</p><div class="next-facts"><span>metric: ${h(spec.metric.name)} (${spec.metric.direction} is better, ${Math.round((spec.metric.minImprovement ?? 0.1) * 100)}% to win)</span><span>checks: ${h(spec.checks.map((argv) => argv.join(" ")).join(", ") || "none")}</span><span>budget ${spec.budgetMinutes} min</span></div>${spec.variants.map((v) => `<details class="experiment-plan"><summary><span class="label">${h(v.label)}</span> ${h(v.idea)}</summary>${v.instruction ? `<p>${h(v.instruction)}</p>` : '<p class="muted">The code as it is now, measured the same way.</p>'}</details>`).join("")}<div class="next-actions">${btn("experiment-start", "▶ Start experiment", {}, "primary", true)}${btn("experiment-discard", "Discard")}</div></div>`;
-  })() : "";
-  const designing = experiments.designing ? '<p class="muted">◇ Designing the experiment…</p>' : "";
-  const error = experiments.error ? `<p class="next-error">${h(experiments.error)}</p>` : "";
-  const body = designing + draft + running + error + settled;
-  return body ? `<div class="drive-heading">EXPERIMENTS</div>${body}` : "";
-}
 function nextQueueHTML() {
   const next = state!.driveNext;
   const signal = new Map(next.signals.map((item) => [item.id, item]));
@@ -1196,7 +1161,7 @@ function driveBody() {
   const idle = !drive || ["completed", "stopped", "idle", "blocked", "paused"].includes(drive.status);
   // With no mission running, Drive opens on what to do next.
   if (!drive)
-    return `<div class="drive-content">${experimentsHTML()}${nextQueueHTML()}<details class="drive-own"${state!.driveNext.proposals.length ? "" : " open"}><summary>Give Drive a mission</summary><p class="muted">Drive reads the session, directs work, and reviews the results. Tool approvals remain yours.</p><form id="drive-form"><input name="mission" placeholder="What should Drive finish?" aria-label="Drive mission" required><label class="drive-mode"><input type="checkbox" name="continuous" checked> Keep choosing improvements</label><button type="submit" class="chip">Start Drive</button></form></details></div>`;
+    return `<div class="drive-content">${nextQueueHTML()}<details class="drive-own"${state!.driveNext.proposals.length ? "" : " open"}><summary>Give Drive a mission</summary><p class="muted">Drive reads the session, directs work, and reviews the results. Tool approvals remain yours.</p><form id="drive-form"><input name="mission" placeholder="What should Drive finish?" aria-label="Drive mission" required><label class="drive-mode"><input type="checkbox" name="continuous" checked> Keep choosing improvements</label><button type="submit" class="chip">Start Drive</button></form></details></div>`;
   // Status + timeline: one status line and short sentence, what Drive did,
   // a plain checklist, one stats line. Everything long sits under Details.
   const now = Date.now(), trace = drive.traces?.at(-1);
@@ -1231,11 +1196,9 @@ function driveBody() {
     drive.protection ? section("BUDGET", `<p class="muted">${Math.floor(drive.protection.used.activeMs / 60_000)}/${drive.protection.limits.maxActiveMinutes} active min · ${drive.protection.used.cycles}/${drive.protection.limits.maxCycles} cycles · ${drive.protection.used.workerRequests}/${drive.protection.limits.maxWorkerRequests} coder requests</p>`) : "",
     ledger.some((task) => task.status === "completed") ? `<p class="muted">Reopen a finished task: /drive reopen &lt;task-id&gt; &lt;reason&gt;<br>${ledger.filter((task) => task.status === "completed").slice(-4).map((task) => `${h(task.id.slice(0, 8))} · ${h(task.title)}`).join("<br>")}</p>` : "",
   ].join("");
-  return `<div class="drive-content">${idle ? experimentsHTML() + nextQueueHTML() + '<div class="drive-heading">LAST MISSION</div>' : ""}<div class="drive-status"><strong class="tone-${tone}">${mark} ${h(label)}</strong>${summary ? `<p class="drive-summary">${h(summary)}</p>` : ""}</div>${
+  return `<div class="drive-content">${idle ? nextQueueHTML() + '<div class="drive-heading">LAST MISSION</div>' : ""}<div class="drive-status"><strong class="tone-${tone}">${mark} ${h(label)}</strong>${summary ? `<p class="drive-summary">${h(summary)}</p>` : ""}</div>${
     steps.length ? section("TIMELINE", `<ol class="drive-timeline">${steps.map((step) => `<li class="tone-${step.tone}"><span>${h(step.mark)}</span><span class="drive-step">${h(step.text)}</span><time>${h(step.when)}</time></li>`).join("")}</ol>`) : ""}${
-    tasks.length ? section("TASKS", `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>`) : ""}<div class="drive-meta">${h(stats)}</div><details data-detail="drive-details"${detailsOpen.has("drive-details") ? " open" : ""}><summary>Details</summary><div class="drive-details">${details}</div></details>${!idle && state!.driveNext.proposals.length ? `<div class="drive-meta">Next · ${state!.driveNext.proposals.length} proposed after this mission</div>` : ""}${
-    // Experiments run on their own, so they stay visible under a live mission.
-    idle ? "" : experimentsHTML()}</div>`;
+    tasks.length ? section("TASKS", `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>`) : ""}<div class="drive-meta">${h(stats)}</div><details data-detail="drive-details"${detailsOpen.has("drive-details") ? " open" : ""}><summary>Details</summary><div class="drive-details">${details}</div></details>${!idle && state!.driveNext.proposals.length ? `<div class="drive-meta">Next · ${state!.driveNext.proposals.length} proposed after this mission</div>` : ""}</div>`;
 }
 function processError() {
   return state?.processesError
@@ -1497,7 +1460,7 @@ function renderPanels() {
         : pane === "context"
           ? [state.provider, state.checkpoint, state.activeTurnId]
           : pane === "drive"
-            ? [state.drive, state.driveNext, state.experiments, state.experiments?.items.some((item) => item.status === "running") ? Math.floor(Date.now() / 60_000) : 0]
+            ? [state.drive, state.driveNext]
             : pane === "preview"
               ? [
                   state.artifacts,
@@ -2519,7 +2482,7 @@ async function dispatch(
     return;
   }
   if (action === "new-session") return api("new-session", {});
-  if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "experiment-start", "experiment-discard", "experiment-stop"].includes(action)) return api(action, args);
+  if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never"].includes(action)) return api(action, args);
   if (action === "drive-forget") return api("drive", { text: `forget ${args.id}` });
   if (action === "overlay") return openOverlay(args.name, args.query ?? "");
   if (action === "close-overlay") {
@@ -3404,7 +3367,6 @@ window.demesneInspect = () => ({
   drivePhase: state?.drive?.autonomy?.phase,
   driveMemory: state?.driveMemory,
   driveNext: state?.driveNext,
-  experiments: state?.experiments,
   driveTasks: state?.drive?.ledger?.tasks.map((task) => ({
     id: task.id,
     status: task.status,

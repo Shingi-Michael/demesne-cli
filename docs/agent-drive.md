@@ -59,31 +59,6 @@ flowchart TD
 
 Queues are cached for up to 12 hours when signals, memory, and selected model match. The graphics host requests them on connection and after settled turns when its 30-minute refresh interval has elapsed; Refresh bypasses the cache. A new veto invalidates the prior cache. Exact matching titles are filtered; semantic veto instructions and task-overlap judgments are not a perfect paraphrase detector.
 
-## Experiments
-
-An **experiment** proposal settles a question by measurement instead of a mission. Run designs and starts it; Plan first shows the design (question, hypothesis, metric, checks, budget, each variant's instruction) with **Start experiment** and **Discard**.
-
-A workspace opts in with [`.demesne/experiments.json`](../.demesne/experiments.json), which declares everything an experiment may run: `setup` commands, `checks`, and named `metrics` (each an argv whose last stdout line is JSON with a numeric `value`, a direction, and the improvement needed to win). Drive's designer chooses a metric by name and writes the variants' instructions; it never authors a command. Without the file, experiment proposals report that the workspace declares none.
-
-```mermaid
-flowchart TD
-    Proposal[Experiment proposal] --> Design[Designer picks a declared metric and writes 1-3 variants]
-    Design --> Worktrees[One git worktree per variant from HEAD, plus the unchanged baseline]
-    Worktrees --> Build[Setup, then a coder turn per variant]
-    Build --> Checks{Declared checks pass?}
-    Checks -->|no| Stopped[Variant stopped: its metric does not count]
-    Checks -->|yes| Measure[Metric, one variant at a time]
-    Measure --> Verdict{Best variant beats the baseline by the required margin?}
-    Verdict -->|yes| Winner[Commit on a local branch for review]
-    Verdict -->|no| NoWinner[No winner]
-    Winner --> Memory[Verdict recorded in project memory]
-    NoWinner --> Memory
-```
-
-Coder turns run unattended in their own worktree: edits anywhere in it and the exact declared check commands are pre-approved, and every other command is denied. Worktrees live under `~/.cache/demesne/experiments` and are removed when the experiment settles. The winner is committed on a local branch (`demesne/experiment-<id>-<label>`) for you to review; losing branches are deleted. Experiments never push or open pull requests. A budget in minutes bounds the whole experiment; Stop ends it early. Records persist in the daemon's `experiments` directory, so verdicts survive closing the window; a daemon restart stops a running experiment rather than resuming it. The window writes each settled verdict to project memory once, so later proposals don't repeat a settled idea.
-
-This repository's kit measures **rounds per task** with [`scripts/bench-agent.ts`](../scripts/bench-agent.ts): eight read-only questions ([`bench/agent-tasks.json`](../bench/agent-tasks.json)) run against a pinned snapshot through a private daemon built from the variant's code, using only the `[provider]` table of your user config. Its value is a 10%-trimmed mean, so one runaway turn can't decide an experiment, and a wrong answer counts as 20 rounds, so a variant can't win by answering badly. It also reports correctness, tool calls, re-reads and input tokens.
-
 ## Direct control is the default
 
 ```mermaid

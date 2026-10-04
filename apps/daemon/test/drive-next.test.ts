@@ -22,7 +22,7 @@ test("ranking: value × confidence ÷ cost, urgent evidence doubles it, uncited 
   const ranked = rankProposals([
     { kind: "tidy", title: "Commit the drafts", why: "w", evidence: ["git:uncommitted"], minutes: 10, coders: 1, confidence: "high", value: 3 },
     { kind: "fix", title: "Fix the failing check", why: "w", evidence: ["check:1"], minutes: 30, coders: 1, confidence: "medium", value: 4 },
-    { kind: "experiment", title: "Made up", why: "w", evidence: ["telemetry:nope"], minutes: 20, coders: 2, confidence: "low", value: 5 },
+    { kind: "investigate", title: "Made up", why: "w", evidence: ["telemetry:nope"], minutes: 20, coders: 2, confidence: "low", value: 5 },
   ], signals);
   expect(ranked.map((item) => [item.title, item.score, item.urgent])).toEqual([["Commit the drafts", 6, false], ["Fix the failing check", 5.6, true]]);
   expect(ranked[0]!.id).toMatch(/^[0-9a-f]{10}$/);

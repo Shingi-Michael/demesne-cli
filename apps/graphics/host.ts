@@ -121,6 +121,9 @@ export class GraphicsHost {
   /// signed in while its browser flow is open.
   providers: { items: ProviderEntry[]; signingIn: string | null; message: string | null; loading: boolean } = { items: [], signingIn: null, message: null, loading: false };
   private providerAccounts: ProviderAccounts | null = null;
+  /// Settings › Clean up sessions: what's worth deleting, what you ticked,
+  /// and whether Delete was pressed once (it asks twice).
+  cleanup: { candidates: import("@demesne/protocol").SessionCleanupCandidate[]; selected: string[]; loading: boolean; armed: boolean; message: string | null; staleDays: number } = { candidates: [], selected: [], loading: false, armed: false, message: null, staleDays: 30 };
   /// Proposals you hid: until a time (Not now, or while running) or for good.
   private nextHidden: Record<string, number | "never"> = {};
   private nextRequested = 0;
@@ -266,6 +269,7 @@ export class GraphicsHost {
       // Drive's project memory for this workspace (shown in Session).
       driveMemory: this.drive?.memoryEntries ?? [],
       providers: this.providers,
+      cleanup: this.cleanup,
       driveNext: {
         ...this.nextQueue,
         proposals: this.nextQueue.proposals.filter((item) => {
@@ -523,6 +527,35 @@ export class GraphicsHost {
   private fail(error: unknown) {
     this.error = error instanceof Error ? error.message : String(error);
     this.publish();
+  }
+  /// Finds sessions worth deleting. The open session (and Drive's) never are.
+  async scanCleanup(message: string | null = null) {
+    this.cleanup = { ...this.cleanup, loading: true, armed: false, message };
+    this.publish();
+    try {
+      const keep = [this.current?.session.id, this.driveState && ["running", "waiting", "blocked"].includes(this.driveState.status) ? this.driveState.homeSessionId : undefined].filter((id): id is string => Boolean(id));
+      const { candidates, staleDays } = await this.client.sessionCleanup(keep);
+      this.cleanup = { candidates, selected: candidates.filter((item) => item.suggested).map((item) => item.id), loading: false, armed: false, message, staleDays };
+    } catch (error) {
+      this.cleanup = { ...this.cleanup, loading: false, message: error instanceof Error ? error.message : String(error) };
+    }
+    this.publish();
+  }
+  /// Delete asks twice: the first press arms it, the second deletes.
+  async deleteCleanup() {
+    const ids = this.cleanup.selected.filter((id) => this.cleanup.candidates.some((item) => item.id === id));
+    if (!ids.length) return;
+    if (!this.cleanup.armed) { this.cleanup = { ...this.cleanup, armed: true }; return this.publish(); }
+    this.cleanup = { ...this.cleanup, loading: true, armed: false };
+    this.publish();
+    try {
+      const { deleted, skipped } = await this.client.deleteSessions(ids);
+      await this.refreshSessions();
+      await this.scanCleanup(`Deleted ${deleted.length} session${deleted.length === 1 ? "" : "s"}${skipped.length ? `; kept ${skipped.length} (${skipped[0]!.reason})` : ""}.`);
+    } catch (error) {
+      this.cleanup = { ...this.cleanup, loading: false, message: error instanceof Error ? error.message : String(error) };
+      this.publish();
+    }
   }
   async refreshSessions() {
     try {
@@ -865,6 +898,16 @@ export class GraphicsHost {
       if (method === "next-plan") return this.submit(`${item.title}. ${item.why}`, true);
       if (!this.drive) throw new Error("Drive is unavailable here.");
       return this.drive.handle("drive", { text: `--bounded ${item.title}. ${item.why}` });
+    }
+    if (method === "cleanup-scan") return this.scanCleanup();
+    if (method === "cleanup-delete") return this.deleteCleanup();
+    if (method === "cleanup-toggle") {
+      const ids = args.id === "*" ? this.cleanup.candidates.map((item) => item.id) : [string(args.id, "id", 100)];
+      const on = args.id === "*" ? this.cleanup.selected.length < this.cleanup.candidates.length : !this.cleanup.selected.includes(ids[0]!);
+      const selected = new Set(this.cleanup.selected);
+      for (const id of ids) on ? selected.add(id) : selected.delete(id);
+      this.cleanup = { ...this.cleanup, selected: [...selected], armed: false, message: null };
+      return this.publish();
     }
     if (method === "providers-refresh") return this.refreshProviders();
     if (method === "provider-signin") return this.signInProvider(string(args.key, "provider", 200));

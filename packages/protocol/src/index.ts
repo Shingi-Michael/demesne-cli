@@ -276,6 +276,23 @@ export interface SessionReplayPage {
   nextCursor: number | null;
 }
 
+/// A session suggested for deletion, and why.
+export interface SessionCleanupCandidate {
+  id: string; title: string; workspace: string | null; updatedAt: string; idleDays: number;
+  turns: number; files: number; commands: number;
+  reason: "empty" | "missing" | "archived" | "unfinished" | "quick" | "stale";
+  detail: string;
+  /// Selected for deletion by default (no real work in it).
+  suggested: boolean;
+}
+export interface SessionCleanupResponse { candidates: SessionCleanupCandidate[]; staleDays: number }
+export interface DeleteSessionsResponse { deleted: string[]; skipped: { id: string; reason: string }[] }
+export function parseDeleteSessionsRequest(value: unknown): { ids: string[] } {
+  if (!isRecord(value) || !Array.isArray(value.ids) || value.ids.length > 500 || value.ids.some((id) => typeof id !== "string" || !id || id.length > 100))
+    throw new ProtocolValidationError("ids: expected 1-500 session ids");
+  return { ids: [...new Set(value.ids as string[])] };
+}
+
 export interface Turn {
   id: string;
   sessionId: string;

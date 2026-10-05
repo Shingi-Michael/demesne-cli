@@ -149,7 +149,7 @@ function buildPainter(enabled: boolean, initial: Theme): Painter {
 }
 
 export type SlashCommandId =
-  | "new" | "sessions" | "resume" | "rename" | "delete" | "model" | "subagent" | "export" | "plan"
+  | "new" | "sessions" | "resume" | "rename" | "delete" | "cleanup" | "model" | "subagent" | "export" | "plan"
   | "status" | "context" | "diff" | "undo" | "compact" | "drive" | "clear" | "help" | "theme" | "providers" | "exit"
   | `custom:${string}`;
 export type SlashCommandArgument = "none" | "optional" | "required";
@@ -182,6 +182,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: "resume", name: "/resume", aliases: ["/switch"], argument: "required", argumentLabel: "id", description: "Switch to a session", section: "session" },
   { id: "rename", name: "/rename", aliases: [], argument: "required", argumentLabel: "title", description: "Rename the current session", section: "session" },
   { id: "delete", name: "/delete", aliases: ["/archive"], argument: "none", description: "Archive the current session", section: "session" },
+  { id: "cleanup", name: "/cleanup", aliases: [], argument: "none", description: "Delete empty, quick and old sessions", section: "session" },
   { id: "model", name: "/model", aliases: [], argument: "optional", argumentLabel: "id", description: "Switch the active model", section: "session" },
   { id: "subagent", name: "/subagent", aliases: [], argument: "optional", argumentLabel: "model", description: "Choose the model sub-agents run on", section: "session" },
   { id: "theme", name: "/theme", aliases: [], argument: "optional", argumentLabel: "name", description: "Change the color theme", section: "session" },

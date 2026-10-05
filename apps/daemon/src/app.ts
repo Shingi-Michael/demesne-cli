@@ -15,7 +15,9 @@ import {
   parseUndoSessionRequest,
   parseUpdateSessionRequest,
   ProtocolValidationError,
-  parseDriveRequest, parseDriveNextRequest,
+  parseDriveRequest, parseDriveNextRequest, parseDeleteSessionsRequest,
+  type DeleteSessionsResponse,
+  type SessionCleanupResponse,
   type ApiErrorBody,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
@@ -47,6 +49,7 @@ import { DRIVE_QUICK_TOKENS, DRIVE_THOUGHT_TOKENS, planDrive } from "./drive-pla
 import { collectDriveSignals } from "./drive-signals.ts";
 import { SessionToolStore } from "./session-tools.ts";
 import { DriveNextCache, proposeNext } from "./drive-next.ts";
+import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
@@ -58,7 +61,7 @@ import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, InferenceSchedulers, type InferenceBoundaryHook } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 
 export { PlaceholderTurnProcessor, type TurnProcessor } from "./processor.ts";
@@ -523,6 +526,26 @@ export function createDaemonApp(options: {
         const { session, event } = store.createSession(body.title, workspaceRoot);
         const response: CreateSessionResponse = { session, eventId: event.eventId };
         return json(response, 201);
+      }
+
+      // Cleanup: sessions worth deleting and why, then deleting them for good.
+      if (request.method === "GET" && url.pathname === "/v1/sessions/cleanup") {
+        const keep = url.searchParams.getAll("keep");
+        const response: SessionCleanupResponse = { candidates: suggestCleanup(store.sessionActivity(), { keep, exists: existsSync }), staleDays: STALE_DAYS };
+        return json(response);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/sessions/delete") {
+        const { ids } = parseDeleteSessionsRequest(await readJson(request));
+        const response: DeleteSessionsResponse = { deleted: [], skipped: [] };
+        for (const id of ids) {
+          const session = store.getSession(id);
+          if (!session) { response.skipped.push({ id, reason: "not found" }); continue; }
+          if (session.turns.some((turn) => turn.status === "queued" || turn.status === "running")) { response.skipped.push({ id, reason: "a turn is running" }); continue; }
+          store.deleteSession(id);
+          rmSync(join(dirname(options.databasePath), "session-tools", `${id}.json`), { force: true });
+          response.deleted.push(id);
+        }
+        return json(response);
       }
 
       if (request.method === "GET" && url.pathname === "/v1/sessions") {

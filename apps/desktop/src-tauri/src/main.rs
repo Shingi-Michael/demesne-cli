@@ -384,6 +384,44 @@ async fn desktop_request(
         _ => bridge.request(&app, &method, args).await,
     }
 }
+/// Text and layout size, like a browser's zoom: ⌘= / ⌘- / ⌘0 in the View
+/// menu. The level is saved in the app's config folder and restored at launch.
+const ZOOM_LEVELS: [f64; 12] = [0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0];
+struct Zoom(Mutex<f64>);
+fn zoom_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path().app_config_dir().ok().map(|dir| dir.join("zoom.json"))
+}
+fn load_zoom(app: &tauri::AppHandle) -> f64 {
+    zoom_path(app)
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| value["zoom"].as_f64())
+        .filter(|level| ZOOM_LEVELS.iter().any(|known| (known - level).abs() < 1e-9))
+        .unwrap_or(1.0)
+}
+/// The next level up (step 1), down (-1), or back to 100% (0).
+fn next_zoom(current: f64, step: i32) -> f64 {
+    match step {
+        0 => 1.0,
+        1 => ZOOM_LEVELS.iter().copied().find(|level| *level > current + 1e-9).unwrap_or(current),
+        _ => ZOOM_LEVELS.iter().rev().copied().find(|level| *level < current - 1e-9).unwrap_or(current),
+    }
+}
+fn apply_zoom(app: &tauri::AppHandle, step: i32) {
+    let state = app.state::<Zoom>();
+    let mut level = state.0.lock().unwrap();
+    *level = next_zoom(*level, step);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_zoom(*level);
+    }
+    if let Some(path) = zoom_path(app) {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, json!({ "zoom": *level }).to_string());
+    }
+}
+
 fn main() {
     let args = std::env::args()
         .skip(1)
@@ -403,6 +441,7 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .manage(bridge)
+        .manage(Zoom(Mutex::new(1.0)))
         .invoke_handler(tauri::generate_handler![desktop_request])
         .setup(|app| {
             let config = app
@@ -411,10 +450,13 @@ fn main() {
                 .windows
                 .first()
                 .ok_or("The main desktop window is not configured")?;
-            tauri::WebviewWindowBuilder::from_config(app, config)?
+            let window = tauri::WebviewWindowBuilder::from_config(app, config)?
                 .on_navigation(local_app_url)
                 .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
                 .build()?;
+            let saved = load_zoom(app.handle());
+            *app.state::<Zoom>().0.lock().unwrap() = saved;
+            let _ = window.set_zoom(saved);
             let menu = tauri::menu::Menu::default(app.handle())?;
             let project = tauri::menu::Submenu::new(app, "Project", true)?;
             project.append(&tauri::menu::MenuItem::with_id(
@@ -432,10 +474,25 @@ fn main() {
                 Some("CmdOrCtrl+,"),
             )?)?;
             menu.append(&project)?;
+            let view = tauri::menu::Submenu::new(app, "View", true)?;
+            for (id, label, accelerator) in [
+                ("zoom-in", "Zoom In", "CmdOrCtrl+="),
+                ("zoom-out", "Zoom Out", "CmdOrCtrl+-"),
+                ("zoom-reset", "Actual Size", "CmdOrCtrl+0"),
+            ] {
+                view.append(&tauri::menu::MenuItem::with_id(app, id, label, true, Some(accelerator))?)?;
+            }
+            menu.append(&view)?;
             app.set_menu(menu)?;
             Ok(())
         })
         .on_menu_event(|app, event| {
+            match event.id().as_ref() {
+                "zoom-in" => return apply_zoom(app, 1),
+                "zoom-out" => return apply_zoom(app, -1),
+                "zoom-reset" => return apply_zoom(app, 0),
+                _ => {}
+            }
             let action = match event.id().as_ref() {
                 "open-project" => Some("open-project"),
                 "desktop-settings" => Some("settings"),
@@ -486,6 +543,16 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn zoom_steps_through_levels_and_stops_at_the_ends() {
+        assert_eq!(next_zoom(1.0, 1), 1.1);
+        assert_eq!(next_zoom(1.0, -1), 0.9);
+        assert_eq!(next_zoom(1.25, 0), 1.0);
+        assert_eq!(next_zoom(3.0, 1), 3.0);
+        assert_eq!(next_zoom(0.67, -1), 0.67);
+        // An unknown saved level steps to its nearest neighbor.
+        assert_eq!(next_zoom(1.05, 1), 1.1);
+    }
     #[test]
     fn only_authored_application_origins_can_access_the_bridge() {
         assert!(allowed_app_url(

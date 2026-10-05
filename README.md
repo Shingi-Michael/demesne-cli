@@ -163,7 +163,7 @@ Plain `/drive <mission>` is continuous; `--bounded` stops after one verified tas
 
 ### Decide what runs next
 
-<img src="docs/assets/demesne-drive.png" alt="Drive NEXT panel with evidence-linked proposals and Run, Plan first, Not now, and Never actions" width="100%">
+<img src="docs/assets/demesne-drive.png" alt="Drive panel on the Next tab: the top proposal expanded with its reason, evidence and actions, the rest as one-line rows with Run" width="100%">
 
 These are demo scenarios rendered by the application, not live-model performance benchmarks.
 

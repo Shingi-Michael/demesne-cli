@@ -558,7 +558,7 @@ export class GraphicsHost {
       this.publish();
     }
   }
-  async submit(content: string, planOnly = this.planOnly) {
+  async submit(content: string, planOnly = this.planOnly, permissionMode: "ask" | "allow" = "ask") {
     if (!this.current || this.connection !== "online")
       throw new Error("Connect to the daemon first.");
     if (!content.trim()) return;
@@ -582,7 +582,7 @@ export class GraphicsHost {
       );
       const result = await this.client.submitTurn(id, {
         content: expanded,
-        permissionMode: "ask",
+        permissionMode,
         planOnly,
       });
       if (this.current?.session.id === id) {

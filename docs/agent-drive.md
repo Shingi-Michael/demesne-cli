@@ -21,7 +21,7 @@ Drive is a separate planning context that coordinates coding turns, inspects rec
 - **Stop** also attempts to interrupt coding work in the mission session.
 - **Resume** re-observes current state and retains the ledger. It cannot silently restart completed work or clear a protection stop.
 - Human typing, pasting and actionable input take over from Drive. Viewing its own progress panel and passive scrolling do not by themselves request new coding work.
-- Drive cannot approve a tool or answer a human question. It waits for the operator.
+- Drive's coding turns are submitted with permission mode `allow`: every edit and command runs without asking, because Drive is meant to work unattended. Commands that publish beyond the machine still ask: `git push`, `gh pr`/`release`/`repo`/`gist` create, merge, edit, delete and similar, `gh api` writes, and `npm`/`pnpm`/`yarn`/`bun publish` (including inside `sh -c` scripts). Your own turns still ask. Drive cannot answer a human question; it waits for you.
 
 ## NEXT: proposed work
 
@@ -65,7 +65,7 @@ Queues are cached for up to 12 hours when signals, memory, and selected model ma
 flowchart TD
     Observe[Read recorded session state] --> Decide[Plan one Drive action]
     Decide --> Submit[Submit a bounded coding request through the API]
-    Submit --> Worker[Coding turn and operator approvals]
+    Submit --> Worker[Coding turn, tools pre-approved except publishing]
     Worker --> Inspect[Inspect answer, changes, checks or log]
     Inspect --> Judge{Enough evidence?}
     Judge -->|no| Decide

@@ -152,7 +152,7 @@ Explore first, then ask for a focused change. Inspect the result beside the conv
 /drive --bounded Fix the failing parser tests and verify the change
 ```
 
-Plain `/drive <mission>` is continuous; `--bounded` stops after one verified task. NEXT’s **Run** action starts a bounded mission. Drive still waits for your approvals and answers. [Mission controls and limits →](docs/agent-drive.md)
+Plain `/drive <mission>` is continuous; `--bounded` stops after one verified task. NEXT’s **Run** action starts a bounded mission. Drive’s coding turns run with every tool allowed, so edits and commands don’t wait for you; pushing, pull requests, releases and package publishes still ask. [Mission controls and limits →](docs/agent-drive.md)
 
 <details>
 <summary><strong>See the start screen and Drive’s NEXT queue</strong></summary>
@@ -183,7 +183,7 @@ These are demo scenarios rendered by the application, not live-model performance
 
 [All commands and keyboard shortcuts →](docs/cli-reference.md)
 
-Writes and host commands require approval unless a matching grant applies. **Commands run as your OS user, not in a sandbox.** Subagents are read-only, and Drive cannot approve tools on your behalf. [Security boundaries →](SECURITY.md)
+Writes and host commands require approval unless a matching grant applies. **Commands run as your OS user, not in a sandbox.** Subagents are read-only. Drive’s own coding turns are pre-approved (except publishing), so a Drive mission can run any command your account can. [Security boundaries →](SECURITY.md)
 
 ## Also at home in a script
 

@@ -59,7 +59,7 @@ import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
 import { imageGenerationTool } from "./image-generation.ts";
 import { captureWindowTool } from "./window-capture.ts";
-import { workspaceFileInfo } from "./workspace-file-info.ts";
+import { workspaceFileChanges, workspaceFileInfo } from "./workspace-file-info.ts";
 import type { AgentConfig, ImageGenerationConfig } from "@demesne/config";
 import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
@@ -704,7 +704,8 @@ export function createDaemonApp(options: {
           const { content, ...status } = file;
           return json(status);
         }
-        return json(file);
+        const changes = file.content === null ? undefined : workspaceFileChanges(session.workspace.root, target);
+        return json(changes ? { ...file, changes } : file);
       }
 
       if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "files") {

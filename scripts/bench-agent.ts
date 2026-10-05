@@ -105,6 +105,8 @@ try {
     return {
       id: run.id, attempt: run.attempt, status: run.status, correct, rounds: calls.length, toolCalls: tools.length,
       searches: tools.filter((t) => t.name === "search_files").length, reads: tools.filter((t) => t.name.startsWith("read_file")).length, rereads,
+      // Which tools the model chose, so a run shows whether new tools get used.
+      toolsUsed: Object.fromEntries([...tools.reduce((counts, t) => counts.set(t.name, (counts.get(t.name) ?? 0) + 1), new Map<string, number>())]),
       inputTokens: calls.reduce((sum, c) => sum + (c.input_tokens ?? 0), 0), outputTokens: calls.reduce((sum, c) => sum + (c.output_tokens ?? 0), 0),
       seconds: Math.round(run.seconds * 10) / 10,
     };
@@ -118,12 +120,14 @@ try {
     metric: "rounds per task", direction: "lower", value: mean(scored.slice(trim, scored.length - trim)), meanRounds: mean(rows.map((r) => r.rounds)),
     correct: rows.filter((r) => r.correct).length, total: rows.length,
     toolCalls: mean(rows.map((r) => r.toolCalls)), rereads: mean(rows.map((r) => r.rereads)),
+    toolsUsed: rows.reduce((totals, r) => { for (const [name, count] of Object.entries(r.toolsUsed)) totals[name] = (totals[name] ?? 0) + count; return totals; }, {} as Record<string, number>),
     inputTokens: mean(rows.map((r) => r.inputTokens)), seconds: mean(rows.map((r) => r.seconds)),
     model: String(provider.model), pin: suite.pin, tasks: rows,
   };
   console.error("\n  task               rounds  tools  rereads  input tok  correct");
   for (const r of rows) console.error(`  ${`${r.id}#${r.attempt + 1}`.padEnd(18)} ${String(r.rounds).padStart(6)} ${String(r.toolCalls).padStart(6)} ${String(r.rereads).padStart(8)} ${String(r.inputTokens).padStart(10)}  ${r.correct ? "yes" : "no"}`);
   console.error(`\n  rounds per task ${summary.value} (trimmed; mean ${summary.meanRounds}) · correct ${summary.correct}/${summary.total} · ${summary.model}`);
+  console.error(`  tools: ${Object.entries(summary.toolsUsed).sort((a, b) => b[1] - a[1]).map(([name, count]) => `${name} ${count}`).join(", ")}`);
   const out = option("json");
   if (out) writeFileSync(out, JSON.stringify(summary, null, 2));
   console.log(JSON.stringify({ ...summary, tasks: undefined }));

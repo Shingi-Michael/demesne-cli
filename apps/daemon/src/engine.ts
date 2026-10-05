@@ -14,6 +14,7 @@ import { PermissionBroker } from "./permissions.ts";
 import type { QuestionBroker } from "./questions.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { routeInspection } from "./inspection-commands.ts";
+import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
 import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinitionFor, type SubagentModel } from "./subagent.ts";
 import type { InferenceSchedulers } from "./inference-scheduler.ts";
 import { composeSystemPrompt, loadProjectInstructions } from "./instructions.ts";
@@ -51,6 +52,8 @@ interface AgentEngineOptions extends AgentConfig {
   inferenceFor?: (model: string, thinkingEnabled: boolean | undefined) => TurnInference;
   /// Models a sub-agent may be asked to run on, offered to the agent by name.
   subagentModels?: () => SubagentModel[];
+  /// The model's own presets and compositions, per session.
+  sessionTools?: SessionToolStore;
 }
 
 export class AgentEngine {
@@ -84,7 +87,8 @@ export class AgentEngine {
     const canAsk = Boolean(this.options.questions) && turn.permissionMode !== "deny";
     const definitions = session.workspace
       ? planModeDefinitions(selectToolsForTurn([...this.tools.definitions(),
-        subagentDefinitionFor(this.options.subagentModels?.() ?? [], this.options.subagentModel ?? inference.modelId)], turn.content), turn.planOnly === true)
+        subagentDefinitionFor(this.options.subagentModels?.() ?? [], this.options.subagentModel ?? inference.modelId),
+        ...(this.options.sessionTools ? [sessionToolsDefinition] : [])], turn.content), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : [];
     const systemPrompt = agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
@@ -463,6 +467,58 @@ export class AgentEngine {
     }
   }
 
+  /// session_tools: define, list, remove, or run the session's own tools. A
+  /// preset runs as its base tool (normal approval); a composition runs its
+  /// read-only steps in order, each able to use earlier results.
+  private async executeSessionTool(toolCallId: string, call: AssembledToolCall, input: unknown, permissionMode: PermissionMode, workspaceRoot: string,
+    turnId: string, sessionId: string, signal: AbortSignal, planOnly: boolean, imageArtifactIds: string[], inference?: TurnInference): Promise<string> {
+    const settle = (status: "completed" | "failed", text: string) => { this.store.settleToolCall(toolCallId, status, text); return text; };
+    const store = this.options.sessionTools;
+    if (!store) return settle("failed", "Error: session tools are unavailable here");
+    const value = isRecord(input) ? input : {};
+    try {
+      const action = String(value.action ?? "");
+      const name = typeof value.name === "string" ? value.name.trim() : "";
+      if (action === "list") {
+        const variants = store.list(sessionId);
+        return settle("completed", variants.length ? variants.map(describe).join("\n") : "No session tools yet. Define one with action define.");
+      }
+      if (action === "define") {
+        const variant = parseVariant(value, new Set(this.tools.definitions().map((definition) => definition.name)));
+        store.define(sessionId, variant);
+        return settle("completed", `Defined ${describe(variant)}. Run it with {"action":"run","name":"${variant.name}","args":{…}}; it lasts for this session.`);
+      }
+      if (action === "remove") return settle("completed", store.remove(sessionId, name) ? `Removed ${name}.` : `No session tool named ${name}.`);
+      if (action !== "run") throw new Error("action must be define, run, list or remove");
+      const variant = store.get(sessionId, name);
+      if (!variant) throw new Error(`No session tool named ${name || "(none)"}; list shows what's defined`);
+      const args = isRecord(value.args) ? value.args : {};
+      if (variant.kind === "preset") {
+        // The base tool's own checks and approval apply, as if called directly.
+        const result = await this.executeTool(toolCallId, { ...call, name: variant.base, arguments: JSON.stringify({ ...variant.defaults, ...args }) },
+          permissionMode, workspaceRoot, turnId, sessionId, signal, planOnly, imageArtifactIds, inference);
+        return `Ran ${variant.name} (${variant.base} with your defaults).\n${result}`;
+      }
+      checkArgs(variant, args);
+      const scope: Record<string, unknown> = { ...args, steps: [] as unknown[] };
+      const outputs: string[] = [];
+      for (const [index, step] of variant.steps.entries()) {
+        signal.throwIfAborted();
+        const filled = fill(step.args, scope) as Record<string, unknown>;
+        if (typeof filled.offset === "number") filled.offset = Math.max(1, filled.offset);
+        let output: string;
+        try { output = await this.tools.get(step.tool)!.execute(filled, { workspaceRoot, signal, sessionId }); }
+        catch (error) { throw new Error(`step ${index + 1} (${step.tool} ${JSON.stringify(filled)}): ${error instanceof Error ? error.message : String(error)}`); }
+        (scope.steps as unknown[]).push(stepData(output));
+        outputs.push(`## ${index + 1}. ${step.tool} ${JSON.stringify(filled)}\n${output}`);
+      }
+      return settle("completed", clipSessionOutput(outputs.join("\n\n")));
+    } catch (error) {
+      if (signal.aborted) throw error;
+      return settle("failed", `Error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private async executeTool(
     toolCallId: string,
     call: AssembledToolCall,
@@ -489,6 +545,7 @@ export class AgentEngine {
       return result;
     }
     if (call.name === SUBAGENT_TOOL && inference) return this.executeSubagent(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
+    if (call.name === SESSION_TOOLS) return this.executeSessionTool(toolCallId, call, input, permissionMode, workspaceRoot, turnId, sessionId, signal, planOnly, imageArtifactIds, inference);
     // ls, cat, grep… through run_command: answered by the built-in read tool
     // when equivalent (no approval, no host process), or pointed at it.
     if (call.name === "run_command") {
@@ -704,7 +761,7 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; definitions
 export function defaultSystemPrompt(workspaceRoot: string | undefined): string {
   if (!workspaceRoot) return "You are a concise assistant. This legacy session has no workspace or coding tools.";
   return `You are Demesne, a careful coding agent in ${workspaceRoot}.
-Inspect before editing with focused list, search, and read tools. Work in few rounds: put independent reads and searches in the same round (read_files takes up to 8 files), read each file once in a large window instead of paging through small slices, and do not re-read what you already have. Use purpose-built tools, never run_command, for file listing, reading, searching, or qualitative repository measurements; use git_history, not run_command, for commit logs, files at other revisions, blame, and diffs between commits. For qualitative summaries, do not compute line counts, file counts, or disk usage unless requested; stop when evidence is sufficient. Use relative paths. Reads are automatic; edits and commands need approval. run_command executes host argv, not a shell/sandbox. Verify changes and summarize concisely.`;
+Inspect before editing with focused list, search, and read tools. Work in few rounds: put independent reads and searches in the same round (read_files takes up to 8 files), read each file once in a large window instead of paging through small slices, and do not re-read what you already have. Use purpose-built tools, never run_command, for file listing, reading, searching, or qualitative repository measurements; use git_history, not run_command, for commit logs, files at other revisions, blame, and diffs between commits. When you'd repeat the same calls, define your own tool once with session_tools (a preset of a tool's defaults, or a few read-only steps run as one call) and run it by name; it lasts for this session. For qualitative summaries, do not compute line counts, file counts, or disk usage unless requested; stop when evidence is sufficient. Use relative paths. Reads are automatic; edits and commands need approval. run_command executes host argv, not a shell/sandbox. Verify changes and summarize concisely.`;
 }
 
 const qualitativeInspectionTools = new Set(["list_files", "read_file", "read_files", "search_files"]);
@@ -719,6 +776,7 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
   "git_status",
   "git_diff",
   "git_history",
+  "session_tools",
   "ask_user",
   // Read-only. A literal: subagent.ts imports this module, so its constant
   // may not be initialised yet while this set is built.

@@ -3,6 +3,7 @@ import type {
   WorkspaceFileText,
   WorkspaceFileStatus,
 } from "@demesne/protocol";
+import hljs from "highlight.js/lib/common";
 import {
   escapeHTML as h,
   SourceDocument,
@@ -17,6 +18,40 @@ const button = (
   disabled = false,
 ) =>
   `<button type="button" data-file-action="${name}" ${name === "back" ? 'data-action="file-back" data-drive="file-back"' : ""} data-args="${h(JSON.stringify(args))}" ${disabled ? "disabled" : ""}>${text}</button>`;
+
+/// A row in the file list: a file, or a folder that opens and closes.
+type Row =
+  | { kind: "file"; key: string; file: WorkspaceFileInfo; depth: number; prefix: string; name: string; right: string; tone: string }
+  | { kind: "dir"; key: string; path: string; depth: number; name: string; open: boolean; right: string; tone: string; changed: boolean }
+  | { kind: "label"; key: string; text: string; right?: string };
+
+const LANGUAGES: Record<string, [string, string]> = {
+  ts: ["TypeScript", "typescript"], tsx: ["TypeScript", "typescript"], mts: ["TypeScript", "typescript"], cts: ["TypeScript", "typescript"],
+  js: ["JavaScript", "javascript"], jsx: ["JavaScript", "javascript"], mjs: ["JavaScript", "javascript"], cjs: ["JavaScript", "javascript"],
+  json: ["JSON", "json"], md: ["Markdown", "markdown"], css: ["CSS", "css"], html: ["HTML", "xml"], svg: ["SVG", "xml"], xml: ["XML", "xml"],
+  rs: ["Rust", "rust"], py: ["Python", "python"], sh: ["Shell", "bash"], bash: ["Shell", "bash"], zsh: ["Shell", "bash"],
+  toml: ["TOML", "ini"], yml: ["YAML", "yaml"], yaml: ["YAML", "yaml"], swift: ["Swift", "swift"], go: ["Go", "go"],
+  java: ["Java", "java"], kt: ["Kotlin", "kotlin"], c: ["C", "c"], h: ["C", "c"], cpp: ["C++", "cpp"], rb: ["Ruby", "ruby"], sql: ["SQL", "sql"],
+};
+const language = (path: string) => LANGUAGES[path.split(".").pop()?.toLowerCase() ?? ""];
+/// Highlighted HTML split into lines: spans open across a newline are
+/// closed at its end and reopened on the next line.
+function splitHighlighted(html: string) {
+  const lines: string[] = [], open: string[] = [];
+  let line = "";
+  for (const [, start, end, newline, text] of html.matchAll(/(<span[^>]*>)|(<\/span>)|(\n)|([^<\n]+)/g)) {
+    if (start) { open.push(start); line += start; }
+    else if (end) { open.pop(); line += end; }
+    else if (newline) { lines.push(line + "</span>".repeat(open.length)); line = open.join(""); }
+    else line += text!.replace(/\r/g, "");
+  }
+  lines.push(line);
+  return lines;
+}
+const ago = (iso: string) => {
+  const seconds = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  return seconds < 60 ? "just now" : seconds < 3600 ? `${Math.floor(seconds / 60)} min ago` : seconds < 86400 ? `${Math.floor(seconds / 3600)} h ago` : new Date(iso).toLocaleDateString();
+};
 
 type Callbacks = {
   request<T>(method: string, args?: Record<string, unknown>): Promise<T>;
@@ -52,6 +87,12 @@ export class FilesView {
   private renderedRange = "";
   private frame = 0;
   private listScroll = 0;
+  /// Folders opened in the tree (`tree:apps/graphics`) and new-file groups
+  /// opened under Changed (`changed:experiments`).
+  private openFolders = new Set<string>();
+  private visible: Row[] = [];
+  private highlighted: string[] | null = null;
+  private marks = new Map<number, string>();
 
   constructor(private callbacks: Callbacks) {
     this.element.className = "files-view";
@@ -108,6 +149,7 @@ export class FilesView {
     if (key === this.filesKey) return;
     this.filesKey = key;
     this.files = files;
+    this.get<HTMLInputElement>("#file-search")?.setAttribute("placeholder", `Search ${files.length.toLocaleString()} files`);
     if (!this.file && !this.loading) this.renderList();
   }
   setActive(active: boolean) {
@@ -158,6 +200,19 @@ export class FilesView {
       this.file = file;
       this.source =
         file.content === null ? null : new SourceDocument(file.content);
+      this.highlighted = null;
+      const lang = language(file.path)?.[1];
+      if (this.source && lang && file.content!.length <= 400_000 && hljs.getLanguage(lang)) {
+        try {
+          const lines = splitHighlighted(hljs.highlight(file.content!, { language: lang, ignoreIllegals: true }).value);
+          if (lines.length === this.source.lines.length) this.highlighted = lines;
+        } catch { /* shown as plain text */ }
+      }
+      // The margin: lines added, changed, or with something removed after them.
+      this.marks = new Map();
+      for (const [first, last] of file.changes?.added ?? []) for (let line = first; line <= last && line - first < 50_000; line++) this.marks.set(line, "add");
+      for (const [first, last] of file.changes?.modified ?? []) for (let line = first; line <= last && line - first < 50_000; line++) this.marks.set(line, "mod");
+      for (const line of file.changes?.removed ?? []) if (!this.marks.has(Math.max(1, line))) this.marks.set(Math.max(1, line), "del");
       this.search = reload ? this.search : "";
       this.matches = this.source?.search(this.search) ?? [];
       this.match = this.matches.length ? 0 : -1;
@@ -192,15 +247,88 @@ export class FilesView {
       terms.every((term) => file.path.toLowerCase().includes(term)),
     );
   }
+  /// Rows you can move to with the arrow keys (labels are skipped).
   private rows() {
-    const list = this.filtered();
-    return this.query.trim()
-      ? list
-      : [...list.filter((f) => f.status?.trim()), ...list];
+    return this.visible.filter((row) => row.kind !== "label");
+  }
+  /// The list as rows: changes first (whole new folders grouped), then the
+  /// folder tree; while searching, matches grouped under their folder.
+  private model(): Row[] {
+    const rows: Row[] = [];
+    const fileRow = (file: WorkspaceFileInfo, depth: number, withPrefix: boolean, key: string): Row => {
+      const split = file.path.lastIndexOf("/") + 1, status = file.status?.trim() ?? "";
+      const right = file.additions !== undefined || file.deletions !== undefined
+        ? `<span class="add">+${file.additions ?? 0}</span> <span class="del">−${file.deletions ?? 0}</span>`
+        : status === "?" || status === "A" ? "new" : status === "D" ? "deleted" : "";
+      return { kind: "file", key, file, depth, prefix: withPrefix ? file.path.slice(0, split) : "", name: file.path.slice(split), right, tone: status === "?" || status === "A" ? "add" : status === "D" ? "del" : status ? "mod" : "" };
+    };
+    if (this.query.trim()) {
+      const groups = new Map<string, WorkspaceFileInfo[]>();
+      for (const file of this.filtered().slice(0, 500)) {
+        const folder = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : "";
+        groups.set(folder, [...(groups.get(folder) ?? []), file]);
+      }
+      for (const [folder, files] of groups) {
+        rows.push({ kind: "label", key: `group:${folder}`, text: folder || "top level" });
+        for (const file of files) rows.push(fileRow(file, 1, false, `search:${file.path}`));
+      }
+      return rows;
+    }
+    // Folders: how many files each holds, and how many of them are new.
+    const total = new Map<string, number>(), untracked = new Map<string, number>(), changed = new Set<string>();
+    for (const file of this.files) {
+      const parts = file.path.split("/");
+      for (let depth = 1; depth < parts.length; depth++) {
+        const folder = parts.slice(0, depth).join("/");
+        total.set(folder, (total.get(folder) ?? 0) + 1);
+        if (file.status?.trim() === "?") untracked.set(folder, (untracked.get(folder) ?? 0) + 1);
+        if (file.status?.trim()) changed.add(folder);
+      }
+    }
+    const allNew = (folder: string) => (total.get(folder) ?? 0) >= 2 && untracked.get(folder) === total.get(folder);
+    const edited = this.files.filter((file) => file.status?.trim() && file.status.trim() !== "?");
+    const fresh = this.files.filter((file) => file.status?.trim() === "?");
+    if (edited.length || fresh.length) {
+      rows.push({ kind: "label", key: "label:changed", text: "Changed", right: [edited.length ? `${edited.length} edited` : "", fresh.length ? `${fresh.length} new` : ""].filter(Boolean).join(" · ") });
+      for (const file of edited) rows.push(fileRow(file, 0, true, `changed:${file.path}`));
+      // A folder of nothing but new files is one row, not one per file.
+      const grouped = new Set<string>();
+      for (const file of fresh) {
+        const parts = file.path.split("/");
+        const folder = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/")).find(allNew);
+        if (folder) {
+          if (grouped.has(folder)) continue;
+          grouped.add(folder);
+          const key = `changed:${folder}`, open = this.openFolders.has(key);
+          rows.push({ kind: "dir", key, path: folder, depth: 0, name: `${folder}/`, open, right: `${total.get(folder)} new files`, tone: "add", changed: false });
+          if (open) for (const inner of fresh.filter((item) => item.path.startsWith(`${folder}/`))) rows.push(fileRow(inner, 1, false, `changed:${inner.path}`));
+        } else rows.push(fileRow(file, 0, true, `changed:${file.path}`));
+      }
+    }
+    rows.push({ kind: "label", key: "label:all", text: "All files", right: this.files.length.toLocaleString() });
+    const walk = (folder: string, depth: number) => {
+      const prefix = folder ? `${folder}/` : "";
+      const folders = new Set<string>(), files: WorkspaceFileInfo[] = [];
+      for (const file of this.files) {
+        if (!file.path.startsWith(prefix)) continue;
+        const rest = file.path.slice(prefix.length), slash = rest.indexOf("/");
+        if (slash >= 0) folders.add(rest.slice(0, slash));
+        else files.push(file);
+      }
+      for (const name of [...folders].sort((a, b) => a.localeCompare(b))) {
+        const path = prefix + name, key = `tree:${path}`, open = this.openFolders.has(key);
+        const wholeNew = allNew(path);
+        rows.push({ kind: "dir", key, path, depth, name, open, right: wholeNew ? `${total.get(path)} new` : String(total.get(path) ?? 0), tone: wholeNew ? "add" : "", changed: !wholeNew && changed.has(path) });
+        if (open) walk(path, depth + 1);
+      }
+      for (const file of files) rows.push(fileRow(file, depth, false, `tree:${file.path}`));
+    };
+    walk("", 0);
+    return rows;
   }
   private render() {
     if (!this.file) {
-      this.element.innerHTML = `<div class="panel-filter file-filter"><input id="file-search" aria-label="Search files" placeholder="Search filename or path…" value="${h(this.query)}">${button("refresh", "↻", {}, Boolean(this.loading))}</div><div class="files-list" tabindex="0" aria-label="Workspace files"></div>`;
+      this.element.innerHTML = `<div class="panel-filter file-filter"><label class="file-search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="file-search" aria-label="Search files" placeholder="Search ${this.files.length.toLocaleString()} files" value="${h(this.query)}" autocomplete="off"></label>${button("refresh", "↻", {}, Boolean(this.loading)).replace("<button ", '<button aria-label="Refresh the file list" ')}</div><div class="files-list" tabindex="0" aria-label="Workspace files"></div><div class="files-keys">↑↓ move · → open folder · ↵ open · type to search</div>`;
       this.renderList();
       const list = this.get(".files-list");
       if (list) list.scrollTop = this.listScroll;
@@ -208,8 +336,8 @@ export class FilesView {
         list!.innerHTML = `<div class="empty">Opening ${h(this.loading)}…</div>`;
       return;
     }
-    const file = this.file;
-    this.element.innerHTML = `<div class="file-toolbar"><div class="panel-actions">${button("back", "‹ Files")}${button("reload", "↻ Reload")}${button("insert", "Insert @path")}</div><div class="file-path" title="${h(file.path)}">${h(file.path)}</div><div class="file-status" role="status"></div></div>${this.source ? `<div class="source-tools"><div class="source-find"><input id="source-search" aria-label="Find in file" placeholder="Find in file…" value="${h(this.search)}"><span id="source-match-count" class="muted"></span>${button("previous", "↑")}${button("next", "↓")}</div><div class="source-jump"><label for="source-line">Line</label><input id="source-line" aria-label="Go to line" inputmode="numeric" placeholder="1–${this.source.lines.length}">${button("go", "Go")}<span class="muted">${this.source.lines.length.toLocaleString()} lines</span></div></div><div class="source-viewport" tabindex="0" aria-label="Source code"><div class="source-space"><div class="source-window"></div></div></div><div class="source-selection"></div>` : `<div class="empty">${h(file.reason ?? "Text unavailable")}</div>`}`;
+    const file = this.file, parts = file.path.split("/");
+    this.element.innerHTML = `<div class="file-head"><div class="file-title">${button("back", "‹").replace("<button ", '<button aria-label="Back to files" class="file-icon" ')}<span class="file-path" title="${h(file.path)}">${parts.slice(0, -1).map((part) => `<span class="muted">${h(part)} / </span>`).join("")}<b>${h(parts.at(-1)!)}</b></span>${button("reload", "↻").replace("<button ", '<button aria-label="Reload from disk" class="file-icon" ')}${button("insert", "@").replace("<button ", '<button aria-label="Mention in your message" class="file-icon" ')}</div><div class="file-status" role="status"></div></div>${this.source ? `<div class="source-tools"><label class="source-find"><input id="source-search" aria-label="Find in file" placeholder="Find in file" value="${h(this.search)}" autocomplete="off"><span id="source-match-count" class="muted"></span>${button("previous", "↑").replace("<button ", '<button aria-label="Previous match" ')}${button("next", "↓").replace("<button ", '<button aria-label="Next match" ')}</label><label class="source-jump"><span class="muted">Line</span><input id="source-line" aria-label="Go to line" inputmode="numeric" placeholder="1–${this.source.lines.length}" autocomplete="off"></label></div><div class="source-viewport" tabindex="0" aria-label="Source code"><div class="source-space"><div class="source-window"></div></div></div><div class="source-selection"></div>` : `<div class="empty">${h(file.reason ?? "Text unavailable")}</div>`}`;
     this.renderedRange = "";
     this.renderStatus();
     this.renderSelection();
@@ -219,30 +347,48 @@ export class FilesView {
   private renderList() {
     const list = this.get(".files-list");
     if (!list || this.file || this.loading) return;
-    const filtered = this.filtered(),
-      changed = filtered.filter((f) => f.status?.trim());
+    this.visible = this.model();
     const rows = this.rows();
     this.index = Math.min(this.index, Math.max(0, rows.length - 1));
+    const selected = rows[this.index]?.key;
+    const terms = this.query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const mark = (text: string) => {
+      if (!terms.length) return h(text);
+      const lower = text.toLowerCase(), hit = new Array<boolean>(text.length).fill(false);
+      for (const term of terms) for (let at = lower.indexOf(term); at >= 0; at = lower.indexOf(term, at + 1)) hit.fill(true, at, at + term.length);
+      let html = "";
+      for (let i = 0; i < text.length; ) {
+        let j = i;
+        while (j < text.length && hit[j] === hit[i]) j++;
+        html += hit[i] ? `<mark>${h(text.slice(i, j))}</mark>` : h(text.slice(i, j));
+        i = j;
+      }
+      return html;
+    };
     let index = 0;
-    const render = (files: WorkspaceFileInfo[]) =>
-      files
-        .map((file) => {
-          const split = file.path.lastIndexOf("/") + 1;
-          return `<button type="button" class="panel-row ${index === this.index ? "selected" : ""}" data-file-action="open" data-action="read-file" data-drive="${h(file.path)}" data-args="${h(JSON.stringify({ path: file.path, index: index++ }))}"><span class="${file.status === "M" ? "amber" : file.status === "D" ? "danger" : "success"}">${h(file.status ?? " ")}</span><span class="name"><span class="muted">${h(file.path.slice(0, split))}</span>${h(file.path.slice(split))}</span><span class="right">${file.byteLength == null ? "" : file.byteLength > 1000 ? `${(file.byteLength / 1000).toFixed(1)}k` : file.byteLength}</span></button>`;
-        })
-        .join("");
-    list.innerHTML = `${!this.query.trim() && changed.length ? `<div class="panel-section">CHANGED</div>${render(changed)}` : ""}<div class="panel-section">${this.query.trim() ? `${filtered.length} MATCHING FILE${filtered.length === 1 ? "" : "S"}` : "ALL FILES"}</div>${render(filtered)}${!filtered.length ? '<div class="empty">No matching files.</div>' : ""}`;
+    list.innerHTML = this.visible.map((row) => {
+      if (row.kind === "label") return `<div class="panel-section files-section"><span>${h(row.text)}</span>${row.right ? `<span>${h(row.right)}</span>` : ""}</div>`;
+      const at = index++, chosen = row.key === selected ? "selected" : "";
+      const indent = `style="--depth:${row.depth}"`;
+      if (row.kind === "dir")
+        return `<button type="button" class="panel-row file-row dir ${chosen}" ${indent} data-file-action="toggle" data-drive="${h(row.key)}" data-args="${h(JSON.stringify({ key: row.key, index: at }))}" aria-expanded="${row.open}"><span class="twisty">${row.open ? "▾" : "▸"}</span><span class="name ${row.tone}">${h(row.name)}</span>${row.changed ? '<span class="dot" aria-label="has changes">•</span>' : ""}<span class="right ${row.tone}">${h(row.right)}</span></button>`;
+      const status = row.file.status?.trim() ?? "";
+      return `<button type="button" class="panel-row file-row ${chosen}" ${indent} data-file-action="open" data-action="read-file" data-drive="${h(row.file.path)}" data-args="${h(JSON.stringify({ path: row.file.path, index: at }))}"><span class="file-mark ${row.tone}">${h(status === "?" ? "+" : status)}</span><span class="name">${row.prefix ? `<span class="muted">${h(row.prefix)}</span>` : ""}${mark(row.name)}</span><span class="right">${row.right}</span></button>`;
+    }).join("") + (this.query.trim() && !rows.length ? '<div class="empty">No matching files.</div>' : "");
     this.notify();
   }
   private renderStatus() {
     const node = this.get(".file-status");
     if (!node || !this.file) return;
-    const text = this.loading
-      ? "Reloading…"
-      : this.stale ||
-        this.statusError ||
-        `Read from disk${this.file.modifiedAt ? ` · saved ${new Date(this.file.modifiedAt).toLocaleTimeString()}` : ""}`;
-    node.textContent = text;
+    const file = this.file, changes = file.changes;
+    const facts = [
+      language(file.path)?.[0],
+      this.source ? `${this.source.lines.length.toLocaleString()} lines` : "",
+      changes?.untracked ? '<span class="add">new file</span>' : changes ? `<span class="add">+${changes.additions}</span> <span class="del">−${changes.deletions}</span> since last commit` : "",
+      file.modifiedAt ? `saved ${ago(file.modifiedAt)}` : "",
+    ].filter(Boolean);
+    const warning = this.loading ? "Reloading…" : this.stale || this.statusError;
+    node.innerHTML = warning ? h(warning) : facts.join(" · ");
     node.classList.toggle("amber", Boolean(this.stale || this.statusError));
   }
   private async checkStatus() {
@@ -282,7 +428,7 @@ export class FilesView {
     if (!node) return;
     const start = Math.min(this.anchor, this.cursor),
       end = Math.max(this.anchor, this.cursor);
-    node.innerHTML = `<span class="muted">${this.selected ? `Lines ${start}${end === start ? "" : `–${end}`} · Shift-click to extend` : "Click a line number · Shift-click for a range"}</span>${button("attach", "Attach lines", {}, !this.selected)}`;
+    node.innerHTML = `<span class="muted">${this.selected ? `${end === start ? `Line ${start}` : `Lines ${start}–${end}`} selected · Shift-click to extend` : "Click a line number · Shift-click for a range"}</span>${button("attach", "Add to message", {}, !this.selected)}`;
   }
   private renderMatches() {
     const node = this.get("#source-match-count");
@@ -334,37 +480,54 @@ export class FilesView {
       high = Math.max(this.anchor, this.cursor),
       needle = this.search.toLowerCase();
     const current = this.matches[this.match];
-    const highlight = (text: string, line: number) => {
-      if (!needle) return h(text);
-      const lower = text.toLowerCase();
-      let at = 0,
-        html = "",
-        count = 0;
-      for (
-        let found = lower.indexOf(needle);
-        found >= 0 && count++ < 500;
-        found = lower.indexOf(needle, at)
-      ) {
-        html +=
-          h(text.slice(at, found)) +
-          `<mark class="${current?.line === line && current.column === found + 1 ? "current" : ""}">${h(text.slice(found, found + needle.length))}</mark>`;
-        at = found + needle.length;
-      }
-      return html + h(text.slice(at));
-    };
     window.innerHTML = this.source.lines
       .slice(start, end)
       .map((text, i) => {
-        const line = start + i + 1;
-        return `<div class="source-row ${this.selected && line >= low && line <= high ? "selected" : ""}" data-line="${line}"><button class="source-number" type="button" aria-label="Select line ${line}" data-file-action="line" data-args='{"line":${line}}'>${line}</button><code>${highlight(text.replace(/\r$/, ""), line) || " "}</code></div>`;
+        const line = start + i + 1, mark = this.marks.get(line);
+        return `<div class="source-row ${this.selected && line >= low && line <= high ? "selected" : ""} ${mark ? `change-${mark}` : ""}" data-line="${line}"><button class="source-number" type="button" aria-label="Select line ${line}" data-file-action="line" data-args='{"line":${line}}'>${line}</button><code>${this.highlighted?.[line - 1] ?? h(text.replace(/\r$/, ""))}</code></div>`;
       })
       .join("");
+    // Find matches, marked inside the highlighted text without disturbing it.
+    if (needle)
+      for (const row of window.querySelectorAll<HTMLElement>(".source-row")) {
+        const line = Number(row.dataset.line);
+        if (!this.source.lines[line - 1]!.toLowerCase().includes(needle)) continue;
+        const walker = document.createTreeWalker(row.querySelector("code")!, NodeFilter.SHOW_TEXT);
+        const nodes: Text[] = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+        let offset = 0;
+        for (const node of nodes) {
+          const text = node.data, lower = text.toLowerCase(), base = offset;
+          offset += text.length;
+          const parts: Node[] = [];
+          let at = 0;
+          for (let found = lower.indexOf(needle); found >= 0; found = lower.indexOf(needle, found + needle.length)) {
+            parts.push(document.createTextNode(text.slice(at, found)));
+            const markNode = document.createElement("mark");
+            if (current?.line === line && current.column === base + found + 1) markNode.className = "current";
+            markNode.textContent = text.slice(found, found + needle.length);
+            parts.push(markNode);
+            at = found + needle.length;
+          }
+          if (!parts.length) continue;
+          parts.push(document.createTextNode(text.slice(at)));
+          node.replaceWith(...parts);
+        }
+      }
     this.notify();
   }
   async action(name: string, args: Record<string, any> = {}, shift = false) {
     if (name === "open") {
       this.index = args.index ?? this.index;
       return this.open({ path: args.path, line: 1 });
+    }
+    if (name === "toggle") {
+      const key = String(args.key);
+      this.index = args.index ?? this.index;
+      if (this.openFolders.has(key)) this.openFolders.delete(key);
+      else this.openFolders.add(key);
+      this.renderList();
+      return;
     }
     if (name === "refresh") {
       await this.callbacks.request("files");
@@ -446,8 +609,16 @@ export class FilesView {
         target.id === "panel" ||
         target.classList.contains("files-list"))
     ) {
-      const file = this.rows()[this.index];
-      if (file) void this.open({ path: file.path, line: 1 });
+      const row = this.rows()[this.index];
+      if (row?.kind === "file") void this.open({ path: row.file.path, line: 1 });
+      else if (row?.kind === "dir") void this.action("toggle", { key: row.key, index: this.index });
+    } else if (
+      ["arrowright", "arrowleft"].includes(key) &&
+      !this.file &&
+      !input
+    ) {
+      const row = this.rows()[this.index];
+      if (row?.kind === "dir" && row.open !== (key === "arrowright")) void this.action("toggle", { key: row.key, index: this.index });
     } else if (
       ["arrowdown", "arrowup"].includes(key) &&
       !this.file &&
@@ -509,6 +680,9 @@ export class FilesView {
       lines: this.source?.lines.length,
       scroll: this.get(".source-viewport")?.scrollTop,
       listCount: this.filtered().length,
+      rows: this.visible.slice(0, 60).map((row) => row.kind === "label" ? `# ${row.text}` : row.kind === "dir" ? `${row.open ? "▾" : "▸"} ${row.name} (${row.right})` : `${row.file.path}${row.right ? ` ${row.right.replace(/<[^>]+>/g, "")}` : ""}`),
+      changeMarks: Object.fromEntries(this.marks),
+      highlighted: Boolean(this.highlighted),
     };
   }
 }

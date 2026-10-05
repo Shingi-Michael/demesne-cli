@@ -1654,12 +1654,9 @@ function renderPanels() {
     body = "",
     footer = "";
   if (pane === "files") {
-    const changed = state.files.filter((file) => file.status?.trim()),
-      images = state.artifacts.filter((image) => image.source.name !== "reference_import");
-    header = panelHeader(
-      "Files",
-      [state.workspace.split("/").pop(), `${state.files.length} files`, changed.length ? `${changed.length} changed` : ""].filter(Boolean).join(" · "),
-    );
+    const images = state.artifacts.filter((image) => image.source.name !== "reference_import");
+    // Counts live in the search field and the list's own sections.
+    header = panelHeader("Files", state.workspace.split("/").pop() ?? "");
     body = (images.length ? `<div class="panel-actions">${btn("panel", `Images ${images.length} ›`, { name: "preview" }, "", true)}</div>` : "") + '<div id="files-mount"></div>';
   }
 

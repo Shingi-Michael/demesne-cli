@@ -145,11 +145,15 @@ export interface ModelToolCall {
   arguments: string;
 }
 
-export interface WorkspaceFileInfo { path: string; byteLength: number | null; status: string | null }
+export interface WorkspaceFileInfo { path: string; byteLength: number | null; status: string | null; additions?: number; deletions?: number }
+/// Lines changed since the last commit, for the file viewer's margin.
+/// Ranges are inclusive line numbers in the current text; `removed` are the
+/// lines after which something was deleted (0: before the first line).
+export interface WorkspaceFileChanges { added: [number, number][]; modified: [number, number][]; removed: number[]; additions: number; deletions: number; untracked?: boolean }
 /// A workspace file's text for the file viewer; `content` is null with a
 /// `reason` when it cannot be shown (protected, binary, too large, missing).
 export interface WorkspaceFileStatus { path: string; byteLength: number | null; revision?: string; modifiedAt?: string; reason?: string }
-export interface WorkspaceFileText extends WorkspaceFileStatus { content: string | null }
+export interface WorkspaceFileText extends WorkspaceFileStatus { content: string | null; changes?: WorkspaceFileChanges }
 
 /// Opaque Responses items, retained for stateless tool and reasoning continuity.
 export interface ResponsesState { accountId: string; model: string; output: Record<string, unknown>[] }

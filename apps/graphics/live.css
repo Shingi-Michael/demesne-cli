@@ -2780,3 +2780,66 @@ button:disabled {
 .breakage-actions button:disabled { opacity: 0.6; }
 .breakage-pulse { animation: breakage-pulse 1.4s ease-in-out infinite; }
 @keyframes breakage-pulse { 50% { opacity: 0.35; } }
+
+/* Files: a tree with changes first, search grouped by folder, and a file
+   view with one header row, highlighting and change marks. */
+.file-filter { padding: 4px 16px 10px; }
+.file-search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--borderBright);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--muted);
+}
+.file-search:focus-within, .source-find:focus-within, .source-jump:focus-within {
+  border-color: var(--electric);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--electric) 15%, transparent);
+}
+.panel-filter .file-search input { border: 0; background: transparent; padding: 6px 0; outline: none; }
+.files-view input:focus { outline: none; }
+.files-section { padding: 12px 16px 4px; text-transform: none; }
+.file-row { padding-left: calc(16px + var(--depth, 0) * 18px); gap: 8px; }
+.file-row .twisty { width: 12px; flex: none; color: var(--muted); }
+.file-row .file-mark { width: 12px; flex: none; text-align: center; }
+.file-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-row.dir .name { color: var(--paper); }
+.file-row .right { color: var(--muted); white-space: nowrap; }
+.file-row .add, .file-status .add { color: var(--citron); }
+.file-row .del, .file-status .del { color: var(--signal); }
+.file-row .mod { color: var(--electric); }
+.file-row .dot { color: var(--electric); }
+.file-row mark { background: color-mix(in srgb, var(--electric) 24%, transparent); color: var(--strong); border-radius: 2px; }
+.files-keys { flex: none; padding: 8px 16px; border-top: 1px solid var(--rule); color: var(--muted); }
+.file-head { flex: none; padding: 2px 16px 10px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 2px; }
+.file-title { display: flex; align-items: center; gap: 10px; }
+.file-title .file-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.file-title .file-path b { color: var(--strong); font-weight: 500; }
+.file-icon { color: var(--secondary); padding: 0 4px; font-size: 14px; }
+.file-icon:hover { color: var(--strong); }
+.file-head .file-status { padding: 0 0 0 22px; }
+.source-tools { flex-direction: row; padding: 8px 16px; }
+.source-find, .source-jump {
+  border: 1px solid var(--borderBright);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 0 8px;
+}
+.source-find { flex: 1; min-width: 0; }
+.source-tools .source-find input, .source-tools .source-jump input { border: 0; background: transparent; padding: 3px 0; }
+.source-jump input { width: 64px; }
+.source-row mark { background: color-mix(in srgb, var(--electric) 24%, transparent); color: var(--strong); }
+.source-row mark.current { background: var(--electric); color: var(--ink); }
+.source-row.change-add .source-number { box-shadow: inset 3px 0 0 var(--citron); }
+.source-row.change-mod .source-number { box-shadow: inset 3px 0 0 var(--electric); }
+.source-row.change-del .source-number { box-shadow: inset 0 -2px 0 var(--signal); }
+.source-selection button:not(:disabled) {
+  border: 1px solid var(--composerRestoredBorder);
+  background: var(--menuSelection);
+  color: var(--strong);
+  border-radius: 4px;
+  padding: 1px 10px;
+}

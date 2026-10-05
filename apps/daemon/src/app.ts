@@ -15,9 +15,12 @@ import {
   parseUndoSessionRequest,
   parseUpdateSessionRequest,
   ProtocolValidationError,
-  parseDriveRequest, parseDriveNextRequest, parseDeleteSessionsRequest,
+  parseDriveRequest, parseDriveNextRequest, parseDeleteSessionsRequest, parseDriveAlertsRequest, parseDriveFixRequest,
   type DeleteSessionsResponse,
   type SessionCleanupResponse,
+  type DriveAlertsResponse,
+  type DriveFixAction,
+  type DriveFixesResponse,
   type ApiErrorBody,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
@@ -50,6 +53,7 @@ import { collectDriveSignals } from "./drive-signals.ts";
 import { SessionToolStore } from "./session-tools.ts";
 import { DriveNextCache, proposeNext } from "./drive-next.ts";
 import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
+import { DriveFixes } from "./drive-fixes.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
@@ -115,6 +119,8 @@ export function createDaemonApp(options: {
   agent?: AgentConfig;
   /// Persists the sub-agent default chosen at runtime (null clears it).
   saveSubagentModel?: (model: string | null) => void;
+  /// Where breakage fixes get their git worktrees (default: beside the data directory).
+  worktreeRoot?: string;
 }): DaemonApp {
   if (options.images && Object.values(options.images).some((value) => value !== undefined)
     && (!options.images.url || !options.images.model)) throw new Error("Image generation requires both images.url and images.model");
@@ -123,6 +129,43 @@ export function createDaemonApp(options: {
   const driveNextCache = new DriveNextCache(join(dirname(options.databasePath), "drive-next"));
   const workspaceTrust = new WorkspaceTrust(join(dirname(options.databasePath), "trusted-workspaces.json"));
   const driveNextRuns = new Map<string, Promise<unknown>>();
+  // Breakage fixes: a coding turn in its own worktree, applied only on request.
+  const driveFixes = new DriveFixes(join(dirname(options.databasePath), "drive-fixes.json"), options.worktreeRoot ?? join(dirname(dirname(options.databasePath)), ".demesne-worktrees"), {
+    startSession: (title, workspace) => {
+      const root = canonicalWorkspace(workspace);
+      // A worktree of a trusted project is the same project's files.
+      workspaceTrust.trust(root);
+      return store.createSession(title, root).session.id;
+    },
+    startTurn: (sessionId, prompt) => {
+      const inference = snapshotTurnInference(processor, true);
+      const { turn } = store.createTurn(sessionId, prompt, "allow", true, false);
+      return { turnId: turn.id, done: queueTurn(turn, inference) };
+    },
+    turn: (turnId) => store.getTurn(turnId),
+    cancel: (turnId) => {
+      const controller = activeControllers.get(turnId);
+      if (!controller) return;
+      store.cancelTurn(turnId);
+      controller.abort(new DOMException("Turn cancelled", "AbortError"));
+      permissions.cancelTurn(turnId, controller.signal.reason);
+      questions.cancelTurn(turnId, controller.signal.reason);
+    },
+    commands: (sessionId) => store.commandsForSession(sessionId),
+    activity: (turnId) => {
+      const rows = store.database.query("SELECT payload FROM events WHERE turn_id = ? AND type = 'tool.call_requested' ORDER BY id DESC").all(turnId) as { payload: string }[];
+      let last: string | null = null;
+      try {
+        const payload = JSON.parse(rows[0]?.payload ?? "null") as { name?: string; arguments?: string } | null;
+        if (payload?.name) {
+          const args = JSON.parse(payload.arguments || "{}") as Record<string, unknown>;
+          const detail = Array.isArray(args.argv) ? args.argv.join(" ") : String(args.path ?? args.query ?? "");
+          last = `${payload.name}${detail ? ` ${detail}` : ""}`.slice(0, 120);
+        }
+      } catch { /* a partial call */ }
+      return { steps: rows.length, last };
+    },
+  });
   const replay = new SessionReplay(store);
   const processor: TurnProcessor = options.processor ?? new PlaceholderTurnProcessor();
   const allowlist = new ConfigAllowlist(options.allowlistPath ?? null);
@@ -188,7 +231,7 @@ export function createDaemonApp(options: {
   let closing = false;
   let closePromise: Promise<void> | undefined;
 
-  function queueTurn(turn: Turn, inference: TurnInference): void {
+  function queueTurn(turn: Turn, inference: TurnInference): Promise<void> {
     const controller = new AbortController();
     activeControllers.set(turn.id, controller);
     const task = runTurn(turn, inference, controller.signal).finally(() => {
@@ -196,6 +239,7 @@ export function createDaemonApp(options: {
       activeControllers.delete(turn.id);
     });
     activeTurns.add(task);
+    return task;
   }
 
   async function runTurn(turn: Turn, inference: TurnInference, signal: AbortSignal): Promise<void> {
@@ -374,6 +418,32 @@ export function createDaemonApp(options: {
         try { return json(await run); }
         catch (error) { return apiError("provider_error", error instanceof Error ? error.message : "Could not propose next work", 502); }
         finally { driveNextRuns.delete(pendingKey); }
+      }
+
+      // Breakage alerts: urgent signals only, no model call, cheap to poll.
+      if (request.method === "POST" && url.pathname === "/v1/drive/alerts") {
+        const body = parseDriveAlertsRequest(await readJson(request));
+        if (!store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace)) return apiError("not_found", "Unknown workspace", 404);
+        const { signals } = await collectDriveSignals(store.database, body.workspace, { gh: body.gh === true, urgentOnly: true });
+        const response: DriveAlertsResponse = { workspace: body.workspace, signals: signals.filter((signal) => signal.urgent), checkedAt: new Date().toISOString() };
+        return json(response);
+      }
+
+      // Breakage fixes in worktrees: list, start, and apply / open a PR / discard.
+      if (request.method === "GET" && url.pathname === "/v1/drive/fixes") {
+        const response: DriveFixesResponse = { fixes: driveFixes.list(url.searchParams.get("workspace") ?? "") };
+        return json(response);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/drive/fixes") {
+        const body = parseDriveFixRequest(await readJson(request));
+        if (!store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace)) return apiError("not_found", "Unknown workspace", 404);
+        if (!workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
+        try { return json({ fix: await driveFixes.start(body.workspace, body.signals) }, 201); }
+        catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start the fix", 409); }
+      }
+      if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "drive" && path[2] === "fixes" && ["apply", "pr", "discard"].includes(path[4]!)) {
+        try { return json({ fix: await driveFixes.act(path[3]!, path[4] as DriveFixAction) }); }
+        catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not finish the fix", 409); }
       }
 
       if (request.method === "POST" && url.pathname === "/v1/drive/decide") {

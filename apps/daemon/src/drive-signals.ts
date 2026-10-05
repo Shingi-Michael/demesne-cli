@@ -68,7 +68,10 @@ export async function collectDriveSignals(database: Database, workspace: string,
   }
   for (const [key, record] of latest) {
     if (record.status !== "failed") continue;
-    const tail = `${record.stderr}\n${record.stdout}`.trim().split("\n").filter(Boolean).slice(-3).join(" | ");
+    // The lines that say what failed, not the runner's closing summary.
+    const lines = `${record.stderr}\n${record.stdout}`.split("\n").map((line) => line.trim()).filter(Boolean);
+    const failures = lines.filter((line) => /\b(fail(ed|ure|s)?|error|expected|received|assert\w*)\b|✗|✕/i.test(line) && !/\b0 fail/i.test(line));
+    const tail = (failures.length ? failures.slice(0, 3) : lines.slice(-3)).join(" | ");
     add({ id: `check:${createHash("sha1").update(key).digest("hex").slice(0, 8)}`, source: "checks", urgent: true,
       title: `Check failing: ${record.argv.map((part) => part.split("/").pop()).join(" ")}`,
       detail: `Latest run exit ${record.exitCode ?? "—"} at ${record.completedAt ?? "?"}. ${tail}` });

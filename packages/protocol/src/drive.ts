@@ -86,6 +86,29 @@ export interface DriveNextResponse {
   workspace: string; proposals: DriveProposal[]; signals: DriveSignal[];
   fingerprint: string; generatedAt: string; model: string | null; cached: boolean;
 }
+/// Breakage alerts: the urgent signals only (failing checks, red CI, PRs with
+/// failing CI), collected without a model call so they can be polled.
+export interface DriveAlertsRequest { workspace: string; gh?: boolean }
+export interface DriveAlertsResponse { workspace: string; signals: DriveSignal[]; checkedAt: string }
+/// A fix for a breakage, made in its own git worktree and branch so the
+/// user's checkout is untouched until they apply it.
+export type DriveFixStatus = "starting" | "running" | "ready" | "failed" | "applied" | "pr" | "discarded";
+export interface DriveFix {
+  id: string; workspace: string; title: string; signals: DriveSignal[];
+  branch: string; path: string; base: string;
+  sessionId: string | null; turnId: string | null;
+  status: DriveFixStatus; startedAt: string; finishedAt: string | null;
+  /// While running: tool calls so far and the latest one.
+  activity?: { steps: number; last: string | null };
+  /// When finished: what the agent says it changed.
+  summary?: string;
+  diff?: { files: number; additions: number; deletions: number; paths: string[] };
+  checks?: { command: string; passed: boolean }[];
+  prUrl?: string; error?: string;
+}
+export interface DriveFixRequest { workspace: string; signals: DriveSignal[] }
+export interface DriveFixesResponse { fixes: DriveFix[] }
+export type DriveFixAction = "apply" | "pr" | "discard";
 export interface DriveRequest {
   mode?: DriveMode; ledger?: DriveLedger; facts?: DriveFacts;
   /// The workspace's project memory, bounded: standing preferences and
@@ -454,6 +477,21 @@ export function parseDriveRequest(value: unknown): DriveRequest {
 export function parseDriveNextRequest(value: unknown): DriveNextRequest {
   if (!isRecord(value)) invalid("request", "expected an object");
   return { workspace: text(value.workspace, 4096, "workspace"), ...(value.memory !== undefined ? { memory: parseProjectMemory(value.memory) } : {}), ...(value.force === true ? { force: true } : {}) };
+}
+export function parseDriveAlertsRequest(value: unknown): DriveAlertsRequest {
+  if (!isRecord(value)) invalid("request", "expected an object");
+  return { workspace: text(value.workspace, 4096, "workspace"), ...(value.gh === true ? { gh: true } : {}) };
+}
+export function parseDriveFixRequest(value: unknown): DriveFixRequest {
+  if (!isRecord(value)) invalid("request", "expected an object");
+  if (!Array.isArray(value.signals) || !value.signals.length || value.signals.length > 5) invalid("signals", "expected 1-5 signals");
+  const sources = ["checks", "git", "github", "sessions", "telemetry", "code"];
+  const signals = value.signals.map((item, index) => {
+    const path = `signals[${index}]`;
+    if (!isRecord(item) || !sources.includes(String(item.source))) invalid(path, "expected a signal");
+    return { id: text(item.id, 200, `${path}.id`), source: item.source as DriveSignal["source"], title: text(item.title, 300, `${path}.title`), detail: text(item.detail, 1000, `${path}.detail`, true), urgent: item.urgent === true };
+  });
+  return { workspace: text(value.workspace, 4096, "workspace"), signals };
 }
 function parseProjectMemory(value: unknown): DriveMemoryEntry[] {
   if (!Array.isArray(value) || value.length > 60) invalid("projectMemory", "expected at most 60 entries");

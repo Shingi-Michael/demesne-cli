@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { NextPromptFilter, splitNextPrompt } from "@demesne/protocol";
 import { isRecord, type CancelTurnResponse, type CreateSessionResponse, type EventEnvelope, type ModelDescriptor, type PermissionDecision, type UserAnswer, type UserQuestion, parseUserQuestions, type RuntimeProfileStatus, type Session, type SessionStateResponse, type SubmitTurnResponse, type TokenUsage } from "@demesne/protocol";
 import { createPainter, formatAssistantHeader, formatDiffPreview, formatFooterLine, formatPermissionCard, formatToolPhaseHeader, formatToolResultLine, formatTurnReceipt, fileUrl, formatHyperlink, renderSpinner, resolveTheme, SPINNER_PERIOD_MS, sanitizeTerminalLine, sanitizeTerminalText, TerminalMarkdownStream, TerminalReasoningStream, toolKindBadge, type BeaconActivity, type PaletteColor } from "@demesne/brand";
 import { existsSync, readFileSync } from "node:fs";
@@ -579,7 +580,7 @@ async function runHeadlessTurn(options: {
     sessionId: options.sessionId,
     turnId: submitted.turn.id,
     status,
-    response,
+    response: splitNextPrompt(response).text,
     rounds: evidence.rounds,
     tools: evidence.tools,
     changes: evidence.changes.map((change) => ({
@@ -658,6 +659,8 @@ async function renderTurn(
   const waitingLabel = options.thinkingEnabled === false ? "Working" : "Thinking";
   const termWidth = getConversationWidth(process.stdout);
   const markdownStream = new TerminalMarkdownStream(paint, termWidth, interactive ? 2 : 0);
+  // The hidden <next>…</next> suggestion isn't printed.
+  const nextFilter = new NextPromptFilter();
   const textPacer = interactive && process.stdin.isTTY && process.stdout.isTTY && !reduceMotion
     ? new TerminalTextPacer({ sink: (text) => process.stdout.write(text) })
     : null;
@@ -837,7 +840,7 @@ async function renderTurn(
           }
         }
         textPacer?.observe(event.payload.delta);
-        writeResponse(markdownStream.write(event.payload.delta));
+        writeResponse(markdownStream.write(nextFilter.push(event.payload.delta)));
       }
 
       if (event.type === "permission.requested") {
@@ -933,7 +936,7 @@ async function renderTurn(
 
       if (event.type === "turn.completed") {
         closeReasoning();
-        const remaining = markdownStream.flush();
+        const remaining = markdownStream.write(nextFilter.end()) + markdownStream.flush();
         if (remaining) writeResponse(remaining);
         await drainResponse();
         process.stdout.write("\n");

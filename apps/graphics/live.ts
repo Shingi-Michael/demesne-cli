@@ -1,6 +1,7 @@
 import { FilesView } from "./files-view.ts";
 import { sourceLocations } from "./file-navigation.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
+import { splitNextPrompt } from "../../packages/protocol/src/next-prompt.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "../cli/src/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "../cli/src/workbench/drive-timeline.ts";
@@ -391,6 +392,13 @@ function totals(run: GraphicsRun, tool: ToolEntry) {
 }
 const counts = (value: { added: number; removed: number }) =>
   `<span class="counts"><span class="plus">+${value.added}</span><span class="minus">−${value.removed}</span></span>`;
+/// The next prompt the model suggested at the end of the last finished turn.
+function nextSuggestion(): string | null {
+  const run = state?.runs.at(-1);
+  if (!run || run.status !== "completed" || state!.activeTurnId) return null;
+  const answer = run.entries.findLast((entry) => entry.type === "assistant");
+  return answer?.type === "assistant" ? splitNextPrompt(answer.raw).next : null;
+}
 /// The latest thing the model said it's thinking about: its last bold
 /// heading (ChatGPT summaries), else its last line, as plain text.
 function thinkingHeadline(raw: string): string {
@@ -608,7 +616,7 @@ function patchStream(
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!;
     if (entry !== before.entries[i] && entry.type === "assistant")
-      saved.views.get(entry.id)!.update(entry.raw);
+      saved.views.get(entry.id)!.update(splitNextPrompt(entry.raw).text);
   }
   return true;
 }
@@ -653,7 +661,7 @@ function renderConversation() {
         }
         view.element.dataset.answer = run.id;
         view.element.dataset.entry = String(id);
-        view.update(entry.raw);
+        view.update(splitNextPrompt(entry.raw).text);
         slot.replaceWith(view.element);
       }
       saved.node.replaceChildren(template.content);
@@ -759,10 +767,11 @@ function renderComposer() {
   el("queue-label").hidden = !queued && !state.restored;
   el("queue-label").innerHTML =
     `<span>${queued ? 'Queued <span class="muted">sends when this turn completes</span>' : 'Restored · not sent <span class="muted">the turn did not finish</span>'}</span>${btn("clear-queue", "Clear ×")}`;
+  const suggestion = nextSuggestion();
   editor.placeholder = inSession()
     ? state.activeTurnId
       ? "Type to queue a follow-up…"
-      : "Continue the conversation…"
+      : suggestion ? `${suggestion}   ⇥ Tab` : "Continue the conversation…"
     : "Describe what you want to build, fix, or explore…";
   editor.disabled =
     state.connection !== "online" ||
@@ -2832,7 +2841,7 @@ async function dispatch(
       text:
         run?.entries
           .filter((e) => e.type === "assistant")
-          .map((e) => (e as any).raw)
+          .map((e) => splitNextPrompt((e as any).raw).text)
           .join("\n\n") ?? "",
     });
     notice("Copied");
@@ -3301,7 +3310,9 @@ document.addEventListener("keydown", (event) => {
     event.target === editor &&
     !editor.value
   ) {
-    run(() => openOverlay("settings"));
+    // The model's suggested next prompt, when one shows; else Settings.
+    const suggestion = nextSuggestion();
+    run(() => (suggestion ? setDraft(suggestion) : openOverlay("settings")));
     return;
   }
   if (key === "enter" && event.target instanceof HTMLInputElement) {
@@ -3435,6 +3446,7 @@ window.demesneInspect = () => ({
         })(),
 
         name: e.getAttribute("name"),
+        placeholder: e.getAttribute("placeholder") ?? undefined,
         label:
           e.innerText ||
           e.getAttribute("aria-label") ||

@@ -1,3 +1,4 @@
+import { splitNextPrompt } from "@demesne/protocol";
 import type { SessionExport } from "@demesne/protocol";
 
 /// Renders a session export as Markdown. Hidden reasoning and tool output are
@@ -22,7 +23,7 @@ export function formatSessionMarkdown(exported: SessionExport, now = new Date())
     }
     lines.push("**Response**", "");
     for (const response of turn.responses) {
-      lines.push(response, "");
+      lines.push(splitNextPrompt(response).text, "");
     }
   });
   return `${lines.join("\n").trimEnd()}\n`;

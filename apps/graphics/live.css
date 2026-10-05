@@ -2420,8 +2420,24 @@ button:disabled {
   font-size: 11.5px;
   padding-top: 4px;
 }
-.next-heading .muted {
-  margin-right: auto;
+.next-heading .next-rank {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.next-heading .next-age {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.next-collapse {
+  margin-left: auto;
+  color: var(--muted);
+  padding: 0 2px;
+}
+.next-after {
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 .next-item {
   padding: 10px 16px 12px;

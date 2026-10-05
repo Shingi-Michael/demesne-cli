@@ -59,6 +59,10 @@ Every proposal shows why it's there and what it would cost. **Run** starts it, *
 <td valign="top"><b>Session tools</b><br>The agent shapes presets and multi-step lookups for the job, without changing the real tools. <a href="docs/session-tools.md">Session tools</a></td>
 </tr>
 <tr>
+<td valign="top"><b>Breakage alerts</b><br>When a check starts failing or CI turns red, a card offers to fix it in a separate git worktree. Apply it to your branch, open a PR, or discard it. <a href="docs/agent-drive.md#breakage-alerts-fix-it-in-a-worktree">Breakage alerts</a></td>
+<td valign="top"><b>Session cleanup</b><br><code>/cleanup</code> lists empty, quick, unfinished and long-unused sessions with the reason for each, and deletes the ones you tick.</td>
+</tr>
+<tr>
 <td valign="top"><b>A suggested next prompt</b><br>After each turn the composer offers what to ask next. <b>Tab</b> takes it.</td>
 <td valign="top"><b>Desktop or terminal</b><br>The same interface in a native window or inside Ghostty, drawn with Kitty graphics.</td>
 </tr>

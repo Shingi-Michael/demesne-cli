@@ -38,6 +38,7 @@ try {
   app.paste("/drive --bounded Add a retry flag to retry.ts"); await Bun.sleep(80); app.write("\r");
   await wait(s => s.live.drive === "blocked" && s.live.pane === "drive", "blocked");
   const text = state.live.text as string;
+  assert(/Drive\s+× needs you/.test(text), "the header says needs you");
   for (const part of ["Blocked · needs you", "WHY", REASON, "WHAT LED HERE", "EVIDENCE", "timeouts are thrown separately", "WHAT YOU CAN DO", "Answer the question or give direction"]) assert(text.includes(part), `the blocked card shows ${part}`);
   assert(state.live.controls.some((c: any) => c.action === "drive-control" && JSON.parse(c.args).control === "resume"), "Resume is offered");
   await Bun.sleep(500);

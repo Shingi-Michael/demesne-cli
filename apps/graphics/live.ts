@@ -816,8 +816,8 @@ function selectedRun() {
 }
 /// Every view's header: its title, one line of subject, and ×. A drill-down
 /// (Checks, Steps, Image, Context) leads with a link back to its place.
-function panelHeader(title: string, subject = "", back?: { name: PaneName; label: string }) {
-  return `<div class="panel-heading">${back ? btn("panel", `‹ ${back.label}`, { name: back.name }, "back", true) : ""}<strong class="title">${h(title)}</strong><span class="subject">${h(subject)}</span>${btn("close-panel", "×", {}, "close", true)}</div>`;
+function panelHeader(title: string, subject = "", back?: { name: PaneName; label: string }, subjectTone = "") {
+  return `<div class="panel-heading">${back ? btn("panel", `‹ ${back.label}`, { name: back.name }, "back", true) : ""}<strong class="title">${h(title)}</strong><span class="subject${subjectTone ? ` tone-${subjectTone}` : ""}">${h(subject)}</span>${btn("close-panel", "×", {}, "close", true)}</div>`;
 }
 /// The panel's four places. Each view belongs to one; the rail lights it.
 const RAIL_ICON = (path: string) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
@@ -1806,8 +1806,13 @@ function renderPanels() {
   }
   if (pane === "drive") {
     const status = state.drive?.status;
-    const proposed = state.driveNext.proposals.length;
-    header = panelHeader("Drive", [status ? (status === "running" ? "live" : status) : "", proposed ? `${proposed} proposed` : ""].filter(Boolean).join(" · ") || "idle");
+    // Drive's state, as in the design: idle when nothing runs, ● live while
+    // it works; the proposal count lives on the Next tab.
+    const [subject, tone] = status === "running" || status === "waiting" ? ["● live", "citron"]
+      : status === "paused" ? ["‖ paused", "secondary"]
+      : status === "blocked" ? ["× needs you", "signal"]
+      : ["idle", ""];
+    header = panelHeader("Drive", subject, undefined, tone);
     body = driveBody();
   }
   const previewScroll =

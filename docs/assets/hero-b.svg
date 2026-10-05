@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="480" viewBox="0 0 1280 480" fill="none" role="img" aria-labelledby="title desc">
-  <title id="title">demesne — Your repo has a to-do list. Drive already read it.</title>
+  <title id="title">demesne: Your repo has a to-do list. Drive already read it.</title>
   <desc id="desc">A midnight-blue banner. On the left, the headline. On the right, the Drive panel listing three ranked next tasks, the first with a Run button.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="480" gradientUnits="userSpaceOnUse"><stop stop-color="#101B24"/><stop offset="1" stop-color="#0B1218"/></linearGradient>
@@ -12,7 +12,7 @@
 
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
     <rect x="60" y="62" width="10" height="10" fill="#5AA9E6"/>
-    <text x="82" y="72" fill="#5AA9E6" font-size="17" letter-spacing="2">DEMESNE</text>
+    <text x="82" y="72" fill="#5AA9E6" font-size="18">demesne</text>
   </g>
   <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="650" letter-spacing="-2.2" fill="#E6EEF4">
     <text x="58" y="180" font-size="56">Your repo has a</text>
@@ -20,11 +20,8 @@
     <text x="58" y="308" font-size="56" fill="#5AA9E6">Drive already read it.</text>
   </g>
   <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="20" fill="#8FA1AF">
-    <text x="60" y="362">A coding agent that proposes the work, runs it,</text>
-    <text x="60" y="390">and hands back the evidence.</text>
-  </g>
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.6" fill="#6B7D8B">
-    <text x="60" y="436">LOCAL OR HOSTED MODELS  ·  TERMINAL OR DESKTOP  ·  MIT</text>
+    <text x="60" y="362">A coding agent that suggests what to work on next</text>
+    <text x="60" y="390">and shows you the evidence when it's done.</text>
   </g>
 
   <!-- Drive panel -->
@@ -35,7 +32,7 @@
     <text x="830" y="99" fill="#4CC38A" font-size="13">live</text>
     <text x="1180" y="99" fill="#6B7D8B" font-size="12" text-anchor="end">Next 3 · Done</text>
     <path d="M752 116h436" stroke="#1E2C38"/>
-    <text x="760" y="140" fill="#6B7D8B" font-size="11" letter-spacing="1">RANKED BY VALUE · CONFIDENCE · COST</text>
+    <text x="760" y="140" fill="#6B7D8B" font-size="12">Ranked by value, confidence and cost</text>
 
     <!-- item 1, selected -->
     <rect x="752.5" y="156.5" width="435" height="118" rx="8" fill="#12202B" stroke="#5AA9E6" stroke-opacity=".7"/>

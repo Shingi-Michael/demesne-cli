@@ -8,11 +8,11 @@
   <rect width="1280" height="340" rx="18" fill="#0B1218"/>
   <rect x=".5" y=".5" width="1279" height="339" rx="17.5" stroke="#1E2C38"/>
 
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="1.6">
-    <text x="60" y="62" fill="#5AA9E6">01  SIGNALS</text>
-    <text x="360" y="62" fill="#5AA9E6">02  NEXT</text>
-    <text x="660" y="62" fill="#5AA9E6">03  MISSION</text>
-    <text x="960" y="62" fill="#5AA9E6">04  EVIDENCE</text>
+  <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15">
+    <text x="60" y="62" fill="#5AA9E6">Signals</text>
+    <text x="360" y="62" fill="#5AA9E6">Next</text>
+    <text x="660" y="62" fill="#5AA9E6">Mission</text>
+    <text x="960" y="62" fill="#5AA9E6">Evidence</text>
   </g>
   <g stroke="#2F4150">
     <rect x="48.5" y="80.5" width="252" height="160" rx="10" fill="#101B24"/>
@@ -53,6 +53,6 @@
   </g>
 
   <path d="M1084 244v36H174v-34" stroke="#5AA9E6" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowA)"/>
-  <rect x="470" y="266" width="340" height="28" rx="6" fill="#0B1218"/>
-  <text x="640" y="285" fill="#5AA9E6" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" text-anchor="middle" letter-spacing="1">remembers decisions, outcomes, vetoes</text>
+  <rect x="380" y="266" width="520" height="28" rx="6" fill="#0B1218"/>
+  <text x="640" y="285" fill="#5AA9E6" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" text-anchor="middle">Drive remembers what you decided, what worked and what you ruled out</text>
 </svg>

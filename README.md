@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero-b.svg" alt="demesne — Your repo has a to-do list. Drive already read it." width="100%">
+  <img src="docs/assets/hero-b.svg" alt="demesne: Your repo has a to-do list. Drive already read it." width="100%">
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
   <a href="docs/README.md">Docs</a>
 </p>
 
-Most coding agents wait for you to say what to do. **demesne reads your project first**—failing checks, red CI, open pull requests, half-finished work—and puts a ranked list of next moves in front of you. Press **Run** and Drive directs the coding agent through a bounded mission, checks the result, and hands back the diff, the commands and the passing checks. You review; it remembers.
+demesne is a coding agent that starts by reading your project. Its **Drive** looks at failing checks, red CI, open pull requests and work you left unfinished, then suggests what to do next. Press **Run** and Drive gives the coding agent a bounded task, checks the result and shows you the diff, the commands it ran and whether the checks passed. It remembers what you decided, so it won't suggest the same thing twice.
 
 ## Try it
 
@@ -26,13 +26,13 @@ bun install --frozen-lockfile
 bun run desktop
 ```
 
-Pick a project, connect a model, and open **Drive**. You need [Bun 1.4.0](https://bun.sh), [Rust](docs/desktop.md#prerequisites) for the desktop window, and a model: one running on your machine, your ChatGPT plan, or OpenRouter. Prefer the terminal or a script? See [Install](#install).
+Choose a project, connect a model and open **Drive**. You need [Bun 1.4](https://bun.sh), plus [Rust](docs/desktop.md#prerequisites) for the desktop window. The model can run on your machine, come from your ChatGPT plan, or be an OpenRouter account. To run demesne in the terminal or from a script, see [Install](#install).
 
 ## How Drive works
 
 <img src="docs/assets/drive-loop.svg" alt="Drive: reads signals from the repo, ranks what’s worth doing, runs a bounded mission, hands back the evidence, and remembers decisions, outcomes and vetoes" width="100%">
 
-Every proposal shows why it's there and what it would cost. **Run** starts it, **Plan first** asks for a plan you approve, **Not now** and **Never** teach Drive what to skip. Missions are bounded by default; `/drive --bounded "…"` starts one from the composer. [The full guide →](docs/agent-drive.md)
+Each suggestion says why it's there and roughly how long it will take. **Run** starts it, and **Plan first** asks for a plan you approve before anything changes. **Not now** hides it for a day, and **Never** tells Drive to stop suggesting it. You can also start a mission yourself with `/drive --bounded "…"`. The [Drive guide](docs/agent-drive.md) has the details.
 
 ## See it
 
@@ -40,52 +40,51 @@ Every proposal shows why it's there and what it would cost. **Run** starts it, *
 
 <table>
 <tr>
-<td width="50%" valign="top"><img src="docs/assets/demesne-start.png" alt="Start screen with three Drive proposals"><br><sub><b>Start from a proposal.</b> The start screen shows what Drive would do next, with the evidence behind each item.</sub></td>
-<td width="50%" valign="top"><img src="docs/assets/demesne-review.png" alt="Review panel with a diff beside the conversation"><br><sub><b>Review the evidence.</b> Every edit, command and check stays attached to its turn; rerun a check before you commit.</sub></td>
+<td width="50%" valign="top"><img src="docs/assets/demesne-start.png" alt="Start screen with three Drive proposals"><br><sub><b>Start from a suggestion.</b> The start screen lists what Drive would do next, and the evidence for each item.</sub></td>
+<td width="50%" valign="top"><img src="docs/assets/demesne-review.png" alt="Review panel with a diff beside the conversation"><br><sub><b>Check the work.</b> Each edit, command and check stays with the turn that made it, and you can rerun a check before you commit.</sub></td>
 </tr>
 </table>
 
-<p align="center"><sub>Real captures from an isolated, deterministic demo. <a href="docs/assets/README.md">How they’re made</a>.</sub></p>
+<p align="center"><sub>Screenshots of the real app running a scripted demo. <a href="docs/assets/README.md">How they’re made</a>.</sub></p>
 
 ## Also inside
 
 <table>
 <tr>
-<td width="50%" valign="top"><b>Your models, your call</b><br>Local servers, ChatGPT plan, OpenRouter. Sign in and out in <b>Settings › Providers</b> without a restart; each model has its own thinking levels. <a href="docs/authentication.md">Providers</a></td>
-<td width="50%" valign="top"><b>Work that survives</b><br>A local daemon owns every turn. Close the window, reopen, continue. <code>/compact</code> keeps long sessions in budget.</td>
+<td width="50%" valign="top"><b>Models</b><br>Use a local server, your ChatGPT plan or OpenRouter. You can sign in and out under <b>Settings › Providers</b> without restarting, and each model has its own thinking levels. <a href="docs/authentication.md">Providers</a></td>
+<td width="50%" valign="top"><b>Sessions</b><br>A local daemon runs every turn, so closing the window doesn't stop the work. Open it again and carry on. <code>/compact</code> shortens a long session.</td>
 </tr>
 <tr>
-<td valign="top"><b>Sub-agents</b><br>Read-only investigators with their own context, in parallel, on a model you choose. <a href="docs/subagents.md">Sub-agents</a></td>
-<td valign="top"><b>Session tools</b><br>The agent shapes presets and multi-step lookups for the job, without changing the real tools. <a href="docs/session-tools.md">Session tools</a></td>
+<td valign="top"><b>Sub-agents</b><br>Read-only helpers that look into things in parallel, each with its own context, on a model you pick. <a href="docs/subagents.md">Sub-agents</a></td>
+<td valign="top"><b>Session tools</b><br>The agent can set up shortcuts and multi-step lookups for one session. The real tools stay as they are. <a href="docs/session-tools.md">Session tools</a></td>
 </tr>
 <tr>
-<td valign="top"><b>Breakage alerts</b><br>When a check starts failing or CI turns red, a card offers to fix it in a separate git worktree. Apply it to your branch, open a PR, or discard it. <a href="docs/agent-drive.md#breakage-alerts-fix-it-in-a-worktree">Breakage alerts</a></td>
-<td valign="top"><b>Session cleanup</b><br><code>/cleanup</code> lists empty, quick, unfinished and long-unused sessions with the reason for each, and deletes the ones you tick.</td>
+<td valign="top"><b>Breakage alerts</b><br>If a check starts failing or CI turns red, a card offers to fix it on a separate branch in a git worktree. You can apply the fix, open a PR with it or throw it away. <a href="docs/agent-drive.md#breakage-alerts-fix-it-in-a-worktree">Breakage alerts</a></td>
+<td valign="top"><b>Session cleanup</b><br><code>/cleanup</code> finds sessions that are empty, abandoned or unused for a month, says why for each one, and deletes the ones you pick.</td>
 </tr>
 <tr>
-<td valign="top"><b>A suggested next prompt</b><br>After each turn the composer offers what to ask next. <b>Tab</b> takes it.</td>
-<td valign="top"><b>Desktop or terminal</b><br>The same interface in a native window or inside Ghostty, drawn with Kitty graphics.</td>
+<td valign="top"><b>Next prompt</b><br>After each turn the composer suggests what to ask next. Press <b>Tab</b> to use it.</td>
+<td valign="top"><b>Desktop or terminal</b><br>The same interface runs in its own window or inside Ghostty.</td>
 </tr>
 </table>
 
-> [!WARNING]
-> **Commands run as your OS user, not in a sandbox.** Your own turns ask before writing files or running commands. Drive's coding turns run with every tool allowed so a mission can work unattended; pushing, pull requests, releases and package publishes still ask. Run Drive where that's acceptable. [Security boundaries](SECURITY.md)
+**A note on safety.** Commands run as your user, not in a sandbox. When you're the one asking, demesne checks with you before it writes a file or runs a command. Drive's coding turns don't ask, so a mission can run on its own, but pushing, opening pull requests, releases and package publishing still need your OK. Only use Drive on projects where that's fine. [Security details](SECURITY.md)
 
 ## Install
 
 <details>
-<summary><b>Desktop app</b> — native window, macOS and Ubuntu 22.04/24.04 (preview, unsigned)</summary>
+<summary><b>Desktop app</b> (macOS and Ubuntu 22.04/24.04, unsigned preview builds)</summary>
 
 ```sh
 bun run desktop          # run from source
 bun run build:desktop    # build an app bundle
 ```
 
-Needs [Rust and platform prerequisites](docs/desktop.md#prerequisites). See the [desktop guide](docs/desktop.md).
+It needs [Rust and a few platform packages](docs/desktop.md#prerequisites). The [desktop guide](docs/desktop.md) has more.
 </details>
 
 <details>
-<summary><b>Ghostty</b> — the full interface in your terminal</summary>
+<summary><b>Ghostty</b> (the full interface in your terminal)</summary>
 
 ```sh
 bun run build
@@ -95,11 +94,11 @@ bun run build:graphics
 ./dist/demesne
 ```
 
-Keep `dist/graphics` and `dist/node_modules` beside the binaries. To use it in any project, link `dist/demesne` and `dist/demesned` onto your PATH, then run `demesne` in that project. Source development: `bun run graphics:setup` and `bun run demesne`. See [graphics setup](apps/graphics/README.md) and [troubleshooting](docs/troubleshooting.md).
+Keep `dist/graphics` and `dist/node_modules` next to the binaries. To use demesne in other projects, link `dist/demesne` and `dist/demesned` onto your PATH and run `demesne` from the project folder. If you're working on demesne itself, use `bun run graphics:setup` and `bun run demesne`. More in [graphics setup](apps/graphics/README.md) and [troubleshooting](docs/troubleshooting.md).
 </details>
 
 <details>
-<summary><b>Linux</b> — Ghostty in a desktop session, as your normal user</summary>
+<summary><b>Linux</b> (Ghostty in a desktop session, as your normal user)</summary>
 
 ```sh
 bun run demesne setup
@@ -107,17 +106,17 @@ bun run demesne daemon start
 bun run graphics
 ```
 
-If you see “The SUID sandbox helper binary was found, but is not configured correctly”, run `bun run graphics:setup --install-sandbox` and launch again. It asks for administrator access only for the sandbox helper. See the [Linux guide](docs/linux.md).
+If you see “The SUID sandbox helper binary was found, but is not configured correctly”, run `bun run graphics:setup --install-sandbox` and launch again. It only asks for administrator access to set up the sandbox helper. The [Linux guide](docs/linux.md) has more.
 </details>
 
 <details>
-<summary><b>Scripts and CI</b> — no window</summary>
+<summary><b>Scripts and CI</b> (no window)</summary>
 
 ```sh
 demesne prompt --output json "Explain the test layout"
 ```
 
-Text, JSON or streamed events. Approval requests are denied rather than left waiting. See [headless usage](docs/cli-reference.md#headless-output).
+Output can be text, JSON or a stream of events. Anything that would need your approval is denied instead of waiting. More in [headless usage](docs/cli-reference.md#headless-output).
 </details>
 
 <details>
@@ -135,7 +134,7 @@ Text, JSON or streamed events. Approval requests are denied rather than left wai
 | Zoom (desktop) | ⌘= / ⌘- / ⌘0 |
 | Quit the UI (work continues) | Ctrl+Q |
 
-[All commands →](docs/cli-reference.md)
+[All commands](docs/cli-reference.md)
 </details>
 
 ---
@@ -147,5 +146,5 @@ Text, JSON or streamed events. Approval requests are denied rather than left wai
   <a href="docs/troubleshooting.md">Troubleshooting</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="CHANGELOG.md">Changelog</a>
-  <br><sub>Built by <a href="https://github.com/Shingi-Michael">Shingirayi Kamucheka</a> · MIT licensed</sub>
+  <br><sub>Made by <a href="https://github.com/Shingi-Michael">Shingirayi Kamucheka</a>. MIT licensed.</sub>
 </p>

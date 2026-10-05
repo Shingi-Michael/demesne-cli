@@ -53,3 +53,18 @@ test("a call for another configured model routes to its provider and keeps per-c
   expect(events).toEqual([{ type: "text_delta", delta: "pc/qwen3.8-27b" }]);
   expect(() => router.createTurnInference(false, { model: "missing" })).toThrow("Unknown model");
 });
+
+test("replace keeps the selected model while its provider stays, else moves to a local one", () => {
+  const chatgpt = processor("ChatGPT", "gpt-6-astra", 272000), qwen = processor("Qwen on PC", "qwen3.8-27b", 32768), openrouter = processor("OpenRouter", "z-ai/glm", 128000);
+  const router = new MultiProviderProcessor([qwen, chatgpt, openrouter], []);
+  router.setModel("gpt-6-astra", "high");
+  // Signing in to another provider keeps the current choice and its thinking level.
+  const kept = router.replace([processor("Qwen on PC", "qwen3.8-27b", 32768), chatgpt, openrouter], [], [true, false, false]);
+  expect(kept).toMatchObject({ switched: false, model: "gpt-6-astra", provider: "ChatGPT" });
+  expect(router.modelId).toBe("gpt-6-astra");
+  // Signing out of ChatGPT moves to the local provider, not the first hosted one.
+  const moved = router.replace([openrouter, qwen], [], [false, true]);
+  expect(moved).toMatchObject({ switched: true, model: "qwen3.8-27b", provider: "Qwen on PC", previous: { model: "gpt-6-astra", provider: "ChatGPT" } });
+  expect(router.availableModels().map((item) => item.id).sort()).toEqual(["qwen3.8-27b", "z-ai/glm"]);
+  expect(() => router.setModel("gpt-6-astra")).toThrow(/Unknown model/);
+});

@@ -21,6 +21,8 @@ import { ProviderTurnProcessor } from "./provider-processor.ts";
 import { acquireDataDirectoryLock } from "./data-directory-lock.ts";
 import { VERSION } from "./version.ts";
 
+const OPENROUTER_API = "https://openrouter.ai/api/v1";
+
 // Configuration comes from environment variables and the user config file
 // (`~/.demesne/config.toml`). Project files are intentionally ignored: daemon
 // provider settings are machine-wide, and a workspace cannot reconfigure the
@@ -68,11 +70,13 @@ if (runtimeProfileRequiresSingleInferenceSlot(configuredRuntimeProfile) && (conf
 const dataDirectory = prepareDataDirectory(config.dataDir);
 const dataDirectoryLock = acquireDataDirectoryLock(dataDirectory);
 let app: ReturnType<typeof createDaemonApp>;
+const processor = createProcessor(await chatGPTSignedIn());
 let server: ReturnType<typeof Bun.serve>;
 try {
   app = createDaemonApp({
     databasePath: join(dataDirectory, "demesne.sqlite"),
-    processor: createProcessor(),
+    processor,
+    reloadProviders: () => reloadProviders(processor),
     systemPrompt: config.provider.systemPrompt,
     authToken: loadDaemonToken(dataDirectory),
     version: VERSION,
@@ -129,12 +133,53 @@ function parseHost(value: string): string {
   return value;
 }
 
-function createProcessor(): ProviderTurnProcessor | MultiProviderProcessor | undefined {
-  const configs = [config.provider, ...Object.values(config.additionalProviders ?? {})];
+/// A provider you've signed out of (ChatGPT without tokens, OpenRouter
+/// without a key) isn't offered; nor is one that would only fail.
+function signedOut(settings: ProviderConfig, chatgptSignedIn: Set<string>): boolean {
+  if (settings.auth === "chatgpt") return !settings.authProfile || !chatgptSignedIn.has(settings.authProfile);
+  return (settings.url ?? "").replace(/\/$/, "") === OPENROUTER_API && !settings.apiKey;
+}
+
+/// Loopback, private and Tailscale addresses, and .local names: a model on
+/// your own machines, preferred when the selected one goes away.
+function isLocalProvider(settings: ProviderConfig): boolean {
+  if (settings.auth === "chatgpt") return false;
+  try {
+    const host = new URL(settings.url ?? "http://127.0.0.1:1234/v1").hostname;
+    return host === "localhost" || host.endsWith(".local") || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(host) || host === "[::1]";
+  } catch { return false; }
+}
+
+async function chatGPTSignedIn(): Promise<Set<string>> {
+  try { return new Set((await new ChatGPTAuth(dataDirectory).accounts()).filter((account) => account.signedIn).map((account) => account.id)); }
+  catch { return new Set(); }
+}
+
+/// The configured providers you're signed in to. When none are, all are
+/// kept, so a request explains what to do instead of finding no provider.
+function buildProviders(settings: typeof config, signedIn: Set<string>) {
+  const all = [settings.provider, ...Object.values(settings.additionalProviders ?? {})];
+  const available = all.filter((item) => !signedOut(item, signedIn));
+  const configs = available.length ? available : all;
   const processors = configs.map(createSingleProcessor);
-  if (processors.length === 1) return processors[0];
+  return { configs, processors };
+}
+
+function createProcessor(signedIn: Set<string>): ProviderTurnProcessor | MultiProviderProcessor | undefined {
+  const { configs, processors } = buildProviders(config, signedIn);
+  if (processors.length === 1 && !processors[0]) return undefined;
   if (processors.some((processor) => !processor)) throw new Error("Each configured provider requires a default model");
   return new MultiProviderProcessor(processors as ProviderTurnProcessor[], configs.map((item) => item.allowedModels ?? []));
+}
+
+/// Re-reads the user config and auth after signing in or out, and swaps the
+/// providers in place: no daemon restart.
+async function reloadProviders(processor: ProviderTurnProcessor | MultiProviderProcessor | undefined) {
+  if (!(processor instanceof MultiProviderProcessor)) throw new Error("Configure a provider with demesne setup first.");
+  const { config: fresh } = loadConfig({ includeProject: false });
+  const { configs, processors } = buildProviders(fresh, await chatGPTSignedIn());
+  if (processors.some((item) => !item)) throw new Error("Each configured provider requires a default model");
+  return processor.replace(processors as ProviderTurnProcessor[], configs.map((item) => item.allowedModels ?? []), configs.map(isLocalProvider));
 }
 
 function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor | undefined {

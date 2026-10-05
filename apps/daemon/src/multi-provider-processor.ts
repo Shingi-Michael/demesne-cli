@@ -7,14 +7,41 @@ export class MultiProviderProcessor implements TurnProcessor {
   private selected: TurnProcessor;
   private routes = new Map<string, TurnProcessor>();
 
-  constructor(private readonly processors: TurnProcessor[], configuredModels: string[][]) {
+  constructor(private processors: TurnProcessor[], configuredModels: string[][]) {
     if (!processors.length) throw new Error("At least one provider is required");
     this.selected = processors[0]!;
+    this.routes = this.buildRoutes(processors, configuredModels);
+  }
+
+  private buildRoutes(processors: TurnProcessor[], configuredModels: string[][]) {
+    const routes = new Map<string, TurnProcessor>();
     processors.forEach((processor, index) => {
       for (const id of new Set([processor.modelId, ...(configuredModels[index] ?? [])])) {
-        this.addRoute(this.routes, id, processor);
+        this.addRoute(routes, id, processor);
       }
     });
+    return routes;
+  }
+
+  /// Swaps in a new provider set (after signing in or out). The selected
+  /// model stays when its provider is still there; otherwise selection moves
+  /// to a local provider, else the first. Turns already queued keep the
+  /// provider they were bound to.
+  replace(processors: TurnProcessor[], configuredModels: string[][], local: boolean[] = []) {
+    if (!processors.length) throw new Error("At least one provider is required");
+    const previous = { model: this.selected.modelId, provider: this.selected.providerId, reasoning: this.selected.reasoning };
+    const routes = this.buildRoutes(processors, configuredModels);
+    const kept = routes.get(previous.model);
+    this.processors = processors;
+    this.routes = routes;
+    if (kept && kept.providerId === previous.provider) {
+      kept.setModel?.(previous.model, previous.reasoning ?? undefined);
+      this.selected = kept;
+      return { switched: false, model: previous.model, provider: previous.provider, previous };
+    }
+    const fallback = processors.findIndex((_, index) => local[index]);
+    this.selected = processors[fallback >= 0 ? fallback : 0]!;
+    return { switched: true, model: this.selected.modelId, provider: this.selected.providerId, previous };
   }
 
   private addRoute(routes: Map<string, TurnProcessor>, id: string, processor: TurnProcessor) {

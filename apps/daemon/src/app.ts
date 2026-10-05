@@ -91,6 +91,8 @@ export interface DaemonApp {
 
 export function createDaemonApp(options: {
   databasePath: string;
+  /// Re-reads provider config and credentials after signing in or out.
+  reloadProviders?: () => Promise<{ switched: boolean; model: string; provider: string; previous: { model: string; provider: string } }>;
   processor?: TurnProcessor;
   systemPrompt?: string;
   authToken?: string;
@@ -471,6 +473,13 @@ export function createDaemonApp(options: {
           return json({ model, models: subagentModels(), saved });
         }
         return json({ model: engine.subagentModel ?? null, models: subagentModels() });
+      }
+
+      // Providers changed (signed in or out): rebuild them without a restart.
+      if (request.method === "POST" && url.pathname === "/v1/providers/reload") {
+        if (!options.reloadProviders) return apiError("not_supported", "This daemon can't reload providers", 400);
+        try { return json(await options.reloadProviders()); }
+        catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not reload providers", 409); }
       }
 
       if (request.method === "POST" && url.pathname === "/v1/model") {

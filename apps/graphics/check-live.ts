@@ -398,7 +398,7 @@ try {
   await state((s) => !s.live.pane);
   await key("\x0b");
   await state((s) => s.live.overlay === "settings");
-  await click("choose-row", { index: 5 });
+  await click("choose-row", { index: 6 }); // Provider setup (after Providers)
   await state(
     (s) => s.live.setup?.step === "provider" && s.live.setup.probes !== null,
   );

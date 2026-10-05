@@ -20,7 +20,7 @@ import { queueSummary } from "./input-queue.ts";
 import { notify, shouldNotifyApproval, shouldNotifyCompletion, type NotificationOptions } from "./notifications.ts";
 import { derivePersistedRule } from "./allow-rules.ts";
 import { VERSION } from "./version.ts";
-import { loadCliSettings, type CliSettings } from "./cli-config.ts";
+import { loadAccountSettings, loadCliSettings, type CliSettings } from "./cli-config.ts";
 import {
   createDaemonControlDependencies,
   daemonStatus,
@@ -32,6 +32,7 @@ import {
 import { formatDoctorReport, runDoctor } from "./doctor.ts";
 import { runSetup } from "./setup.ts";
 import { runChatGPTAuthCommand } from "./chatgpt-auth.ts";
+import { runCodexAuthCommand } from "./codex-auth.ts";
 import { beginOpenRouterLogin, configureOpenRouter } from "./openrouter-auth.ts";
 import { updateUserConfig } from "@demesne/config";
 import { createInterface } from "node:readline/promises";
@@ -41,6 +42,7 @@ const args = process.argv.slice(2);
 // Headless runs can't answer the trust question, so they confirm it up front.
 const trustWorkspaceFlag = args.includes("--trust-workspace");
 if (trustWorkspaceFlag) args.splice(args.indexOf("--trust-workspace"), 1);
+let requestedServer: string | undefined;
 const settings = loadSettings();
 const server = validateServerUrl(settings.server);
 const daemonToken = loadDaemonToken(settings.dataDirectory);
@@ -55,7 +57,8 @@ const client = new DemesneClient({ server, token: daemonToken });
 
 function loadSettings(): CliSettings {
   try {
-    return loadCliSettings({ serverOverride: takeOption(args, "--server") });
+    requestedServer = takeOption(args, "--server");
+    return loadCliSettings({ serverOverride: requestedServer, includeProject: !(args[0] === "auth" && args[2] === "codex") });
   } catch (error) {
     console.error(`Configuration error: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
@@ -254,6 +257,20 @@ async function run(command: string[]): Promise<void> {
   }
 
   if (command[0] === "auth") {
+    if (command[2] === "codex") {
+      const accountSettings = loadAccountSettings({ serverOverride: requestedServer });
+      const accountServer = validateServerUrl(accountSettings.server);
+      const accountClient = new DemesneClient({ server: accountServer, token: loadDaemonToken(accountSettings.dataDirectory) });
+      await runCodexAuthCommand(command, { configPath: accountSettings.configPath, dataDirectory: accountSettings.dataDirectory,
+        open: async url => { try { return await Bun.spawn(process.platform === "darwin" ? ["open", url] : process.platform === "win32" ? ["rundll32.exe", "url.dll,FileProtocolHandler", url] : ["xdg-open", url], { stdout: "ignore", stderr: "ignore" }).exited === 0; } catch { return false; } },
+        reload: async () => {
+          if (!(await daemonStatus(createDaemonControlDependencies(accountServer, accountSettings.dataDirectory))).running) return "stopped";
+          await accountClient.reloadProviders();
+          return "reloaded";
+        },
+      });
+      return;
+    }
     if (["chatgpt", "openai"].includes(command[2] ?? "")) {
       await runChatGPTAuthCommand(command, { configPath: settings.configPath, dataDirectory: settings.dataDirectory,
         open: async url => { try { return await Bun.spawn(process.platform === "darwin" ? ["open", url] : process.platform === "win32" ? ["rundll32.exe", "url.dll,FileProtocolHandler", url] : ["xdg-open", url], { stdout: "ignore", stderr: "ignore" }).exited === 0; } catch { return false; } },
@@ -268,7 +285,7 @@ async function run(command: string[]): Promise<void> {
       return;
     }
 
-    if (command[1] !== "login" || command[2] !== "openrouter") throw new Error("Usage: demesne auth login <chatgpt|openrouter> [--model <id>] [--no-browser]");
+    if (command[1] !== "login" || command[2] !== "openrouter") throw new Error("Usage: demesne auth login <codex|chatgpt|openrouter> [--model <id>] [--no-browser]");
     const model = takeOption(command, "--model");
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -1272,7 +1289,8 @@ function printUsage(): void {
   demesne [chat <message>] [--model <id>] [--workspace <path>] [--session <id>] [--scale auto|0.5-3] [--setup]
       Opens demesne in Ghostty (Kitty graphics), sending <message> first. Without a terminal, runs it like demesne prompt.
   demesne setup [--provider-url <url> --model <id>] [--context-window <n>] [--max-output-tokens <n>] [--theme auto|dark|light] [--yes]
-  demesne auth login <chatgpt|openrouter> [--model <id>] [--no-browser]
+  demesne auth login <codex|chatgpt|openrouter> [--model <id>] [--no-browser]
+  demesne auth status|logout codex
   demesne auth accounts|status|use|logout chatgpt [--account <id>]
   demesne auth login chatgpt [--account <id> | --new-account] [--consent] [--accept-plan-usage]
   demesne doctor [--json]

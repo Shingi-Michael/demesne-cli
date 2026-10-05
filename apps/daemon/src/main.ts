@@ -7,7 +7,8 @@ import { randomBytes } from "node:crypto";
 import { ConfigError, loadConfig, updateUserConfig, userConfigPath, type ProviderConfig } from "@demesne/config";
 import { MultiProviderProcessor } from "./multi-provider-processor.ts";
 import { ChatGPTAuth } from "@demesne/chatgpt-auth";
-import { ChatGPTProvider, OpenAICompatibleProvider } from "@demesne/providers";
+import { CodexAuth } from "@demesne/codex";
+import { ChatGPTProvider, CodexProvider, OpenAICompatibleProvider } from "@demesne/providers";
 import { createDaemonApp } from "./app.ts";
 import { serveDaemon } from "./http-server.ts";
 import {
@@ -34,7 +35,7 @@ const port = config.daemon.port ?? 7337;
 const inferenceSlots = config.inferenceSlots ?? 1;
 const providerInferenceSlots: Record<string, number> = {};
 for (const settings of [config.provider, ...Object.values(config.additionalProviders ?? {})]) {
-  const id = settings.auth === "chatgpt" ? "ChatGPT" : settings.id ?? "openai-compatible";
+  const id = settings.auth === "chatgpt" ? "ChatGPT" : settings.auth === "codex" ? "Codex" : settings.id ?? "openai-compatible";
   const slots = settings.inferenceSlots ?? inferenceSlots;
   if (runtimeProfileRequiresSingleInferenceSlot(settings.runtimeProfile) && slots !== 1) throw new Error(`${id}'s runtime profile requires one inference slot`);
   if (providerInferenceSlots[id] !== undefined && providerInferenceSlots[id] !== slots) throw new Error(`Conflicting inference slots for provider ${id}`);
@@ -70,7 +71,7 @@ if (runtimeProfileRequiresSingleInferenceSlot(configuredRuntimeProfile) && (conf
 const dataDirectory = prepareDataDirectory(config.dataDir);
 const dataDirectoryLock = acquireDataDirectoryLock(dataDirectory);
 let app: ReturnType<typeof createDaemonApp>;
-const processor = createProcessor(await chatGPTSignedIn());
+const processor = createProcessor(await signedInAccounts());
 let server: ReturnType<typeof Bun.serve>;
 try {
   app = createDaemonApp({
@@ -137,22 +138,33 @@ function parseHost(value: string): string {
 /// without a key) isn't offered; nor is one that would only fail.
 function signedOut(settings: ProviderConfig, chatgptSignedIn: Set<string>): boolean {
   if (settings.auth === "chatgpt") return !settings.authProfile || !chatgptSignedIn.has(settings.authProfile);
+  if (settings.auth === "codex") return !chatgptSignedIn.has("codex");
   return (settings.url ?? "").replace(/\/$/, "") === OPENROUTER_API && !settings.apiKey;
 }
 
 /// Loopback, private and Tailscale addresses, and .local names: a model on
 /// your own machines, preferred when the selected one goes away.
 function isLocalProvider(settings: ProviderConfig): boolean {
-  if (settings.auth === "chatgpt") return false;
+  if (settings.auth === "chatgpt" || settings.auth === "codex") return false;
   try {
     const host = new URL(settings.url ?? "http://127.0.0.1:1234/v1").hostname;
     return host === "localhost" || host.endsWith(".local") || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(host) || host === "[::1]";
   } catch { return false; }
 }
 
-async function chatGPTSignedIn(): Promise<Set<string>> {
-  try { return new Set((await new ChatGPTAuth(dataDirectory).accounts()).filter((account) => account.signedIn).map((account) => account.id)); }
-  catch { return new Set(); }
+async function signedInAccounts(): Promise<Set<string>> {
+  const signedIn = new Set<string>();
+  try { for (const account of await new ChatGPTAuth(dataDirectory).accounts()) if (account.signedIn) signedIn.add(account.id); }
+  catch { /* A signed-out account must not hide other providers. */ }
+  // Avoid launching Codex on machines that have not configured the provider.
+  const fresh = loadConfig({ includeProject: false }).config;
+  if ([fresh.provider, ...Object.values(fresh.additionalProviders ?? {})].some(settings => settings.auth === "codex")) {
+    const auth = new CodexAuth(dataDirectory);
+    try { if ((await auth.status(AbortSignal.timeout(5000))).authMode === "chatgpt") signedIn.add("codex"); }
+    catch { /* Settings remains available to install/sign in to Codex. */ }
+    finally { await auth.close(); }
+  }
+  return signedIn;
 }
 
 /// The configured providers you're signed in to. When none are, all are
@@ -177,9 +189,9 @@ function createProcessor(signedIn: Set<string>): ProviderTurnProcessor | MultiPr
 async function reloadProviders(processor: ProviderTurnProcessor | MultiProviderProcessor | undefined) {
   if (!(processor instanceof MultiProviderProcessor)) throw new Error("Configure a provider with demesne setup first.");
   const { config: fresh } = loadConfig({ includeProject: false });
-  const { configs, processors } = buildProviders(fresh, await chatGPTSignedIn());
+  const { configs, processors } = buildProviders(fresh, await signedInAccounts());
   if (processors.some((item) => !item)) throw new Error("Each configured provider requires a default model");
-  return processor.replace(processors as ProviderTurnProcessor[], configs.map((item) => item.allowedModels ?? []), configs.map(isLocalProvider));
+  return processor.replaceFromCatalog(processors as ProviderTurnProcessor[], configs.map((item) => item.allowedModels ?? []), configs.map(isLocalProvider));
 }
 
 function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor | undefined {
@@ -190,7 +202,7 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
   }
   if (!model) return undefined;
   const baseUrl = settings.url ?? "http://127.0.0.1:1234/v1";
-  const providerId = settings.auth === "chatgpt" ? "ChatGPT" : settings.id ?? "openai-compatible";
+  const providerId = settings.auth === "chatgpt" ? "ChatGPT" : settings.auth === "codex" ? "Codex" : settings.id ?? "openai-compatible";
   const configuredContextCapacity = settings.contextWindow;
   const allowedModelIds = settings.allowedModels;
   const maxOutputTokens = settings.maxOutputTokens
@@ -206,7 +218,8 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
   }
   if (settings.auth === "chatgpt" && !settings.authProfile) throw new Error("ChatGPT requires an auth_profile. Run demesne auth login chatgpt.");
   const auth = settings.auth === "chatgpt" ? new ChatGPTAuth(dataDirectory) : undefined;
-  const provider = auth ? new ChatGPTProvider({ accountId: settings.authProfile!, accessToken: signal => auth.accessToken(settings.authProfile!, signal), contextWindow: configuredContextCapacity }) : new OpenAICompatibleProvider({
+  const provider = settings.auth === "codex" ? new CodexProvider({ dataDir: dataDirectory, contextWindow: configuredContextCapacity })
+    : auth ? new ChatGPTProvider({ accountId: settings.authProfile!, accessToken: signal => auth.accessToken(settings.authProfile!, signal), contextWindow: configuredContextCapacity }) : new OpenAICompatibleProvider({
     baseUrl,
     allowHttpEndpoint: settings.allowHttpEndpoint,
     apiKey: settings.apiKey,
@@ -216,7 +229,7 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
     openRouterIgnore: settings.openRouterIgnore,
     contextWindow: configuredContextCapacity,
   });
-  const verifier = auth ? undefined : createRuntimeProfileVerifier({
+  const verifier = auth || settings.auth === "codex" ? undefined : createRuntimeProfileVerifier({
     profile: runtimeProfile,
     providerId,
     baseUrl,
@@ -229,7 +242,7 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
     verifier,
     configuredContextCapacity,
     allowedModelIds,
-    runtimeProfileSupportsPromptCache(runtimeProfile),
+    settings.auth === "codex" || runtimeProfileSupportsPromptCache(runtimeProfile),
   );
 }
 

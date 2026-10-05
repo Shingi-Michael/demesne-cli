@@ -80,6 +80,14 @@ export async function runSubagent(options: {
   /// Stable for this run, so its rounds can reuse the provider's prompt cache.
   cacheKey?: string;
 }): Promise<string> {
+  try {
+    return await runSubagentInference(options);
+  } finally {
+    await options.inference.release?.(options.cacheKey);
+  }
+}
+
+async function runSubagentInference(options: Parameters<typeof runSubagent>[0]): Promise<string> {
   const { inference, signal } = options;
   const definitions = options.tools.definitions().filter((definition) => SUBAGENT_TOOLS.has(definition.name));
   const streamLimits = providerStreamLimits(inference.maxOutputTokens, options.limits);

@@ -51,7 +51,7 @@ Each suggestion says why it's there and roughly how long it will take. **Run** s
 
 <table>
 <tr>
-<td width="50%" valign="top"><b>Models</b><br>Use a local server, your ChatGPT plan or OpenRouter. You can sign in and out under <b>Settings › Providers</b> without restarting, and each model has its own thinking levels. <a href="docs/authentication.md">Providers</a></td>
+<td width="50%" valign="top"><b>Models</b><br>Use a local server, your ChatGPT plan, Codex or OpenRouter. You can sign in and out under <b>Settings › Providers</b> without restarting, and each model has its own thinking levels. Codex uses an installed official CLI and a separate account sign-in. <a href="docs/authentication.md">Providers</a></td>
 <td width="50%" valign="top"><b>Sessions</b><br>A local daemon runs every turn, so closing the window doesn't stop the work. Open it again and carry on. <code>/compact</code> shortens a long session.</td>
 </tr>
 <tr>

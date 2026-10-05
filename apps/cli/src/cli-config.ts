@@ -10,6 +10,9 @@ export interface CliSettings {
   loaded: LoadedConfig;
   server: string;
   dataDirectory: string;
+  /// Account credentials follow machine configuration, even when a project
+  /// overrides the directory used by its CLI session.
+  accountDataDirectory?: string;
   /// A named theme, or `auto` to follow the terminal background.
   theme: string;
   autoStart: AutoStartPolicy;
@@ -24,6 +27,7 @@ export interface LoadCliSettingsOptions {
   workspaceRoot?: string;
   env?: Record<string, string | undefined>;
   home?: string;
+  includeProject?: boolean;
 }
 
 export function loadCliSettings(options: LoadCliSettingsOptions = {}): CliSettings {
@@ -33,17 +37,32 @@ export function loadCliSettings(options: LoadCliSettingsOptions = {}): CliSettin
     workspaceRoot: options.workspaceRoot ?? process.cwd(),
     env,
     home,
+    includeProject: options.includeProject,
   });
   const server = options.serverOverride ?? loaded.config.server ?? defaultServer(loaded.config);
+  const accounts = loadAccountSettings({ env, home, serverOverride: options.serverOverride });
   return {
     loaded,
     server,
     dataDirectory: loaded.config.dataDir ?? join(home, ".demesne"),
+    accountDataDirectory: accounts.dataDirectory,
     theme: loaded.config.theme ?? "auto",
     autoStart: loaded.config.daemon.autoStart,
     notifications: loaded.config.notifications,
     ui: loaded.config.ui,
-    configPath: loaded.files.user ?? userConfigPath(home),
+    configPath: accounts.configPath,
+  };
+}
+
+/// Browser sign-in configures the shared daemon. A project's config must not
+/// choose where machine account credentials are saved or which daemon reloads.
+export function loadAccountSettings(options: Pick<LoadCliSettingsOptions, "env" | "home" | "serverOverride"> = {}) {
+  const env = options.env ?? process.env, home = options.home ?? homedir();
+  const loaded = loadConfig({ env, home, includeProject: false });
+  return {
+    dataDirectory: loaded.config.dataDir ?? join(home, ".demesne"),
+    configPath: loaded.files.user ?? env.DEMESNE_CONFIG_FILE ?? userConfigPath(home),
+    server: options.serverOverride ?? loaded.config.server ?? defaultServer(loaded.config),
   };
 }
 

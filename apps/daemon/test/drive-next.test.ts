@@ -43,12 +43,12 @@ test("signals: a failing check, an unfinished ask, uncommitted work and TODOs, w
   store.startTurn(ask.id);
   store.saveCommand({ id: "c1", sessionId: session.id, turnId: ask.id, toolCallId: null, rerunOf: null, argv: ["/usr/local/bin/bun", "test"], cwd: workspace,
     background: false, check: true, pid: null, status: "failed", startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), lastOutputAt: null,
-    exitCode: 1, timedOut: false, stdout: "1 fail\nRan 1 tests across 1 file. [4ms]", stderr: "bun test v1.4.0\nexpected 2", truncated: false, fingerprint: null, freshness: "current" });
+    exitCode: 1, timedOut: false, stdout: "1 fail\nRan 1 tests across 1 file. [4ms]", stderr: "bun test v1.4.0\n3 | if (++n < 3) throw Error(\"flaky\");\nerror: expected 2\n(fail) adds [1ms]", truncated: false, fingerprint: null, freshness: "current" });
   const first = await collectDriveSignals(store.database, workspace, { gh: false });
   const byId = Object.fromEntries(first.signals.map((signal) => [signal.id.split(":")[0] + (signal.id.startsWith("git") ? `:${signal.id.split(":")[1]}` : ""), signal]));
   expect(byId.check).toMatchObject({ source: "checks", urgent: true, title: "Check failing: bun test" });
   // The detail names what failed, not the runner's closing summary.
-  expect(byId.check!.detail).toEndWith("expected 2 | 1 fail");
+  expect(byId.check!.detail).toEndWith(". error: expected 2 | (fail) adds [1ms]");
   expect(byId.ask).toMatchObject({ source: "sessions", title: "Unfinished ask (failed)" });
   expect(byId["git:uncommitted"]).toMatchObject({ title: "1 uncommitted change" });
   expect(byId.code).toMatchObject({ title: "1 TODO/FIXME note in code" });

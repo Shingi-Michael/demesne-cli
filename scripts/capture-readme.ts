@@ -75,9 +75,13 @@ async function wait(check: (s: any) => boolean) {
 async function click(action: string, args: Record<string, unknown> = {}) {
   const matches = (c: any) => c.action === action && Object.entries(args).every(([k,v]) => JSON.parse(c.args ?? "{}")[k] === v);
   await wait(s => s.live?.controls.some(matches));
-  const c = state.live.controls.find(matches); app.click(Math.round(c.x), Math.round(c.y));
+  const c = state.live.controls.find(matches); clickedAt = app.batches; app.click(Math.round(c.x), Math.round(c.y));
 }
+// The state file can report a new pane before its frame is drawn; a capture
+// waits for a frame after the last click (plus a moment to settle).
+let clickedAt = 0;
 async function save(name: string) {
+  await app.after(clickedAt, 10000); await Bun.sleep(400);
   // Decode the actual Kitty transport and require it to match the browser capture.
   await eventually(async () => { try {
     const a = await app.raw(), b = await sharp(join(capture, "latest.png")).ensureAlpha().raw().toBuffer({ resolveWithObject: true });

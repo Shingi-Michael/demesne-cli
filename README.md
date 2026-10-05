@@ -4,8 +4,8 @@
 
 <p align="center">
   <a href="https://github.com/Shingi-Michael/demesne-cli/actions/workflows/ci.yml"><img src="https://github.com/Shingi-Michael/demesne-cli/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-e5a93c?style=flat-square&amp;labelColor=1a1611" alt="MIT license"></a>
-  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-1.4.0-e5a93c?style=flat-square&amp;labelColor=1a1611" alt="Bun 1.4.0"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5AA9E6?style=flat-square&amp;labelColor=0B1218" alt="MIT license"></a>
+  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-1.4.0-5AA9E6?style=flat-square&amp;labelColor=0B1218" alt="Bun 1.4.0"></a>
 </p>
 
 <p align="center">

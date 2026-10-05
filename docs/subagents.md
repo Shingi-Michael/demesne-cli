@@ -6,7 +6,7 @@
 
 The coding agent calls the `subagent` tool with a task label, a self-contained prompt, and optionally a configured model ID. Each invocation gets a fresh context. The parent receives its final report; the UI separately shows its model, thinking, tool steps and status.
 
-Allowed tools are `list_files`, `read_file`, `read_files`, `search_files`, `git_status`, and `git_diff`. Subagents cannot edit files, run commands, ask the human, or spawn more subagents. They are useful for independent investigations, not parallel code changes. [Implementation](../apps/daemon/src/subagent.ts) · [tests](../apps/daemon/test/subagent.test.ts).
+Allowed tools are `list_files`, `read_file`, `read_files`, `search_files`, `git_status`, `git_diff`, and `git_history`. Subagents cannot edit files, run commands, ask the human, or spawn more subagents. They are useful for independent investigations, not parallel code changes. [Implementation](../apps/daemon/src/subagent.ts) · [tests](../apps/daemon/test/subagent.test.ts).
 
 ```text
 /subagent qwen3.8-27b

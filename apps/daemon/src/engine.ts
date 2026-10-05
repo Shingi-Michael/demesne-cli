@@ -13,6 +13,7 @@ import { recordedToolChanges } from "./tool-change-preview.ts";
 import { PermissionBroker } from "./permissions.ts";
 import type { QuestionBroker } from "./questions.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
+import { routeInspection } from "./inspection-commands.ts";
 import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinitionFor, type SubagentModel } from "./subagent.ts";
 import type { InferenceSchedulers } from "./inference-scheduler.ts";
 import { composeSystemPrompt, loadProjectInstructions } from "./instructions.ts";
@@ -488,6 +489,19 @@ export class AgentEngine {
       return result;
     }
     if (call.name === SUBAGENT_TOOL && inference) return this.executeSubagent(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
+    // ls, cat, grep… through run_command: answered by the built-in read tool
+    // when equivalent (no approval, no host process), or pointed at it.
+    if (call.name === "run_command") {
+      const route = routeInspection(input);
+      if (route?.kind === "pointer") {
+        this.store.settleToolCall(toolCallId, "denied", route.message);
+        return route.message;
+      }
+      if (route?.kind === "tool") {
+        const result = await this.executeTool(toolCallId, { ...call, name: route.name, arguments: JSON.stringify(route.input) }, permissionMode, workspaceRoot, turnId, sessionId, signal, planOnly, imageArtifactIds, inference);
+        return `${route.note}\n${result}`;
+      }
+    }
     const tool = this.tools.get(call.name);
     if (!tool) {
       const result = `Error: unknown tool ${call.name}`;
@@ -690,7 +704,7 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; definitions
 export function defaultSystemPrompt(workspaceRoot: string | undefined): string {
   if (!workspaceRoot) return "You are a concise assistant. This legacy session has no workspace or coding tools.";
   return `You are Demesne, a careful coding agent in ${workspaceRoot}.
-Inspect before editing with focused list, search, and read tools. Work in few rounds: put independent reads and searches in the same round (read_files takes up to 8 files), read each file once in a large window instead of paging through small slices, and do not re-read what you already have. Use purpose-built tools, never run_command, for file listing, reading, searching, or qualitative repository measurements. For qualitative summaries, do not compute line counts, file counts, or disk usage unless requested; stop when evidence is sufficient. Use relative paths. Reads are automatic; edits and commands need approval. run_command executes host argv, not a shell/sandbox. Verify changes and summarize concisely.`;
+Inspect before editing with focused list, search, and read tools. Work in few rounds: put independent reads and searches in the same round (read_files takes up to 8 files), read each file once in a large window instead of paging through small slices, and do not re-read what you already have. Use purpose-built tools, never run_command, for file listing, reading, searching, or qualitative repository measurements; use git_history, not run_command, for commit logs, files at other revisions, blame, and diffs between commits. For qualitative summaries, do not compute line counts, file counts, or disk usage unless requested; stop when evidence is sufficient. Use relative paths. Reads are automatic; edits and commands need approval. run_command executes host argv, not a shell/sandbox. Verify changes and summarize concisely.`;
 }
 
 const qualitativeInspectionTools = new Set(["list_files", "read_file", "read_files", "search_files"]);
@@ -704,6 +718,7 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
   "search_files",
   "git_status",
   "git_diff",
+  "git_history",
   "ask_user",
   // Read-only. A literal: subagent.ts imports this module, so its constant
   // may not be initialised yet while this set is built.

@@ -16,6 +16,8 @@ A workspace's `DEMESNE.md`/`AGENTS.md`, `.demesne/commands/` and `.demesne/confi
 - Command grants match argv in their allowed scope; a trailing wildcard deliberately broadens the allowed arguments.
 - Non-interactive approval requests are denied. Existing configured grants can still authorize operations.
 - **Agent Drive's coding turns use permission mode `allow`:** writes and host commands run without approval, so a Drive mission can do anything the daemon's OS account can, unattended. Only commands that publish beyond the machine (pushes, pull request/release/repo changes, `gh api` writes, package publishes) still ask. Run Drive only in workspaces where that is acceptable.
+- Inspection commands sent through `run_command` that a built-in read tool answers identically (`ls`, `cat`, `head`, `sed -n 'X,Yp'`, plain-text `grep`/`rg`, `find DIR -name PATTERN`) run as that tool instead: no host process and no approval. `tail` and `wc` are pointed at `read_file` instead of running. Other commands run normally.
+- `git_history` (log, show, blame, diffs between revisions) is read-only: revisions are validated, protected paths are refused, and git runs without hooks, external diff drivers or the user's config.
 - Subagents receive only read/search/Git-inspection tools; they cannot run commands, edit files or spawn further subagents.
 - Drive cannot answer approval prompts or user questions on the user’s behalf.
 

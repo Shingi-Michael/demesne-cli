@@ -131,6 +131,7 @@ function builtInTools(): AgentTool[] {
     writeFileTool(),
     gitStatusTool(),
     gitDiffTool(),
+    gitHistoryTool(),
     movePathTool(),
     deletePathTool(),
     runCommandTool(),
@@ -905,6 +906,69 @@ function gitDiffTool(): AgentTool {
       const diff = await runGit(context.workspaceRoot, args, context.signal);
       const truncated = Buffer.byteLength(diff.stdout) >= GIT_OUTPUT_LIMIT_BYTES;
       return JSON.stringify({ empty: diff.stdout.length === 0, truncated, diff: diff.stdout });
+    },
+  };
+}
+
+/// Read-only git history: commit logs, a commit or a file at any revision,
+/// line blame, and diffs between revisions, without run_command.
+function gitHistoryTool(): AgentTool {
+  const revisionOf = (value: unknown, name: string) => {
+    const revision = optionalString(value, name);
+    if (revision !== undefined && (!/^[A-Za-z0-9._/~^@{}+-]{1,200}$/.test(revision) || revision.startsWith("-")))
+      throw toolError("BAD_REVISION", `${name} ${JSON.stringify(revision)} is not a revision`, "use a branch, tag, commit hash, HEAD~N or main..HEAD");
+    return revision;
+  };
+  const pathOf = (value: unknown) => {
+    const path = optionalString(value, "path");
+    if (path !== undefined && (path.startsWith("-") || path.includes("\0"))) throw toolError("BAD_PATH", "invalid path", "use a workspace-relative path");
+    // Protected files (keys, .env…) stay out of history reads, as for read_file.
+    if (path !== undefined && isSensitivePath(path)) throw toolError("PROTECTED_PATH", `${path} is protected`, "choose a non-secret file");
+    return path;
+  };
+  return {
+    definition: {
+      name: "git_history",
+      description: "Read-only git history, no approval needed. action log: commits newest first (optional path, revision or range like main..HEAD, limit). show: a commit's message and patch, or with path a file's content at that revision. blame: who last changed each line of path (optional start/end lines). diff: changes between base and revision (default HEAD), optionally for one path.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["log", "show", "blame", "diff"] },
+          revision: { type: "string" },
+          base: { type: "string" },
+          path: { type: "string" },
+          limit: { type: "integer", minimum: 1, maximum: 100 },
+          start: { type: "integer", minimum: 1 },
+          end: { type: "integer", minimum: 1 },
+        },
+        required: ["action"],
+        additionalProperties: false,
+      },
+    },
+    permission: () => null,
+    async execute(input, context) {
+      const value = objectInput(input);
+      ensureRepository(await runGit(context.workspaceRoot, ["rev-parse", "--is-inside-work-tree"], context.signal));
+      const action = requiredString(value.action, "action");
+      const revision = revisionOf(value.revision, "revision"), base = revisionOf(value.base, "base"), path = pathOf(value.path);
+      let args: string[];
+      if (action === "log") {
+        args = ["log", "--no-color", `--max-count=${boundedInteger(value.limit, "limit", 1, 100, 20)}`, "--date=short", "--format=%h %ad %an%n    %s", ...(revision ? [revision] : []), "--", ...(path ? [path] : [])];
+      } else if (action === "show") {
+        args = path ? ["show", "--no-color", `${revision ?? "HEAD"}:./${path.replace(/^\.\//, "")}`]
+          : ["show", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", revision ?? "HEAD"];
+      } else if (action === "blame") {
+        if (!path) throw toolError("MISSING_PATH", "blame needs a path", "pass the file to blame");
+        const start = value.start === undefined ? undefined : boundedInteger(value.start, "start", 1, 10_000_000, 1);
+        const end = value.end === undefined ? (start ? start + 80 : undefined) : boundedInteger(value.end, "end", 1, 10_000_000, 1);
+        args = ["blame", "--date=short", ...(start ? ["-L", `${start},${Math.max(start, end ?? start)}`] : []), ...(revision ? [revision] : []), "--", path];
+      } else if (action === "diff") {
+        if (!base) throw toolError("MISSING_BASE", "diff needs a base revision", "pass base (and optionally revision, default HEAD); git_diff covers uncommitted changes");
+        args = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", base, revision ?? "HEAD", "--", ...(path ? [path] : [])];
+      } else throw toolError("BAD_ACTION", `unknown action ${JSON.stringify(action)}`, "use log, show, blame or diff");
+      const result = await runGit(context.workspaceRoot, args, context.signal);
+      if (result.code !== 0) throw toolError("GIT_FAILED", (result.stderr.trim().split("\n")[0] || `git ${action} failed`).slice(0, 300), "check the revision and path");
+      return JSON.stringify({ truncated: Buffer.byteLength(result.stdout) >= GIT_OUTPUT_LIMIT_BYTES, output: result.stdout });
     },
   };
 }

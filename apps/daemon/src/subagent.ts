@@ -12,7 +12,7 @@ export const SUBAGENT_TOOL = "subagent";
 /// What a sub-agent may use: reading and searching only. It cannot edit, run
 /// commands, ask the person, or start sub-agents of its own, so it never needs
 /// an approval and several can run at once.
-export const SUBAGENT_TOOLS: ReadonlySet<string> = new Set(["list_files", "read_file", "read_files", "search_files", "git_status", "git_diff"]);
+export const SUBAGENT_TOOLS: ReadonlySet<string> = new Set(["list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history"]);
 
 export const SUBAGENT_LIMITS = { rounds: 16, toolCalls: 48, toolResultBytes: 32 * 1024, reportBytes: 16 * 1024 } as const;
 

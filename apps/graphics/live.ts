@@ -1149,20 +1149,21 @@ function contextBody() {
 let driveTab: "next" | "done" = "next";
 let nextOpen: string | null = null;
 const DRIVE_PINNED = ["running", "waiting", "paused", "blocked"];
-function nextQueueHTML() {
+function nextQueueHTML(busy = false) {
   const next = state!.driveNext;
   const signal = new Map(next.signals.map((item) => [item.id, item]));
-  const open = next.proposals.some((item) => item.id === nextOpen) ? nextOpen : next.proposals[0]?.id;
+  // null: the top proposal opens by itself; "": all collapsed.
+  const open = nextOpen === "" ? "" : next.proposals.some((item) => item.id === nextOpen) ? nextOpen : next.proposals[0]?.id;
   const minutes = (value: number) => (value < 60 ? `${value} min` : `${Math.round(value / 6) / 10} h`);
   const rows = next.proposals
     .map((item) => {
       const tag = `<span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span>`;
       if (item.id !== open)
-        return `<div class="next-row">${tag}${btn("next-open", h(item.title), { id: item.id }, "next-row-title")}${btn("next-run", "▶", { id: item.id }, "next-row-run", true)}</div>`;
-      return `<div class="next-item first"><div class="next-top">${tag}<span class="next-title">${h(item.title)}</span></div><p class="next-why">${h(item.why)}</p><div class="next-facts">${item.evidence.map((id) => `<span title="${h(signal.get(id)?.detail ?? "")}">${item.urgent && signal.get(id)?.urgent ? "! " : ""}${h(signal.get(id)?.title ?? id)}</span>`).join("")}<span>~${minutes(item.minutes)} · ${item.coders} coder${item.coders === 1 ? "" : "s"}</span><span class="confidence-${item.confidence}">confidence ${item.confidence}</span></div><div class="next-actions">${btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id }, "quiet")}${btn("next-never", "Never", { id: item.id }, "quiet")}</div></div>`;
+        return `<div class="next-row">${tag}${btn("next-open", h(item.title), { id: item.id }, "next-row-title")}${busy ? '<span class="muted next-after">after this</span>' : btn("next-run", "▶", { id: item.id }, "next-row-run", true)}</div>`;
+      return `<div class="next-item first"><div class="next-top">${tag}<span class="next-title">${h(item.title)}</span>${btn("next-open", "▾", { id: "" }, "next-collapse")}</div><p class="next-why">${h(item.why)}</p><div class="next-facts">${item.evidence.map((id) => `<span title="${h(signal.get(id)?.detail ?? "")}">${item.urgent && signal.get(id)?.urgent ? "! " : ""}${h(signal.get(id)?.title ?? id)}</span>`).join("")}<span>~${minutes(item.minutes)} · ${item.coders} coder${item.coders === 1 ? "" : "s"}</span><span class="confidence-${item.confidence}">confidence ${item.confidence}</span></div><div class="next-actions">${busy ? '<span class="muted next-after">Runs after this mission</span>' : btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id }, "quiet")}${btn("next-never", "Never", { id: item.id }, "quiet")}</div></div>`;
     })
     .join("");
-  return `<div class="next-heading" title="Ranked by value, confidence and cost"><span class="muted">${next.loading ? "Reading the project…" : next.generatedAt ? `updated ${age(next.generatedAt)}` : ""}</span>${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${
+  return `<div class="next-heading"><span class="muted next-rank">ranked by value · confidence · cost</span><span class="muted next-age">${next.loading ? "Reading…" : next.generatedAt ? age(next.generatedAt) : ""}</span>${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${
     next.error ? `<p class="next-error">${h(next.error)}</p>` : ""
   }${rows || (next.loading ? "" : '<p class="muted next-empty">Nothing worth proposing right now. Drive looks again after your next turn, or press ↻.</p>')}`;
 }
@@ -1227,17 +1228,17 @@ function driveBody() {
   const tab = (name: "next" | "done", label: string, count: number) => `<button type="button" role="tab" aria-selected="${driveTab === name}" class="drive-tab${driveTab === name ? " active" : ""}" data-action="drive-tab" data-args="${h(JSON.stringify({ tab: name }))}">${label}${count ? ` <span class="count">${count}</span>` : ""}</button>`;
   const tabs = `<div class="drive-tabs" role="tablist">${tab("next", "Next", state!.driveNext.proposals.length)}${tab("done", "Done", doneCount)}</div>`;
   let body: string;
-  if (driveTab === "next") body = nextQueueHTML();
+  if (driveTab === "next") body = nextQueueHTML(Boolean(pinned));
   else {
     let top = "";
     if (finished) {
       const parts = missionParts(finished);
-      top = `<div class="done-item first"><div class="done-top"><span class="tone-${parts.tone}">${parts.mark}</span><span class="done-title">${h(parts.title)}</span></div><p class="next-why">${h(finished.answer ?? parts.summary ?? parts.label)}</p>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("panel", "Review changes", { name: "changes" }, "primary", true)}</div>${parts.details}</div>`;
+      top = `<div class="done-item first"><div class="done-top"><span class="tone-${parts.tone}">${parts.mark}</span><span class="done-title">${h(parts.title)}</span></div><p class="next-why">${h(finished.answer ?? parts.summary ?? parts.label)}</p>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${finished.homeSessionId && finished.homeSessionId !== state!.session?.id ? btn("select-session", "Open session", { id: finished.homeSessionId }, "primary") : ""}${btn("panel", "Review changes", { name: "changes" }, finished.homeSessionId && finished.homeSessionId !== state!.session?.id ? "" : "primary", true)}</div>${parts.details}</div>`;
     }
     const rows = memory.slice(0, 30).map((entry) => `<div class="done-row"><span class="${entry.kind === "blocker" ? "tone-thinking" : "tone-citron"}">${entry.kind === "blocker" ? "◌" : "✓"}</span><span class="done-text">${entry.kind === "blocker" ? '<b class="tone-thinking">Needs you:</b> ' : ""}${h(entry.text)}</span><time>${h(age(entry.at))}</time></div>`).join("");
-    body = top + rows || '<p class="muted next-empty">Finished missions and what Drive learned from them appear here.</p>';
+    body = top || rows ? `<div class="next-heading"><span class="muted">newest first · outcomes also go to Drive memory</span></div>${top}${rows}` : '<p class="muted next-empty">Finished missions and what Drive learned from them appear here.</p>';
   }
-  return `<div class="drive-content">${card}${tabs}<div class="drive-tab-body">${body}</div><p class="drive-foot muted">Start your own mission: <code>/drive</code> in the composer</p></div>`;
+  return `<div class="drive-content">${card}${tabs}<div class="drive-tab-body">${body}</div><p class="drive-foot muted">${pinned ? "Steer Drive by typing in the composer" : "Start your own mission: <code>/drive</code> in the composer"}</p></div>`;
 }
 function processError() {
   return state?.processesError

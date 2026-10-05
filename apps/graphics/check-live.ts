@@ -364,24 +364,35 @@ try {
   await state((s) => s.value === "");
   await click("panel", { name: "drive" });
   await state((s) => s.live.pane === "drive");
-  // Missions start from the composer (the panel has no mission form).
-  const composer = current.live.controls.find((c: any) => c.tag === "TEXTAREA");
-  app.click(Math.round(composer.x), Math.round(composer.y));
-  app.paste("/drive --continuous Review this result");
+  // Missions start from the composer (the panel has no mission form). The
+  // composer moves as the panel opens, so click it from fresh coordinates
+  // until the text lands there.
+  const missionText = "/drive --continuous Review this result";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await Bun.sleep(150);
+    await state(() => true);
+    const composer = current.live.controls.find((c: any) => c.tag === "TEXTAREA");
+    app.click(Math.round(composer.x), Math.round(composer.y));
+    app.paste(missionText);
+    try { await state((s) => s.live.controls.some((c: any) => c.tag === "TEXTAREA" && c.value === missionText), "mission typed"); break; }
+    catch { if (attempt === 4) throw new Error("The mission never reached the composer"); }
+  }
   await key("\r");
   await state((s) => s.live.runs.length === 3, "Drive composer submission");
-  await state(
-    (s) => s.live.runs.at(-1)?.status === "completed",
-    "Drive worker completion",
-  );
-  await capture("drive-live");
   if (current.live.pane !== "drive") {
     await click("panel", { name: "drive" });
     await state((s) => s.live.pane === "drive");
   }
-  if (current.live.drive !== "paused")
-    await click("drive-control", { control: "pause" });
-  await state((s) => s.live.drive === "paused");
+  // Pause while the mission is certainly live: once the worker finishes,
+  // Drive may review it and block (which offers Resume, not Pause).
+  await state((s) => ["running", "waiting"].includes(s.live.drive), "Drive live");
+  await capture("drive-live");
+  await click("drive-control", { control: "pause" });
+  await state((s) => s.live.drive === "paused", "Drive paused");
+  await state(
+    (s) => s.live.runs.at(-1)?.status === "completed",
+    "Drive worker completion",
+  );
   await capture("drive-paused");
   await click("close-panel");
   await state((s) => !s.live.pane);

@@ -18,6 +18,8 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 | `demesne auth login chatgpt` | Continue with ChatGPT |
 | `demesne auth accounts\|status\|use\|logout chatgpt` | Manage ChatGPT registrations |
 | `demesne auth login openrouter` | Connect OpenRouter |
+| `demesne auth login codex [--model codex/ID] [--context-window TOKENS] [--no-browser]` | Sign in to Demesne's managed Codex account |
+| `demesne auth status\|logout codex` | Inspect or sign out of that Codex account |
 | `demesne daemon start\|stop\|status\|logs` | Manage the daemon |
 | `demesne doctor [--json]` | Inspect configuration and connectivity |
 | `demesne ps [--watch] [--json]` | Active turns, queues, and provider slot capacities |
@@ -31,6 +33,8 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 | `demesne --version` | Show version; interactive use also checks for updates (`--no-check` disables it) |
 
 `--server URL` selects the daemon. Graphics supports `--scale auto` or `--scale 0.5` through `3`; auto follows terminal cell size. Use the explicit `graphics` entry point for graphics diagnostic flags described in the [graphics guide](../apps/graphics/README.md).
+
+Codex requires an installed official CLI; `DEMESNE_CODEX_BIN` can specify its executable. Its models have `codex/` IDs. [Authentication](authentication.md#codex-with-a-chatgpt-account) explains the separate sign-in and catalog.
 
 The former `--no-tui` full-screen/text-workbench switch is not an interactive mode in the current entry point. Use `prompt` for text output.
 

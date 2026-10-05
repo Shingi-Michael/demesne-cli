@@ -16,8 +16,8 @@ try {
   await wait(s => s.live?.connection === "online" && s.live?.sessionId, "online");
   await Bun.sleep(300);
   app.paste("/providers"); await Bun.sleep(80); app.write("\r");
-  await wait(s => s.live.overlay === "providers" && /ChatGPT/.test(s.live.text) && /OpenRouter/.test(s.live.text), "providers overlay");
-  for (const part of ["Providers", "ACCOUNTS", "Not set up · signing in uses your ChatGPT plan", "Not set up · hosted models", "sign in ↗"]) assert(state.live.text.includes(part), `the overlay shows ${part}`);
+  await wait(s => s.live.overlay === "providers" && /Codex/.test(s.live.text) && /ChatGPT/.test(s.live.text) && /OpenRouter/.test(s.live.text), "providers overlay");
+  for (const part of ["Providers", "ACCOUNTS", "Codex · ChatGPT account", "Not set up · browser sign-in for Codex models", "Not set up · ChatGPT plan sharing", "Not set up · hosted models", "sign in ↗"]) assert(state.live.text.includes(part), `the overlay shows ${part}`);
   await Bun.sleep(400);
   await app.png(join(output, "providers.png")); console.log("✓ providers");
   // The Settings row opens the same overlay.

@@ -74,6 +74,24 @@ Use [the auth commands](authentication.md), check the account/model catalog, and
 
 The Responses adapter retains completed output items from streaming events when the terminal response contains an empty output array. It requires a completed response before executing tool calls. Actual truncation, malformed arguments or a failed/incomplete response remain failures; silently executing partial JSON would be incorrect. Update an older daemon before diagnosing repeated incomplete-call errors. Inspect the recorded failure and output allowance; do not assume every incomplete response is an auth error.
 
+## Codex models or sign-in
+
+```sh
+codex --version
+demesne auth status codex
+demesne models
+```
+
+If Codex is missing, install the official CLI (`npm install -g @openai/codex`) or set `DEMESNE_CODEX_BIN` to a working executable. The integration was built against the 0.160.0 app-server protocol; initialization or dynamic-tool errors on an older version may require updating Codex. A desktop build contains Demesne's provider bridge but does not include the Codex executable.
+
+Sign in under Settings › Providers › **Codex · ChatGPT account**, or run `demesne auth login codex`. Demesne uses `<data_dir>/codex`, so a successful sign-in in OpenCode or your regular Codex CLI does not sign in this provider. Check which `data_dir` the CLI and daemon use. Do not copy another application's credential file into Demesne.
+
+Codex and the existing ChatGPT provider have different catalog routes. Look for `codex/gpt-6.1-sol` under the Codex group when the app-server offers it; `gpt-6.1-sol` without the prefix belongs to another route. A catalog listing is not a guarantee of account access. If the service rejects that model, preserve the error and choose another model from the current Codex catalog. Demesne does not fall back to API-key billing.
+
+CLI login writes configuration; login and logout reload a running daemon's providers automatically, as does in-app sign-in. If an older daemon cannot reload, the CLI prints a restart reminder. If the picker remains stale after a successful sign-in, reopen it and inspect `demesne models` to distinguish daemon discovery from UI state. Signing out or reloading providers can interrupt pending Codex work; wait for active work to finish when appropriate.
+
+The bridge runs Demesne's tools and approvals. An error about an unsupported Codex server request or native tool is an integration failure, not a reason to enable native shell access. Update the integration/runtime and retry from the saved Demesne transcript. Cancellation closes pending tool requests and ephemeral threads; it does not certify that a Demesne tool already executing made no changes.
+
 ## Qwen thinking for too long or subagents waiting
 
 Three agent tasks do not imply three simultaneous GPU executions. Check `providerInferenceSlots` and the server’s actual parallel capacity. Both sides must agree; see [subagents and concurrency](subagents.md).

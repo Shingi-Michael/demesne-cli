@@ -85,3 +85,17 @@ test("signing back in returns you to the model you were moved off, unless you ch
   router.setModel("qwen3.8-27b");
   expect(router.replace([qwen, chatgpt], [], [true, false])).toMatchObject({ switched: false, model: "qwen3.8-27b" });
 });
+
+test("provider reload keeps a catalog-only Codex model and restores it after signing back in", async () => {
+  const codex = () => new ProviderTurnProcessor({ id: "Codex", async listModels() {
+    return ["codex/gpt-6.1-sol", "codex/gpt-6.1-sol-fast"].map(id => ({ id, provider: "Codex", contextWindow: 272000 }));
+  }, async *stream() { yield { type: "finish" as const, reason: "stop" }; } }, "codex/gpt-6.1-sol");
+  const local = processor("local", "qwen", 32768);
+  const router = new MultiProviderProcessor([local, codex()], []);
+  await router.listModels();
+  router.setModel("codex/gpt-6.1-sol-fast", "high");
+  expect(await router.replaceFromCatalog([local, codex()], [], [true, false])).toMatchObject({ switched: false, model: "codex/gpt-6.1-sol-fast", provider: "Codex" });
+  expect(router.reasoning).toBe("high");
+  expect(await router.replaceFromCatalog([local], [], [true])).toMatchObject({ switched: true, model: "qwen" });
+  expect(await router.replaceFromCatalog([local, codex()], [], [true, false])).toMatchObject({ switched: true, restored: true, model: "codex/gpt-6.1-sol-fast" });
+});

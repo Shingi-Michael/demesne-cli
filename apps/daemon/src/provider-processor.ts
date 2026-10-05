@@ -117,6 +117,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
       maxOutputTokens: requestDefaults.maxOutputTokens,
       temperature: requestDefaults.temperature,
       seed: requestDefaults.seed,
+      release: (cacheKey?: string) => this.provider.release?.(cacheKey) ?? Promise.resolve(),
       stream: (messages: ProviderMessage[], tools: ProviderToolDefinition[], signal: AbortSignal, options?: StreamOptions) => (
         this.streamModel(model, modelGeneration, requestDefaults, messages, tools, signal, thinkingEnabled, undefined, options?.cacheKey)
       ),

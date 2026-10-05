@@ -11,6 +11,8 @@ export interface TurnInference {
   readonly maxOutputTokens?: number;
   readonly temperature?: number;
   readonly seed?: number;
+  /// Close provider-owned state when this conversation's turn ends or fails.
+  release?(cacheKey?: string): Promise<void>;
   stream(
     messages: ProviderMessage[],
     tools: ProviderToolDefinition[],

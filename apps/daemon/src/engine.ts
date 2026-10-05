@@ -73,6 +73,15 @@ export class AgentEngine {
   setSubagentModel(model: string | undefined): void { this.options.subagentModel = model; }
 
   async run(turnId: string, inference: TurnInference, signal: AbortSignal): Promise<void> {
+    const sessionId = this.store.getTurn(turnId)?.sessionId;
+    try {
+      await this.runInference(turnId, inference, signal);
+    } finally {
+      if (sessionId) await inference.release?.(sessionId);
+    }
+  }
+
+  private async runInference(turnId: string, inference: TurnInference, signal: AbortSignal): Promise<void> {
     const turn = this.store.getTurn(turnId);
     if (!turn) throw new NotFoundError(`Turn not found: ${turnId}`);
     this.store.startTurn(turnId);

@@ -51,6 +51,7 @@ export interface GraphicsHostOptions {
   sessionId?: string;
   settings?: CliSettings;
   client?: DemesneClient;
+  providerAccounts?: Pick<ProviderAccounts, "signingIn" | "list" | "signIn" | "signOut" | "cancel">;
   command?: (command: GraphicsUICommand) => void;
   /// Desktop hosts use trusted native IPC instead of command-line OS utilities.
   copy?: (text: string) => Promise<void>;
@@ -121,7 +122,8 @@ export class GraphicsHost {
   /// Settings › Providers: each provider's sign-in state, and the one being
   /// signed in while its browser flow is open.
   providers: { items: ProviderEntry[]; signingIn: string | null; message: string | null; loading: boolean } = { items: [], signingIn: null, message: null, loading: false };
-  private providerAccounts: ProviderAccounts | null = null;
+  private providerAccounts: NonNullable<GraphicsHostOptions["providerAccounts"]> | null = null;
+  private providerSignInGeneration = 0;
   /// Settings › Clean up sessions: what's worth deleting, what you ticked,
   /// and whether Delete was pressed once (it asks twice).
   cleanup: { candidates: import("@demesne/protocol").SessionCleanupCandidate[]; selected: string[]; loading: boolean; armed: boolean; message: string | null; staleDays: number } = { candidates: [], selected: [], loading: false, armed: false, message: null, staleDays: 30 };
@@ -708,27 +710,41 @@ export class GraphicsHost {
     this.publish();
   }
   private accounts() {
-    return this.providerAccounts ??= new ProviderAccounts({ configPath: this.settings.configPath, dataDirectory: this.settings.dataDirectory, open: (url) => this.open(url) });
+    return this.providerAccounts ??= this.options.providerAccounts ?? new ProviderAccounts({ configPath: this.settings.configPath, dataDirectory: this.settings.dataDirectory, codexDataDirectory: this.settings.accountDataDirectory, open: (url) => this.open(url) });
   }
   async refreshProviders(message: string | null = this.providers.message) {
+    const generation = this.providerSignInGeneration;
     this.providers = { ...this.providers, loading: true };
     this.publish();
-    try { this.providers = { items: await this.accounts().list(this.model.provider), signingIn: this.accounts().signingIn, message, loading: false }; }
-    catch (error) { this.providers = { ...this.providers, loading: false, message: error instanceof Error ? error.message : String(error) }; }
+    try {
+      const items = await this.accounts().list(this.model.provider);
+      if (generation !== this.providerSignInGeneration || this.disposed) return;
+      this.providers = { items, signingIn: this.accounts().signingIn, message, loading: false };
+    }
+    catch (error) {
+      if (generation !== this.providerSignInGeneration || this.disposed) return;
+      this.providers = { ...this.providers, loading: false, message: error instanceof Error ? error.message : String(error) };
+    }
     this.publish();
   }
   /// After signing in or out: the daemon rebuilds its providers, and the
   /// model shown follows it (switching away from a provider you left).
-  private async applyProviderChange(done: string) {
+  private async applyProviderChange(done: string, generation?: number) {
+    const stale = () => this.disposed || (generation !== undefined && generation !== this.providerSignInGeneration);
     const result = await this.client.reloadProviders();
+    if (stale()) return;
     this.modelCache = null;
     const health = await this.client.health();
+    if (stale()) return;
     this.reasoning = health.reasoning;
     this.model = { id: health.model, provider: health.provider, ...(health.contextCapacity ? { contextWindow: health.contextCapacity } : {}) };
+    let account: ChatGPTAccount | null = null;
     try {
       const id = configuredChatGPTAccount(this.settings.configPath);
-      this.chatgptAccount = id ? (await new ChatGPTAuth(this.settings.dataDirectory).accounts()).find(a => a.id === id) ?? null : null;
-    } catch { this.chatgptAccount = null; }
+      account = id ? (await new ChatGPTAuth(this.settings.dataDirectory).accounts()).find(a => a.id === id) ?? null : null;
+    } catch {}
+    if (stale()) return;
+    this.chatgptAccount = account;
     await this.refreshProviders(result.restored ? `${done} Back on ${result.model} (${result.provider}).`
       : result.switched ? `${done} Switched to ${result.model} (${result.provider}); signing back in returns you to ${result.previous.model}.` : done);
   }
@@ -737,13 +753,16 @@ export class GraphicsHost {
     await this.applyProviderChange(`Signed out of ${label}.${revoked === false ? " Remove Demesne in ChatGPT settings to confirm remote revocation." : ""}`);
   }
   private async signInProvider(key: string) {
-    this.providers = { ...this.providers, signingIn: key, message: "Finish signing in in your browser." };
+    const generation = ++this.providerSignInGeneration;
+    this.providers = { ...this.providers, signingIn: key, loading: false, message: "Finish signing in in your browser." };
     this.publish();
     try {
       const { label } = await this.accounts().signIn(key);
+      if (generation !== this.providerSignInGeneration || this.disposed) return;
       this.providers = { ...this.providers, signingIn: null };
-      await this.applyProviderChange(`Signed in to ${label}.`);
+      await this.applyProviderChange(`Signed in to ${label}.`, generation);
     } catch (error) {
+      if (generation !== this.providerSignInGeneration || this.disposed) return;
       this.providers = { ...this.providers, signingIn: null, message: error instanceof Error ? error.message : String(error) };
       this.publish();
     }
@@ -929,7 +948,7 @@ export class GraphicsHost {
     if (method === "providers-refresh") return this.refreshProviders();
     if (method === "provider-signin") return this.signInProvider(string(args.key, "provider", 200));
     if (method === "provider-signout") return this.signOutProvider(string(args.key, "provider", 200));
-    if (method === "provider-cancel") { this.providerAccounts?.cancel(); this.providers = { ...this.providers, signingIn: null, message: "Sign-in cancelled." }; this.publish(); return; }
+    if (method === "provider-cancel") { this.providerSignInGeneration++; this.providerAccounts?.cancel(); this.providers = { ...this.providers, signingIn: null, loading: false, message: "Sign-in cancelled." }; this.publish(); return; }
     if (method === "processes") {
       await this.refreshProcesses();
       return this.processes;
@@ -1343,6 +1362,8 @@ export class GraphicsHost {
   }
   dispose() {
     this.batchGeneration++;
+    this.providerSignInGeneration++;
+    this.providerAccounts?.cancel();
     if (this.panelWatchTimer) clearInterval(this.panelWatchTimer);
     this.breakage.stop();
     this.drive?.dispose();

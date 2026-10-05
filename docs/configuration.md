@@ -55,12 +55,12 @@ The same fields are supported under `[provider]` and `[additional_providers.NAME
 
 | Field | Meaning |
 | --- | --- |
-| `id`, `url`, `model` | Provider identity, base URL, default model ID |
+| `id`, `url`, `model` | Provider identity, base URL, default model ID; omit URL for Codex |
 | `allowed_models` | Optional model allowlist; include the default model |
 | `api_key` | Bearer key for OpenAI-compatible endpoints |
-| `auth`, `auth_profile` | `api-key` or `chatgpt`; ChatGPT profile reference written by login |
+| `auth`, `auth_profile` | `api-key`, `chatgpt`, or `codex`; `auth_profile` belongs only to ChatGPT registration |
 | `context_window` | Usable context **per request/slot**, including reserved output |
-| `max_output_tokens` | Chat Completions output cap and planning reserve; reserve only on the ChatGPT plan route |
+| `max_output_tokens` | Chat Completions output cap and planning reserve; local reserve on ChatGPT and Codex routes |
 | `inference_slots` | Provider-specific concurrency; otherwise inherits the top-level value |
 | `vision` | Opt-in image hydration for the daemon's configured vision path |
 | `reasoning_effort` | Config default: `none`, `low`, `medium`, `high`, or `max`; actual support depends on the provider |
@@ -74,6 +74,25 @@ The same fields are supported under `[provider]` and `[additional_providers.NAME
 The default stream first-event deadline is at least 180 seconds, with profile-specific floors. The default overall deadline scales with the output allowance; it is at least 15 minutes. See [provider limits](../apps/daemon/src/provider-limits.ts). These deadlines are not reasoning budgets.
 
 HTTP is accepted on loopback. Other endpoints require HTTPS unless the exact Tailscale URL is explicitly allowed. ChatGPT credentials always go to the fixed official API/auth destinations; a custom `url` cannot redirect those tokens.
+
+## Codex provider
+
+[Sign in first](authentication.md#codex-with-a-chatgpt-account). Login writes a provider entry like this while preserving existing local providers:
+
+```toml
+[additional_providers.codex]
+id = "Codex"
+auth = "codex"
+model = "codex/gpt-6.1-sol"
+context_window = 272000
+max_output_tokens = 16384
+```
+
+Use a model offered by the Codex catalog; the example does not grant model access. Codex model IDs must start with `codex/`, including entries in `allowed_models`. A Codex provider cannot set `url`, `api_key` or `auth_profile`: the managed app-server owns its transport and account under `<data_dir>/codex`.
+
+Login uses the catalog's context capacity when provided, otherwise a conservative planning budget of 272,000 tokens. The output reserve is one quarter of that budget, capped at 16,384. `--context-window TOKENS` on `demesne auth login codex` changes the local planning budget. These values do not enforce a server output cap or claim the model's full capacity. Demesne discovers thinking levels from the catalog and rejects unsupported selections.
+
+`DEMESNE_CODEX_BIN` selects the installed Codex executable. The app-server gets a private `CODEX_HOME`; the user's global Codex configuration and repository instructions are not used as provider settings. Demesne still supplies its own workspace guidance in the coding prompt. No user-configurable Codex tool execution bypass is exposed.
 
 ## Multiple providers and concurrency
 
@@ -100,7 +119,7 @@ max_output_tokens = 8192
 subagent_model = "qwen3.8-27b"
 ```
 
-Additional providers require URL, model, context and output settings. Model IDs must be unambiguous across providers. `/model` changes the main selection; `/subagent` changes and saves the subagent default independently.
+Additional providers require model, context and output settings, plus a URL for HTTP providers. Model IDs must be unambiguous across providers. `/model` changes the main selection; `/subagent` changes and saves the subagent default independently.
 
 The example grants Qwen three slots and leaves the hosted provider at one. It does not reconfigure the server: the server must actually support three simultaneous requests and 32K per slot. Runtime profiles that require one slot reject an incompatible override. `demesne ps --json` reports `providerInferenceSlots`; `inferenceSlots` describes the currently selected provider. See [the concurrency guide](subagents.md#three-slot-qwen-example).
 
@@ -155,6 +174,7 @@ The exported [environment map](../packages/config/src/index.ts) is authoritative
 | Agent | `DEMESNE_MAX_MODEL_ROUNDS`, `DEMESNE_MAX_TOOL_CALLS`, `DEMESNE_SUBAGENT_MODEL` |
 | Images | `DEMESNE_IMAGE_URL`, `DEMESNE_IMAGE_MODEL`, `DEMESNE_IMAGE_API_KEY`, `DEMESNE_IMAGE_REQUEST_TIMEOUT_MS` |
 | OpenRouter login | `OPENROUTER_API_KEY` |
+| Codex runtime | `DEMESNE_CODEX_BIN` (installed Codex executable) |
 | Graphics diagnostics | `DEMESNE_GRAPHICS_FILES`, `DEMESNE_GRAPHICS_GPU`, `DEMESNE_GRAPHICS_TRACE` |
 | Drive transport | `DEMESNE_DRIVE_CONTROL=ui` selects the compatibility UI-control path |
 

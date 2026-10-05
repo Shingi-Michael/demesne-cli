@@ -46,6 +46,8 @@ export interface ProviderAdapter {
   readonly id: string;
   listModels(signal?: AbortSignal): Promise<ModelDescriptor[]>;
   stream(request: ProviderRequest, signal: AbortSignal): AsyncIterable<ProviderStreamEvent>;
+  /// Release a conversation that can be paused at an external tool boundary.
+  release?(cacheKey?: string): Promise<void>;
 }
 
 export class ProviderError extends Error {
@@ -576,3 +578,4 @@ function integerOrNull(value: unknown): number | null {
 }
 
 export { ChatGPTProvider } from "./chatgpt.ts";
+export { CodexProvider } from "./codex.ts";

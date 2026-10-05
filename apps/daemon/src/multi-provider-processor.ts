@@ -57,6 +57,17 @@ export class MultiProviderProcessor implements TurnProcessor {
     return { switched: true, model: this.selected.modelId, provider: this.selected.providerId, previous };
   }
 
+  /// Rebuild discovery routes before deciding whether a selected model survived
+  /// an account change. Catalog-only choices are not limited to config defaults.
+  async replaceFromCatalog(processors: TurnProcessor[], configuredModels: string[][], local: boolean[] = []) {
+    const results = await Promise.allSettled(processors.map(processor => processor.listModels(AbortSignal.timeout(5000))));
+    const models = processors.map((_, index) => [...new Set([
+      ...(configuredModels[index] ?? []),
+      ...(results[index]?.status === "fulfilled" ? results[index].value.map(model => model.id) : []),
+    ])]);
+    return this.replace(processors, models, local);
+  }
+
   private addRoute(routes: Map<string, TurnProcessor>, id: string, processor: TurnProcessor) {
     if (routes.has(id) && routes.get(id) !== processor) throw new Error(`Ambiguous model ID across providers: ${id}`);
     routes.set(id, processor);

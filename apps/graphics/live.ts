@@ -37,6 +37,7 @@ type OverlayName =
   | "models"
   | "themes"
   | "providers"
+  | "cleanup"
   | "sessions"
   | "rename"
   | "confirm-archive"
@@ -1697,7 +1698,7 @@ function renderPanels() {
               .join("")
           : '<div class="check-row muted">Nothing yet. Drive records finished work here; add a standing note with /drive remember …</div>'
       }` +
-      `<div class="panel-section">OTHER SESSIONS ${btn("overlay", "All ›", { name: "sessions" }, "link")}</div>${state.sessions
+      `<div class="panel-section">OTHER SESSIONS ${btn("overlay", "Clean up", { name: "cleanup" }, "link")}${btn("overlay", "All ›", { name: "sessions" }, "link")}</div>${state.sessions
         .filter((item) => item.id !== state!.session?.id && item.turns > 0)
         .slice(0, 5)
         .map((item) =>
@@ -1935,6 +1936,7 @@ async function openOverlay(name: OverlayName, query = "") {
     void act(() => api("providers-refresh"));
     return;
   }
+  if (name === "cleanup") void act(() => api("cleanup-scan"));
   if (name === "models") {
     modelLevels.clear();
     // Opens at once with the last list; the host answers from its cache.
@@ -1970,6 +1972,7 @@ function renderOverlay() {
     state.sessions,
     models,
     state.providers,
+    state.cleanup,
   ]);
   if (signature === overlaySignature) return;
   overlaySignature = signature;
@@ -2016,6 +2019,14 @@ function renderOverlay() {
         action: "overlay",
         data: { name: "sessions" },
         hint: "/sessions",
+      },
+      {
+        label: "Clean up sessions",
+        value: "delete empty, quick and old ones",
+        group: "NAVIGATE",
+        action: "overlay",
+        data: { name: "cleanup" },
+        hint: "/cleanup",
       },
       {
         label: "All commands",
@@ -2109,6 +2120,39 @@ function renderOverlay() {
         hint: signing ? "cancel ↵" : item.status === "signed-in" ? "sign out ↵" : item.status === "signed-out" ? "sign in ↗" : "",
       };
     });
+  } else if (overlay === "cleanup") {
+    const { candidates, selected, loading, armed, message, staleDays } = state.cleanup;
+    const chosen = new Set(selected);
+    title = "Clean up sessions";
+    subtitle = loading ? "looking…" : `${chosen.size} of ${candidates.length} selected`;
+    filter = false;
+    footerNote = message ?? "Deleting can't be undone · the open session and running ones are never listed";
+    const GROUPS: Record<string, string> = { empty: "EMPTY", missing: "FOLDER GONE", archived: "ARCHIVED", unfinished: "NEVER FINISHED", quick: "QUICK QUESTIONS", stale: `NOT USED IN ${staleDays}+ DAYS` };
+    const order = Object.keys(GROUPS);
+    const here = state.workspace;
+    overlayRows = candidates.length
+      ? [
+          {
+            label: armed ? `Delete ${chosen.size} session${chosen.size === 1 ? "" : "s"} for good?` : chosen.size ? `Delete ${chosen.size} selected` : "Nothing selected",
+            value: armed ? "press ↵ again to delete · Esc to cancel" : "",
+            action: chosen.size ? "cleanup-delete" : "",
+            data: {},
+            hint: armed ? "confirm" : "",
+          },
+          { label: chosen.size === candidates.length ? "Select none" : "Select all", value: "", action: "cleanup-toggle", data: { id: "*" }, hint: "" },
+          ...[...candidates]
+            .sort((a, b) => order.indexOf(a.reason) - order.indexOf(b.reason))
+            .map((item) => ({
+              label: `${chosen.has(item.id) ? "☒" : "☐"} ${item.title}`,
+              value: `${item.detail} · ${age(item.updatedAt)}${item.workspace && item.workspace !== here ? ` · ${item.workspace.split("/").pop()}` : ""}`,
+              group: GROUPS[item.reason],
+              action: "cleanup-toggle",
+              data: { id: item.id },
+              hint: chosen.has(item.id) ? "delete" : "keep",
+            })),
+        ]
+      : [];
+    if (!candidates.length) footerNote = message ?? (loading ? "" : "Nothing to clean up.");
   } else if (overlay === "themes") {
     title = "Theme";
     subtitle = "this session";
@@ -2393,6 +2437,11 @@ async function submitText(value = editor.value) {
       clear();
       return;
     }
+    if (id === "cleanup") {
+      await openOverlay("cleanup");
+      clear();
+      return;
+    }
     if (id === "theme") {
       if (argument) await api("theme", { name: argument });
       else await openOverlay("themes");
@@ -2653,6 +2702,7 @@ async function dispatch(
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never"].includes(action)) return api(action, args);
   if (action.startsWith("breakage-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
+  if (["cleanup-toggle", "cleanup-delete"].includes(action)) return act(() => api(action, args));
   if (action === "drive-forget") return api("drive", { text: `forget ${args.id}` });
   if (action === "overlay") return openOverlay(args.name, args.query ?? "");
   if (action === "close-overlay") {
@@ -2750,8 +2800,8 @@ async function dispatch(
       el("overlay").querySelector<HTMLInputElement>("input")?.focus();
       return;
     }
-    // Providers stay open while signing in or out, so the result shows.
-    if (row && overlay === "providers") {
+    // Providers and cleanup stay open, so the result shows.
+    if (row && (overlay === "providers" || overlay === "cleanup")) {
       if (row.action) await dispatch(row.action, row.data);
       return;
     }
@@ -3552,6 +3602,7 @@ window.demesneInspect = () => ({
   drivePhase: state?.drive?.autonomy?.phase,
   driveMemory: state?.driveMemory,
   driveNext: state?.driveNext,
+  cleanup: state?.cleanup,
   breakage: state?.breakage,
   driveTasks: state?.drive?.ledger?.tasks.map((task) => ({
     id: task.id,

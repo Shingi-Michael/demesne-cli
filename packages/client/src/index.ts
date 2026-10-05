@@ -251,6 +251,15 @@ export class DemesneClient {
     });
   }
 
+  /// Sessions worth deleting and why; `keep` are never suggested.
+  async sessionCleanup(keep: string[] = []): Promise<import("@demesne/protocol").SessionCleanupResponse> {
+    const query = keep.map((id) => `keep=${encodeURIComponent(id)}`).join("&");
+    return this.request(`/v1/sessions/cleanup${query ? `?${query}` : ""}`);
+  }
+  /// Deletes sessions for good (not archive). Sessions with a running turn are skipped.
+  async deleteSessions(ids: string[]): Promise<import("@demesne/protocol").DeleteSessionsResponse> {
+    return this.request("/v1/sessions/delete", { method: "POST", body: JSON.stringify({ ids }) });
+  }
   async archiveSession(sessionId: string): Promise<ArchiveSessionResponse> {
     return this.request<ArchiveSessionResponse>(`/v1/sessions/${sessionId}`, { method: "DELETE" });
   }

@@ -35,6 +35,7 @@ type OverlayName =
   | "settings"
   | "models"
   | "themes"
+  | "providers"
   | "sessions"
   | "rename"
   | "confirm-archive"
@@ -1865,6 +1866,10 @@ async function openOverlay(name: OverlayName, query = "") {
   completionDismissed = true;
   el("completion").hidden = true;
   renderOverlay();
+  if (name === "providers") {
+    void act(() => api("providers-refresh"));
+    return;
+  }
   if (name === "models") {
     modelLevels.clear();
     // Opens at once with the last list; the host answers from its cache.
@@ -1899,6 +1904,7 @@ function renderOverlay() {
     state.planOnly,
     state.sessions,
     models,
+    state.providers,
   ]);
   if (signature === overlaySignature) return;
   overlaySignature = signature;
@@ -1953,6 +1959,14 @@ function renderOverlay() {
         action: "insert-command",
         data: {},
         hint: "/",
+      },
+      {
+        label: "Providers",
+        value: state.providers.items.length ? `${state.providers.items.filter((item) => item.status === "signed-in").length} signed in` : "sign in · sign out",
+        group: "CONNECTION",
+        action: "overlay",
+        data: { name: "providers" },
+        hint: "/providers",
       },
       {
         label: "Provider setup",
@@ -2013,6 +2027,23 @@ function renderOverlay() {
       for (const group of large)
         overlayRows.push({ label: `All ${sizes.get(models.find((model) => model.provider.toUpperCase() === group)!.provider)} models`, value: "type to search", group, action: "focus-filter", data: {}, hint: "" });
     if (!models.length && modelsLoading) footerNote = "Loading models…";
+  } else if (overlay === "providers") {
+    title = "Providers";
+    subtitle = state.providers.loading ? "checking…" : `using ${state.model.provider}`;
+    noun = "providers";
+    filter = false;
+    footerNote = state.providers.message ?? "Enter signs in or out · signing out keeps the provider set up";
+    overlayRows = state.providers.items.map((item) => {
+      const signing = state!.providers.signingIn === item.key;
+      return {
+        label: `${item.label}${item.active ? " ●" : ""}`,
+        value: signing ? "Waiting for your browser…" : item.detail,
+        group: item.kind === "local" ? "LOCAL" : item.kind === "api-key" ? "API KEY" : "ACCOUNTS",
+        action: signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "",
+        data: { key: item.key },
+        hint: signing ? "cancel ↵" : item.status === "signed-in" ? "sign out ↵" : item.status === "signed-out" ? "sign in ↗" : "",
+      };
+    });
   } else if (overlay === "themes") {
     title = "Theme";
     subtitle = "this session";
@@ -2292,6 +2323,11 @@ async function submitText(value = editor.value) {
       clear();
       return;
     }
+    if (id === "providers") {
+      await openOverlay("providers");
+      clear();
+      return;
+    }
     if (id === "theme") {
       if (argument) await api("theme", { name: argument });
       else await openOverlay("themes");
@@ -2550,6 +2586,7 @@ async function dispatch(
   }
   if (action === "new-session") return api("new-session", {});
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never"].includes(action)) return api(action, args);
+  if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
   if (action === "drive-forget") return api("drive", { text: `forget ${args.id}` });
   if (action === "overlay") return openOverlay(args.name, args.query ?? "");
   if (action === "close-overlay") {
@@ -2645,6 +2682,11 @@ async function dispatch(
     const row = overlayRows[args.index];
     if (row?.action === "focus-filter") {
       el("overlay").querySelector<HTMLInputElement>("input")?.focus();
+      return;
+    }
+    // Providers stay open while signing in or out, so the result shows.
+    if (row && overlay === "providers") {
+      if (row.action) await dispatch(row.action, row.data);
       return;
     }
     if (row) {

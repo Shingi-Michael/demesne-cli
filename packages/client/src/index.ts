@@ -151,6 +151,12 @@ export class DemesneClient {
     return (await this.request<{ models: ModelDescriptor[] }>("/v1/models")).models;
   }
 
+  /// Rebuilds the daemon's providers after signing in or out. Reports a
+  /// switch when the selected model's provider went away.
+  async reloadProviders(): Promise<{ switched: boolean; model: string; provider: string; previous: { model: string; provider: string } }> {
+    try { return await this.request("/v1/providers/reload", { method: "POST", body: "{}" }); }
+    catch (error) { if (error instanceof ApiRequestError && error.status === 404) throw new Error("Restart the daemon to apply provider changes (this daemon can't reload them)."); throw error; }
+  }
   async setModel(model: string, reasoning?: string): Promise<void> {
     await this.request("/v1/model", { method: "POST", body: JSON.stringify({ model, ...(reasoning ? { reasoning } : {}) }) });
   }

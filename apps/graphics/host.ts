@@ -40,6 +40,7 @@ import {
   titleFromRequest,
 } from "../cli/src/session-title.ts";
 import { GraphicsDrive, type GraphicsUICommand } from "./drive-controller.ts";
+import { ProviderAccounts, type ProviderEntry } from "./providers.ts";
 import { GraphicsSetup } from "./setup-controller.ts";
 import { GraphicsSession } from "./session-model.ts";
 
@@ -116,6 +117,10 @@ export class GraphicsHost {
     loading: boolean;
     error: string | null;
   } = { proposals: [], signals: [], generatedAt: null, model: null, loading: false, error: null };
+  /// Settings › Providers: each provider's sign-in state, and the one being
+  /// signed in while its browser flow is open.
+  providers: { items: ProviderEntry[]; signingIn: string | null; message: string | null; loading: boolean } = { items: [], signingIn: null, message: null, loading: false };
+  private providerAccounts: ProviderAccounts | null = null;
   /// Proposals you hid: until a time (Not now, or while running) or for good.
   private nextHidden: Record<string, number | "never"> = {};
   private nextRequested = 0;
@@ -260,6 +265,7 @@ export class GraphicsHost {
       drive: this.driveState,
       // Drive's project memory for this workspace (shown in Session).
       driveMemory: this.drive?.memoryEntries ?? [],
+      providers: this.providers,
       driveNext: {
         ...this.nextQueue,
         proposals: this.nextQueue.proposals.filter((item) => {
@@ -652,6 +658,46 @@ export class GraphicsHost {
     }
     this.publish();
   }
+  private accounts() {
+    return this.providerAccounts ??= new ProviderAccounts({ configPath: this.settings.configPath, dataDirectory: this.settings.dataDirectory, open: (url) => this.open(url) });
+  }
+  async refreshProviders(message: string | null = this.providers.message) {
+    this.providers = { ...this.providers, loading: true };
+    this.publish();
+    try { this.providers = { items: await this.accounts().list(this.model.provider), signingIn: this.accounts().signingIn, message, loading: false }; }
+    catch (error) { this.providers = { ...this.providers, loading: false, message: error instanceof Error ? error.message : String(error) }; }
+    this.publish();
+  }
+  /// After signing in or out: the daemon rebuilds its providers, and the
+  /// model shown follows it (switching away from a provider you left).
+  private async applyProviderChange(done: string) {
+    const result = await this.client.reloadProviders();
+    this.modelCache = null;
+    const health = await this.client.health();
+    this.reasoning = health.reasoning;
+    this.model = { id: health.model, provider: health.provider, ...(health.contextCapacity ? { contextWindow: health.contextCapacity } : {}) };
+    try {
+      const id = configuredChatGPTAccount(this.settings.configPath);
+      this.chatgptAccount = id ? (await new ChatGPTAuth(this.settings.dataDirectory).accounts()).find(a => a.id === id) ?? null : null;
+    } catch { this.chatgptAccount = null; }
+    await this.refreshProviders(result.switched ? `${done} Switched to ${result.model} (${result.provider}).` : done);
+  }
+  private async signOutProvider(key: string) {
+    const { label, revoked } = await this.accounts().signOut(key);
+    await this.applyProviderChange(`Signed out of ${label}.${revoked === false ? " Remove Demesne in ChatGPT settings to confirm remote revocation." : ""}`);
+  }
+  private async signInProvider(key: string) {
+    this.providers = { ...this.providers, signingIn: key, message: "Finish signing in in your browser." };
+    this.publish();
+    try {
+      const { label } = await this.accounts().signIn(key);
+      this.providers = { ...this.providers, signingIn: null };
+      await this.applyProviderChange(`Signed in to ${label}.`);
+    } catch (error) {
+      this.providers = { ...this.providers, signingIn: null, message: error instanceof Error ? error.message : String(error) };
+      this.publish();
+    }
+  }
   private nextHiddenPath() {
     return join(this.settings.dataDirectory, "drive", `${createHash("sha256").update(this.workspace).digest("hex").slice(0, 32)}.next-hidden.json`);
   }
@@ -819,6 +865,10 @@ export class GraphicsHost {
       if (!this.drive) throw new Error("Drive is unavailable here.");
       return this.drive.handle("drive", { text: `--bounded ${item.title}. ${item.why}` });
     }
+    if (method === "providers-refresh") return this.refreshProviders();
+    if (method === "provider-signin") return this.signInProvider(string(args.key, "provider", 200));
+    if (method === "provider-signout") return this.signOutProvider(string(args.key, "provider", 200));
+    if (method === "provider-cancel") { this.providerAccounts?.cancel(); this.providers = { ...this.providers, signingIn: null, message: "Sign-in cancelled." }; this.publish(); return; }
     if (method === "processes") {
       await this.refreshProcesses();
       return this.processes;
@@ -901,9 +951,14 @@ export class GraphicsHost {
             });
             if (this.connection !== "online") await this.startDaemon();
             else {
-              this.error =
-                "Configuration saved. Restart the daemon when all sessions are idle to apply provider changes.";
-              this.publish();
+              // Apply the new provider now; an older daemon that can't reload
+              // still asks for a restart.
+              try { await this.applyProviderChange("Provider setup saved."); }
+              catch {
+                this.error =
+                  "Configuration saved. Restart the daemon when all sessions are idle to apply provider changes.";
+                this.publish();
+              }
             }
           }
         },

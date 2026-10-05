@@ -680,7 +680,8 @@ export class GraphicsHost {
       const id = configuredChatGPTAccount(this.settings.configPath);
       this.chatgptAccount = id ? (await new ChatGPTAuth(this.settings.dataDirectory).accounts()).find(a => a.id === id) ?? null : null;
     } catch { this.chatgptAccount = null; }
-    await this.refreshProviders(result.switched ? `${done} Switched to ${result.model} (${result.provider}).` : done);
+    await this.refreshProviders(result.restored ? `${done} Back on ${result.model} (${result.provider}).`
+      : result.switched ? `${done} Switched to ${result.model} (${result.provider}); signing back in returns you to ${result.previous.model}.` : done);
   }
   private async signOutProvider(key: string) {
     const { label, revoked } = await this.accounts().signOut(key);

@@ -6,6 +6,9 @@ import { snapshotTurnInference, type InferenceOverrides, type TurnProcessor } fr
 export class MultiProviderProcessor implements TurnProcessor {
   private selected: TurnProcessor;
   private routes = new Map<string, TurnProcessor>();
+  /// The model you were moved off when its provider went away (signed out);
+  /// it comes back when the provider does, unless you chose another since.
+  private displaced: { model: string; provider: string; reasoning?: string } | null = null;
 
   constructor(private processors: TurnProcessor[], configuredModels: string[][]) {
     if (!processors.length) throw new Error("At least one provider is required");
@@ -34,12 +37,22 @@ export class MultiProviderProcessor implements TurnProcessor {
     const kept = routes.get(previous.model);
     this.processors = processors;
     this.routes = routes;
+    const back = this.displaced && routes.get(this.displaced.model);
+    if (back && back.providerId === this.displaced!.provider) {
+      const restored = this.displaced!;
+      back.setModel?.(restored.model, restored.reasoning);
+      this.selected = back;
+      this.displaced = null;
+      return { switched: true, restored: true, model: restored.model, provider: restored.provider, previous };
+    }
     if (kept && kept.providerId === previous.provider) {
       kept.setModel?.(previous.model, previous.reasoning ?? undefined);
       this.selected = kept;
       return { switched: false, model: previous.model, provider: previous.provider, previous };
     }
     const fallback = processors.findIndex((_, index) => local[index]);
+    // Moved again while already displaced: remember your choice, not the fallback.
+    this.displaced ??= { model: previous.model, provider: previous.provider, ...(previous.reasoning ? { reasoning: previous.reasoning } : {}) };
     this.selected = processors[fallback >= 0 ? fallback : 0]!;
     return { switched: true, model: this.selected.modelId, provider: this.selected.providerId, previous };
   }
@@ -71,6 +84,7 @@ export class MultiProviderProcessor implements TurnProcessor {
   setModel(id: string, reasoning?: string) {
     const processor = this.routes.get(id);
     if (!processor) throw new Error(`Unknown model: ${id}`);
+    this.displaced = null;
     processor.setModel?.(id, reasoning);
     this.selected = processor;
   }

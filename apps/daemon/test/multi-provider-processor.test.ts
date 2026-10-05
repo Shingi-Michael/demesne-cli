@@ -68,3 +68,20 @@ test("replace keeps the selected model while its provider stays, else moves to a
   expect(router.availableModels().map((item) => item.id).sort()).toEqual(["qwen3.8-27b", "z-ai/glm"]);
   expect(() => router.setModel("gpt-6-astra")).toThrow(/Unknown model/);
 });
+
+test("signing back in returns you to the model you were moved off, unless you chose another", () => {
+  const chatgpt = processor("ChatGPT", "gpt-6-astra", 272000), qwen = processor("Qwen on PC", "qwen3.8-27b", 32768), openrouter = processor("OpenRouter", "z-ai/glm", 128000);
+  const router = new MultiProviderProcessor([qwen, chatgpt, openrouter], []);
+  router.setModel("gpt-6-astra", "medium");
+  // Out of ChatGPT: moved to Qwen. Out of OpenRouter too: still remembers astra.
+  expect(router.replace([qwen, openrouter], [], [true, false])).toMatchObject({ switched: true, model: "qwen3.8-27b" });
+  expect(router.replace([qwen], [], [true])).toMatchObject({ switched: false, model: "qwen3.8-27b" });
+  // Back into ChatGPT: back on astra, same thinking level.
+  expect(router.replace([qwen, chatgpt], [], [true, false])).toMatchObject({ switched: true, restored: true, model: "gpt-6-astra", provider: "ChatGPT" });
+  expect(router.modelId).toBe("gpt-6-astra");
+  expect(router.reasoning).toBe("medium");
+  // A choice made in between wins: no restore.
+  router.replace([qwen], [], [true]);
+  router.setModel("qwen3.8-27b");
+  expect(router.replace([qwen, chatgpt], [], [true, false])).toMatchObject({ switched: false, model: "qwen3.8-27b" });
+});

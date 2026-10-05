@@ -45,6 +45,7 @@ import { formatSessionMarkdown } from "./session-export.ts";
 import { SessionReplay } from "./session-replay.ts";
 import { DRIVE_QUICK_TOKENS, DRIVE_THOUGHT_TOKENS, planDrive } from "./drive-planner.ts";
 import { collectDriveSignals } from "./drive-signals.ts";
+import { SessionToolStore } from "./session-tools.ts";
 import { DriveNextCache, proposeNext } from "./drive-next.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
@@ -169,6 +170,7 @@ export function createDaemonApp(options: {
       commands,
       inferenceFor: (model, thinkingEnabled) => snapshotTurnInference(processor, thinkingEnabled, { model }),
       subagentModels: () => subagentModels(),
+      sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
       ...options.agent,
     },
   );

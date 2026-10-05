@@ -184,6 +184,8 @@ const verb = (tool: ToolEntry) =>
     delete_path: "Delete",
     git_diff: "Diff",
     git_status: "Git",
+    git_history: "History",
+    session_tools: "Tool",
     subagent: "Agent",
   })[tool.name] ?? tool.name.replaceAll("_", " ");
 const tools = (run: GraphicsRun) =>

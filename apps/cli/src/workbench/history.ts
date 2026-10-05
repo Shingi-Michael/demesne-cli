@@ -12,6 +12,8 @@ export function toolArguments(value: unknown): Record<string, unknown> {
 }
 export function toolTarget(name: string, input: Record<string, unknown>): string | undefined {
   if (name === "subagent") return typeof input.description === "string" ? input.description : undefined;
+  // session_tools: "run find_definition", "define ts_search".
+  if (name === "session_tools") return [input.action, input.name].filter((part) => typeof part === "string" && part).join(" ") || undefined;
   if (name === "move_path" && typeof input.from === "string" && typeof input.to === "string") return `${input.from} → ${input.to}`;
   if (typeof input.path === "string") return input.path;
   if (Array.isArray(input.paths) && input.paths.every((value) => typeof value === "string")) return input.paths.length === 1 ? input.paths[0] : `${input.paths.length} files`;

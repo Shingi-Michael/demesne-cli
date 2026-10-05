@@ -2693,3 +2693,8 @@ button:disabled {
 /* Keep the rounded composer edge in one raster layer during adjacent panel updates. */
 .composer { transform: translateZ(0); }
 
+
+/* Drive's state in the panel heading: ● live, ‖ paused, × needs you. */
+.panel-heading .subject.tone-citron { color: var(--citron); }
+.panel-heading .subject.tone-signal { color: var(--signal); }
+.panel-heading .subject.tone-secondary { color: var(--secondary); }

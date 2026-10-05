@@ -46,14 +46,14 @@ try {
   await wait(s => s.live?.driveNext?.proposals.length === 4);
   assert(state.live.text.includes("DRIVE PROPOSES")); await capture("next-start");
   const [snooze, veto, plan, run] = state.live.driveNext.proposals;
-  await click("panel", { name: "drive" }); await wait(s => s.live.pane === "drive"); await capture("next-panel");
+  await click("panel", { name: "drive" }); await wait(s => s.live.pane === "drive" && /Drive\s+idle/.test(s.live.text)); await capture("next-panel");
   await click("next-snooze", { id:snooze.id }); await wait(s => s.live.driveNext.proposals.length === 3);
   await click("next-never", { id:veto.id }); await wait(s => s.live.driveNext.proposals.length === 2 && s.live.driveMemory.some((m:any) => m.kind === "veto")); await capture("next-dismissed");
   await click("next-plan", { id:plan.id }); await wait(s => s.live.runs.at(-1)?.status === "completed");
   const session = await f.client.getSessionState(state.live.sessionId);
   assert(session.session.turns.at(-1)?.planOnly, "Plan first creates a read-only turn");
   assert.equal(session.session.turns.at(-1)?.status,"completed"); await capture("next-plan");
-  await click("next-run", { id:run.id }); await wait(s => s.live.driveMode === "bounded" && ["running","waiting"].includes(s.live.drive)); await capture("next-running");
+  await click("next-run", { id:run.id }); await wait(s => s.live.driveMode === "bounded" && ["running","waiting"].includes(s.live.drive) && /Drive\s+● live/.test(s.live.text)); await capture("next-running");
   await click("drive-control", { control:"stop" });
   app.write("\x11"); assert.equal(await app.child.exited,0); assert(app.restored);
   console.log(JSON.stringify({result:"passed",screenshots:output,checked:["start screen proposals","Next panel","Not now","Never persists veto","Plan first is read-only","Run starts bounded Drive"]}));

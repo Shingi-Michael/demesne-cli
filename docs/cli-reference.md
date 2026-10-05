@@ -60,6 +60,7 @@ These commands are handled by the graphics host. The canonical grammar is in [th
 | `/resume ID` (`/switch`) | Select a session |
 | `/rename TITLE` | Rename the current session |
 | `/delete` (`/archive`) | Archive, not erase, the session |
+| `/cleanup` | Delete sessions for good: lists empty ones, quick questions that changed nothing, ones that never finished, archived ones, ones whose folder is gone, and ones unused for 30+ days, each with its reason. Sessions with no real work come ticked; Delete asks twice. The open session and running ones are never listed. Also in Settings and the Session panel. |
 | `/model [ID]` | Select a model or open the picker |
 | `/subagent [MODEL]` | Choose the subagent default; `same` uses the main model |
 | `/theme [NAME]` | Change the interface theme |

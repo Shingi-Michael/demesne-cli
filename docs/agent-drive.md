@@ -59,6 +59,19 @@ flowchart TD
 
 Queues are cached for up to 12 hours when signals, memory, and selected model match. The graphics host requests them on connection and after settled turns when its 30-minute refresh interval has elapsed; Refresh bypasses the cache. A new veto invalidates the prior cache. Exact matching titles are filtered; semantic veto instructions and task-overlap judgments are not a perfect paraphrase detector.
 
+## Breakage alerts: fix it in a worktree
+
+When something **newly** breaks, a card pops up over the conversation: a check that starts failing, CI on the default branch turning red, or an open pull request whose CI fails. Only changes alert. Whatever was already broken when demesne opened stays in the Next queue, and nothing pops up while a turn is running. Local checks are looked at every two minutes and after each turn; GitHub at most every five minutes. No model runs until you choose:
+
+- **Fix in a worktree**: Drive creates a git worktree on a new branch (`drive/fix-…`) beside the data directory (`~/.demesne-worktrees`), links your `node_modules` into it, and runs a coding turn there with every tool allowed. Your files and conversation are untouched. The card shows the steps as they happen.
+- **Not now** hides the card until the next new breakage; **Never for this** remembers to skip that alert (a veto in project memory).
+
+When the fix finishes, demesne commits it on the branch and the card shows the diff size, the files, the checks the agent ran, and its summary:
+
+- **Apply to my branch** cherry-picks the fix onto your current branch, then removes the worktree and branch. If it doesn't apply cleanly (for example, your uncommitted changes touch the same file), nothing changes and the fix stays on its branch.
+- **Open PR** pushes the branch and opens a pull request with the evidence. Since you clicked it, it doesn't ask again.
+- **Discard** (or **Stop and discard** while running) removes the worktree and branch.
+
 ## Direct control is the default
 
 ```mermaid

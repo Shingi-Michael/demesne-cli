@@ -315,6 +315,35 @@ export class DemesneStore {
     })();
   }
 
+  /// Removes a session and everything recorded in it, for good. The caller
+  /// makes sure no turn is running in it.
+  deleteSession(id: string): void {
+    this.database.transaction(() => {
+      this.getSessionOrThrow(id);
+      // Rows without a cascade, then the session (turns, events, messages,
+      // snapshots and commands cascade with it).
+      this.database.query("DELETE FROM image_artifacts WHERE session_id = ?").run(id);
+      if (this.database.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_search'").get())
+        this.database.query("DELETE FROM message_search WHERE session_id = ?").run(id);
+      this.database.query("DELETE FROM sessions WHERE id = ?").run(id);
+    })();
+  }
+
+  /// How much each session holds, for suggesting cleanup: turns by outcome,
+  /// files changed and commands run.
+  sessionActivity(): Array<{ id: string; title: string; workspace: string | null; createdAt: string; updatedAt: string; archivedAt: string | null; turns: number; completed: number; active: number; files: number; commands: number }> {
+    return (this.database.query(`
+      SELECT s.id, s.title, w.root AS workspace, s.created_at AS createdAt, s.updated_at AS updatedAt, s.archived_at AS archivedAt,
+        (SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id AND t.kind = 'chat') AS turns,
+        (SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id AND t.kind = 'chat' AND t.status = 'completed') AS completed,
+        (SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id AND t.status IN ('queued', 'running')) AS active,
+        (SELECT COUNT(DISTINCT file_path) FROM turn_snapshots ts WHERE ts.session_id = s.id) AS files,
+        (SELECT COUNT(*) FROM command_runs c WHERE c.session_id = s.id) AS commands
+      FROM sessions s LEFT JOIN workspaces w ON w.id = s.workspace_id
+      ORDER BY s.updated_at DESC
+    `).all() as ReturnType<DemesneStore["sessionActivity"]>);
+  }
+
   archiveSession(id: string): { session: Session; event: EventEnvelope } {
     const result = this.database.transaction(() => {
       const session = this.getSessionOrThrow(id);

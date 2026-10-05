@@ -15,6 +15,9 @@ const TEST_PATH = /(^|\/)(tests?|__tests__|fixtures?|testdata)\/|\.(test|spec)\.
 interface CollectOptions {
   /// Look up open PRs and CI runs with the GitHub CLI.
   gh?: boolean;
+  /// Only what's broken (failing checks, red CI, PRs with failing CI): cheap
+  /// enough to poll for breakage alerts.
+  urgentOnly?: boolean;
   now?: number;
   run?: (argv: string[], cwd: string) => Promise<string | null>;
 }
@@ -71,50 +74,53 @@ export async function collectDriveSignals(database: Database, workspace: string,
       detail: `Latest run exit ${record.exitCode ?? "—"} at ${record.completedAt ?? "?"}. ${tail}` });
   }
 
-  // Asks that failed or were cancelled and were not followed by a completed turn.
-  const turns = database.query(`SELECT id, session_id, content, status, created_at FROM turns WHERE session_id IN ${inSessions} AND created_at >= ? AND kind = 'chat' ORDER BY created_at`).all(...sessions, since) as { id: string; session_id: string; content: string; status: string; created_at: string }[];
-  const lastCompleted = new Map<string, string>();
-  for (const turn of turns) if (turn.status === "completed") lastCompleted.set(turn.session_id, turn.created_at);
-  for (const turn of turns.filter((turn) => ["failed", "interrupted"].includes(turn.status) && (lastCompleted.get(turn.session_id) ?? "") < turn.created_at).slice(-5))
-    add({ id: `ask:${turn.id.slice(0, 8)}`, source: "sessions", title: `Unfinished ask (${turn.status})`, detail: `"${clip(turn.content.replace(/\s+/g, " "), 240)}" on ${turn.created_at.slice(0, 10)}` });
+  if (!options.urgentOnly) {
+    // Asks that failed or were cancelled and were not followed by a completed turn.
+    const turns = database.query(`SELECT id, session_id, content, status, created_at FROM turns WHERE session_id IN ${inSessions} AND created_at >= ? AND kind = 'chat' ORDER BY created_at`).all(...sessions, since) as { id: string; session_id: string; content: string; status: string; created_at: string }[];
+    const lastCompleted = new Map<string, string>();
+    for (const turn of turns) if (turn.status === "completed") lastCompleted.set(turn.session_id, turn.created_at);
+    for (const turn of turns.filter((turn) => ["failed", "interrupted"].includes(turn.status) && (lastCompleted.get(turn.session_id) ?? "") < turn.created_at).slice(-5))
+      add({ id: `ask:${turn.id.slice(0, 8)}`, source: "sessions", title: `Unfinished ask (${turn.status})`, detail: `"${clip(turn.content.replace(/\s+/g, " "), 240)}" on ${turn.created_at.slice(0, 10)}` });
 
-  // Telemetry from the event log: rounds, re-reads and prompt caching per model.
-  const events = database.query(`SELECT turn_id, type, payload FROM events WHERE session_id IN ${inSessions} AND occurred_at >= ? AND agent_run_id IS NULL AND type IN ('model.request_started','model.usage','model.metrics','tool.call_requested')`).all(...sessions, new Date(now - 7 * DAY).toISOString()) as { turn_id: string; type: string; payload: string }[];
-  const perModel = new Map<string, { turns: Map<string, { rounds: number; reads: string[] }>; input: number; cached: number; cachedKnown: boolean; ttft: number[] }>();
-  const turnModel = new Map<string, string>();
-  for (const event of events) {
-    let payload: Record<string, unknown> = {};
-    try { payload = JSON.parse(event.payload); } catch { continue; }
-    if (event.type === "model.request_started") turnModel.set(event.turn_id, String(payload.model ?? "?"));
-    const model = turnModel.get(event.turn_id);
-    if (!model) continue;
-    const stats = perModel.get(model) ?? { turns: new Map(), input: 0, cached: 0, cachedKnown: false, ttft: [] as number[] };
-    perModel.set(model, stats);
-    const turn = stats.turns.get(event.turn_id) ?? { rounds: 0, reads: [] };
-    stats.turns.set(event.turn_id, turn);
-    if (event.type === "model.request_started") turn.rounds++;
-    if (event.type === "model.usage" && typeof payload.inputTokens === "number") {
-      stats.input += payload.inputTokens;
-      if (typeof payload.cachedInputTokens === "number") { stats.cached += payload.cachedInputTokens; stats.cachedKnown = true; }
+    // Telemetry from the event log: rounds, re-reads and prompt caching per model.
+    const events = database.query(`SELECT turn_id, type, payload FROM events WHERE session_id IN ${inSessions} AND occurred_at >= ? AND agent_run_id IS NULL AND type IN ('model.request_started','model.usage','model.metrics','tool.call_requested')`).all(...sessions, new Date(now - 7 * DAY).toISOString()) as { turn_id: string; type: string; payload: string }[];
+    const perModel = new Map<string, { turns: Map<string, { rounds: number; reads: string[] }>; input: number; cached: number; cachedKnown: boolean; ttft: number[] }>();
+    const turnModel = new Map<string, string>();
+    for (const event of events) {
+      let payload: Record<string, unknown> = {};
+      try { payload = JSON.parse(event.payload); } catch { continue; }
+      if (event.type === "model.request_started") turnModel.set(event.turn_id, String(payload.model ?? "?"));
+      const model = turnModel.get(event.turn_id);
+      if (!model) continue;
+      const stats = perModel.get(model) ?? { turns: new Map(), input: 0, cached: 0, cachedKnown: false, ttft: [] as number[] };
+      perModel.set(model, stats);
+      const turn = stats.turns.get(event.turn_id) ?? { rounds: 0, reads: [] };
+      stats.turns.set(event.turn_id, turn);
+      if (event.type === "model.request_started") turn.rounds++;
+      if (event.type === "model.usage" && typeof payload.inputTokens === "number") {
+        stats.input += payload.inputTokens;
+        if (typeof payload.cachedInputTokens === "number") { stats.cached += payload.cachedInputTokens; stats.cachedKnown = true; }
+      }
+      if (event.type === "model.metrics" && typeof payload.timeToFirstTokenMs === "number") stats.ttft.push(payload.timeToFirstTokenMs);
+      if (event.type === "tool.call_requested" && payload.name === "read_file") {
+        try { turn.reads.push(String(JSON.parse(String(payload.arguments)).path)); } catch { /* malformed arguments */ }
+      }
     }
-    if (event.type === "model.metrics" && typeof payload.timeToFirstTokenMs === "number") stats.ttft.push(payload.timeToFirstTokenMs);
-    if (event.type === "tool.call_requested" && payload.name === "read_file") {
-      try { turn.reads.push(String(JSON.parse(String(payload.arguments)).path)); } catch { /* malformed arguments */ }
+    for (const [model, stats] of perModel) {
+      const working = [...stats.turns.values()].filter((turn) => turn.rounds >= 3);
+      if (working.length < 3) continue;
+      const reads = working.flatMap((turn) => turn.reads), repeats = working.reduce((n, turn) => n + turn.reads.length - new Set(turn.reads).size, 0);
+      const cachedShare = stats.cachedKnown && stats.input ? Math.round((100 * stats.cached) / stats.input) : null;
+      add({ id: `telemetry:${model}`, source: "telemetry", title: `Agent telemetry for ${model} (7 days)`,
+        detail: `${working.length} tool-heavy turns; rounds per turn median ${median(working.map((turn) => turn.rounds))}; repeat reads ${repeats}/${reads.length}; first token median ${((median(stats.ttft) ?? 0) / 1000).toFixed(1)}s${cachedShare !== null ? `; cached input ${cachedShare}%` : ""}` });
     }
-  }
-  for (const [model, stats] of perModel) {
-    const working = [...stats.turns.values()].filter((turn) => turn.rounds >= 3);
-    if (working.length < 3) continue;
-    const reads = working.flatMap((turn) => turn.reads), repeats = working.reduce((n, turn) => n + turn.reads.length - new Set(turn.reads).size, 0);
-    const cachedShare = stats.cachedKnown && stats.input ? Math.round((100 * stats.cached) / stats.input) : null;
-    add({ id: `telemetry:${model}`, source: "telemetry", title: `Agent telemetry for ${model} (7 days)`,
-      detail: `${working.length} tool-heavy turns; rounds per turn median ${median(working.map((turn) => turn.rounds))}; repeat reads ${repeats}/${reads.length}; first token median ${((median(stats.ttft) ?? 0) / 1000).toFixed(1)}s${cachedShare !== null ? `; cached input ${cachedShare}%` : ""}` });
   }
 
   // Git: uncommitted work, stale unmerged branches.
   let defaultBranch = "main";
-  const status = await exec(["git", "status", "--porcelain"], workspace);
-  if (status !== null) {
+  const status = options.urgentOnly ? "" : await exec(["git", "status", "--porcelain"], workspace);
+  if (options.urgentOnly) defaultBranch = (await exec(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], workspace))?.trim().replace(/^origin\//, "") || "main";
+  else if (status !== null) {
     const changed = status.split("\n").filter(Boolean);
     if (changed.length) add({ id: "git:uncommitted", source: "git", title: `${changed.length} uncommitted change${changed.length === 1 ? "" : "s"}`, detail: changed.slice(0, 12).map((line) => line.trim()).join(", ") });
     const head = (await exec(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], workspace))?.trim().replace(/^origin\//, "") || "main";

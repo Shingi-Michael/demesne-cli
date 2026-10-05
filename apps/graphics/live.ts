@@ -37,6 +37,7 @@ type OverlayName =
   | "models"
   | "themes"
   | "providers"
+  | "cleanup"
   | "sessions"
   | "rename"
   | "confirm-archive"
@@ -822,6 +823,46 @@ function renderApproval() {
     run = state.runs.find((run) => run.id === approval.turnId);
   el("approval").innerHTML =
     `<div class="approval-card"><div class="approval-title"><span class="amber">!</span> Allow this ${approval.name === "run_command" ? "command" : "action"}?<small>${h(approval.name)} · Turn ${run?.number ?? "—"}</small></div><p class="approval-description">${h(approval.summary)}</p><div class="command-inset"><pre>${approval.name === "run_command" ? "$ " : ""}${h(command)}</pre><small>in ${h(approval.input.cwd ?? state.workspace)}${approval.name === "run_command" ? ' · <span class="amber">runs on your machine, not sandboxed</span>' : ""}</small></div><div class="approval-actions">${btn("permission", `${k("y")} Allow once`, { id: approval.id, decision: "allow_once" })}${btn("permission", `${k("n")} Deny`, { id: approval.id, decision: "deny" }, "deny")}${approval.name !== "run_command" ? btn("permission", "a &nbsp; allow this session", { id: approval.id, decision: "allow_session" }, "quiet") : ""}${approval.rule ? btn("permission", "s &nbsp; always allow", { id: approval.id, decision: "allow_always" }, "quiet") : ""}</div></div>`;
+}
+/// Breakage alerts: a card over the conversation when something newly
+/// breaks, then the worktree fix as it runs and when it's ready to review.
+let breakageSignature = "";
+function renderBreakage() {
+  if (!state) return;
+  const { signals, fix, busy, message } = state.breakage;
+  const signature = JSON.stringify([signals, fix, busy, message, fix?.status === "running" ? Math.floor(Date.now() / 1000) : 0]);
+  if (signature === breakageSignature) return;
+  breakageSignature = signature;
+  // Both shells (Ghostty and desktop) carry #breakage; never let a missing
+  // one stop the rest of the render.
+  const node = document.getElementById("breakage");
+  if (!node) return;
+  const cards: string[] = [];
+  const close = (action: string, label: string) => btn(action, "×", {}, "breakage-close", true).replace("<button ", `<button aria-label="${label}" `);
+  const doing = (action: string, label: string, idle: string) => (busy === action ? label : idle);
+  if (message) {
+    cards.push(`<div class="breakage-card toast ${message.tone}"><div class="breakage-head"><span class="breakage-mark">${message.tone === "ok" ? "✓" : "!"}</span><span class="breakage-text">${h(message.text)}</span>${message.url ? btn("breakage-open", "Open ›", {}, "link", true) : ""}${close("breakage-close", "Dismiss")}</div></div>`);
+  }
+  if (signals.length) {
+    const running = fix && ["starting", "running"].includes(fix.status);
+    cards.push(`<div class="breakage-card alert"><div class="breakage-head"><span class="breakage-mark">✕</span><span class="breakage-text">${signals.length === 1 ? "Something just broke" : `${signals.length} things just broke`}</span>${close("breakage-dismiss", "Not now")}</div><ul class="breakage-list">${signals.map((signal) => `<li><b>${h(signal.title)}</b><span>${h(signal.detail.replace(/^Latest run exit (\S+) at \S+\.\s*/, "exit $1 · "))}</span></li>`).join("")}</ul><p class="breakage-note">${running ? "A fix is already running; this one waits until it finishes." : "Drive can fix it in a separate git worktree. Your files and this conversation stay as they are until you choose to apply it."}</p><div class="breakage-actions">${running ? "" : btn("breakage-fix", doing("fix", "Starting…", "▶ Fix in a worktree"), {}, "primary", true, Boolean(busy))}${btn("breakage-dismiss", "Not now", {}, "quiet", true)}${btn("breakage-never", "Never for this", {}, "quiet", true)}</div></div>`);
+  }
+  if (fix) {
+    const elapsed = duration((fix.finishedAt ? Date.parse(fix.finishedAt) : Date.now()) - Date.parse(fix.startedAt));
+    const branch = `<code class="breakage-branch">${h(fix.branch)}</code>`;
+    if (fix.status === "starting" || fix.status === "running") {
+      const activity = fix.activity ? `${fix.activity.steps} step${fix.activity.steps === 1 ? "" : "s"}${fix.activity.last ? ` · ${h(fix.activity.last)}` : ""}` : "Creating the worktree…";
+      cards.push(`<div class="breakage-card running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">Fixing in a worktree</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><div class="breakage-meta">${branch}<span>${activity}</span></div><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Stopping…", "Stop and discard"), {}, "quiet", true, Boolean(busy))}</div></div>`);
+    } else if (fix.status === "ready") {
+      const diff = fix.diff ? `<span class="add">+${fix.diff.additions}</span> <span class="del">−${fix.diff.deletions}</span> · ${fix.diff.files} file${fix.diff.files === 1 ? "" : "s"}` : "";
+      const checks = (fix.checks ?? []).map((check) => `<li class="${check.passed ? "pass" : "fail"}">${check.passed ? "✓" : "✕"} <code>${h(check.command)}</code></li>`).join("");
+      cards.push(`<div class="breakage-card ready"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text">Fix ready to review</span><small>${diff}</small></div><p class="breakage-title">${h(fix.title)}</p>${fix.summary ? `<p class="breakage-summary">${h(fix.summary)}</p>` : ""}${checks ? `<ul class="breakage-checks">${checks}</ul>` : '<p class="breakage-note">No checks ran in the worktree.</p>'}<div class="breakage-meta">${branch}<span>${(fix.diff?.paths ?? []).map(h).join(" · ")}</span></div><div class="breakage-actions">${btn("breakage-apply", doing("apply", "Applying…", "Apply to my branch"), {}, "primary", true, Boolean(busy))}${btn("breakage-pr", doing("pr", "Opening…", "Open PR"), {}, "", true, Boolean(busy))}${btn("breakage-discard", doing("discard", "Discarding…", "Discard"), {}, "quiet", true, Boolean(busy))}</div></div>`);
+    } else if (fix.status === "failed") {
+      cards.push(`<div class="breakage-card failed"><div class="breakage-head"><span class="breakage-mark">!</span><span class="breakage-text">Couldn't fix it</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><p class="breakage-summary">${h(fix.error ?? "The fix failed.")}${fix.summary ? ` ${h(fix.summary)}` : ""}</p><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Discarding…", "Discard the worktree"), {}, "quiet", true, Boolean(busy))}</div></div>`);
+    }
+  }
+  node.innerHTML = cards.join("");
+  node.hidden = !cards.length;
 }
 function renderQuestion() {
   if (!state) return;
@@ -1657,7 +1698,7 @@ function renderPanels() {
               .join("")
           : '<div class="check-row muted">Nothing yet. Drive records finished work here; add a standing note with /drive remember …</div>'
       }` +
-      `<div class="panel-section">OTHER SESSIONS ${btn("overlay", "All ›", { name: "sessions" }, "link")}</div>${state.sessions
+      `<div class="panel-section">OTHER SESSIONS ${btn("overlay", "Clean up", { name: "cleanup" }, "link")}${btn("overlay", "All ›", { name: "sessions" }, "link")}</div>${state.sessions
         .filter((item) => item.id !== state!.session?.id && item.turns > 0)
         .slice(0, 5)
         .map((item) =>
@@ -1895,6 +1936,7 @@ async function openOverlay(name: OverlayName, query = "") {
     void act(() => api("providers-refresh"));
     return;
   }
+  if (name === "cleanup") void act(() => api("cleanup-scan"));
   if (name === "models") {
     modelLevels.clear();
     // Opens at once with the last list; the host answers from its cache.
@@ -1930,6 +1972,7 @@ function renderOverlay() {
     state.sessions,
     models,
     state.providers,
+    state.cleanup,
   ]);
   if (signature === overlaySignature) return;
   overlaySignature = signature;
@@ -1976,6 +2019,14 @@ function renderOverlay() {
         action: "overlay",
         data: { name: "sessions" },
         hint: "/sessions",
+      },
+      {
+        label: "Clean up sessions",
+        value: "delete empty, quick and old ones",
+        group: "NAVIGATE",
+        action: "overlay",
+        data: { name: "cleanup" },
+        hint: "/cleanup",
       },
       {
         label: "All commands",
@@ -2069,6 +2120,39 @@ function renderOverlay() {
         hint: signing ? "cancel ↵" : item.status === "signed-in" ? "sign out ↵" : item.status === "signed-out" ? "sign in ↗" : "",
       };
     });
+  } else if (overlay === "cleanup") {
+    const { candidates, selected, loading, armed, message, staleDays } = state.cleanup;
+    const chosen = new Set(selected);
+    title = "Clean up sessions";
+    subtitle = loading ? "looking…" : `${chosen.size} of ${candidates.length} selected`;
+    filter = false;
+    footerNote = message ?? "Deleting can't be undone · the open session and running ones are never listed";
+    const GROUPS: Record<string, string> = { empty: "EMPTY", missing: "FOLDER GONE", archived: "ARCHIVED", unfinished: "NEVER FINISHED", quick: "QUICK QUESTIONS", stale: `NOT USED IN ${staleDays}+ DAYS` };
+    const order = Object.keys(GROUPS);
+    const here = state.workspace;
+    overlayRows = candidates.length
+      ? [
+          {
+            label: armed ? `Delete ${chosen.size} session${chosen.size === 1 ? "" : "s"} for good?` : chosen.size ? `Delete ${chosen.size} selected` : "Nothing selected",
+            value: armed ? "press ↵ again to delete · Esc to cancel" : "",
+            action: chosen.size ? "cleanup-delete" : "",
+            data: {},
+            hint: armed ? "confirm" : "",
+          },
+          { label: chosen.size === candidates.length ? "Select none" : "Select all", value: "", action: "cleanup-toggle", data: { id: "*" }, hint: "" },
+          ...[...candidates]
+            .sort((a, b) => order.indexOf(a.reason) - order.indexOf(b.reason))
+            .map((item) => ({
+              label: `${chosen.has(item.id) ? "☒" : "☐"} ${item.title}`,
+              value: `${item.detail} · ${age(item.updatedAt)}${item.workspace && item.workspace !== here ? ` · ${item.workspace.split("/").pop()}` : ""}`,
+              group: GROUPS[item.reason],
+              action: "cleanup-toggle",
+              data: { id: item.id },
+              hint: chosen.has(item.id) ? "delete" : "keep",
+            })),
+        ]
+      : [];
+    if (!candidates.length) footerNote = message ?? (loading ? "" : "Nothing to clean up.");
   } else if (overlay === "themes") {
     title = "Theme";
     subtitle = "this session";
@@ -2353,6 +2437,11 @@ async function submitText(value = editor.value) {
       clear();
       return;
     }
+    if (id === "cleanup") {
+      await openOverlay("cleanup");
+      clear();
+      return;
+    }
     if (id === "theme") {
       if (argument) await api("theme", { name: argument });
       else await openOverlay("themes");
@@ -2611,7 +2700,9 @@ async function dispatch(
   }
   if (action === "new-session") return api("new-session", {});
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never"].includes(action)) return api(action, args);
+  if (action.startsWith("breakage-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
+  if (["cleanup-toggle", "cleanup-delete"].includes(action)) return act(() => api(action, args));
   if (action === "drive-forget") return api("drive", { text: `forget ${args.id}` });
   if (action === "overlay") return openOverlay(args.name, args.query ?? "");
   if (action === "close-overlay") {
@@ -2709,8 +2800,8 @@ async function dispatch(
       el("overlay").querySelector<HTMLInputElement>("input")?.focus();
       return;
     }
-    // Providers stay open while signing in or out, so the result shows.
-    if (row && overlay === "providers") {
+    // Providers and cleanup stay open, so the result shows.
+    if (row && (overlay === "providers" || overlay === "cleanup")) {
       if (row.action) await dispatch(row.action, row.data);
       return;
     }
@@ -2956,6 +3047,7 @@ function renderState(next: Snapshot) {
   renderComposer();
   renderApproval();
   renderQuestion();
+  renderBreakage();
   renderPanels();
   renderOverlay();
   renderCompletion();
@@ -3510,6 +3602,8 @@ window.demesneInspect = () => ({
   drivePhase: state?.drive?.autonomy?.phase,
   driveMemory: state?.driveMemory,
   driveNext: state?.driveNext,
+  cleanup: state?.cleanup,
+  breakage: state?.breakage,
   driveTasks: state?.drive?.ledger?.tasks.map((task) => ({
     id: task.id,
     status: task.status,

@@ -90,6 +90,20 @@ export class DemesneClient {
     try { return await this.request("/v1/drive/next", { method: "POST", body: JSON.stringify(request), signal }); }
     catch (error) { if (error instanceof ApiRequestError && error.status === 404 && /route|not found/i.test(error.message) && !/workspace/i.test(error.message)) throw new Error("Drive's Next queue needs the updated daemon. Restart it after current work finishes."); throw error; }
   }
+  /// What's broken right now (urgent signals only, no model call).
+  async driveAlerts(request: import("@demesne/protocol").DriveAlertsRequest, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveAlertsResponse> {
+    return this.request("/v1/drive/alerts", { method: "POST", body: JSON.stringify(request), signal });
+  }
+  /// Breakage fixes for a workspace, each in its own git worktree.
+  async driveFixes(workspace: string, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveFixesResponse> {
+    return this.request(`/v1/drive/fixes?workspace=${encodeURIComponent(workspace)}`, { signal });
+  }
+  async startDriveFix(request: import("@demesne/protocol").DriveFixRequest): Promise<{ fix: import("@demesne/protocol").DriveFix }> {
+    return this.request("/v1/drive/fixes", { method: "POST", body: JSON.stringify(request) });
+  }
+  async driveFixAction(id: string, action: import("@demesne/protocol").DriveFixAction): Promise<{ fix: import("@demesne/protocol").DriveFix }> {
+    return this.request(`/v1/drive/fixes/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+  }
   async decideDrive(request: DriveRequest, signal?: AbortSignal, progress?: (event: DriveProgress) => void): Promise<DriveResponse> {
     if (!progress) return this.request("/v1/drive/decide", { method: "POST", body: JSON.stringify(request), signal });
     const response = await this.fetchImpl(new URL("/v1/drive/decide", this.server), { method: "POST", body: JSON.stringify(request), signal,
@@ -237,6 +251,15 @@ export class DemesneClient {
     });
   }
 
+  /// Sessions worth deleting and why; `keep` are never suggested.
+  async sessionCleanup(keep: string[] = []): Promise<import("@demesne/protocol").SessionCleanupResponse> {
+    const query = keep.map((id) => `keep=${encodeURIComponent(id)}`).join("&");
+    return this.request(`/v1/sessions/cleanup${query ? `?${query}` : ""}`);
+  }
+  /// Deletes sessions for good (not archive). Sessions with a running turn are skipped.
+  async deleteSessions(ids: string[]): Promise<import("@demesne/protocol").DeleteSessionsResponse> {
+    return this.request("/v1/sessions/delete", { method: "POST", body: JSON.stringify({ ids }) });
+  }
   async archiveSession(sessionId: string): Promise<ArchiveSessionResponse> {
     return this.request<ArchiveSessionResponse>(`/v1/sessions/${sessionId}`, { method: "DELETE" });
   }

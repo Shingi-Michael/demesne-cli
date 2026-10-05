@@ -51,6 +51,8 @@ test("signals: a failing check, an unfinished ask, uncommitted work and TODOs, w
   expect(byId["git:uncommitted"]).toMatchObject({ title: "1 uncommitted change" });
   expect(byId.code).toMatchObject({ title: "1 TODO/FIXME note in code" });
   expect((await collectDriveSignals(store.database, workspace, { gh: false })).fingerprint).toBe(first.fingerprint);
+  // Breakage alerts poll only what's broken.
+  expect((await collectDriveSignals(store.database, workspace, { gh: false, urgentOnly: true })).signals.map((signal) => signal.id)).toEqual([byId.check!.id]);
   writeFileSync(join(workspace, "another.ts"), "x\n");
   expect((await collectDriveSignals(store.database, workspace, { gh: false })).fingerprint).not.toBe(first.fingerprint);
   store.close?.();

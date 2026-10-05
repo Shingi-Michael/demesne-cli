@@ -1,3 +1,4 @@
+import { splitNextPrompt } from "../../packages/protocol/src/next-prompt.ts";
 import { createHash } from "node:crypto";
 import type {
   DriveAction,
@@ -30,7 +31,7 @@ const MAX_CHARS = 24_000;
 const clip = (text: string) => (text.length > MAX_ROW ? `${text.slice(0, MAX_ROW - 1)}…` : text);
 const lines = (text: string) => text.split("\n").map((line) => line.trimEnd()).filter((line) => line.trim()).map(clip);
 const answers = (run: GraphicsRun) =>
-  run.entries.filter((entry): entry is Extract<WorkbenchEntry, { type: "assistant" }> => entry.type === "assistant").flatMap((entry) => lines(entry.raw));
+  run.entries.filter((entry): entry is Extract<WorkbenchEntry, { type: "assistant" }> => entry.type === "assistant").flatMap((entry) => lines(splitNextPrompt(entry.raw).text));
 const tools = (run: GraphicsRun) => run.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
 const FILE_TOOLS = new Set(["edit_file", "write_file", "move_path", "delete_path"]);
 

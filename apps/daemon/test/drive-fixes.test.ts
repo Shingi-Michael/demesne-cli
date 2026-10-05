@@ -10,7 +10,7 @@ const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 // The daemon commits and cherry-picks with the user's git identity; CI has none.
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "a@b", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "a@b" });
-const git = (cwd: string, ...args: string[]) => Bun.spawnSync(["git", ...args], { cwd });
+const git = (cwd: string, ...args: string[]) => Bun.spawnSync(["git", ...args], { cwd, env: process.env });
 const out = (cwd: string, ...args: string[]) => git(cwd, ...args).stdout.toString().trim();
 
 test("a breakage is fixed in its own worktree, then applied to the user's branch or discarded", async () => {
@@ -60,6 +60,7 @@ test("a breakage is fixed in its own worktree, then applied to the user's branch
     expect((await call("/v1/drive/alerts", { method: "POST", body: JSON.stringify({ workspace }) })).body.signals).toEqual([]);
 
     const started = await call("/v1/drive/fixes", { method: "POST", body: JSON.stringify({ workspace, signals }) });
+    expect(started.body.error?.message ?? "").toBe("");
     expect(started.status).toBe(201);
     const first = started.body.fix as DriveFix;
     expect(first.branch).toMatch(/^drive\/fix-check-failing-bun-test-/);

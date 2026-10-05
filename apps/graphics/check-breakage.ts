@@ -29,7 +29,7 @@ const f = await fixture({ providerId: "test", modelId: "breakage-fixture", conte
     }
     yield { type: "text_delta", delta: "count had regressed to 1; I set it back to 2 and the check passes." }; yield { type: "finish", reason: "stop" };
   } });
-const git = (...args: string[]) => Bun.spawnSync(["git", ...args], { cwd: f.workspace }).stdout.toString().trim();
+const git = (...args: string[]) => Bun.spawnSync(["git", ...args], { cwd: f.workspace, env: process.env }).stdout.toString().trim();
 mkdirSync(join(f.workspace, "src"));
 writeFileSync(join(f.workspace, "check"), "grep -q 'count = 2' src/count.ts || { echo 'expected count 2' >&2; exit 1; }\n");
 writeFileSync(join(f.workspace, "src", "count.ts"), "export const count = 2;\n");

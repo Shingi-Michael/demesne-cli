@@ -832,7 +832,10 @@ function renderBreakage() {
   const signature = JSON.stringify([signals, fix, busy, message, fix?.status === "running" ? Math.floor(Date.now() / 1000) : 0]);
   if (signature === breakageSignature) return;
   breakageSignature = signature;
-  const node = el("breakage");
+  // Both shells (Ghostty and desktop) carry #breakage; never let a missing
+  // one stop the rest of the render.
+  const node = document.getElementById("breakage");
+  if (!node) return;
   const cards: string[] = [];
   const close = (action: string, label: string) => btn(action, "×", {}, "breakage-close", true).replace("<button ", `<button aria-label="${label}" `);
   const doing = (action: string, label: string, idle: string) => (busy === action ? label : idle);

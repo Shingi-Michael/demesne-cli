@@ -2698,3 +2698,8 @@ button:disabled {
 .panel-heading .subject.tone-citron { color: var(--citron); }
 .panel-heading .subject.tone-signal { color: var(--signal); }
 .panel-heading .subject.tone-secondary { color: var(--secondary); }
+
+/* Live thinking: one line with the latest heading; the text is behind it. */
+.thinking .thinking-now {
+  color: var(--secondary);
+}

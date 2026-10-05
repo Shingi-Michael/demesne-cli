@@ -389,6 +389,14 @@ function totals(run: GraphicsRun, tool: ToolEntry) {
 }
 const counts = (value: { added: number; removed: number }) =>
   `<span class="counts"><span class="plus">+${value.added}</span><span class="minus">−${value.removed}</span></span>`;
+/// The latest thing the model said it's thinking about: its last bold
+/// heading (ChatGPT summaries), else its last line, as plain text.
+function thinkingHeadline(raw: string): string {
+  const headings = [...raw.matchAll(/\*\*([^*\n]{2,120})\*\*/g)];
+  const line = headings.at(-1)?.[1] ?? raw.trim().split("\n").filter((text) => text.trim()).at(-1) ?? "";
+  const plain = line.replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
+  return plain.length > 72 ? `${plain.slice(0, 71)}…` : plain;
+}
 /// The same braille spinner as the terminal's thinking presence. Spans are
 /// advanced in place by one timer, so only the glyphs repaint.
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -479,7 +487,9 @@ function runHTML(run: GraphicsRun, index: number) {
       body += `<div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div>`;
     if (entry.type === "reasoning") {
       const live = active(run) && i === run.entries.length - 1;
-      body += `<details class="thinking ${live ? "live" : ""}" data-detail="${key}"${(live && !detailsClosed.has(key)) || detailsOpen.has(key) ? " open" : ""}><summary>${live ? spinner() : "◇"} ${live ? "Thinking" : "Thought"} <span class="muted">${duration(entry.durationMs)}</span></summary>${thinkingBody(entry.raw)}</details>`;
+      // Live thinking is one line: the latest heading, expandable. The full
+      // text narrates actions that the tool rows below already show.
+      body += `<details class="thinking ${live ? "live" : ""}" data-detail="${key}"${detailsOpen.has(key) ? " open" : ""}><summary>${live ? spinner() : "◇"} ${live ? "Thinking" : "Thought"}${live && thinkingHeadline(entry.raw) ? `<span class="thinking-now"> · ${h(thinkingHeadline(entry.raw))}</span>` : ""} <span class="muted">${duration(entry.durationMs)}</span></summary>${thinkingBody(entry.raw)}</details>`;
     }
     if (entry.type === "tool") {
       const group: ToolEntry[] = [entry];
@@ -549,12 +559,16 @@ function runHTML(run: GraphicsRun, index: number) {
       : latestTool?.waiting
         ? "Waiting for your approval · "
         : latestTool?.drafting
-          ? "Drafting "
+          // A command still being written isn't typed out here: its row
+          // shows it once it's complete.
+          ? "Writing a command…"
           : latestTool
             ? `${verb(latestTool)} `
             : "Thinking";
-  const activity = active(run)
-    ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
+  // The live thinking row already says "Thinking"; don't repeat it here.
+  const thinkingLive = run.entries.at(-1)?.type === "reasoning" && !latestTool && !state!.questions.length;
+  const activity = active(run) && !thinkingLive
+    ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.drafting ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
     : "";
   return `<div class="request"><span class="mark">▶</span><span class="text">${h(run.content)}</span><time>${clock(run.createdAt).slice(0, 5)}</time></div><div class="response ${active(run) ? "running" : run.status === "failed" ? "failed" : ""}"><div class="speaker"><span>demesne</span><time>${clock(run.entries.find((e) => e.type === "assistant")?.type === "assistant" ? (run.entries.find((e) => e.type === "assistant") as any).at : run.createdAt)}${active(run) ? " · live" : ""}</time></div>${body}${footer}${activity}</div>`;
 }

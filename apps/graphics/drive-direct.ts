@@ -120,7 +120,8 @@ export class DirectDriveControl {
     const text = action.text.trim();
     const plan = /^\/plan\s+\S/.test(text);
     if (text.startsWith("/") && !plan) throw new Error("Drive may send requests or /plan prompts only.");
-    await this.host.submit(plan ? text.replace(/^\/plan\s+/, "") : text, plan);
+    // Drive's coder works with every tool allowed (publishing still asks).
+    await this.host.submit(plan ? text.replace(/^\/plan\s+/, "") : text, plan, "allow");
     return `${SENT} ${text.slice(0, 500)}`;
   }
 

@@ -1,5 +1,5 @@
 import type { CommandMonitor } from "./command-monitor.ts";
-import { isRecord, type StoredModelMessage, type UserQuestion } from "@demesne/protocol";
+import { isRecord, type PermissionMode, type StoredModelMessage, type UserQuestion } from "@demesne/protocol";
 import { DEFAULT_AGENT_LIMITS, type AgentConfig } from "@demesne/config";
 import { ingestImage } from "./artifacts.ts";
 import { hydrateImageInputs } from "./image-inputs.ts";
@@ -465,7 +465,7 @@ export class AgentEngine {
   private async executeTool(
     toolCallId: string,
     call: AssembledToolCall,
-    permissionMode: "ask" | "deny",
+    permissionMode: PermissionMode,
     workspaceRoot: string | undefined,
     turnId: string,
     sessionId: string,
@@ -508,7 +508,9 @@ export class AgentEngine {
       return result;
     }
     if (permission) {
-      const preapproved = this.permissions.preapproved(sessionId, call.name, input);
+      // allow (Drive's coder) needs no approval, except for publishing.
+      const preapproved = (permissionMode === "allow" && !publishesOutside(call.name, input))
+        || this.permissions.preapproved(sessionId, call.name, input);
       if (!preapproved && permissionMode === "deny") {
         const result = "Permission denied by session policy";
         this.store.settleToolCall(toolCallId, "denied", result);
@@ -741,4 +743,32 @@ function isQualitativeWorkspaceOverview(request: string): boolean {
   // is a request for that tool, never a trimmed overview without it.
   const asksForDelegation = /\bsub-?\s?agents?\b|\bdelegat/.test(normalized);
   return asksForOverview && !needsExecutionOrMeasurement && !asksForDelegation;
+}
+
+/// A command that publishes beyond this machine: pushing to a remote, opening,
+/// merging or editing pull requests and releases, or publishing a package.
+/// Even with every other tool allowed, these still ask.
+export function publishesOutside(toolName: string, input: unknown): boolean {
+  if (toolName !== "run_command" || !isRecord(input) || !Array.isArray(input.argv)) return false;
+  const argv = input.argv.map(String);
+  const program = argv[0]?.split("/").at(-1) ?? "";
+  // A shell script: look for the commands anywhere in it.
+  if (["sh", "bash", "zsh", "dash", "fish"].includes(program)) {
+    const script = argv.slice(1).join(" ");
+    return /\bgit\b[^;&|]*\bpush\b/.test(script)
+      || /\bgh\s+(pr|release|repo|gist)\s+(create|merge|edit|delete|close|reopen|comment|review|upload)\b/.test(script)
+      || /\bgh\s+api\b[^;&|]*(-X|--method)\s*(POST|PUT|PATCH|DELETE)\b/i.test(script)
+      || /\b(npm|pnpm|yarn|bun)\s+publish\b/.test(script);
+  }
+  // A direct command: its subcommand, skipping git's leading options.
+  if (program === "git") {
+    let index = 1;
+    while (argv[index]?.startsWith("-")) index += ["-C", "-c", "--git-dir", "--work-tree"].includes(argv[index]!) ? 2 : 1;
+    return argv[index] === "push";
+  }
+  if (program === "gh") {
+    if (argv[1] === "api") return argv.some((word, i) => (/^(-X|--method)$/.test(word) && /^(POST|PUT|PATCH|DELETE)$/i.test(argv[i + 1] ?? "")) || /^(-X|--method=)(POST|PUT|PATCH|DELETE)$/i.test(word));
+    return ["pr", "release", "repo", "gist"].includes(argv[1] ?? "") && ["create", "merge", "edit", "delete", "close", "reopen", "comment", "review", "upload"].includes(argv[2] ?? "");
+  }
+  return ["npm", "pnpm", "yarn", "bun"].includes(program) && argv[1] === "publish";
 }

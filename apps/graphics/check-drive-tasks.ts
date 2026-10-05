@@ -209,10 +209,11 @@ try {
   await state((s) => s.live.driveMemory?.some((item: any) => item.text === "Keep the CLI clean" && item.source === "you"), "remembered note");
   app.paste("/drive --bounded Verify the fixture check");
   await key("\r");
-  await state((s) => s.live.approvals === 1, "Drive worker approval");
-  // Approving the tool is not a takeover: Drive keeps running on its own.
-  await click("permission", { decision: "allow_once" });
-  await eventually(()=>journal()?.status === "completed",20000);
+  // Drive's coder runs with tools pre-approved: the check command runs and
+  // the mission completes without any approval prompt.
+  let asked = false;
+  await eventually(() => { try { if (JSON.parse(readFileSync(join(output, "state.json"), "utf8")).live?.approvals) asked = true; } catch {} return journal()?.status === "completed"; }, 20000);
+  assert(!asked, "Drive's coder never asked for approval");
   // The verified task is recorded in project memory for later missions.
   await state((s) => s.live.driveMemory?.some((item: any) => item.kind === "outcome" && item.source === "drive"), "recorded outcome");
   await key("\x1bj");
@@ -260,10 +261,10 @@ try {
     `/drive reopen ${id.slice(0, 8)} Check again as explicitly requested`,
   );
   await key("\r");
-  await state((s) => s.live.approvals === 1, "Reopened worker approval");
-  await click("permission", { decision: "allow_once" });
+  // The reopened task runs without approval prompts too.
   await key("\x1bj");
   await eventually(()=>journal()?.status === "completed" && journal()?.ledger.tasks[0].completions.length === 2,20000);
+  assert(!current.live?.approvals, "the reopened task never asked for approval");
   await key("\x1bj");
   await capture("explicit-reopen-history");
   assert.equal(

@@ -15,6 +15,7 @@ A workspace's `DEMESNE.md`/`AGENTS.md`, `.demesne/commands/` and `.demesne/confi
 - Writes and commands use the permission broker unless an applicable explicit grant exists. Session grants and persistent config grants are different lifetimes.
 - Command grants match argv in their allowed scope; a trailing wildcard deliberately broadens the allowed arguments.
 - Non-interactive approval requests are denied. Existing configured grants can still authorize operations.
+- **Agent Drive's coding turns use permission mode `allow`:** writes and host commands run without approval, so a Drive mission can do anything the daemon's OS account can, unattended. Only commands that publish beyond the machine (pushes, pull request/release/repo changes, `gh api` writes, package publishes) still ask. Run Drive only in workspaces where that is acceptable.
 - Subagents receive only read/search/Git-inspection tools; they cannot run commands, edit files or spawn further subagents.
 - Drive cannot answer approval prompts or user questions on the user’s behalf.
 

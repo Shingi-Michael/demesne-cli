@@ -310,7 +310,10 @@ export interface CompactSessionRequest {
   instructions?: string;
 }
 
-export type PermissionMode = "ask" | "deny";
+/// ask: you approve each edit or command; deny: anything needing approval is
+/// refused; allow: approved without asking (Drive's coder turns), except
+/// commands that publish beyond this machine, which still ask.
+export type PermissionMode = "ask" | "deny" | "allow";
 export type PermissionDecision = "allow_once" | "allow_session" | "allow_always" | "deny";
 
 export interface Workspace {
@@ -572,8 +575,8 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
   if (content.length > 100_000) {
     throw new ProtocolValidationError("content must be at most 100000 characters");
   }
-  if (value.permissionMode !== undefined && value.permissionMode !== "ask" && value.permissionMode !== "deny") {
-    throw new ProtocolValidationError("permissionMode must be ask or deny");
+  if (value.permissionMode !== undefined && value.permissionMode !== "ask" && value.permissionMode !== "deny" && value.permissionMode !== "allow") {
+    throw new ProtocolValidationError("permissionMode must be ask, deny or allow");
   }
   if (value.thinkingEnabled !== undefined && typeof value.thinkingEnabled !== "boolean") {
     throw new ProtocolValidationError("thinkingEnabled must be a boolean");

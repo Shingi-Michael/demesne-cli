@@ -83,6 +83,7 @@ test("Codex replays conversation history and runs in an isolated read-only threa
     const start = f.client.requests.find(r => r.method === "thread/start")!.params;
     expect(start).toMatchObject({ model: "gpt-6.1-sol", ephemeral: true, approvalPolicy: "never", sandbox: "read-only", environments: [], runtimeWorkspaceRoots: [], allowProviderModelFallback: false });
     expect(start.config["features.stable_environment_tools"]).toBe(false);
+    expect(start.config["include_permissions_instructions"]).toBe(false);
     expect(start.dynamicTools[0].name).toBe("demesne_read_file");
     expect(f.client.requests.find(r => r.method === "thread/inject_items")!.params.items).toContainEqual({ type: "message", role: "assistant", content: [{ type: "output_text", text: "Previous answer." }] });
     expect(f.client.requests.find(r => r.method === "turn/start")!.params.input[0].text).toBe("Continue.");

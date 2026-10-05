@@ -76,6 +76,8 @@ The Responses adapter retains completed output items from streaming events when 
 
 ## Codex models or sign-in
 
+Build sessions support writes through Demesne's edit tools and request approval by default. If a Codex response claims the session is read-only despite Build mode, update the provider and restart the daemon: older bridge instructions incorrectly applied Codex's native read-only sandbox description to Demesne's client tools. Continue in the same session after updating; changing folder permissions or creating another session is unnecessary.
+
 ```sh
 codex --version
 demesne auth status codex

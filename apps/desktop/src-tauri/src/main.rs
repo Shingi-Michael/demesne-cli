@@ -474,15 +474,30 @@ fn main() {
                 Some("CmdOrCtrl+,"),
             )?)?;
             menu.append(&project)?;
-            let view = tauri::menu::Submenu::new(app, "View", true)?;
+            // Zoom joins the default View menu (beside Toggle Full Screen);
+            // a platform without one gets its own.
+            let existing = menu.items()?.into_iter().find_map(|item| match item {
+                tauri::menu::MenuItemKind::Submenu(submenu) if submenu.text().ok().as_deref() == Some("View") => Some(submenu),
+                _ => None,
+            });
+            let view = match existing {
+                Some(view) => {
+                    view.prepend(&tauri::menu::PredefinedMenuItem::separator(app)?)?;
+                    view
+                }
+                None => {
+                    let view = tauri::menu::Submenu::new(app, "View", true)?;
+                    menu.append(&view)?;
+                    view
+                }
+            };
             for (id, label, accelerator) in [
-                ("zoom-in", "Zoom In", "CmdOrCtrl+="),
-                ("zoom-out", "Zoom Out", "CmdOrCtrl+-"),
                 ("zoom-reset", "Actual Size", "CmdOrCtrl+0"),
+                ("zoom-out", "Zoom Out", "CmdOrCtrl+-"),
+                ("zoom-in", "Zoom In", "CmdOrCtrl+="),
             ] {
-                view.append(&tauri::menu::MenuItem::with_id(app, id, label, true, Some(accelerator))?)?;
+                view.prepend(&tauri::menu::MenuItem::with_id(app, id, label, true, Some(accelerator))?)?;
             }
-            menu.append(&view)?;
             app.set_menu(menu)?;
             Ok(())
         })

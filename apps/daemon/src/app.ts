@@ -92,7 +92,7 @@ export interface DaemonApp {
 export function createDaemonApp(options: {
   databasePath: string;
   /// Re-reads provider config and credentials after signing in or out.
-  reloadProviders?: () => Promise<{ switched: boolean; model: string; provider: string; previous: { model: string; provider: string } }>;
+  reloadProviders?: () => Promise<{ switched: boolean; restored?: boolean; model: string; provider: string; previous: { model: string; provider: string } }>;
   processor?: TurnProcessor;
   systemPrompt?: string;
   authToken?: string;

@@ -41,6 +41,7 @@ import {
 } from "../cli/src/session-title.ts";
 import { GraphicsDrive, type GraphicsUICommand } from "./drive-controller.ts";
 import { ProviderAccounts, type ProviderEntry } from "./providers.ts";
+import { BreakageWatch } from "./breakage.ts";
 import { GraphicsSetup } from "./setup-controller.ts";
 import { GraphicsSession } from "./session-model.ts";
 
@@ -121,6 +122,17 @@ export class GraphicsHost {
   /// signed in while its browser flow is open.
   providers: { items: ProviderEntry[]; signingIn: string | null; message: string | null; loading: boolean } = { items: [], signingIn: null, message: null, loading: false };
   private providerAccounts: ProviderAccounts | null = null;
+  /// New breakages, and the worktree fix for them.
+  readonly breakage = new BreakageWatch({
+    client: () => this.client,
+    workspace: () => this.workspace,
+    publish: () => this.publish(),
+    busy: () => this.busy,
+    vetoes: () => (this.drive?.memoryEntries ?? []).filter((entry) => entry.kind === "veto").map((entry) => entry.text),
+    veto: (text) => this.drive?.addMemory({ kind: "veto", text, source: "you" }),
+    open: (url) => this.open(url),
+    applied: () => { void this.refreshFiles().catch(() => {}); void this.refreshProcesses(); },
+  });
   /// Proposals you hid: until a time (Not now, or while running) or for good.
   private nextHidden: Record<string, number | "never"> = {};
   private nextRequested = 0;
@@ -266,6 +278,7 @@ export class GraphicsHost {
       // Drive's project memory for this workspace (shown in Session).
       driveMemory: this.drive?.memoryEntries ?? [],
       providers: this.providers,
+      breakage: this.breakage.state,
       driveNext: {
         ...this.nextQueue,
         proposals: this.nextQueue.proposals.filter((item) => {
@@ -327,6 +340,7 @@ export class GraphicsHost {
       void this.models().catch(() => {});
       this.loadNextHidden();
       void this.refreshNext();
+      void this.breakage.start();
       await this.applyStartup();
     } catch (error) {
       if (!this.autoStarted && this.settings.autoStart === "always") {
@@ -471,6 +485,8 @@ export class GraphicsHost {
           /^turn\.(completed|failed|cancelled|interrupted)$/.test(event.type)
         ) {
           if (Date.now() - this.nextRequested > 30 * 60_000) void this.refreshNext();
+          // After the turn settles, look for anything it (or anyone) broke.
+          setTimeout(() => void this.breakage.check(), 1500);
           const queued = this.queue;
           this.queue = "";
           if (queued.trim() && event.type === "turn.completed") {
@@ -866,6 +882,7 @@ export class GraphicsHost {
       if (!this.drive) throw new Error("Drive is unavailable here.");
       return this.drive.handle("drive", { text: `--bounded ${item.title}. ${item.why}` });
     }
+    if (method.startsWith("breakage-")) return this.breakage.handle(method, args);
     if (method === "providers-refresh") return this.refreshProviders();
     if (method === "provider-signin") return this.signInProvider(string(args.key, "provider", 200));
     if (method === "provider-signout") return this.signOutProvider(string(args.key, "provider", 200));
@@ -1284,6 +1301,7 @@ export class GraphicsHost {
   dispose() {
     this.batchGeneration++;
     if (this.panelWatchTimer) clearInterval(this.panelWatchTimer);
+    this.breakage.stop();
     this.drive?.dispose();
     this.setup?.dispose();
     this.disposed = true;

@@ -1210,12 +1210,37 @@ function missionParts(drive: NonNullable<Snapshot["drive"]>) {
     details: `<details data-detail="drive-details"${detailsOpen.has("drive-details") ? " open" : ""}><summary>Details</summary><div class="drive-details">${details}</div></details>`,
   };
 }
+/// A blocked mission says why, what led there, and what to do about it,
+/// in full rather than squeezed into the status line.
+function blockedCard(drive: NonNullable<Snapshot["drive"]>) {
+  const parts = missionParts(drive), now = Date.now();
+  const reason = drive.activity?.trim() || drive.steps.at(-1)?.note || "Drive stopped without recording a reason.";
+  const trip = drive.protection?.trip;
+  const hint = trip
+    ? "It reached a mission limit. Resume keeps the same limits; to continue with fresh limits, start a new mission with /drive."
+    : /^Could not save Drive progress/.test(reason)
+      ? "Drive couldn't save its progress to disk. Check free space and permissions for the demesne data folder, then Resume."
+      : drive.feedback?.startsWith("Last rejected decision")
+        ? "Drive's planner kept choosing actions it couldn't carry out. Resume retries once; if it blocks again, rephrase the mission or switch the model."
+        : /approv|permission|denied/i.test(reason)
+          ? "A command needed your approval and didn't get it (publishing always asks, and unanswered prompts are denied after 5 minutes). Approve it when asked, or tell Drive to skip it, then Resume."
+          : "Answer the question or give direction in the composer, then press Resume. Resume retries the blocked step once.";
+  const steps = drive.steps.slice(-4).map((step) => ({ ...driveStepLine(step), when: driveSince(step.at, now) }));
+  const evidence = (drive.evidence ?? []).slice(-2).filter((item) => item.quote?.trim());
+  const section = (title: string, body: string) => body ? `<div class="drive-heading">${title}</div>${body}` : "";
+  return `<section class="drive-pinned drive-blocked tone-border-signal" aria-label="Blocked mission"><div class="drive-pinned-title">${h(parts.title)}</div><strong class="tone-signal">× Blocked · needs you</strong>${
+    section("WHY", `<p class="drive-why">${h(reason)}</p>`)}${
+    steps.length ? section("WHAT LED HERE", `<ol class="drive-timeline">${steps.map((step) => `<li class="tone-${step.tone}"><span>${h(step.mark)}</span><span class="drive-step">${h(step.text)}</span><time>${h(step.when)}</time></li>`).join("")}</ol>`) : ""}${
+    evidence.length ? section("EVIDENCE", evidence.map((item) => `<blockquote class="drive-quote">${h(item.quote.length > 400 ? `${item.quote.slice(0, 399)}…` : item.quote)}</blockquote>`).join("")) : ""}${
+    section("WHAT YOU CAN DO", `<p class="drive-hint">${h(hint)}</p>`)}${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("drive-control", "Resume", { control: "resume" }, "primary")}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>${parts.details}</section>`;
+}
 function driveBody() {
   const drive = state!.drive;
-  const pinned = drive && DRIVE_PINNED.includes(drive.status) && !drive.protection?.trip ? drive : null;
+  const pinned = drive && DRIVE_PINNED.includes(drive.status) && (!drive.protection?.trip || drive.status === "blocked") ? drive : null;
   const finished = drive && !pinned ? drive : null;
   let card = "";
-  if (pinned) {
+  if (pinned?.status === "blocked") card = blockedCard(pinned);
+  else if (pinned) {
     const parts = missionParts(pinned), live = pinned.status === "running" || pinned.status === "waiting";
     card = `<section class="drive-pinned tone-border-${parts.tone}" aria-label="Live mission"><div class="drive-pinned-title">${h(parts.title)}</div><div class="drive-status"><strong class="tone-${parts.tone}">${parts.mark} ${h(parts.label)}</strong>${parts.summary ? `<span class="drive-summary">${h(parts.summary)}</span>` : ""}</div>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("drive-control", live ? "Pause" : "Resume", { control: live ? "pause" : "resume" })}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>${parts.details}</section>`;
   }

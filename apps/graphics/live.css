@@ -2516,6 +2516,22 @@ button:disabled {
 .drive-pinned.tone-border-signal { border-left-color: var(--signal); }
 .drive-pinned.tone-border-secondary { border-left-color: var(--borderBright); }
 .drive-pinned.tone-border-thinking { border-left-color: var(--thinking); }
+.drive-why {
+  margin: 0;
+  color: var(--paper);
+  white-space: pre-wrap;
+}
+.drive-hint {
+  margin: 0;
+  color: var(--strong);
+}
+.drive-quote {
+  margin: 0 0 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--borderBright);
+  color: var(--secondary);
+  white-space: pre-wrap;
+}
 .drive-pinned-title,
 .done-title {
   color: var(--strong);

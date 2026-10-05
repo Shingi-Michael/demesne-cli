@@ -1,79 +1,87 @@
 <p align="center">
-  <img src="docs/assets/hero.svg" alt="demesne — The coding agent that knows what’s next." width="100%">
-</p>
-
-<p align="center">
-  <strong>Drive reads your project—failing checks, open PRs, unfinished work—and proposes what to do next.</strong><br>
-  Run it, watch the evidence come in, review every change. Local or hosted models. Terminal or desktop.
+  <img src="docs/assets/hero-b.svg" alt="demesne — Your repo has a to-do list. Drive already read it." width="100%">
 </p>
 
 <p align="center">
   <a href="https://github.com/Shingi-Michael/demesne-cli/actions/workflows/ci.yml"><img src="https://github.com/Shingi-Michael/demesne-cli/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-334b5e?style=flat-square&amp;labelColor=101a23" alt="MIT license"></a>
-  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-1.4.0-334b5e?style=flat-square&amp;labelColor=101a23" alt="Bun 1.4.0"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-e5a93c?style=flat-square&amp;labelColor=1a1611" alt="MIT license"></a>
+  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-1.4.0-e5a93c?style=flat-square&amp;labelColor=1a1611" alt="Bun 1.4.0"></a>
 </p>
 
 <p align="center">
-  <a href="#get-started"><strong>Get started</strong></a> ·
-  <a href="#a-three-minute-tour"><strong>Tour</strong></a> ·
-  <a href="docs/agent-drive.md"><strong>How Drive works</strong></a> ·
-  <a href="docs/README.md"><strong>Documentation</strong></a> ·
-  <a href="CONTRIBUTING.md"><strong>Contribute</strong></a>
+  <a href="#try-it">Try it</a> &nbsp;·&nbsp;
+  <a href="#how-drive-works">How Drive works</a> &nbsp;·&nbsp;
+  <a href="#see-it">See it</a> &nbsp;·&nbsp;
+  <a href="#install">Install</a> &nbsp;·&nbsp;
+  <a href="docs/README.md">Docs</a>
 </p>
 
-<br>
+Most coding agents wait for you to say what to do. **demesne reads your project first**—failing checks, red CI, open pull requests, half-finished work—and puts a ranked list of next moves in front of you. Press **Run** and Drive directs the coding agent through a bounded mission, checks the result, and hands back the diff, the commands and the passing checks. You review; it remembers.
 
-<a href="docs/assets/demesne-drive.png"><img src="docs/assets/demesne-drive.png" alt="Demesne: a finished coding turn with its edits and passing check, beside the Drive panel proposing the next tasks" width="100%"></a>
-
-<p align="center"><sub>The real interface, captured from an isolated, deterministic demo. <a href="docs/assets/README.md">About these captures</a>.</sub></p>
-
-## Why demesne
-
-<table>
-<tr>
-<td width="33%" valign="top">
-<h3>◇ Drive proposes the work</h3>
-<p>Drive collects signals from your repository—failing checks, red CI, open pull requests, uncommitted changes, unfinished asks—and ranks what’s worth doing by value, confidence and cost. <strong>Run</strong> starts a bounded mission; Drive directs the coding agent, checks the result, and remembers what it learned.</p>
-<a href="docs/agent-drive.md">How Drive works →</a>
-</td>
-<td width="33%" valign="top">
-<h3>✓ Every change has evidence</h3>
-<p>Diffs, command output, and checks stay attached to the turn that produced them. Review a change beside the conversation, rerun a check, or undo a file. A local daemon owns the work, so closing the window never loses a turn in progress.</p>
-<a href="apps/graphics/README.md#review-panel-upgrades">See the review panels →</a>
-</td>
-<td width="33%" valign="top">
-<h3>⚙ Your models</h3>
-<p>Run a model on your own machine for free, use your ChatGPT plan, or sign in to OpenRouter. Sign in and out from <strong>Settings › Providers</strong>; switching never needs a restart, and each model offers its own thinking levels.</p>
-<a href="docs/authentication.md">Connect a provider →</a>
-</td>
-</tr>
-</table>
-
-## Get started
-
-You’ll need [Bun 1.4.0](https://bun.sh) and a model: a local OpenAI-compatible server, a ChatGPT plan, or an OpenRouter account.
+## Try it
 
 ```sh
-git clone https://github.com/Shingi-Michael/demesne-cli.git
-cd demesne-cli
+git clone https://github.com/Shingi-Michael/demesne-cli.git && cd demesne-cli
 bun install --frozen-lockfile
-```
-
-Then pick how you want to work:
-
-<table>
-<tr>
-<td width="33%" valign="top">
-<h4>In the desktop app</h4>
-
-```sh
 bun run desktop
 ```
 
-A native window (Tauri, system webview). Needs [Rust and platform prerequisites](docs/desktop.md#prerequisites). Pick a project, connect a provider in setup; `bun run build:desktop` builds an app bundle. <sub>Preview: macOS and Ubuntu 22.04/24.04, not yet signed. <a href="docs/desktop.md">Desktop guide</a></sub>
-</td>
-<td width="33%" valign="top">
-<h4>In Ghostty</h4>
+Pick a project, connect a model, and open **Drive**. You need [Bun 1.4.0](https://bun.sh), [Rust](docs/desktop.md#prerequisites) for the desktop window, and a model: one running on your machine, your ChatGPT plan, or OpenRouter. Prefer the terminal or a script? See [Install](#install).
+
+## How Drive works
+
+<img src="docs/assets/drive-loop.svg" alt="Drive: reads signals from the repo, ranks what’s worth doing, runs a bounded mission, hands back the evidence, and remembers decisions, outcomes and vetoes" width="100%">
+
+Every proposal shows why it's there and what it would cost. **Run** starts it, **Plan first** asks for a plan you approve, **Not now** and **Never** teach Drive what to skip. Missions are bounded by default; `/drive --bounded "…"` starts one from the composer. [The full guide →](docs/agent-drive.md)
+
+## See it
+
+<a href="docs/assets/demesne-drive.png"><img src="docs/assets/demesne-drive.png" alt="A finished coding turn with its edits and passing check, beside the Drive panel proposing the next tasks" width="100%"></a>
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/assets/demesne-start.png" alt="Start screen with three Drive proposals"><br><sub><b>Start from a proposal.</b> The start screen shows what Drive would do next, with the evidence behind each item.</sub></td>
+<td width="50%" valign="top"><img src="docs/assets/demesne-review.png" alt="Review panel with a diff beside the conversation"><br><sub><b>Review the evidence.</b> Every edit, command and check stays attached to its turn; rerun a check before you commit.</sub></td>
+</tr>
+</table>
+
+<p align="center"><sub>Real captures from an isolated, deterministic demo. <a href="docs/assets/README.md">How they’re made</a>.</sub></p>
+
+## Also inside
+
+<table>
+<tr>
+<td width="50%" valign="top"><b>Your models, your call</b><br>Local servers, ChatGPT plan, OpenRouter. Sign in and out in <b>Settings › Providers</b> without a restart; each model has its own thinking levels. <a href="docs/authentication.md">Providers</a></td>
+<td width="50%" valign="top"><b>Work that survives</b><br>A local daemon owns every turn. Close the window, reopen, continue. <code>/compact</code> keeps long sessions in budget.</td>
+</tr>
+<tr>
+<td valign="top"><b>Sub-agents</b><br>Read-only investigators with their own context, in parallel, on a model you choose. <a href="docs/subagents.md">Sub-agents</a></td>
+<td valign="top"><b>Session tools</b><br>The agent shapes presets and multi-step lookups for the job, without changing the real tools. <a href="docs/session-tools.md">Session tools</a></td>
+</tr>
+<tr>
+<td valign="top"><b>A suggested next prompt</b><br>After each turn the composer offers what to ask next. <b>Tab</b> takes it.</td>
+<td valign="top"><b>Desktop or terminal</b><br>The same interface in a native window or inside Ghostty, drawn with Kitty graphics.</td>
+</tr>
+</table>
+
+> [!WARNING]
+> **Commands run as your OS user, not in a sandbox.** Your own turns ask before writing files or running commands. Drive's coding turns run with every tool allowed so a mission can work unattended; pushing, pull requests, releases and package publishes still ask. Run Drive where that's acceptable. [Security boundaries](SECURITY.md)
+
+## Install
+
+<details>
+<summary><b>Desktop app</b> — native window, macOS and Ubuntu 22.04/24.04 (preview, unsigned)</summary>
+
+```sh
+bun run desktop          # run from source
+bun run build:desktop    # build an app bundle
+```
+
+Needs [Rust and platform prerequisites](docs/desktop.md#prerequisites). See the [desktop guide](docs/desktop.md).
+</details>
+
+<details>
+<summary><b>Ghostty</b> — the full interface in your terminal</summary>
 
 ```sh
 bun run build
@@ -83,138 +91,57 @@ bun run build:graphics
 ./dist/demesne
 ```
 
-The full interface inside [Ghostty](https://ghostty.org), drawn with Kitty graphics. <sub><a href="#install-details">Install details</a> · <a href="#on-linux">Linux</a></sub>
-</td>
-<td width="33%" valign="top">
-<h4>From a script</h4>
-
-```sh
-demesne prompt --output json \
-  "Explain the test layout"
-```
-
-Text, JSON, or streamed events, no window. Approval requests are denied rather than left waiting. <sub><a href="docs/cli-reference.md#headless-output">Headless usage</a></sub>
-</td>
-</tr>
-</table>
-
-Setup walks you through the provider, model and configuration. [Provider and account guide →](docs/authentication.md)
-
-<details id="install-details">
-<summary><strong>Install details and working in another project</strong></summary>
-
-Both builds are needed for the Ghostty interface. Keep `dist/graphics` and `dist/node_modules` beside the CLI and daemon:
-
-```text
-dist/
-├── demesne
-├── demesned
-├── graphics/
-└── node_modules/
-```
-
-Link the binaries into a directory on your PATH, start the daemon, then open any project:
-
-```sh
-ln -sf "$PWD/dist/demesne" "$PWD/dist/demesned" /usr/local/bin/
-demesne daemon start
-cd /path/to/project
-demesne
-```
-
-For source development, use `bun run graphics:setup` and `bun run demesne`. [Graphics setup and packaging](apps/graphics/README.md) covers the details; [troubleshooting](docs/troubleshooting.md) covers older running processes and terminal capabilities. Rebuilds don’t replace a running daemon or UI.
-
+Keep `dist/graphics` and `dist/node_modules` beside the binaries. To use it in any project, link `dist/demesne` and `dist/demesned` onto your PATH, then run `demesne` in that project. Source development: `bun run graphics:setup` and `bun run demesne`. See [graphics setup](apps/graphics/README.md) and [troubleshooting](docs/troubleshooting.md).
 </details>
 
-<details id="on-linux">
-<summary><strong>On Linux</strong></summary>
-
-From the cloned repository, as your **normal user inside Ghostty** in a desktop session:
+<details>
+<summary><b>Linux</b> — Ghostty in a desktop session, as your normal user</summary>
 
 ```sh
-bun install --frozen-lockfile
 bun run demesne setup
 bun run demesne daemon start
 bun run graphics
 ```
 
-`bun run graphics` downloads a missing Electron runtime and checks that a sandboxed renderer can start. If you see “The SUID sandbox helper binary was found, but is not configured correctly”, run the explicit repair, then launch again:
-
-```sh
-bun run graphics:setup --install-sandbox
-bun run graphics
-```
-
-The repair requests administrator access **only for the sandbox helper**; the app stays unprivileged and sandboxed. Ubuntu 20.04 and 24.04 are checked in CI. See the [Linux guide](docs/linux.md).
-
+If you see “The SUID sandbox helper binary was found, but is not configured correctly”, run `bun run graphics:setup --install-sandbox` and launch again. It asks for administrator access only for the sandbox helper. See the [Linux guide](docs/linux.md).
 </details>
 
-## A three-minute tour
+<details>
+<summary><b>Scripts and CI</b> — no window</summary>
 
-**1 · Ask, or start from a proposal.** The start screen shows what Drive would do next, ranked, with the evidence behind each item.
-
-<img src="docs/assets/demesne-start.png" alt="Demesne start screen: the composer, three Drive proposals with Run and Plan first, and starter actions" width="100%">
-
-**2 · Let it work.** The agent reads, edits and runs checks; each step appears as it happens. When it finishes, the composer suggests a next prompt—press **Tab** to use it.
-
-```text
-/drive --bounded Fix the failing parser tests and verify the change
+```sh
+demesne prompt --output json "Explain the test layout"
 ```
 
-**3 · Review the evidence.** Every edit, command and check is attached to its turn. Open **Review** to read the diff and rerun a check before you commit.
-
-<img src="docs/assets/demesne-review.png" alt="Demesne review panel: the retry helper’s diff beside the conversation, with the check passing" width="100%">
-
-## What’s inside
-
-| | |
-| --- | --- |
-| **Agent Drive** | Proposes next work from real signals; runs bounded or continuous missions; remembers decisions, outcomes and vetoes per project. [Guide](docs/agent-drive.md) |
-| **Review panels** | Diffs, files, checks and the full step log, per turn or across the session. |
-| **Sub-agents** | Read-only investigators with their own context, run in parallel, on a model you choose. [Guide](docs/subagents.md) |
-| **Session tools** | The agent can define presets and multi-step lookups for a session, without changing the real tools. [Guide](docs/session-tools.md) |
-| **Durable sessions** | A local daemon owns the work: close the window, reopen, continue. Compact long conversations with `/compact`. |
-| **Providers** | Local servers, ChatGPT plan, OpenRouter; sign in and out in Settings; thinking levels per model. [Guide](docs/authentication.md) |
-| **Desktop and terminal** | The same interface in a native window or inside Ghostty. |
-
-## Stay in control
-
-**Commands run as your OS user, not in a sandbox.** Your own turns ask before writing files or running commands, unless you’ve granted that action. Sub-agents are read-only. **Drive’s coding turns run with every tool allowed**, so a mission works unattended; pushing, pull requests, releases and package publishes still ask. Run Drive where that’s acceptable. [Security boundaries →](SECURITY.md)
+Text, JSON or streamed events. Approval requests are denied rather than left waiting. See [headless usage](docs/cli-reference.md#headless-output).
+</details>
 
 <details>
-<summary><strong>Keyboard shortcuts</strong></summary>
+<summary><b>Keyboard shortcuts</b></summary>
 
 | Do this | Use this |
 | --- | --- |
-| Send a message / add a line | Enter / Shift+Enter |
-| Use the suggested next prompt | Tab on an empty composer |
-| Open settings | Tab on an empty composer (no suggestion), or Ctrl+K |
-| Inspect changes / files / checks | Alt+D / Alt+O / Alt+T |
-| Open Drive / history | Alt+J / Alt+H |
-| Return to live output | Ctrl+G |
-| Stop work | Ctrl+C, or double Esc after closing menus and panels |
+| Send / new line | Enter / Shift+Enter |
+| Take the suggested prompt | Tab on an empty composer |
+| Settings | Tab (no suggestion) or Ctrl+K |
+| Changes / files / checks | Alt+D / Alt+O / Alt+T |
+| Drive / history | Alt+J / Alt+H |
+| Back to live output | Ctrl+G |
+| Stop | Ctrl+C, or double Esc |
 | Zoom (desktop) | ⌘= / ⌘- / ⌘0 |
-| Close the UI | Ctrl+Q; daemon-owned work continues |
+| Quit the UI (work continues) | Ctrl+Q |
 
-[All commands and shortcuts →](docs/cli-reference.md)
-
+[All commands →](docs/cli-reference.md)
 </details>
-
-## Go deeper
-
-| | |
-| --- | --- |
-| [Documentation index](docs/README.md) | Every guide in one place |
-| [Configuration](docs/configuration.md) | Providers, context budgets, slots, and environment variables |
-| [Architecture](docs/architecture.md) | Processes, APIs, storage, and request flows |
-| [Troubleshooting](docs/troubleshooting.md) | Startup, auth, rendering, and slow inference |
-| [Contributing](CONTRIBUTING.md) | Development setup and verification |
 
 ---
 
 <p align="center">
-  Built by <a href="https://github.com/Shingi-Michael">Shingirayi Kamucheka</a> ·
-  <a href="LICENSE">MIT licensed</a> ·
-  <a href="CHANGELOG.md">Changelog</a> ·
-  <a href="https://github.com/Shingi-Michael/demesne-cli/issues">Issues &amp; ideas</a>
+  <a href="docs/README.md">Docs</a> ·
+  <a href="docs/configuration.md">Configuration</a> ·
+  <a href="docs/architecture.md">Architecture</a> ·
+  <a href="docs/troubleshooting.md">Troubleshooting</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+  <br><sub>Built by <a href="https://github.com/Shingi-Michael">Shingirayi Kamucheka</a> · MIT licensed</sub>
 </p>

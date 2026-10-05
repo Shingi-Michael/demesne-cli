@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">How a Drive mission works</title>
+  <desc id="desc">Four stages left to right: signals from the repository, a ranked next list, a bounded mission, and evidence. An arrow returns from evidence to signals: Drive remembers decisions, outcomes and vetoes.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#7d7060"/></marker>
+    <marker id="arrowA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#e5a93c"/></marker>
+  </defs>
+  <rect width="1280" height="340" rx="18" fill="#14110d"/>
+  <rect x=".5" y=".5" width="1279" height="339" rx="17.5" stroke="#3a3127"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="1.6">
+    <text x="60" y="62" fill="#e5a93c">01  SIGNALS</text>
+    <text x="360" y="62" fill="#e5a93c">02  NEXT</text>
+    <text x="660" y="62" fill="#e5a93c">03  MISSION</text>
+    <text x="960" y="62" fill="#e5a93c">04  EVIDENCE</text>
+  </g>
+  <g stroke="#4a3e2f">
+    <rect x="48.5" y="80.5" width="252" height="160" rx="10" fill="#1a1611"/>
+    <rect x="348.5" y="80.5" width="252" height="160" rx="10" fill="#1a1611"/>
+    <rect x="648.5" y="80.5" width="252" height="160" rx="10" fill="#1a1611"/>
+    <rect x="948.5" y="80.5" width="272" height="160" rx="10" fill="#1a1611"/>
+  </g>
+  <g stroke="#7d7060" stroke-width="1.5" marker-end="url(#arrow)">
+    <path d="M304 160h38"/><path d="M604 160h38"/><path d="M904 160h38"/>
+  </g>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="17" font-weight="600" fill="#f3ead8">
+    <text x="68" y="116">Reads the repo</text>
+    <text x="368" y="116">Ranks what’s worth doing</text>
+    <text x="668" y="116">Runs a bounded mission</text>
+    <text x="968" y="116">Hands back the proof</text>
+  </g>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#a8987c">
+    <text x="68" y="150">✕ failing checks</text>
+    <text x="68" y="172">✕ red CI</text>
+    <text x="68" y="194">◌ open pull requests</text>
+    <text x="68" y="216">± uncommitted work</text>
+
+    <text x="368" y="150">value ········ high</text>
+    <text x="368" y="172">confidence ··· high</text>
+    <text x="368" y="194">cost ········ ~10 min</text>
+    <text x="368" y="216" fill="#e5a93c">▶ Run · Plan first</text>
+
+    <text x="668" y="150">Drive directs the</text>
+    <text x="668" y="172">coding agent, checks</text>
+    <text x="668" y="194">each result, and stops</text>
+    <text x="668" y="216">at the bound you set</text>
+
+    <text x="968" y="150">diff  +15 −0</text>
+    <text x="968" y="172">exit 0 · bun test</text>
+    <text x="968" y="194" fill="#7cc48a">✓ checks passed</text>
+    <text x="968" y="216">attached to the turn</text>
+  </g>
+
+  <path d="M1084 244v36H174v-34" stroke="#e5a93c" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowA)"/>
+  <rect x="470" y="266" width="340" height="28" rx="6" fill="#14110d"/>
+  <text x="640" y="285" fill="#e5a93c" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" text-anchor="middle" letter-spacing="1">remembers decisions, outcomes, vetoes</text>
+</svg>

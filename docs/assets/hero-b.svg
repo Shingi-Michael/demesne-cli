@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="480" viewBox="0 0 1280 480" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">demesne — Your repo has a to-do list. Drive already read it.</title>
+  <desc id="desc">A warm dark banner. On the left, the headline. On the right, the Drive panel listing three ranked next tasks, the first with a Run button.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="480" gradientUnits="userSpaceOnUse"><stop stop-color="#1a1611"/><stop offset="1" stop-color="#0d0b09"/></linearGradient>
+    <linearGradient id="glow" x1="980" y1="40" x2="980" y2="440" gradientUnits="userSpaceOnUse"><stop stop-color="#e5a93c" stop-opacity=".10"/><stop offset="1" stop-color="#e5a93c" stop-opacity="0"/></linearGradient>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#3a3127" fill-opacity=".55"/></pattern>
+  </defs>
+  <rect width="1280" height="480" rx="18" fill="url(#bg)"/>
+  <rect x="660" width="620" height="480" rx="18" fill="url(#dots)"/>
+  <rect x=".5" y=".5" width="1279" height="479" rx="17.5" stroke="#3a3127"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="60" y="62" width="10" height="10" fill="#e5a93c"/>
+    <text x="82" y="72" fill="#e5a93c" font-size="17" letter-spacing="2">DEMESNE</text>
+  </g>
+  <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="650" letter-spacing="-2.2" fill="#f3ead8">
+    <text x="58" y="180" font-size="56">Your repo has a</text>
+    <text x="58" y="244" font-size="56">to-do list.</text>
+    <text x="58" y="308" font-size="56" fill="#e5a93c">Drive already read it.</text>
+  </g>
+  <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="20" fill="#a8987c">
+    <text x="60" y="362">A coding agent that proposes the work, runs it,</text>
+    <text x="60" y="390">and hands back the evidence.</text>
+  </g>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.6" fill="#7d7060">
+    <text x="60" y="436">LOCAL OR HOSTED MODELS  ·  TERMINAL OR DESKTOP  ·  MIT</text>
+  </g>
+
+  <!-- Drive panel -->
+  <rect x="736.5" y="64.5" width="467" height="352" rx="12" fill="#15120e" stroke="#4a3e2f"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="760" y="99" fill="#f3ead8" font-size="15" font-weight="600">Drive</text>
+    <circle cx="820" cy="94" r="4" fill="#7cc48a"/>
+    <text x="830" y="99" fill="#7cc48a" font-size="13">live</text>
+    <text x="1180" y="99" fill="#7d7060" font-size="12" text-anchor="end">Next 3 · Done</text>
+    <path d="M752 116h436" stroke="#3a3127"/>
+    <text x="760" y="140" fill="#7d7060" font-size="11" letter-spacing="1">RANKED BY VALUE · CONFIDENCE · COST</text>
+
+    <!-- item 1, selected -->
+    <rect x="752.5" y="156.5" width="435" height="118" rx="8" fill="#211b14" stroke="#e5a93c" stroke-opacity=".7"/>
+    <rect x="768" y="172" width="44" height="20" rx="4" stroke="#e98b6d"/>
+    <text x="790" y="186" fill="#e98b6d" font-size="11" text-anchor="middle">FIX</text>
+    <text x="824" y="187" fill="#f3ead8" font-size="14">Parser tests failing on main</text>
+    <text x="768" y="216" fill="#a8987c" font-size="12">3 checks red since 4f1c2e0 · touches src/parse.ts</text>
+    <text x="768" y="240" fill="#7d7060" font-size="11">value</text>
+    <rect x="812" y="232" width="64" height="8" rx="2" fill="#3a3127"/><rect x="812" y="232" width="56" height="8" rx="2" fill="#e5a93c"/>
+    <text x="894" y="240" fill="#7d7060" font-size="11">confidence</text>
+    <rect x="972" y="232" width="64" height="8" rx="2" fill="#3a3127"/><rect x="972" y="232" width="50" height="8" rx="2" fill="#7cc48a"/>
+    <rect x="1100" y="226" width="72" height="28" rx="6" fill="#e5a93c"/>
+    <text x="1136" y="245" fill="#1a1611" font-size="13" font-weight="700" text-anchor="middle">▶ Run</text>
+    <text x="768" y="262" fill="#7d7060" font-size="11">~10 min · 1 coder · bounded</text>
+
+    <!-- item 2 -->
+    <rect x="752.5" y="286.5" width="435" height="52" rx="8" stroke="#3a3127"/>
+    <rect x="768" y="302" width="64" height="20" rx="4" stroke="#8fb4d8"/>
+    <text x="800" y="316" fill="#8fb4d8" font-size="11" text-anchor="middle">REVIEW</text>
+    <text x="844" y="317" fill="#d9ccb4" font-size="14">PR #41 waiting on a rerun</text>
+    <text x="1172" y="317" fill="#7d7060" font-size="13" text-anchor="end">▶</text>
+
+    <!-- item 3 -->
+    <rect x="752.5" y="348.5" width="435" height="52" rx="8" stroke="#3a3127"/>
+    <rect x="768" y="364" width="64" height="20" rx="4" stroke="#b9a37e"/>
+    <text x="800" y="378" fill="#b9a37e" font-size="11" text-anchor="middle">FINISH</text>
+    <text x="844" y="379" fill="#d9ccb4" font-size="14">Retry docs left half-written</text>
+    <text x="1172" y="379" fill="#7d7060" font-size="13" text-anchor="end">▶</text>
+  </g>
+</svg>

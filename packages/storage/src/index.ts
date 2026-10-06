@@ -56,6 +56,7 @@ interface SessionRow {
   context_start_message_id: number | null;
   archived_at: string | null;
   preferred_model: string | null;
+  auto_approve: number;
 }
 
 interface TurnRow {
@@ -129,7 +130,7 @@ export class NotFoundError extends Error {}
 export class InvalidStateError extends Error {}
 
 export type EventSink = (event: EventEnvelope) => void;
-const STORAGE_SCHEMA_VERSION = 6;
+const STORAGE_SCHEMA_VERSION = 7;
 
 export class DemesneStore {
   readonly filename: string;
@@ -251,7 +252,7 @@ export class DemesneStore {
     const row = this.database
       .query(`
         SELECT sessions.id, sessions.title, sessions.created_at, sessions.updated_at,
-               sessions.workspace_id, sessions.archived_at, sessions.preferred_model,
+               sessions.workspace_id, sessions.archived_at, sessions.preferred_model, sessions.auto_approve,
                workspaces.root AS workspace_root
         FROM sessions
         LEFT JOIN workspaces ON workspaces.id = sessions.workspace_id
@@ -265,6 +266,7 @@ export class DemesneStore {
     return {
       id: row.id,
       title: row.title,
+      autoApprove: row.auto_approve === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       workspace: row.workspace_id && row.workspace_root
@@ -313,6 +315,27 @@ export class DemesneStore {
       this.database.query("UPDATE sessions SET preferred_model = ? WHERE id = ?").run(model, id);
       return this.getSessionOrThrow(id);
     })();
+  }
+
+  /// A lightweight policy read for every approval and model request. A
+  /// deleted or missing session never receives automatic authorization.
+  isSessionAutoApprove(id: string): boolean {
+    const row = this.database.query("SELECT auto_approve FROM sessions WHERE id = ?").get(id) as { auto_approve: number } | null;
+    return row?.auto_approve === 1;
+  }
+
+  setSessionAutoApprove(id: string, autoApprove: boolean): { session: Session; event: EventEnvelope | null } {
+    if (typeof autoApprove !== "boolean") throw new InvalidStateError("autoApprove must be a boolean");
+    const result = this.database.transaction(() => {
+      const session = this.getSessionOrThrow(id);
+      if (session.autoApprove === autoApprove) return { session, event: null };
+      const now = new Date().toISOString();
+      this.database.query("UPDATE sessions SET auto_approve = ?, updated_at = ? WHERE id = ?").run(autoApprove ? 1 : 0, now, id);
+      const event = this.insertEvent("session.permissions_changed", id, null, { autoApprove }, now);
+      return { session: this.getSessionOrThrow(id), event };
+    })();
+    if (result.event) this.eventSink?.(result.event);
+    return result;
   }
 
   /// Removes a session and everything recorded in it, for good. The caller
@@ -1540,6 +1563,9 @@ export class DemesneStore {
     }
     if (!this.hasColumn("sessions", "preferred_model")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN preferred_model TEXT");
+    }
+    if (!this.hasColumn("sessions", "auto_approve")) {
+      this.database.run("ALTER TABLE sessions ADD COLUMN auto_approve INTEGER NOT NULL DEFAULT 0 CHECK (auto_approve IN (0, 1))");
     }
     this.backfillModelMessages();
     this.migrateSearchIndex();

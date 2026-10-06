@@ -206,3 +206,31 @@ test("an untrusted workspace waits for Trust folder before creating a session", 
     await f.close();
   }
 });
+
+test("/drive moves the mission into its own worktree session, and returns you after Discard", async () => {
+  const f = await fixture({ providerId: "test", modelId: "test", contextCapacity: 262144, async listModels() { return []; },
+    async *stream() { yield { type: "text_delta", delta: "Thinking it over." }; yield { type: "finish", reason: "stop" }; } });
+  for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=a@b", "commit", "-qm", "init"]])
+    Bun.spawnSync(["git", ...args], { cwd: f.workspace });
+  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, command: () => {} });
+  try {
+    await host.connect();
+    await eventually(() => Boolean(host.current), 5000);
+    const home = host.current!.session.id;
+    await host.drive!.handle("drive", { text: "--bounded Make the README friendlier" });
+    const fix = host.breakage.state.fix!;
+    expect(fix).toMatchObject({ mission: "Make the README friendlier", status: "running" });
+    expect(host.current!.session.id).toBe(fix.sessionId!);
+    expect(host.current!.session.workspace?.root.startsWith(fix.path)).toBe(true);
+    expect(host.driveState?.homeSessionId).toBe(fix.sessionId!);
+
+    // Stopping settles the mission: the worktree is committed for review (nothing changed here).
+    await host.drive!.handle("drive-control", { control: "stop" });
+    await eventually(() => host.breakage.state.fix?.status === "failed", 5000);
+    expect(host.breakage.state.fix?.unchanged).toBe(true);
+
+    await host.handle("breakage-discard", { sessionId: fix.sessionId });
+    await eventually(() => host.current?.session.id === home, 5000);
+    expect(host.breakage.state.fix).toBeNull();
+  } finally { host.dispose(); await f.close(); }
+});

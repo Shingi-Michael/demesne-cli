@@ -97,7 +97,7 @@ export class DemesneClient {
   async driveAlerts(request: import("@demesne/protocol").DriveAlertsRequest, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveAlertsResponse> {
     return this.request("/v1/drive/alerts", { method: "POST", body: JSON.stringify(request), signal });
   }
-  /// Breakage fixes for a workspace, each in its own git worktree.
+  /// Worktree work for a workspace (breakage fixes, proposals, missions), each in its own git worktree.
   async driveFixes(workspace: string, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveFixesResponse> {
     return this.request(`/v1/drive/fixes?workspace=${encodeURIComponent(workspace)}`, { signal });
   }
@@ -106,6 +106,10 @@ export class DemesneClient {
   }
   async driveFixAction(id: string, action: import("@demesne/protocol").DriveFixAction): Promise<{ fix: import("@demesne/protocol").DriveFix }> {
     return this.request(`/v1/drive/fixes/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+  }
+  /// A Drive mission in a worktree settled: commit what it changed for review.
+  async finishDriveMission(id: string, summary?: string): Promise<{ fix: import("@demesne/protocol").DriveFix }> {
+    return this.request(`/v1/drive/fixes/${encodeURIComponent(id)}/finish`, { method: "POST", body: JSON.stringify(summary ? { summary } : {}) });
   }
   async decideDrive(request: DriveRequest, signal?: AbortSignal, progress?: (event: DriveProgress) => void): Promise<DriveResponse> {
     if (!progress) return this.request("/v1/drive/decide", { method: "POST", body: JSON.stringify(request), signal });

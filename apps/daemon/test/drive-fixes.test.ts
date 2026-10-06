@@ -146,3 +146,69 @@ test("a Next proposal runs in its own worktree and branch, with no breakage need
     expect(out(workspace, "branch", "--list", "drive/*")).toBe("");
   } finally { server.stop(true); await app.close(); }
 });
+
+test("a /drive mission gets its own worktree session, survives a daemon restart, and commits when it settles", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "drive-mission-"))); roots.push(root);
+  const workspace = join(root, "repo");
+  mkdirSync(join(workspace, "node_modules", "dep"), { recursive: true });
+  writeFileSync(join(workspace, ".gitignore"), "node_modules/\n");
+  writeFileSync(join(workspace, "parser.ts"), "export const strict = false;\n");
+  git(workspace, "init", "-q", "-b", "main"); git(workspace, "add", "-A"); git(workspace, "commit", "-qm", "init");
+
+  const processor: TurnProcessor = { providerId: "test", modelId: "coder", async listModels() { return []; },
+    async *stream(messages) {
+      if (messages.at(-1)!.role === "user") {
+        yield { type: "tool_call_delta" as const, index: 0, idDelta: "w", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "parser.ts", content: "export const strict = true;\n" }) };
+        yield { type: "finish" as const, reason: "tool_calls" }; return;
+      }
+      yield { type: "text_delta" as const, delta: "Parser is strict now." };
+      yield { type: "finish" as const, reason: "stop" };
+    } };
+  const databasePath = join(root, "data", "state.sqlite");
+  let app = createDaemonApp({ databasePath, processor });
+  let server = Bun.serve({ port: 0, fetch: app.fetch });
+  const call = async (path: string, init?: RequestInit) => {
+    const response = await fetch(new URL(path, server.url), { headers: { "Content-Type": "application/json" }, ...init });
+    return { status: response.status, body: await response.json() as any };
+  };
+  const list = async () => (await call(`/v1/drive/fixes?workspace=${encodeURIComponent(workspace)}`)).body.fixes as DriveFix[];
+  try {
+    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) });
+    const opened = await call("/v1/drive/fixes", { method: "POST", body: JSON.stringify({ workspace, signals: [], mission: "Make the parser strict\nand keep its tests green" }) });
+    expect(opened.status).toBe(201);
+    const mission = opened.body.fix as DriveFix;
+    expect(mission).toMatchObject({ status: "running", title: "Make the parser strict", turnId: null, mission: "Make the parser strict\nand keep its tests green" });
+    expect(mission.branch).toMatch(/^drive\/mission-make-the-parser-strict-/);
+    expect(mission.sessionId).toBeTruthy();
+    // While its worktree is open, nothing else starts one.
+    expect((await call("/v1/drive/fixes", { method: "POST", body: JSON.stringify({ workspace, signals: [], mission: "Another" }) })).body.error?.message ?? "").toMatch(/still open/);
+
+    // A restart keeps the mission's worktree open (its planner resumes in the client).
+    server.stop(true); await app.close();
+    app = createDaemonApp({ databasePath, processor });
+    server = Bun.serve({ port: 0, fetch: app.fetch });
+    expect((await list()).find((fix) => fix.id === mission.id)?.status).toBe("running");
+
+    // Drive's planner submits a turn to the mission session; it edits the worktree only.
+    const submitted = await call(`/v1/sessions/${mission.sessionId}/turns`, { method: "POST", body: JSON.stringify({ content: "Make parser.ts strict", permissionMode: "allow" }) });
+    expect(submitted.status).toBe(202);
+    for (let i = 0; i < 400; i++) {
+      const state = await call(`/v1/sessions/${mission.sessionId}`);
+      if (state.body.session?.turns?.at(-1)?.status === "completed") break;
+      await Bun.sleep(25);
+    }
+    expect(readFileSync(join(mission.path, "parser.ts"), "utf8")).toBe("export const strict = true;\n");
+    expect(readFileSync(join(workspace, "parser.ts"), "utf8")).toBe("export const strict = false;\n");
+
+    const finished = await call(`/v1/drive/fixes/${mission.id}/finish`, { method: "POST", body: JSON.stringify({ summary: "Parser is strict now." }) });
+    expect(finished.body.fix).toMatchObject({ status: "ready", summary: "Parser is strict now.", diff: { files: 1, paths: ["parser.ts"] } });
+    // The linked node_modules survived the restart as an exclusion, so it isn't committed.
+    expect(out(workspace, "show", "--stat", "--format=%s", mission.branch)).not.toContain("node_modules");
+    expect(out(workspace, "log", "-1", "--format=%s", mission.branch)).toBe("Make the parser strict");
+
+    expect((await call(`/v1/drive/fixes/${mission.id}/apply`, { method: "POST" })).body.fix.status).toBe("applied");
+    expect(readFileSync(join(workspace, "parser.ts"), "utf8")).toBe("export const strict = true;\n");
+    expect(existsSync(mission.path)).toBe(false);
+    expect((await call(`/v1/drive/fixes/${mission.id}/finish`, { method: "POST", body: "{}" })).status).toBe(409);
+  } finally { server.stop(true); await app.close(); }
+});

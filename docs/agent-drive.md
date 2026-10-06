@@ -13,7 +13,10 @@ Drive is a separate planning context that coordinates coding turns, inspects rec
 /drive resume
 /drive stop
 /drive reopen TASK_ID Explain what changed since completion
+/drive --here --bounded Run this one in the current session
 ```
+
+**Every new mission works in its own git worktree** (see [Missions work in a worktree](#missions-work-in-a-worktree)). Add `--here` to keep it in the current session.
 
 **Plain `/drive MISSION` currently defaults to continuous mode.** Use `--bounded` for one verified task. A saved mission retains its mode. A question can finish when answered in either mode. `/drive` or Alt+J opens the panel.
 
@@ -65,7 +68,17 @@ Pressing **Run** on a proposal never touches your checkout. Drive creates a git 
 
 When it finishes, demesne commits the change on that branch and shows the same card as a breakage fix: the diff size, the files, the checks that ran and the coder's summary, with **Apply to my branch**, **Open PR** and **Discard**. If the coder decides nothing needs changing (common for an investigation), the card says so with its summary, and Discard cleans up. Only one worktree job runs per project at a time.
 
-Outside a git repository, or in one with no commits yet, Run falls back to a **bounded** mission in the current session. `/drive --bounded "…"` always runs in the current session.
+Outside a git repository, or in one with no commits yet, Run falls back to a **bounded** mission in the current session.
+
+## Missions work in a worktree
+
+A new `/drive` mission doesn't touch your checkout either. Drive creates a git worktree on a branch named after the mission (`drive/mission-…`), opens a session rooted there and moves you into it. The planner, check-ins and every coding turn then run in that session, with the same limits and evidence as before. Your original session and files stay as they were.
+
+When the mission settles (completed, idle or stopped), demesne commits what changed on the branch and shows the review card: diff size, files, the checks the mission ran and its summary, with **Apply to my branch**, **Open PR** and **Discard**. Applying or discarding takes you back to the session you started from. If you resume a settled mission, it keeps working in the same worktree, and the next settle adds a commit.
+
+While a mission's worktree is open, no other worktree job (a breakage fix or a proposal Run) starts in that project: apply or discard it first. A daemon restart keeps the worktree open; the mission reopens paused as usual.
+
+`/drive --here MISSION` runs in the current session instead. So does any mission outside a git repository, in one with no commits, or under `DEMESNE_DRIVE_CONTROL=ui`. The worktree links your `node_modules` rather than reinstalling, so a coder that installs packages there changes your checkout's dependencies too.
 
 ## Breakage alerts: fix it in a worktree
 

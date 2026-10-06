@@ -139,7 +139,11 @@ export class GraphicsHost {
     veto: (text) => this.drive?.addMemory({ kind: "veto", text, source: "you" }),
     open: (url) => this.open(url),
     applied: () => { void this.refreshFiles().catch(() => {}); void this.refreshProcesses(); },
+    closed: (fix) => void this.leaveMission(fix),
   });
+  /// The session you were in when a mission opened its worktree session.
+  private missionReturn: string | null = null;
+  private missionFinishing = new Set<string>();
   /// Proposals you hid: until a time (Not now, or while running) or for good.
   private nextHidden: Record<string, number | "never"> = {};
   private nextRequested = 0;
@@ -420,6 +424,38 @@ export class GraphicsHost {
     await this.select(result.session.id);
     return result.session.id;
   }
+  /// Opens a worktree and session for a /drive mission and moves you into
+  /// it, so Drive's turns run there and your checkout stays as it is.
+  async openMissionWorktree(mission: string) {
+    const previous = this.current?.session.id ?? null;
+    const fix = await this.breakage.openMission(mission);
+    this.missionReturn = previous;
+    await this.select(fix.sessionId!);
+    void this.refreshSessions();
+  }
+
+  /// Drive's state changed: when a worktree mission settles (completed, idle
+  /// or stopped), commit what it changed and show it for review.
+  missionChanged(state: import("@demesne/protocol").DriveState | null) {
+    if (!state || !["completed", "idle", "stopped"].includes(state.status)) return;
+    const fix = this.breakage.missionFor(state.homeSessionId);
+    const key = `${state.id}:${state.status}:${state.step}`;
+    if (!fix || this.missionFinishing.has(key)) return;
+    this.missionFinishing.add(key);
+    const summary = state.answer || state.completed.join("\n") || state.activity;
+    void this.breakage.finishMission(fix.id, summary);
+  }
+
+  /// A mission's worktree is gone: go back to the session you started from.
+  private async leaveMission(fix: import("@demesne/protocol").DriveFix) {
+    if (this.current?.session.id !== fix.sessionId) return;
+    const back = this.missionReturn && this.sessions.some((session) => session.id === this.missionReturn) ? this.missionReturn
+      : this.sessions.find((session) => session.id !== fix.sessionId && session.workspace?.root === this.workspace)?.id;
+    this.missionReturn = null;
+    try { if (back) await this.select(back); else await this.newSession(); }
+    catch { /* stay; the session list still has yours */ }
+  }
+
   async select(id: string) {
     if (this.busy)
       throw new Error("Wait for the current session action to finish.");

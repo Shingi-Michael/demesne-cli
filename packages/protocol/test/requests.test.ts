@@ -25,6 +25,9 @@ describe("session update validation", () => {
     expect(parseUpdateSessionRequest({ preferredModel: "local-model" })).toEqual({ preferredModel: "local-model" });
     expect(parseUpdateSessionRequest({ preferredModel: null })).toEqual({ preferredModel: null });
     expect(parseUpdateSessionRequest({ title: "Both", preferredModel: "m" })).toEqual({ title: "Both", preferredModel: "m" });
+    expect(parseUpdateSessionRequest({ autoApprove: true })).toEqual({ autoApprove: true });
+    expect(parseUpdateSessionRequest({ autoApprove: false })).toEqual({ autoApprove: false });
+    expect(parseUpdateSessionRequest({ title: "Enabled", autoApprove: true })).toEqual({ title: "Enabled", autoApprove: true });
   });
 
   test("rejects empty updates and invalid fields", () => {
@@ -34,6 +37,9 @@ describe("session update validation", () => {
     expect(() => parseUpdateSessionRequest({ preferredModel: 42 })).toThrow(ProtocolValidationError);
     expect(() => parseUpdateSessionRequest({ preferredModel: "" })).toThrow(ProtocolValidationError);
     expect(() => parseUpdateSessionRequest({ title: "x".repeat(201) })).toThrow(ProtocolValidationError);
+    for (const autoApprove of ["true", 1, 0, null, [], {}]) {
+      expect(() => parseUpdateSessionRequest({ autoApprove })).toThrow("autoApprove must be a boolean");
+    }
   });
 });
 

@@ -211,6 +211,7 @@ let overlay: OverlayName | null = null,
     data: Record<string, unknown>;
     group?: string;
     hint?: string;
+    description?: string;
   }[] = [];
 let completionItems: {
     label: string;
@@ -353,6 +354,7 @@ function renderStatus() {
     state.provider?.metrics,
     state.workspace,
     state.session?.title,
+    state.session?.autoApprove,
     pane,
     state.session?.workspace?.gitBranch,
     state.activeTurnId
@@ -370,7 +372,7 @@ function renderStatus() {
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   const workspace = state.workspace.replace(/^.*\/projects\//, "projects/");
   el("header").innerHTML =
-    `<div class="identity"><strong>demesne</strong>${pane === "changes" && state.session ? `<span class="session-title">${h(state.session.title)}</span>` : ""}<span title="${h(state.workspace)}">${pane === "changes" ? "" : "· "}${h(workspace)}</span></div><div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}${state.runs.length ? `<span class="age">${pane === "changes" ? clock(Date.now()).slice(0, 5) : `· ${duration(Date.now() - Date.parse(state.session!.createdAt))}`}</span>` : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true)}</div>`;
+    `<div class="identity"><strong>demesne</strong>${pane === "changes" && state.session ? `<span class="session-title">${h(state.session.title)}</span>` : ""}<span title="${h(state.workspace)}">${pane === "changes" ? "" : "· "}${h(workspace)}</span></div><div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "pill auto-approve") : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}${state.runs.length ? `<span class="age">${pane === "changes" ? clock(Date.now()).slice(0, 5) : `· ${duration(Date.now() - Date.parse(state.session!.createdAt))}`}</span>` : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true)}</div>`;
 }
 function totals(run: GraphicsRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -751,6 +753,8 @@ function renderComposer() {
     state.busy,
     state.approvals.length,
     state.questions.length,
+    state.session?.autoApprove,
+    state.planOnly,
   ]);
   if (
     signature === composerSignature &&
@@ -763,6 +767,16 @@ function renderComposer() {
   composerWidth = width;
   const form = el("composer"),
     queued = Boolean(state.activeTurnId && editor.value.trim());
+  let approvalMode = form.querySelector<HTMLElement>(".approval-mode");
+  if (!approvalMode) {
+    approvalMode = document.createElement("div");
+    approvalMode.className = "approval-mode";
+    form.insertBefore(approvalMode, editor);
+  }
+  approvalMode.hidden = !state.session?.autoApprove;
+  approvalMode.innerHTML = state.session?.autoApprove
+    ? btn("overlay", `Auto-approve all · ${state.planOnly ? "Plan stays read only" : "this session"}`, { name: "settings" })
+    : "";
   form.classList.toggle("queued", queued);
   form.classList.toggle("restored", state.restored);
   form.classList.toggle("stop-armed", Date.now() < stopArmed);
@@ -828,7 +842,7 @@ function renderApproval() {
       ? `<details class="approval-details"><summary>Command details</summary>${preview}</details>`
       : `<p class="approval-description">${h(approval.summary)}</p>${preview}`;
   el("approval").innerHTML =
-    `<div class="approval-card"><div class="approval-title"><span class="amber">!</span> Allow this ${isCommand ? "command" : "action"}?<small>${isCommand ? "" : `${h(approval.name)} · `}Turn ${run?.number ?? "—"}</small></div>${description}<div class="approval-actions">${btn("permission", `${k("y")} Allow once`, { id: approval.id, decision: "allow_once" })}${btn("permission", `${k("n")} Deny`, { id: approval.id, decision: "deny" }, "deny")}${!isCommand ? btn("permission", "a &nbsp; allow this session", { id: approval.id, decision: "allow_session" }, "quiet") : ""}${approval.rule ? btn("permission", "s &nbsp; always allow", { id: approval.id, decision: "allow_always" }, "quiet") : ""}</div></div>`;
+    `<div class="approval-card"><div class="approval-title"><span class="amber">!</span> Allow this ${isCommand ? "command" : "action"}?<small>${isCommand ? "" : `${h(approval.name)} · `}Turn ${run?.number ?? "—"}</small></div>${description}<div class="approval-actions">${btn("permission", `${k("y")} Allow once`, { id: approval.id, decision: "allow_once" })}${btn("permission", `${k("n")} Deny`, { id: approval.id, decision: "deny" }, "deny")}${!isCommand ? btn("permission", "a &nbsp; allow this session", { id: approval.id, decision: "allow_session" }, "quiet") : ""}${approval.rule ? btn("permission", "s &nbsp; always allow", { id: approval.id, decision: "allow_always" }, "quiet") : ""}${btn("auto-approve", "Auto-approve all · this session", { autoApprove: true }, "auto-approve")}</div><p class="approval-scope">With Auto-approve all, edits, commands, deletions and publishing run without asking.</p></div>`;
 }
 /// Breakage alerts: a card over the conversation when something newly
 /// breaks, then the worktree fix as it runs and when it's ready to review.
@@ -1972,6 +1986,7 @@ function renderOverlay() {
     state.model,
     state.theme,
     state.planOnly,
+    state.session?.autoApprove,
     state.sessions,
     models,
     state.providers,
@@ -2006,6 +2021,15 @@ function renderOverlay() {
         action: "overlay",
         data: { name: "models" },
         hint: "/model",
+      },
+      {
+        label: "Approvals",
+        value: state.session?.autoApprove ? "Auto-approve all" : "Ask first",
+        group: "SESSION",
+        action: "auto-approve",
+        data: { autoApprove: !state.session?.autoApprove },
+        hint: state.session?.autoApprove ? "turn off ↵" : "turn on ↵",
+        description: "Auto-approve all skips prompts for edits, commands, deletions and publishing. Plan stays read only.",
       },
       {
         label: "Theme",
@@ -2232,7 +2256,7 @@ function renderOverlay() {
           { index },
           `menu-row ${index === overlayIndex ? "selected" : ""}`,
           overlay === "sessions",
-        )
+        ) + (row.description ? `<p class="settings-description">${h(row.description)}</p>` : "")
       );
     })
     .join("");
@@ -2533,6 +2557,8 @@ async function dispatch(
   args: Record<string, any>,
   target?: HTMLElement,
 ) {
+  if (action === "auto-approve" && driveNavigating)
+    throw new Error("Only you can change session approvals.");
   if (action === "review-scope") {
     reviewScope = args.scope;
     reviewMode = "diff";
@@ -2804,7 +2830,7 @@ async function dispatch(
       return;
     }
     // Providers and cleanup stay open, so the result shows.
-    if (row && (overlay === "providers" || overlay === "cleanup")) {
+    if (row && (overlay === "providers" || overlay === "cleanup" || row.action === "auto-approve")) {
       if (row.action) await dispatch(row.action, row.data);
       return;
     }
@@ -2976,6 +3002,7 @@ async function dispatch(
   if (
     [
       "permission",
+      "auto-approve",
       "cancel",
       "clear-queue",
       "compact",
@@ -3601,6 +3628,7 @@ window.demesneInspect = () => ({
     entries: run.entries.length,
   })),
   approvals: state?.approvals.length,
+  autoApprove: state?.session?.autoApprove === true,
   approvalText: el("approval").innerText,
   approvalDetailsOpen: el("approval").querySelector<HTMLDetailsElement>("details")?.open ?? false,
   questions: state?.questions.length,

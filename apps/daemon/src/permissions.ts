@@ -9,6 +9,7 @@ interface PendingPermission {
   resolve: (decision: PermissionDecision) => void;
   reject: (error: unknown) => void;
   timeout: ReturnType<typeof setTimeout>;
+  clearAbort: () => void;
 }
 
 export interface SessionRule {
@@ -31,7 +32,10 @@ export class PermissionBroker {
   private readonly pending = new Map<string, PendingPermission>();
   private readonly grants = new Map<string, SessionRule[]>();
 
-  constructor(private readonly allowlist?: ConfigAllowlist) {}
+  constructor(
+    private readonly allowlist?: ConfigAllowlist,
+    private readonly sessionAutoApprove: (sessionId: string) => boolean = () => false,
+  ) {}
 
   wait(
     permissionId: string,
@@ -41,23 +45,32 @@ export class PermissionBroker {
     argsJson: string,
     signal: AbortSignal,
   ): Promise<PermissionDecision> {
+    if (signal.aborted) return Promise.reject(signal.reason);
+    // The UI can enable the policy synchronously while the permission event
+    // is being delivered, before this waiter has been registered.
+    if (this.sessionAutoApprove(sessionId)) return Promise.resolve("allow_once");
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(permissionId);
+        pending.clearAbort();
         resolve("deny");
       }, 5 * 60_000);
-      const pending: PendingPermission = { turnId, sessionId, toolName, argsJson, resolve, reject, timeout };
-      this.pending.set(permissionId, pending);
-      signal.addEventListener("abort", () => {
+      const onAbort = () => {
         if (this.pending.delete(permissionId)) {
           clearTimeout(timeout);
+          pending.clearAbort();
           reject(signal.reason);
         }
-      }, { once: true });
+      };
+      const pending: PendingPermission = { turnId, sessionId, toolName, argsJson, resolve, reject, timeout,
+        clearAbort: () => signal.removeEventListener("abort", onAbort) };
+      this.pending.set(permissionId, pending);
+      signal.addEventListener("abort", onAbort, { once: true });
     });
   }
 
   preapproved(sessionId: string, toolName: string, input: unknown): boolean {
+    if (this.sessionAutoApprove(sessionId)) return true;
     const rules = this.grants.get(sessionId);
     if (rules && sessionRulesCover(rules, toolName, input)) return true;
     const allowRules = this.allowlist?.rulesFor();
@@ -68,11 +81,23 @@ export class PermissionBroker {
     return [...this.grants.get(sessionId) ?? []];
   }
 
+  /// Enabling the persisted policy releases this session's existing waiters.
+  /// One-shot decisions never create grants that would survive disabling it.
+  approvePendingSession(sessionId: string): number {
+    if (!this.sessionAutoApprove(sessionId)) return 0;
+    let resolved = 0;
+    for (const [permissionId, pending] of this.pending) {
+      if (pending.sessionId === sessionId && this.resolve(permissionId, "allow_once")) resolved++;
+    }
+    return resolved;
+  }
+
   resolve(permissionId: string, decision: PermissionDecision): boolean {
     const pending = this.pending.get(permissionId);
     if (!pending) return false;
     this.pending.delete(permissionId);
     clearTimeout(pending.timeout);
+    pending.clearAbort();
     if ((decision === "allow_session" || decision === "allow_always") && pending.toolName) {
       for (const rule of deriveRules(pending.toolName, pending.argsJson)) this.grant(pending.sessionId, rule);
     }
@@ -85,6 +110,7 @@ export class PermissionBroker {
       if (pending.turnId !== turnId) continue;
       this.pending.delete(permissionId);
       clearTimeout(pending.timeout);
+      pending.clearAbort();
       pending.reject(reason);
     }
   }

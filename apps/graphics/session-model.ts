@@ -131,6 +131,8 @@ export class GraphicsSession {
     const p = event.payload;
     if (event.type === "session.renamed" && typeof p.title === "string")
       this.session.title = p.title;
+    if (event.type === "session.permissions_changed" && typeof p.autoApprove === "boolean")
+      this.session.autoApprove = p.autoApprove;
     if (event.type === "turn.created" && event.turnId)
       this.ensureTurn({
         id: event.turnId,

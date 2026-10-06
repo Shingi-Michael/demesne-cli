@@ -217,6 +217,20 @@ async function run(command: string[]): Promise<void> {
     return;
   }
 
+  if (command[0] === "session" && command[1] === "auto-approve") {
+    const id = command[2], mode = command[3];
+    if (!id || !["on", "off", "status"].includes(mode ?? "") || command.length !== 4)
+      throw new Error("Usage: demesne session auto-approve <session-id> on|off|status");
+    const path = `/v1/sessions/${encodeURIComponent(id)}`;
+    const result = await request<{ session: Session }>(path, mode === "status" ? undefined : {
+      method: "PATCH", body: JSON.stringify({ autoApprove: mode === "on" }),
+    });
+    if (typeof result.session.autoApprove !== "boolean" || (mode !== "status" && result.session.autoApprove !== (mode === "on")))
+      throw new Error("Restart the daemon to use session auto-approval.");
+    console.log(sanitizeTerminalText(`Auto-approve all: ${result.session.autoApprove ? "on" : "off"} · session ${id}`));
+    return;
+  }
+
   if (command[0] === "session" && command[1] === "list") {
     const result = await request<{ sessions: Session[] }>("/v1/sessions");
     for (const session of result.sessions) {
@@ -1288,6 +1302,7 @@ function printUsage(): void {
   demesne session list
   demesne session create [--workspace <path>] [title]
   demesne session show <session-id>
+  demesne session auto-approve <session-id> on|off|status
   demesne models
   demesne cancel <turn-id>
   demesne events <session-id> [--after <event-id>]

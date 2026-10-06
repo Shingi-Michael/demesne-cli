@@ -246,6 +246,7 @@ export class GraphicsHost {
             title: this.current.session.title,
             workspace: this.current.session.workspace,
             createdAt: this.current.session.createdAt,
+            autoApprove: this.current.session.autoApprove === true,
           }
         : null,
       sessions: this.sessions.map((session) => ({
@@ -911,6 +912,25 @@ export class GraphicsHost {
     ]);
     if (!globals.has(method) && args.sessionId !== this.current?.session.id)
       throw new Error("The session changed. Try the action again.");
+    if (method === "auto-approve") {
+      if (args.driveCommand !== undefined)
+        throw new Error("Only you can change session approvals.");
+      if (typeof args.autoApprove !== "boolean")
+        throw new Error("Invalid auto-approve setting");
+      if (!this.current) throw new Error("Choose a session first.");
+      const selected = this.current;
+      const result = await this.client.updateSession(selected.session.id, {
+        autoApprove: args.autoApprove,
+      });
+      if (result.session.autoApprove !== args.autoApprove)
+        throw new Error("The daemon did not apply this approval setting. Restart Demesne to update the daemon.");
+      // A session switch during the request must not alter the new selection.
+      if (this.current === selected) {
+        selected.session.autoApprove = result.session.autoApprove === true;
+        this.publish();
+      }
+      return;
+    }
     if (method === "panel-watch") {
       this.watchPanel(
         typeof args.panel === "string" ? args.panel : null,

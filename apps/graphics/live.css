@@ -82,6 +82,19 @@
   color: var(--thinking);
   border-color: var(--composerQueuedBorder);
 }
+.pill.auto-approve {
+  color: var(--thinking);
+  background: var(--thinkingSurface);
+  border-color: var(--composerQueuedBorder);
+}
+.approval-mode {
+  margin-bottom: 6px;
+}
+.approval-mode button {
+  color: var(--thinking);
+  font-size: 12px;
+  line-height: 18px;
+}
 .pill.failed {
   background: var(--errorSurface);
   color: var(--signal);
@@ -671,6 +684,19 @@
   line-height: 20px;
   color: var(--secondary);
 }
+.approval-scope {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.settings-description {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 16px 8px;
+  margin: 0;
+}
 .approval-details > summary {
   color: var(--muted);
   font-size: 12px;
@@ -726,6 +752,10 @@
   color: var(--signal);
   background: var(--errorSurface);
   border-color: var(--composerStoppedBorder);
+}
+.approval-actions .auto-approve {
+  color: var(--thinking);
+  border-color: var(--composerQueuedBorder);
 }
 .approval-actions .quiet {
   padding: 0;

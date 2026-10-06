@@ -13,6 +13,48 @@ afterEach(() => {
 });
 
 describe("DemesneStore", () => {
+  test("defaults to manual approval and persists a session-scoped policy and event", () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-storage-test-"));
+    temporaryDirectories.push(directory);
+    const databasePath = join(directory, "demesne.sqlite");
+    const store = new DemesneStore(databasePath);
+    const { session } = store.createSession("Automatic");
+    const { session: other } = store.createSession("Manual");
+    expect(session.autoApprove).toBe(false);
+    expect(store.isSessionAutoApprove("missing")).toBe(false);
+    const enabled = store.setSessionAutoApprove(session.id, true);
+    expect(enabled.session.autoApprove).toBe(true);
+    expect(enabled.event).toMatchObject({ type: "session.permissions_changed", sessionId: session.id, payload: { autoApprove: true } });
+    expect(store.isSessionAutoApprove(other.id)).toBe(false);
+    expect(store.setSessionAutoApprove(session.id, true).event).toBeNull();
+    store.close();
+    const reopened = new DemesneStore(databasePath);
+    expect(reopened.getSession(session.id)?.autoApprove).toBe(true);
+    expect(reopened.isSessionAutoApprove(session.id)).toBe(true);
+    expect(reopened.setSessionAutoApprove(session.id, false).event?.payload).toEqual({ autoApprove: false });
+    expect(reopened.isSessionAutoApprove(session.id)).toBe(false);
+    expect(reopened.listSessions().every(session => session.autoApprove === false)).toBe(true);
+    reopened.close();
+  });
+
+  test("migrates schema 6 sessions to manual approval without losing history", () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-storage-test-"));
+    temporaryDirectories.push(directory);
+    const databasePath = join(directory, "demesne.sqlite");
+    const store = new DemesneStore(databasePath);
+    const { session } = store.createSession("Legacy");
+    const { turn } = store.createTurn(session.id, "Saved request");
+    store.database.run("ALTER TABLE sessions DROP COLUMN auto_approve");
+    store.database.run("PRAGMA user_version = 6");
+    store.close();
+    const migrated = new DemesneStore(databasePath);
+    expect(migrated.database.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
+    expect(migrated.getSession(session.id)).toMatchObject({ title: "Legacy", autoApprove: false, turns: [{ id: turn.id, content: "Saved request" }] });
+    expect(migrated.isSessionAutoApprove(session.id)).toBe(false);
+    expect(migrated.database.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    migrated.close();
+  });
+
   test("marks unfinished turns as interrupted when the journal reopens", () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-storage-test-"));
     temporaryDirectories.push(directory);

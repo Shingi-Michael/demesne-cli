@@ -15,9 +15,11 @@ export function configuredChatGPTAccount(configPath: string): string | undefined
   const config = loadConfig({ userConfigPath: configPath, includeProject: false, env: {} }).config;
   return [config.provider, ...Object.values(config.additionalProviders ?? {})].find(p => p.auth === "chatgpt")?.authProfile;
 }
-export async function discoverChatGPT(auth: ChatGPTAuth, accountId: string, options: { fetch?: typeof fetch; signal?: AbortSignal } = {}): Promise<ProbeResult> {
+export async function discoverChatGPT(auth: ChatGPTAuth, accountId: string, options: { fetch?: typeof fetch; signal?: AbortSignal; model?: string } = {}): Promise<ProbeResult> {
   const provider = new ChatGPTProvider({ accountId, accessToken: signal => auth.accessToken(accountId, signal), fetch: options.fetch });
-  const models = await provider.listModels(AbortSignal.any([AbortSignal.timeout(30_000), ...(options.signal ? [options.signal] : [])]));
+  const signal = AbortSignal.any([AbortSignal.timeout(30_000), ...(options.signal ? [options.signal] : [])]);
+  const models = await provider.listModels(signal);
+  if (options.model && !models.some(model => model.id === options.model)) models.push(await provider.verifyModel(options.model, signal));
   if (!models.length) throw new Error("This ChatGPT account has no available models. Choose another account.");
   return { target: { id: "ChatGPT", label: "ChatGPT", url: CHATGPT_API }, reachable: true, models };
 }
@@ -41,8 +43,8 @@ export function configureChatGPT(options: { configPath: string; account: ChatGPT
   return { backup, model: selected.id, contextWindow, maxOutputTokens, detected: !!selected.contextWindow };
 }
 
-export async function runChatGPTAuthCommand(command: string[], options: { configPath: string; dataDirectory: string; open: (url: string) => Promise<boolean>; acknowledge: () => Promise<boolean> }) {
-  const auth = new ChatGPTAuth(options.dataDirectory);
+export async function runChatGPTAuthCommand(command: string[], options: { configPath: string; dataDirectory: string; open: (url: string) => Promise<boolean>; acknowledge: () => Promise<boolean>; fetch?: typeof fetch }) {
+  const auth = new ChatGPTAuth(options.dataDirectory, { fetch: options.fetch });
   const option = (name: string) => { const i = command.indexOf(name); if (i < 0) return undefined; const value = command[i + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} requires a value`); return value; };
   const action = command[1];
   const accounts = await auth.accounts();
@@ -78,8 +80,9 @@ export async function runChatGPTAuthCommand(command: string[], options: { config
       if (!command.includes("--accept-plan-usage") && !await options.acknowledge()) throw new Error("Account saved. Run login or use with --accept-plan-usage after reviewing the plan notice.");
       await auth.acknowledge(account.id); account = { ...account, acknowledged: true };
     }
-    const catalog = await discoverChatGPT(auth, account.id, { signal: controller.signal });
-    const result = configureChatGPT({ configPath: options.configPath, account, models: catalog.models, model: option("--model"), contextWindow: option("--context-window") ? Number(option("--context-window")) : undefined });
+    const model = option("--model");
+    const catalog = await discoverChatGPT(auth, account.id, { fetch: options.fetch, signal: controller.signal, model });
+    const result = configureChatGPT({ configPath: options.configPath, account, models: catalog.models, model, contextWindow: option("--context-window") ? Number(option("--context-window")) : undefined });
     console.log(`Connected ${account.label} · Using ChatGPT plan\nModel: ${result.model}`);
     if (!result.detected) console.log(`Using a conservative ${result.contextWindow.toLocaleString()} token context budget; adjust context_window if needed.`);
     console.log(`Restart the daemon, then select /model ${result.model}. Manage usage: ${CHATGPT_USAGE}`);

@@ -14,6 +14,8 @@ Signing out keeps the provider's configuration so signing back in is one step: C
 
 ## Continue with ChatGPT
 
+The **ChatGPT** provider connects directly to OpenAI's public Responses API. It can use `gpt-6.1-sol` with an eligible signed-in account, without a Codex executable or desktop app. The separate [Codex provider](#codex-with-a-chatgpt-account) remains available for its app-server route.
+
 ```sh
 demesne auth login chatgpt
 demesne auth accounts chatgpt
@@ -24,7 +26,17 @@ demesne auth login chatgpt --account ACCOUNT_ID --consent
 demesne auth logout chatgpt --account ACCOUNT_ID
 ```
 
-`openai` is accepted as an alias for `chatgpt` by the auth entry point. Model choices come from the signed-in account's catalog. The CLI validates an explicitly selected slug and otherwise selects the first available catalog item. Existing local providers are preserved by standalone login; setup's Review makes the chosen provider primary.
+To select Sol directly, sign in once or use an existing Demesne ChatGPT account:
+
+```sh
+demesne auth login chatgpt --model gpt-6.1-sol
+# With an already signed-in account:
+demesne auth use chatgpt --account ACCOUNT_ID --model gpt-6.1-sol
+```
+
+`openai` is accepted as an alias for `chatgpt` by the auth entry point. Model choices normally come from the signed-in account's catalog, and the default remains its first available item. If you explicitly request `gpt-6.1-sol` and the catalog omits it, Demesne sends a small text-only verification request with that account. The connection is saved only after a completed response identifies Sol. This uses plan allowance; a denial, failed or incomplete response leaves the provider configuration unchanged. Opening the model list does not run this verification. Other unlisted model IDs remain unavailable.
+
+Existing local providers are preserved by standalone login; setup's Review makes the chosen provider primary. After connecting, select `/model gpt-6.1-sol`. A configured Sol choice remains available when the account's catalog omits it; inference still requires that account's access.
 
 ```mermaid
 sequenceDiagram
@@ -53,11 +65,11 @@ Credentials live under `<data_dir>/auth/chatgpt.json`, with private directory/fi
 
 ## ChatGPT inference behavior
 
-Demesne uses the public [Responses API route for plan usage](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference), with `store: false`, `stream: true`, and locally supplied conversation history. Function tools are namespaced. Completed streamed items are retained even when the terminal response's output array is empty; opaque reasoning is reused only with the matching account/model.
+Demesne uses the public [Responses API route for plan usage](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference), with `store: false`, `stream: true`, and locally supplied conversation history. OpenAI documents `gpt-6.1-sol` on this direct route. Demesne handles workspace tools and approvals; no Codex process is started by this provider. Function tools are namespaced. Completed streamed items are retained even when the terminal response's output array is empty; opaque reasoning is reused only with the matching account/model.
 
 A completed stream is required before tools execute. Failed, incomplete, or disconnected streams remain failures. Eligible calls count against ChatGPT plan usage/credits; [Manage usage](https://chatgpt.com/settings/usage). There is no automatic API-key billing fallback.
 
-Under the documented [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations), `max_output_tokens` is omitted from this route. In Demesne it is a local context reserve, not an enforced server output cap. Supported reasoning levels and summary support are discovered from model metadata; the adapter forwards the selected level and requests summaries only where supported. Image generation remains a separately configured backend.
+Under the documented [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations), `max_output_tokens` is omitted from this route. In Demesne it is a local context reserve, not an enforced server output cap. Supported reasoning levels and summary support normally come from model metadata. A verified Sol entry uses its documented context and reasoning levels if the catalog supplies none. The adapter forwards the selected level and requests summaries only where supported. Image generation remains a separately configured backend.
 
 Implementation: [OAuth package](../packages/chatgpt-auth/src/index.ts), [CLI wiring](../apps/cli/src/chatgpt-auth.ts), [Responses adapter](../packages/providers/src/chatgpt.ts).
 

@@ -219,7 +219,7 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
   if (settings.auth === "chatgpt" && !settings.authProfile) throw new Error("ChatGPT requires an auth_profile. Run demesne auth login chatgpt.");
   const auth = settings.auth === "chatgpt" ? new ChatGPTAuth(dataDirectory) : undefined;
   const provider = settings.auth === "codex" ? new CodexProvider({ dataDir: dataDirectory, contextWindow: configuredContextCapacity })
-    : auth ? new ChatGPTProvider({ accountId: settings.authProfile!, accessToken: signal => auth.accessToken(settings.authProfile!, signal), contextWindow: configuredContextCapacity }) : new OpenAICompatibleProvider({
+    : auth ? new ChatGPTProvider({ accountId: settings.authProfile!, accessToken: signal => auth.accessToken(settings.authProfile!, signal), contextWindow: configuredContextCapacity, configuredModel: model }) : new OpenAICompatibleProvider({
     baseUrl,
     allowHttpEndpoint: settings.allowHttpEndpoint,
     apiKey: settings.apiKey,
@@ -242,7 +242,7 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
     verifier,
     configuredContextCapacity,
     allowedModelIds,
-    settings.auth === "codex" || runtimeProfileSupportsPromptCache(runtimeProfile),
+    settings.auth === "codex" || settings.auth === "chatgpt" || runtimeProfileSupportsPromptCache(runtimeProfile),
   );
 }
 

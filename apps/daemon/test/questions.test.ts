@@ -16,10 +16,15 @@ describe("QuestionBroker", () => {
     expect(broker.resolve("q1", answers)).toBe(false);
   });
 
-  test("an unanswered question times out as skipped instead of hanging the turn", async () => {
+  test("inactivity pauses without inventing answers, and explicit input resumes it", async () => {
     const broker = new QuestionBroker(10);
-    expect(await broker.wait("q2", "turn", 2, new AbortController().signal)).toEqual([
-      { answer: null, source: "skipped" }, { answer: null, source: "skipped" }]);
+    let settled=false, pauses=0;
+    const waiting=broker.wait("q2","turn",1,new AbortController().signal,()=>pauses++).then(value=>{settled=true;return value;});
+    await Bun.sleep(25);
+    expect(settled).toBe(false);expect(broker.isPaused("q2")).toBe(true);expect(pauses).toBe(1);
+    expect(broker.resume("q2")).toBe(true);
+    expect(broker.resolve("q2",[{answer:"warm",source:"typed"}])).toBe(true);
+    expect(await waiting).toEqual([{answer:"warm",source:"typed"}]);
   });
 
   test("cancelling the turn rejects its pending questions", async () => {
@@ -52,10 +57,29 @@ describe("ask_user", () => {
     expect(result).toBe("1. Which guard should change?\n   Answer: The lexer guard\n2. Allow digits after the first letter?\n   Answer: yes, like ASCII (the user's own words)");
   });
 
-  test("a skipped question and a turn with nobody to ask both tell the agent to decide", async () => {
+  test("explicit skips record missing preferences and unavailable input never invites guessing", async () => {
     const skipped = await tool.execute({ questions: [questions[1]] }, { ...context, ask: async () => [{ answer: null, source: "skipped" }] });
-    expect(skipped).toContain("no answer. Decide yourself and state the assumption you made.");
-    expect(await tool.execute({ questions }, context)).toBe("Nobody is available to answer. Decide yourself and state the assumption you made.");
+    expect(skipped).toContain("explicitly skipped");
+    await expect(tool.execute({questions},context)).rejects.toThrow("do not infer");
+  });
+
+  test("interview mode asks one adaptive question per call", async () => {
+    await expect(tool.execute({mode:"interview",questions},context)).rejects.toThrow("one question");
+    let mode: string | undefined;
+    await tool.execute({mode:"interview",questions:[questions[0]]},{...context,ask:async (_questions,value)=>{mode=value;return [{answer:"warm",source:"typed"}];}});
+    expect(mode).toBe("interview");
+  });
+
+  test("already aborted waiters reject immediately and repeated answers clean up", async () => {
+    const broker=new QuestionBroker(5), controller=new AbortController();controller.abort(new Error("already cancelled"));
+    await expect(broker.wait("dead","turn",1,controller.signal)).rejects.toThrow("already cancelled");
+    expect(broker.has("dead")).toBe(false);
+    const active=new AbortController();
+    for(let index=0;index<20;index++) {
+      const id=String(index), waiting=broker.wait(id,"turn",1,active.signal);
+      expect(broker.resolve(id,[{answer:"yes",source:"typed"}])).toBe(true);await waiting;
+    }
+    active.abort();expect(broker.has("19")).toBe(false);
   });
 
   test("rejects malformed questions and answers", async () => {

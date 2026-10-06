@@ -272,14 +272,11 @@ try {
   await click("permission", { decision: "allow_once" });
   await state((s) => s.live.questions === 1, "question");
   await capture("question");
-  await click("suggest-answer", { index: 0, value: "hello" });
-  await state((s) =>
-    s.live.controls.some((c: any) => c.label?.includes("Answer")),
-  );
-  const answer = current.live.controls.find(
-    (c: any) => c.tag === "BUTTON" && c.label?.includes("Answer"),
-  );
-  app.click(Math.round(answer.x), Math.round(answer.y));
+  assert(!current.live.controls.some((input: any)=>input.name === "0"),"questions use the main composer");
+  const composer=current.live.controls.find((input: any)=>input.tag === "TEXTAREA");
+  assert(composer && !composer.disabled,"the composer accepts typed answers");
+  app.click(Math.round(composer.x),Math.round(composer.y));
+  app.paste("hello");app.write("\r");
   await state((s) => s.live.runs.at(-1)?.status === "completed", "completion");
   await capture("answer");
   assert(current.live.text.includes("<script>"));

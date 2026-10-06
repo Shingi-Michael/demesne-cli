@@ -48,7 +48,7 @@ describe("DemesneStore", () => {
     store.database.run("PRAGMA user_version = 6");
     store.close();
     const migrated = new DemesneStore(databasePath);
-    expect(migrated.database.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
+    expect(migrated.database.query("PRAGMA user_version").get()).toEqual({ user_version: 8 });
     expect(migrated.getSession(session.id)).toMatchObject({ title: "Legacy", autoApprove: false, turns: [{ id: turn.id, content: "Saved request" }] });
     expect(migrated.isSessionAutoApprove(session.id)).toBe(false);
     expect(migrated.database.query("PRAGMA foreign_key_check").all()).toEqual([]);

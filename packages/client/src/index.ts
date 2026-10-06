@@ -13,6 +13,8 @@ import {
   type DaemonStatusResponse,
   type EventEnvelope,
   type ModelDescriptor,
+  type QuestionState,
+  type QuestionActionRequest,
   type PermissionDecision,
   type RuntimeProfileStatus,
   type Session,
@@ -324,6 +326,10 @@ export class DemesneClient {
       method: "POST",
       body: JSON.stringify({ decision }),
     });
+  }
+
+  async questionAction(id: string, action: QuestionActionRequest): Promise<{question:QuestionState;turnId?:string;eventId?:number}> {
+    return this.request(`/v1/questions/${encodeURIComponent(id)}`, {method:"POST",body:JSON.stringify(action)});
   }
 
   async undo(sessionId: string, request: UndoSessionRequest = {}): Promise<UndoTurnResponse> {

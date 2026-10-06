@@ -26,6 +26,8 @@ export type EventType =
   | "permission.resolved"
   | "question.requested"
   | "question.resolved"
+  | "question.updated"
+  | "question.cancelled"
   | "tool.call_started"
   | "tool.call_progress"
   | "tool.call_completed"
@@ -405,6 +407,7 @@ export interface SessionStateResponse {
   session: Session;
   lastEventId: number;
   pendingPermissions: PendingPermissionSnapshot[];
+  pendingQuestions?: QuestionState[];
   latestProviderCall: ProviderCallSnapshot | null;
   /// `argv`/`cwd` are set for command grants: that exact command, there.
   sessionGrants?: Array<{ tool: string; pathPrefix: string; argv?: string[]; cwd?: string }>;
@@ -631,7 +634,7 @@ export interface UserQuestion {
 }
 
 /// How one question was answered: a suggestion taken as offered, the user's
-/// own words, or skipped (the agent decides and says what it assumed).
+/// own words, or explicitly skipped. Inactivity never supplies an answer.
 export interface UserAnswer {
   answer: string | null;
   source: "suggestion" | "typed" | "skipped";
@@ -639,6 +642,45 @@ export interface UserAnswer {
 
 export interface AnswerQuestionsRequest {
   answers: UserAnswer[];
+}
+
+export type QuestionMode = "clarification" | "interview";
+export interface QuestionState {
+  id: string;
+  sessionId: string;
+  turnId: string;
+  toolCallId: string;
+  questions: UserQuestion[];
+  answers: UserAnswer[];
+  mode: QuestionMode;
+  status: "waiting" | "paused" | "answered" | "cancelled";
+  draft: string;
+  draftVersion: number;
+  revision: number;
+  interrupted: boolean;
+}
+export type QuestionActionRequest =
+  | { action: "answer"; index: number; revision: number; answer: UserAnswer }
+  | { action: "draft"; index: number; revision: number; text: string; draftVersion: number }
+  | { action: "pause" | "resume" | "cancel"; revision: number };
+
+export function parseQuestionActionRequest(value: unknown): QuestionActionRequest {
+  if (!isRecord(value) || !["answer", "draft", "pause", "resume", "cancel"].includes(String(value.action)))
+    throw new ProtocolValidationError("Expected a question answer, draft, pause, resume or cancel action");
+  const revision = value.revision;
+  if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0)
+    throw new ProtocolValidationError("revision must be a non-negative integer");
+  if (value.action === "pause" || value.action === "resume" || value.action === "cancel") return { action: value.action, revision };
+  const index = value.index;
+  if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || index >= MAX_USER_QUESTIONS)
+    throw new ProtocolValidationError("index must identify the current question");
+  if (value.action === "answer") {
+    const { answers } = parseAnswerQuestionsRequest({ answers: [value.answer] });
+    return { action: "answer", index, revision, answer: answers[0]! };
+  }
+  if (typeof value.text !== "string" || value.text.length > 2000 || typeof value.draftVersion !== "number" || !Number.isSafeInteger(value.draftVersion) || value.draftVersion < 0)
+    throw new ProtocolValidationError("Question drafts must be at most 2000 characters and include a non-negative draftVersion");
+  return { action: "draft", index, revision, text: value.text, draftVersion: value.draftVersion };
 }
 
 export const MAX_USER_QUESTIONS = 4;

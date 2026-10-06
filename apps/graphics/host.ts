@@ -21,6 +21,7 @@ import {
 import {
   isRecord,
   parseAnswerQuestionsRequest,
+  parseQuestionActionRequest,
   type ImageArtifact,
   type Session,
   type EventEnvelope,
@@ -1224,6 +1225,24 @@ export class GraphicsHost {
       this.current!.approvals.delete(id);
       this.publish();
       return;
+    }
+    if (method === "question-action") {
+      if (args.driveCommand !== undefined) throw new Error("Only the user can answer or control an interview");
+      if (!this.current) throw new Error("Choose a session first");
+      const id=string(args.id,"question id",200), selected=this.current!;
+      const pending=selected.questions.get(id);
+      if (!pending) throw new Error("This question is no longer pending");
+      if (pending.revision === undefined) throw new Error("Restart the updated daemon to answer questions in the composer");
+      const result=await this.client.questionAction(id,parseQuestionActionRequest(args.action));
+      if (this.current === selected) {
+        const latest=selected.questions.get(id);
+        if (latest && result.question.revision >= (latest.revision ?? 0)) {
+          if (["answered","cancelled"].includes(result.question.status)) selected.questions.delete(id);
+          else if (result.question.revision > (latest.revision ?? 0) || result.question.draftVersion >= (latest.draftVersion ?? 0)) selected.questions.set(id,result.question);
+        }
+        this.publish();
+      }
+      return result;
     }
     if (method === "answer") {
       const id = string(args.id, "question id", 200);

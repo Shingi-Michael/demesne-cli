@@ -99,7 +99,7 @@ export class AgentEngine {
         subagentDefinitionFor(this.options.subagentModels?.() ?? [], this.options.subagentModel ?? inference.modelId),
         ...(this.options.sessionTools ? [sessionToolsDefinition] : [])], turn.content), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
-      : [];
+      : canAsk ? this.tools.definitions().filter(definition=>definition.name === "ask_user") : [];
     const checkpoint = this.store.getSessionCheckpoint(session.id);
     const checkpointMessages: ProviderMessage[] = checkpoint ? [{ role: "assistant", content: checkpoint.summary }] : [];
     let totalToolCalls = 0;
@@ -541,11 +541,12 @@ export class AgentEngine {
     imageArtifactIds: string[] = [],
     inference?: TurnInference,
   ): Promise<string> {
-    if (!workspaceRoot) {
+    if (!workspaceRoot && call.name !== "ask_user") {
       const result = "Error: this session is not bound to a workspace";
       this.store.settleToolCall(toolCallId, "failed", result);
       return result;
     }
+    workspaceRoot ??= ""; // Questions themselves require no filesystem access.
     let input: unknown;
     try {
       input = JSON.parse(call.arguments);
@@ -615,9 +616,11 @@ export class AgentEngine {
       const questions = permissionMode === "deny" ? undefined : this.options.questions;
       const output = await (tool.executeWithArtifacts ?? tool.execute)(input, { workspaceRoot, signal, sessionId,
         commands:this.options.commands?.reporter(sessionId,turnId,toolCallId,workspaceRoot),
-        ...(questions ? { ask: async (asked: UserQuestion[]) => {
-          const { questionId } = this.store.requestQuestions(toolCallId, asked);
-          const answers = await questions.wait(questionId, turnId, asked.length, signal);
+        ...(questions ? { ask: async (asked: UserQuestion[], mode?: import("@demesne/protocol").QuestionMode) => {
+          const { questionId,event } = this.store.requestQuestions(toolCallId, asked,mode,false);
+          const waiting = questions.wait(questionId,turnId,asked.length,signal,()=>this.store.pauseQuestions(turnId));
+          this.store.publishEvent(event);
+          const answers = await waiting;
           this.store.resolveQuestions(questionId, toolCallId, answers);
           return answers;
         } } : {}) });

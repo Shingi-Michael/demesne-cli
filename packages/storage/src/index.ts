@@ -14,6 +14,9 @@ import {
   type PermissionDecision,
   type UserAnswer,
   type UserQuestion,
+  type QuestionState,
+  type QuestionMode,
+  type QuestionActionRequest,
   type PermissionMode,
   type PendingPermissionSnapshot,
   type ProviderCallSnapshot,
@@ -26,6 +29,8 @@ import {
   type TurnStatus,
   type ToolFileChange,
 } from "@demesne/protocol";
+import { QuestionRepository } from "./questions.ts";
+export { QuestionStateError } from "./questions.ts";
 
 export interface SnapshotFile {
   path: string;
@@ -130,11 +135,12 @@ export class NotFoundError extends Error {}
 export class InvalidStateError extends Error {}
 
 export type EventSink = (event: EventEnvelope) => void;
-const STORAGE_SCHEMA_VERSION = 7;
+const STORAGE_SCHEMA_VERSION = 8;
 
 export class DemesneStore {
   readonly filename: string;
   readonly database: Database;
+  readonly userQuestions: QuestionRepository;
   private eventSink: EventSink | undefined;
   private ftsEnabled = false;
 
@@ -161,6 +167,7 @@ export class DemesneStore {
       }
     }
     this.migrate();
+    this.userQuestions = new QuestionRepository(this.database,schemaVersion < 8);
     this.database.run(`      CREATE TABLE IF NOT EXISTS command_runs (
         id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
         turn_id TEXT NOT NULL REFERENCES turns(id), created_at TEXT NOT NULL, data_json TEXT NOT NULL
@@ -178,6 +185,7 @@ export class DemesneStore {
     ); CREATE INDEX IF NOT EXISTS image_artifacts_session ON image_artifacts(session_id, sequence);`);
     if (schemaVersion < STORAGE_SCHEMA_VERSION) this.database.run(`PRAGMA user_version = ${STORAGE_SCHEMA_VERSION}`);
     this.recoverInterruptedTurns();
+    this.userQuestions.recover();
   }
 
   setEventSink(eventSink: EventSink): void {
@@ -516,6 +524,7 @@ export class DemesneStore {
     session: Session;
     lastEventId: number;
     pendingPermissions: PendingPermissionSnapshot[];
+    pendingQuestions: QuestionState[];
     latestProviderCall: ProviderCallSnapshot | null;
     checkpoint: SessionCheckpoint | null;
   } | null {
@@ -555,6 +564,7 @@ export class DemesneStore {
         lastEventId: latest.id,
         latestProviderCall: snapshot,
         checkpoint,
+        pendingQuestions: this.userQuestions.list(id),
         pendingPermissions: rows.map((row) => ({
           id: row.permission_id,
           turnId: row.turn_id,
@@ -960,6 +970,7 @@ export class DemesneStore {
       const event = this.insertEvent("turn.cancelled", turn.sessionId, turnId, {}, now);
       return { turn: this.getTurnOrThrow(turnId), event, events: [...toolEvents, ...events, event] };
     })();
+    this.cancelQuestions(turnId);
     result.events.forEach((event) => this.eventSink?.(event));
     return { turn: result.turn, event: result.event };
   }
@@ -1163,23 +1174,55 @@ export class DemesneStore {
     return result;
   }
 
-  /// Records that a running `ask_user` call is waiting on the user. Questions
-  /// live in the event log only; a daemon restart interrupts the turn.
-  requestQuestions(toolCallId: string, questions: UserQuestion[]): { questionId: string; event: EventEnvelope } {
+  /// The row survives a window or daemon restart. Register the live waiter
+  /// before publishing, so even an immediate answer cannot race registration.
+  requestQuestions(toolCallId: string, questions: UserQuestion[], mode: QuestionMode = "clarification", publish = true): { questionId: string; event: EventEnvelope } {
     const questionId = crypto.randomUUID();
     const event = this.database.transaction(() => {
       const call = this.getToolCallOrThrow(toolCallId);
       const turn = this.getTurnOrThrow(call.turn_id);
-      return this.insertEvent("question.requested", turn.sessionId, turn.id, { questionId, toolCallId, questions }, new Date().toISOString());
+      const pending=this.userQuestions.list(turn.sessionId).filter(q=>q.turnId===turn.id);
+      if(pending.some(q=>q.mode==="interview") || mode==="interview" && pending.length)
+        throw new InvalidStateError("Answer the current interview question before asking another");
+      const state = this.userQuestions.create(questionId,turn.sessionId,turn.id,toolCallId,questions,mode);
+      return this.insertEvent("question.requested", turn.sessionId, turn.id, { questionId, toolCallId, questions, state }, new Date().toISOString());
     })();
-    this.eventSink?.(event);
+    if (publish) this.eventSink?.(event);
     return { questionId, event };
   }
 
-  resolveQuestions(questionId: string, toolCallId: string, answers: UserAnswer[]): EventEnvelope {
+  publishEvent(event: EventEnvelope): void { this.eventSink?.(event); }
+
+  updateQuestion(questionId: string, action: QuestionActionRequest): QuestionState {
+    const result=this.database.transaction(()=>{
+      const state=this.userQuestions.change(questionId,action);
+      const event=action.action === "draft" ? null : this.insertEvent(action.action === "cancel" ? "question.cancelled" : "question.updated",state.sessionId,state.turnId,
+        {questionId,state},new Date().toISOString());
+      return{state,event};
+    })();
+    if(result.event)this.eventSink?.(result.event);
+    return result.state;
+  }
+  pauseQuestions(turnId: string): void {
+    for (const state of this.userQuestions.pauseTurn(turnId)) {
+      const event=this.insertEvent("question.updated",state.sessionId,turnId,{questionId:state.id,state},new Date().toISOString());
+      this.eventSink?.(event);
+    }
+  }
+  cancelQuestions(turnId: string): void {
+    const turn=this.getTurn(turnId);
+    if (!turn) return;
+    for (const state of this.userQuestions.list(turn.sessionId).filter(q=>q.turnId===turnId))
+      this.updateQuestion(state.id,{action:"cancel",revision:state.revision});
+  }
+
+  resolveQuestions(questionId: string, toolCallId: string, answers: UserAnswer[]): EventEnvelope | null {
+    const current=this.userQuestions.get(questionId);
+    if (current?.status === "answered") return null;
     const event = this.database.transaction(() => {
       const call = this.getToolCallOrThrow(toolCallId);
       const turn = this.getTurnOrThrow(call.turn_id);
+      this.userQuestions.finish(questionId,answers);
       return this.insertEvent("question.resolved", turn.sessionId, turn.id, { questionId, toolCallId, answers }, new Date().toISOString());
     })();
     this.eventSink?.(event);

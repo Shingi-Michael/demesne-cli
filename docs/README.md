@@ -15,6 +15,7 @@ These guides describe the current implementation, including direct ChatGPT infer
 | [Linux setup](linux.md) | Automatic runtime setup, sandbox repair, desktop dependencies, test coverage |
 | [Subagents and concurrency](subagents.md) | Routing, read-only tools, provider slots, Qwen sizing |
 | [Agent Drive](agent-drive.md) | NEXT, missions, project memory, check-ins, loop protection |
+| [Questions and interviews](questions.md) | Typed composer answers, adaptive follow-ups, saved drafts, pause and recovery |
 | [Image preview](artifact-preview-plan.md) | Supported producers, formats, controls, current limitations |
 | [Troubleshooting](troubleshooting.md) | Startup, old builds, sign-in, stalled work, EPIPE |
 

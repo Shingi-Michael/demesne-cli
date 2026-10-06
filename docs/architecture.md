@@ -112,7 +112,7 @@ All production routes except `/healthz` require the daemon bearer token. This is
 | Sessions | `GET/POST /v1/sessions`, `GET/PATCH/DELETE /v1/sessions/:id` |
 | Turns and history | Session turn submission, compact, replay, export, changes, review and undo routes |
 | Live events | `GET /v1/events` with session and event cursor |
-| Tools | Permission/question resolution, workspace file and command routes |
+| Tools | Permission resolution, [question actions and recovery](questions.md), workspace file and command routes |
 | Drive | `POST /v1/drive/next`, `POST /v1/drive/decide`, session Drive facts, guarded check-in cancellation |
 | Images | Session artifact list, metadata, content and import routes |
 
@@ -124,7 +124,7 @@ The default data directory is `~/.demesne`, overridden by `data_dir` or `DEMESNE
 
 | Data | Owner/location |
 | --- | --- |
-| Sessions, events, tools, approvals, checkpoints, commands, artifact descriptors | Daemon SQLite database |
+| Sessions, events, tools, approvals, question progress/drafts, checkpoints, commands, artifact descriptors | Daemon SQLite database |
 | Immutable image originals and previews | `artifacts/` beside the database |
 | Daemon token, PID, log and lock | Data directory |
 | ChatGPT tokens and issued registrations | `auth/chatgpt.json` |

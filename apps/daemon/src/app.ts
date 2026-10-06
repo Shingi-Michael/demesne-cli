@@ -10,6 +10,7 @@ import {
   parseCreateSessionRequest,
   parseCompactSessionRequest,
   parseAnswerQuestionsRequest,
+  parseQuestionActionRequest,
   parseResolvePermissionRequest,
   parseSubmitTurnRequest,
   parseUndoSessionRequest,
@@ -34,7 +35,7 @@ import {
   type UndoTurnResponse,
   type UpdateSessionResponse,
 } from "@demesne/protocol";
-import { DemesneStore, InvalidStateError, NotFoundError } from "@demesne/storage";
+import { DemesneStore, InvalidStateError, NotFoundError, QuestionStateError } from "@demesne/storage";
 import { PlaceholderTurnProcessor, snapshotTurnInference, type TurnInference, type TurnProcessor } from "./processor.ts";
 import { AgentEngine } from "./engine.ts";
 import { SessionCompactor } from "./session-compaction.ts";
@@ -115,6 +116,7 @@ export function createDaemonApp(options: {
   providerFirstEventTimeoutMs?: number;
   providerRequestTimeoutMs?: number;
   providerEventLimit?: number;
+  questionTimeoutMs?: number;
   providerVision?: boolean;
   agent?: AgentConfig;
   /// Persists the sub-agent default chosen at runtime (null clears it).
@@ -174,7 +176,7 @@ export function createDaemonApp(options: {
     console.warn(`Ignoring ${invalidRules.length} invalid permissions.allow entr${invalidRules.length === 1 ? "y" : "ies"}: ${invalidRules.join(", ")}`);
   }
   const permissions = new PermissionBroker(allowlist, (sessionId) => store.isSessionAutoApprove(sessionId));
-  const questions = new QuestionBroker();
+  const questions = new QuestionBroker(options.questionTimeoutMs);
   const inferenceSlots = options.inferenceSlots ?? 1;
   const primarySlots = options.providerInferenceSlots?.[processor.providerId] ?? inferenceSlots;
   const runtimeProfile = processor.runtimeStatus?.().profile;
@@ -768,11 +770,66 @@ export function createDaemonApp(options: {
       }
 
       if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "questions") {
-        const body = parseAnswerQuestionsRequest(await readJson(request));
-        if (!questions.resolve(path[2]!, body.answers)) {
-          return apiError("invalid_state", "Question is no longer pending, or the answers do not match what was asked", 409);
+        const id=path[2]!, input=await readJson(request), pending=store.userQuestions.get(id);
+        if (!pending) return apiError("not_found","Question not found",404);
+        if (!["waiting","paused"].includes(pending.status)) return apiError("invalid_state","This question is already closed",409);
+        const original=store.getTurn(pending.turnId)!;
+        const live=questions.has(id);
+        if (!live && ["queued","running"].includes(original.status)) return apiError("invalid_state","The question is not ready to receive an answer",409);
+        const action=isRecord(input) && input.answers === undefined ? parseQuestionActionRequest(input) : undefined;
+        const legacy=action ? undefined : parseAnswerQuestionsRequest(input);
+        const finishing=legacy !== undefined || action?.action === "answer" && pending.answers.length+1 === pending.questions.length
+          || action?.action === "resume" && pending.answers.length === pending.questions.length;
+        const otherPending=store.userQuestions.list(pending.sessionId).some(q=>q.turnId===pending.turnId && q.id!==id);
+        let resumeInference:TurnInference | undefined;
+        if(!live && finishing && !otherPending) {
+          try {resumeInference=snapshotTurnInference(processor,original.thinkingEnabled ?? undefined);}
+          catch(error){return apiError("not_supported",`Select an available model before resuming: ${error instanceof Error?error.message:"model unavailable"}`,400);}
         }
-        return json({ questionId: path[2] }, 202);
+        let state=pending;
+        if (legacy) {
+          const { answers }=legacy;
+          if (answers.length !== pending.questions.length) return apiError("invalid_state","Answers must match every question",409);
+          store.resolveQuestions(id,pending.toolCallId,answers);
+          state=store.userQuestions.get(id)!;
+        } else {
+          state=store.updateQuestion(id,action!);
+          if (action!.action === "answer") questions.resume(id);
+          if (action!.action === "draft" && state.status === "waiting") questions.resume(id);
+          if (!action) throw new InvalidStateError("Question action missing");
+          if (action.action === "pause") { questions.pause(id,false); return json({question:state},202); }
+          if (action.action === "resume") {
+            questions.resume(id);
+            if(state.answers.length < state.questions.length)return json({question:state},202);
+          }
+          if (action.action === "cancel") {
+            store.cancelQuestions(pending.turnId);
+            const controller=activeControllers.get(pending.turnId);
+            if (controller) {
+              store.cancelTurn(pending.turnId);
+              controller.abort(new DOMException("Question cancelled by user","AbortError"));
+              questions.cancelTurn(pending.turnId,controller.signal.reason);
+              permissions.cancelTurn(pending.turnId,controller.signal.reason);
+            }
+            return json({question:state},202);
+          }
+          if (action.action === "draft" || state.answers.length < state.questions.length) return json({question:state},202);
+          store.resolveQuestions(id,pending.toolCallId,state.answers);
+          state=store.userQuestions.get(id)!;
+        }
+        if (live) {
+          if (!questions.resolve(id,state.answers)) throw new InvalidStateError("Question waiter could not consume the answers");
+          return json({question:state},202);
+        }
+        if(otherPending)return json({question:state},202);
+        // The old model turn was interrupted on daemon shutdown. Resume from
+        // saved history only after the person explicitly finishes answering.
+        const answers=store.userQuestions.forTurn(state.turnId).filter(q=>q.status==="answered")
+          .flatMap(request=>request.questions.map((q,index)=>`${q.question}\nUser answer: ${request.answers[index]?.answer ?? "explicitly skipped"}`)).join("\n");
+        const content=`Continue this interrupted request using the user's recorded answers. Preserve their latest refinements and ask one follow-up at a time if necessary.\nOriginal request: ${original.content}\n${answers}`;
+        const resumed=store.createTurn(state.sessionId,content,original.permissionMode,original.thinkingEnabled ?? undefined,original.planOnly ?? false);
+        queueTurn(resumed.turn,resumeInference!);
+        return json({question:state,turnId:resumed.turn.id,eventId:resumed.event.eventId},202);
       }
 
       if (
@@ -803,6 +860,7 @@ export function createDaemonApp(options: {
           return apiError("invalid_state", `Turn cannot be cancelled from ${turn.status}`, 409);
         }
         const { turn, event } = store.cancelTurn(turnId);
+        store.cancelQuestions(turnId);
         controller.abort(new DOMException("Turn cancelled", "AbortError"));
         permissions.cancelTurn(turnId, controller.signal.reason);
         questions.cancelTurn(turnId, controller.signal.reason);
@@ -885,8 +943,10 @@ export function createDaemonApp(options: {
     } catch (error) {
       if (error instanceof NotFoundError) return apiError("not_found", error.message, 404);
       if (error instanceof InvalidStateError) return apiError("invalid_state", error.message, 409);
+      if (error instanceof QuestionStateError) return apiError("invalid_state",error.message,409);
       if (error instanceof SyntaxError) return apiError("invalid_json", "Request body is not valid JSON", 400);
       if (error instanceof ProtocolValidationError) return apiError("invalid_request", error.message, 400);
+      if (request.signal.aborted || error instanceof DOMException && error.name === "AbortError") return apiError("cancelled","Request connection closed",499);
       console.error("Unhandled daemon request error", error);
       return apiError("internal_error", "Unexpected server error", 500);
     } finally {
@@ -916,7 +976,11 @@ export function createDaemonApp(options: {
       }
       for (const [turnId, controller] of activeControllers) {
         const turn = store.getTurn(turnId);
-        if (turn?.status === "queued" || turn?.status === "running") store.cancelTurn(turnId);
+        if (turn?.status === "queued" || turn?.status === "running") {
+          const waiting=store.userQuestions.list(turn.sessionId).some(q=>q.turnId===turnId);
+          if (waiting) { store.pauseQuestions(turnId); store.interruptTurn(turnId,"Question interview paused for daemon shutdown"); }
+          else store.cancelTurn(turnId);
+        }
         controller.abort(new DOMException("Daemon shutting down", "AbortError"));
         permissions.cancelTurn(turnId, controller.signal.reason);
         questions.cancelTurn(turnId, controller.signal.reason);

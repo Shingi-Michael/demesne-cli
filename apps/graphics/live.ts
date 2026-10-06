@@ -397,6 +397,7 @@ const counts = (value: { added: number; removed: number }) =>
   `<span class="counts"><span class="plus">+${value.added}</span><span class="minus">−${value.removed}</span></span>`;
 /// The next prompt the model suggested at the end of the last finished turn.
 function nextSuggestion(): string | null {
+  if (pendingQuestion()) return null;
   const run = state?.runs.at(-1);
   if (!run || run.status !== "completed" || state!.activeTurnId) return null;
   const answer = run.entries.findLast((entry) => entry.type === "assistant");
@@ -440,7 +441,7 @@ function toolRow(run: GraphicsRun, tool: ToolEntry) {
     tool.state === "done"
       ? "background started"
       : tool.waiting
-        ? "awaiting approval"
+        ? tool.name === "ask_user" || state?.questions.some(q=>q.toolCallId===tool.toolCallId) ? "waiting for answer" : "awaiting approval"
         : tool.phase === "change"
           ? tool.drafting
             ? "drafting"
@@ -740,6 +741,39 @@ function renderHero() {
 let composerSignature = "",
   composerFiles: Snapshot["files"] | null = null,
   composerWidth = 0;
+let composerSlot = "chat", questionDraftVersion = 0;
+let answeringQuestion = false;
+let composerSession: string | null = null, heldChatDraft: string | null = null;
+function pendingQuestion() { return state?.questions[0]; }
+function questionIndex() { return pendingQuestion()?.answers?.length ?? 0; }
+function replyCacheKey(id: string,index: number) { return `demesne-question-draft:${id}:${index}`; }
+function cachedReply(id: string,index: number): {text:string;version:number} | null {
+  try {
+    const value=JSON.parse(localStorage.getItem(replyCacheKey(id,index)) ?? "null");
+    return value && typeof value.text === "string" && value.text.length <= 2000 && Number.isSafeInteger(value.version) && value.version>=0 ? value : null;
+  } catch { return null; }
+}
+function clearReply(id: string,index: number) { try { localStorage.removeItem(replyCacheKey(id,index)); } catch {} }
+async function questionAction(action: "pause" | "resume" | "cancel") {
+  const q=pendingQuestion(); if(!q)return;
+  const index=q.answers?.length ?? 0;
+  clearTimeout(draftTimer);
+  const result=await api("question-action",{id:q.id,action:{action,revision:q.revision ?? 0}});
+  if(action === "cancel")clearReply(q.id,index);
+  return result;
+}
+async function answerQuestion(value: string) {
+  const q=pendingQuestion(); if(!q || !value.trim() || answeringQuestion)return;
+  clearTimeout(draftTimer);
+  const key=`${q.id}:${questionIndex()}`;
+  answeringQuestion=true;renderComposer();
+  try {
+    await api("question-action",{id:q.id,action:{action:"answer",index:questionIndex(),revision:q.revision ?? 0,
+      answer:{source:"typed",answer:value.trim()}}});
+    clearReply(q.id,q.answers?.length ?? 0);
+    if (composerSlot===key) editor.value="";
+  } finally { answeringQuestion=false;renderComposer(); }
+}
 function renderComposer() {
   if (!state) return;
   const width = editor.clientWidth;
@@ -755,6 +789,7 @@ function renderComposer() {
     state.questions.length,
     state.session?.autoApprove,
     state.planOnly,
+    answeringQuestion,
   ]);
   if (
     signature === composerSignature &&
@@ -766,7 +801,9 @@ function renderComposer() {
   composerFiles = state.files;
   composerWidth = width;
   const form = el("composer"),
-    queued = Boolean(state.activeTurnId && editor.value.trim());
+    question = pendingQuestion(),
+    answered = question && (question.answers?.length ?? 0) >= question.questions.length,
+    queued = Boolean(!question && state.activeTurnId && editor.value.trim());
   let approvalMode = form.querySelector<HTMLElement>(".approval-mode");
   if (!approvalMode) {
     approvalMode = document.createElement("div");
@@ -778,13 +815,15 @@ function renderComposer() {
     ? btn("overlay", `Auto-approve all · ${state.planOnly ? "Plan stays read only" : "this session"}`, { name: "settings" })
     : "";
   form.classList.toggle("queued", queued);
-  form.classList.toggle("restored", state.restored);
+  form.classList.toggle("restored", state.restored && !question);
   form.classList.toggle("stop-armed", Date.now() < stopArmed);
-  el("queue-label").hidden = !queued && !state.restored;
+  el("queue-label").hidden = Boolean(question) || !queued && !state.restored;
   el("queue-label").innerHTML =
     `<span>${queued ? 'Queued <span class="muted">sends when this turn completes</span>' : 'Restored · not sent <span class="muted">the turn did not finish</span>'}</span>${btn("clear-queue", "Clear ×")}`;
   const suggestion = nextSuggestion();
-  editor.placeholder = inSession()
+  editor.placeholder = question
+    ? answered ? "Your answers are saved. Choose Resume to continue." : question.status === "paused" ? "Type your answer to resume the interview…" : "Type your answer here…"
+    : inSession()
     ? state.activeTurnId
       ? "Type to queue a follow-up…"
       : suggestion ? `${suggestion}   ⇥ Tab` : "Continue the conversation…"
@@ -792,24 +831,25 @@ function renderComposer() {
   editor.disabled =
     state.connection !== "online" ||
     state.busy ||
-    state.approvals.length > 0 ||
-    state.questions.length > 0;
+    answeringQuestion ||
+    Boolean(answered) ||
+    state.approvals.length > 0;
   el("composer-slot").hidden =
-    state.approvals.length > 0 || state.questions.length > 0;
+    state.approvals.length > 0;
   // Like the terminal: no stop hint while running (Esc Esc still stops; only
   // the armed confirmation shows). In a session, an empty composer shows
   // / and @, and a draft shows ↵ send instead. The start screen keeps both.
   const armed = Date.now() < stopArmed;
   const draft = Boolean(editor.value.trim()), session = inSession();
-  el("send-label").innerHTML = state.activeTurnId
+  el("send-label").innerHTML = question ? "answer" : state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : ""
     : "send";
-  form.querySelector<HTMLElement>(".send")!.hidden = state.activeTurnId ? !armed : session && !draft;
+  form.querySelector<HTMLElement>(".send")!.hidden = question ? !draft : state.activeTurnId ? !armed : session && !draft;
   form.querySelector<HTMLElement>(".hints")!.hidden = Boolean(state.activeTurnId) || (session && draft);
   (form.querySelector(".send") as HTMLButtonElement).disabled =
-    state.connection !== "online" || state.busy;
+    state.connection !== "online" || state.busy || answeringQuestion;
   form.querySelector<HTMLElement>(".send>kbd")!.hidden = Boolean(
-    state.activeTurnId,
+    state.activeTurnId && !question,
   );
   el("tokens").textContent =
     `~${num(Math.ceil(new TextEncoder().encode(editor.value).length / 3))} tok`;
@@ -890,8 +930,10 @@ function renderQuestion() {
     signature = JSON.stringify(question);
   if (signature === questionSignature) return;
   questionSignature = signature;
-  el("question").innerHTML = question
-    ? `<form id="question-form" class="question-card" data-id="${h(question.id)}"><div class="approval-title"><span class="amber">?</span> A question before continuing</div>${question.questions.map((item, i) => `<fieldset><legend>${h(item.question)}</legend>${item.reason ? `<p class="muted">${h(item.reason)}</p>` : ""}<div class="suggestions">${item.suggestions.map((value) => btn("suggest-answer", h(value), { index: i, value })).join("")}</div><input name="${i}" aria-label="${h(item.question)}" autocomplete="off"></fieldset>`).join("")}<button type="submit">${k("↵")} Answer</button></form>`
+  const index=question?.answers?.length ?? 0, answered=question && index>=question.questions.length,
+    item=question?.questions[Math.min(index,question.questions.length-1)];
+  el("question").innerHTML = question && item
+    ? `<section class="question-card"><div class="approval-title"><span class="amber">?</span> ${question.mode === "interview" ? "Interview" : "A question before continuing"}<small>${question.questions.length > 1 ? `${Math.min(index+1,question.questions.length)} of ${question.questions.length}` : ""}</small></div><p class="user-question">${h(item.question)}</p>${item.reason ? `<p class="muted">${h(item.reason)}</p>` : ""}${answered ? `<p>${h(question.answers?.at(-1)?.answer ?? "Explicitly skipped")}</p>` : ""}<p class="muted">${answered ? "Your answers are saved. Resume to continue from them." : question.interrupted ? "Saved after interruption. Your answer continues the interview." : question.status === "paused" ? "Paused. Your draft is saved; answering resumes the interview." : "Type your answer in the composer below."}</p><div class="approval-actions">${btn("question-control",question.status === "paused" || answered ? "Resume" : "Pause",{action:question.status === "paused" || answered ? "resume" : "pause"})}${btn("question-control","Cancel interview",{action:"cancel"},"quiet")}</div></section>`
     : "";
 }
 function selectedRun() {
@@ -2272,6 +2314,7 @@ function renderOverlay() {
     ?.scrollIntoView({ block: "nearest" });
 }
 function renderCompletion() {
+  if (pendingQuestion()) { el("completion").hidden=true;completionItems=[];return; }
   if (
     !state ||
     overlay ||
@@ -2364,6 +2407,16 @@ function renderCompletion() {
     ?.scrollIntoView({ block: "nearest" });
 }
 function changedDraft() {
+  const question=pendingQuestion();
+  if (question) {
+    completionDismissed=true;el("completion").hidden=true;renderComposer();
+    clearTimeout(draftTimer);
+    const text=editor.value,index=questionIndex(),revision=question.revision ?? 0,version=++questionDraftVersion;
+    try { localStorage.setItem(replyCacheKey(question.id,index),JSON.stringify({text,version})); } catch {}
+    draftTimer=setTimeout(()=>void api("question-action",{id:question.id,action:{action:"draft",text,index,revision,draftVersion:version}})
+      .catch(()=>{}),60);
+    reportObservation();return;
+  }
   // Writing in the composer is what takes over from Drive; clicking,
   // navigating and reading panels leave it running.
   if (state?.drive && ["running", "waiting"].includes(state.drive.status))
@@ -2413,6 +2466,7 @@ async function chooseCompletion(index = completionIndex) {
 }
 async function submitText(value = editor.value) {
   if (!state || !value.trim()) return;
+  if (pendingQuestion()) return answerQuestion(value);
   if (state.activeTurnId) return;
   clearTimeout(draftTimer);
   completionDismissed = true;
@@ -2557,6 +2611,7 @@ async function dispatch(
   args: Record<string, any>,
   target?: HTMLElement,
 ) {
+  if (action === "question-control") return questionAction(args.action);
   if (action === "auto-approve" && driveNavigating)
     throw new Error("Only you can change session approvals.");
   if (action === "review-scope") {
@@ -2967,14 +3022,6 @@ async function dispatch(
     notice("Copied");
     return;
   }
-  if (action === "suggest-answer") {
-    const input = el("question").querySelectorAll("input")[args.index];
-    if (input) {
-      input.value = args.value;
-      input.dataset.source = "suggestion";
-    }
-    return;
-  }
   if (
     action === "mode" ||
     action === "model" ||
@@ -3055,10 +3102,28 @@ function renderState(next: Snapshot) {
     runNodes.clear();
     paneSignature = heroSignature = overlaySignature = "";
   }
-  if (lastDraftVersion !== next.draftVersion) {
+  const question=next.questions[0], slot=question ? `${question.id}:${question.answers?.length ?? 0}` : "chat";
+  if (slot !== composerSlot) {
+    const sameSession=composerSession===(next.session?.id ?? null);
+    if(question && composerSlot==="chat" && sameSession) {
+      heldChatDraft=editor.value;
+      if(heldChatDraft!==next.draft)void api("draft",{text:heldChatDraft}).catch(()=>{});
+    }
+    const restored=!question && sameSession ? heldChatDraft : null;
+    clearTimeout(draftTimer);composerSlot=slot;
+    editor.value=question?.draft ?? restored ?? next.draft;
+    if(!question || !sameSession)heldChatDraft=null;
+    questionDraftVersion=question?.draftVersion ?? 0;
+    if (question) {
+      const cached=cachedReply(question.id,question.answers?.length ?? 0);
+      if(cached && cached.version>questionDraftVersion){editor.value=cached.text;questionDraftVersion=cached.version;}
+    }
+    lastDraftVersion=next.draftVersion;
+  } else if (!question && lastDraftVersion !== next.draftVersion) {
     lastDraftVersion = next.draftVersion;
     editor.value = next.draft;
   }
+  composerSession=next.session?.id ?? null;
   if (renderedPalette !== next.palette) {
     for (const [name, color] of Object.entries(next.palette))
       document.documentElement.style.setProperty(`--${name}`, color);
@@ -3170,7 +3235,6 @@ document.addEventListener("input", (event) => {
     previewOpacity = Number(input.value);
     applyPreviewLayout();
   }
-  if (input.closest("#question")) input.dataset.source = "typed";
   if (input.closest("#setup")) setupInput(input);
 });
 document.addEventListener("submit", (event) => {
@@ -3178,7 +3242,8 @@ document.addEventListener("submit", (event) => {
   const form = event.target as HTMLFormElement;
   void act(async () => {
     if (form.id === "composer") {
-      if (state?.activeTurnId) {
+      if (pendingQuestion()) await submitText();
+      else if (state?.activeTurnId) {
         if ((event as SubmitEvent).submitter) await api("cancel");
       } else await submitText();
     }
@@ -3188,18 +3253,6 @@ document.addEventListener("submit", (event) => {
       });
       overlay = null;
       renderOverlay();
-    }
-    if (form.id === "question-form") {
-      const inputs = [...form.querySelectorAll("input")];
-      await api("answer", {
-        id: form.dataset.id,
-        answers: inputs.map((input) => ({
-          answer: input.value.trim() || null,
-          source: input.value.trim()
-            ? (input.dataset.source ?? "typed")
-            : "skipped",
-        })),
-      });
     }
     if (form.id === "reference-form") {
       const path = (form.elements.namedItem("path") as HTMLInputElement).value;
@@ -3429,7 +3482,7 @@ document.addEventListener("keydown", (event) => {
     }
   }
   if (event.target === editor && key === "enter" && !event.shiftKey) {
-    run(() => (state!.activeTurnId ? undefined : submitText()));
+    run(() => (state!.activeTurnId && !pendingQuestion() ? undefined : submitText()));
     return;
   }
   if (
@@ -3574,6 +3627,7 @@ window.demesneInspect = () => ({
         })(),
 
         name: e.getAttribute("name"),
+        disabled: e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement || e instanceof HTMLButtonElement ? e.disabled : undefined,
         placeholder: e.getAttribute("placeholder") ?? undefined,
         label:
           e.innerText ||

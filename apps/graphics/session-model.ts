@@ -7,6 +7,7 @@ import {
   type Turn,
   type ProviderCallSnapshot,
   type UserQuestion,
+  type QuestionState,
 } from "@demesne/protocol";
 import {
   restoreSessionEntries,
@@ -29,7 +30,7 @@ export interface GraphicsApproval {
   input: Record<string, unknown>;
   rule: string | null;
 }
-export interface GraphicsQuestion {
+export interface GraphicsQuestion extends Partial<Omit<QuestionState,"id" | "turnId" | "toolCallId" | "questions">> {
   id: string;
   turnId: string;
   toolCallId: string;
@@ -103,6 +104,10 @@ export class GraphicsSession {
         });
     for (const [id, question] of this.questions)
       if (!this.isActive(question.turnId)) this.questions.delete(id);
+    if (state.pendingQuestions) {
+      this.questions.clear();
+      for (const question of state.pendingQuestions) this.questions.set(question.id,question);
+    }
   }
   get session() {
     return this.state.session;
@@ -177,7 +182,7 @@ export class GraphicsSession {
         for (const [id, item] of this.approvals)
           if (item.turnId === turn.id) this.approvals.delete(id);
         for (const [id, item] of this.questions)
-          if (item.turnId === turn.id) this.questions.delete(id);
+          if (item.turnId === turn.id && item.status !== "paused") this.questions.delete(id);
       }
     }
     if (event.type === "model.request_started")
@@ -252,8 +257,13 @@ export class GraphicsSession {
         turnId: event.turnId,
         toolCallId: String(p.toolCallId),
         questions: parseUserQuestions(p.questions),
+        ...(isRecord(p.state) ? p.state : {}),
       });
-    if (event.type === "question.resolved")
+    if (event.type === "question.updated" && isRecord(p.state)) {
+      const current=this.questions.get(String(p.questionId));
+      if (current) this.questions.set(current.id,{...current,...p.state} as GraphicsQuestion);
+    }
+    if (event.type === "question.resolved" || event.type === "question.cancelled")
       this.questions.delete(String(p.questionId));
   }
   runs(): GraphicsRun[] {

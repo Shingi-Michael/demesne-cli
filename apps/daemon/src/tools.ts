@@ -17,7 +17,7 @@ import { homedir, tmpdir } from "node:os";
 import { open } from "node:fs/promises";
 import { isAbsolute, join, dirname, relative, resolve, sep } from "node:path";
 import type { ProviderToolDefinition } from "@demesne/providers";
-import { isRecord, MAX_QUESTION_SUGGESTIONS, MAX_USER_QUESTIONS, parseUserQuestions, type UserAnswer, type UserQuestion } from "@demesne/protocol";
+import { isRecord, MAX_QUESTION_SUGGESTIONS, MAX_USER_QUESTIONS, parseUserQuestions, parseAnswerQuestionsRequest, type UserAnswer, type UserQuestion, type QuestionMode } from "@demesne/protocol";
 import { applyEdits, EditApplyError, type EditHunk } from "./edit-engine.ts";
 import { backgroundProcesses } from "./background.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
@@ -31,7 +31,7 @@ export interface ToolContext {
   signal: AbortSignal;
   /// Puts questions to the person at the terminal and waits for the answers.
   /// Absent when nobody can answer (non-interactive turns).
-  ask?: (questions: UserQuestion[]) => Promise<UserAnswer[]>;
+  ask?: (questions: UserQuestion[], mode?: QuestionMode) => Promise<UserAnswer[]>;
 }
 
 export interface ToolPermission {
@@ -78,16 +78,16 @@ export class ToolRegistry {
 }
 
 /// Lets the agent pause for decisions that are the user's to make. The
-/// first suggestion of each question is the recommended answer, which the
-/// user accepts with Enter; they can pick another or answer in their own words.
+/// suggestions are optional hints; answers are explicitly typed in the composer.
 function askUserTool(): AgentTool {
   return {
     definition: {
       name: "ask_user",
-      description: `Ask the user up to ${MAX_USER_QUESTIONS} short questions and wait for the answers. Use only when blocked on a decision that is theirs to make (scope, a choice between valid approaches, a missing requirement) and you cannot settle it from the request, the code, or a sensible default. Do not ask for permission to proceed or for facts you can look up. Put your recommended answer first in suggestions.`,
+      description: `Ask the user for decisions or preferences and wait for typed answers in the composer. Use interview mode for guided conversations: ask one question, use its answer to choose the next question, retain refinements, and do not repeat answered questions. Stop interviewing once you understand the request. In clarification mode ask up to ${MAX_USER_QUESTIONS} questions. Ask only for choices that belong to the user, not facts you can inspect or permission to proceed. Unanswered questions pause; never guess a missing interview preference. Suggestions are optional hints.`,
       inputSchema: {
         type: "object",
         properties: {
+          mode: { type: "string", enum: ["clarification", "interview"], description: "Interview asks one adaptive question per tool call. Default: clarification." },
           questions: {
             type: "array", minItems: 1, maxItems: MAX_USER_QUESTIONS,
             items: {
@@ -107,12 +107,18 @@ function askUserTool(): AgentTool {
     permission: () => null,
     async execute(input, context) {
       const questions = parseUserQuestions(isRecord(input) ? input.questions : undefined);
-      if (!context.ask) return "Nobody is available to answer. Decide yourself and state the assumption you made.";
-      const answers = await context.ask(questions);
+      const mode = isRecord(input) ? input.mode ?? "clarification" : "clarification";
+      if (mode !== "clarification" && mode !== "interview") throw new Error("Question mode must be clarification or interview");
+      if (mode === "interview" && questions.length !== 1) throw new Error("Interview mode asks one question at a time");
+      if (!context.ask) throw new Error("User input is unavailable. Pause this request; do not infer the user's preferences.");
+      const answers = await context.ask(questions,mode);
+      if (answers.length !== questions.length) throw new Error("User answers do not match the questions");
+      parseAnswerQuestionsRequest({answers});
+      if (mode === "interview" && answers.some(a=>a.source === "skipped")) throw new Error("Interview preferences need an explicit answer or cancellation");
       return questions.map((asked, index) => {
         const given = answers[index];
         const answer = !given || given.source === "skipped" || !given.answer
-          ? "no answer. Decide yourself and state the assumption you made."
+          ? "the user explicitly skipped this question; no preference was supplied"
           : given.source === "typed" ? `${given.answer} (the user's own words)` : given.answer;
         return `${index + 1}. ${asked.question}\n   Answer: ${answer}`;
       }).join("\n");

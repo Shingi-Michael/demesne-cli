@@ -119,6 +119,9 @@ export function createDaemonApp(options: {
   providerEventLimit?: number;
   questionTimeoutMs?: number;
   theme?: string;
+  /// Allows fixture tests to keep repository signals real while isolating
+  /// external GitHub queries from the caller's account and CI environment.
+  driveSignals?: typeof collectDriveSignals;
   providerVision?: boolean;
   agent?: AgentConfig;
   /// Persists the sub-agent default chosen at runtime (null clears it).
@@ -132,6 +135,7 @@ export function createDaemonApp(options: {
   const store = new DemesneStore(options.databasePath, (event) => hub.publish(event));
   const themes = new ThemeStore(join(dirname(options.databasePath), "themes.json"), options.theme);
   const driveNextCache = new DriveNextCache(join(dirname(options.databasePath), "drive-next"));
+  const collectSignals = options.driveSignals ?? collectDriveSignals;
   const workspaceTrust = new WorkspaceTrust(join(dirname(options.databasePath), "trusted-workspaces.json"));
   const driveNextRuns = new Map<string, Promise<unknown>>();
   // Breakage fixes: a coding turn in its own worktree, applied only on request.
@@ -402,7 +406,7 @@ export function createDaemonApp(options: {
         const pending = driveNextRuns.get(pendingKey);
         if (pending) return json(await pending);
         const run = (async () => {
-          const collected = await collectDriveSignals(store.database, body.workspace);
+          const collected = await collectSignals(store.database, body.workspace);
           const { signals } = collected;
           const fingerprint = createHash("sha256").update(collected.fingerprint + contextKey).digest("hex").slice(0, 16);
           const cached = driveNextCache.read(body.workspace);
@@ -430,7 +434,7 @@ export function createDaemonApp(options: {
       if (request.method === "POST" && url.pathname === "/v1/drive/alerts") {
         const body = parseDriveAlertsRequest(await readJson(request));
         if (!store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace)) return apiError("not_found", "Unknown workspace", 404);
-        const { signals } = await collectDriveSignals(store.database, body.workspace, { gh: body.gh === true, urgentOnly: true });
+        const { signals } = await collectSignals(store.database, body.workspace, { gh: body.gh === true, urgentOnly: true });
         const response: DriveAlertsResponse = { workspace: body.workspace, signals: signals.filter((signal) => signal.urgent), checkedAt: new Date().toISOString() };
         return json(response);
       }

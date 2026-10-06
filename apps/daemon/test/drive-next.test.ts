@@ -76,7 +76,11 @@ test("/v1/drive/next: known workspaces only, cached until signals change, vetoes
       yield { type: "finish" as const, reason: "tool_calls" };
     } };
   // The data directory may not contain the workspace.
-  const app = createDaemonApp({ databasePath: join(root, "data", "state.sqlite"), processor });
+  // This cache test concerns the fixture's git files and vetoes. Do not let
+  // gh consult a developer account or CI's ambient GitHub repository; those
+  // external signals can change mid-test and consume the test's deadline.
+  const app = createDaemonApp({ databasePath: join(root, "data", "state.sqlite"), processor,
+    driveSignals: (database,workspace,options) => collectDriveSignals(database,workspace,{...options,gh:false}) });
   const server = Bun.serve({ port: 0, fetch: app.fetch });
   const post = async (body: unknown) => { const response = await fetch(new URL("/v1/drive/next", server.url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return { status: response.status, body: await response.json() as DriveNextResponse }; };
   try {

@@ -12,6 +12,102 @@ test("uses the account catalog's order, visibility, slugs and display names", as
   expect((await p.listModels()).map(m => [m.id, m.displayName])).toEqual([["first", "First"], ["second", "Second"]]);
 });
 
+test("only explicitly configured Sol is retained when omitted, with no inference during discovery", async () => {
+  const calls: string[] = [];
+  const fetcher = (async (url: string | URL | Request) => {
+    calls.push(String(url));
+    expect(String(url)).toBe("https://api.openai.com/v1/models");
+    return Response.json({ models: [{ slug: "first", display_name: "First", visibility: "list" }, { slug: "second", visibility: "list" }] });
+  }) as unknown as typeof fetch;
+  for (const configuredModel of [undefined, "gpt-6-sol", "some-model", "gpt-6.1-sol"]) {
+    const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", configuredModel, fetch: fetcher });
+    const models = await p.listModels();
+    expect(models.map(model => model.id)).toEqual(configuredModel === "gpt-6.1-sol" ? ["first", "second", "gpt-6.1-sol"] : ["first", "second"]);
+    if (configuredModel === "gpt-6.1-sol") expect(models[2]).toEqual({ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", provider: "ChatGPT", contextWindow: 1_050_000, maxOutputTokens: 128_000,
+      reasoningLevels: ["low", "medium", "high", "xhigh", "max"], defaultReasoningLevel: "medium" });
+  }
+  expect(calls).toHaveLength(4);
+});
+
+test("a listed Sol keeps the account's display name, metadata and position", async () => {
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", configuredModel: "gpt-6.1-sol", fetch: (async () => Response.json({ models: [
+    { slug: "first", visibility: "list" },
+    { slug: "gpt-6.1-sol", visibility: "list", display_name: "Sol for this account", context_window: 272_000, max_output_tokens: 32_768,
+      supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }], default_reasoning_level: "high" },
+    { slug: "last", visibility: "list" },
+  ] })) as unknown as typeof fetch });
+  const models = await p.listModels();
+  expect(models.map(model => model.id)).toEqual(["first", "gpt-6.1-sol", "last"]);
+  expect(models[1]).toEqual({ id: "gpt-6.1-sol", displayName: "Sol for this account", provider: "ChatGPT", contextWindow: 272_000, maxOutputTokens: 32_768,
+    reasoningLevels: ["low", "high"], defaultReasoningLevel: "high" });
+});
+
+test("explicit Sol verification requires completed inference and caches only this provider instance", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const signal = new AbortController().signal;
+  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith("/models")) return Response.json({ models: [{ slug: "first", visibility: "list" }] });
+    expect(String(url)).toBe("https://api.openai.com/v1/responses");
+    expect(init?.signal).toBe(signal);
+    bodies.push(JSON.parse(String(init?.body)));
+    return responseStream({ model: "gpt-6.1-sol" });
+  }) as unknown as typeof fetch;
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: fetcher });
+  expect((await p.listModels()).map(model => model.id)).toEqual(["first"]);
+  const verified = await p.verifyModel("gpt-6.1-sol", signal);
+  expect(verified).toMatchObject({ id: "gpt-6.1-sol", provider: "ChatGPT", contextWindow: 1_050_000 });
+  expect(bodies).toEqual([{ model: "gpt-6.1-sol", store: false, stream: true, reasoning: { effort: "low" },
+    input: [{ role: "user", content: "Reply exactly: OK." }], include: ["reasoning.encrypted_content"] }]);
+  // A cached verification is copied, so callers cannot mutate later discovery.
+  verified.reasoningLevels!.push("ultra");
+  expect((await p.verifyModel("gpt-6.1-sol", signal)).reasoningLevels).not.toContain("ultra");
+  expect(bodies).toHaveLength(1);
+  expect((await p.listModels()).map(model => model.id)).toEqual(["first", "gpt-6.1-sol"]);
+  const other = new ChatGPTProvider({ accountId: "b", accessToken: async () => "other-access", fetch: fetcher });
+  expect((await other.listModels()).map(model => model.id)).toEqual(["first"]);
+});
+
+test.each(["missing-model", "different-model", "incomplete", "invalid-terminal", "failed", "interrupted"] as const)("Sol verification does not cache %s responses", async failure => {
+  let attempts = 0;
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async (url: string | URL | Request) => {
+    if (String(url).endsWith("/models")) return Response.json({ models: [] });
+    attempts++;
+    if (failure === "incomplete") return new Response(`data: ${JSON.stringify({ type: "response.incomplete", response: { model: "gpt-6.1-sol", status: "incomplete" } })}\n\n`);
+    if (failure === "invalid-terminal") return new Response(`data: ${JSON.stringify({ type: "response.completed", response: { model: "gpt-6.1-sol", status: "incomplete", output: [] } })}\n\n`);
+    return responseStream({ ...(failure === "missing-model" ? {} : { model: failure === "different-model" ? "gpt-6-sol" : "gpt-6.1-sol" }),
+      ...(failure === "failed" ? { failure: "subscription_sharing_usage_unavailable" } : {}), ...(failure === "interrupted" ? { complete: false } : {}) });
+  }) as unknown as typeof fetch });
+  await expect(p.verifyModel("gpt-6.1-sol")).rejects.toThrow();
+  expect(await p.listModels()).toEqual([]);
+  await expect(p.verifyModel("gpt-6.1-sol")).rejects.toThrow();
+  expect(attempts).toBe(2);
+});
+
+test("unlisted unsupported model IDs are not probed and invalid Sol efforts never reach inference", async () => {
+  let calls = 0;
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async () => { calls++; return responseStream({ model: "gpt-6.1-sol" }); }) as unknown as typeof fetch });
+  await expect(p.verifyModel("gpt-6-sol")).rejects.toThrow("only gpt-6.1-sol");
+  for (const reasoningLevel of ["ultra", "none", "minimal"]) await expect(collect(p, { model: "gpt-6.1-sol", messages: [], reasoningLevel })).rejects.toThrow(`does not support the ${reasoningLevel} reasoning effort`);
+  expect(calls).toBe(0);
+  await collect(p, { model: "gpt-6.1-sol", messages: [], reasoningLevel: "max" });
+  expect(calls).toBe(1);
+});
+
+test("configured Sol never asks for a reasoning summary without current catalog support", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  let catalogCalls = 0;
+  const p = new ChatGPTProvider({ accountId: "a", configuredModel: "gpt-6.1-sol", accessToken: async () => "access", fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith("/models")) return Response.json({ models: catalogCalls++ === 0 ? [{ slug: "gpt-6.1-sol", visibility: "list", supports_reasoning_summaries: true }] : [] });
+    bodies.push(JSON.parse(String(init?.body))); return responseStream({ model: "gpt-6.1-sol" });
+  }) as unknown as typeof fetch });
+  await p.listModels();
+  await collect(p, { model: "gpt-6.1-sol", messages: [], reasoningLevel: "medium" });
+  expect(bodies[0].reasoning).toEqual({ effort: "medium", summary: "auto" });
+  await p.listModels();
+  await collect(p, { model: "gpt-6.1-sol", messages: [], reasoningLevel: "medium" });
+  expect(bodies[1].reasoning).toEqual({ effort: "medium" });
+});
+
 test("reasoning summary parts stream as separate paragraphs of thinking", async () => {
   const message = { id: "msg_1", type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Done.", annotations: [] }] };
   const events = [
@@ -46,25 +142,28 @@ test("the catalog's thinking levels are listed, and a chosen level is sent with 
   expect(bodies[2]).not.toHaveProperty("reasoning");
 });
 
-test.each(["full", "empty"] as const)("Responses request preserves streamed tools and reasoning with %s terminal output", async terminalOutput => {
+test.each([
+  ["full", "model-fixture"], ["empty", "model-fixture"], ["full", "gpt-6.1-sol"], ["empty", "gpt-6.1-sol"],
+] as const)("Responses request preserves streamed tools and reasoning with %s terminal output for %s", async (terminalOutput, model) => {
+  const initial = { ...request, model };
   const bodies: any[] = [];
   const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async (url: string | URL | Request, init?: RequestInit) => {
-    expect(String(url)).toBe("https://api.openai.com/v1/responses"); expect(init?.redirect).toBe("manual"); bodies.push(JSON.parse(String(init?.body))); return responseStream({ tool: bodies.length === 1, terminalOutput });
+    expect(String(url)).toBe("https://api.openai.com/v1/responses"); expect(init?.redirect).toBe("manual"); bodies.push(JSON.parse(String(init?.body))); return responseStream({ model, tool: bodies.length === 1, terminalOutput });
   }) as unknown as typeof fetch });
-  const events = await collect(p); const state = events.find((e): e is Extract<ProviderStreamEvent, { type: "response_state" }> => e.type === "response_state")!.state;
+  const events = await collect(p, initial); const state = events.find((e): e is Extract<ProviderStreamEvent, { type: "response_state" }> => e.type === "response_state")!.state;
   expect(bodies[0].store).toBe(false); expect(bodies[0].stream).toBe(true); expect(bodies[0].input[0].role).toBe("developer");
   expect(bodies[0].tools[0]).toMatchObject({ type: "namespace", name: "demesne", tools: [{ type: "function", name: "read_file", strict: false }] });
   for (const field of ["max_output_tokens", "max_tokens", "temperature", "seed", "previous_response_id", "metadata"]) expect(bodies[0]).not.toHaveProperty(field);
   expect(events.filter(e => e.type === "tool_call_delta").map(e => e.index)).toEqual([0, 0]);
   expect(events.at(-1)).toEqual({ type: "finish", reason: "tool_calls" });
-  const next: ProviderRequest = { ...request, messages: [...request.messages, { role: "assistant", content: null, toolCalls: [{ id: "call_1", name: "read_file", arguments: tool.arguments }], responses: state }, { role: "tool", toolCallId: "call_1", content: "file content" }] };
+  const next: ProviderRequest = { ...initial, messages: [...initial.messages, { role: "assistant", content: null, toolCalls: [{ id: "call_1", name: "read_file", arguments: tool.arguments }], responses: state }, { role: "tool", toolCallId: "call_1", content: "file content" }] };
   expect(bodies[0]).not.toHaveProperty("prompt_cache_key");
   // Tool rounds of one conversation share a cache key, so the prefix is reused.
   await collect(p, { ...next, cacheKey: "session-1" });
   expect(bodies[1].prompt_cache_key).toBe("session-1");
   expect(bodies[1].input).toContainEqual(reasoning); expect(bodies[1].input).toContainEqual(tool); expect(bodies[1].input.at(-1)).toEqual({ type: "function_call_output", call_id: "call_1", output: "file content" });
   await collect(p, { ...next, model: "other-model" }); expect(JSON.stringify(bodies[2])).not.toContain("opaque-reasoning");
-  const other = new ChatGPTProvider({ accountId: "b", accessToken: async () => "other", fetch: (async (_url: string | URL | Request, init?: RequestInit) => { expect(String(init?.body)).not.toContain("opaque-reasoning"); return responseStream(); }) as unknown as typeof fetch });
+  const other = new ChatGPTProvider({ accountId: "b", accessToken: async () => "other", fetch: (async (_url: string | URL | Request, init?: RequestInit) => { expect(String(init?.body)).not.toContain("opaque-reasoning"); return responseStream({ model }); }) as unknown as typeof fetch });
   await collect(other, next);
 });
 

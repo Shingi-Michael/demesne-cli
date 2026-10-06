@@ -4,6 +4,14 @@ import { ProviderError, readEventData, readLimitedText, type ProviderAdapter, ty
 
 const API = "https://api.openai.com/v1";
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";
+const SOL = "gpt-6.1-sol";
+// Public Responses specifications, not an assertion of account eligibility:
+// https://developers.openai.com/api/docs/models/gpt-6.1-sol
+const SOL_REASONING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+function solDescriptor(): ModelDescriptor {
+  return { id: SOL, displayName: "GPT-6.1 Sol", provider: "ChatGPT", contextWindow: 1_050_000, maxOutputTokens: 128_000,
+    reasoningLevels: [...SOL_REASONING_LEVELS], defaultReasoningLevel: "medium" };
+}
 const integer = (n: unknown): number | undefined => typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : undefined;
 const count = (n: unknown): number | null => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : null;
 function wireName(name: string): string { return /^[A-Za-z0-9_-]{1,64}$/.test(name) ? name : `${name.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 47)}_${createHash("sha256").update(name).digest("hex").slice(0, 16)}`; }
@@ -14,10 +22,15 @@ export class ChatGPTProvider implements ProviderAdapter {
   private readonly fetcher: typeof fetch;
   /// Models whose catalog entry says they can stream reasoning summaries.
   private readonly summaries = new Set<string>();
+  private listedSol?: ModelDescriptor;
+  private verifiedSol = false;
   constructor(private readonly options: {
     accountId: string;
     accessToken: (signal?: AbortSignal) => Promise<string>;
     contextWindow?: number;
+    /// Retain an explicitly selected Sol model when the account catalog omits it.
+    /// This is discovery metadata; inference still enforces account eligibility.
+    configuredModel?: string;
     fetch?: typeof fetch;
   }) { this.fetcher = options.fetch ?? fetch; }
   async listModels(signal?: AbortSignal): Promise<ModelDescriptor[]> {
@@ -26,8 +39,9 @@ export class ChatGPTProvider implements ProviderAdapter {
     let body: unknown;
     try { body = JSON.parse(await readLimitedText(response, 1024 * 1024)); } catch { throw new ProviderError("ChatGPT returned an invalid model catalog."); }
     if (!isRecord(body) || !Array.isArray(body.models) || body.models.length > 1000) throw new ProviderError("ChatGPT returned an invalid model catalog.");
+    this.summaries.clear();
     const seen = new Set<string>();
-    return body.models.flatMap((m): ModelDescriptor[] => {
+    const models = body.models.flatMap((m): ModelDescriptor[] => {
       if (!isRecord(m) || m.visibility !== "list" || typeof m.slug !== "string" || !m.slug || seen.has(m.slug)) return [];
       seen.add(m.slug);
       if (m.supports_reasoning_summaries === true) this.summaries.add(m.slug);
@@ -40,8 +54,29 @@ export class ChatGPTProvider implements ProviderAdapter {
         ...(levels.length ? { reasoningLevels: levels } : {}),
         ...(typeof m.default_reasoning_level === "string" && levels.includes(m.default_reasoning_level) ? { defaultReasoningLevel: m.default_reasoning_level } : {}) }];
     });
+    this.listedSol = models.find(model => model.id === SOL);
+    // Do not probe from discovery or inject every documented model. A selected
+    // model may be usable despite lagging catalog data; an explicit verification
+    // can also retain Sol for this provider/account instance only.
+    if (!this.listedSol && (this.options.configuredModel === SOL || this.verifiedSol)) models.push(solDescriptor());
+    return models;
+  }
+  /// Verify an explicitly requested, unlisted Sol with a small synthetic request.
+  /// No workspace messages or tools are sent, and no credential/config is changed.
+  async verifyModel(model: string, signal?: AbortSignal): Promise<ModelDescriptor> {
+    signal?.throwIfAborted();
+    if (model !== SOL) throw new ProviderError("This model is not in the ChatGPT account catalog. Choose a listed model; only gpt-6.1-sol supports explicit verification.", undefined, "model_not_listed");
+    if (!this.verifiedSol) {
+      for await (const _event of this.stream({ model, messages: [{ role: "user", content: "Reply exactly: OK." }], reasoningLevel: "low", thinkingEnabled: false }, signal ?? new AbortController().signal)) { /* Consume through the validated terminal event. */ }
+      this.verifiedSol = true;
+    }
+    return this.listedSol ? { ...this.listedSol, ...(this.listedSol.reasoningLevels ? { reasoningLevels: [...this.listedSol.reasoningLevels] } : {}) } : solDescriptor();
   }
   async *stream(request: ProviderRequest, signal: AbortSignal): AsyncGenerator<ProviderStreamEvent> {
+    if (request.model === SOL && request.reasoningLevel) {
+      const levels = this.listedSol?.reasoningLevels ?? SOL_REASONING_LEVELS;
+      if (!levels.includes(request.reasoningLevel)) throw new ProviderError(`GPT-6.1 Sol through ChatGPT does not support the ${request.reasoningLevel} reasoning effort. Choose ${levels.join(", ")}.`, undefined, "unsupported_reasoning_effort");
+    }
     const names = new Map((request.tools ?? []).map(t => [wireName(t.name), t.name]));
     const response = await this.request("responses", { signal, method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       model: request.model, store: false, stream: true,
@@ -118,6 +153,7 @@ export class ChatGPTProvider implements ProviderAdapter {
       }
       if (event.type === "response.completed") {
         if (!isRecord(event.response) || event.response.status !== "completed" || !Array.isArray(event.response.output) || event.response.output.some((item: unknown) => !isRecord(item))) throw new ProviderError("ChatGPT returned an invalid completion event.");
+        if (request.model === SOL && event.response.model !== request.model) throw new ProviderError("ChatGPT did not confirm the requested GPT-6.1 Sol model in its completed response.", undefined, "model_mismatch");
         // The ChatGPT plan route can send an empty terminal output array after
         // emitting every completed item individually. Keep those items (including
         // encrypted reasoning) in output-index order for the next tool round.

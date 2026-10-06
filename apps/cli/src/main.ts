@@ -217,6 +217,20 @@ async function run(command: string[]): Promise<void> {
     return;
   }
 
+  if (command[0] === "session" && command[1] === "auto-approve") {
+    const id = command[2], mode = command[3];
+    if (!id || !["on", "off", "status"].includes(mode ?? "") || command.length !== 4)
+      throw new Error("Usage: demesne session auto-approve <session-id> on|off|status");
+    const path = `/v1/sessions/${encodeURIComponent(id)}`;
+    const result = await request<{ session: Session }>(path, mode === "status" ? undefined : {
+      method: "PATCH", body: JSON.stringify({ autoApprove: mode === "on" }),
+    });
+    if (typeof result.session.autoApprove !== "boolean" || (mode !== "status" && result.session.autoApprove !== (mode === "on")))
+      throw new Error("Restart the daemon to use session auto-approval.");
+    console.log(sanitizeTerminalText(`Auto-approve all: ${result.session.autoApprove ? "on" : "off"} · session ${id}`));
+    return;
+  }
+
   if (command[0] === "session" && command[1] === "list") {
     const result = await request<{ sessions: Session[] }>("/v1/sessions");
     for (const session of result.sessions) {
@@ -617,15 +631,6 @@ async function runHeadlessTurn(options: {
   if (options.output === "json") console.log(JSON.stringify(result));
   else console.log(JSON.stringify({ type: "result", ...result }));
   return result;
-}
-
-/// A command as a person would type it: `bun test "my file.ts"`, quoting only
-/// arguments that need it, instead of JSON-quoting every word.
-function shellCommand(argv: readonly unknown[]): string {
-  return argv.map((value) => {
-    const text = String(value);
-    return /^[\w@%+=:,./~-]+$/.test(text) ? text : JSON.stringify(text);
-  }).join(" ");
 }
 
 async function renderTurn(
@@ -1077,8 +1082,8 @@ async function answerQuestionsInScrollback(event: EventEnvelope, interactive: bo
 async function resolvePermission(event: EventEnvelope, onCancel?: () => void): Promise<void> {
   const permissionId = typeof event.payload.permissionId === "string" ? event.payload.permissionId : null;
   if (!permissionId) throw new Error("Permission event is missing its ID");
-  const summary = sanitizeTerminalLine(typeof event.payload.summary === "string" ? event.payload.summary : "dangerous operation");
   const toolName = typeof event.payload.name === "string" ? event.payload.name : undefined;
+  const summary = toolName === "run_command" ? "Command" : sanitizeTerminalLine(typeof event.payload.summary === "string" ? event.payload.summary : "dangerous operation");
   const rawArgs = event.payload.arguments;
   let decision: PermissionDecision = "deny";
 
@@ -1088,22 +1093,18 @@ async function resolvePermission(event: EventEnvelope, onCancel?: () => void): P
       const parsed = JSON.parse(rawArgs);
       if (toolName === "edit_file" && typeof parsed.oldText === "string" && typeof parsed.newText === "string") {
         previewRows.push(...formatDiffPreview(parsed.oldText, parsed.newText, 6, paintLog));
-      } else if (toolName === "run_command" && Array.isArray(parsed.argv)) {
-        previewRows.push(paintLog.text(`$ ${shellCommand(parsed.argv)}`, "paper"));
       }
     } catch {}
   } else if (isRecord(rawArgs)) {
     if (toolName === "edit_file" && typeof rawArgs.oldText === "string" && typeof rawArgs.newText === "string") {
       previewRows.push(...formatDiffPreview(rawArgs.oldText, rawArgs.newText, 6, paintLog));
-    } else if (toolName === "run_command" && Array.isArray(rawArgs.argv)) {
-      previewRows.push(paintLog.text(`$ ${shellCommand(rawArgs.argv)}`, "paper"));
     }
   }
 
   if (process.stdin.isTTY && process.stdout.isTTY) {
     const width = getTerminalWidth(process.stdout);
     const persistedRule = derivePersistedRule(toolName, rawArgs);
-    console.log(formatPermissionCard(summary, toolName, width, paint, previewRows.length > 0 ? previewRows : undefined));
+    if (toolName !== "run_command") console.log(formatPermissionCard(summary, toolName, width, paint, previewRows.length > 0 ? previewRows : undefined));
     const selection = await promptApprovalSelection(true, onCancel, persistedRule !== null, toolName === "run_command");
     decision = selection.decision;
     if (decision === "allow_always" && persistedRule) {
@@ -1168,7 +1169,7 @@ function promptApprovalSelection(
 
   return new Promise((resolve) => {
     const render = () => {
-      output.write(`\r\x1b[2K${formatApprovalSelection(selected, allowSession, getTerminalWidth(output), paint, allowPersist)}`);
+      output.write(`\r\x1b[2K${formatApprovalSelection(selected, allowSession, getTerminalWidth(output), paint, allowPersist, failSafe ? "command" : "action")}`);
     };
 
     const cleanup = () => {
@@ -1301,6 +1302,7 @@ function printUsage(): void {
   demesne session list
   demesne session create [--workspace <path>] [title]
   demesne session show <session-id>
+  demesne session auto-approve <session-id> on|off|status
   demesne models
   demesne cancel <turn-id>
   demesne events <session-id> [--after <event-id>]

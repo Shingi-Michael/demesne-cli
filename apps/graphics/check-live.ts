@@ -173,12 +173,13 @@ async function state(check: (s: any) => boolean, label = "state") {
   }
   return current;
 }
-async function click(action: string, args?: Record<string, unknown>) {
+async function click(action: string, args?: Record<string, unknown>, label?: string) {
   await state(
     (s) =>
       s.live?.controls.some(
         (c: any) =>
           c.action === action &&
+          (!label || c.label.startsWith(label)) &&
           (!args ||
             Object.entries(args).every(
               ([k, v]) => JSON.parse(c.args ?? "{}")[k] === v,
@@ -189,6 +190,7 @@ async function click(action: string, args?: Record<string, unknown>) {
   const c = current.live.controls.find(
     (c: any) =>
       c.action === action &&
+      (!label || c.label.startsWith(label)) &&
       (!args ||
         Object.entries(args).every(
           ([k, v]) => JSON.parse(c.args ?? "{}")[k] === v,
@@ -237,7 +239,7 @@ try {
   await key("\t");
   await state((s) => s.live.overlay === "settings");
   await capture("settings");
-  await click("choose-row", { index: 1 });
+  await click("choose-row", undefined, "Model");
   await state(
     (s) => s.live.overlay === "models" && s.live.text.includes("qwen3.8-9b"),
   );
@@ -398,7 +400,7 @@ try {
   await state((s) => !s.live.pane);
   await key("\x0b");
   await state((s) => s.live.overlay === "settings");
-  await click("choose-row", { index: 7 }); // Provider setup (after Providers)
+  await click("choose-row", undefined, "Provider setup");
   await state(
     (s) => s.live.setup?.step === "provider" && s.live.setup.probes !== null,
   );

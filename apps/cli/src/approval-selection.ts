@@ -62,6 +62,7 @@ export function formatApprovalSelection(
   width: number,
   painter: Painter,
   allowPersist = false,
+  subject: "action" | "command" = "action",
 ): string {
   const { options } = approvalOptions(allowSession, allowPersist);
   const labels: Record<PermissionDecision, string> = {
@@ -81,9 +82,9 @@ export function formatApprovalSelection(
     ? painter.wash(`› ${labels[option]}`, colors[index]!)
     : painter.dim(labels[option])).join("   ");
   const keys = allowPersist ? (allowSession ? "y/a/s/n" : "y/s/n") : (allowSession ? "y/a/n" : "y/n");
-  const full = `  ${painter.bold("Allow this action?", "paper")}  ${choices}${painter.dim(`   (←/→ · ${keys} · enter · esc denies)`)}`;
+  const full = `  ${painter.bold(`Allow this ${subject}?`, "paper")}  ${choices}${painter.dim(`   (←/→ · ${keys} · enter · esc denies)`)}`;
   if (visibleLength(full) <= width) return full;
   const selected = options[selectedIndex]!;
-  const compact = `  ${painter.bold("APPROVAL", "paper")} ${selectedIndex + 1}/${options.length} ${painter.wash(`› ${labels[selected]}`, colors[selectedIndex]!)} ${painter.dim(`· ←/→ · ${keys} · enter`)}`;
+  const compact = `  ${painter.bold(subject === "command" ? "Allow command?" : "APPROVAL", "paper")} ${selectedIndex + 1}/${options.length} ${painter.wash(`› ${labels[selected]}`, colors[selectedIndex]!)} ${painter.dim(`· ←/→ · ${keys} · enter`)}`;
   return truncateText(compact, Math.max(1, width));
 }

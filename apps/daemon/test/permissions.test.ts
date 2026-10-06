@@ -108,6 +108,52 @@ describe("PermissionBroker session grants", () => {
   });
 });
 
+describe("PermissionBroker session auto-approve", () => {
+  test("reads current policy for all tools and releases only that session without grants", async () => {
+    const enabled = new Set<string>();
+    const broker = new PermissionBroker(undefined, id => enabled.has(id));
+    const controller = new AbortController();
+    const first = broker.wait("first", "turn", "one", "write_file", "{}", controller.signal);
+    const publish = broker.wait("publish", "turn", "one", "run_command", '{"argv":["git","push"]}', controller.signal);
+    const other = broker.wait("other", "other-turn", "two", "write_file", "{}", controller.signal);
+    expect(broker.approvePendingSession("one")).toBe(0);
+    enabled.add("one");
+    expect(broker.preapproved("one", "run_command", { argv: ["npm", "publish"] })).toBe(true);
+    expect(broker.preapproved("two", "run_command", { argv: ["npm", "publish"] })).toBe(false);
+    expect(broker.approvePendingSession("one")).toBe(2);
+    expect(await Promise.all([first, publish])).toEqual(["allow_once", "allow_once"]);
+    expect(broker.listGrants("one")).toEqual([]);
+    enabled.delete("one");
+    expect(broker.preapproved("one", "write_file", { path: "x" })).toBe(false);
+    expect(broker.preapproved("one", "run_command", { argv: ["git", "push"] })).toBe(false);
+    expect(broker.resolve("other", "deny")).toBe(true);
+    expect(await other).toBe("deny");
+  });
+
+  test("enabling before wait registration allows once, but cancellation always wins", async () => {
+    const broker = new PermissionBroker(undefined, () => true);
+    const controller = new AbortController();
+    expect(await broker.wait("race", "turn", "one", "write_file", "{}", controller.signal)).toBe("allow_once");
+    expect(broker.resolve("race", "allow_session")).toBe(false);
+    expect(broker.listGrants("one")).toEqual([]);
+    controller.abort(new Error("cancelled"));
+    await expect(broker.wait("aborted", "turn", "one", "write_file", "{}", controller.signal)).rejects.toThrow("cancelled");
+  });
+
+  test("cancelled pending work cannot be resumed by enabling the policy", async () => {
+    let enabled = false;
+    const broker = new PermissionBroker(undefined, () => enabled);
+    const controller = new AbortController();
+    const waiter = broker.wait("pending", "turn", "one", "write_file", "{}", controller.signal);
+    const rejected = waiter.catch(error => error);
+    broker.cancelTurn("turn", new Error("cancelled"));
+    enabled = true;
+    expect(broker.approvePendingSession("one")).toBe(0);
+    expect(broker.resolve("pending", "allow_once")).toBe(false);
+    expect(await rejected).toMatchObject({ message: "cancelled" });
+  });
+});
+
 describe("PermissionBroker persisted allowlist", () => {
   test("preapproves matching calls from the user config", () => {
     const directory = temporaryDirectory();

@@ -211,6 +211,7 @@ let overlay: OverlayName | null = null,
     data: Record<string, unknown>;
     group?: string;
     hint?: string;
+    description?: string;
   }[] = [];
 let completionItems: {
     label: string;
@@ -353,6 +354,7 @@ function renderStatus() {
     state.provider?.metrics,
     state.workspace,
     state.session?.title,
+    state.session?.autoApprove,
     pane,
     state.session?.workspace?.gitBranch,
     state.activeTurnId
@@ -370,7 +372,7 @@ function renderStatus() {
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   const workspace = state.workspace.replace(/^.*\/projects\//, "projects/");
   el("header").innerHTML =
-    `<div class="identity"><strong>demesne</strong>${pane === "changes" && state.session ? `<span class="session-title">${h(state.session.title)}</span>` : ""}<span title="${h(state.workspace)}">${pane === "changes" ? "" : "· "}${h(workspace)}</span></div><div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}${state.runs.length ? `<span class="age">${pane === "changes" ? clock(Date.now()).slice(0, 5) : `· ${duration(Date.now() - Date.parse(state.session!.createdAt))}`}</span>` : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true)}</div>`;
+    `<div class="identity"><strong>demesne</strong>${pane === "changes" && state.session ? `<span class="session-title">${h(state.session.title)}</span>` : ""}<span title="${h(state.workspace)}">${pane === "changes" ? "" : "· "}${h(workspace)}</span></div><div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "pill auto-approve") : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}${state.runs.length ? `<span class="age">${pane === "changes" ? clock(Date.now()).slice(0, 5) : `· ${duration(Date.now() - Date.parse(state.session!.createdAt))}`}</span>` : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true)}</div>`;
 }
 function totals(run: GraphicsRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -416,6 +418,7 @@ const spinner = () => `<span class="spin" aria-hidden="true">${spinnerFrame()}</
 /// A running sub-agent's target: its task and a phrase that cycles the whole
 /// time it runs (updated in place by a timer); its steps count on the right.
 function toolTarget(run: GraphicsRun, tool: ToolEntry) {
+  if (tool.name === "run_command" && tool.waiting) return "command";
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   if (tool.name !== "subagent" || tool.state !== "running") return h(base);
   // Still being written by the model: not running yet.
@@ -568,18 +571,18 @@ function runHTML(run: GraphicsRun, index: number) {
     phase = state!.questions.length
       ? "Waiting for your answer · "
       : latestTool?.waiting
-        ? "Waiting for your approval · "
+        ? latestTool.name === "run_command" ? "Waiting for your approval" : "Waiting for your approval · "
         : latestTool?.drafting
           // A command still being written isn't typed out here: its row
           // shows it once it's complete.
           ? "Writing a command…"
           : latestTool
-            ? `${verb(latestTool)} `
+            ? latestTool.name === "run_command" ? "Running command" : `${verb(latestTool)} `
             : "Thinking";
   // The live thinking row already says "Thinking"; don't repeat it here.
   const thinkingLive = run.entries.at(-1)?.type === "reasoning" && !latestTool && !state!.questions.length;
   const activity = active(run) && !thinkingLive
-    ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.drafting ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
+    ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
     : "";
   return `<div class="request"><span class="mark">▶</span><span class="text">${h(run.content)}</span><time>${clock(run.createdAt).slice(0, 5)}</time></div><div class="response ${active(run) ? "running" : run.status === "failed" ? "failed" : ""}"><div class="speaker"><span>demesne</span><time>${clock(run.entries.find((e) => e.type === "assistant")?.type === "assistant" ? (run.entries.find((e) => e.type === "assistant") as any).at : run.createdAt)}${active(run) ? " · live" : ""}</time></div>${body}${footer}${activity}</div>`;
 }
@@ -750,6 +753,8 @@ function renderComposer() {
     state.busy,
     state.approvals.length,
     state.questions.length,
+    state.session?.autoApprove,
+    state.planOnly,
   ]);
   if (
     signature === composerSignature &&
@@ -762,6 +767,16 @@ function renderComposer() {
   composerWidth = width;
   const form = el("composer"),
     queued = Boolean(state.activeTurnId && editor.value.trim());
+  let approvalMode = form.querySelector<HTMLElement>(".approval-mode");
+  if (!approvalMode) {
+    approvalMode = document.createElement("div");
+    approvalMode.className = "approval-mode";
+    form.insertBefore(approvalMode, editor);
+  }
+  approvalMode.hidden = !state.session?.autoApprove;
+  approvalMode.innerHTML = state.session?.autoApprove
+    ? btn("overlay", `Auto-approve all · ${state.planOnly ? "Plan stays read only" : "this session"}`, { name: "settings" })
+    : "";
   form.classList.toggle("queued", queued);
   form.classList.toggle("restored", state.restored);
   form.classList.toggle("stop-armed", Date.now() < stopArmed);
@@ -820,9 +835,14 @@ function renderApproval() {
   const command = Array.isArray(approval.input.argv)
       ? approval.input.argv.join(" ")
       : JSON.stringify(approval.input, null, 2),
-    run = state.runs.find((run) => run.id === approval.turnId);
+    run = state.runs.find((run) => run.id === approval.turnId),
+    isCommand = approval.name === "run_command",
+    preview = `<div class="command-inset"><pre>${isCommand ? "$ " : ""}${h(command)}</pre><small>in ${h(approval.input.cwd ?? state.workspace)}${isCommand ? ' · <span class="amber">runs on your machine, not sandboxed</span>' : ""}</small></div>`,
+    description = isCommand
+      ? `<details class="approval-details"><summary>Command details</summary>${preview}</details>`
+      : `<p class="approval-description">${h(approval.summary)}</p>${preview}`;
   el("approval").innerHTML =
-    `<div class="approval-card"><div class="approval-title"><span class="amber">!</span> Allow this ${approval.name === "run_command" ? "command" : "action"}?<small>${h(approval.name)} · Turn ${run?.number ?? "—"}</small></div><p class="approval-description">${h(approval.summary)}</p><div class="command-inset"><pre>${approval.name === "run_command" ? "$ " : ""}${h(command)}</pre><small>in ${h(approval.input.cwd ?? state.workspace)}${approval.name === "run_command" ? ' · <span class="amber">runs on your machine, not sandboxed</span>' : ""}</small></div><div class="approval-actions">${btn("permission", `${k("y")} Allow once`, { id: approval.id, decision: "allow_once" })}${btn("permission", `${k("n")} Deny`, { id: approval.id, decision: "deny" }, "deny")}${approval.name !== "run_command" ? btn("permission", "a &nbsp; allow this session", { id: approval.id, decision: "allow_session" }, "quiet") : ""}${approval.rule ? btn("permission", "s &nbsp; always allow", { id: approval.id, decision: "allow_always" }, "quiet") : ""}</div></div>`;
+    `<div class="approval-card"><div class="approval-title"><span class="amber">!</span> Allow this ${isCommand ? "command" : "action"}?<small>${isCommand ? "" : `${h(approval.name)} · `}Turn ${run?.number ?? "—"}</small></div>${description}<div class="approval-actions">${btn("permission", `${k("y")} Allow once`, { id: approval.id, decision: "allow_once" })}${btn("permission", `${k("n")} Deny`, { id: approval.id, decision: "deny" }, "deny")}${!isCommand ? btn("permission", "a &nbsp; allow this session", { id: approval.id, decision: "allow_session" }, "quiet") : ""}${approval.rule ? btn("permission", "s &nbsp; always allow", { id: approval.id, decision: "allow_always" }, "quiet") : ""}${btn("auto-approve", "Auto-approve all · this session", { autoApprove: true }, "auto-approve")}</div><p class="approval-scope">With Auto-approve all, edits, commands, deletions and publishing run without asking.</p></div>`;
 }
 /// Breakage alerts: a card over the conversation when something newly
 /// breaks, then the worktree fix as it runs and when it's ready to review.
@@ -1966,6 +1986,7 @@ function renderOverlay() {
     state.model,
     state.theme,
     state.planOnly,
+    state.session?.autoApprove,
     state.sessions,
     models,
     state.providers,
@@ -2000,6 +2021,15 @@ function renderOverlay() {
         action: "overlay",
         data: { name: "models" },
         hint: "/model",
+      },
+      {
+        label: "Approvals",
+        value: state.session?.autoApprove ? "Auto-approve all" : "Ask first",
+        group: "SESSION",
+        action: "auto-approve",
+        data: { autoApprove: !state.session?.autoApprove },
+        hint: state.session?.autoApprove ? "turn off ↵" : "turn on ↵",
+        description: "Auto-approve all skips prompts for edits, commands, deletions and publishing. Plan stays read only.",
       },
       {
         label: "Theme",
@@ -2226,7 +2256,7 @@ function renderOverlay() {
           { index },
           `menu-row ${index === overlayIndex ? "selected" : ""}`,
           overlay === "sessions",
-        )
+        ) + (row.description ? `<p class="settings-description">${h(row.description)}</p>` : "")
       );
     })
     .join("");
@@ -2527,6 +2557,8 @@ async function dispatch(
   args: Record<string, any>,
   target?: HTMLElement,
 ) {
+  if (action === "auto-approve" && driveNavigating)
+    throw new Error("Only you can change session approvals.");
   if (action === "review-scope") {
     reviewScope = args.scope;
     reviewMode = "diff";
@@ -2798,7 +2830,7 @@ async function dispatch(
       return;
     }
     // Providers and cleanup stay open, so the result shows.
-    if (row && (overlay === "providers" || overlay === "cleanup")) {
+    if (row && (overlay === "providers" || overlay === "cleanup" || row.action === "auto-approve")) {
       if (row.action) await dispatch(row.action, row.data);
       return;
     }
@@ -2970,6 +3002,7 @@ async function dispatch(
   if (
     [
       "permission",
+      "auto-approve",
       "cancel",
       "clear-queue",
       "compact",
@@ -3078,6 +3111,7 @@ function renderState(next: Snapshot) {
 new ResizeObserver(() => renderComposer()).observe(editor);
 document.addEventListener("click", (event) => {
   const summary = (event.target as Element).closest("summary");
+  if (summary instanceof HTMLElement && summary.closest("#approval")) summary.focus({ preventScroll: true });
   const detail = summary?.parentElement as HTMLDetailsElement | undefined;
   if (detail?.dataset.detail) {
     const id = detail.dataset.detail;
@@ -3234,6 +3268,11 @@ document.addEventListener("keydown", (event) => {
     event.target instanceof HTMLTextAreaElement;
   const key = event.key.toLowerCase(),
     ctrl = event.ctrlKey || event.metaKey;
+  // Native details and buttons must keep Enter/Space when a side panel is open.
+  if (!ctrl && !event.altKey && (key === "enter" || key === " ") && event.target instanceof Element) {
+    const control = event.target.closest<HTMLElement>("#approval summary, #approval button");
+    if (control) { event.preventDefault(); control.click(); return; }
+  }
   const run = (task: () => Promise<unknown> | void) => {
     event.preventDefault();
     void act(async () => task());
@@ -3509,7 +3548,7 @@ window.demesneInspect = () => ({
   requests: [...document.querySelectorAll<HTMLElement>(".request .text")].map((e) => { const r = e.getBoundingClientRect(); return { text: e.textContent, x: r.x, y: r.y, width: r.width, height: r.height }; }),
   controls: [
     ...document.querySelectorAll<HTMLElement>(
-      "button,input,textarea,[role=separator],.preview-canvas",
+      "button,input,textarea,summary,[role=separator],.preview-canvas",
     ),
   ]
     .filter(
@@ -3589,6 +3628,9 @@ window.demesneInspect = () => ({
     entries: run.entries.length,
   })),
   approvals: state?.approvals.length,
+  autoApprove: state?.session?.autoApprove === true,
+  approvalText: el("approval").innerText,
+  approvalDetailsOpen: el("approval").querySelector<HTMLDetailsElement>("details")?.open ?? false,
   questions: state?.questions.length,
   queue: state?.queue,
   pane,

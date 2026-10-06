@@ -26,6 +26,7 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 | `demesne models` | List provider model IDs |
 | `demesne session list` | List sessions |
 | `demesne session create [--workspace PATH] [title]` | Create a workspace-bound session (asks to trust a new folder) |
+| `demesne session auto-approve SESSION_ID on\|off\|status` | Enable, disable or inspect automatic approval for that session |
 | `demesne session show ID` | Print a session as JSON |
 | `demesne compact ID [instructions]` | Summarize older context |
 | `demesne cancel TURN_ID` | Cancel a turn |
@@ -52,6 +53,8 @@ demesne prompt --session SESSION_ID "Continue the investigation"
 A new session in a folder you haven't trusted yet asks "Do you trust the files in this folder?" on a terminal. Without one, the command fails; pass `--trust-workspace` to confirm trust for a scripted run. See [workspace trust](../SECURITY.md#workspace-trust).
 
 `--permission ask|deny` chooses the turn's permission mode. Without an interactive approval channel, requested approvals are denied rather than left waiting. Saved grants and workspace permissions remain subject to daemon policy; `ask` is not unattended blanket authorization.
+
+**Settings › Approvals › Auto-approve all** enables automatic approval for the current session. The approval card offers the same option. Edits, commands, deletions and publishing run without asking, including any action already waiting for approval. The setting persists for that session across reopening and daemon restarts; new sessions start with **Ask first**. Turn it off to resume approval prompts for later actions. Plan mode still exposes inspection tools only.
 
 ## Slash commands
 

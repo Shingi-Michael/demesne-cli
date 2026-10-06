@@ -7,6 +7,7 @@ export type EventType =
   | "artifact.created"
   | "session.created"
   | "session.renamed"
+  | "session.permissions_changed"
   | "session.archived"
   | "session.compacted"
   | "turn.created"
@@ -366,9 +367,13 @@ export interface Session {
   /// Model this session was last switched to through the CLI. It is a hint for
   /// the user, not an automatic daemon-side switch.
   preferredModel?: string | null;
+  /// Session-wide approval policy; older clients and fixtures may omit it.
+  /// Stored sessions always return a boolean and default to false.
+  autoApprove?: boolean;
 }
 
 export interface UpdateSessionRequest {
+  autoApprove?: boolean;
   title?: string;
   preferredModel?: string | null;
 }
@@ -573,8 +578,12 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
       update.preferredModel = null;
     }
   }
-  if (update.title === undefined && update.preferredModel === undefined) {
-    throw new ProtocolValidationError("title or preferredModel is required");
+  if (value.autoApprove !== undefined) {
+    if (typeof value.autoApprove !== "boolean") throw new ProtocolValidationError("autoApprove must be a boolean");
+    update.autoApprove = value.autoApprove;
+  }
+  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined) {
+    throw new ProtocolValidationError("title, preferredModel or autoApprove is required");
   }
   return update;
 }

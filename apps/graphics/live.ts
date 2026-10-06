@@ -2135,7 +2135,7 @@ function renderOverlay() {
     subtitle = state.providers.loading ? "checking…" : `using ${state.model.provider}`;
     noun = "providers";
     filter = false;
-    footerNote = state.providers.message ?? "Enter signs in or out · Codex and ChatGPT plan sharing are separate connections";
+    footerNote = state.providers.message ?? "Enter signs in or out · ChatGPT uses your plan, OpenRouter uses hosted models";
     overlayRows = state.providers.items.map((item) => {
       const signing = state!.providers.signingIn === item.key;
       return {

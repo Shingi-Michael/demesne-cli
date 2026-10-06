@@ -55,12 +55,12 @@ The same fields are supported under `[provider]` and `[additional_providers.NAME
 
 | Field | Meaning |
 | --- | --- |
-| `id`, `url`, `model` | Provider identity, base URL, default model ID; omit URL for Codex |
+| `id`, `url`, `model` | Provider identity, base URL, default model ID |
 | `allowed_models` | Optional model allowlist; include the default model |
 | `api_key` | Bearer key for OpenAI-compatible endpoints |
-| `auth`, `auth_profile` | `api-key`, `chatgpt`, or `codex`; `auth_profile` belongs only to ChatGPT registration |
+| `auth`, `auth_profile` | `api-key` or `chatgpt`; `auth_profile` belongs only to ChatGPT registration |
 | `context_window` | Usable context **per request/slot**, including reserved output |
-| `max_output_tokens` | Chat Completions output cap and planning reserve; local reserve on ChatGPT and Codex routes |
+| `max_output_tokens` | Chat Completions output cap and planning reserve; local reserve on the ChatGPT route |
 | `inference_slots` | Provider-specific concurrency; otherwise inherits the top-level value |
 | `vision` | Opt-in image hydration for the daemon's configured vision path |
 | `reasoning_effort` | Config default: `none`, `low`, `medium`, `high`, or `max`; actual support depends on the provider |
@@ -75,24 +75,26 @@ The default stream first-event deadline is at least 180 seconds, with profile-sp
 
 HTTP is accepted on loopback. Other endpoints require HTTPS unless the exact Tailscale URL is explicitly allowed. ChatGPT credentials always go to the fixed official API/auth destinations; a custom `url` cannot redirect those tokens.
 
-## Codex provider
+## ChatGPT provider
 
-[Sign in first](authentication.md#codex-with-a-chatgpt-account). Login writes a provider entry like this while preserving existing local providers:
+[Sign in first](authentication.md#continue-with-chatgpt). `demesne auth login chatgpt --model gpt-6.1-sol` writes an account-bound provider entry while preserving existing local providers. A typical entry has this shape; use the issued account ID from login rather than inventing one:
 
 ```toml
-[additional_providers.codex]
-id = "Codex"
-auth = "codex"
-model = "codex/gpt-6.1-sol"
-context_window = 272000
+[additional_providers.chatgpt]
+id = "ChatGPT"
+url = "https://api.openai.com/v1"
+auth = "chatgpt"
+auth_profile = "ACCOUNT_ID"
+model = "gpt-6.1-sol"
+context_window = 1050000
 max_output_tokens = 16384
 ```
 
-Use a model offered by the Codex catalog; the example does not grant model access. Codex model IDs must start with `codex/`, including entries in `allowed_models`. A Codex provider cannot set `url`, `api_key` or `auth_profile`: the managed app-server owns its transport and account under `<data_dir>/codex`.
+The signed-in account must have model access. An explicit Sol selection verifies a completed response when the account's catalog omits Sol; merely opening the picker does not send that request. Other model choices come from the account's catalog. Tokens are loaded from Demesne's private ChatGPT registration, not from `api_key`. The adapter uses fixed official destinations even if `url` is changed.
 
-Login uses the catalog's context capacity when provided, otherwise a conservative planning budget of 272,000 tokens. The output reserve is one quarter of that budget, capped at 16,384. `--context-window TOKENS` on `demesne auth login codex` changes the local planning budget. These values do not enforce a server output cap or claim the model's full capacity. Demesne discovers thinking levels from the catalog and rejects unsupported selections.
+Login uses the catalog's context capacity or Sol's documented capacity after successful verification; other models without capacity metadata use a conservative 32,768-token planning budget. The output reserve is one quarter of that budget, capped at 16,384. `--context-window TOKENS` on `demesne auth login chatgpt` changes the local planning budget. `max_output_tokens` is omitted from plan-usage requests, so this field is a context reserve, not a server output cap. Supported reasoning choices come from model metadata, with documented defaults for a verified Sol entry.
 
-`DEMESNE_CODEX_BIN` selects the installed Codex executable. The app-server gets a private `CODEX_HOME`; the user's global Codex configuration and repository instructions are not used as provider settings. Demesne still supplies its own workspace guidance in the coding prompt. No user-configurable Codex tool execution bypass is exposed.
+Older `auth = "codex"` sections are retired during configuration loading. See [upgrade guidance](authentication.md#upgrading-from-the-retired-codex-provider) for provider recovery and credential ownership.
 
 ## Multiple providers and concurrency
 
@@ -174,7 +176,6 @@ The exported [environment map](../packages/config/src/index.ts) is authoritative
 | Agent | `DEMESNE_MAX_MODEL_ROUNDS`, `DEMESNE_MAX_TOOL_CALLS`, `DEMESNE_SUBAGENT_MODEL` |
 | Images | `DEMESNE_IMAGE_URL`, `DEMESNE_IMAGE_MODEL`, `DEMESNE_IMAGE_API_KEY`, `DEMESNE_IMAGE_REQUEST_TIMEOUT_MS` |
 | OpenRouter login | `OPENROUTER_API_KEY` |
-| Codex runtime | `DEMESNE_CODEX_BIN` (installed Codex executable) |
 | Graphics diagnostics | `DEMESNE_GRAPHICS_FILES`, `DEMESNE_GRAPHICS_GPU`, `DEMESNE_GRAPHICS_TRACE` |
 | Drive transport | `DEMESNE_DRIVE_CONTROL=ui` selects the compatibility UI-control path |
 

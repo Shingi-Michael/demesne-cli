@@ -1,6 +1,6 @@
 # Documentation
 
-These guides describe the implementation on `main`, audited on **2026-10-03**. Example model IDs, paths, and provider URLs must be replaced with values from your installation. A model's advertised capability or a measured local profile is not a universal default.
+These guides describe the current implementation, including direct ChatGPT inference and retirement of the separate Codex runtime provider. The provider guides were updated on **2026-10-05**; the broader documentation audit was on **2026-10-03**. Example model IDs, paths, and provider URLs must be replaced with values from your installation. A model's advertised capability or a measured local profile is not a universal default.
 
 ## Use Demesne
 

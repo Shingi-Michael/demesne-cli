@@ -20,8 +20,8 @@ test("a cancelled browser flow cannot erase a newer sign-in or its cancel state"
   };
   const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, providerAccounts: accounts, changed: () => {} });
   try {
-    const old = host.handle("provider-signin", { key: "new:codex" });
-    expect(host.providers.signingIn).toBe("new:codex");
+    const old = host.handle("provider-signin", { key: "new:chatgpt" });
+    expect(host.providers.signingIn).toBe("new:chatgpt");
     const current = host.handle("provider-signin", { key: "new:openrouter" });
     await old;
     expect(host.providers).toMatchObject({ signingIn: "new:openrouter", message: "Finish signing in in your browser." });
@@ -36,11 +36,11 @@ test("closing the host cancels its browser sign-in without publishing a stale er
   const login = Promise.withResolvers<{ label: string }>();
   let cancelled = 0, publications = 0;
   const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => { publications++; }, providerAccounts: {
-    signingIn: "new:codex", list: async () => [], signIn: () => login.promise, signOut: async () => ({ label: "unused" }),
+    signingIn: "new:chatgpt", list: async () => [], signIn: () => login.promise, signOut: async () => ({ label: "unused" }),
     cancel() { cancelled++; login.reject(new Error("Cancelled on close.")); },
   } });
   try {
-    const flow = host.handle("provider-signin", { key: "new:codex" });
+    const flow = host.handle("provider-signin", { key: "new:chatgpt" });
     host.dispose();
     const before = publications;
     await flow;

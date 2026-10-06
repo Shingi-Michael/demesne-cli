@@ -330,7 +330,7 @@ export class GraphicsHost {
       };
       try {
         const id = configuredChatGPTAccount(this.settings.configPath);
-        this.chatgptAccount = id ? (await new ChatGPTAuth(this.settings.dataDirectory).accounts()).find(a => a.id === id) ?? null : null;
+        this.chatgptAccount = id ? (await new ChatGPTAuth(this.settings.accountDataDirectory ?? this.settings.dataDirectory).accounts()).find(a => a.id === id) ?? null : null;
       } catch { this.chatgptAccount = null; }
       this.sessions = await this.client.listSessions();
       this.connection = "online";
@@ -711,7 +711,7 @@ export class GraphicsHost {
     this.publish();
   }
   private accounts() {
-    return this.providerAccounts ??= this.options.providerAccounts ?? new ProviderAccounts({ configPath: this.settings.configPath, dataDirectory: this.settings.dataDirectory, codexDataDirectory: this.settings.accountDataDirectory, open: (url) => this.open(url) });
+    return this.providerAccounts ??= this.options.providerAccounts ?? new ProviderAccounts({ configPath: this.settings.configPath, dataDirectory: this.settings.dataDirectory, accountDataDirectory: this.settings.accountDataDirectory, open: (url) => this.open(url) });
   }
   async refreshProviders(message: string | null = this.providers.message) {
     const generation = this.providerSignInGeneration;
@@ -742,7 +742,7 @@ export class GraphicsHost {
     let account: ChatGPTAccount | null = null;
     try {
       const id = configuredChatGPTAccount(this.settings.configPath);
-      account = id ? (await new ChatGPTAuth(this.settings.dataDirectory).accounts()).find(a => a.id === id) ?? null : null;
+      account = id ? (await new ChatGPTAuth(this.settings.accountDataDirectory ?? this.settings.dataDirectory).accounts()).find(a => a.id === id) ?? null : null;
     } catch {}
     if (stale()) return;
     this.chatgptAccount = account;
@@ -1035,7 +1035,7 @@ export class GraphicsHost {
     if (method === "setup") {
       this.setup?.dispose();
       this.setup = new GraphicsSetup({
-        dataDirectory: this.settings.dataDirectory,
+        dataDirectory: this.settings.accountDataDirectory ?? this.settings.dataDirectory,
         configPath: this.settings.configPath,
         changed: () => this.publish(),
         copy: (text) => this.copy(text),

@@ -17,7 +17,6 @@
         "@demesne/brand": "workspace:*",
         "@demesne/chatgpt-auth": "workspace:*",
         "@demesne/client": "workspace:*",
-        "@demesne/codex": "workspace:*",
         "@demesne/config": "workspace:*",
         "@demesne/protocol": "workspace:*",
         "@demesne/providers": "workspace:*",
@@ -27,7 +26,6 @@
       "name": "@demesne/daemon",
       "dependencies": {
         "@demesne/chatgpt-auth": "workspace:*",
-        "@demesne/codex": "workspace:*",
         "@demesne/config": "workspace:*",
         "@demesne/protocol": "workspace:*",
         "@demesne/providers": "workspace:*",
@@ -50,7 +48,6 @@
         "@demesne/brand": "workspace:*",
         "@demesne/chatgpt-auth": "workspace:*",
         "@demesne/client": "workspace:*",
-        "@demesne/codex": "workspace:*",
         "@demesne/config": "workspace:*",
         "@demesne/protocol": "workspace:*",
         "@fontsource/jetbrains-mono": "5.3.0",
@@ -80,9 +77,6 @@
         "@demesne/protocol": "workspace:*",
       },
     },
-    "packages/codex": {
-      "name": "@demesne/codex",
-    },
     "packages/config": {
       "name": "@demesne/config",
     },
@@ -92,7 +86,6 @@
     "packages/providers": {
       "name": "@demesne/providers",
       "dependencies": {
-        "@demesne/codex": "workspace:*",
         "@demesne/protocol": "workspace:*",
       },
     },
@@ -111,8 +104,6 @@
     "@demesne/cli": ["@demesne/cli@workspace:apps/cli"],
 
     "@demesne/client": ["@demesne/client@workspace:packages/client"],
-
-    "@demesne/codex": ["@demesne/codex@workspace:packages/codex"],
 
     "@demesne/config": ["@demesne/config@workspace:packages/config"],
 

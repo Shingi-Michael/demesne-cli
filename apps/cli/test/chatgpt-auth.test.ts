@@ -41,6 +41,22 @@ test("CLI login adds ChatGPT while preserving a local provider; setup clears inc
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("direct ChatGPT configuration recovers a retired-only runtime config without accessing its credentials", () => {
+  const root = mkdtempSync(join(tmpdir(), "chatgpt-retired-config-")), path = join(root, "config.toml");
+  const legacy = 'theme = "light"\n[provider]\nauth = "codex"\nid = "Codex"\nmodel = "codex/gpt-6.1-sol"\ncontext_window = 272000\nmax_output_tokens = 16384\n';
+  try {
+    writeFileSync(path, legacy);
+    mkdirSync(join(root, "codex"));
+    writeFileSync(join(root, "codex/auth.json"), "unreadable-as-json legacy credentials");
+    configureChatGPT({ configPath: path, account, models });
+    const config = loadConfig({ userConfigPath: path, includeProject: false, env: {} }).config;
+    expect(config.provider).toMatchObject({ auth: "chatgpt", authProfile: account.id, model: "account-model" });
+    expect(config.theme).toBe("light");
+    expect(readFileSync(`${path}.bak`, "utf8")).toBe(legacy);
+    expect(readFileSync(join(root, "codex/auth.json"), "utf8")).toBe("unreadable-as-json legacy credentials");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("rejects unlisted models and unacknowledged plan usage before changing config", () => {
   const root = mkdtempSync(join(tmpdir(), "chatgpt-config-")), path = join(root, "config.toml");
   try {

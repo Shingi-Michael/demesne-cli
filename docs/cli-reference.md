@@ -16,10 +16,9 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 | `demesne --setup` | Open graphics setup |
 | `demesne setup` | Terminal provider/model/review wizard |
 | `demesne auth login chatgpt` | Continue with ChatGPT |
+| `demesne auth login chatgpt --model gpt-6.1-sol` | Connect directly to Sol; verify account access when it is absent from the catalog |
 | `demesne auth accounts\|status\|use\|logout chatgpt` | Manage ChatGPT registrations |
 | `demesne auth login openrouter` | Connect OpenRouter |
-| `demesne auth login codex [--model codex/ID] [--context-window TOKENS] [--no-browser]` | Sign in to Demesne's managed Codex account |
-| `demesne auth status\|logout codex` | Inspect or sign out of that Codex account |
 | `demesne daemon start\|stop\|status\|logs` | Manage the daemon |
 | `demesne doctor [--json]` | Inspect configuration and connectivity |
 | `demesne ps [--watch] [--json]` | Active turns, queues, and provider slot capacities |
@@ -35,7 +34,7 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 
 `--server URL` selects the daemon. Graphics supports `--scale auto` or `--scale 0.5` through `3`; auto follows terminal cell size. Use the explicit `graphics` entry point for graphics diagnostic flags described in the [graphics guide](../apps/graphics/README.md).
 
-Codex requires an installed official CLI; `DEMESNE_CODEX_BIN` can specify its executable. Its models have `codex/` IDs. [Authentication](authentication.md#codex-with-a-chatgpt-account) explains the separate sign-in and catalog.
+ChatGPT uses the public Responses API directly. [Authentication](authentication.md#continue-with-chatgpt) explains account selection, Sol verification and plan usage.
 
 The former `--no-tui` full-screen/text-workbench switch is not an interactive mode in the current entry point. Use `prompt` for text output.
 

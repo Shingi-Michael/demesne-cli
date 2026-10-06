@@ -495,9 +495,10 @@ function runHTML(run: GraphicsRun, index: number) {
       body += `<div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div>`;
     if (entry.type === "reasoning") {
       const live = active(run) && i === run.entries.length - 1;
-      // Match subagent traces: stream below a stable header, open while
-      // working unless the reader collapsed it, and fold when finished.
-      body += `<details class="thinking ${live ? "live" : ""}" data-detail="${key}"${(live && !detailsClosed.has(key)) || detailsOpen.has(key) ? " open" : ""}><summary>${live ? spinner() : "◇"} ${live ? "Thinking" : "Thought"} <span class="muted">${duration(entry.durationMs)}</span></summary>${thinkingBody(entry.raw)}</details>`;
+      // The trace leads; its activity/toggle row follows underneath. Preserve
+      // the same live-open and manual collapse behavior as subagent traces.
+      const open=(live && !detailsClosed.has(key)) || detailsOpen.has(key);
+      body += `<div class="thinking thinking-main ${live ? "live" : ""}"><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${live ? spinner() : "◇"} ${live ? "Thinking" : "Thought"} <span class="muted">${duration(entry.durationMs)}</span></button></div>`;
     }
     if (entry.type === "tool") {
       const group: ToolEntry[] = [entry];
@@ -2610,6 +2611,14 @@ async function dispatch(
   args: Record<string, any>,
   target?: HTMLElement,
 ) {
+  if(action === "toggle-thinking") {
+    const content=document.getElementById(`thinking-body-${args.id}`), toggle=content?.nextElementSibling;
+    if(!content || !(toggle instanceof HTMLButtonElement))return;
+    const open=toggle.getAttribute("aria-expanded") === "true";
+    if(open){detailsOpen.delete(args.id);detailsClosed.add(args.id);}
+    else{detailsClosed.delete(args.id);detailsOpen.add(args.id);}
+    content.hidden=open;toggle.setAttribute("aria-expanded",String(!open));reportObservation();return;
+  }
   if (action === "question-control") return questionAction(args.action);
   if (action === "auto-approve" && driveNavigating)
     throw new Error("Only you can change session approvals.");
@@ -3323,7 +3332,7 @@ document.addEventListener("keydown", (event) => {
     ctrl = event.ctrlKey || event.metaKey;
   // Native details and buttons must keep Enter/Space when a side panel is open.
   if (!ctrl && !event.altKey && (key === "enter" || key === " ") && event.target instanceof Element) {
-    const control = event.target.closest<HTMLElement>("#approval summary, #approval button");
+    const control = event.target.closest<HTMLElement>("#approval summary, #approval button, .thinking-toggle");
     if (control) { event.preventDefault(); control.click(); return; }
   }
   const run = (task: () => Promise<unknown> | void) => {
@@ -3598,11 +3607,11 @@ window.demesneInspect = () => ({
   // Whether the conversation follows new text, and where it is scrolled.
   stage: { follow, top: Math.round(el("stage").scrollTop), bottom: Math.round(el("stage").scrollHeight - el("stage").clientHeight) },
   selection: getSelection()?.toString() ?? "",
-  thinking: [...document.querySelectorAll<HTMLDetailsElement>("#conversation details.thinking")].map(detail=>{
-    const summary=detail.querySelector("summary")!, body=summary.nextElementSibling;
-    const header=summary.getBoundingClientRect(), content=body?.getBoundingClientRect();
-    return {open:detail.open,live:detail.classList.contains("live"),summary:summary.textContent,body:body?.textContent?.slice(-2000),
-      x:header.x+header.width/2,y:header.y+header.height/2,headerBottom:header.bottom,bodyTop:content?.top};
+  thinking: [...document.querySelectorAll<HTMLElement>("#conversation .thinking-main")].map(trace=>{
+    const toggle=trace.querySelector(".thinking-toggle")!, body=trace.querySelector(".thinking-content")!;
+    const row=toggle.getBoundingClientRect(), content=body.getBoundingClientRect();
+    return {open:toggle.getAttribute("aria-expanded") === "true",live:trace.classList.contains("live"),summary:toggle.textContent,body:body.textContent?.slice(-2000),
+      x:row.x+row.width/2,y:row.y+row.height/2,statusTop:row.top,bodyBottom:content.bottom};
   }),
   requests: [...document.querySelectorAll<HTMLElement>(".request .text")].map((e) => { const r = e.getBoundingClientRect(); return { text: e.textContent, x: r.x, y: r.y, width: r.width, height: r.height }; }),
   controls: [

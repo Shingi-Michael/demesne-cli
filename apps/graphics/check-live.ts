@@ -61,7 +61,7 @@ const f = await fixture(
           delta: "I will add the module, then check the exported value.",
         };
         await traceUpdate.promise;
-        yield {type:"reasoning_delta",delta:"\n\nThe trace continues beneath the thinking header, including a longer explanation that wraps across multiple lines instead of being truncated beside the spinner."};
+        yield {type:"reasoning_delta",delta:"\n\nThe trace continues above the thinking row, including a longer explanation that wraps across multiple lines instead of being truncated beside the spinner."};
         await traceFinish.promise;
         yield {
           type: "tool_call_delta",
@@ -277,7 +277,7 @@ try {
   await state(s=>s.live.thinking?.[0]?.live && s.live.thinking[0].open,"expanded live thinking");
   let trace=current.live.thinking[0];
   assert(!trace.summary.includes("I will"),"reasoning stays out of the thinking header");
-  assert(trace.bodyTop>trace.headerBottom,"the trace renders below its header");
+  assert(trace.bodyBottom<trace.statusTop,"the trace renders above the spinner and Thinking row");
   await capture("thinking-live");
   app.click(Math.round(trace.x),Math.round(trace.y));
   await state(s=>!s.live.thinking[0].open,"manually collapsed thinking");
@@ -286,6 +286,10 @@ try {
   assert(!current.live.thinking[0].open,"new chunks respect manual collapse");
   trace=current.live.thinking[0];app.click(Math.round(trace.x),Math.round(trace.y));
   await state(s=>s.live.thinking[0].open,"reopened thinking");
+  await key(" ");
+  await state(s=>!s.live.thinking[0].open,"Space collapses the focused trace");
+  await key("\r");
+  await state(s=>s.live.thinking[0].open,"Enter reopens the focused trace");
   await capture("thinking-expanded");
   traceFinish.resolve();
   await state((s) => s.live.approvals === 1, "write approval");
@@ -295,7 +299,8 @@ try {
   await state(s=>!s.live.thinking[0].open,"fold completed trace before checking panels");
   await click("permission", { decision: "allow_once" });
   await state(s=>s.live.thinking?.[1]?.live && s.live.thinking[1].open,"second live trace");
-  assert(!current.live.thinking[1].summary.includes("Checking the export"),"summary headings also stay below the header");
+  assert(!current.live.thinking[1].summary.includes("Checking the export"),"summary headings also stay in the trace body");
+  assert(current.live.thinking[1].bodyBottom<current.live.thinking[1].statusTop,"formatted reasoning also precedes the activity row");
   checkTraceFinish.resolve();
   await state(
     (s) =>

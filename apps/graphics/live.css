@@ -343,7 +343,8 @@
   font-size: 13px;
   line-height: 20px;
 }
-.thinking summary {
+.thinking summary,
+.thinking-toggle {
   display: flex;
   gap: 6px;
   align-items: center;
@@ -351,7 +352,8 @@
 .thinking summary img {
   display: inline-block;
 }
-.thinking > pre {
+.thinking > pre,
+.thinking-content > pre {
   margin: 6px 0 0;
   padding: 8px 12px;
   border-left: 2px solid var(--electric);
@@ -360,7 +362,8 @@
   color: var(--secondary);
   font: inherit;
 }
-.thinking > .thinking-text {
+.thinking > .thinking-text,
+.thinking-content > .thinking-text {
   margin: 6px 0 0;
   padding: 8px 12px;
   border-left: 2px solid var(--electric);
@@ -374,9 +377,15 @@
 .thinking-text > p {
   margin: 0 0 6px;
 }
-.thinking.live summary {
+.thinking.live summary,
+.thinking.live .thinking-toggle {
   color: var(--electric);
 }
+.thinking-toggle { color: var(--secondary); cursor: pointer; }
+.thinking-toggle:before { content: "▸ "; color: var(--muted); }
+.thinking-toggle[aria-expanded="true"]:before { content: "▾ "; }
+.thinking-content > pre,
+.thinking-content > .thinking-text { margin: 0 0 6px; }
 .live-activity {
   display: flex;
   gap: 8px;

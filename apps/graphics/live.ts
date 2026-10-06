@@ -416,6 +416,7 @@ const spinner = () => `<span class="spin" aria-hidden="true">${spinnerFrame()}</
 /// A running sub-agent's target: its task and a phrase that cycles the whole
 /// time it runs (updated in place by a timer); its steps count on the right.
 function toolTarget(run: GraphicsRun, tool: ToolEntry) {
+  if (tool.name === "run_command" && tool.waiting) return "command";
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   if (tool.name !== "subagent" || tool.state !== "running") return h(base);
   // Still being written by the model: not running yet.
@@ -568,18 +569,18 @@ function runHTML(run: GraphicsRun, index: number) {
     phase = state!.questions.length
       ? "Waiting for your answer · "
       : latestTool?.waiting
-        ? "Waiting for your approval · "
+        ? latestTool.name === "run_command" ? "Waiting for your approval" : "Waiting for your approval · "
         : latestTool?.drafting
           // A command still being written isn't typed out here: its row
           // shows it once it's complete.
           ? "Writing a command…"
           : latestTool
-            ? `${verb(latestTool)} `
+            ? latestTool.name === "run_command" ? "Running command" : `${verb(latestTool)} `
             : "Thinking";
   // The live thinking row already says "Thinking"; don't repeat it here.
   const thinkingLive = run.entries.at(-1)?.type === "reasoning" && !latestTool && !state!.questions.length;
   const activity = active(run) && !thinkingLive
-    ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.drafting ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
+    ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
     : "";
   return `<div class="request"><span class="mark">▶</span><span class="text">${h(run.content)}</span><time>${clock(run.createdAt).slice(0, 5)}</time></div><div class="response ${active(run) ? "running" : run.status === "failed" ? "failed" : ""}"><div class="speaker"><span>demesne</span><time>${clock(run.entries.find((e) => e.type === "assistant")?.type === "assistant" ? (run.entries.find((e) => e.type === "assistant") as any).at : run.createdAt)}${active(run) ? " · live" : ""}</time></div>${body}${footer}${activity}</div>`;
 }
@@ -820,9 +821,14 @@ function renderApproval() {
   const command = Array.isArray(approval.input.argv)
       ? approval.input.argv.join(" ")
       : JSON.stringify(approval.input, null, 2),
-    run = state.runs.find((run) => run.id === approval.turnId);
+    run = state.runs.find((run) => run.id === approval.turnId),
+    isCommand = approval.name === "run_command",
+    preview = `<div class="command-inset"><pre>${isCommand ? "$ " : ""}${h(command)}</pre><small>in ${h(approval.input.cwd ?? state.workspace)}${isCommand ? ' · <span class="amber">runs on your machine, not sandboxed</span>' : ""}</small></div>`,
+    description = isCommand
+      ? `<details class="approval-details"><summary>Command details</summary>${preview}</details>`
+      : `<p class="approval-description">${h(approval.summary)}</p>${preview}`;
   el("approval").innerHTML =
-    `<div class="approval-card"><div class="approval-title"><span class="amber">!</span> Allow this ${approval.name === "run_command" ? "command" : "action"}?<small>${h(approval.name)} · Turn ${run?.number ?? "—"}</small></div><p class="approval-description">${h(approval.summary)}</p><div class="command-inset"><pre>${approval.name === "run_command" ? "$ " : ""}${h(command)}</pre><small>in ${h(approval.input.cwd ?? state.workspace)}${approval.name === "run_command" ? ' · <span class="amber">runs on your machine, not sandboxed</span>' : ""}</small></div><div class="approval-actions">${btn("permission", `${k("y")} Allow once`, { id: approval.id, decision: "allow_once" })}${btn("permission", `${k("n")} Deny`, { id: approval.id, decision: "deny" }, "deny")}${approval.name !== "run_command" ? btn("permission", "a &nbsp; allow this session", { id: approval.id, decision: "allow_session" }, "quiet") : ""}${approval.rule ? btn("permission", "s &nbsp; always allow", { id: approval.id, decision: "allow_always" }, "quiet") : ""}</div></div>`;
+    `<div class="approval-card"><div class="approval-title"><span class="amber">!</span> Allow this ${isCommand ? "command" : "action"}?<small>${isCommand ? "" : `${h(approval.name)} · `}Turn ${run?.number ?? "—"}</small></div>${description}<div class="approval-actions">${btn("permission", `${k("y")} Allow once`, { id: approval.id, decision: "allow_once" })}${btn("permission", `${k("n")} Deny`, { id: approval.id, decision: "deny" }, "deny")}${!isCommand ? btn("permission", "a &nbsp; allow this session", { id: approval.id, decision: "allow_session" }, "quiet") : ""}${approval.rule ? btn("permission", "s &nbsp; always allow", { id: approval.id, decision: "allow_always" }, "quiet") : ""}</div></div>`;
 }
 /// Breakage alerts: a card over the conversation when something newly
 /// breaks, then the worktree fix as it runs and when it's ready to review.
@@ -3078,6 +3084,7 @@ function renderState(next: Snapshot) {
 new ResizeObserver(() => renderComposer()).observe(editor);
 document.addEventListener("click", (event) => {
   const summary = (event.target as Element).closest("summary");
+  if (summary instanceof HTMLElement && summary.closest("#approval")) summary.focus({ preventScroll: true });
   const detail = summary?.parentElement as HTMLDetailsElement | undefined;
   if (detail?.dataset.detail) {
     const id = detail.dataset.detail;
@@ -3234,6 +3241,11 @@ document.addEventListener("keydown", (event) => {
     event.target instanceof HTMLTextAreaElement;
   const key = event.key.toLowerCase(),
     ctrl = event.ctrlKey || event.metaKey;
+  // Native details and buttons must keep Enter/Space when a side panel is open.
+  if (!ctrl && !event.altKey && (key === "enter" || key === " ") && event.target instanceof Element) {
+    const control = event.target.closest<HTMLElement>("#approval summary, #approval button");
+    if (control) { event.preventDefault(); control.click(); return; }
+  }
   const run = (task: () => Promise<unknown> | void) => {
     event.preventDefault();
     void act(async () => task());
@@ -3509,7 +3521,7 @@ window.demesneInspect = () => ({
   requests: [...document.querySelectorAll<HTMLElement>(".request .text")].map((e) => { const r = e.getBoundingClientRect(); return { text: e.textContent, x: r.x, y: r.y, width: r.width, height: r.height }; }),
   controls: [
     ...document.querySelectorAll<HTMLElement>(
-      "button,input,textarea,[role=separator],.preview-canvas",
+      "button,input,textarea,summary,[role=separator],.preview-canvas",
     ),
   ]
     .filter(
@@ -3589,6 +3601,8 @@ window.demesneInspect = () => ({
     entries: run.entries.length,
   })),
   approvals: state?.approvals.length,
+  approvalText: el("approval").innerText,
+  approvalDetailsOpen: el("approval").querySelector<HTMLDetailsElement>("details")?.open ?? false,
   questions: state?.questions.length,
   queue: state?.queue,
   pane,

@@ -159,7 +159,12 @@ try {
   await type(prompt);
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["edit_file"]), "file approval visible");
   await click("permission", { decision: "allow_once" });
-  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["run_command"]), "command approval visible");
+  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["Allow this command?"]), "command approval visible");
+  assert(await evaluate<boolean>("const details = document.querySelector('.approval-card .approval-details'); return !!details && !details.open;"), "Command details start collapsed");
+  const commandDetails = await find(".approval-card .approval-details > summary");
+  await request("POST", `/session/${session}/element/${elementId(commandDetails)}/click`, {});
+  await until(() => evaluate<boolean>("const details = document.querySelector('.approval-card .approval-details'); return !!details?.open && details.innerText.includes('run check');"), "command details can be inspected");
+  await capture("02-command-approval");
   await click("permission", { decision: "allow_once" });
   await textIncludes(completed);
   assert.equal(readFileSync(join(f.workspace, "hello.ts"), "utf8"), "export const greeting = 'after';\n");

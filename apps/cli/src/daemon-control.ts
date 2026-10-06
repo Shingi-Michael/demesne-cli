@@ -30,6 +30,8 @@ export interface DaemonControlDependencies {
   sleep: (ms: number) => Promise<void>;
   kill: (pid: number, signal: NodeJS.Signals) => void;
   isProcessAlive: (pid: number) => boolean;
+  /// The process's command line, or null when it cannot be determined.
+  processCommand: (pid: number) => string | null;
   resolveCommand: () => string[] | null;
 }
 
@@ -51,6 +53,16 @@ export function createDaemonControlDependencies(
         return true;
       } catch {
         return false;
+      }
+    },
+    processCommand: (pid) => {
+      try {
+        const result = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="], { stdout: "pipe", stderr: "ignore" });
+        if (!result.success) return null;
+        const command = result.stdout.toString().trim();
+        return command || null;
+      } catch {
+        return null;
       }
     },
     resolveCommand: () => resolveDaemonCommand(env),
@@ -106,7 +118,8 @@ export async function daemonStatus(deps: DaemonControlDependencies): Promise<{
   health: DaemonHealth | null;
   pid: number | null;
 }> {
-  const [health, pid] = [await daemonHealth(deps), readPid(deps)];
+  const health = await daemonHealth(deps);
+  const pid = readPid(deps) ?? (health ? lockOwnerDaemonPid(deps) : null);
   return { running: health !== null, health, pid };
 }
 
@@ -116,6 +129,19 @@ export async function startDaemon(
 ): Promise<{ started: boolean; pid: number | null; health: DaemonHealth | null; message: string }> {
   const existing = await daemonHealth(deps);
   if (existing) return { started: false, pid: readPid(deps), health: existing, message: "Daemon is already running." };
+
+  // A daemon that holds the data directory but is not answering health checks
+  // (busy, or listening elsewhere) would make a new one exit on the lock.
+  const owner = lockOwnerDaemonPid(deps);
+  if (owner) {
+    return {
+      started: false,
+      pid: owner,
+      health: null,
+      message: `Daemon pid ${owner} holds ${deps.dataDirectory} but is not healthy at ${deps.server}. `
+        + "Stop it with `demesne daemon stop` before starting another.",
+    };
+  }
 
   const command = deps.resolveCommand();
   if (!command) {
@@ -145,6 +171,7 @@ export async function startDaemon(
     closeSync(logFd);
   }
   child.unref();
+  const previousPid = readPid(deps);
   writePid(deps, child.pid);
 
   const timeoutMs = options.timeoutMs ?? 15_000;
@@ -154,7 +181,10 @@ export async function startDaemon(
     const health = await daemonHealth(deps);
     if (health) return { started: true, pid: child.pid, health, message: `Daemon started (pid ${child.pid}).` };
     if (!deps.isProcessAlive(child.pid)) {
-      removePid(deps);
+      // Never leave the file pointing at a dead child, and never take it away
+      // from a daemon that is still running.
+      if (previousPid && previousPid !== child.pid && deps.isProcessAlive(previousPid)) writePid(deps, previousPid);
+      else removePid(deps, child.pid);
       return {
         started: false,
         pid: null,
@@ -175,9 +205,14 @@ export async function stopDaemon(
   deps: DaemonControlDependencies,
   options: { timeoutMs?: number } = {},
 ): Promise<{ stopped: boolean; message: string }> {
-  const pid = readPid(deps);
+  const recorded = readPid(deps);
   const health = await daemonHealth(deps);
-  if (!pid && !health) return { stopped: false, message: "Daemon is not running." };
+  if (!recorded && !health) return { stopped: false, message: "Daemon is not running." };
+
+  // The pid file can be missing or stale while a daemon still serves; the data
+  // directory lock records the process that actually owns it.
+  let pid = recorded;
+  if (health && (!pid || !deps.isProcessAlive(pid))) pid = lockOwnerDaemonPid(deps) ?? pid;
 
   if (pid) {
     try {
@@ -253,7 +288,34 @@ function writePid(deps: DaemonControlDependencies, pid: number): void {
   writeFileSync(pidPath(deps), `${pid}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
-function removePid(deps: DaemonControlDependencies): void {
+/// Removes the pid file, or only when it still records `expected`.
+function removePid(deps: DaemonControlDependencies, expected?: number): void {
   const path = pidPath(deps);
-  if (existsSync(path)) unlinkSync(path);
+  if (!existsSync(path)) return;
+  if (expected !== undefined && readPid(deps) !== expected) return;
+  unlinkSync(path);
+}
+
+/// The live demesned process recorded as owner of the data directory lock
+/// (written by the daemon's acquireDataDirectoryLock), or null.
+function lockOwnerDaemonPid(deps: DaemonControlDependencies): number | null {
+  let pid: unknown;
+  try {
+    pid = (JSON.parse(readFileSync(join(deps.dataDirectory, "daemon.lock", "owner.json"), "utf8")) as { pid?: unknown })?.pid;
+  } catch {
+    return null;
+  }
+  if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) return null;
+  if (!deps.isProcessAlive(pid)) return null;
+  // Guards against a stale lock whose pid now belongs to an unrelated process.
+  // When the command line cannot be read, the live lock owner is trusted.
+  const command = deps.processCommand(pid);
+  if (command !== null && !looksLikeDaemon(command, deps.resolveCommand())) return null;
+  return pid;
+}
+
+function looksLikeDaemon(command: string, resolved: string[] | null): boolean {
+  if (/demesned|daemon\/src\/main\.ts/.test(command)) return true;
+  const configured = resolved?.at(-1);
+  return Boolean(configured && command.includes(configured));
 }

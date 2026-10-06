@@ -1,11 +1,12 @@
 import type { DemesneClient } from "@demesne/client";
-import type { DriveFix, DriveFixAction, DriveSignal } from "@demesne/protocol";
+import type { DriveFix, DriveFixAction, DriveFixProposal, DriveSignal } from "@demesne/protocol";
 
 /// Breakage alerts: notices when something newly breaks (a check starts
 /// failing, CI on the default branch turns red, an open PR's CI fails) and
 /// offers to fix it in a git worktree. Only transitions alert: whatever was
 /// already broken when demesne opened stays in Drive's Next queue. Nothing
-/// costs tokens until you choose Fix.
+/// costs tokens until you choose Fix. Next proposals you Run use the same
+/// worktree and card.
 
 export interface BreakageState {
   /// Newly broken, waiting for Fix / Not now / Never.
@@ -104,6 +105,26 @@ export class BreakageWatch {
     }, FIX_EVERY);
   }
 
+  /// Whether this daemon makes worktree fixes (older ones don't).
+  get supported() { return !this.unsupported; }
+
+  /// Runs a Next proposal in its own worktree, shown on the same card.
+  /// Throws when it can't start (not a git repository, or one already running).
+  async runProposal(proposal: DriveFixProposal, signals: DriveSignal[]) {
+    if (this.state.busy) throw new Error("Wait for the current worktree action to finish.");
+    this.state.busy = "fix"; this.state.message = null;
+    this.options.publish();
+    try {
+      const { fix } = await this.options.client().startDriveFix({ workspace: this.options.workspace(), signals: signals.slice(0, 5), proposal });
+      this.state.fix = fix;
+      if (fix.status === "failed") this.state.message = { text: fix.error ?? "It couldn't start.", tone: "error" };
+      else this.watchFix();
+    } finally {
+      this.state.busy = null;
+      this.options.publish();
+    }
+  }
+
   async handle(method: string, args: Record<string, unknown>) {
     if (method === "breakage-dismiss") { this.state.signals = []; return this.options.publish(); }
     if (method === "breakage-never") {
@@ -134,7 +155,7 @@ export class BreakageWatch {
         this.state.fix = null;
         if (action === "apply") { this.state.message = { text: `Applied to your branch: ${fix.title}`, tone: "ok" }; this.options.applied(); }
         if (action === "pr") this.state.message = { text: `Opened a pull request from ${fix.branch}`, tone: "ok", ...(fix.prUrl ? { url: fix.prUrl } : {}) };
-        if (action === "discard") this.state.message = { text: "Fix discarded; the worktree and branch are gone.", tone: "ok" };
+        if (action === "discard") this.state.message = { text: `${fix.proposal ? "Discarded" : "Fix discarded"}; the worktree and branch are gone.`, tone: "ok" };
       } else throw new Error(`Unknown action ${method}`);
     } catch (error) {
       this.state.message = { text: error instanceof Error ? error.message : String(error), tone: "error" };

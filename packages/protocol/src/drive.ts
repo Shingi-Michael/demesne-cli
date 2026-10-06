@@ -90,11 +90,13 @@ export interface DriveNextResponse {
 /// failing CI), collected without a model call so they can be polled.
 export interface DriveAlertsRequest { workspace: string; gh?: boolean }
 export interface DriveAlertsResponse { workspace: string; signals: DriveSignal[]; checkedAt: string }
-/// A fix for a breakage, made in its own git worktree and branch so the
-/// user's checkout is untouched until they apply it.
+/// Work made in its own git worktree and branch so the user's checkout is
+/// untouched until they apply it: a fix for a breakage, or a Next proposal.
 export type DriveFixStatus = "starting" | "running" | "ready" | "failed" | "applied" | "pr" | "discarded";
 export interface DriveFix {
   id: string; workspace: string; title: string; signals: DriveSignal[];
+  /// Set when this is a Next proposal you ran rather than a breakage fix.
+  proposal?: DriveFixProposal;
   branch: string; path: string; base: string;
   sessionId: string | null; turnId: string | null;
   status: DriveFixStatus; startedAt: string; finishedAt: string | null;
@@ -105,8 +107,12 @@ export interface DriveFix {
   diff?: { files: number; additions: number; deletions: number; paths: string[] };
   checks?: { command: string; passed: boolean }[];
   prUrl?: string; error?: string;
+  /// The turn finished but changed nothing (for a proposal, often the right answer).
+  unchanged?: boolean;
 }
-export interface DriveFixRequest { workspace: string; signals: DriveSignal[] }
+export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "why">;
+/// A breakage fix sends 1-5 signals; a proposal sends the signals it cites (0-5).
+export interface DriveFixRequest { workspace: string; signals: DriveSignal[]; proposal?: DriveFixProposal }
 export interface DriveFixesResponse { fixes: DriveFix[] }
 export type DriveFixAction = "apply" | "pr" | "discard";
 export interface DriveRequest {
@@ -484,14 +490,20 @@ export function parseDriveAlertsRequest(value: unknown): DriveAlertsRequest {
 }
 export function parseDriveFixRequest(value: unknown): DriveFixRequest {
   if (!isRecord(value)) invalid("request", "expected an object");
-  if (!Array.isArray(value.signals) || !value.signals.length || value.signals.length > 5) invalid("signals", "expected 1-5 signals");
+  let proposal: DriveFixProposal | undefined;
+  if (value.proposal !== undefined) {
+    const item = value.proposal;
+    if (!isRecord(item) || !["fix", "investigate", "tidy"].includes(String(item.kind))) invalid("proposal", "expected a proposal");
+    proposal = { id: text(item.id, 200, "proposal.id"), kind: item.kind as DriveProposal["kind"], title: text(item.title, 300, "proposal.title"), why: text(item.why, 2000, "proposal.why") };
+  }
+  if (!Array.isArray(value.signals) || (!proposal && !value.signals.length) || value.signals.length > 5) invalid("signals", proposal ? "expected at most 5 signals" : "expected 1-5 signals");
   const sources = ["checks", "git", "github", "sessions", "telemetry", "code"];
   const signals = value.signals.map((item, index) => {
     const path = `signals[${index}]`;
     if (!isRecord(item) || !sources.includes(String(item.source))) invalid(path, "expected a signal");
     return { id: text(item.id, 200, `${path}.id`), source: item.source as DriveSignal["source"], title: text(item.title, 300, `${path}.title`), detail: text(item.detail, 1000, `${path}.detail`, true), urgent: item.urgent === true };
   });
-  return { workspace: text(value.workspace, 4096, "workspace"), signals };
+  return { workspace: text(value.workspace, 4096, "workspace"), signals, ...(proposal ? { proposal } : {}) };
 }
 function parseProjectMemory(value: unknown): DriveMemoryEntry[] {
   if (!Array.isArray(value) || value.length > 60) invalid("projectMemory", "expected at most 60 entries");

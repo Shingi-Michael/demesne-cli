@@ -6,6 +6,8 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Added
 
+- Drive Next's **Run** works in its own git worktree and branch, with the breakage-fix card's Apply / Open PR / Discard. Your checkout is untouched until you apply it; outside git it falls back to a bounded mission.
+
 - `/themefy` adaptive composer interviews, instant validated palettes, saved custom themes and persistent theme undo in the shared desktop/Ghostty interface. Theme interviews have a restricted tool scope and stay out of coding context.
 
 - Default Ghostty graphics UI using offscreen Electron/Chromium and Kitty image tiles, with browser typography, Markdown, syntax highlighting, math, themes and responsive scaling.

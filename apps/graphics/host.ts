@@ -15,6 +15,7 @@ import { updateUserConfig } from "@demesne/config";
 import {
   themeByName,
   themeNames,
+  type ThemeLibrary,
   resolveTheme,
   SLASH_COMMANDS,
 } from "@demesne/brand";
@@ -182,6 +183,8 @@ export class GraphicsHost {
   restored = false;
   busy = false;
   theme: string;
+  private themeLibrary: ThemeLibrary | null = null;
+  get hasSavedTheme() { return this.themeLibrary?.persisted === true; }
   private stream: AbortController | null = null;
   private generation = 0;
   private revision = 0;
@@ -277,8 +280,10 @@ export class GraphicsHost {
       draftVersion: this.draftVersion,
       restored: this.restored,
       theme: this.theme,
-      palette: themeByName(this.theme).colors,
-      themes: themeNames(),
+      palette: this.themeLibrary?.themes.find(t=>t.name === this.theme)?.colors ?? themeByName(this.theme).colors,
+      themes: this.themeLibrary?.themes.map(t=>t.name) ?? themeNames(),
+      themeOptions: this.themeLibrary?.themes ?? [],
+      themeCanUndo: this.themeLibrary?.canUndo ?? false,
       commands: SLASH_COMMANDS,
       workspace: this.current?.session.workspace?.root ?? this.workspace,
       drive: this.driveState,
@@ -313,12 +318,21 @@ export class GraphicsHost {
         if (!this.disposed) this.options.changed(this.snapshot());
       }, 25);
   }
+  private setThemes(library:ThemeLibrary) {
+    // Preserve an initial --theme / terminal appearance override until the
+    // user actually saves a selection in the daemon's shared library.
+    this.themeLibrary=library.persisted?library:{...library,selected:themeByName(this.theme)};
+    this.theme=this.themeLibrary.selected.name;this.publish();
+  }
+  private async refreshThemes() {this.setThemes(await this.client.themes());}
   async connect() {
     this.connection = "connecting";
     this.error = null;
     this.publish();
     try {
       const health = await this.client.health();
+      // Older daemons may not yet have theme persistence. Built-ins still work.
+      try { await this.refreshThemes(); } catch {}
       const contextWindow = health.contextCapacity ?? [this.settings.loaded.config.provider, ...Object.values(this.settings.loaded.config.additionalProviders ?? {})]
         .find(p => p.model === health.model)?.contextWindow;
       this.reasoning = health.reasoning;
@@ -469,6 +483,7 @@ export class GraphicsHost {
       )) {
         if (generation !== this.generation || controller.signal.aborted) break;
         if (!this.current!.apply(event)) continue;
+        if(event.type === "tool.call_completed" && event.payload.name === "apply_theme")void this.refreshThemes().catch(error=>this.fail(error));
         this.onEvent?.(event);
         this.drive?.agent.workerEvent(event);
         if (
@@ -991,7 +1006,7 @@ export class GraphicsHost {
     // Only the person writing or sending a message takes over from Drive
     // ("manual" is the renderer's signal that the composer draft changed).
     // Clicking, navigating, opening panels and reading leave it running.
-    if (!driven && ["manual", "submit", "plan-submit"].includes(method)) {
+    if (!driven && ["manual", "submit", "plan-submit", "themefy"].includes(method)) {
       this.onManual?.();
       this.drive?.agent.intervene();
     }
@@ -1107,8 +1122,20 @@ export class GraphicsHost {
       this.publish();
       return;
     }
+    if (method === "themefy") {
+      if(args.driveCommand)throw new Error("Only the user can start a theme interview");
+      if(!this.current)await this.newSession();
+      if(this.current!.active)throw new Error("Wait for the current turn to finish before starting Themefy");
+      if(this.themeLibrary && !this.themeLibrary.persisted)this.setThemes(await this.client.selectTheme(this.theme));
+      const result=await this.client.themefy(this.current!.session.id,typeof args.preferences === "string"?args.preferences:"");
+      this.current!.ensureTurn(result.turn);this.publish();return;
+    }
+    if (method === "theme-undo") {
+      this.setThemes(await this.client.undoTheme());return;
+    }
     if (method === "theme") {
       const name = string(args.name, "theme", 100);
+      if(this.themeLibrary){this.setThemes(await this.client.selectTheme(name));return;}
       if (!themeNames().includes(name)) throw new Error("Unknown theme");
       this.theme = name;
       this.publish();

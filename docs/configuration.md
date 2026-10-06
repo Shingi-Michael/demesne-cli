@@ -156,7 +156,7 @@ Each MCP server may also supply an `env` table. Tools are named `mcp__SERVER__TO
 
 ## Preferences and grants
 
-- `theme`: `auto`, `demesne`, `demesne-light`, `dracula`, `tokyo-night`, `tokyo-night-storm`, `nord`, `gruvbox-dark`, `catppuccin-mocha`, `catppuccin-latte`, `github-light`. `/theme` changes it live.
+- `theme`: `auto`, `demesne`, `demesne-light`, `dracula`, `tokyo-night`, `tokyo-night-storm`, `nord`, `gruvbox-dark`, `catppuccin-mocha`, `catppuccin-latte`, `github-light`. This supplies the initial palette. `/theme` persists a live selection in the daemon's `themes.json`; that selection takes precedence on subsequent launches. [`/themefy`](themes.md) creates custom palettes through an interview and adds them to the picker.
 - `[permissions] allow`: scoped rules such as `edit_file:src` or `run_command:git status`. Command rules match exact argv; a terminal ` *` explicitly permits additional arguments. Avoid broad execution grants.
 - `[notifications] enabled` and `minimum_duration_ms` configure supported notification paths (default true / 30000 ms).
 - `[ui] intro` and `hyperlinks` remain parsed client settings; they are not switches back to the removed text workbench. Graphics motion uses `prefers-reduced-motion` in the browser.

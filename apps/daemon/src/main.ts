@@ -78,6 +78,7 @@ try {
     processor,
     reloadProviders: () => reloadProviders(processor),
     systemPrompt: config.provider.systemPrompt,
+    theme: config.theme,
     authToken: loadDaemonToken(dataDirectory),
     version: VERSION,
     inferenceSlots,

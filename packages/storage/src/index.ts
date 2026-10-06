@@ -831,7 +831,7 @@ export class DemesneStore {
     permissionMode: PermissionMode = "deny",
     thinkingEnabled?: boolean,
     planOnly = false,
-    kind: "chat" | "compaction" = "chat",
+    kind: "chat" | "compaction" | "themefy" = "chat",
   ): { turn: Turn; event: EventEnvelope } {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -860,7 +860,7 @@ export class DemesneStore {
         content,
         ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),
         ...(planOnly ? { planOnly: true } : {}),
-        ...(kind === "compaction" ? { kind } : {}),
+        ...(kind !== "chat" ? { kind } : {}),
       }, now);
       return { turn: this.getTurnOrThrow(id), event };
     })();
@@ -1864,7 +1864,7 @@ function mapTurn(row: TurnRow): Turn {
     permissionMode: row.permission_mode,
     thinkingEnabled: row.thinking_enabled === null ? null : row.thinking_enabled !== 0,
     ...(row.plan_only ? { planOnly: true } : {}),
-    ...(row.kind === "compaction" ? { kind: "compaction" as const } : {}),
+    ...(row.kind === "compaction" || row.kind === "themefy" ? { kind: row.kind } : {}),
   };
 }
 

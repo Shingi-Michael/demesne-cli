@@ -1,4 +1,5 @@
 import type {ReviewScope, ReviewResponse, CommandsResponse} from "@demesne/protocol";
+import type { ThemeLibrary } from "@demesne/brand";
 import {
   type ImageArtifact,
   type ArtifactPage,
@@ -201,6 +202,10 @@ export class DemesneClient {
   async getSessionState(sessionId: string): Promise<SessionStateResponse> {
     return this.request<SessionStateResponse>(`/v1/sessions/${sessionId}`);
   }
+  async themes():Promise<ThemeLibrary> {return this.request("/v1/themes");}
+  async selectTheme(name:string):Promise<ThemeLibrary> {return this.request("/v1/themes",{method:"POST",body:JSON.stringify({action:"select",name})});}
+  async undoTheme():Promise<ThemeLibrary> {return this.request("/v1/themes",{method:"POST",body:JSON.stringify({action:"undo"})});}
+  async themefy(sessionId:string,preferences=""):Promise<SubmitTurnResponse> {return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/themefy`,{method:"POST",body:JSON.stringify({preferences})});}
 
   async replayPage(sessionId: string, after: number, through: number, signal?: AbortSignal): Promise<SessionReplayPage> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/replay?after=${after}&through=${through}`, { signal });

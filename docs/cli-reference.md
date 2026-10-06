@@ -70,6 +70,7 @@ These commands are handled by the graphics host. The canonical grammar is in [th
 | `/model [ID]` | Select a model or open the picker |
 | `/subagent [MODEL]` | Choose the subagent default; `same` uses the main model |
 | `/theme [NAME]` | Change the interface theme |
+| `/themefy [PREFERENCES]` | Design and apply a saved palette through an adaptive interview; `/themefy undo` restores the previous palette ([guide](themes.md)) |
 | `/status`, `/context` | Session/model status and context budget |
 | `/export [md|json]` | Export the transcript |
 | `/diff`, `/undo [PATH]` | Review or revert recorded changes |

@@ -77,6 +77,19 @@ class Sidecar {
 }
 const bootstrap = (value: unknown) => value as DesktopBootstrap;
 
+test("saved theme selections survive project opening and OS appearance changes",async()=>{
+  const f=await fixture();writeFileSync(f.settings.configPath,'theme = "auto"\n[daemon]\nauto_start = "never"\n');
+  await f.client.selectTheme("nord");const sidecar=new Sidecar(f);
+  try {
+    await sidecar.value("desktop-appearance",{dark:false});
+    const opened=bootstrap(await sidecar.value("desktop-open-project",{path:f.workspace}));
+    expect(opened.snapshot!.theme).toBe("nord");expect(opened.snapshot!.palette.ink).toBe("#2E3440");
+    await sidecar.value("desktop-appearance",{dark:true});
+    const latest=await sidecar.value("bootstrap") as {theme:string;palette:{ink:string}};
+    expect(latest.theme).toBe("nord");expect(latest.palette.ink).toBe("#2E3440");
+  }finally{await sidecar.close();await f.close();}
+});
+
 test("desktop sidecar starts without a project and keeps malformed IPC recoverable", async () => {
   const f = await fixture(), sidecar = new Sidecar(f);
   try {

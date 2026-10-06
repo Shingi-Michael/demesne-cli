@@ -145,7 +145,7 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
       const endedAt = Date.parse(turn.completedAt ?? close?.occurredAt ?? "");
       const measured = throughput.snapshot();
       const responseModel = recorded.findLast((event) => event.type === "model.request_started" && typeof event.payload.model === "string")?.payload.model;
-      const receipt: ResponseReceipt = { mode: turn.kind === "compaction" ? "Compact" : turn.planOnly ? "Plan" : "Build", model: typeof responseModel === "string" ? responseModel : request.model,
+      const receipt: ResponseReceipt = { mode: turn.kind === "compaction" ? "Compact" : turn.kind === "themefy" ? "Themefy" : turn.planOnly ? "Plan" : "Build", model: typeof responseModel === "string" ? responseModel : request.model,
         durationMs: Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt >= startedAt ? endedAt - startedAt : null,
         tokensPerSecond: measured.decodeTokensPerSecond ?? measured.tokensPerSecond, ...(context ? { context } : {}) };
       if (answer && answer.id > ([...tools.values()].at(-1)?.id ?? request.id)) answer.receipt = receipt;

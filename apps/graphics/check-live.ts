@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import sharp from "sharp";
 import { TerminalHarness } from "./test/terminal-harness.ts";
 import { fixture, eventually } from "./test/fixture.ts";
+import { warmOlive } from "../../packages/brand/test/theme-fixture.ts";
 
 const directory = resolve(
   process.argv[2] ?? "/tmp/demesne-graphics-live-check",
@@ -23,6 +24,13 @@ const f = await fixture(
       ];
     },
     async *stream(_messages, _tools, signal) {
+      if (_tools.some(tool=>tool.name === "apply_theme")) {
+        const answers=_messages.filter(m=>m.role === "tool");
+        const name=answers.length<2?"ask_user":"apply_theme";
+        yield {type:"tool_call_delta",index:0,idDelta:"themefy-"+answers.length,nameDelta:name,argumentsDelta:JSON.stringify(answers.length<2?
+          {mode:"interview",questions:[{question:answers.length?"For that warm mood, which accent colors?":"What mood and appearance should your theme have?"}]}:warmOlive)};
+        yield {type:"finish",reason:"tool_calls"};return;
+      }
       if (_tools.some((tool) => tool.name === "drive_ui")) {
         const action =
           ++driveDecisions === 1
@@ -439,6 +447,29 @@ try {
   app.resize(100, 34);
   await state((s) => s.width === 800 && s.height === 612);
   await capture("resized");
+  // The same renderer used by Ghostty and the desktop consumes Themefy's
+  // ordinary composer answers, then swaps tokens in the running page.
+  const newComposer=current.live.controls.find((c:any)=>c.tag === "TEXTAREA");
+  app.click(Math.round(newComposer.x),Math.round(newComposer.y));app.paste("/new");await key("\r");
+  await state(s=>!s.live.runs.length && !s.value,"fresh theme session");
+  app.paste("/themefy");await key("\r");
+  await state(s=>s.live.questions === 1,"theme interview");
+  await capture("themefy-question");
+  for(const text of ["warm dark colours","muted olive with soft gold"]) {
+    await state(s=>s.live.questions === 1);
+    const composer=current.live.controls.find((c:any)=>c.tag === "TEXTAREA");
+    app.click(Math.round(composer.x),Math.round(composer.y));app.paste(text);await key("\r");
+    await state(s=>!s.live.questions || s.live.text.includes("which accent"));
+  }
+  await state(s=>s.live.runs.at(-1)?.status === "completed" && s.live.theme?.startsWith("custom-"),"theme applied");
+  await capture("themefy-applied");
+  const themeComposer=current.live.controls.find((c:any)=>c.tag === "TEXTAREA");
+  app.click(Math.round(themeComposer.x),Math.round(themeComposer.y));app.paste("/theme");await key("\r");
+  await state(s=>s.live.overlay === "themes" && s.live.text.includes("Olive & Gold"),"saved theme picker");
+  await capture("themefy-saved");
+  await click("choose-row",undefined,"Undo last theme change");
+  await state(s=>!s.live.overlay && s.live.theme === "demesne","theme undo");
+  await capture("themefy-undo");
   app.write("\x11");
   assert.equal(await app.child.exited, 0);
   assert(app.restored);

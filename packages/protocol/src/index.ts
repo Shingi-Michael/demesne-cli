@@ -312,7 +312,7 @@ export interface Turn {
   thinkingEnabled: boolean | null;
   /// Read-only planning turn: write and execution tools are not offered.
   planOnly?: boolean;
-  kind?: "compaction";
+  kind?: "compaction" | "themefy";
 }
 
 export interface SessionCheckpoint {

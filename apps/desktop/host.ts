@@ -121,7 +121,7 @@ export class DesktopHost {
           candidate.error = null;
         } catch {}
       }
-      if (candidate.settings.theme === "auto") candidate.theme = this.darkAppearance ? "demesne" : "demesne-light";
+      if (candidate.settings.theme === "auto" && !candidate.hasSavedTheme) candidate.theme = this.darkAppearance ? "demesne" : "demesne-light";
       if (this.closed) { candidate.dispose(); return this.bootstrap(); }
       const prefs = { ...this.prefs, lastWorkspace: workspace, recentProjects: [workspace, ...this.prefs.recentProjects.filter(item => item !== workspace)].slice(0, 10) };
       writePreferences(this.preferencePath, prefs);
@@ -195,7 +195,7 @@ export class DesktopHost {
     if (request.method === "desktop-appearance") {
       if (typeof request.args.dark !== "boolean") throw new Error("Invalid desktop appearance");
       this.darkAppearance = request.args.dark;
-      if (this.host && this.host.settings.theme === "auto" && !this.explicitTheme) {
+      if (this.host && this.host.settings.theme === "auto" && !this.explicitTheme && !this.host.hasSavedTheme) {
         this.host.theme = this.darkAppearance ? "demesne" : "demesne-light";
         this.host.publish();
       }

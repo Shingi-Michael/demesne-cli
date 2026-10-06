@@ -49,6 +49,8 @@ Each suggestion says why it's there and roughly how long it will take. **Run** s
 
 ## Also inside
 
+**Make it yours.** Type [`/themefy`](docs/themes.md) and answer the model's questions in the composer. It creates a readable palette and applies it instantly. Generated themes stay in `/theme`; `/themefy undo` restores your previous colors.
+
 <table>
 <tr>
 <td width="50%" valign="top"><b>Models</b><br>Use a local server, your ChatGPT plan or OpenRouter. ChatGPT connects directly to OpenAI's Responses API, including GPT-6.1 Sol for eligible accounts: <code>demesne auth login chatgpt --model gpt-6.1-sol</code>. You can sign in and out under <b>Settings › Providers</b> without restarting. <a href="docs/authentication.md">Providers and model access</a></td>

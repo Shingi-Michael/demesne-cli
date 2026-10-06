@@ -66,32 +66,32 @@ describe("command menu layout", () => {
   test("the window opens on a section label without losing the selection", () => {
     // /plan is the first control command: its label fits a seven-row window
     // that keeps the selection, so the label leads the window.
-    const rows = layoutCommandMenu(SLASH_COMMANDS, 7, 14);
+    const rows = layoutCommandMenu(SLASH_COMMANDS, 7, SLASH_COMMANDS.findIndex(c=>c.id === "plan"));
     expect(rows).toHaveLength(7);
     expect(rows[0]!.kind).toBe("more");
     expect(rows[1]!.kind).toBe("section");
     expect(rows[1]!.section).toBe("control");
-    expect(rows.filter((row) => row.kind === "command").map((row) => row.index)).toEqual([14, 15, 16, 17]);
+    expect(rows.filter((row) => row.kind === "command").map((row) => row.index)).toEqual([15, 16, 17, 18]);
     expect(rows[rows.length - 1]!.kind).toBe("more");
   });
 
   test("the window keeps the selection when a section boundary would not fit", () => {
-    // /help sits near the end of the control section: opening on its label
+    // /clear sits near the end of the control section: opening on its label
     // would overflow a seven-row window, so the window leads with `…` and
     // keeps the selection with the rest of the section around it.
-    const rows = layoutCommandMenu(SLASH_COMMANDS, 7, 18);
+    const rows = layoutCommandMenu(SLASH_COMMANDS, 7, SLASH_COMMANDS.findIndex(c=>c.id === "clear"));
     expect(rows).toHaveLength(7);
     expect(rows[0]!.kind).toBe("more");
     expect(rows[1]!.kind).toBe("command");
-    expect(rows.filter((row) => row.kind === "command").map((row) => row.index)).toEqual([14, 15, 16, 17, 18]);
+    expect(rows.filter((row) => row.kind === "command").map((row) => row.index)).toEqual([15, 16, 17, 18, 19]);
     expect(rows[rows.length - 1]!.kind).toBe("more");
   });
 
   test("a tiny window keeps the selected row with a single more marker", () => {
-    const rows = layoutCommandMenu(SLASH_COMMANDS, 4, 15);
+    const rows = layoutCommandMenu(SLASH_COMMANDS, 4, SLASH_COMMANDS.findIndex(c=>c.id === "drive"));
     expect(rows).toHaveLength(4);
     expect(rows[0]!.kind).toBe("more");
-    expect(rows.filter((row) => row.kind === "command").map((row) => row.index)).toEqual([14, 15]);
+    expect(rows.filter((row) => row.kind === "command").map((row) => row.index)).toEqual([15, 16]);
     expect(rows[rows.length - 1]!.kind).toBe("more");
   });
 

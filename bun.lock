@@ -25,6 +25,7 @@
     "apps/daemon": {
       "name": "@demesne/daemon",
       "dependencies": {
+        "@demesne/brand": "workspace:*",
         "@demesne/chatgpt-auth": "workspace:*",
         "@demesne/config": "workspace:*",
         "@demesne/protocol": "workspace:*",
@@ -74,6 +75,7 @@
     "packages/client": {
       "name": "@demesne/client",
       "dependencies": {
+        "@demesne/brand": "workspace:*",
         "@demesne/protocol": "workspace:*",
       },
     },

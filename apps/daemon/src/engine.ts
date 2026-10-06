@@ -12,6 +12,8 @@ import { providerStreamLimits } from "./provider-limits.ts";
 import { recordedToolChanges } from "./tool-change-preview.ts";
 import { PermissionBroker } from "./permissions.ts";
 import type { QuestionBroker } from "./questions.ts";
+import type { ThemeStore } from "./themes.ts";
+import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
@@ -44,6 +46,7 @@ interface AgentEngineOptions extends AgentConfig {
   /// Lets `ask_user` wait on the person at the terminal. Without it the tool
   /// is not offered, as in non-interactive (`deny`) turns.
   questions?: QuestionBroker;
+  themes?: ThemeStore;
   providerVision?: boolean;
   providerFirstEventTimeoutMs?: number;
   providerRequestTimeoutMs?: number;
@@ -88,19 +91,22 @@ export class AgentEngine {
     const session = this.store.getSession(turn.sessionId);
     if (!session) throw new NotFoundError(`Session not found: ${turn.sessionId}`);
 
-    const history = groupHistory(this.store.getModelContextTranscript(session.id));
+    const themefy = turn.kind === "themefy";
+    const history = themefy ? [] : groupHistory(this.store.getModelContextTranscript(session.id));
     const userMessage = { role: "user" as const, content: turn.content };
     const currentUser = this.store.appendModelMessage(turnId, userMessage);
     const currentMessages: ProviderMessage[] = [userMessage];
     // `ask_user` needs someone to answer: not in non-interactive turns.
     const canAsk = Boolean(this.options.questions) && turn.permissionMode !== "deny";
-    const definitions = session.workspace
+    const definitions = themefy
+      ? [...this.tools.definitions().filter(definition=>definition.name === "ask_user"),themefyDefinition]
+      : session.workspace
       ? planModeDefinitions(selectToolsForTurn([...this.tools.definitions(),
         subagentDefinitionFor(this.options.subagentModels?.() ?? [], this.options.subagentModel ?? inference.modelId),
         ...(this.options.sessionTools ? [sessionToolsDefinition] : [])], turn.content), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : canAsk ? this.tools.definitions().filter(definition=>definition.name === "ask_user") : [];
-    const checkpoint = this.store.getSessionCheckpoint(session.id);
+    const checkpoint = themefy ? null : this.store.getSessionCheckpoint(session.id);
     const checkpointMessages: ProviderMessage[] = checkpoint ? [{ role: "assistant", content: checkpoint.summary }] : [];
     let totalToolCalls = 0;
     let totalToolResultBytes = 0;
@@ -122,7 +128,7 @@ export class AgentEngine {
       const finalizing = budgetReason !== undefined;
       const requestDefinitions = finalizing ? [] : definitions;
       const historyMessages = history.flatMap((entry) => entry.messages);
-      const systemPrompt = agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
+      const systemPrompt = themefy ? THEMEFY_PROMPT : agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
         planOnly: turn.planOnly, autoApprove: this.store.isSessionAutoApprove(session.id),
         providerVision: this.options.providerVision, configured: this.configuredSystemPrompt });
       const unplannedMessages: ProviderMessage[] = [
@@ -281,6 +287,7 @@ export class AgentEngine {
 
       round += 1;
       if (assembled.size === 0) {
+        if(themefy)throw new Error("Themefy ended without applying a theme. Your existing theme is unchanged; run /themefy to try again.");
         this.store.appendModelMessage(turnId, { role: "assistant", content: roundText, ...(responses ? { responses } : {}) });
         if (pendingContextDrops.length > 0) {
           const firstRetainedMessageId = history[0]?.firstMessageId ?? currentUser.id;
@@ -292,6 +299,7 @@ export class AgentEngine {
       }
 
       const providerCalls = [...assembled.entries()].sort(([left], [right]) => left - right).map(([, call]) => call);
+      if(themefy && providerCalls.length !== 1)throw new Error("Themefy requires one question or palette at a time. Your existing theme is unchanged.");
       const exceedsToolAllowance = totalToolCalls + providerCalls.length > maxToolCalls;
       totalToolCalls += providerCalls.length;
       if (providerCalls.some((call) => !call.id || !call.name)) throw new Error("Model returned an incomplete tool call");
@@ -362,6 +370,14 @@ export class AgentEngine {
           const toolMessage = { role: "tool" as const, toolCallId: call.id, content: result, ...(imageArtifactIds.length ? { imageArtifactIds } : {}) };
           currentMessages.push(toolMessage);
           this.store.appendModelMessage(turnId, toolMessage);
+          if(themefy && call.name === "apply_theme" && !result.startsWith("Error:")) {
+            const summary=JSON.parse(result) as {label:string;name:string};
+            const text=`Applied and saved ${summary.label}. Use /theme to select it again, or /themefy undo to restore your previous theme.`;
+            this.store.appendMessageDelta(turnId,text);
+            this.store.appendModelMessage(turnId,{role:"assistant",content:text});
+            this.store.completeTurn(turnId);
+            return;
+          }
         }
       }
       if (totalToolResultBytes >= 4 * 1024 * 1024) budgetReason = "Reached the 4 MiB tool-result allowance";
@@ -541,7 +557,12 @@ export class AgentEngine {
     imageArtifactIds: string[] = [],
     inference?: TurnInference,
   ): Promise<string> {
-    if (!workspaceRoot && call.name !== "ask_user") {
+    const themefy=this.store.getTurn(turnId)?.kind === "themefy";
+    if(themefy && !["ask_user","apply_theme"].includes(call.name)) {
+      const result="Error: Themefy can only ask questions and apply palettes";
+      this.store.settleToolCall(toolCallId,"denied",result);return result;
+    }
+    if (!workspaceRoot && call.name !== "ask_user" && !(themefy && call.name === "apply_theme")) {
       const result = "Error: this session is not bound to a workspace";
       this.store.settleToolCall(toolCallId, "failed", result);
       return result;
@@ -554,6 +575,27 @@ export class AgentEngine {
       const result = "Error: tool arguments are not valid JSON";
       this.store.settleToolCall(toolCallId, "failed", result);
       return result;
+    }
+    if(themefy && call.name === "apply_theme") {
+      try {
+        if(!this.options.themes)throw new Error("Theme storage is unavailable");
+        // Count real answers, including the exact interrupted continuation
+        // chain. A different interview in the same session cannot authorize it.
+        let answered=0,previous:string|undefined=turnId;const visited=new Set<string>();
+        while(previous && !visited.has(previous)) {
+          visited.add(previous);const interview=this.store.getTurn(previous);
+          if(!interview || interview.kind !== "themefy" || interview.sessionId !== sessionId)break;
+          answered+=this.store.userQuestions.forTurn(previous).filter(q=>q.mode === "interview" && q.status === "answered").flatMap(q=>q.answers).filter(a=>a.source === "typed").length;
+          previous=interview.content.startsWith("Continue this interrupted request")?interview.content.match(/^Previous interview turn: ([a-z0-9-]+)$/m)?.[1]:undefined;
+        }
+        if(answered<2)throw new Error("Gather at least two typed preferences through ask_user in interview mode before applying a palette");
+        signal.throwIfAborted();this.store.startToolCall(toolCallId);
+        const library=this.options.themes.apply(input), result=JSON.stringify({label:library.selected.label,name:library.selected.name});
+        this.store.settleToolCall(toolCallId,"completed",result);return result;
+      }catch(error){const result=`Error: ${error instanceof Error?error.message:String(error)}`;this.store.settleToolCall(toolCallId,"failed",result);return result;}
+    }
+    if(themefy && call.name === "ask_user" && (!isRecord(input) || input.mode !== "interview")) {
+      const result="Error: Themefy questions must use mode=interview";this.store.settleToolCall(toolCallId,"failed",result);return result;
     }
     if (call.name === SUBAGENT_TOOL && inference) return this.executeSubagent(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
     if (call.name === SESSION_TOOLS) return this.executeSessionTool(toolCallId, call, input, permissionMode, workspaceRoot, turnId, sessionId, signal, planOnly, imageArtifactIds, inference);

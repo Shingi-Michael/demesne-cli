@@ -151,7 +151,7 @@ export class GraphicsSession {
         thinkingEnabled:
           typeof p.thinkingEnabled === "boolean" ? p.thinkingEnabled : null,
         planOnly: p.planOnly === true,
-        ...(p.kind === "compaction" ? { kind: "compaction" as const } : {}),
+        ...(p.kind === "compaction" || p.kind === "themefy" ? { kind: p.kind } : {}),
       });
     const turn = this.session.turns.find((turn) => turn.id === event.turnId);
     if (turn) {

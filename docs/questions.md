@@ -29,6 +29,6 @@ Closing the app leaves daemon-owned work alive. If the daemon stops, an unfinish
 
 The state changes are journaled as `question.requested`, `question.updated`, `question.resolved`, and `question.cancelled`. Storage schema 8 adds the `user_questions` table. The caller never receives permission to infer a missing interview preference merely because time elapsed.
 
-This is the question infrastructure for future guided commands such as `/themefy`. Palette generation, theme validation, and theme application are separate from `ask_user`.
+[`/themefy`](themes.md) uses this infrastructure for adaptive color interviews. Its restricted palette workflow validates, saves and applies the theme after your answers; `ask_user` handles the questions and their durable lifecycle.
 
 Implementation: [tool definition](../apps/daemon/src/tools.ts), [live waiter](../apps/daemon/src/questions.ts), [durable state](../packages/storage/src/questions.ts), and [composer](../apps/graphics/live.ts).

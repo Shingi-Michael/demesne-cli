@@ -6,6 +6,8 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Added
 
+- `/themefy` adaptive composer interviews, instant validated palettes, saved custom themes and persistent theme undo in the shared desktop/Ghostty interface. Theme interviews have a restricted tool scope and stay out of coding context.
+
 - Default Ghostty graphics UI using offscreen Electron/Chromium and Kitty image tiles, with browser typography, Markdown, syntax highlighting, math, themes and responsive scaling.
 - Files/source navigation, recorded and workspace diffs, verification freshness and reruns, command inspection/stop, image zoom/pan/reference comparison, history and context panels.
 - Durable image artifacts from tools, MCP and a separately configured image backend; authenticated content routes and optional model vision hydration.

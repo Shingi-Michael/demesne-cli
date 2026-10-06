@@ -4,6 +4,7 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
+    "@demesne/brand": "workspace:*",
     "@demesne/protocol": "workspace:*"
   }
 }

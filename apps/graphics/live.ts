@@ -175,6 +175,7 @@ const verb = (tool: ToolEntry) =>
   ({
     run_command: "Run",
     ask_user: "Ask",
+    apply_theme: "Apply theme",
     view_image: "View",
     read_file: "Read",
     read_files: "Read",
@@ -526,7 +527,8 @@ function runHTML(run: GraphicsRun, index: number) {
         }
       if (group.length >= 3) {
         const sum = group.reduce((n, t) => n + (t.durationMs ?? 0), 0);
-        body += `<details class="explored" data-detail="${key}"${detailsOpen.has(key) ? " open" : ""}><summary>Explored · ${group.length} reads · ${duration(sum)}</summary><div>${group.map((tool) => toolRow(run, tool)).join("")}</div></details>`;
+        const summary=run.kind === "themefy" ? `Theme interview · ${group.filter(tool=>tool.name === "ask_user").length} questions${group.some(tool=>tool.name === "apply_theme" && tool.state === "done")?" · palette applied":""}` : `Explored · ${group.length} reads`;
+        body += `<details class="explored" data-detail="${key}"${detailsOpen.has(key) ? " open" : ""}><summary>${summary} · ${duration(sum)}</summary><div>${group.map((tool) => toolRow(run, tool)).join("")}</div></details>`;
         i = j - 1;
       } else body += toolRow(run, entry) + subagentTrace(run, entry, key);
     }
@@ -2224,20 +2226,20 @@ function renderOverlay() {
     if (!candidates.length) footerNote = message ?? (loading ? "" : "Nothing to clean up.");
   } else if (overlay === "themes") {
     title = "Theme";
-    subtitle = "this session";
+    subtitle = "saved on this device";
     noun = "themes";
-    overlayRows = state.themes.map((name) => ({
-      label: name,
+    overlayRows = [...(state.themeCanUndo ? [{label:"Undo last theme change",value:"restore previous palette",action:"theme-undo",data:{},group:"ACTIONS"}] : []),...state.themes.map((name) => ({
+      label: state!.themeOptions.find(t=>t.name === name)?.label ?? name,
       value: name === state!.theme ? "current" : "",
       action: "theme",
       data: { name },
       group:
-        name.includes("light") ||
+        name.startsWith("custom-") ? "YOUR THEMES" : name.includes("light") ||
         name.includes("latte") ||
         name === "github-light"
           ? "LIGHT"
           : "DARK",
-    }));
+    })).sort((a,b)=>["YOUR THEMES","DARK","LIGHT"].indexOf(a.group)-["YOUR THEMES","DARK","LIGHT"].indexOf(b.group))];
   } else if (overlay === "sessions") {
     title = "Sessions";
     noun = "sessions";
@@ -2528,6 +2530,11 @@ async function submitText(value = editor.value) {
       else await openOverlay("themes");
       clear();
       return;
+    }
+    if (id === "themefy") {
+      if(argument === "undo")await api("theme-undo");
+      else await api("themefy",{preferences:argument});
+      clear();return;
     }
     if (id === "rename") {
       if (argument) await api("rename", { title: argument });
@@ -3026,6 +3033,7 @@ async function dispatch(
     action === "mode" ||
     action === "model" ||
     action === "theme" ||
+    action === "theme-undo" ||
     action === "select-session" ||
     action === "archive" ||
     action === "undo"
@@ -3674,6 +3682,7 @@ window.demesneInspect = () => ({
       : null;
   })(),
   connection: state?.connection,
+  theme: state?.theme,
   sessionId: state?.session?.id,
   activeTurnId: state?.activeTurnId,
   runs: state?.runs.map((run) => ({

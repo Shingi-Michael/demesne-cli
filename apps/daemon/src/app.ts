@@ -43,6 +43,7 @@ import type { ContextPlanner } from "./context-planner.ts";
 import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
 import { QuestionBroker } from "./questions.ts";
+import { ThemeStore } from "./themes.ts";
 import { ConfigAllowlist } from "./allowlist.ts";
 import { WorkspaceTrust } from "./workspace-trust.ts";
 import { canonicalWorkspace, listWorkspaceFiles, readWorkspaceText, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
@@ -117,6 +118,7 @@ export function createDaemonApp(options: {
   providerRequestTimeoutMs?: number;
   providerEventLimit?: number;
   questionTimeoutMs?: number;
+  theme?: string;
   providerVision?: boolean;
   agent?: AgentConfig;
   /// Persists the sub-agent default chosen at runtime (null clears it).
@@ -128,6 +130,7 @@ export function createDaemonApp(options: {
     && (!options.images.url || !options.images.model)) throw new Error("Image generation requires both images.url and images.model");
   const hub = new EventHub();
   const store = new DemesneStore(options.databasePath, (event) => hub.publish(event));
+  const themes = new ThemeStore(join(dirname(options.databasePath), "themes.json"), options.theme);
   const driveNextCache = new DriveNextCache(join(dirname(options.databasePath), "drive-next"));
   const workspaceTrust = new WorkspaceTrust(join(dirname(options.databasePath), "trusted-workspaces.json"));
   const driveNextRuns = new Map<string, Promise<unknown>>();
@@ -215,6 +218,7 @@ export function createDaemonApp(options: {
       providerEventLimit: options.providerEventLimit,
       providerVision: options.providerVision,
       questions,
+      themes,
       commands,
       inferenceFor: (model, thinkingEnabled) => snapshotTurnInference(processor, thinkingEnabled, { model }),
       subagentModels: () => subagentModels(),
@@ -769,6 +773,25 @@ export function createDaemonApp(options: {
         return json(response, 202);
       }
 
+      if (path[0] === "v1" && path[1] === "themes" && path.length === 2) {
+        if (request.method === "GET") return json(themes.snapshot());
+        if (request.method === "POST") {
+          const body=await readJson(request);
+          if(!isRecord(body))throw new ProtocolValidationError("Expected a theme selection");
+          if(body.action === "undo")return json(themes.undo());
+          if(body.action === "select" && typeof body.name === "string")return json(themes.select(body.name));
+          throw new ProtocolValidationError("Expected select or undo theme action");
+        }
+      }
+      if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "themefy") {
+        const body=await readJson(request);
+        if(!isRecord(body) || (body.preferences !== undefined && (typeof body.preferences !== "string" || body.preferences.length>2000)))throw new ProtocolValidationError("Theme preferences must be at most 2000 characters");
+        const inference=snapshotTurnInference(processor,true);
+        const content=`/themefy${body.preferences ? ` ${body.preferences}`:""}`;
+        const {turn,event}=store.createTurn(path[2]!,content,"ask",true,false,"themefy");
+        queueTurn(turn,inference);
+        return json({turn,eventId:event.eventId} satisfies SubmitTurnResponse,202);
+      }
       if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "questions") {
         const id=path[2]!, input=await readJson(request), pending=store.userQuestions.get(id);
         if (!pending) return apiError("not_found","Question not found",404);
@@ -826,8 +849,9 @@ export function createDaemonApp(options: {
         // saved history only after the person explicitly finishes answering.
         const answers=store.userQuestions.forTurn(state.turnId).filter(q=>q.status==="answered")
           .flatMap(request=>request.questions.map((q,index)=>`${q.question}\nUser answer: ${request.answers[index]?.answer ?? "explicitly skipped"}`)).join("\n");
-        const content=`Continue this interrupted request using the user's recorded answers. Preserve their latest refinements and ask one follow-up at a time if necessary.\nOriginal request: ${original.content}\n${answers}`;
-        const resumed=store.createTurn(state.sessionId,content,original.permissionMode,original.thinkingEnabled ?? undefined,original.planOnly ?? false);
+        const previous=original.kind === "themefy" ? `Previous interview turn: ${original.id}\n` : "";
+        const content=`Continue this interrupted request using the user's recorded answers. Preserve their latest refinements and ask one follow-up at a time if necessary.\n${previous}Original request: ${original.content}\n${answers}`;
+        const resumed=store.createTurn(state.sessionId,content,original.permissionMode,original.thinkingEnabled ?? undefined,original.planOnly ?? false,original.kind ?? "chat");
         queueTurn(resumed.turn,resumeInference!);
         return json({question:state,turnId:resumed.turn.id,eventId:resumed.event.eventId},202);
       }

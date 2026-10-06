@@ -1,0 +1,2 @@
+import type {ThemeInput} from "../src/index.ts";
+export const warmOlive:ThemeInput={label:"Olive & Gold",appearance:"dark",colors:{background:"#181A14",surface:"#20231B",raised:"#2B3024",text:"#EEEAD8",secondary:"#7B806B",accent:"#A6B879",accentBright:"#DBCD8B",warning:"#DBC384",syntaxKeyword:"#C6A6D0",syntaxString:"#A6B879",syntaxNumber:"#DBCD8B",syntaxComment:"#6C745C",syntaxType:"#91C0B0",syntaxFunction:"#D3B889"}};

@@ -404,14 +404,6 @@ function nextSuggestion(): string | null {
   const answer = run.entries.findLast((entry) => entry.type === "assistant");
   return answer?.type === "assistant" ? splitNextPrompt(answer.raw).next : null;
 }
-/// The latest thing the model said it's thinking about: its last bold
-/// heading (ChatGPT summaries), else its last line, as plain text.
-function thinkingHeadline(raw: string): string {
-  const headings = [...raw.matchAll(/\*\*([^*\n]{2,120})\*\*/g)];
-  const line = headings.at(-1)?.[1] ?? raw.trim().split("\n").filter((text) => text.trim()).at(-1) ?? "";
-  const plain = line.replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
-  return plain.length > 72 ? `${plain.slice(0, 71)}…` : plain;
-}
 /// The same braille spinner as the terminal's thinking presence. Spans are
 /// advanced in place by one timer, so only the glyphs repaint.
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -503,9 +495,9 @@ function runHTML(run: GraphicsRun, index: number) {
       body += `<div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div>`;
     if (entry.type === "reasoning") {
       const live = active(run) && i === run.entries.length - 1;
-      // Live thinking is one line: the latest heading, expandable. The full
-      // text narrates actions that the tool rows below already show.
-      body += `<details class="thinking ${live ? "live" : ""}" data-detail="${key}"${detailsOpen.has(key) ? " open" : ""}><summary>${live ? spinner() : "◇"} ${live ? "Thinking" : "Thought"}${live && thinkingHeadline(entry.raw) ? `<span class="thinking-now"> · ${h(thinkingHeadline(entry.raw))}</span>` : ""} <span class="muted">${duration(entry.durationMs)}</span></summary>${thinkingBody(entry.raw)}</details>`;
+      // Match subagent traces: stream below a stable header, open while
+      // working unless the reader collapsed it, and fold when finished.
+      body += `<details class="thinking ${live ? "live" : ""}" data-detail="${key}"${(live && !detailsClosed.has(key)) || detailsOpen.has(key) ? " open" : ""}><summary>${live ? spinner() : "◇"} ${live ? "Thinking" : "Thought"} <span class="muted">${duration(entry.durationMs)}</span></summary>${thinkingBody(entry.raw)}</details>`;
     }
     if (entry.type === "tool") {
       const group: ToolEntry[] = [entry];
@@ -3606,6 +3598,12 @@ window.demesneInspect = () => ({
   // Whether the conversation follows new text, and where it is scrolled.
   stage: { follow, top: Math.round(el("stage").scrollTop), bottom: Math.round(el("stage").scrollHeight - el("stage").clientHeight) },
   selection: getSelection()?.toString() ?? "",
+  thinking: [...document.querySelectorAll<HTMLDetailsElement>("#conversation details.thinking")].map(detail=>{
+    const summary=detail.querySelector("summary")!, body=summary.nextElementSibling;
+    const header=summary.getBoundingClientRect(), content=body?.getBoundingClientRect();
+    return {open:detail.open,live:detail.classList.contains("live"),summary:summary.textContent,body:body?.textContent?.slice(-2000),
+      x:header.x+header.width/2,y:header.y+header.height/2,headerBottom:header.bottom,bodyTop:content?.top};
+  }),
   requests: [...document.querySelectorAll<HTMLElement>(".request .text")].map((e) => { const r = e.getBoundingClientRect(); return { text: e.textContent, x: r.x, y: r.y, width: r.width, height: r.height }; }),
   controls: [
     ...document.querySelectorAll<HTMLElement>(

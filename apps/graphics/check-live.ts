@@ -12,6 +12,7 @@ const directory = resolve(
 mkdirSync(directory, { recursive: true });
 let round = 0,
   driveDecisions = 0;
+const traceUpdate=Promise.withResolvers<void>(), traceFinish=Promise.withResolvers<void>(), checkTraceFinish=Promise.withResolvers<void>();
 const f = await fixture(
   {
     providerId: "test",
@@ -59,7 +60,9 @@ const f = await fixture(
           type: "reasoning_delta",
           delta: "I will add the module, then check the exported value.",
         };
-        await Bun.sleep(150);
+        await traceUpdate.promise;
+        yield {type:"reasoning_delta",delta:"\n\nThe trace continues beneath the thinking header, including a longer explanation that wraps across multiple lines instead of being truncated beside the spinner."};
+        await traceFinish.promise;
         yield {
           type: "tool_call_delta",
           index: 0,
@@ -72,6 +75,8 @@ const f = await fixture(
         };
         yield { type: "finish", reason: "tool_calls" };
       } else if (round === 2) {
+        yield {type:"reasoning_delta",delta:"**Checking the export**\n\nI will run the fixture check now."};
+        await checkTraceFinish.promise;
         yield {
           type: "tool_call_delta",
           index: 0,
@@ -269,14 +274,35 @@ try {
   await key("\x7f".repeat(100));
   app.paste("Create hello.ts and verify it");
   await key("\r");
+  await state(s=>s.live.thinking?.[0]?.live && s.live.thinking[0].open,"expanded live thinking");
+  let trace=current.live.thinking[0];
+  assert(!trace.summary.includes("I will"),"reasoning stays out of the thinking header");
+  assert(trace.bodyTop>trace.headerBottom,"the trace renders below its header");
+  await capture("thinking-live");
+  app.click(Math.round(trace.x),Math.round(trace.y));
+  await state(s=>!s.live.thinking[0].open,"manually collapsed thinking");
+  traceUpdate.resolve();
+  await state(s=>s.live.thinking[0].body.includes("trace continues"),"reasoning update");
+  assert(!current.live.thinking[0].open,"new chunks respect manual collapse");
+  trace=current.live.thinking[0];app.click(Math.round(trace.x),Math.round(trace.y));
+  await state(s=>s.live.thinking[0].open,"reopened thinking");
+  await capture("thinking-expanded");
+  traceFinish.resolve();
   await state((s) => s.live.approvals === 1, "write approval");
+  assert(current.live.thinking[0].open,"explicitly expanded traces stay open after thinking finishes");
   await capture("approval-write");
+  trace=current.live.thinking[0];app.click(Math.round(trace.x),Math.round(trace.y));
+  await state(s=>!s.live.thinking[0].open,"fold completed trace before checking panels");
   await click("permission", { decision: "allow_once" });
+  await state(s=>s.live.thinking?.[1]?.live && s.live.thinking[1].open,"second live trace");
+  assert(!current.live.thinking[1].summary.includes("Checking the export"),"summary headings also stay below the header");
+  checkTraceFinish.resolve();
   await state(
     (s) =>
       s.live.approvals === 1 && s.live.text.includes("Allow this command?"),
   );
   await capture("approval-command");
+  assert(!current.live.thinking[1].open,"untouched traces fold when thinking finishes");
   await click("permission", { decision: "allow_once" });
   await state((s) => s.live.questions === 1, "question");
   await capture("question");
@@ -483,6 +509,7 @@ try {
     }),
   );
 } finally {
+  traceUpdate.resolve();traceFinish.resolve();checkTraceFinish.resolve();
   app.kill();
   await f.close();
 }

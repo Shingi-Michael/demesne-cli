@@ -33,6 +33,8 @@ Panels preserve navigation within a session; changing sessions clears session-sp
 
 Use theme roles such as `paper`, `secondary`, `muted`, `rule`, `electric`, `thinking`, `citron` and `signal`. Blue identifies primary interaction, amber ongoing reasoning/attention, green successful evidence and red failure. Preserve text labels and icons so color is not the only signal. Source syntax colors remain distinct from added/removed diff markings.
 
+Thinking traces appear below a stable spinner, label and duration header. Like subagent traces, they open while working, respect a reader's manual collapse during streaming, and fold when finished unless explicitly expanded. Reasoning text and headings belong in the trace body, never inline beside the spinner.
+
 Markdown is sanitized; code fences use syntax highlighting and math uses KaTeX. In-progress Markdown is reparsed for correctness while unchanged rendered blocks retain their nodes. Code attached from Files remains literal, including `@` characters. Recorded file changes use immutable before/after evidence; the Files viewer explicitly shows current workspace contents.
 
 A check’s success is separate from its freshness. Verification labels outdated, stopped, unverified and incomplete evidence rather than treating every historical green result as current. See [panel behavior](../apps/graphics/README.md#review-panel-upgrades).

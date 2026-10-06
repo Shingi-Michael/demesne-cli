@@ -19,7 +19,7 @@ export type ConfigSource = "env" | "user" | "project";
 export interface ProviderConfig {
   /// Maximum concurrent requests to this provider; defaults to inference_slots.
   inferenceSlots?: number;
-  auth?: "api-key" | "chatgpt" | "codex";
+  auth?: "api-key" | "chatgpt";
   authProfile?: string;
   allowHttpEndpoint?: string;
   vision?: boolean;
@@ -178,7 +178,6 @@ export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
   }
 
   applyEnvironment(config, env, sources);
-  assertCodexProvider(config.provider);
   return { config, files, sources };
 }
 
@@ -231,6 +230,7 @@ function applyDocument(
   source: ConfigSource,
   sources: Record<string, ConfigSource>,
 ): void {
+  document = retireLegacyProviders(document);
   const path = source === "user" ? "user config" : "project config";
   assertKnownKeys(document, [
     "server", "data_dir", "theme", "inference_slots",
@@ -258,7 +258,7 @@ function applyDocument(
       if (slots !== undefined && slots > 1024) throw new ConfigError(`${key} must be between 1 and 1024`);
       return slots;
     });
-    assignInto(config.provider, "auth", provider.auth, source, sources, "provider.auth", (value, key) => optionalEnum(value, ["api-key", "chatgpt", "codex"], key));
+    assignInto(config.provider, "auth", provider.auth, source, sources, "provider.auth", (value, key) => optionalEnum(value, ["api-key", "chatgpt"], key));
     assignInto(config.provider, "authProfile", provider.auth_profile, source, sources, "provider.authProfile", optionalString);
     assignInto(config.provider, "allowHttpEndpoint", provider.allow_http_endpoint, source, sources, "provider.allowHttpEndpoint", optionalString);
     assignInto(config.provider, "url", provider.url, source, sources, "provider.url", (value, key) => {
@@ -285,7 +285,6 @@ function applyDocument(
     assignInto(config.provider, "systemPrompt", provider.system_prompt, source, sources, "provider.systemPrompt", optionalString);
     assignInto(config.provider, "firstEventTimeoutMs", provider.first_event_timeout_ms, source, sources, "provider.firstEventTimeoutMs", optionalPositiveInteger);
     assignInto(config.provider, "requestTimeoutMs", provider.request_timeout_ms, source, sources, "provider.requestTimeoutMs", optionalPositiveInteger);
-    assertCodexProvider(config.provider);
   }
 
   if (document.additional_providers !== undefined) {
@@ -297,8 +296,8 @@ function applyDocument(
       const childSources: Record<string, ConfigSource> = {};
       applyDocument(child, { provider: entry }, source, childSources);
       child.provider.id ??= id;
-      if ((!child.provider.url && child.provider.auth !== "codex") || !child.provider.model || !child.provider.contextWindow || !child.provider.maxOutputTokens) {
-        throw new ConfigError(`additional_providers.${id} requires ${child.provider.auth === "codex" ? "" : "url, "}model, context_window and max_output_tokens`);
+      if (!child.provider.url || !child.provider.model || !child.provider.contextWindow || !child.provider.maxOutputTokens) {
+        throw new ConfigError(`additional_providers.${id} requires url, model, context_window and max_output_tokens`);
       }
       if (child.provider.maxOutputTokens >= child.provider.contextWindow) {
         throw new ConfigError(`additional_providers.${id}.max_output_tokens must be smaller than context_window`);
@@ -403,14 +402,28 @@ function applyDocument(
   }
 }
 
-function assertCodexProvider(provider: ProviderConfig): void {
-  if (provider.auth !== "codex") return;
-  for (const key of ["url", "apiKey", "authProfile"] as const) {
-    if (provider[key] !== undefined) throw new ConfigError(`provider.${key} is not used by Codex; sign in with demesne auth login codex`);
+/// Retire the removed runtime without turning its credentials or model IDs into
+/// a different provider. Old files remain loadable for setup and sign-in; the
+/// original is backed up when the user next updates their configuration.
+function retireLegacyProviders(document: Record<string, unknown>): Record<string, unknown> {
+  const retiredPrimary = isRecord(document.provider) && document.provider.auth === "codex";
+  const entries = isRecord(document.additional_providers) ? document.additional_providers : undefined;
+  if (!retiredPrimary && !entries) return document;
+  const remaining = entries ? Object.fromEntries(Object.entries(entries).filter(([, provider]) => !isRecord(provider) || provider.auth !== "codex")) : undefined;
+  const normalized = { ...document };
+  if (remaining) normalized.additional_providers = remaining;
+  if (retiredPrimary) {
+    delete normalized.provider;
+    const fallback = Object.entries(remaining ?? {})[0];
+    if (fallback && isRecord(fallback[1])) {
+      // Promotion must retain the stricter requirements of an additional
+      // provider, including its endpoint and complete context budget.
+      validateConfigDocument({ additional_providers: { [fallback[0]]: fallback[1] } });
+      normalized.provider = { ...fallback[1], id: fallback[1].id ?? fallback[0] };
+      delete remaining![fallback[0]];
+    }
   }
-  const namespaced = (model: string) => /^codex\/[^\s]+$/.test(model);
-  if (provider.model && !namespaced(provider.model)) throw new ConfigError("provider.model for Codex must start with codex/");
-  if (provider.allowedModels?.some(model => !namespaced(model))) throw new ConfigError("provider.allowedModels for Codex must contain codex/ model IDs");
+  return normalized;
 }
 
 /// Canonical environment variable for each configurable key. Exported so
@@ -624,8 +637,12 @@ export function updateUserConfig(
   path: string,
   updates: Record<string, unknown>,
 ): { backup: string | null; document: Record<string, unknown> } {
-  const existing = existsSync(path) ? parseConfigFile(path) : {};
-  const merged = deepMerge(existing, updates);
+  const providers = [updates.provider, ...Object.values(isRecord(updates.additional_providers) ? updates.additional_providers : {})];
+  if (providers.some(provider => isRecord(provider) && provider.auth === "codex")) {
+    throw new ConfigError("provider.auth must be one of api-key, chatgpt");
+  }
+  const existing = existsSync(path) ? retireLegacyProviders(parseConfigFile(path)) : {};
+  const merged = retireLegacyProviders(deepMerge(existing, updates));
   validateConfigDocument(merged, path);
   const rendered = renderConfigDocument(merged);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });

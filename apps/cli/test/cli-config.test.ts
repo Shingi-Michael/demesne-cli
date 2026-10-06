@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadCliSettings } from "../src/cli-config.ts";
+import { loadAccountSettings, loadCliSettings } from "../src/cli-config.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -17,6 +17,23 @@ afterEach(() => {
 });
 
 describe("loadCliSettings", () => {
+  test("ChatGPT account settings use machine credentials and daemon when a project overrides session settings", () => {
+    const root = temporaryDirectory(), home = join(root, "home"), workspace = join(root, "project");
+    const configPath = join(home, ".demesne/config.toml");
+    mkdirSync(join(home, ".demesne"), { recursive: true });
+    mkdirSync(join(workspace, ".demesne"), { recursive: true });
+    writeFileSync(configPath, `data_dir = "${join(root, "machine-data")}"\nserver = "http://127.0.0.1:7437"\n`);
+    writeFileSync(join(workspace, ".demesne/config.toml"), `data_dir = "${join(root, "project-data")}"\nserver = "http://127.0.0.1:7537"\n`);
+    const settings = loadCliSettings({ env: {}, home, workspaceRoot: workspace });
+    expect(settings.dataDirectory).toBe(join(root, "project-data"));
+    expect(settings.accountDataDirectory).toBe(join(root, "machine-data"));
+    expect(loadAccountSettings({ env: {}, home })).toEqual({ configPath, dataDirectory: join(root, "machine-data"), server: "http://127.0.0.1:7437" });
+    const env = { DEMESNE_CONFIG_FILE: join(root, "new-config.toml"), DEMESNE_DATA_DIR: join(root, "environment-data"), DEMESNE_SERVER: "http://127.0.0.1:7637" };
+    expect(loadAccountSettings({ home, env })).toEqual({ configPath: env.DEMESNE_CONFIG_FILE, dataDirectory: env.DEMESNE_DATA_DIR, server: env.DEMESNE_SERVER });
+    expect(loadAccountSettings({ home, env, serverOverride: "http://127.0.0.1:7737" }).server).toBe("http://127.0.0.1:7737");
+    writeFileSync(join(workspace, ".demesne/config.toml"), "broken = true\n");
+    expect(loadCliSettings({ env: {}, home, workspaceRoot: workspace, includeProject: false }).dataDirectory).toBe(join(root, "machine-data"));
+  });
   test("falls back to loopback defaults without any configuration", () => {
     const home = temporaryDirectory();
     const settings = loadCliSettings({ env: {}, home, workspaceRoot: home });

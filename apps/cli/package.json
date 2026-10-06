@@ -5,7 +5,6 @@
   "dependencies": {
     "@demesne/brand": "workspace:*",
     "@demesne/client": "workspace:*",
-    "@demesne/codex": "workspace:*",
     "@demesne/config": "workspace:*",
     "@demesne/protocol": "workspace:*",
     "@demesne/providers": "workspace:*",

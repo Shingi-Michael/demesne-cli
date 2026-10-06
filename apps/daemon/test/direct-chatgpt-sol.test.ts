@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DemesneClient } from "../../../packages/client/src/index.ts";
 import type { EventEnvelope } from "@demesne/protocol";
-import { ChatGPTProvider, type ProviderAdapter } from "@demesne/providers";
+import { ChatGPTProvider } from "@demesne/providers";
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp } from "../src/app.ts";
 import { MultiProviderProcessor } from "../src/multi-provider-processor.ts";
@@ -62,10 +62,6 @@ test("unlisted configured direct Sol preserves Codex history and waits for Demes
     } finally { store.close(); }
 
     const bodies: RequestBody[] = [];
-    let codexCalls = 0;
-    const codex: ProviderAdapter = { id: "Codex", async listModels() {
-      return [{ id: `codex/${SOL}`, provider: this.id, contextWindow: 272_000 }];
-    }, async *stream() { codexCalls++; throw new Error("Direct Sol must not call the Codex runtime"); } };
     const direct = new ChatGPTProvider({ accountId: "direct-account", accessToken: async () => "fake-own-token", configuredModel: SOL,
       contextWindow: 262_144, fetch: (async (url, init) => {
         if (String(url) === "https://api.openai.com/v1/models") {
@@ -80,7 +76,6 @@ test("unlisted configured direct Sol preserves Codex history and waits for Demes
         return responseStream(bodies.length === 1);
       }) as typeof fetch });
     const router = new MultiProviderProcessor([
-      new ProviderTurnProcessor(codex, `codex/${SOL}`, { maxOutputTokens: 1536 }, undefined, 272_000),
       new ProviderTurnProcessor(direct, SOL, { maxOutputTokens: 1536 }, undefined, 262_144, undefined, true),
     ], []);
     const running = app = createDaemonApp({ databasePath, processor: router, agent: { maxModelRounds: 3, maxToolCalls: 6 } });
@@ -88,7 +83,7 @@ test("unlisted configured direct Sol preserves Codex history and waits for Demes
       Promise.resolve(running.fetch(new Request(input, init)))) as typeof fetch });
     const models = await client.listModels();
     expect(models.find(model => model.id === SOL)).toMatchObject({ provider: "ChatGPT", displayName: "GPT-6.1 Sol" });
-    expect(models.some(model => model.id === `codex/${SOL}` && model.provider === "Codex")).toBe(true);
+    expect(models.every(model => model.provider === "ChatGPT")).toBe(true);
     expect(bodies).toHaveLength(0); // Discovery does not spend inference or prove access.
     await client.setModel(SOL, "high");
     expect(await client.health()).toMatchObject({ provider: "ChatGPT", model: SOL, reasoning: "high", contextCapacity: 262_144 });
@@ -115,7 +110,6 @@ test("unlisted configured direct Sol preserves Codex history and waits for Demes
     expect(events.at(-1)?.type).toBe("turn.completed");
     expect(events.some(event => event.type === "tool.call_completed" && event.payload.name === "write_file")).toBe(true);
     expect(readFileSync(join(workspace, "proof.txt"), "utf8")).toBe("Written through the direct provider.\n");
-    expect(codexCalls).toBe(0);
     expect(bodies).toHaveLength(2);
     expect(bodies[0]!.input).toContainEqual({ role: "user", content: "Read legacy.txt" });
     expect(bodies[0]!.input).toContainEqual({ type: "function_call", call_id: "call_codex_legacy", name: "read_file", namespace: "demesne", arguments: '{"path":"legacy.txt"}' });

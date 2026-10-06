@@ -113,7 +113,9 @@ test("a queued follow-up is sent only on success and restored on cancellation", 
       text: "Follow-up",
     });
     gates[0]!.resolve();
-    await eventually(() => calls === 2);
+    // The daemon can start the second turn before the host has the submit
+    // response that records it locally; wait for both.
+    await eventually(() => calls === 2 && host.current!.session.turns.length === 2);
     expect(host.current!.session.turns[1]?.content).toBe("Follow-up");
     await host.handle("draft", {
       sessionId: host.current!.session.id,

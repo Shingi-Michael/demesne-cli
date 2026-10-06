@@ -73,6 +73,8 @@ Codex model IDs are namespaced as `codex/MODEL`. The [managed client](../package
 
 The provider starts an ephemeral Codex thread, injects Demesne's model-visible history, and registers the current Demesne tool definitions. Workspace environments are empty; native shell, editing, plugins, hosted tools and skill discovery are disabled. A read-only sandbox and refusal of unexpected native requests provide additional protection. Repository instructions reach the model through Demesne's existing prompt builder.
 
+Codex's generic permission instructions are suppressed because they would describe the entire session as read-only. The bridge instead explains that Demesne executes client tools under its own permission policy: Build offers edits with approval, while Plan offers inspection tools. The native sandbox enforcement remains read-only.
+
 ```mermaid
 sequenceDiagram
     participant E as Demesne engine

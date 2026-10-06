@@ -70,7 +70,7 @@ These are separate diagnostic runs, not a recommended permanent combination. Tra
 
 ## ChatGPT sign-in or incomplete tool calls
 
-Use [the auth commands](authentication.md), check the account/model catalog, and restart the daemon after manually changing provider configuration. Login and account selection reload providers automatically. Model availability and supported reasoning levels come from the signed-in account. A separate image backend is still required for generation.
+Use [the auth commands](authentication.md), check the account/model catalog, and restart the daemon after CLI login, account selection, or manually changing provider configuration. In-app sign-in reloads providers automatically. Model availability and supported reasoning levels come from the signed-in account. A separate image backend is still required for generation.
 
 For Sol, run `demesne auth login chatgpt --model gpt-6.1-sol`, or select it for an existing registration with `demesne auth use chatgpt --account ACCOUNT_ID --model gpt-6.1-sol`. If the catalog omits Sol, that explicit selection performs a small text-only access check and saves the model only after a completed response identifies it. A saved choice does not guarantee that later requests will succeed if account access or allowance changes.
 

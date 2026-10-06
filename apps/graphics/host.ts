@@ -967,6 +967,19 @@ export class GraphicsHost {
       }
       this.hideNext(item.id, Date.now() + 6 * 3_600_000);
       if (method === "next-plan") return this.submit(`${item.title}. ${item.why}`, true);
+      // Run works in its own git worktree, so your checkout and this
+      // conversation stay as they are until you apply the result. Outside a
+      // git repository (or on an older daemon) it's a bounded mission here.
+      if (this.breakage.supported) {
+        const cited = this.nextQueue.signals.filter((signal) => item.evidence.includes(signal.id));
+        try { return await this.breakage.runProposal({ id: item.id, kind: item.kind, title: item.title, why: item.why }, cited); }
+        catch (error) {
+          if (!/needs a git repository|no commits yet/.test(error instanceof Error ? error.message : "")) {
+            this.hideNext(item.id, 0);
+            throw error;
+          }
+        }
+      }
       if (!this.drive) throw new Error("Drive is unavailable here.");
       return this.drive.handle("drive", { text: `--bounded ${item.title}. ${item.why}` });
     }

@@ -94,3 +94,55 @@ test("a breakage is fixed in its own worktree, then applied to the user's branch
     expect((await call(`/v1/drive/fixes/${second.id}/apply`, { method: "POST" })).status).toBe(409);
   } finally { server.stop(true); await app.close(); }
 });
+
+test("a Next proposal runs in its own worktree and branch, with no breakage needed", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "drive-proposal-"))); roots.push(root);
+  const workspace = join(root, "repo");
+  mkdirSync(join(workspace, "src"), { recursive: true });
+  writeFileSync(join(workspace, "src", "todo.ts"), "// TODO: export a version\n");
+  git(workspace, "init", "-q", "-b", "main"); git(workspace, "add", "-A"); git(workspace, "commit", "-qm", "init");
+
+  let prompt = "";
+  const processor: TurnProcessor = { providerId: "test", modelId: "coder", async listModels() { return []; },
+    async *stream(messages) {
+      const last = messages.at(-1)!;
+      if (last.role === "user") {
+        prompt = String(last.content);
+        yield { type: "tool_call_delta" as const, index: 0, idDelta: "w", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "src/todo.ts", content: "export const version = \"1\";\n" }) };
+        yield { type: "finish" as const, reason: "tool_calls" }; return;
+      }
+      yield { type: "text_delta" as const, delta: "Exported the version the TODO asked for." };
+      yield { type: "finish" as const, reason: "stop" };
+    } };
+  const app = createDaemonApp({ databasePath: join(root, "data", "state.sqlite"), processor });
+  const server = Bun.serve({ port: 0, fetch: app.fetch });
+  const call = async (path: string, init?: RequestInit) => {
+    const response = await fetch(new URL(path, server.url), { headers: { "Content-Type": "application/json" }, ...init });
+    return { status: response.status, body: await response.json() as any };
+  };
+  const proposal = { id: "p1", kind: "tidy", title: "Resolve the version TODO", why: "src/todo.ts asks for an exported version." };
+  try {
+    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) });
+    // A breakage fix still needs a signal; a proposal doesn't.
+    expect((await call("/v1/drive/fixes", { method: "POST", body: JSON.stringify({ workspace, signals: [] }) })).status).toBe(400);
+    const started = await call("/v1/drive/fixes", { method: "POST", body: JSON.stringify({ workspace, signals: [], proposal }) });
+    expect(started.status).toBe(201);
+    const fix = started.body.fix as DriveFix;
+    expect(fix.branch).toMatch(/^drive\/tidy-resolve-the-version-todo-/);
+    expect(fix.proposal).toEqual(proposal as DriveFix["proposal"]);
+    let ready: DriveFix | undefined;
+    for (let i = 0; i < 400 && !ready; i++) {
+      const item = (await call(`/v1/drive/fixes?workspace=${encodeURIComponent(workspace)}`)).body.fixes.find((entry: DriveFix) => entry.id === fix.id) as DriveFix;
+      if (item.status !== "starting" && item.status !== "running") ready = item; else await Bun.sleep(25);
+    }
+    expect(ready).toMatchObject({ status: "ready", title: proposal.title, diff: { files: 1, paths: ["src/todo.ts"] } });
+    expect(prompt).toContain("Task: Resolve the version TODO");
+    expect(prompt).toContain("Why: src/todo.ts asks for an exported version.");
+    // Nothing reaches the checkout until Apply, and the commit carries the task's title.
+    expect(readFileSync(join(workspace, "src", "todo.ts"), "utf8")).toBe("// TODO: export a version\n");
+    expect(out(workspace, "log", "-1", "--format=%s", ready!.branch)).toBe("Resolve the version TODO");
+    expect((await call(`/v1/drive/fixes/${fix.id}/apply`, { method: "POST" })).body.fix.status).toBe("applied");
+    expect(readFileSync(join(workspace, "src", "todo.ts"), "utf8")).toBe("export const version = \"1\";\n");
+    expect(out(workspace, "branch", "--list", "drive/*")).toBe("");
+  } finally { server.stop(true); await app.close(); }
+});

@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import { splitNextPrompt, type CommandRecord, type DriveFix, type DriveFixAction, type DriveSignal, type Turn } from "@demesne/protocol";
+import { splitNextPrompt, type CommandRecord, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveSignal, type Turn } from "@demesne/protocol";
 
-/// Fixes for breakages, each made in its own git worktree on its own branch:
-/// the user's checkout and conversation are untouched while the agent works,
-/// and nothing reaches them until they choose Apply (cherry-pick onto their
+/// Drive's unattended work, each piece in its own git worktree on its own
+/// branch: fixes for breakages, and Next proposals you press Run on. The
+/// user's checkout and conversation are untouched while the agent works, and
+/// nothing reaches them until they choose Apply (cherry-pick onto their
 /// branch), Open PR (push the branch), or Discard.
 
 export interface FixHost {
@@ -48,6 +49,23 @@ ${fix.signals.map((signal) => `- ${signal.title}: ${signal.detail}`).join("\n")}
 End with two or three plain sentences: what was wrong and what you changed.`;
 }
 
+export function proposalPrompt(fix: Pick<DriveFix, "branch" | "signals"> & { proposal: DriveFixProposal }) {
+  const { proposal } = fix;
+  return `You're doing one task Drive proposed for this repository. You're working in a separate git worktree on branch ${fix.branch}, so the user's own checkout is untouched.
+
+Task: ${proposal.title}
+Why: ${proposal.why}
+${fix.signals.length ? `\nEvidence:\n${fix.signals.map((signal) => `- ${signal.title}: ${signal.detail}`).join("\n")}\n` : ""}
+1. Read the relevant code and confirm the task is real before changing anything. If it isn't, change nothing and say why.
+2. Make the smallest change that completes the task. Stay inside its scope: don't refactor or touch unrelated code.
+3. Run the checks that cover what you changed (tests, typecheck, lint) and confirm they pass.
+4. Don't install or upgrade dependencies (node_modules is shared with the user's checkout), and don't commit or push: demesne commits the result for the user to review.
+
+End with two or three plain sentences: what you changed and how you checked it.`;
+}
+
+const slugOf = (text: string, fallback: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32).replace(/-$/, "") || fallback;
+
 export class DriveFixes {
   private fixes: DriveFix[] = [];
   private done = new Map<string, Promise<void>>();
@@ -85,19 +103,18 @@ export class DriveFixes {
   /// Waits for a running fix to finish (tests and shutdown).
   async settled(id: string) { await this.done.get(id); }
 
-  async start(workspace: string, signals: DriveSignal[]): Promise<DriveFix> {
+  async start(workspace: string, signals: DriveSignal[], proposal?: DriveFixProposal): Promise<DriveFix> {
     if (this.fixes.some((fix) => fix.workspace === workspace && (fix.status === "starting" || fix.status === "running")))
-      throw new Error("A fix is already running for this project.");
+      throw new Error(proposal ? "Drive is already working in a worktree for this project." : "A fix is already running for this project.");
     const top = await this.git(["git", "rev-parse", "--show-toplevel"], workspace);
     if (!top.ok) throw new Error("Fixing in a worktree needs a git repository.");
     const base = await this.git(["git", "rev-parse", "HEAD"], workspace);
     if (!base.ok) throw new Error("This repository has no commits yet.");
     const id = randomUUID().slice(0, 8);
-    const title = signals.length === 1 ? signals[0]!.title : `${signals.length} breakages: ${signals.map((signal) => signal.title).join("; ")}`.slice(0, 200);
-    const slug = signals[0]!.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32).replace(/-$/, "") || "breakage";
-    const branch = `drive/fix-${slug}-${id.slice(0, 4)}`;
+    const title = proposal ? proposal.title.slice(0, 200) : signals.length === 1 ? signals[0]!.title : `${signals.length} breakages: ${signals.map((signal) => signal.title).join("; ")}`.slice(0, 200);
+    const branch = proposal ? `drive/${proposal.kind}-${slugOf(proposal.title, "task")}-${id.slice(0, 4)}` : `drive/fix-${slugOf(signals[0]!.title, "breakage")}-${id.slice(0, 4)}`;
     const path = join(this.worktreeRoot, `${basename(top.out)}-${id}`);
-    const fix: DriveFix = { id, workspace, title, signals, branch, path, base: base.out, sessionId: null, turnId: null, status: "starting", startedAt: new Date().toISOString(), finishedAt: null };
+    const fix: DriveFix = { id, workspace, title, signals, ...(proposal ? { proposal } : {}), branch, path, base: base.out, sessionId: null, turnId: null, status: "starting", startedAt: new Date().toISOString(), finishedAt: null };
     this.fixes.push(fix); this.save();
     try {
       mkdirSync(this.worktreeRoot, { recursive: true, mode: 0o700 });
@@ -106,8 +123,8 @@ export class DriveFixes {
       this.linked.set(id, await this.linkDependencies(top.out, path));
       // The session opens where the user works inside the repository.
       const sub = relative(top.out, workspace);
-      const sessionId = this.host.startSession(`Fix: ${title}`.slice(0, 200), sub ? join(path, sub) : path);
-      const { turnId, done } = this.host.startTurn(sessionId, fixPrompt(fix));
+      const sessionId = this.host.startSession(`${proposal ? "Drive" : "Fix"}: ${title}`.slice(0, 200), sub ? join(path, sub) : path);
+      const { turnId, done } = this.host.startTurn(sessionId, proposal ? proposalPrompt({ ...fix, proposal }) : fixPrompt(fix));
       Object.assign(fix, { sessionId, turnId, status: "running" });
       this.save();
       this.done.set(id, done.then(() => this.finish(fix)).catch((error) => this.fail(fix, error)).finally(() => this.done.delete(id)));
@@ -147,18 +164,18 @@ export class DriveFixes {
       if (command.check && command.status !== "running" && !latest.has(key)) latest.set(key, command);
     }
     fix.checks = [...latest.entries()].slice(0, 6).map(([command, record]) => ({ command, passed: record.status === "completed" && record.exitCode === 0 }));
-    if (turn?.status !== "completed") return this.fail(fix, new Error(turn?.status === "cancelled" ? "The fix was stopped." : `The fix turn ${turn?.status ?? "was lost"}.`));
+    if (turn?.status !== "completed") return this.fail(fix, new Error(turn?.status === "cancelled" ? `The ${fix.proposal ? "task" : "fix"} was stopped.` : `The coding turn ${turn?.status ?? "was lost"}.`));
     // Commit what the agent changed, never the linked dependencies.
     const excludes = (this.linked.get(fix.id) ?? []).map((rel) => `:(exclude,top)${rel}`);
     await this.git(["git", "add", "-A", "--", ".", ...excludes], fix.path);
     const staged = await this.git(["git", "diff", "--cached", "--quiet"], fix.path);
     if (!staged.ok) {
-      const committed = await this.git(["git", "commit", "-m", `Fix: ${fix.title}`.slice(0, 200), "-m", (summary || "Made by demesne in a worktree.").slice(0, 2000)], fix.path);
-      if (!committed.ok) return this.fail(fix, new Error(`Couldn't commit the fix: ${firstLine(committed.err || committed.out)}`));
+      const committed = await this.git(["git", "commit", "-m", (fix.proposal ? fix.title : `Fix: ${fix.title}`).slice(0, 200), "-m", (summary || "Made by demesne in a worktree.").slice(0, 2000)], fix.path);
+      if (!committed.ok) return this.fail(fix, new Error(`Couldn't commit the ${fix.proposal ? "change" : "fix"}: ${firstLine(committed.err || committed.out)}`));
     }
     const numstat = await this.git(["git", "diff", "--numstat", `${fix.base}..HEAD`], fix.path);
     const rows = numstat.out.split("\n").filter(Boolean).map((line) => line.split("\t"));
-    if (!rows.length) return this.fail(fix, new Error("The agent made no changes."));
+    if (!rows.length) { fix.unchanged = true; return this.fail(fix, new Error("The agent made no changes.")); }
     fix.diff = { files: rows.length, additions: rows.reduce((n, [a]) => n + (Number(a) || 0), 0), deletions: rows.reduce((n, [, d]) => n + (Number(d) || 0), 0), paths: rows.slice(0, 8).map((row) => row[2]!) };
     Object.assign(fix, { status: "ready", finishedAt: new Date().toISOString() });
     this.save();
@@ -174,21 +191,22 @@ export class DriveFixes {
       this.save();
       return fix;
     }
-    if (fix.status !== "ready") throw new Error("The fix isn't ready yet.");
+    if (fix.status !== "ready") throw new Error(`The ${fix.proposal ? "change" : "fix"} isn't ready yet.`);
     if (action === "apply") {
       const picked = await this.git(["git", "cherry-pick", `${fix.base}..${fix.branch}`], fix.workspace, 120_000);
       if (!picked.ok) {
         await this.git(["git", "cherry-pick", "--abort"], fix.workspace);
-        throw new Error(`It didn't apply cleanly to your checkout (${firstLine(picked.err || picked.out)}). The fix is still on ${fix.branch}.`);
+        throw new Error(`It didn't apply cleanly to your checkout (${firstLine(picked.err || picked.out)}). It's still on ${fix.branch}.`);
       }
       await this.cleanup(fix, true);
       fix.status = "applied";
     } else {
       const pushed = await this.git(["git", "push", "-u", "origin", fix.branch], fix.path, 120_000);
       if (!pushed.ok) throw new Error(`Couldn't push ${fix.branch}: ${firstLine(pushed.err)}`);
-      const body = [`Fixes a breakage demesne noticed:`, ...fix.signals.map((signal) => `- **${signal.title}**: ${signal.detail}`), "", fix.summary ?? "",
+      const body = [...(fix.proposal ? [`Drive proposed this and you ran it: ${fix.proposal.why}`, ...(fix.signals.length ? ["", "Evidence:"] : [])] : [`Fixes a breakage demesne noticed:`]),
+        ...fix.signals.map((signal) => `- **${signal.title}**: ${signal.detail}`), "", fix.summary ?? "",
         ...(fix.checks?.length ? ["", "Checks run in the worktree:", ...fix.checks.map((check) => `- ${check.passed ? "✓" : "✕"} \`${check.command}\``)] : [])].join("\n");
-      const pr = await this.git(["gh", "pr", "create", "--head", fix.branch, "--title", `Fix: ${fix.title}`.slice(0, 200), "--body", body.slice(0, 60_000)], fix.path, 120_000);
+      const pr = await this.git(["gh", "pr", "create", "--head", fix.branch, "--title", (fix.proposal ? fix.title : `Fix: ${fix.title}`).slice(0, 200), "--body", body.slice(0, 60_000)], fix.path, 120_000);
       if (!pr.ok) throw new Error(`Pushed ${fix.branch}, but couldn't open the PR: ${firstLine(pr.err)}`);
       fix.prUrl = pr.out.split("\n").findLast((line) => /^https?:\/\//.test(line)) ?? pr.out;
       await this.cleanup(fix, false);

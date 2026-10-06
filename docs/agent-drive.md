@@ -29,7 +29,7 @@ The Drive panel pins a live, paused or blocked mission at the top (status, tasks
 
 | Action | Result |
 | --- | --- |
-| Run | Start a **bounded** mission for that proposal |
+| Run | Do it in its own git worktree and branch, then show the result to Apply, Open PR or Discard ([below](#run-works-in-a-worktree)) |
 | Plan first | Submit a read-only planning turn |
 | Not now | Hide that proposal for 24 hours |
 | Never | Hide its stable proposal ID and record a project-memory veto |
@@ -48,7 +48,7 @@ flowchart TD
     Evidence --> Rank[Rank by value, confidence, cost and urgency]
     Rank --> Queue
     Queue --> Choice{User action}
-    Choice -->|Run| Bounded[Bounded Drive mission]
+    Choice -->|Run| Worktree[Coding turn in its own git worktree]
     Choice -->|Plan first| Plan[Read-only coding turn]
     Choice -->|Not now or Never| Hide[Persist dismissal or veto]
 ```
@@ -58,6 +58,14 @@ flowchart TD
 [Proposal generation](../apps/daemon/src/drive-next.ts) requires cited signal IDs and ranks value × confidence ÷ estimated cost, with an urgent-evidence boost. It returns at most six items. Estimates of minutes, confidence and coders are model estimates, not reservations of runtime capacity.
 
 Queues are cached for up to 12 hours when signals, memory, and selected model match. The graphics host requests them on connection and after settled turns when its 30-minute refresh interval has elapsed; Refresh bypasses the cache. A new veto invalidates the prior cache. Exact matching titles are filtered; semantic veto instructions and task-overlap judgments are not a perfect paraphrase detector.
+
+## Run works in a worktree
+
+Pressing **Run** on a proposal never touches your checkout. Drive creates a git worktree on a new branch named after the proposal (`drive/tidy-…`, `drive/fix-…`, `drive/investigate-…`) and runs one coding turn there with every tool allowed. The prompt is the proposal's title, why and cited evidence. The coder is told to confirm the task is real, keep the change small, and run the checks that cover it. Your files and conversation stay as they are, so you can keep working while it runs.
+
+When it finishes, demesne commits the change on that branch and shows the same card as a breakage fix: the diff size, the files, the checks that ran and the coder's summary, with **Apply to my branch**, **Open PR** and **Discard**. If the coder decides nothing needs changing (common for an investigation), the card says so with its summary, and Discard cleans up. Only one worktree job runs per project at a time.
+
+Outside a git repository, or in one with no commits yet, Run falls back to a **bounded** mission in the current session. `/drive --bounded "…"` always runs in the current session.
 
 ## Breakage alerts: fix it in a worktree
 

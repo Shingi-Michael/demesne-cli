@@ -439,7 +439,7 @@ export function createDaemonApp(options: {
         return json(response);
       }
 
-      // Breakage fixes in worktrees: list, start, and apply / open a PR / discard.
+      // Worktree work (breakage fixes and Next proposals): list, start, and apply / open a PR / discard.
       if (request.method === "GET" && url.pathname === "/v1/drive/fixes") {
         const response: DriveFixesResponse = { fixes: driveFixes.list(url.searchParams.get("workspace") ?? "") };
         return json(response);
@@ -448,7 +448,7 @@ export function createDaemonApp(options: {
         const body = parseDriveFixRequest(await readJson(request));
         if (!store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace)) return apiError("not_found", "Unknown workspace", 404);
         if (!workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
-        try { return json({ fix: await driveFixes.start(body.workspace, body.signals) }, 201); }
+        try { return json({ fix: await driveFixes.start(body.workspace, body.signals, body.proposal) }, 201); }
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start the fix", 409); }
       }
       if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "drive" && path[2] === "fixes" && ["apply", "pr", "discard"].includes(path[4]!)) {

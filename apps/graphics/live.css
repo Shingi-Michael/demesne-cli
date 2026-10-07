@@ -26,8 +26,51 @@
 .live-app.start > .status[data-quiet="true"] {
   display: none;
 }
-.intro .model-link:hover {
+/* Start screen: the project's name, what waits on you, then the composer
+   with its model, then Drive's top three. */
+.live-app.start .intro h1 {
+  font-size: 22px;
+  line-height: 30px;
+}
+.live-app.start .intro p {
+  font-size: 13px;
+  line-height: 20px;
+}
+.intro .link {
   color: var(--electric);
+}
+#composer-model {
+  display: none;
+}
+.live-app.start #composer-model {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--secondary);
+  white-space: nowrap;
+}
+.live-app.start #composer-model:hover {
+  color: var(--electric);
+}
+.live-app.start .composer-bar .hints {
+  margin-left: auto;
+}
+.live-app.start #tokens,
+.live-app.start #send-label {
+  display: none;
+}
+.proposals-footer {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.proposals-footer button {
+  color: var(--electric);
+}
+.proposals-footer button + span + button,
+.proposals-footer button[data-action="panel"] {
+  color: var(--muted);
 }
 .live-app.start #rail {
   display: none;
@@ -2684,7 +2727,7 @@ button:disabled {
   font-weight: 600;
 }
 
-/* Start screen: Drive's top proposals under the composer. */
+/* Drive's top proposals under the composer. */
 .proposals h2 {
   display: flex;
   justify-content: space-between;
@@ -2703,8 +2746,9 @@ button:disabled {
 .proposal-row + .proposal-row {
   border-top: 1px solid var(--rule);
 }
+/* The title keeps its room; the evidence after it gives way first. */
 .proposal-row b {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -2713,6 +2757,11 @@ button:disabled {
   color: var(--strong);
 }
 .proposal-row small {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--muted);
 }
 .proposal-row button {

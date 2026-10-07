@@ -67,6 +67,14 @@ const f = await fixture({
       return;
     }
     const user = messages.findLast(message => message.role === "user")?.content;
+    // A proposal run (in its own worktree): one edit, then done.
+    if (String(user).includes("Handle an empty name in greet()")) {
+      if (!messages.some(message => message.role === "tool")) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "fix-1", nameDelta: "edit_file", argumentsDelta: JSON.stringify({ path: "hello.ts", edits: [{ oldText: "`${greeting}, ${name}!`", newText: "name ? `${greeting}, ${name}!` : `${greeting}!`" }] }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else { yield { type: "text_delta", delta: "greet('') now returns 'Hello!'." }; yield { type: "finish", reason: "stop" }; }
+      return;
+    }
     if (user !== prompt) { yield { type: "text_delta", delta: "Ready." }; yield { type: "finish", reason: "stop" }; return; }
     const operation = [
       { name: "edit_file", input: { path: "hello.ts", edits: [{ oldText: "export const greeting = 'Hello';", newText: "export const greeting = process.env.GREETING ?? 'Hello';" }] } },
@@ -145,6 +153,22 @@ const shot = async (name: string) => { await page.screenshot({ path: join(output
 const panel = async (name: string) => { await page.locator(`#rail button[data-args*='"${name}"']`).click(); await page.waitForTimeout(1500); };
 const named = (scratch: string, published: string) => readme ? `demesne-${published}` : scratch;
 await shot(named("01-start", "start"));
+if (!readme) {
+  // Run the top proposal in its worktree; the start screen then says a branch waits for review.
+  await page.locator('#hero button[data-action="next-run"]').first().click();
+  for (let i = 0; i < 60 && !(await page.locator('#hero button[data-action="review-open"]').count()); i++) {
+    const approve = page.locator("#approval button[data-action]").first();
+    if (await approve.count() && await approve.isVisible()) await approve.click();
+    await page.waitForTimeout(500);
+  }
+  await page.waitForTimeout(800);
+  await shot("01-start-review");
+  if (await page.locator('#hero button[data-action="review-open"]').count()) {
+    await page.locator('#hero button[data-action="review-open"]').click(); await page.waitForTimeout(800);
+    await shot("01-start-review-open");
+    await page.locator('#hero button[data-action="review-open"]').click();
+  }
+}
 await page.fill("textarea", prompt); await page.keyboard.press("Enter");
 for (let i = 0; i < 40; i++) {
   const approve = page.locator("#approval button[data-action]").first();

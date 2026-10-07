@@ -695,37 +695,49 @@ function renderConversation() {
     else stage.scrollTop = top;
   }
 }
+/// Finished worktree branches waiting for a decision. On the start screen
+/// they are one line under the project name; their cards open from it.
+const reviewJobs = () =>
+  state ? [state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job) && (job!.status === "ready" || job!.status === "failed")) : [];
+let reviewShown = false;
 function renderHero() {
   if (!state) return;
-  const recent = state.sessions
-      .filter(
-        (session) => session.turns > 0 && session.id !== state!.session?.id,
-      )
-      .slice(0, 3),
-    signature = JSON.stringify([recent, state.model, state.planOnly, state.driveNext.proposals, state.driveNext.loading]);
+  const review = reviewJobs(),
+    next = state.driveNext,
+    away = state.breakage.away,
+    driveBusy = Boolean(state.breakage.fix && (state.breakage.fix.status === "starting" || state.breakage.fix.status === "running")) || away?.status === "running",
+    signature = JSON.stringify([state.workspace, state.model.id, state.model.displayName, review.map((job) => job.id), away?.status, driveBusy, reviewShown, next.proposals, next.signals.length]);
   if (signature === heroSignature) return;
   heroSignature = signature;
   const composer = el("composer-slot");
   composer.remove();
+  const name = state.workspace.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || state.workspace;
+  const waiting = review.length
+    ? `<p>${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ›`, {}, "link", true)}<span class="muted"> · ${away && away.status !== "running" ? "Drive ran them while you were away" : "each in its own worktree"}</span></p>`
+    : "";
+  const signal = new Map(next.signals.map((item) => [item.id, item]));
+  const minutes = (value: number) => (value < 60 ? `${value} min` : `${Math.round(value / 6) / 10} h`);
+  const top = next.proposals.slice(0, 3);
+  const words = ["", "it", "both", "all three"];
+  const footer = [
+    top.length && !driveBusy ? btn("next-away", `Run ${words[top.length]} overnight ›`, { count: top.length }, "link", true).replace("<button ", `<button title="Run ${top.length === 1 ? "it" : "them"} one after another while you're away, each in its own worktree. They wait for your review." `) : "",
+    next.proposals.length > 3 ? btn("panel", `${next.proposals.length - 3} more in Drive`, { name: "drive" }, "", true) : "",
+  ].filter(Boolean).join('<span class="muted"> · </span>');
   el("hero").innerHTML =
-    `<div class="intro"><h1>What are we working on?</h1><p>${btn("overlay", h(state.model.id || "Choose a model"), { name: "models" }, "model-link", true)} · ctx ${num(state.model.contextWindow)} · ${state.planOnly ? "Plan" : "Build"} mode</p></div><div id="hero-composer"></div>${
-      // Drive's Next queue, ready when you open demesne: the top three, with
-      // the full queue in the Drive panel.
-      state.driveNext.proposals.length
-        ? `<section class="proposals"><h2>DRIVE PROPOSES ${btn("panel", "All in Drive ›", { name: "drive" }, "link", true)}</h2><div class="proposal-list">${state.driveNext.proposals
-            .slice(0, 3)
-            .map(
-              (item) =>
-                `<div class="proposal-row"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b title="${h(item.why)}">${h(item.title)}</b><small>~${(item.expectedMinutes ?? item.minutes) < 60 ? `${item.expectedMinutes ?? item.minutes} min` : `${Math.round((item.expectedMinutes ?? item.minutes) / 6) / 10} h`}</small>${btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}</div>`,
-            )
-            .join("")}</div></section>`
-        : ""
-    }${
-      // Hidden until there is a session to go back to.
-      recent.length
-        ? `<section class="recent"><h2>RECENT</h2><div class="list">${recent.map((session) => btn("select-session", `<span class="${tone(session.status ?? "")}">${mark(session.status ?? "")}</span><b>${h(session.title)}</b><span class="meta">${session.turns} turns · ${h(session.status ?? "")}</span><small>${age(session.updatedAt)}</small>`, { id: session.id })).join("")}</div><p class="recent-footer">${btn("overlay", "Alt+H all sessions", { name: "sessions" }, "", true)} · /resume &lt;name&gt;</p></section>`
+    `<div class="intro"><h1>${h(name)}</h1>${waiting}</div><div id="hero-composer"></div>${
+      // Drive's Next queue, ready when you open demesne: the top three, each
+      // with the evidence it rests on; the full queue is in the Drive panel.
+      top.length
+        ? `<section class="proposals"><h2>DRIVE WOULD DO NEXT</h2><div class="proposal-list">${top
+            .map((item) => {
+              const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
+              return `<div class="proposal-row"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b title="${h(item.why)}">${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}${evidence ? ` · ${h(evidence)}` : ""}</small>${btn("next-run", "Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan", { id: item.id })}</div>`;
+            })
+            .join("")}</div>${footer ? `<p class="proposals-footer">${footer}</p>` : ""}</section>`
         : ""
     }`;
+  // The composer is detached while the hero is rebuilt.
+  composer.querySelector("#composer-model")!.innerHTML = `${h(state.model.displayName ?? state.model.id) || "Choose a model"} <span class="muted">⌄</span>`;
   el("hero-composer").append(composer);
 }
 let composerSignature = "",
@@ -817,7 +829,7 @@ function renderComposer() {
     ? state.activeTurnId
       ? "Type to queue a follow-up…"
       : suggestion ? `${suggestion}   ⇥ Tab` : "Continue the conversation…"
-    : "Describe what you want to build, fix, or explore…";
+    : "What should we do?";
   editor.disabled =
     state.connection !== "online" ||
     state.busy ||
@@ -882,7 +894,10 @@ let awayOpen: string | null = null;
 function renderBreakage() {
   if (!state) return;
   const { signals, fix, busy, message } = state.breakage;
-  const signature = JSON.stringify([signals, fix, state.breakage.inbox, state.breakage.away, awayOpen, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0]);
+  // On the start screen finished branches are a line under the project
+  // name; their cards show once you open that line.
+  const folding = !inSession() && !reviewShown;
+  const signature = JSON.stringify([folding, signals, fix, state.breakage.inbox, state.breakage.away, awayOpen, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0]);
   if (signature === breakageSignature) return;
   breakageSignature = signature;
   // Both shells (Ghostty and desktop) carry #breakage; never let a missing
@@ -920,7 +935,7 @@ function renderBreakage() {
   const away = state.breakage.away;
   const open = new Map([fix, ...state.breakage.inbox].filter((item): item is NonNullable<typeof fix> => Boolean(item)).map((item) => [item.id, item]));
   const folded = new Set(away ? away.items.flatMap((item) => (item.fixId ? [item.fixId] : [])) : []);
-  if (away) {
+  if (away && !(folding && away.status !== "running")) {
     const done = away.items.filter((item) => !["queued", "running"].includes(item.state)).length;
     const waiting = away.items.filter((item) => item.fixId && open.has(item.fixId) && ["ready", "unchanged", "failed"].includes(item.state)).length;
     const rows = away.items.map((item) => {
@@ -941,6 +956,7 @@ function renderBreakage() {
   for (const item of [fix, ...state.breakage.inbox]) {
     if (!item || (item.mission && (item.status === "starting" || item.status === "running"))) continue;
     if (folded.has(item.id) && item.id !== awayOpen) continue;
+    if (folding && (item.status === "ready" || item.status === "failed")) continue;
     fixCard(item);
   }
   node.innerHTML = cards.join("");
@@ -2889,6 +2905,13 @@ async function dispatch(
   if (action === "drive-tab") {
     driveTab = args.tab === "done" ? "done" : "next";
     renderPanels();
+    return;
+  }
+  if (action === "review-open") {
+    reviewShown = !reviewShown;
+    heroSignature = breakageSignature = "";
+    renderHero();
+    renderBreakage();
     return;
   }
   if (action === "away-open") {

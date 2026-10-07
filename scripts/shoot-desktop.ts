@@ -150,7 +150,13 @@ await page.goto(server.url.href);
 await page.waitForSelector("#app:not([hidden])", { timeout: 30_000 });
 await page.waitForTimeout(3000);
 const shot = async (name: string) => { await page.screenshot({ path: join(output, `${name}.png`) }); console.log("shot", name); };
-const panel = async (name: string) => { await page.locator(`#rail button[data-args*='"${name}"']`).click(); await page.waitForTimeout(1500); };
+const panel = async (name: string) => { await page.locator(`.header-nav button[data-args*='"${name}"']`).click(); await page.waitForTimeout(1500); };
+const toggle = async (selector: string, name: string) => {
+  if (!(await page.locator(selector).count())) return;
+  await page.locator(selector).first().click(); await page.waitForTimeout(800);
+  await shot(name);
+  await page.locator(selector).first().click(); await page.waitForTimeout(400);
+};
 const named = (scratch: string, published: string) => readme ? `demesne-${published}` : scratch;
 await shot(named("01-start", "start"));
 if (!readme) {
@@ -177,10 +183,32 @@ for (let i = 0; i < 40; i++) {
   await page.waitForTimeout(500);
 }
 await page.waitForTimeout(1500);
-if (!readme) await shot("02-turn");
-for (const name of readme ? ["drive", "changes"] : ["changes", "files", "drive", "history"]) {
+if (readme) {
+  // The finished turn, with Drive's next ideas unfolded above the composer.
+  await page.locator('#briefing button[data-action="ideas-show"]').click(); await page.waitForTimeout(800);
+  await shot("demesne-drive");
+  await page.locator('#briefing button[data-action="ideas-show"]').click(); await page.waitForTimeout(400);
+} else {
+  await shot("02-turn");
+  // The briefing line above the composer, each part opened, then Drive's popover.
+  await toggle('#briefing button[data-action="review-open"]', "02-review-open");
+  await toggle('#briefing button[data-action="ideas-show"]', "02-ideas");
+  await toggle('.turn-receipt button[data-action="toggle-steps"]', "02-steps");
+  await page.locator("#drive-word").click(); await page.waitForTimeout(800);
+  await shot("02-drive-pop");
+  await page.keyboard.press("Escape"); await page.waitForTimeout(400);
+}
+for (const name of readme ? ["changes"] : ["changes", "files", "history"]) {
   await panel(name);
   await shot(named(`03-panel-${name}`, name === "changes" ? "review" : name));
+}
+if (!readme) {
+  // A Drive mission: its line above the composer, unfolded into the live card.
+  await page.locator(".header-nav button.active").click().catch(() => {});
+  await page.fill("textarea", "/drive Tidy the README"); await page.keyboard.press("Enter");
+  for (let i = 0; i < 20 && !(await page.locator('#briefing button[data-action="drive-show"]').count()); i++) await page.waitForTimeout(500);
+  await page.waitForTimeout(1500);
+  await shot("04-drive-live");
 }
 await browser.close();
 host.kill(); server.stop(true); await f.close(); rmSync(web, { recursive: true, force: true });

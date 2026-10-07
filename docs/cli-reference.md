@@ -27,6 +27,7 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 | `demesne session create [--workspace PATH] [title]` | Create a workspace-bound session (asks to trust a new folder) |
 | `demesne session auto-approve SESSION_ID on\|off\|status` | Enable, disable or inspect automatic approval for that session |
 | `demesne session show ID` | Print a session as JSON |
+| `demesne drive [--pr N] [--here] MISSION` | Run a Drive mission with no window, print its receipt, and post it to PR N; exits 0 only when every task is verified. See [Drive in CI](agent-drive.md#drive-in-ci) |
 | `demesne compact ID [instructions]` | Summarize older context |
 | `demesne cancel TURN_ID` | Cancel a turn |
 | `demesne events SESSION_ID [--after EVENT_ID]` | Stream journal events |

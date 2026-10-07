@@ -112,6 +112,43 @@ Closing the window doesn't stop a running mission. The window's host hands it to
 
 Only a running mission is handed off. Pause or Stop it before closing if you want it to wait. Its limits still apply, and its active time keeps counting while it works in the background. Approvals still ask: a mission waiting on one waits until you reopen the window. The process writes to `drive/away.log` in the data directory, and `<journal>.away.json` next to the mission journal records which process has it. The screen-driven route (`DEMESNE_DRIVE_CONTROL=ui`) needs the window, so it still pauses on close. [Implementation](../apps/desktop/drive-away.ts)
 
+## Drive in CI
+
+`demesne drive "MISSION"` runs a mission with no window: the same planner, limits and worktree as `/drive`, until the mission settles. It prints the [mission receipt](#mission-receipts) as Markdown, adds it to the job summary when `GITHUB_STEP_SUMMARY` is set, and with `--pr N` posts it as a comment on that pull request (this needs `gh` and a token that can comment). A worktree mission's change is committed on its `drive/mission-…` branch, which the receipt names; `--here` leaves the change in the checkout instead. Progress goes to stderr. It exits 0 only when the mission completed and every task is verified, so a step fails when the work isn't proven.
+
+Nobody can answer an approval in CI, so anything that asks (publishing, for example) is denied rather than left waiting. A new folder has to be trusted, so pass `--trust-workspace`.
+
+```yaml
+# .github/workflows/drive.yml: comment "/drive <mission>" on a pull request
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  drive:
+    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/drive ') && github.event.comment.author_association == 'OWNER'
+    runs-on: macos-14   # releases ship the demesne CLI for macOS
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+      - run: |
+          curl -fsSL https://raw.githubusercontent.com/Shingi-Michael/demesne-cli/main/scripts/install.sh | DEMESNE_NO_APP=1 sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: demesne auth login openrouter && demesne daemon start
+      - run: demesne --trust-workspace drive --here --pr ${{ github.event.issue.number }} "${MISSION#/drive }"
+        env:
+          MISSION: ${{ github.event.comment.body }}
+```
+
+Pass the mission through an environment variable, as above, never by pasting `${{ github.event.comment.body }}` into the script. Limit who can start it: a mission runs commands with the job's token and secrets. [Implementation](../apps/graphics/headless-drive.ts)
+
 ## Breakage alerts: fix it in a worktree
 
 When something **newly** breaks, a card pops up over the conversation: a check that starts failing, CI on the default branch turning red, or an open pull request whose CI fails. Only changes alert. Whatever was already broken when demesne opened stays in the Next queue, and nothing pops up while a turn is running. Local checks are looked at every two minutes and after each turn; GitHub at most every five minutes. No model runs until you choose:

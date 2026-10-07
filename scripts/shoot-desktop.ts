@@ -1,18 +1,25 @@
-/** Screenshots of the desktop UI against the real Bun desktop host, drawn in Chromium. */
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+/**
+ * Screenshots of the desktop UI: the real Bun desktop host and an isolated
+ * daemon with a scripted model, drawn in Chromium instead of the native
+ * webview. `bun scripts/shoot-desktop.ts [dir]` writes every view to dir;
+ * `--readme` retakes docs/assets/demesne-{start,drive,review}.png.
+ * Needs Playwright (set PLAYWRIGHT_MODULE to its path if it is not installed here).
+ */
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { join, resolve, extname } from "node:path";
 import { fixture } from "../apps/graphics/test/fixture.ts";
 
 const root = resolve(import.meta.dir, ".."), desktop = join(root, "apps/desktop"), graphics = join(root, "apps/graphics");
-const output = resolve(process.argv[2] ?? "test-results/shots");
+const readme = process.argv.includes("--readme");
+const output = readme ? join(root, "docs/assets") : resolve(process.argv.slice(2).find(arg => !arg.startsWith("--")) ?? "test-results/shots");
 const pw = process.env.PLAYWRIGHT_MODULE ?? "playwright";
 const { chromium } = await import(pw);
 mkdirSync(output, { recursive: true });
 
 // The same page prepare-desktop builds, minus the native sidecars.
-const web = join(output, ".web");
-rmSync(web, { recursive: true, force: true }); mkdirSync(web, { recursive: true });
+const web = mkdtempSync(join(tmpdir(), "demesne-shots-web-"));
 const bundle = await Bun.build({ entrypoints: [join(desktop, "frontend.ts")], outdir: web, target: "browser", splitting: true });
 if (!bundle.success) throw new Error(bundle.logs.map(String).join("\n"));
 writeFileSync(join(web, "ui.css"), readFileSync(join(graphics, "ui.css"), "utf8").replaceAll("node_modules/@fontsource/jetbrains-mono/files/", "vendor/fonts/"));
@@ -39,6 +46,9 @@ window.__TAURI__ = {
 };`);
 
 const prompt = "Make the greeting configurable and check it";
+// A fixed, readable project path for the published images.
+const demoRoot = join(tmpdir(), "demesne-demo");
+if (readme) rmSync(demoRoot, { recursive: true, force: true });
 let round = 0;
 const f = await fixture({
   providerId: "test", modelId: "qwen3.8-27b", contextCapacity: 262144,
@@ -70,7 +80,7 @@ const f = await fixture({
       yield { type: "finish", reason: "stop" };
     }
   },
-});
+}, readme ? { root: demoRoot, workspaceName: "greeter" } : {});
 writeFileSync(join(f.workspace, "hello.ts"), "export const greeting = 'Hello';\n// TODO: greet('') returns 'Hello, !'\nexport const greet = (name: string) => `${greeting}, ${name}!`;\n");
 writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ name: "hello", scripts: { check: "bun check.ts" } }));
 writeFileSync(join(f.workspace, "check.ts"), "import {greet} from './hello.ts';if(!greet('a').includes('a'))throw new Error('bad');console.log('CHECK_PASSED');\n");
@@ -126,32 +136,28 @@ const server = Bun.serve({
 
 const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
 const theme = (process.env.THEME ?? "dark") as "dark" | "light";
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: theme });
+const page = await browser.newPage({ viewport: readme ? { width: 1280, height: 800 } : { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: theme });
 page.on("pageerror", (error: Error) => console.error("page:", error.message));
 await page.goto(server.url.href);
 await page.waitForSelector("#app:not([hidden])", { timeout: 30_000 });
 await page.waitForTimeout(3000);
 const shot = async (name: string) => { await page.screenshot({ path: join(output, `${name}.png`) }); console.log("shot", name); };
-await shot("01-start");
-for (const step of (process.env.STEPS ?? "turn").split(",")) {
-  if (step === "turn") {
-    await page.fill("textarea", prompt); await page.keyboard.press("Enter");
-    for (let i = 0; i < 40; i++) {
-      const approve = page.locator('#approval button[data-action]').first();
-      if (await approve.count() && await approve.isVisible()) { await approve.click(); await page.waitForTimeout(500); }
-      if (await page.evaluate(() => document.body.innerText.includes("falls back to"))) break;
-      await page.waitForTimeout(500);
-    }
-    await page.waitForTimeout(1500);
-    await shot("02-turn");
-  }
+const panel = async (name: string) => { await page.locator(`#rail button[data-args*='"${name}"']`).click(); await page.waitForTimeout(1500); };
+const named = (scratch: string, published: string) => readme ? `demesne-${published}` : scratch;
+await shot(named("01-start", "start"));
+await page.fill("textarea", prompt); await page.keyboard.press("Enter");
+for (let i = 0; i < 40; i++) {
+  const approve = page.locator("#approval button[data-action]").first();
+  if (await approve.count() && await approve.isVisible()) { await approve.click(); await page.waitForTimeout(500); }
+  if (await page.evaluate(() => document.body.innerText.includes("falls back to"))) break;
+  await page.waitForTimeout(500);
 }
-const rail = await page.$$eval("#rail button", (buttons) => buttons.map(b => (b as HTMLElement).dataset.args || b.getAttribute("aria-label") || b.textContent));
-console.log("rail", rail);
-for (const name of ["changes", "files", "drive", "history"]) {
-  await page.locator(`#rail button[data-args*='"${name}"']`).click(); await page.waitForTimeout(1500);
-  await shot(`03-panel-${name}`);
+await page.waitForTimeout(1500);
+if (!readme) await shot("02-turn");
+for (const name of readme ? ["drive", "changes"] : ["changes", "files", "drive", "history"]) {
+  await panel(name);
+  await shot(named(`03-panel-${name}`, name === "changes" ? "review" : name));
 }
 await browser.close();
-host.kill(); server.stop(true); await f.close();
+host.kill(); server.stop(true); await f.close(); rmSync(web, { recursive: true, force: true });
 process.exit(0);

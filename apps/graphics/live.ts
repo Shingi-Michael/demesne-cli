@@ -372,6 +372,9 @@ function renderStatus() {
   // A quiet footer: a spinner while working, a word only when the state
   // needs attention (failed, approval, offline…). "ready" says nothing.
   const working = Boolean(state.activeTurnId) && !["approval", "waiting", "failed"].includes(phase);
+  // The start screen names the model under its heading, so a ready status
+  // bar would only repeat it there.
+  el("status").dataset.quiet = String(phase === "ready");
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   // The desktop toolbar already names the project and its path; the header
@@ -705,7 +708,7 @@ function renderHero() {
   const composer = el("composer-slot");
   composer.remove();
   el("hero").innerHTML =
-    `<div class="intro"><h1>What are we working on?</h1><p>${h(state.model.id || "Choose a model")} · ctx ${num(state.model.contextWindow)} · ${state.planOnly ? "Plan" : "Build"} mode</p></div><div id="hero-composer"></div>${
+    `<div class="intro"><h1>What are we working on?</h1><p>${btn("overlay", h(state.model.id || "Choose a model"), { name: "models" }, "model-link", true)} · ctx ${num(state.model.contextWindow)} · ${state.planOnly ? "Plan" : "Build"} mode</p></div><div id="hero-composer"></div>${
       // Drive's Next queue, ready when you open demesne: the top three, with
       // the full queue in the Drive panel.
       state.driveNext.proposals.length
@@ -717,24 +720,12 @@ function renderHero() {
             )
             .join("")}</div></section>`
         : ""
-    }<section class="operations"><h2>START FROM</h2><div class="grid">${[
-      ["Explore", "Trace a call flow end to end"],
-      ["Debug", "Find and fix a failing behavior"],
-      ["Build", "Implement a feature with tests"],
-      ["Learn", "Map the architecture"],
-    ]
-      .map(([label, prompt], i) =>
-        btn(
-          "operation",
-          `<span>${i + 1}</span><b>${label}</b><small>${prompt}</small>`,
-          { text: prompt },
-          `operation ${i === 0 ? "selected" : ""}`,
-          true,
-        ),
-      )
-      .join(
-        "",
-      )}</div></section><section class="recent"><h2>RECENT</h2><div class="list">${recent.length ? recent.map((session) => btn("select-session", `<span class="${tone(session.status ?? "")}">${mark(session.status ?? "")}</span><b>${h(session.title)}</b><span class="meta">${session.turns} turns · ${h(session.status ?? "")}</span><small>${age(session.updatedAt)}</small>`, { id: session.id })).join("") : '<div class="empty">Your sessions will appear here.</div>'}</div><p class="recent-footer">${btn("overlay", "Alt+H all sessions", { name: "sessions" }, "", true)} · /resume &lt;name&gt;</p></section>`;
+    }${
+      // Hidden until there is a session to go back to.
+      recent.length
+        ? `<section class="recent"><h2>RECENT</h2><div class="list">${recent.map((session) => btn("select-session", `<span class="${tone(session.status ?? "")}">${mark(session.status ?? "")}</span><b>${h(session.title)}</b><span class="meta">${session.turns} turns · ${h(session.status ?? "")}</span><small>${age(session.updatedAt)}</small>`, { id: session.id })).join("")}</div><p class="recent-footer">${btn("overlay", "Alt+H all sessions", { name: "sessions" }, "", true)} · /resume &lt;name&gt;</p></section>`
+        : ""
+    }`;
   el("hero-composer").append(composer);
 }
 let composerSignature = "",
@@ -1783,7 +1774,8 @@ function renderPanels() {
       usage = state.provider?.usage,
       metrics = state.provider?.metrics,
       rate = usage?.outputTokens != null && metrics?.durationMs ? usage.outputTokens / (metrics.durationMs / 1000) : null,
-      cached = usage?.cachedInputTokens != null && usage.inputTokens ? Math.round((100 * usage.cachedInputTokens) / usage.inputTokens) : null;
+      cached = usage?.cachedInputTokens != null && usage.inputTokens ? Math.round((100 * usage.cachedInputTokens) / usage.inputTokens) : null,
+      others = state.sessions.filter((item) => item.id !== state!.session?.id && item.turns > 0).slice(0, 5);
     header = panelHeader("Session", state.session?.title ?? "");
     body =
       `<div class="panel-actions">${btn("overlay", "Rename", { name: "rename" })}${btn("compact", "Compact")}${btn("new-session", "New session")}</div>` +
@@ -1801,31 +1793,30 @@ function renderPanels() {
           ),
         )
         .join("")}` +
-      `<div class="panel-section">DRIVE MEMORY <span>${state.driveMemory.length ? `${state.driveMemory.length}` : ""}</span></div>${
-        state.driveMemory.length
-          ? [...state.driveMemory]
-              .reverse()
-              .slice(0, 12)
-              .map(
-                (item) =>
-                  `<div class="check-row memory-row"><span class="${item.kind === "outcome" ? "success" : item.kind === "blocker" ? "danger" : "electric"}">${item.kind === "outcome" ? "✓" : item.kind === "blocker" ? "×" : "you"}</span><span class="name" title="${h(item.text)}">${h(item.text)}</span>${btn("drive-forget", "Forget", { id: item.id }, "link")}</div>`,
-              )
-              .join("")
-          : '<div class="check-row muted">Nothing yet. Drive records finished work here; add a standing note with /drive remember …</div>'
-      }` +
-      `<div class="panel-section">OTHER SESSIONS ${btn("overlay", "Clean up", { name: "cleanup" }, "link")}${btn("overlay", "All ›", { name: "sessions" }, "link")}</div>${state.sessions
-        .filter((item) => item.id !== state!.session?.id && item.turns > 0)
-        .slice(0, 5)
-        .map((item) =>
-          btn(
-            "select-session",
-            `<span class="muted">→</span><span class="name">${h(item.title)}</span><span class="right">${age(item.updatedAt)}</span>`,
-            { id: item.id },
-            "panel-row",
-            true,
-          ),
-        )
-        .join("")}`;
+      // Drive memory and other sessions appear once they have something in them.
+      (state.driveMemory.length
+        ? `<div class="panel-section">DRIVE MEMORY <span>${state.driveMemory.length}</span></div>${[...state.driveMemory]
+            .reverse()
+            .slice(0, 12)
+            .map(
+              (item) =>
+                `<div class="check-row memory-row"><span class="${item.kind === "outcome" ? "success" : item.kind === "blocker" ? "danger" : "electric"}">${item.kind === "outcome" ? "✓" : item.kind === "blocker" ? "×" : "you"}</span><span class="name" title="${h(item.text)}">${h(item.text)}</span>${btn("drive-forget", "Forget", { id: item.id }, "link")}</div>`,
+            )
+            .join("")}`
+        : "") +
+      (others.length
+        ? `<div class="panel-section">OTHER SESSIONS ${btn("overlay", "Clean up", { name: "cleanup" }, "link")}${btn("overlay", "All ›", { name: "sessions" }, "link")}</div>${others
+            .map((item) =>
+              btn(
+                "select-session",
+                `<span class="muted">→</span><span class="name">${h(item.title)}</span><span class="right">${age(item.updatedAt)}</span>`,
+                { id: item.id },
+                "panel-row",
+                true,
+              ),
+            )
+            .join("")}`
+        : "");
   }
   if (pane === "context") {
     header = panelHeader("Context", `${state.model.id} · ${state.model.provider}`, { name: "history", label: "Session" });
@@ -2845,7 +2836,6 @@ async function dispatch(
     await loadReference();
     return;
   }
-  if (action === "operation") return setDraft(String(args.text));
   if (action === "panel") return openPanel(args.name, args.turnId ?? "");
   // A check row in Review opens that check in Checks.
   if (action === "open-check") {

@@ -90,8 +90,8 @@
   width: 100%;
   padding-bottom: 10px;
 }
-/* Only Drive opens a session before its first turn. */
-#conversation:empty::before {
+/* Only Drive opens a session before its first turn; its own turn says so. */
+#conversation:empty:not(.driving)::before {
   content: "Drive is choosing the first step…";
   display: block;
   padding: 18px 0;
@@ -2913,6 +2913,7 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
    answer, a receipt line under it, then one briefing line and the composer.
    Nothing floats over the conversation. */
 .live-app:not(.start) #conversation,
+.live-app:not(.start) #drive-turn,
 .live-app:not(.start) #input-area {
   width: 100%;
   max-width: 780px;
@@ -3514,3 +3515,225 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 .composer .approval-actions .quiet:hover b {
   color: var(--electric);
 }
+
+/* A mission homed in this session is the conversation's newest turn: the
+   ask, a trail of its steps, and quiet links. */
+#drive-turn {
+  padding-bottom: 14px;
+}
+#conversation:not(:empty) + #drive-turn {
+  border-top: 1px solid var(--rule);
+  padding-top: 14px;
+  margin-top: -4px;
+}
+.live-app:not(.start) #conversation.driving:empty {
+  padding-bottom: 0;
+}
+#drive-turn .request {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.drive-turn-where {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+.drive-trail {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0 0 0 12px;
+  border-left: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  line-height: 20px;
+}
+.drive-trail li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.drive-trail-mark {
+  flex: none;
+  width: 12px;
+}
+.drive-trail-what {
+  flex: none;
+}
+.drive-trail li.now .drive-trail-what {
+  color: var(--strong);
+}
+.drive-trail-detail {
+  margin-left: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.drive-turn-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+}
+.drive-turn-meta {
+  flex: 1;
+  min-width: 0;
+}
+.drive-turn-actions {
+  display: flex;
+  gap: 12px;
+  flex: none;
+}
+.drive-turn-actions .link {
+  font-size: 12px;
+  color: var(--electric);
+}
+.drive-turn-actions .link.danger {
+  color: var(--signal);
+}
+#drive-turn .drive-details {
+  font-size: 12.5px;
+  line-height: 19px;
+  color: var(--secondary);
+  margin-top: 10px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+#drive-turn .drive-pinned {
+  margin: 0;
+}
+.briefing-label {
+  color: var(--electric);
+}
+.briefing-label.amber {
+  color: var(--thinking);
+}
+/* A branch ready to review: what changed, how its checks went, what to do. */
+.breakage-card.ready.compact {
+  border-left-width: 1px;
+  border-left-color: var(--borderBright);
+  gap: 4px;
+  padding: 10px 14px;
+}
+.breakage-card.compact .breakage-summary,
+.breakage-card.compact .breakage-actions {
+  margin-left: 20px;
+}
+.breakage-card.compact .breakage-summary .pass { color: var(--citron); }
+.breakage-card.compact .breakage-summary .fail { color: var(--signal); }
+.breakage-card.compact .breakage-summary .muted { color: var(--muted); }
+.breakage-card.compact .breakage-actions { align-items: baseline; }
+.breakage-card.compact .breakage-diff { margin-left: auto; }
+.breakage-card.compact .breakage-diff:hover { color: var(--electric); }
+/* Review: one heading line (scope, checks, refresh), then the files with the
+   open one's diff right under its row, in one gutter. */
+.review-heading {
+  position: relative;
+}
+.review-heading .review-scope-button {
+  color: var(--secondary);
+  font-size: 12.5px;
+  flex: none;
+}
+.review-heading .review-scope-button:hover {
+  color: var(--electric);
+}
+.review-heading .review-check {
+  flex: none;
+  font-size: 12px;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-heading .review-check.success { color: var(--citron); }
+.review-heading .review-check.danger { color: var(--signal); }
+.review-heading .review-check.amber { color: var(--thinking); }
+.review-heading .review-refresh {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+.review-heading .review-refresh:hover {
+  color: var(--electric);
+}
+.review-heading .close {
+  margin-left: 0;
+}
+.review-scope-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 70px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 4px;
+  background: var(--raised, var(--surface));
+  border: 1px solid var(--borderBright);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px #0007;
+}
+.review-scope-menu .review-scope-option {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  color: var(--paper);
+  text-align: left;
+}
+.review-scope-menu .review-scope-option.selected,
+.review-scope-menu .review-scope-option:hover {
+  background: var(--menuSelection);
+  color: var(--strong);
+}
+.review-scope-menu .muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+.review-files .review-file {
+  margin-bottom: 8px;
+}
+.review-files .review-file .diff-code {
+  padding: 4px 0;
+}
+.review-files .review-modes {
+  gap: 8px;
+}
+.review-files .review-modes button {
+  color: var(--muted);
+}
+.review-files .review-modes button:hover {
+  color: var(--electric);
+}
+.review-files .review-modes .danger {
+  color: var(--signal);
+}
+.review-files .review-modes .right {
+  margin-left: auto;
+}
+.review-files .diff-line.gap { padding-left: 50px; }
+.menu-footer .completion-more {
+  font-size: 12px;
+  color: var(--electric);
+}
+#drive-turn .drive-details p {
+  margin: 0;
+}
+#drive-turn .drive-details pre {
+  margin: 0;
+  font: 12px/18px var(--font, "JetBrains Mono", monospace);
+  white-space: pre-wrap;
+  color: var(--secondary);
+}
+.review-heading .review-scope-button.branch { color: var(--paper); }
+#drive-turn .drive-pinned-title { display: none; }

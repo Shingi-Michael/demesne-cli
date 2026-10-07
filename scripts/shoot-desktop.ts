@@ -91,6 +91,8 @@ const f = await fixture({
 }, readme ? { root: demoRoot, workspaceName: "greeter" } : {});
 writeFileSync(join(f.workspace, "hello.ts"), "export const greeting = 'Hello';\n// TODO: greet('') returns 'Hello, !'\nexport const greet = (name: string) => `${greeting}, ${name}!`;\n");
 writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ name: "hello", scripts: { check: "bun check.ts" } }));
+mkdirSync(join(f.workspace, ".demesne/workflows"), { recursive: true });
+writeFileSync(join(f.workspace, ".demesne/workflows/fix-bug.md"), "# Fix a bug\n\nReproduce, fix, prove it.\n\n## Reproduce\nWrite a failing test.\ncheck: bun check.ts\nexpect: fail\n\n## Fix\nMake the smallest change.\ncheck: bun check.ts\n\n## Tidy\nRemove dead code.\n");
 writeFileSync(join(f.workspace, "check.ts"), "import {greet} from './hello.ts';if(!greet('a').includes('a'))throw new Error('bad');console.log('CHECK_PASSED');\n");
 const git = (...values: string[]) => execFileSync("git", ["-C", f.workspace, ...values], { stdio: "pipe" });
 git("init", "-q"); git("add", ".");
@@ -197,16 +199,21 @@ if (readme) {
   await page.locator("#drive-word").click(); await page.waitForTimeout(800);
   await shot("02-drive-pop");
   await page.keyboard.press("Escape"); await page.waitForTimeout(400);
+  // The slash list: your workflows first, then what you used recently.
+  await page.locator("textarea").click(); await page.keyboard.type("/"); await page.waitForTimeout(900);
+  await shot("02-slash");
+  await page.fill("textarea", ""); await page.keyboard.press("Escape"); await page.waitForTimeout(300);
 }
 for (const name of readme ? ["changes"] : ["changes", "files", "history"]) {
   await panel(name);
   await shot(named(`03-panel-${name}`, name === "changes" ? "review" : name));
+  if (name === "changes" && !readme) await toggle(".review-scope-button", "03-panel-scope");
 }
 if (!readme) {
-  // A Drive mission: its line above the composer, unfolded into the live card.
+  // A workflow running as a Drive mission: the conversation's newest turn.
   await page.locator(".header-nav button.active").click().catch(() => {});
-  await page.fill("textarea", "/drive Tidy the README"); await page.keyboard.press("Enter");
-  for (let i = 0; i < 20 && !(await page.locator('#briefing button[data-action="drive-show"]').count()); i++) await page.waitForTimeout(500);
+  await page.fill("textarea", "/fix-bug Handle an empty name in greet()"); await page.keyboard.press("Enter");
+  for (let i = 0; i < 20 && !(await page.locator("#drive-turn:not([hidden])").count()); i++) await page.waitForTimeout(500);
   await page.waitForTimeout(1500);
   await shot("04-drive-live");
 }

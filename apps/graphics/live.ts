@@ -234,6 +234,10 @@ let selectedImage = "",
   followImages = true,
   previewData = "",
   previewLoading = "";
+/// Whether the Review heading's scope menu is open.
+let reviewScopeMenu = false;
+/// A worktree branch shown in Review instead of this session's changes.
+let reviewBranch: { sessionId: string; title: string } | null = null;
 let reviewScope: ReviewScope = "turn",
   reviewMeta: ReviewResponse | null = null,
   reviewError = "",
@@ -1036,7 +1040,7 @@ function renderBreakage() {
   // screen, above the composer in a session); their cards show once you open
   // it. In a session, work still running folds behind "Drive is working".
   const folding = !reviewShown, running = !inSession() || driveShown;
-  const signature = JSON.stringify([folding, running, signals, fix, state.breakage.inbox, state.breakage.away, awayOpen, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0]);
+  const signature = JSON.stringify([folding, running, signals, fix, state.breakage.inbox, state.breakage.away, awayOpen, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0, Boolean(driveTurnMission())]);
   if (signature === breakageSignature) return;
   breakageSignature = signature;
   // Never let a missing #breakage stop the rest of the render.
@@ -1057,17 +1061,26 @@ function renderBreakage() {
     const elapsed = duration((fix.finishedAt ? Date.parse(fix.finishedAt) : Date.now()) - Date.parse(fix.startedAt));
     const branch = `<code class="breakage-branch">${h(fix.branch)}</code>`;
     if (fix.status === "starting" || fix.status === "running") {
-      if (!running) return;
+      if (!running || (fix.mission && driveTurnMission())) return;
       const activity = fix.activity ? `${fix.activity.steps} step${fix.activity.steps === 1 ? "" : "s"}${fix.activity.last ? ` · ${h(fix.activity.last)}` : ""}` : "Creating the worktree…";
       cards.push(`<div class="breakage-card running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">${fix.proposal ? "Working in a worktree" : "Fixing in a worktree"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><div class="breakage-meta">${branch}<span>${activity}</span></div><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Stopping…", "Stop and discard"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
     } else if (fix.status === "ready") {
-      const diff = fix.diff ? `<span class="add">+${fix.diff.additions}</span> <span class="del">−${fix.diff.deletions}</span> · ${fix.diff.files} file${fix.diff.files === 1 ? "" : "s"}` : "";
-      // A workflow mission lists its steps, each with the check Drive ran for it.
+      // Three lines: what changed, what it says it did and how its checks
+      // went, and what to do. The branch and file list are on hover.
+      const paths = fix.diff?.paths ?? [];
+      const where = fix.diff ? `<span class="add">+${fix.diff.additions}</span> <span class="del">−${fix.diff.deletions}</span> · ${paths.length === 1 ? h(paths[0]!.split("/").at(-1)!) : `${fix.diff.files} file${fix.diff.files === 1 ? "" : "s"}`}` : "";
+      // A workflow mission counts its steps, each with the check Drive ran for it.
       const run = state!.drive?.workflow && state!.drive.homeSessionId === fix.sessionId ? state!.drive.workflow : null;
-      const checks = run
-        ? run.steps.map((step, index) => { const ok = index < run.current && (!step.check || step.result?.ok); return `<li class="${ok ? "pass" : "fail"}">${ok ? "✓" : "✕"} ${h(step.title)}${step.check ? ` · <code>${h(step.check.command)}</code>${step.check.expect === "fail" ? " failed as expected" : ""}` : ""}</li>`; }).join("")
-        : (fix.checks ?? []).map((check) => `<li class="${check.passed ? "pass" : "fail"}">${check.passed ? "✓" : "✕"} <code>${h(check.command)}</code></li>`).join("");
-      cards.push(`<div class="breakage-card ready"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text">${fix.mission ? "Mission ready to review" : fix.proposal ? "Ready to review" : "Fix ready to review"}</span><small>${diff}</small></div><p class="breakage-title">${h(fix.title)}</p>${fix.headline ? `<p class="breakage-receipt">${h(fix.headline)} ${btn("breakage-receipt", "Copy receipt", { id: fix.id }, "link", true)}</p>` : ""}${fix.summary ? `<p class="breakage-summary">${h(fix.summary)}</p>` : ""}${checks ? `<ul class="breakage-checks">${checks}</ul>` : '<p class="breakage-note">No checks ran in the worktree.</p>'}<div class="breakage-meta">${branch}<span>${(fix.diff?.paths ?? []).map(h).join(" · ")}</span></div><div class="breakage-actions">${btn("breakage-apply", doing("apply", "Applying…", "Apply to my branch"), { id: fix.id }, "primary", true, Boolean(busy))}${btn("breakage-pr", doing("pr", "Opening…", "Open PR"), { id: fix.id }, "", true, Boolean(busy))}${btn("breakage-discard", doing("discard", "Discarding…", "Discard"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
+      const rows = run
+        ? run.steps.map((step, index) => ({ ok: index < run.current && (!step.check || Boolean(step.result?.ok)), text: `${step.title}${step.check ? ` · ${step.check.command}${step.check.expect === "fail" ? " failed as expected" : ""}` : ""}` }))
+        : (fix.checks ?? []).map((check) => ({ ok: check.passed, text: check.command }));
+      const passed = rows.filter((row) => row.ok).length;
+      const verdict = !rows.length ? "No checks ran."
+        : run ? `${passed} of ${rows.length} steps passed.`
+        : passed === rows.length ? `${rows.length === 1 ? "Its check" : `All ${rows.length} checks`} passed.` : `${rows.length - passed} of ${rows.length} checks failed.`;
+      const proof = rows.length ? `<span class="${passed === rows.length ? "pass" : "fail"}" title="${h(rows.map((row) => `${row.ok ? "✓" : "✕"} ${row.text}`).join("\n"))}">${h(verdict)}</span>` : `<span class="muted">${verdict}</span>`;
+      const kind = fix.mission ? "Mission" : fix.proposal ? "Proposal" : "Fix";
+      cards.push(`<div class="breakage-card ready compact"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text" title="${h(`${kind} on ${fix.branch}`)}">${h(fix.title)}</span><small${paths.length > 1 ? ` title="${h(paths.join("\n"))}"` : ""}>${where}</small></div><p class="breakage-summary">${fix.summary ? `${h(fix.summary)} ` : ""}${proof}</p><div class="breakage-actions">${btn("breakage-apply", doing("apply", "Applying…", "Apply"), { id: fix.id }, "primary", true, Boolean(busy)).replace("<button ", '<button title="Apply to my branch" ')}${btn("breakage-pr", doing("pr", "Opening…", "Open PR"), { id: fix.id }, "", true, Boolean(busy))}${btn("breakage-discard", doing("discard", "Discarding…", "discard"), { id: fix.id }, "quiet", true, Boolean(busy))}${fix.receipt ? btn("breakage-receipt", "copy receipt", { id: fix.id }, "quiet", true) : ""}${fix.sessionId ? btn("review-diff", "diff ›", { id: fix.sessionId }, "quiet breakage-diff") : ""}</div></div>`);
     } else if (fix.status === "failed") {
       cards.push(`<div class="breakage-card failed"><div class="breakage-head"><span class="breakage-mark">${(fix.proposal || fix.mission) && fix.unchanged ? "○" : "!"}</span><span class="breakage-text">${fix.proposal || fix.mission ? (fix.unchanged ? "Finished without changes" : "Couldn't finish it") : "Couldn't fix it"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><p class="breakage-summary">${h(fix.error ?? (fix.proposal || fix.mission ? "It failed." : "The fix failed."))}${fix.summary ? ` ${h(fix.summary)}` : ""}</p><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Discarding…", "Discard the worktree"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
     }
@@ -1278,11 +1291,13 @@ function refreshChanges(force = false): Promise<void> {
 async function refreshChangesNow(force = false) {
   const run = selectedRun();
   if (!state || pane !== "changes" || reviewBusy) return;
-  if (reviewScope === "turn" && !run) {
+  const branch = reviewBranch, scope = branch ? "session" : reviewScope;
+  if (scope === "turn" && !run) {
     changes = [];
     return;
   }
   const signature =
+    (branch ? `branch:${branch.sessionId}:` : "") +
     reviewScope +
     ":" +
     (run?.id ?? "") +
@@ -1299,13 +1314,14 @@ async function refreshChangesNow(force = false) {
   try {
     const result = await api<ReviewResponse & { files: GraphicsChange[] }>(
       "changes",
-      { turnId: run?.id, scope: reviewScope, force },
+      branch ? { scope, branchSession: branch.sessionId, force } : { turnId: run?.id, scope, force },
     );
     if (
       request === changesRequest &&
       state?.session?.id === session &&
       pane === "changes" &&
-      result.scope === reviewScope
+      result.scope === scope &&
+      reviewBranch === branch
     ) {
       const path = changes[paneIndex]?.path;
       reviewMeta = result;
@@ -1555,7 +1571,7 @@ function renderBriefing() {
   if (!review.length) reviewShown = false;
   const signature = JSON.stringify([
     inSession(), review.map((job) => [job.id, job.status, job.title, job.diff]), reviewShown, away?.status,
-    pinned && (driveShown ? [pinned, detailsOpen.has("drive-details"), Math.floor(Date.now() / 10_000)] : [pinned.status, pinned.mission, activeMinutes(pinned)]),
+    pinned && (driveShown && !driveTurnMission() ? [pinned, detailsOpen.has("drive-details"), Math.floor(Date.now() / 10_000)] : [pinned.status, pinned.mission, driveTurnMission() ? driveProgress(pinned) : activeMinutes(pinned)]),
     run.fix && [run.fix.title, run.fix.status], run.away && run.away.items.map((item) => item.state),
     driveShown, ideasShown, next.proposals, next.loading, next.generatedAt && age(next.generatedAt),
   ]);
@@ -1565,10 +1581,15 @@ function renderBriefing() {
   let unfolded = "";
   if (review.length) {
     const only = review.length === 1 ? review[0]! : null;
-    const about = only ? `${only.title}${only.diff ? ` · +${only.diff.additions} −${only.diff.deletions}` : ""}` : away && away.status !== "running" ? "Drive ran them while you were away" : "";
+    const about = only && reviewShown ? "" : only ? `${only.title}${only.diff ? ` · +${only.diff.additions} −${only.diff.deletions}` : ""}` : away && away.status !== "running" ? "Drive ran them while you were away" : "";
     parts.push(`${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ${reviewShown ? "⌄" : "›"}`, {}, "link", true)}${about ? `<span class="muted">${h(about)}</span>` : ""}`);
   }
-  if (pinned) {
+  if (pinned && driveTurnMission()) {
+    // The mission is the conversation's newest turn; this line only says how far it has got.
+    const label = pinned.status === "blocked" ? "Drive needs you" : pinned.status === "paused" ? "Drive is paused" : "Drive is working";
+    const progress = driveProgress(pinned);
+    parts.push(`<span class="briefing-label${pinned.status === "blocked" ? " amber" : ""}">${label}</span>${progress ? `<span class="muted sep">·</span><span class="muted">${h(progress)}</span>` : ""}`);
+  } else if (pinned) {
     const label = pinned.status === "blocked" ? "Drive needs you" : pinned.status === "paused" ? "Drive is paused" : "Drive is working";
     const time = activeMinutes(pinned);
     parts.push(`${btn("drive-show", `${label} ${driveShown ? "⌄" : "›"}`, {}, `link${pinned.status === "blocked" ? " amber" : ""}`)}<span class="muted">${h(missionTitle(pinned))}${time ? ` · ${time}` : ""}</span>`);
@@ -1677,6 +1698,7 @@ function missionParts(drive: NonNullable<Snapshot["drive"]>) {
   return {
     mark, label, tone, summary, title, stats,
     tasks: tasks.length ? `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>` : "",
+    detailsBody: details,
     details: `<details data-detail="drive-details"${detailsOpen.has("drive-details") ? " open" : ""}><summary>Details</summary><div class="drive-details">${details}</div></details>`,
   };
 }
@@ -1710,6 +1732,74 @@ function pinnedCard(pinned: NonNullable<Snapshot["drive"]>) {
   if (pinned.status === "blocked") return blockedCard(pinned);
   const parts = missionParts(pinned), live = pinned.status === "running" || pinned.status === "waiting";
   return `<section class="drive-pinned tone-border-${parts.tone}" aria-label="Live mission"><div class="drive-pinned-title">${h(parts.title)}</div><div class="drive-status"><strong class="tone-${parts.tone}">${parts.mark} ${h(parts.label)}</strong>${parts.summary ? `<span class="drive-summary">${h(parts.summary)}</span>` : ""}</div>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("drive-control", live ? "Pause" : "Resume", { control: live ? "pause" : "resume" })}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>${parts.details}</section>`;
+}
+/// The mission homed in this session, which reads as its newest turn.
+const driveTurnMission = () => {
+  const pinned = pinnedMission();
+  return pinned && pinned.homeSessionId === state?.session?.id ? pinned : null;
+};
+/// How far the mission has got, for the briefing line: "step 2 of 3 · 1 min".
+function driveProgress(drive: NonNullable<Snapshot["drive"]>) {
+  const tasks = driveTaskList(drive), done = tasks.filter((task) => task.mark === "✓").length, time = activeMinutes(drive);
+  return [tasks.length > 1 ? `step ${Math.min(done + 1, tasks.length)} of ${tasks.length}` : "", time].filter(Boolean).join(" · ");
+}
+/// A mission homed in this session is a turn at the end of the conversation:
+/// what it was asked, its steps (a workflow's, or its tasks) with the one
+/// running now, and quiet pause, stop and details links.
+let driveTurnSignature = "";
+function renderDriveTurn() {
+  if (!state) return;
+  const node = document.getElementById("drive-turn");
+  if (!node) return;
+  const drive = inSession() ? driveTurnMission() : null, now = Date.now();
+  const fix = state.breakage.fix, worktree = Boolean(drive && fix?.mission && ["starting", "running"].includes(fix.status));
+  const retry = drive?.recovery && drive.recovery.retryAt > now ? Math.ceil((drive.recovery.retryAt - now) / 1000) : 0;
+  const signature = JSON.stringify([drive, worktree, retry, detailsOpen.has("drive-details"), drive ? Math.floor(now / 10_000) : 0]);
+  if (signature === driveTurnSignature) return;
+  driveTurnSignature = signature;
+  el("conversation").classList.toggle("driving", Boolean(drive));
+  node.hidden = !drive;
+  if (!drive) {
+    node.innerHTML = "";
+    return;
+  }
+  const parts = missionParts(drive), live = drive.status === "running" || drive.status === "waiting";
+  // A workflow's mission reads as you typed it: "/fix-bug Handle an empty name".
+  const name = drive.workflow ? `<span class="tone-electric">/${h(drive.workflow.name)}</span> ` : "";
+  const prefix = drive.workflow ? `${drive.workflow.name} · ` : "", title = prefix && parts.title.startsWith(prefix) ? parts.title.slice(prefix.length) : parts.title;
+  const ask = `<div class="request"><span class="text">${name}${h(title)}</span><span class="drive-turn-where">Drive${worktree ? " · in a worktree" : ""}</span></div>`;
+  if (drive.status === "blocked") {
+    node.innerHTML = `${ask}<div class="response">${blockedCard(drive)}</div>`;
+    if (follow) el("stage").scrollTop = el("stage").scrollHeight;
+    return;
+  }
+  const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
+  const tasks = driveTaskList(drive);
+  const doing = clip((drive.activity ?? "").split("\n")[0]!.trim(), 64);
+  const rows = tasks.length
+    ? tasks.map((task) => {
+        const [what, ...rest] = task.text.split(" · "), current = task.mark === "◌";
+        const detail = current && live && !drive.workflow && doing ? doing : rest.join(" · ");
+        const sign = current && live ? spinner() : h(task.mark === "·" ? "○" : task.mark);
+        return `<li class="tone-${task.tone}${current ? " now" : ""}"><span class="drive-trail-mark">${sign}</span><span class="drive-trail-what">${h(what!)}</span>${detail ? `<span class="drive-trail-detail">${h(detail)}</span>` : ""}</li>`;
+      }).join("")
+    : `<li class="now"><span class="drive-trail-mark">${live ? spinner() : "○"}</span><span class="drive-trail-what">${live ? "Choosing the first step" : "Not started"}</span></li>`;
+  const used = drive.protection?.used;
+  const meta = [
+    drive.status === "paused" ? '<span class="tone-secondary">paused</span>' : "",
+    retry ? `<span class="tone-thinking">retrying in ${retry}s</span>` : "",
+    used ? `${num(used.planningTokens + used.workerTokens)} tokens` : "",
+    drive.recovery?.attempt && !retry ? `retried ${drive.recovery.attempt === 1 ? "once" : `${drive.recovery.attempt} times`}` : "",
+  ].filter(Boolean).join('<span class="sep"> · </span>');
+  const open = detailsOpen.has("drive-details");
+  const actions = [
+    btn("drive-control", live ? "pause" : "resume", { control: live ? "pause" : "resume" }, "link"),
+    btn("drive-control", "stop", { control: "stop" }, "link danger"),
+    btn("drive-details", open ? "hide details" : "details ›", {}, "link"),
+  ].join("");
+  const stage = el("stage"), bottom = follow;
+  node.innerHTML = `${ask}<div class="response${live ? " running" : ""}"><ol class="drive-trail">${rows}</ol><div class="drive-turn-foot"><span class="drive-turn-meta">${meta}</span><span class="drive-turn-actions">${actions}</span></div>${open ? `<div class="drive-details">${parts.detailsBody}</div>` : ""}</div>`;
+  if (bottom) stage.scrollTop = stage.scrollHeight;
 }
 function driveBody() {
   const drive = state!.drive;
@@ -2122,26 +2212,37 @@ function renderPanels() {
       header = `<div class="panel-heading">${btn("log-back", "‹ Steps", {}, "back", true)}<strong class="title">Step ${index + 1} of ${all.length}</strong><span class="subject">Turn ${run.number}</span>${btn("log-next", "Next ›", {}, "link", true)}${btn("close-panel", "×", {}, "close", true)}</div>`;
     }
   }
+  if (pane === "changes" && reviewBranch && !reviewJobs().some((job) => job.sessionId === reviewBranch!.sessionId)) {
+    // The branch was applied or discarded: back to this session's changes.
+    reviewBranch = null;
+    changes = [];
+    changesKey = "";
+    void refreshChanges(true);
+  }
   if (pane === "changes") {
     const file = changes[paneIndex],
-      total = changes.reduce(
-        (n, f) => ({
-          added: n.added + f.added,
-          removed: n.removed + f.removed,
-        }),
-        { added: 0, removed: 0 },
-      ),
-      checks = verificationChecks(),
-      busy = Boolean(state.activeTurnId || state.processes.some((c) => ["running", "stopping"].includes(c.status)));
-    header = panelHeader(
-      "Review",
-      [
-        reviewScope === "turn" ? (run ? `Turn ${run.number}` : "This turn") : reviewScope === "session" ? "Session" : "Workspace",
-        `${changes.length} ${changes.length === 1 ? "file" : "files"}`,
-        checks.length ? `checks ${verificationOverall(checks)}` : "",
-      ].filter(Boolean).join(" · "),
-    );
-    const tabs = `<div class="panel-tabs">${(["turn", "session", "workspace"] as const).map((scope) => btn("review-scope", scope === "turn" ? "This turn" : scope === "session" ? "Session" : "Workspace", { scope }, scope === reviewScope ? "selected" : "")).join("")}${btn("refresh-review", reviewBusy ? "Refreshing…" : "↻", {}, "right")}</div>`;
+      checks = verificationChecks();
+    // One heading line: the scope, how the checks went, refresh and close.
+    // The files follow, the open one with its diff right under it.
+    const scopeName = (scope: ReviewScope) => (scope === "turn" ? "this turn" : scope);
+    const failed = checks.filter((check) => checkLabel(check) === "failed").length,
+      passed = checks.filter((check) => checkLabel(check) === "passed").length;
+    const checkText = !checks.length ? ""
+      : failed ? `× ${checks.length === 1 ? commandLabel(checks[0]!.argv) : `${failed} of ${checks.length} checks failed`}`
+      : passed === checks.length ? `✓ ${checks.length === 1 ? commandLabel(checks[0]!.argv) : `${checks.length} checks`}`
+      : `◌ ${checks.length === 1 ? commandLabel(checks[0]!.argv) : `${checks.length - passed} of ${checks.length} checks ${verificationOverall(checks)}`}`;
+    const checkTone = failed ? "danger" : passed === checks.length ? "success" : "amber";
+    const checkLink = checks.length
+      ? btn("panel", h(checkText), { name: "verification" }, `review-check ${checkTone}`, true).replace("<button ", `<button title="${h(checks.map((check) => `${checkLabel(check)} · ${commandLabel(check.argv)}`).join("\n"))} · open Checks" `)
+      : "";
+    const scopeMenu = reviewScopeMenu
+      ? `<div class="review-scope-menu" role="menu">${(["turn", "session", "workspace"] as const).map((scope) => btn("review-scope", scope === "turn" ? (run ? `this turn <span class="muted">turn ${run.number}</span>` : "this turn") : scope === "session" ? "session <span class=\"muted\">every turn here</span>" : "workspace <span class=\"muted\">all uncommitted</span>", { scope }, `review-scope-option${scope === reviewScope && !reviewBranch ? " selected" : ""}`)).join("")}</div>`
+      : "";
+    const branch = reviewBranch;
+    const scopeButton = branch
+      ? btn("review-scope-menu", `${h(branch.title.length > 34 ? `${branch.title.slice(0, 33)}…` : branch.title)} ⌄`, {}, "review-scope-button branch").replace("<button ", `<button title="${h(`Branch waiting for review: ${branch.title}`)}" `)
+      : btn("review-scope-menu", `${scopeName(reviewScope)} ⌄`, {}, "review-scope-button");
+    header = `<div class="panel-heading review-heading"><strong class="title">Review</strong>${scopeButton}<span class="subject"></span>${branch ? "" : checkLink}${btn("refresh-review", reviewBusy ? "…" : "↻", {}, "review-refresh")}${btn("close-panel", "×", {}, "close", true)}${scopeMenu}</div>`;
     let code = "";
     if (file) {
       if (reviewMode !== "diff") {
@@ -2157,6 +2258,7 @@ function renderPanels() {
                 )
                 .join("");
       } else {
+        // One gutter: the new line number, or the old one for a removed line.
         let section = -1,
           wasChanged = false;
         code =
@@ -2166,34 +2268,23 @@ function renderPanels() {
                 anchor =
                   changed && !wasChanged ? ` data-hunk="${++section}"` : "";
               wasChanged = changed;
-              return `<div class="diff-line ${row.kind}"${anchor}>${row.kind === "gap" ? h(row.text) : `<span class="number">${row.old ?? ""}</span>${row.next ? btn("source-location", String(row.next), { path: file.path, line: row.next }, "number") : '<span class="number"></span>'}<span class="marker">${row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " "}</span><code>${h(row.text)}</code>`}</div>`;
+              return `<div class="diff-line ${row.kind}"${anchor}>${row.kind === "gap" ? h(row.text) : `${row.kind !== "removed" && row.next ? btn("source-location", String(row.next), { path: file.path, line: row.next }, "number") : `<span class="number">${row.old ?? ""}</span>`}<span class="marker">${row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " "}</span><code>${h(row.text)}</code>`}</div>`;
             })
             .join("") || '<div class="empty">No textual changes.</div>';
       }
     }
-    const checksSection = `<div class="panel-section">CHECKS ${btn("panel", "Details ›", { name: "verification" }, "link", true)}</div>` + (checks.length
-      ? `${checks
-          .slice(0, 4)
-          .map((check, index) => {
-            const label = checkLabel(check);
-            return `<div class="check-row">${btn("open-check", `<span class="${label === "passed" ? "success" : label === "failed" ? "danger" : "amber"}">${label === "passed" ? "✓" : label === "failed" ? "×" : label === "running" ? "◌" : "·"}</span><span class="name">${h(commandLabel(check.argv))}</span><span class="muted">${label === "passed" ? "" : label}</span>`, { index }, "", true)}${check.id.startsWith("legacy:") ? "" : btn("rerun-check", "↻ Rerun", { id: check.id }, "link", false, busy)}</div>`;
-          })
-          .join("")}`
-      : '<div class="check-row muted">No checks run</div>');
+    const sep = '<span class="muted">·</span>';
+    const fileBlock = file
+      ? `<div class="review-file"><div class="diff-code">${file.unavailable && reviewMode === "diff" ? `<div class="empty">${h(file.unavailable)}</div>` : code}</div>${reviewMeta?.truncated ? '<div class="panel-note">Some diff content is omitted.</div>' : ""}<div class="panel-actions review-modes">${(["diff", "before", "after"] as const).filter((mode) => mode !== reviewMode).map((mode) => btn("review-mode", mode, { mode })).join(sep)}${branch ? "" : `${sep}${btn("review-current", "open", { path: file.path })}${file.undo?.available ? btn("review-undo", "undo file", { path: file.path, turnId: file.undo.turnId }, "danger right") : ""}`}</div>${!branch && file.undo && !file.undo.available ? `<div class="panel-note">Undo unavailable: ${h(file.undo.reason)}</div>` : ""}</div>`
+      : "";
     body =
-      tabs +
       (reviewError
         ? `<div class="panel-error">${h(reviewError)} ${btn("refresh-review", "Retry")}</div>`
         : "") +
-      checksSection +
-      `<div class="panel-section">FILES <span>${changes.length ? counts(total) : ""}</span></div><div class="file-list">${changes.map((file, index) => btn("change-file", `<span class="name">${pathHTML(file.path)}</span>${file.state === "applied" ? "" : `<span class="muted">${h(file.state)}</span>`}<span class="right"></span>${counts(file)}`, { index }, `panel-row ${index === paneIndex ? "selected" : ""}`, true)).join("")}</div>` +
-      (file
-        ? `<div class="panel-actions">${(["diff", "before", "after"] as const).map((mode) => btn("review-mode", mode === "diff" ? "Diff" : mode === "before" ? "Before" : "After", { mode }, reviewMode === mode ? "selected" : "")).join("")}${btn("review-current", "Open", { path: file.path })}${file.undo?.available ? btn("review-undo", "Undo file", { path: file.path, turnId: file.undo.turnId }, "danger right") : ""}</div>${file.undo && !file.undo.available ? `<div class="panel-note">Undo unavailable: ${h(file.undo.reason)}</div>` : ""}<div class="diff-code">${file.unavailable && reviewMode === "diff" ? `<div class="empty">${h(file.unavailable)}</div>` : code}</div>${reviewMeta?.truncated ? '<div class="panel-note">Some diff content is omitted.</div>' : ""}`
-        : '<div class="empty">No changes in this scope.</div>');
-    // The turn's step log, one row down; Ctrl+B opens it too.
-    footer = run
-      ? btn("panel", `▸ Steps <span class="muted">${logRecords(run).length} · ${duration(run.receipt?.durationMs)}</span>`, { name: "log" }, "panel-steps", true)
-      : "";
+      (changes.length
+        ? `<div class="review-files">${changes.map((item, index) => btn("change-file", `<span class="name">${pathHTML(item.path)}</span>${item.state === "applied" ? "" : `<span class="muted">${h(item.state)}</span>`}<span class="right"></span>${counts(item)}`, { index }, `panel-row ${index === paneIndex ? "selected" : ""}`, true) + (index === paneIndex ? fileBlock : "")).join("")}</div>`
+        : `<div class="empty">${branch ? "No changes on this branch." : `No changes in ${h(scopeName(reviewScope))}.`}</div>`);
+    footer = "";
   }
   if (pane === "verification") {
     const checks = verificationChecks(),
@@ -2666,6 +2757,18 @@ function renderOverlay() {
     .querySelector(".menu-row.selected")
     ?.scrollIntoView({ block: "nearest" });
 }
+/// Slash commands you ran lately, newest first, kept in this browser only.
+let completionAll = false, completionMore = 0;
+const RECENT_KEY = "demesne.recentCommands";
+function recentCommands(): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch { return []; }
+}
+function rememberCommand(name: string) {
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify([name, ...recentCommands().filter((item) => item !== name)].slice(0, 8))); } catch { /* storage may be off */ }
+}
 function renderCompletion() {
   if (pendingQuestion()) { el("completion").hidden=true;completionItems=[];return; }
   if (
@@ -2702,18 +2805,31 @@ function renderCompletion() {
         kind: "mention",
       }));
   } else if (command) {
-    completionItems = state.commands
-      .filter((item) =>
-        [item.name, ...item.aliases].some((name) => name.startsWith(value)),
-      )
-      .map((item) => ({
-        label: item.name,
-        description: item.description,
-        hint: item.detail ?? item.aliases.join(" "),
-        group: item.section.toUpperCase(),
-        value: item.name,
-        kind: "command",
-      }));
+    const row = (item: Snapshot["commands"][number], group = item.section.toUpperCase()) => ({
+      label: item.name,
+      description: item.description,
+      hint: item.detail ?? item.aliases.join(" "),
+      group,
+      value: item.name,
+      kind: "command" as const,
+    });
+    const all = state.commands.filter((item) =>
+      [item.name, ...item.aliases].some((name) => name.startsWith(value)),
+    );
+    // A bare "/" leads with your workflows and commands, then the ones you
+    // used lately; the rest wait behind "N more" or a letter typed.
+    const yours = value === "/" && !completionAll ? all.filter((item) => item.id.startsWith("workflow:") || item.id.startsWith("custom:")) : [];
+    const recent = value === "/" && !completionAll ? recentCommands().map((name) => all.find((item) => item.name === name)).filter((item): item is (typeof all)[number] => Boolean(item) && !yours.includes(item!)).slice(0, 4) : [];
+    if (yours.length || recent.length) {
+      completionItems = [
+        ...yours.map((item) => row(item, item.id.startsWith("workflow:") ? "YOUR WORKFLOWS" : "YOUR COMMANDS")),
+        ...recent.map((item) => row(item, "RECENT")),
+      ];
+      completionMore = all.length - completionItems.length;
+    } else {
+      completionItems = all.map((item) => row(item));
+      completionMore = 0;
+    }
   }
   el("completion").hidden = !completionItems.length;
   if (!completionItems.length) return;
@@ -2732,7 +2848,7 @@ function renderCompletion() {
     .map((item, index) => {
       const heading =
         group !== item.group
-          ? `<div class="section-label">${item.group}<span>${mention ? `${completionItems.length} match${completionItems.length === 1 ? "" : "es"} “${h(needle)}”` : completionItems.filter((row) => row.group === item.group).length}</span></div>`
+          ? `<div class="section-label">${item.group}<span>${mention ? `${completionItems.length} match${completionItems.length === 1 ? "" : "es"} “${h(needle)}”` : completionMore ? "" : completionItems.filter((row) => row.group === item.group).length}</span></div>`
           : "";
       group = item.group;
       const definition = state!.commands.find(
@@ -2754,7 +2870,7 @@ function renderCompletion() {
     })
     .join("");
   el("completion").innerHTML =
-    `<div class="menu-list">${rows}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} ${mention ? "insert" : "run"} ${!mention ? `${k("Tab")} complete` : ""} ${k("Esc")} close <span class="right">${mention ? "files with spaces are skipped" : h(state!.commands.find((command) => command.name === completionItems[completionIndex]?.value)?.preview ?? `${completionItems.length} commands`)}</span></div>`;
+    `<div class="menu-list">${rows}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} ${mention ? "insert" : "run"} ${!mention ? `${k("Tab")} complete` : ""} ${k("Esc")} close <span class="right">${mention ? "files with spaces are skipped" : completionMore ? `${btn("completion-more", `${completionMore} more ›`, {}, "completion-more")}<span class="muted"> · type to filter</span>` : h(state!.commands.find((command) => command.name === completionItems[completionIndex]?.value)?.preview ?? `${completionItems.length} commands`)}</span></div>`;
   el("completion")
     .querySelector(".selected")
     ?.scrollIntoView({ block: "nearest" });
@@ -2775,6 +2891,7 @@ function changedDraft() {
   if (state?.drive && ["running", "waiting"].includes(state.drive.status))
     void api("manual");
   completionDismissed = false;
+  completionAll = false;
   completionIndex = 0;
   renderComposer();
   renderCompletion();
@@ -2843,6 +2960,8 @@ async function submitText(value = editor.value) {
       notice(`Unknown command: ${name}`);
       return;
     }
+    const known = state.commands.find((command) => command.id === id);
+    if (known) rememberCommand(known.name);
     if (id.startsWith("workflow:")) {
       // A workflow runs as a Drive mission and unfolds on the briefing line.
       driveShown = true;
@@ -3013,7 +3132,15 @@ async function dispatch(
   if (action === "question-control") return questionAction(args.action);
   if (action === "auto-approve" && driveNavigating)
     throw new Error("Only you can change session approvals.");
+  if (action === "review-scope-menu") {
+    reviewScopeMenu = !reviewScopeMenu;
+    paneSignature = "";
+    renderPanels();
+    return;
+  }
   if (action === "review-scope") {
+    reviewScopeMenu = false;
+    reviewBranch = null;
     reviewScope = args.scope;
     reviewMode = "diff";
     paneIndex = 0;
@@ -3235,6 +3362,28 @@ async function dispatch(
     renderBreakage();
     return;
   }
+  if (action === "review-diff") {
+    // A branch's diff opens in Review without leaving this session (which
+    // would pull a running Drive mission away from its window).
+    const job = reviewJobs().find((item) => item.sessionId === args.id);
+    if (!job?.sessionId) return;
+    reviewBranch = { sessionId: job.sessionId, title: job.title };
+    reviewScopeMenu = false;
+    reviewMode = "diff";
+    paneIndex = 0;
+    changes = [];
+    changesKey = "";
+    reviewMeta = null;
+    if (pane === "changes") await refreshChanges(true);
+    else await openPanel("changes");
+    return;
+  }
+  if (action === "drive-details") {
+    if (detailsOpen.has("drive-details")) detailsOpen.delete("drive-details");
+    else detailsOpen.add("drive-details");
+    renderDriveTurn();
+    return;
+  }
   if (action === "drive-show" || action === "ideas-show") {
     if (action === "drive-show") driveShown = !driveShown;
     else ideasShown = !ideasShown;
@@ -3316,6 +3465,12 @@ async function dispatch(
     return changedDraft();
   }
   if (action === "completion") return chooseCompletion(args.index);
+  if (action === "completion-more") {
+    completionAll = true;
+    renderCompletion();
+    editor.focus();
+    return;
+  }
   if (action === "choose-row") {
     const row = overlayRows[args.index];
     if (row?.action === "focus-filter") {
@@ -3548,6 +3703,7 @@ function renderState(next: Snapshot) {
     runNodes.forEach((item) => item.node.remove());
     runNodes.clear();
     paneSignature = heroSignature = overlaySignature = "";
+    reviewBranch = null;
   }
   const question=next.questions[0], slot=question ? `${question.id}:${question.answers?.length ?? 0}` : "chat";
   if (slot !== composerSlot) {
@@ -3586,6 +3742,7 @@ function renderState(next: Snapshot) {
   else if (wasStart) el("input-area").append(el("composer-slot"));
   renderStatus();
   renderConversation();
+  renderDriveTurn();
   renderComposer();
   renderApproval();
   renderQuestion();
@@ -3628,6 +3785,11 @@ document.addEventListener("click", (event) => {
     drivePopOpen = false;
     renderStatus();
     renderDrivePop();
+  }
+  if (reviewScopeMenu && !(event.target as Element).closest(".review-scope-menu, .review-scope-button")) {
+    reviewScopeMenu = false;
+    paneSignature = "";
+    renderPanels();
   }
   const summary = (event.target as Element).closest("summary");
   if (summary instanceof HTMLElement && summary.closest(".approval-card")) summary.focus({ preventScroll: true });
@@ -4242,6 +4404,7 @@ setInterval(() => {
 }, 300);
 setInterval(() => {
   if (state?.activeTurnId) renderStatus();
+  renderDriveTurn();
   for (const span of document.querySelectorAll<HTMLElement>("[data-since]")) {
     const next = elapsed(span.dataset.since!);
     if (span.textContent !== next) span.textContent = next;
@@ -4537,7 +4700,7 @@ function observeUI(): DriveObservation {
       !parent ||
       !node.textContent?.trim() ||
       parent.closest(
-        "#status,header,.drive-pane,.drive-live,#drive-pop,#overlay[hidden],#completion[hidden],time,script,style,textarea",
+        "#status,header,.drive-pane,.drive-live,#drive-turn,#drive-pop,#overlay[hidden],#completion[hidden],time,script,style,textarea",
       )
     )
       continue;
@@ -4616,7 +4779,7 @@ function observeUI(): DriveObservation {
   )) {
     if (
       !driveAllowed.has(element.dataset.action!) ||
-      element.closest(".drive-pane, .drive-live, #drive-pop")
+      element.closest(".drive-pane, .drive-live, #drive-turn, #drive-pop")
     )
       continue;
     const box = geometry(element);

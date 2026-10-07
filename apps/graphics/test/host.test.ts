@@ -108,16 +108,24 @@ test("a queued follow-up is sent only on success and restored on cancellation", 
     await host.connect();
     await host.submit("First request");
     await eventually(() => gates.length === 1);
+    // Typing alone is a draft; Enter (submit) queues it.
     await host.handle("draft", {
       sessionId: host.current!.session.id,
       text: "Follow-up",
     });
+    expect(host.queue).toBe("");
+    await host.handle("submit", {
+      sessionId: host.current!.session.id,
+      text: "Follow-up",
+    });
+    expect(host.queue).toBe("Follow-up");
+    expect(host.draft).toBe("");
     gates[0]!.resolve();
     // The daemon can start the second turn before the host has the submit
     // response that records it locally; wait for both.
     await eventually(() => calls === 2 && host.current!.session.turns.length === 2);
     expect(host.current!.session.turns[1]?.content).toBe("Follow-up");
-    await host.handle("draft", {
+    await host.handle("submit", {
       sessionId: host.current!.session.id,
       text: "Keep this unsent",
     });
@@ -126,6 +134,55 @@ test("a queued follow-up is sent only on success and restored on cancellation", 
     expect(host.draft).toBe("Keep this unsent");
     expect(host.queue).toBe("");
     expect(calls).toBe(2);
+  } finally {
+    gates.forEach((g) => g.resolve());
+    host.dispose();
+    await f.close();
+  }
+});
+test("a queued follow-up can be edited, dropped or sent now", async () => {
+  let gates: ReturnType<typeof Promise.withResolvers<void>>[] = [],
+    calls = 0;
+  const f = await fixture({
+      providerId: "test",
+      modelId: "test",
+      async listModels() {
+        return [];
+      },
+      async *stream(_messages, _tools, signal) {
+        calls++;
+        const gate = Promise.withResolvers<void>();
+        gates.push(gate);
+        await Promise.race([
+          gate.promise,
+          new Promise<void>((r) =>
+            signal.addEventListener("abort", () => r(), { once: true }),
+          ),
+        ]);
+        signal.throwIfAborted();
+        yield { type: "text_delta", delta: "Finished." };
+        yield { type: "finish", reason: "stop" };
+      },
+    }),
+    host = hostFor(f);
+  try {
+    await host.connect();
+    const sessionId = host.current!.session.id;
+    await host.submit("First request");
+    await eventually(() => gates.length === 1);
+    await host.handle("submit", { sessionId, text: "Edit me" });
+    await host.handle("draft", { sessionId, text: "typed since" });
+    await host.handle("queue-action", { sessionId, action: "edit" });
+    expect(host.queue).toBe("");
+    expect(host.draft).toBe("Edit me\n\ntyped since");
+    await host.handle("submit", { sessionId, text: "Drop me" });
+    await host.handle("queue-action", { sessionId, action: "drop" });
+    expect(host.queue).toBe("");
+    await host.handle("submit", { sessionId, text: "Right away" });
+    await host.handle("queue-action", { sessionId, action: "now" });
+    await eventually(() => calls === 2 && host.current!.session.turns.length === 2);
+    expect(host.current!.session.turns[1]?.content).toBe("Right away");
+    expect(host.current!.session.turns[0]?.status).not.toBe("completed");
   } finally {
     gates.forEach((g) => g.resolve());
     host.dispose();

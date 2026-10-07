@@ -504,23 +504,23 @@ function runHTML(run: GraphicsRun, index: number) {
             ],
         ),
     ).size;
-  if (index < state!.runs.length - 1 && !expanded.has(run.id) && !active(run))
-    return btn(
-      "expand-turn",
-      `▸ Turn ${run.number} · <span class="${tone(run.status)}">${h(run.status)}</span> at ${clock(run.completedAt ?? run.createdAt).slice(0, 5)} · ${duration(run.receipt?.durationMs)} · ${files ? `${files} file${files === 1 ? "" : "s"} changed` : "no diff"} · <span class="muted">${h(shortcut("Ctrl+B"))} log</span>`,
-      { id: run.id },
-      "folded-turn",
-      true,
-    );
   // A finished turn reads as its answer: thinking and tool steps fold into
-  // the receipt line under it, and open from there.
-  const fold = run.status === "completed" && !stepsOpen.has(run.id);
+  // the receipt line under it, and open from there. A running turn folds its
+  // steps into one trail line and its thinking into one streaming line.
+  const live = active(run),
+    fold = (run.status === "completed" || live) && !stepsOpen.has(run.id);
+  const lastThought = run.entries.findLast((e) => e.type === "reasoning");
   let body = "";
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!,
       key = `${run.id}:${entry.id}`;
     if (entry.type === "assistant")
       body += `<div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div>`;
+    if (fold && live && entry === lastThought) {
+      const open = detailsOpen.has(key), text = entry.raw.trim().split(/\n+/).at(-1) ?? "";
+      body += `<div class="thinking thinking-line"><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div><button type="button" class="thinking-line-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({ id: key }))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">◇ thinking <i>${h(text.slice(-240))}</i></button></div>`;
+      continue;
+    }
     if (fold && (entry.type === "reasoning" || entry.type === "tool")) continue;
     if (entry.type === "reasoning") {
       const live = active(run) && i === run.entries.length - 1;
@@ -602,7 +602,9 @@ function runHTML(run: GraphicsRun, index: number) {
       duration(receipt?.durationMs),
     ].filter(Boolean);
     const mark = run.status === "completed" ? '<span class="success">✓</span>' : run.status === "failed" ? '<span class="danger">×</span>' : "<span>■</span>";
-    footer = `<div class="turn-receipt">${mark}${parts.join(sep)}${files ? btn("panel", "review ›", { name: "changes", turnId: run.id }, "receipt-review", true) : ""}${error ? btn("panel", "log ›", { name: "log", turnId: run.id }, "receipt-review", true) : ""}${btn("copy-answer", "copy", { id: run.id }, "copy-answer")}</div>`;
+    // A turn that only answered needs no receipt: its time is on the ask.
+    const bare = run.status === "completed" && !files && !checks.length && !steps && !thought && !(receipt?.mode === "Plan" || run.planOnly) && !model;
+    footer = bare ? "" : `<div class="turn-receipt">${mark}${parts.join(sep)}${files ? btn("panel", "review ›", { name: "changes", turnId: run.id }, "receipt-review", true) : ""}${error ? btn("panel", "log ›", { name: "log", turnId: run.id }, "receipt-review", true) : ""}</div>`;
   }
   const latestTool = items.findLast(
       (tool) => tool.state === "running" || tool.waiting,
@@ -620,10 +622,37 @@ function runHTML(run: GraphicsRun, index: number) {
             : "Thinking";
   // The live thinking row already says "Thinking"; don't repeat it here.
   const thinkingLive = run.entries.at(-1)?.type === "reasoning" && !latestTool && !state!.questions.length;
-  const activity = active(run) && !thinkingLive
+  const trail = !live || !items.length ? "" : fold ? stepTrail(run, items) : `<div class="step-trail">${btn("toggle-steps", "hide steps", { id: run.id }, "receipt-steps")}</div>`;
+  const activity = live && !thinkingLive && !(fold && items.length)
     ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
     : "";
-  return `<div class="request"><span class="text">${h(run.content)}</span><time>${clock(run.createdAt).slice(0, 5)}</time></div><div class="response ${active(run) ? "running" : run.status === "failed" ? "failed" : ""}">${body}${footer}${activity}</div>`;
+  const answered = run.entries.some((e) => e.type === "assistant");
+  const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}${answered ? btn("copy-answer", "copy", { id: run.id }, "copy-answer") : ""}</span>`;
+  const queued = live && state!.queue.trim() ? `<div class="next-line"><span class="next-label">NEXT</span><span class="next-text">${h(state!.queue.trim())}</span>${btn("queue-action", "edit", { action: "edit" })}${btn("queue-action", "send now", { action: "now" })}${btn("queue-action", "×", { action: "drop" }, "next-drop")}</div>` : "";
+  return `<div class="request"><span class="text">${h(run.content)}</span>${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></div><div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${activity}</div>${queued}`;
+}
+/** Whole seconds since a moment, for clocks that tick in place. */
+const elapsed = (since: string) => {
+  const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(since)) / 1000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+};
+/// A running turn's steps as one line: the last few, what runs now, and how
+/// long the turn has run; the step count opens the full rows.
+function stepTrail(run: GraphicsRun, items: ToolEntry[]) {
+  if (!items.length) return "";
+  const shown = items.slice(-4), earlier = items.length - shown.length;
+  const name = (tool: ToolEntry) => {
+    const detail = tool.name === "run_command" ? String(tool.detail ?? "").replace(/^\$\s*/, "") : String(tool.input.path ?? tool.detail ?? "").split(/[\\/]/).at(-1) ?? "";
+    return `${verb(tool).toLowerCase()} ${detail}`.trim();
+  };
+  const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
+  const step = (tool: ToolEntry) => {
+    const now = tool.state === "running" || tool.waiting || tool.drafting;
+    const sign = now ? spinner() : `<span class="${tone(tool.state)}">${mark(tool.state)}</span>`;
+    const added = tool.phase === "change" && tool.state === "done" ? totals(run, tool).added : 0;
+    return `<span class="trail-step ${now ? "now" : ""}">${sign} ${h(tool.waiting ? `waiting for you · ${name(tool)}` : clip(name(tool), 48))}${added ? ` <span class="success">+${added}</span>` : ""}</span>`;
+  };
+  return `<div class="step-trail">${earlier ? `<span class="muted">${earlier} earlier ·</span>` : ""}${shown.map(step).join("")}<span class="trail-meta">${btn("toggle-steps", `${items.length} step${items.length === 1 ? "" : "s"}`, { id: run.id }, "receipt-steps")} · <span data-since="${h(run.createdAt)}">${elapsed(run.createdAt)}</span></span></div>`;
 }
 /** Text deltas keep the response shell, tool rows and finished Markdown blocks.
  * Structural transitions (tools, fold/unfold, receipts) rebuild only the shell
@@ -678,6 +707,8 @@ function renderConversation() {
       expanded.has(run.id),
       stepsOpen.has(run.id),
       state.questions.length > 0,
+      active(run) ? state.queue : "",
+      state.activeTurnId,
     ]);
     let saved = runNodes.get(run.id);
     if (!saved) {
@@ -824,6 +855,7 @@ function renderComposer() {
   const signature = JSON.stringify([
     editor.value,
     Boolean(state.activeTurnId),
+    state.queue,
     state.restored,
     Date.now() < stopArmed,
     inSession(),
@@ -847,7 +879,7 @@ function renderComposer() {
   const form = el("composer"),
     question = pendingQuestion(),
     answered = question && (question.answers?.length ?? 0) >= question.questions.length,
-    queued = Boolean(!question && state.activeTurnId && editor.value.trim());
+    queued = false;
   let approvalMode = form.querySelector<HTMLElement>(".approval-mode");
   if (!approvalMode) {
     approvalMode = document.createElement("div");
@@ -869,7 +901,7 @@ function renderComposer() {
     ? answered ? "Your answers are saved. Choose Resume to continue." : question.status === "paused" ? "Type your answer to resume the interview…" : "Type your answer here…"
     : inSession()
     ? state.activeTurnId
-      ? "Type to queue a follow-up…"
+      ? state.queue.trim() ? "Queue another follow-up…" : "Queue a follow-up…"
       : suggestion ? `${suggestion}   ⇥ Tab` : "Continue the conversation…"
     : "What should we do?";
   editor.disabled =
@@ -885,10 +917,11 @@ function renderComposer() {
   // / and @, and a draft shows ↵ send instead. The start screen keeps both.
   const armed = Date.now() < stopArmed;
   const draft = Boolean(editor.value.trim()), session = inSession();
+  // While a turn runs the send button is Stop; Enter queues what you type.
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
-    ? armed ? `Press ${k("Esc")} again to stop` : ""
+    ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${k("Enter")} queue</span>` : ""}<span class="stop-word">■ Stop</span>`
     : "send";
-  form.querySelector<HTMLElement>(".send")!.hidden = question ? !draft : state.activeTurnId ? !armed : session && !draft;
+  form.querySelector<HTMLElement>(".send")!.hidden = question ? !draft : state.activeTurnId ? false : session && !draft;
   form.querySelector<HTMLElement>(".hints")!.hidden = Boolean(state.activeTurnId) || (session && draft);
   (form.querySelector(".send") as HTMLButtonElement).disabled =
     state.connection !== "online" || state.busy || answeringQuestion;
@@ -2704,7 +2737,15 @@ async function chooseCompletion(index = completionIndex) {
 async function submitText(value = editor.value) {
   if (!state || !value.trim()) return;
   if (pendingQuestion()) return answerQuestion(value);
-  if (state.activeTurnId) return;
+  if (state.activeTurnId) {
+    // Enter while a turn runs queues the message as the next one.
+    if (value.startsWith("/")) return;
+    clearTimeout(draftTimer);
+    editor.value = "";
+    renderComposer();
+    await api("submit", { text: value });
+    return;
+  }
   clearTimeout(draftTimer);
   completionDismissed = true;
   el("completion").hidden = true;
@@ -3305,6 +3346,14 @@ async function dispatch(
     }
     return;
   }
+  if (action === "edit-ask" || action === "retry-ask") {
+    const run = state!.runs.find((run) => run.id === args.id);
+    if (!run) return;
+    if (action === "edit-ask") return setDraft(run.content);
+    if (state!.activeTurnId) return;
+    return submitText(run.content);
+  }
+  if (action === "queue-action") return api("queue-action", { action: args.action });
   if (action === "copy-answer") {
     const run = state!.runs.find((run) => run.id === args.id);
     await api("copy", {
@@ -3548,6 +3597,7 @@ document.addEventListener("submit", (event) => {
       if (pendingQuestion()) await submitText();
       else if (state?.activeTurnId) {
         if ((event as SubmitEvent).submitter) await api("cancel");
+        else await submitText();
       } else await submitText();
     }
     if (form.id === "rename-form") {
@@ -3791,7 +3841,7 @@ document.addEventListener("keydown", (event) => {
     }
   }
   if (event.target === editor && key === "enter" && !event.shiftKey) {
-    run(() => (state!.activeTurnId && !pendingQuestion() ? undefined : submitText()));
+    run(() => submitText());
     return;
   }
   if (
@@ -4085,6 +4135,10 @@ setInterval(() => {
 }, 300);
 setInterval(() => {
   if (state?.activeTurnId) renderStatus();
+  for (const span of document.querySelectorAll<HTMLElement>("[data-since]")) {
+    const next = elapsed(span.dataset.since!);
+    if (span.textContent !== next) span.textContent = next;
+  }
   if (pane === "log") commandClocks();
   if (state?.setup?.step === "auth") updateSetupTimer();
 }, 1000);

@@ -197,6 +197,8 @@ export class GraphicsHost {
   private trustWorkspace = false;
   planOnly = false;
   queue = "";
+  /** Send now: the queued follow-up goes out as soon as the stopped turn settles. */
+  sendQueuedOnStop = false;
   draft = "";
   draftVersion = 0;
   restored = false;
@@ -563,9 +565,10 @@ export class GraphicsHost {
           if (!this.options.headless && Date.now() - this.nextRequested > 30 * 60_000) void this.refreshNext();
           // After the turn settles, look for anything it (or anyone) broke.
           setTimeout(() => void this.breakage.check(), 1500);
-          const queued = this.queue;
+          const queued = this.queue, now = this.sendQueuedOnStop;
           this.queue = "";
-          if (queued.trim() && event.type === "turn.completed") {
+          this.sendQueuedOnStop = false;
+          if (queued.trim() && (event.type === "turn.completed" || now)) {
             this.draft = "";
             this.draftVersion++;
             void this.submit(queued).catch((error) => {
@@ -577,7 +580,7 @@ export class GraphicsHost {
               this.fail(error);
             });
           } else if (queued) {
-            this.draft = queued;
+            this.draft = this.draft.trim() ? `${queued}\n\n${this.draft}` : queued;
             this.draftVersion++;
             this.restored = true;
           }
@@ -690,8 +693,9 @@ export class GraphicsHost {
       throw new Error("Connect to the daemon first.");
     if (!content.trim()) return;
     if (this.active) {
-      this.queue = content;
-      this.draft = content;
+      // Enter while a turn runs queues the text as the next message.
+      this.queue = this.queue.trim() ? `${this.queue}\n\n${content}` : content;
+      this.draft = "";
       this.draftVersion++;
       this.publish();
       return { queued: true };
@@ -1114,7 +1118,6 @@ export class GraphicsHost {
     if (method === "draft") {
       this.draft = string(args.text, "draft");
       this.restored = false;
-      if (this.active) this.queue = this.draft;
       this.publish();
       return;
     }
@@ -1169,6 +1172,24 @@ export class GraphicsHost {
     }
     if (method === "submit") return this.submit(string(args.text, "prompt"));
     if (method === "cancel") return this.interrupt();
+    if (method === "queue-action") {
+      const action = string(args.action, "queue action", 10);
+      if (action === "edit") {
+        // Back into the composer, ahead of anything typed since.
+        this.draft = this.draft.trim() ? `${this.queue}\n\n${this.draft}` : this.queue;
+        this.draftVersion++;
+        this.queue = "";
+      } else if (action === "drop") this.queue = "";
+      else if (action === "now") {
+        if (!this.active || !this.queue.trim()) return;
+        this.sendQueuedOnStop = true;
+        this.publish();
+        await this.interrupt();
+        return;
+      } else throw new Error(`Unknown queue action: ${action}`);
+      this.publish();
+      return;
+    }
     if (method === "clear-queue") {
       this.queue = "";
       this.restored = false;

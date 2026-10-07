@@ -24,12 +24,14 @@ function sessionEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string
 
 export async function fixture(
   processor?: TurnProcessor,
-  options: { vision?: boolean; trusted?: boolean } = {},
+  // `root` and `workspaceName` give screenshots a readable project path.
+  options: { vision?: boolean; trusted?: boolean; root?: string; workspaceName?: string } = {},
 ) {
+  if (options.root) mkdirSync(options.root);
   const root = realpathSync(
-      mkdtempSync(join(tmpdir(), "demesne-graphics-test-")),
+      options.root ?? mkdtempSync(join(tmpdir(), "demesne-graphics-test-")),
     ),
-    workspace = join(root, "workspace"),
+    workspace = join(root, options.workspaceName ?? "workspace"),
     home = join(root, "home");
   mkdirSync(workspace);
   mkdirSync(join(home, ".demesne"), { recursive: true });

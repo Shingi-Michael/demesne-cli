@@ -999,6 +999,10 @@ export class GraphicsHost {
       "setup",
       "setup-action",
     ]);
+    // A draft saved for a session that is no longer current (a workflow or
+    // mission that just switched sessions, a keystroke racing a switch) has
+    // nowhere to go; dropping it is not an error worth a notice.
+    if (method === "draft" && args.sessionId !== this.current?.session.id) return;
     if (!globals.has(method) && args.sessionId !== this.current?.session.id)
       throw new Error("The session changed. Try the action again.");
     if (method === "auto-approve") {
@@ -1102,8 +1106,8 @@ export class GraphicsHost {
       return;
     }
     const driven = this.drive?.authorize(method, args);
-    // Only the person writing or sending a message takes over from Drive
-    // ("manual" is the renderer's signal that the composer draft changed).
+    // Only the person sending a message takes over from Drive ("manual" is
+    // kept for callers that take over explicitly; typing no longer sends it).
     // Clicking, navigating, opening panels and reading leave it running.
     if (!driven && ["manual", "submit", "plan-submit", "themefy"].includes(method)) {
       this.onManual?.();

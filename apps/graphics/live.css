@@ -3737,3 +3737,30 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 }
 .review-heading .review-scope-button.branch { color: var(--paper); }
 #drive-turn .drive-pinned-title { display: none; }
+
+/* The start screen's proposals sit unboxed under the composer, split by
+   hairlines; the reason and evidence show on hover. */
+#hero .proposal-list {
+  border: 0;
+  background: none;
+  border-radius: 0;
+}
+#hero .proposal-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+}
+#hero .proposal-row + .proposal-row {
+  border-top: 0;
+}
+#hero .proposal-row small {
+  flex: 1 1 0;
+}
+#header .sessions-word {
+  color: var(--muted);
+  padding-left: 10px;
+  margin-left: 10px;
+  border-left: 1px solid var(--rule);
+}
+#header .sessions-word:hover {
+  color: var(--paper);
+}

@@ -203,6 +203,9 @@ test("session switch failure preserves the event stream and stale actions cannot
     await expect(
       host.handle("submit", { sessionId: first, text: "wrong session" }),
     ).rejects.toThrow("session changed");
+    // A draft for the old session is dropped quietly, not reported.
+    await host.handle("draft", { sessionId: first, text: "stale draft" });
+    expect(host.snapshot().draft).toBe("");
     expect(host.current!.session.turns).toHaveLength(0);
     expect(JSON.stringify(host.snapshot())).not.toContain(
       "graphics-test-token",

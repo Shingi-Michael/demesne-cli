@@ -147,7 +147,8 @@ const server = Bun.serve({
 const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
 const theme = (process.env.THEME ?? "dark") as "dark" | "light";
 const page = await browser.newPage({ viewport: readme ? { width: 1280, height: 800 } : { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: theme });
-page.on("pageerror", (error: Error) => console.error("page:", error.message));
+const pageErrors: string[] = [];
+page.on("pageerror", (error: Error) => { pageErrors.push(error.message); console.error("page:", error.message); });
 await page.goto(server.url.href);
 await page.waitForSelector("#app:not([hidden])", { timeout: 30_000 });
 await page.waitForTimeout(3000);
@@ -212,10 +213,20 @@ for (const name of readme ? ["changes"] : ["changes", "files", "history"]) {
 if (!readme) {
   // A workflow running as a Drive mission: the conversation's newest turn.
   await page.locator(".header-nav button.active").click().catch(() => {});
+  // Starting a workflow switches sessions; nothing may fail or leave a
+  // stray "The session changed" notice behind.
+  const before = pageErrors.length;
+  await page.evaluate(() => {
+    const notes: string[] = ((window as unknown as { notices: string[] }).notices = []);
+    const notice = document.getElementById("notice")!;
+    new MutationObserver(() => { if (!notice.hidden) notes.push(notice.textContent ?? ""); }).observe(notice, { attributes: true, childList: true, characterData: true, subtree: true });
+  });
   await page.fill("textarea", "/fix-bug Handle an empty name in greet()"); await page.keyboard.press("Enter");
   for (let i = 0; i < 20 && !(await page.locator("#drive-turn:not([hidden])").count()); i++) await page.waitForTimeout(500);
   await page.waitForTimeout(1500);
   await shot("04-drive-live");
+  const stray = [...(await page.evaluate(() => (window as unknown as { notices: string[] }).notices)), ...pageErrors.slice(before)].filter((text) => text.includes("session changed"));
+  if (stray.length) throw new Error(`Stray error after starting a workflow: ${stray.join(" | ")}`);
 }
 await browser.close();
 host.kill(); server.stop(true); await f.close(); rmSync(web, { recursive: true, force: true });

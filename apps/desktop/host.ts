@@ -52,6 +52,10 @@ export interface DesktopHostOptions {
   workspace?: string;
   server?: string;
   sessionId?: string;
+  /// `demesne --model <id>` and `demesne "<message>"`, applied to the first
+  /// project that opens; `--setup` opens setup there.
+  startup?: { model?: string; prompt?: string };
+  setup?: boolean;
   send: (message: DesktopOutput) => void;
   close: () => void;
   nativeTimeoutMs?: number;
@@ -108,7 +112,11 @@ export class DesktopHost {
         command: command => { if (this.generation === generation && !this.closed) this.send({ kind: "command", command }); },
         copy: text => this.native("copy", { text }),
         open: path => this.native("open", { path }),
+        ...(this.options.startup?.model || this.options.startup?.prompt ? { startup: this.options.startup } : {}),
       });
+      // Launch options belong to the first project only.
+      const setup = this.options.setup;
+      this.options = { ...this.options, startup: undefined, setup: false };
       // Keep the previous host until the replacement is ready. An offline
       // daemon still yields a valid project with the existing Start daemon UI.
       await candidate.connect();
@@ -131,6 +139,7 @@ export class DesktopHost {
       this.generation = generation;
       this.encoder = encoder;
       this.prefs = prefs;
+      if (setup) void candidate.handle("setup", {}).catch(error => this.send({ kind: "protocol-error", error: `Could not open setup: ${error instanceof Error ? error.message : String(error)}` }));
       const snapshot = candidate.snapshot();
       this.rememberSession(snapshot);
       this.send({ kind: "update", update: this.encoder.encode(snapshot) });
@@ -256,7 +265,9 @@ export function runDesktopHost(args = process.argv.slice(2)) {
       if (closing && !pendingWrites) process.exit(0);
     });
   };
-  const host = new DesktopHost({ workspace: option(args, "workspace"), server: option(args, "server"), sessionId: option(args, "session"), send, close });
+  const model = option(args, "model"), prompt = option(args, "prompt");
+  const host = new DesktopHost({ workspace: option(args, "workspace"), server: option(args, "server"), sessionId: option(args, "session"),
+    ...(model || prompt ? { startup: { model, prompt } } : {}), setup: args.includes("--setup"), send, close });
   process.stdout.on("error", () => host.dispose());
   process.stdout.on("close", () => host.dispose());
   process.stdin.on("error", () => host.dispose());

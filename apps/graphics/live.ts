@@ -709,7 +709,7 @@ function renderHero() {
             .slice(0, 3)
             .map(
               (item) =>
-                `<div class="proposal-row"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b title="${h(item.why)}">${h(item.title)}</b><small>~${item.minutes < 60 ? `${item.minutes} min` : `${Math.round(item.minutes / 6) / 10} h`}</small>${btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}</div>`,
+                `<div class="proposal-row"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b title="${h(item.why)}">${h(item.title)}</b><small>~${(item.expectedMinutes ?? item.minutes) < 60 ? `${item.expectedMinutes ?? item.minutes} min` : `${Math.round((item.expectedMinutes ?? item.minutes) / 6) / 10} h`}</small>${btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}</div>`,
             )
             .join("")}</div></section>`
         : ""
@@ -1274,6 +1274,15 @@ function contextBody() {
 let driveTab: "next" | "done" = "next";
 let nextOpen: string | null = null;
 const DRIVE_PINNED = ["running", "waiting", "paused", "blocked"];
+/// The Next heading: how the queue is ranked and, once any proposal has
+/// run, how Drive's picks have actually turned out here.
+function calibrationLine(calibration: import("@demesne/protocol").DriveCalibration | null | undefined) {
+  if (!calibration?.total) return "ranked by value · confidence · cost";
+  const levels = (["high", "medium", "low"] as const).filter((level) => calibration.levels[level].total)
+    .map((level) => `${level} ${calibration.levels[level].landed}/${calibration.levels[level].total}`).join(", ");
+  const time = calibration.timeRatio === 1 ? "" : ` · runs take ~${calibration.timeRatio}× its estimates`;
+  return `<span title="Ranked by value · confidence · cost, with confidence and time taken from how Drive's proposals turned out here (landed by confidence: ${levels})">Drive's picks landed ${calibration.landed} of ${calibration.total} here${time}</span>`;
+}
 function nextQueueHTML(busy = false) {
   const next = state!.driveNext;
   const signal = new Map(next.signals.map((item) => [item.id, item]));
@@ -1285,10 +1294,10 @@ function nextQueueHTML(busy = false) {
       const tag = `<span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span>`;
       if (item.id !== open)
         return `<div class="next-row">${tag}${btn("next-open", h(item.title), { id: item.id }, "next-row-title")}${busy ? '<span class="muted next-after">after this</span>' : btn("next-run", "▶", { id: item.id }, "next-row-run", true)}</div>`;
-      return `<div class="next-item first"><div class="next-top">${tag}<span class="next-title">${h(item.title)}</span>${btn("next-open", "▾", { id: "" }, "next-collapse")}</div><p class="next-why">${h(item.why)}</p><div class="next-facts">${item.evidence.map((id) => `<span title="${h(signal.get(id)?.detail ?? "")}">${item.urgent && signal.get(id)?.urgent ? "! " : ""}${h(signal.get(id)?.title ?? id)}</span>`).join("")}<span>~${minutes(item.minutes)} · ${item.coders} coder${item.coders === 1 ? "" : "s"}</span><span class="confidence-${item.confidence}">confidence ${item.confidence}</span></div><div class="next-actions">${busy ? '<span class="muted next-after">Runs after this mission</span>' : btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id }, "quiet")}${btn("next-never", "Never", { id: item.id }, "quiet")}</div></div>`;
+      return `<div class="next-item first"><div class="next-top">${tag}<span class="next-title">${h(item.title)}</span>${btn("next-open", "▾", { id: "" }, "next-collapse")}</div><p class="next-why">${h(item.why)}</p><div class="next-facts">${item.evidence.map((id) => `<span title="${h(signal.get(id)?.detail ?? "")}">${item.urgent && signal.get(id)?.urgent ? "! " : ""}${h(signal.get(id)?.title ?? id)}</span>`).join("")}<span${item.expectedMinutes ? ` title="Drive estimated ${minutes(item.minutes)}; runs here take ${next.calibration?.timeRatio ?? 1}× its estimates"` : ""}>~${minutes(item.expectedMinutes ?? item.minutes)} · ${item.coders} coder${item.coders === 1 ? "" : "s"}</span><span class="confidence-${item.confidence}">confidence ${item.confidence}</span></div><div class="next-actions">${busy ? '<span class="muted next-after">Runs after this mission</span>' : btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id }, "quiet")}${btn("next-never", "Never", { id: item.id }, "quiet")}</div></div>`;
     })
     .join("");
-  return `<div class="next-heading"><span class="muted next-rank">ranked by value · confidence · cost</span><span class="muted next-age">${next.loading ? "Reading…" : next.generatedAt ? age(next.generatedAt) : ""}</span>${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${
+  return `<div class="next-heading"><span class="muted next-rank">${calibrationLine(next.calibration)}</span><span class="muted next-age">${next.loading ? "Reading…" : next.generatedAt ? age(next.generatedAt) : ""}</span>${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${
     next.error ? `<p class="next-error">${h(next.error)}</p>` : ""
   }${rows || (next.loading ? "" : '<p class="muted next-empty">Nothing worth proposing right now. Drive looks again after your next turn, or press ↻.</p>')}`;
 }

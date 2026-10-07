@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Added
 
+- Drive learns its own accuracy: every proposal you Run records whether it landed and how long it took, and Next ranks with this project's landing rate per confidence level and scales time estimates by how far off they have been. The Next heading shows the hit rate.
 - Drive mission receipts: the review card shows how many tasks the recorded checks verify, and Copy receipt / Open PR carry a Markdown receipt that separates verified work from claims.
 - `/drive` missions work in their own git worktree and session, then commit the result for Apply / Open PR / Discard and return you to your session. `--here` keeps a mission in the current session.
 - Drive Next's **Run** works in its own git worktree and branch, with the breakage-fix card's Apply / Open PR / Discard. Your checkout is untouched until you apply it; outside git it falls back to a bounded mission.

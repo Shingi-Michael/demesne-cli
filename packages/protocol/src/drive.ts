@@ -80,11 +80,25 @@ export interface DriveProposal {
   minutes: number; coders: number; confidence: "high" | "medium" | "low"; value: number;
   /// value × confidence ÷ cost, boosted when it cites an urgent signal.
   score: number; urgent: boolean;
+  /// The estimate scaled by how long this project's runs really took, once
+  /// there are enough timed runs to say.
+  expectedMinutes?: number;
+}
+/// How Drive's past proposals in this project turned out: the share that
+/// landed (applied or opened as a PR), the landing rate per confidence level
+/// (`weight` is the smoothed rate the ranking uses), and the median ratio of
+/// real to estimated time (1 until enough runs are timed).
+export interface DriveCalibration {
+  landed: number; total: number;
+  levels: Record<DriveProposal["confidence"], { landed: number; total: number; weight: number }>;
+  timeRatio: number; timed: number;
 }
 export interface DriveNextRequest { workspace: string; memory?: DriveMemoryEntry[]; force?: boolean }
 export interface DriveNextResponse {
   workspace: string; proposals: DriveProposal[]; signals: DriveSignal[];
   fingerprint: string; generatedAt: string; model: string | null; cached: boolean;
+  /// Present once a proposal run here has an outcome; the queue is ranked with it.
+  calibration?: DriveCalibration | null;
 }
 /// Breakage alerts: the urgent signals only (failing checks, red CI, PRs with
 /// failing CI), collected without a model call so they can be polled.
@@ -119,7 +133,9 @@ export interface DriveFix {
   /// checks) and its one-line headline; the receipt opens the PR body.
   receipt?: string; headline?: string;
 }
-export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "why">;
+/// What a proposal run carries; the estimate and confidence let its outcome
+/// calibrate later rankings.
+export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "why"> & Partial<Pick<DriveProposal, "minutes" | "confidence">>;
 /// A breakage fix sends 1-5 signals; a proposal sends the signals it cites
 /// (0-5); a mission sends none.
 export interface DriveFixRequest { workspace: string; signals: DriveSignal[]; proposal?: DriveFixProposal; mission?: string }
@@ -505,7 +521,9 @@ export function parseDriveFixRequest(value: unknown): DriveFixRequest {
   if (value.proposal !== undefined) {
     const item = value.proposal;
     if (!isRecord(item) || !["fix", "investigate", "tidy"].includes(String(item.kind))) invalid("proposal", "expected a proposal");
-    proposal = { id: text(item.id, 200, "proposal.id"), kind: item.kind as DriveProposal["kind"], title: text(item.title, 300, "proposal.title"), why: text(item.why, 2000, "proposal.why") };
+    proposal = { id: text(item.id, 200, "proposal.id"), kind: item.kind as DriveProposal["kind"], title: text(item.title, 300, "proposal.title"), why: text(item.why, 2000, "proposal.why"),
+      ...(typeof item.minutes === "number" && Number.isFinite(item.minutes) && item.minutes > 0 ? { minutes: Math.min(10_000, item.minutes) } : {}),
+      ...(["high", "medium", "low"].includes(String(item.confidence)) ? { confidence: item.confidence as DriveProposal["confidence"] } : {}) };
   }
   const mission = value.mission === undefined ? undefined : text(value.mission, 8000, "mission");
   if (mission !== undefined && proposal) invalid("mission", "expected a mission or a proposal, not both");

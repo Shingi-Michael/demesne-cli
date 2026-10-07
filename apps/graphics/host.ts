@@ -121,6 +121,8 @@ export class GraphicsHost {
     model: string | null;
     loading: boolean;
     error: string | null;
+    /// How Drive's past proposals here turned out, once any have.
+    calibration?: import("@demesne/protocol").DriveCalibration | null;
   } = { proposals: [], signals: [], generatedAt: null, model: null, loading: false, error: null };
   /// Settings › Providers: each provider's sign-in state, and the one being
   /// signed in while its browser flow is open.
@@ -758,7 +760,7 @@ export class GraphicsHost {
         memory: this.drive?.memory.forPlanner() ?? [],
         ...(force ? { force: true } : {}),
       });
-      this.nextQueue = { proposals: result.proposals, signals: result.signals, generatedAt: result.generatedAt, model: result.model, loading: false, error: null };
+      this.nextQueue = { proposals: result.proposals, signals: result.signals, generatedAt: result.generatedAt, model: result.model, loading: false, error: null, calibration: result.calibration ?? null };
     } catch (error) {
       this.nextQueue = { ...this.nextQueue, loading: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -1010,7 +1012,7 @@ export class GraphicsHost {
       // git repository (or on an older daemon) it's a bounded mission here.
       if (this.breakage.supported) {
         const cited = this.nextQueue.signals.filter((signal) => item.evidence.includes(signal.id));
-        try { return await this.breakage.runProposal({ id: item.id, kind: item.kind, title: item.title, why: item.why }, cited); }
+        try { return await this.breakage.runProposal({ id: item.id, kind: item.kind, title: item.title, why: item.why, minutes: item.minutes, confidence: item.confidence }, cited); }
         catch (error) {
           if (!/needs a git repository|no commits yet/.test(error instanceof Error ? error.message : "")) {
             this.hideNext(item.id, 0);

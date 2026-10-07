@@ -60,6 +60,12 @@ flowchart TD
 
 [Proposal generation](../apps/daemon/src/drive-next.ts) requires cited signal IDs and ranks value × confidence ÷ estimated cost, with an urgent-evidence boost. It returns at most six items. Estimates of minutes, confidence and coders are model estimates, not reservations of runtime capacity.
 
+### Drive learns its own accuracy
+
+Each proposal you **Run** leaves an outcome in `drive-calibration.jsonl` in the daemon's data directory: **landed** (applied or opened as a PR), **discarded** after review, **failed**, or **unchanged** (the coder found nothing to change). An investigation that rightly changes nothing records no outcome. Landed and reviewed runs also record how long they really took.
+
+[Calibration](../apps/daemon/src/drive-calibration.ts) then ranks the queue with this project's evidence instead of the model's word. For each confidence level, the weight is the observed landing rate smoothed toward the default (high 1, medium 0.7, low 0.4) as if that default were three earlier outcomes, so a single run moves it only a little. Once three runs are timed, estimates are scaled by the median ratio of real to estimated time (clamped to 0.25–4×), and the queue shows the scaled estimate. Only the 50 most recent outcomes per project count. The Next heading then reads, for example, "Drive's picks landed 7 of 9 here · runs take ~1.4× its estimates"; hover it for the breakdown by confidence. Cached queues are re-ranked on every request, so a new outcome changes the order without another model call.
+
 Queues are cached for up to 12 hours when signals, memory, and selected model match. The graphics host requests them on connection and after settled turns when its 30-minute refresh interval has elapsed; Refresh bypasses the cache. A new veto invalidates the prior cache. Exact matching titles are filtered; semantic veto instructions and task-overlap judgments are not a perfect paraphrase detector.
 
 ## Run works in a worktree

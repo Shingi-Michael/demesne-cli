@@ -56,6 +56,7 @@ import { SessionToolStore } from "./session-tools.ts";
 import { DriveNextCache, proposeNext } from "./drive-next.ts";
 import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { DriveFixes } from "./drive-fixes.ts";
+import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
@@ -138,6 +139,8 @@ export function createDaemonApp(options: {
   const collectSignals = options.driveSignals ?? collectDriveSignals;
   const workspaceTrust = new WorkspaceTrust(join(dirname(options.databasePath), "trusted-workspaces.json"));
   const driveNextRuns = new Map<string, Promise<unknown>>();
+  // How Drive's proposals turned out here, which calibrates the Next ranking.
+  const calibrationLog = new CalibrationLog(join(dirname(options.databasePath), "drive-calibration.jsonl"));
   // Breakage fixes: a coding turn in its own worktree, applied only on request.
   const driveFixes = new DriveFixes(join(dirname(options.databasePath), "drive-fixes.json"), options.worktreeRoot ?? join(dirname(dirname(options.databasePath)), ".demesne-worktrees"), {
     startSession: (title, workspace) => {
@@ -174,6 +177,7 @@ export function createDaemonApp(options: {
       } catch { /* a partial call */ }
       return { steps: rows.length, last };
     },
+    settled: (fix, before) => calibrationLog.settle(fix, before),
   });
   const replay = new SessionReplay(store);
   const processor: TurnProcessor = options.processor ?? new PlaceholderTurnProcessor();
@@ -411,7 +415,8 @@ export function createDaemonApp(options: {
           const fingerprint = createHash("sha256").update(collected.fingerprint + contextKey).digest("hex").slice(0, 16);
           const cached = driveNextCache.read(body.workspace);
           const fresh = cached && cached.fingerprint === fingerprint && Date.now() - Date.parse(cached.generatedAt) < 12 * 3_600_000;
-          if (cached && fresh && !body.force) return { workspace: body.workspace, ...cached, signals, cached: true };
+          const calibration = calibrationLog.calibration(body.workspace);
+          if (cached && fresh && !body.force) return { workspace: body.workspace, ...cached, proposals: applyCalibration(cached.proposals, calibration), signals, cached: true, calibration };
           const vetoes = (body.memory ?? []).filter((item) => item.kind === "veto").map((item) => item.text.toLowerCase());
           const leaseId = `drive-next:${randomUUID()}`, slots = scheduler.for(inference.providerId);
           const lease = await slots.acquire(leaseId, AbortSignal.any([request.signal, driveLifecycle.signal]), {});
@@ -421,7 +426,7 @@ export function createDaemonApp(options: {
               .filter((item) => !vetoes.some((veto) => veto.includes(item.title.toLowerCase())));
             const value = { fingerprint, generatedAt: new Date().toISOString(), model: `${inference.providerId} / ${inference.modelId}`, proposals, signals };
             driveNextCache.write(body.workspace, value);
-            return { workspace: body.workspace, ...value, cached: false };
+            return { workspace: body.workspace, ...value, proposals: applyCalibration(proposals, calibration), cached: false, calibration };
           } finally { lease.release({ turnContinues: false }); slots.finishTurn(leaseId); }
         })();
         driveNextRuns.set(pendingKey, run);

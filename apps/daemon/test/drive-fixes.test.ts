@@ -120,7 +120,7 @@ test("a Next proposal runs in its own worktree and branch, with no breakage need
     const response = await fetch(new URL(path, server.url), { headers: { "Content-Type": "application/json" }, ...init });
     return { status: response.status, body: await response.json() as any };
   };
-  const proposal = { id: "p1", kind: "tidy", title: "Resolve the version TODO", why: "src/todo.ts asks for an exported version." };
+  const proposal = { id: "p1", kind: "tidy", title: "Resolve the version TODO", why: "src/todo.ts asks for an exported version.", minutes: 15, confidence: "medium" };
   try {
     await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) });
     // A breakage fix still needs a signal; a proposal doesn't.
@@ -144,6 +144,10 @@ test("a Next proposal runs in its own worktree and branch, with no breakage need
     expect((await call(`/v1/drive/fixes/${fix.id}/apply`, { method: "POST" })).body.fix.status).toBe("applied");
     expect(readFileSync(join(workspace, "src", "todo.ts"), "utf8")).toBe("export const version = \"1\";\n");
     expect(out(workspace, "branch", "--list", "drive/*")).toBe("");
+    // The outcome is recorded, which calibrates later Next rankings.
+    const [record] = readFileSync(join(root, "data", "drive-calibration.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(record).toMatchObject({ workspace, proposalId: "p1", kind: "tidy", confidence: "medium", minutes: 15, outcome: "landed" });
+    expect(record.actualMinutes).toBeGreaterThanOrEqual(0);
   } finally { server.stop(true); await app.close(); }
 });
 

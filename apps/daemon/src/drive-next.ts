@@ -5,6 +5,7 @@ import type { DriveMemoryEntry, DriveProposal, DriveSignal } from "@demesne/prot
 import type { ProviderMessage, ProviderToolDefinition } from "@demesne/providers";
 import type { TurnInference } from "./processor.ts";
 import { assertModelResponseComplete, withProviderDeadlines } from "./engine.ts";
+import { scoreProposal } from "./drive-calibration.ts";
 
 /// Drive's Next queue: one model call turns the workspace's signals and
 /// project memory into a few concrete proposals, each citing the signals it
@@ -49,10 +50,8 @@ const tool: ProviderToolDefinition = {
   },
 };
 
-const CONFIDENCE = { high: 1, medium: 0.7, low: 0.4 } as const;
-
-/// value × confidence ÷ cost, where cost grows with time and coders; an
-/// urgent cited signal (failing check, red CI) doubles the score.
+/// Scored by `scoreProposal` (value × confidence ÷ cost); the route
+/// re-scores with this project's calibration when it has one.
 export function rankProposals(raw: Omit<DriveProposal, "id" | "score" | "urgent">[], signals: DriveSignal[]): DriveProposal[] {
   const byId = new Map(signals.map((signal) => [signal.id, signal]));
   return raw
@@ -61,8 +60,7 @@ export function rankProposals(raw: Omit<DriveProposal, "id" | "score" | "urgent"
     .filter((item) => item.evidence.length > 0)
     .map((item) => {
       const urgent = item.evidence.some((id) => byId.get(id)?.urgent);
-      const cost = Math.max(0.5, (item.minutes / 30) * item.coders);
-      const score = Math.round((100 * item.value * CONFIDENCE[item.confidence] * (urgent ? 2 : 1)) / cost) / 100;
+      const score = scoreProposal(item, urgent);
       const id = createHash("sha1").update(`${item.kind}:${item.title.toLowerCase()}`).digest("hex").slice(0, 10);
       return { ...item, id, score, urgent };
     })

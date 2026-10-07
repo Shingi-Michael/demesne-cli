@@ -142,6 +142,24 @@ export interface DriveFixRequest { workspace: string; signals: DriveSignal[]; pr
 export interface DriveFixFinishRequest { summary?: string; receipt?: string; headline?: string }
 export interface DriveFixesResponse { fixes: DriveFix[] }
 export type DriveFixAction = "apply" | "pr" | "discard";
+/// Away mode: Next proposals queued to run one after another, each in its own
+/// worktree, while you're away. What finishes waits as an inbox of branches.
+export interface DriveAwayItem {
+  proposal: DriveFixProposal; signals: DriveSignal[];
+  state: "queued" | "running" | "ready" | "unchanged" | "failed" | "skipped";
+  fixId?: string; note?: string;
+}
+export interface DriveAway {
+  id: string; workspace: string; status: "running" | "finished" | "stopped";
+  startedAt: string; finishedAt: string | null;
+  /// No new run starts after this; one already running finishes.
+  deadline: string;
+  items: DriveAwayItem[];
+  /// Why it ended early, when it did.
+  reason?: string;
+}
+export interface DriveAwayRequest { workspace: string; items: Pick<DriveAwayItem, "proposal" | "signals">[]; minutes?: number }
+export interface DriveAwayResponse { away: DriveAway | null }
 export interface DriveRequest {
   mode?: DriveMode; ledger?: DriveLedger; facts?: DriveFacts;
   /// The workspace's project memory, bounded: standing preferences and
@@ -535,6 +553,20 @@ export function parseDriveFixRequest(value: unknown): DriveFixRequest {
     return { id: text(item.id, 200, `${path}.id`), source: item.source as DriveSignal["source"], title: text(item.title, 300, `${path}.title`), detail: text(item.detail, 1000, `${path}.detail`, true), urgent: item.urgent === true };
   });
   return { workspace: text(value.workspace, 4096, "workspace"), signals, ...(proposal ? { proposal } : {}), ...(mission !== undefined ? { mission } : {}) };
+}
+export const DRIVE_AWAY_MAX_ITEMS = 6;
+export function parseDriveAwayRequest(value: unknown): DriveAwayRequest {
+  if (!isRecord(value)) invalid("request", "expected an object");
+  if (!Array.isArray(value.items) || !value.items.length || value.items.length > DRIVE_AWAY_MAX_ITEMS) invalid("items", `expected 1-${DRIVE_AWAY_MAX_ITEMS} proposals`);
+  const workspace = text(value.workspace, 4096, "workspace");
+  const items = value.items.map((item, index) => {
+    if (!isRecord(item) || item.proposal === undefined) invalid(`items[${index}]`, "expected a proposal");
+    const { proposal, signals } = parseDriveFixRequest({ workspace, proposal: item.proposal, signals: item.signals ?? [] });
+    return { proposal: proposal!, signals };
+  });
+  const minutes = value.minutes;
+  if (minutes !== undefined && (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes < 1 || minutes > 24 * 60)) invalid("minutes", "expected 1-1440 minutes");
+  return { workspace, items, ...(minutes !== undefined ? { minutes: minutes as number } : {}) };
 }
 export function parseDriveFixFinishRequest(value: unknown): DriveFixFinishRequest {
   if (value === null || value === undefined) return {};

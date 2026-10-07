@@ -2466,6 +2466,21 @@ button:disabled {
 }
 
 /* Drive's Next queue (design doc mockup). */
+.next-away {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 6px 0 2px;
+  font-size: 11.5px;
+}
+.next-away button {
+  border: 1px solid var(--borderBright);
+  border-radius: 4px;
+  padding: 0 9px;
+  font-size: 12px;
+  color: var(--paper);
+}
 .next-heading {
   display: flex;
   align-items: center;
@@ -2764,6 +2779,9 @@ button:disabled {
   flex-direction: column;
   gap: 10px;
   z-index: 20;
+  /* An away run can leave several cards: scroll them rather than cover the window. */
+  max-height: calc(100% - 76px);
+  overflow-y: auto;
 }
 .breakage-card {
   background: var(--surface);
@@ -2818,6 +2836,16 @@ button:disabled {
 .breakage-checks .pass { color: var(--citron); }
 .breakage-checks .fail { color: var(--signal); }
 .breakage-checks code { color: var(--secondary); }
+.breakage-card.away:not(.running) { border-left-color: var(--citron); }
+.breakage-card.away:not(.running) .breakage-mark { color: var(--citron); }
+.away-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; line-height: 18px; }
+.away-list li { display: grid; grid-template-columns: 14px 1fr; column-gap: 6px; color: var(--paper); min-width: 0; }
+.away-list li small { grid-column: 2; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.away-mark { text-align: center; color: var(--muted); }
+.away-ready .away-mark { color: var(--citron); }
+.away-running .away-mark { color: var(--thinking); }
+.away-failed .away-mark { color: var(--signal); }
+.away-skipped, .away-queued { color: var(--secondary); }
 .breakage-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .breakage-actions button {
   border: 1px solid var(--borderBright);

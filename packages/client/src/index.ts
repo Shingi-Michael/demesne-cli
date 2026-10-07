@@ -112,6 +112,18 @@ export class DemesneClient {
   async driveFixAction(id: string, action: import("@demesne/protocol").DriveFixAction): Promise<{ fix: import("@demesne/protocol").DriveFix }> {
     return this.request(`/v1/drive/fixes/${encodeURIComponent(id)}/${action}`, { method: "POST" });
   }
+  /// Away mode: run these proposals one after another, each in its own worktree.
+  async startDriveAway(request: import("@demesne/protocol").DriveAwayRequest): Promise<import("@demesne/protocol").DriveAwayResponse> {
+    return this.request("/v1/drive/away", { method: "POST", body: JSON.stringify(request) });
+  }
+  /// The workspace's latest away run, if any.
+  async driveAway(workspace: string, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveAwayResponse> {
+    return this.request(`/v1/drive/away?workspace=${encodeURIComponent(workspace)}`, { signal });
+  }
+  /// Starts nothing more; a run already working finishes.
+  async stopDriveAway(workspace: string): Promise<import("@demesne/protocol").DriveAwayResponse> {
+    return this.request("/v1/drive/away/stop", { method: "POST", body: JSON.stringify({ workspace }) });
+  }
   /// A Drive mission in a worktree settled: commit what it changed for review.
   async finishDriveMission(id: string, request: import("@demesne/protocol").DriveFixFinishRequest = {}): Promise<{ fix: import("@demesne/protocol").DriveFix }> {
     return this.request(`/v1/drive/fixes/${encodeURIComponent(id)}/finish`, { method: "POST", body: JSON.stringify(request) });

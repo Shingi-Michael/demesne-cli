@@ -112,7 +112,7 @@ All production routes except `/healthz` require the daemon bearer token. This is
 | Turns and history | Session turn submission, compact, replay, export, changes, review and undo routes |
 | Live events | `GET /v1/events` with session and event cursor |
 | Tools | Permission resolution, [question actions and recovery](questions.md), workspace file and command routes |
-| Drive | `POST /v1/drive/next`, `POST /v1/drive/decide`, session Drive facts, guarded check-in cancellation |
+| Drive | `POST /v1/drive/next`, `POST /v1/drive/decide`, worktree fixes and `GET/POST /v1/drive/away` (away mode), session Drive facts, guarded check-in cancellation |
 | Images | Session artifact list, metadata, content and import routes |
 
 SSE clients resume from event cursors and use bounded replay to recover gaps. Filesystem operations resolve against the session's canonical workspace. Image bytes use [authenticated binary routes](artifact-preview-implementation.md), not event JSON.

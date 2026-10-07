@@ -307,3 +307,17 @@ test("desktop CLI rejects missing and empty split or inline option values", asyn
     expect(await f.client.listSessions()).toHaveLength(0);
   } finally { await f.close(); }
 });
+
+test("desktop launch options send the first message to the opened project", async () => {
+  const f = await fixture();
+  const sidecar = new Sidecar(f, [`--workspace=${f.workspace}`, "--prompt=Hello from the command line"]);
+  try {
+    await eventually(async () => {
+      const sessions = await f.client.listSessions();
+      if (!sessions.length) return false;
+      return (await f.client.getSessionState(sessions[0]!.id)).session.turns.at(-1)?.status === "completed";
+    });
+    const [session] = await f.client.listSessions();
+    expect((await f.client.getSessionState(session!.id)).session.turns.map(turn => turn.content)).toEqual(["Hello from the command line"]);
+  } finally { expect(await sidecar.close()).toBe(0); await f.close(); }
+});

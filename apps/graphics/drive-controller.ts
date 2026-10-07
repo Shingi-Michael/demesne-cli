@@ -9,6 +9,7 @@ import {
 import { AgentDrive } from "../cli/src/agent-drive.ts";
 import { ProjectMemory } from "../cli/src/drive-memory.ts";
 import { inspectDrive } from "../cli/src/drive-inspection.ts";
+import { parseDriveStart } from "../cli/src/drive-tasks.ts";
 import { DirectDriveControl } from "./drive-direct.ts";
 import type { GraphicsHost } from "./host.ts";
 
@@ -26,6 +27,8 @@ export class GraphicsDrive {
   /// This workspace's project memory, and its entries for the UI.
   readonly memory: ProjectMemory;
   memoryEntries: DriveMemoryEntry[] = [];
+  /// Direct control (the default) can move a mission into its own worktree session.
+  private direct = false;
   private observed: DriveObservation | null = null;
   private pending = new Map<
     string,
@@ -48,6 +51,7 @@ export class GraphicsDrive {
       process.env.DEMESNE_DRIVE_CONTROL === "ui"
         ? null
         : new DirectDriveControl(host);
+    this.direct = Boolean(direct);
     const ui = direct
       ? {
           observe: () => direct.observe(),
@@ -89,6 +93,7 @@ export class GraphicsDrive {
         host.api.decideDrive(request, signal, progress),
       changed: (state) => {
         host.driveState = state;
+        host.missionChanged(state);
         host.publish();
       },
       cancelWorker: async (turnId, signal, review) => {
@@ -270,7 +275,7 @@ export class GraphicsDrive {
       } else if (value.startsWith("reopen ")) {
         const [, id, ...reason] = value.split(/\s+/);
         this.agent.reopen(id ?? "", reason.join(" "));
-      } else if (value !== "status") this.agent.start(value);
+      } else if (value !== "status") await this.startMission(value);
       return;
     }
     if (method === "drive-control") {
@@ -282,6 +287,22 @@ export class GraphicsDrive {
       return;
     }
     throw new Error(`Unsupported action: ${method}`);
+  }
+  /// A new mission works in its own git worktree and session, so your
+  /// checkout stays as it is until you apply the result. `--here` (or no git
+  /// repository with commits) keeps it in the current session.
+  private async startMission(value: string) {
+    const here = /(^|\s)--here(?=\s|$)/.test(value);
+    const text = value.replace(/(^|\s)--here(?=\s|$)/g, " ").trim();
+    if (!here && this.direct && this.host.breakage.supported) {
+      const { mission } = parseDriveStart(text);
+      if (!mission.trim() || mission.length > 8000) throw new Error("Use /drive <mission> (up to 8,000 characters).");
+      try { await this.host.openMissionWorktree(mission); }
+      catch (error) {
+        if (!/needs a git repository|no commits yet/.test(error instanceof Error ? error.message : "")) throw error;
+      }
+    }
+    this.agent.start(text);
   }
   /// Adds to project memory and shows it.
   addMemory(entry: Pick<DriveMemoryEntry, "kind" | "text" | "source">) {

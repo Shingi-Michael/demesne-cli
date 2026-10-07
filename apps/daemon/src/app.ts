@@ -16,7 +16,7 @@ import {
   parseUndoSessionRequest,
   parseUpdateSessionRequest,
   ProtocolValidationError,
-  parseDriveRequest, parseDriveNextRequest, parseDeleteSessionsRequest, parseDriveAlertsRequest, parseDriveFixRequest,
+  parseDriveRequest, parseDriveNextRequest, parseDeleteSessionsRequest, parseDriveAlertsRequest, parseDriveFixRequest, parseDriveFixFinishRequest,
   type DeleteSessionsResponse,
   type SessionCleanupResponse,
   type DriveAlertsResponse,
@@ -448,8 +448,13 @@ export function createDaemonApp(options: {
         const body = parseDriveFixRequest(await readJson(request));
         if (!store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace)) return apiError("not_found", "Unknown workspace", 404);
         if (!workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
-        try { return json({ fix: await driveFixes.start(body.workspace, body.signals, body.proposal) }, 201); }
+        try { return json({ fix: await driveFixes.start(body.workspace, body.signals, body.proposal, body.mission) }, 201); }
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start the fix", 409); }
+      }
+      if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "drive" && path[2] === "fixes" && path[4] === "finish") {
+        const body = parseDriveFixFinishRequest(await readJson(request));
+        try { return json({ fix: await driveFixes.finishMission(path[3]!, body.summary) }); }
+        catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not finish the mission", 409); }
       }
       if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "drive" && path[2] === "fixes" && ["apply", "pr", "discard"].includes(path[4]!)) {
         try { return json({ fix: await driveFixes.act(path[3]!, path[4] as DriveFixAction) }); }

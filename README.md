@@ -32,7 +32,7 @@ Choose a project, connect a model and open **Drive**. You need [Bun 1.4](https:/
 
 <img src="docs/assets/drive-loop.svg" alt="Drive: reads signals from the repo, ranks what’s worth doing, runs a bounded mission, hands back the evidence, and remembers decisions, outcomes and vetoes" width="100%">
 
-Each suggestion says why it's there and roughly how long it will take. **Run** does it in its own git worktree and branch, so your checkout stays untouched until you choose **Apply**, **Open PR** or **Discard**. **Plan first** asks for a plan you approve before anything changes. **Not now** hides it for a day, and **Never** tells Drive to stop suggesting it. You can also start a mission yourself with `/drive --bounded "…"`. The [Drive guide](docs/agent-drive.md) has the details.
+Each suggestion says why it's there and roughly how long it will take. **Run** does it in its own git worktree and branch, so your checkout stays untouched until you choose **Apply**, **Open PR** or **Discard**. **Plan first** asks for a plan you approve before anything changes. **Not now** hides it for a day, and **Never** tells Drive to stop suggesting it. You can also start a mission yourself with `/drive --bounded "…"`. It works in its own worktree too, and ends with the same Apply, Open PR or Discard choice. The [Drive guide](docs/agent-drive.md) has the details.
 
 ## See it
 
@@ -70,7 +70,7 @@ Each suggestion says why it's there and roughly how long it will take. **Run** d
 </tr>
 </table>
 
-**A note on safety.** Commands run as your user, not in a sandbox. When you're the one asking, demesne checks with you before it writes a file or runs a command. Drive's coding turns don't ask, so a mission can run on its own (proposals you Run work in a separate git worktree, never your checkout), but pushing, opening pull requests, releases and package publishing still need your OK. Only use Drive on projects where that's fine. [Security details](SECURITY.md)
+**A note on safety.** Commands run as your user, not in a sandbox. When you're the one asking, demesne checks with you before it writes a file or runs a command. Drive's coding turns don't ask, so a mission can run on its own (missions and proposals you Run work in a separate git worktree, never your checkout, unless you add `--here`), but pushing, opening pull requests, releases and package publishing still need your OK. Only use Drive on projects where that's fine. [Security details](SECURITY.md)
 
 ## Install
 

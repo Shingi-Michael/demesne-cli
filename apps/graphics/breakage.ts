@@ -5,8 +5,8 @@ import type { DriveFix, DriveFixAction, DriveFixProposal, DriveSignal } from "@d
 /// failing, CI on the default branch turns red, an open PR's CI fails) and
 /// offers to fix it in a git worktree. Only transitions alert: whatever was
 /// already broken when demesne opened stays in Drive's Next queue. Nothing
-/// costs tokens until you choose Fix. Next proposals you Run use the same
-/// worktree and card.
+/// costs tokens until you choose Fix. Next proposals you Run and /drive
+/// missions use the same worktree and card.
 
 export interface BreakageState {
   /// Newly broken, waiting for Fix / Not now / Never.
@@ -44,6 +44,8 @@ export class BreakageWatch {
     open: (url: string) => Promise<void>;
     /// The checkout changed (a fix was applied).
     applied: () => void;
+    /// A mission's worktree was applied, opened as a PR or discarded.
+    closed?: (fix: DriveFix) => void;
   }) {}
 
   async start() {
@@ -52,7 +54,7 @@ export class BreakageWatch {
     try {
       const { fixes } = await this.options.client().driveFixes(this.options.workspace());
       this.state.fix = fixes.filter((fix) => OPEN.has(fix.status)).at(-1) ?? null;
-      if (this.state.fix && ["starting", "running"].includes(this.state.fix.status)) this.watchFix();
+      if (this.state.fix && ["starting", "running"].includes(this.state.fix.status) && !this.state.fix.mission) this.watchFix();
     } catch { this.unsupported = true; return; }
     this.options.publish();
     await this.check();
@@ -108,6 +110,35 @@ export class BreakageWatch {
   /// Whether this daemon makes worktree fixes (older ones don't).
   get supported() { return !this.unsupported; }
 
+  /// Opens a worktree and session for a /drive mission. Drive's planner works
+  /// there; finishMission commits the result for the card. Throws when it
+  /// can't (not a git repository, or worktree work already running).
+  async openMission(mission: string): Promise<DriveFix> {
+    if (this.state.busy) throw new Error("Wait for the current worktree action to finish.");
+    const { fix } = await this.options.client().startDriveFix({ workspace: this.options.workspace(), signals: [], mission });
+    if (fix.status === "failed" || !fix.sessionId) throw new Error(fix.error ?? "Couldn't open a worktree for the mission.");
+    this.state.fix = fix; this.state.message = null;
+    this.options.publish();
+    return fix;
+  }
+
+  /// The open mission worktree whose session is this one, if any.
+  missionFor(sessionId: string) {
+    const fix = this.state.fix;
+    return fix?.mission && fix.sessionId === sessionId && OPEN.has(fix.status) ? fix : null;
+  }
+
+  /// A mission settled: commit its changes and show them for review.
+  async finishMission(id: string, summary: string) {
+    try {
+      const { fix } = await this.options.client().finishDriveMission(id, summary.slice(0, 4000));
+      if (this.state.fix?.id === id) this.state.fix = fix;
+    } catch (error) {
+      this.state.message = { text: error instanceof Error ? error.message : String(error), tone: "error" };
+    }
+    this.options.publish();
+  }
+
   /// Runs a Next proposal in its own worktree, shown on the same card.
   /// Throws when it can't start (not a git repository, or one already running).
   async runProposal(proposal: DriveFixProposal, signals: DriveSignal[]) {
@@ -153,9 +184,10 @@ export class BreakageWatch {
         const id = this.state.fix?.id ?? String(args.id ?? "");
         const { fix } = await this.options.client().driveFixAction(id, action as DriveFixAction);
         this.state.fix = null;
+        if (fix.mission) this.options.closed?.(fix);
         if (action === "apply") { this.state.message = { text: `Applied to your branch: ${fix.title}`, tone: "ok" }; this.options.applied(); }
         if (action === "pr") this.state.message = { text: `Opened a pull request from ${fix.branch}`, tone: "ok", ...(fix.prUrl ? { url: fix.prUrl } : {}) };
-        if (action === "discard") this.state.message = { text: `${fix.proposal ? "Discarded" : "Fix discarded"}; the worktree and branch are gone.`, tone: "ok" };
+        if (action === "discard") this.state.message = { text: `${fix.proposal || fix.mission ? "Discarded" : "Fix discarded"}; the worktree and branch are gone.`, tone: "ok" };
       } else throw new Error(`Unknown action ${method}`);
     } catch (error) {
       this.state.message = { text: error instanceof Error ? error.message : String(error), tone: "error" };

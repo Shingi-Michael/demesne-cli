@@ -4,7 +4,8 @@ import { basename, dirname, join, relative } from "node:path";
 import { splitNextPrompt, type CommandRecord, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveSignal, type Turn } from "@demesne/protocol";
 
 /// Drive's unattended work, each piece in its own git worktree on its own
-/// branch: fixes for breakages, and Next proposals you press Run on. The
+/// branch: fixes for breakages, Next proposals you press Run on, and /drive
+/// missions (whose turns the client's Drive planner submits). The
 /// user's checkout and conversation are untouched while the agent works, and
 /// nothing reaches them until they choose Apply (cherry-pick onto their
 /// branch), Open PR (push the branch), or Discard.
@@ -69,14 +70,13 @@ const slugOf = (text: string, fallback: string) => text.toLowerCase().replace(/[
 export class DriveFixes {
   private fixes: DriveFix[] = [];
   private done = new Map<string, Promise<void>>();
-  /// Paths linked into each worktree (shared node_modules), never committed.
-  private linked = new Map<string, string[]>();
 
   constructor(private readonly stateFile: string, private readonly worktreeRoot: string, private readonly host: FixHost, private readonly git: Run = run) {
     try { this.fixes = JSON.parse(readFileSync(stateFile, "utf8")) as DriveFix[]; } catch { this.fixes = []; }
-    // A fix that was working when the daemon stopped can't resume.
+    // A fix that was working when the daemon stopped can't resume. A mission
+    // can: its planner lives in the client and resumes paused.
     let changed = false;
-    for (const fix of this.fixes) if (fix.status === "starting" || fix.status === "running") {
+    for (const fix of this.fixes) if (fix.status === "starting" || (fix.status === "running" && !fix.mission)) {
       Object.assign(fix, { status: "failed", finishedAt: new Date().toISOString(), error: "The daemon restarted while this fix was running." });
       changed = true;
     }
@@ -103,27 +103,34 @@ export class DriveFixes {
   /// Waits for a running fix to finish (tests and shutdown).
   async settled(id: string) { await this.done.get(id); }
 
-  async start(workspace: string, signals: DriveSignal[], proposal?: DriveFixProposal): Promise<DriveFix> {
-    if (this.fixes.some((fix) => fix.workspace === workspace && (fix.status === "starting" || fix.status === "running")))
-      throw new Error(proposal ? "Drive is already working in a worktree for this project." : "A fix is already running for this project.");
+  async start(workspace: string, signals: DriveSignal[], proposal?: DriveFixProposal, mission?: string): Promise<DriveFix> {
+    // One at a time; a mission's worktree stays open until you apply or discard it.
+    const busy = this.fixes.find((fix) => fix.workspace === workspace && (fix.status === "starting" || fix.status === "running" || (fix.mission && ACTIVE.has(fix.status))));
+    if (busy) throw new Error(busy.mission ? "A Drive mission's worktree is still open for this project. Apply or discard it first." : proposal || mission ? "Drive is already working in a worktree for this project." : "A fix is already running for this project.");
     const top = await this.git(["git", "rev-parse", "--show-toplevel"], workspace);
     if (!top.ok) throw new Error("Fixing in a worktree needs a git repository.");
     const base = await this.git(["git", "rev-parse", "HEAD"], workspace);
     if (!base.ok) throw new Error("This repository has no commits yet.");
     const id = randomUUID().slice(0, 8);
-    const title = proposal ? proposal.title.slice(0, 200) : signals.length === 1 ? signals[0]!.title : `${signals.length} breakages: ${signals.map((signal) => signal.title).join("; ")}`.slice(0, 200);
-    const branch = proposal ? `drive/${proposal.kind}-${slugOf(proposal.title, "task")}-${id.slice(0, 4)}` : `drive/fix-${slugOf(signals[0]!.title, "breakage")}-${id.slice(0, 4)}`;
+    const title = mission ? firstLine(mission).slice(0, 200) : proposal ? proposal.title.slice(0, 200) : signals.length === 1 ? signals[0]!.title : `${signals.length} breakages: ${signals.map((signal) => signal.title).join("; ")}`.slice(0, 200);
+    const branch = mission ? `drive/mission-${slugOf(title, "work")}-${id.slice(0, 4)}` : proposal ? `drive/${proposal.kind}-${slugOf(proposal.title, "task")}-${id.slice(0, 4)}` : `drive/fix-${slugOf(signals[0]!.title, "breakage")}-${id.slice(0, 4)}`;
     const path = join(this.worktreeRoot, `${basename(top.out)}-${id}`);
-    const fix: DriveFix = { id, workspace, title, signals, ...(proposal ? { proposal } : {}), branch, path, base: base.out, sessionId: null, turnId: null, status: "starting", startedAt: new Date().toISOString(), finishedAt: null };
+    const fix: DriveFix = { id, workspace, title, signals, ...(proposal ? { proposal } : {}), ...(mission ? { mission } : {}), branch, path, base: base.out, sessionId: null, turnId: null, status: "starting", startedAt: new Date().toISOString(), finishedAt: null };
     this.fixes.push(fix); this.save();
     try {
       mkdirSync(this.worktreeRoot, { recursive: true, mode: 0o700 });
       const added = await this.git(["git", "worktree", "add", "-b", branch, path, fix.base], workspace, 120_000);
       if (!added.ok) throw new Error(`Couldn't create the worktree: ${firstLine(added.err)}`);
-      this.linked.set(id, await this.linkDependencies(top.out, path));
+      fix.linked = await this.linkDependencies(top.out, path);
       // The session opens where the user works inside the repository.
       const sub = relative(top.out, workspace);
-      const sessionId = this.host.startSession(`${proposal ? "Drive" : "Fix"}: ${title}`.slice(0, 200), sub ? join(path, sub) : path);
+      const sessionId = this.host.startSession(`${mission ? "Drive mission" : proposal ? "Drive" : "Fix"}: ${title}`.slice(0, 200), sub ? join(path, sub) : path);
+      if (mission) {
+        // Drive's planner submits the turns; finishMission commits the result.
+        Object.assign(fix, { sessionId, status: "running" });
+        this.save();
+        return fix;
+      }
       const { turnId, done } = this.host.startTurn(sessionId, proposal ? proposalPrompt({ ...fix, proposal }) : fixPrompt(fix));
       Object.assign(fix, { sessionId, turnId, status: "running" });
       this.save();
@@ -158,20 +165,42 @@ export class DriveFixes {
     const turn = fix.turnId ? this.host.turn(fix.turnId) : null;
     const summary = splitNextPrompt(turn?.responseText ?? "").text.trim().slice(-1200);
     if (summary) fix.summary = summary;
+    fix.checks = this.checks(fix);
+    if (turn?.status !== "completed") return this.fail(fix, new Error(turn?.status === "cancelled" ? `The ${fix.proposal || fix.mission ? "task" : "fix"} was stopped.` : `The coding turn ${turn?.status ?? "was lost"}.`));
+    await this.commit(fix);
+  }
+
+  /// The latest result of each check the session ran, newest first.
+  private checks(fix: DriveFix) {
     const latest = new Map<string, CommandRecord>();
     for (const command of fix.sessionId ? this.host.commands(fix.sessionId) : []) {
       const key = command.argv.join(" ");
       if (command.check && command.status !== "running" && !latest.has(key)) latest.set(key, command);
     }
-    fix.checks = [...latest.entries()].slice(0, 6).map(([command, record]) => ({ command, passed: record.status === "completed" && record.exitCode === 0 }));
-    if (turn?.status !== "completed") return this.fail(fix, new Error(turn?.status === "cancelled" ? `The ${fix.proposal ? "task" : "fix"} was stopped.` : `The coding turn ${turn?.status ?? "was lost"}.`));
+    return [...latest.entries()].slice(0, 6).map(([command, record]) => ({ command, passed: record.status === "completed" && record.exitCode === 0 }));
+  }
+
+  /// A mission settled (completed, idle or stopped): commit what it changed
+  /// for review. It can settle again after a resume, adding a commit.
+  async finishMission(id: string, summary?: string): Promise<DriveFix> {
+    const fix = this.get(id);
+    if (!fix?.mission || !["running", "ready", "failed"].includes(fix.status)) throw new Error("That mission's worktree is no longer open.");
+    if (summary?.trim()) fix.summary = summary.trim().slice(-1200);
+    fix.checks = this.checks(fix);
+    delete fix.error; delete fix.unchanged;
+    await this.commit(fix);
+    return fix;
+  }
+
+  private async commit(fix: DriveFix) {
+    const summary = fix.summary ?? "";
     // Commit what the agent changed, never the linked dependencies.
-    const excludes = (this.linked.get(fix.id) ?? []).map((rel) => `:(exclude,top)${rel}`);
+    const excludes = (fix.linked ?? []).map((rel) => `:(exclude,top)${rel}`);
     await this.git(["git", "add", "-A", "--", ".", ...excludes], fix.path);
     const staged = await this.git(["git", "diff", "--cached", "--quiet"], fix.path);
     if (!staged.ok) {
-      const committed = await this.git(["git", "commit", "-m", (fix.proposal ? fix.title : `Fix: ${fix.title}`).slice(0, 200), "-m", (summary || "Made by demesne in a worktree.").slice(0, 2000)], fix.path);
-      if (!committed.ok) return this.fail(fix, new Error(`Couldn't commit the ${fix.proposal ? "change" : "fix"}: ${firstLine(committed.err || committed.out)}`));
+      const committed = await this.git(["git", "commit", "-m", (fix.proposal || fix.mission ? fix.title : `Fix: ${fix.title}`).slice(0, 200), "-m", (summary || "Made by demesne in a worktree.").slice(0, 2000)], fix.path);
+      if (!committed.ok) return this.fail(fix, new Error(`Couldn't commit the ${fix.proposal || fix.mission ? "change" : "fix"}: ${firstLine(committed.err || committed.out)}`));
     }
     const numstat = await this.git(["git", "diff", "--numstat", `${fix.base}..HEAD`], fix.path);
     const rows = numstat.out.split("\n").filter(Boolean).map((line) => line.split("\t"));
@@ -191,7 +220,7 @@ export class DriveFixes {
       this.save();
       return fix;
     }
-    if (fix.status !== "ready") throw new Error(`The ${fix.proposal ? "change" : "fix"} isn't ready yet.`);
+    if (fix.status !== "ready") throw new Error(`The ${fix.proposal || fix.mission ? "change" : "fix"} isn't ready yet.`);
     if (action === "apply") {
       const picked = await this.git(["git", "cherry-pick", `${fix.base}..${fix.branch}`], fix.workspace, 120_000);
       if (!picked.ok) {
@@ -203,10 +232,10 @@ export class DriveFixes {
     } else {
       const pushed = await this.git(["git", "push", "-u", "origin", fix.branch], fix.path, 120_000);
       if (!pushed.ok) throw new Error(`Couldn't push ${fix.branch}: ${firstLine(pushed.err)}`);
-      const body = [...(fix.proposal ? [`Drive proposed this and you ran it: ${fix.proposal.why}`, ...(fix.signals.length ? ["", "Evidence:"] : [])] : [`Fixes a breakage demesne noticed:`]),
+      const body = [...(fix.mission ? [`A Drive mission, worked in its own worktree:`, "", `> ${fix.mission.slice(0, 2000).replace(/\n/g, "\n> ")}`] : fix.proposal ? [`Drive proposed this and you ran it: ${fix.proposal.why}`, ...(fix.signals.length ? ["", "Evidence:"] : [])] : [`Fixes a breakage demesne noticed:`]),
         ...fix.signals.map((signal) => `- **${signal.title}**: ${signal.detail}`), "", fix.summary ?? "",
         ...(fix.checks?.length ? ["", "Checks run in the worktree:", ...fix.checks.map((check) => `- ${check.passed ? "✓" : "✕"} \`${check.command}\``)] : [])].join("\n");
-      const pr = await this.git(["gh", "pr", "create", "--head", fix.branch, "--title", (fix.proposal ? fix.title : `Fix: ${fix.title}`).slice(0, 200), "--body", body.slice(0, 60_000)], fix.path, 120_000);
+      const pr = await this.git(["gh", "pr", "create", "--head", fix.branch, "--title", (fix.proposal || fix.mission ? fix.title : `Fix: ${fix.title}`).slice(0, 200), "--body", body.slice(0, 60_000)], fix.path, 120_000);
       if (!pr.ok) throw new Error(`Pushed ${fix.branch}, but couldn't open the PR: ${firstLine(pr.err)}`);
       fix.prUrl = pr.out.split("\n").findLast((line) => /^https?:\/\//.test(line)) ?? pr.out;
       await this.cleanup(fix, false);
@@ -223,6 +252,5 @@ export class DriveFixes {
       if (!removed.ok) { rmSync(fix.path, { recursive: true, force: true }); await this.git(["git", "worktree", "prune"], fix.workspace); }
     }
     if (deleteBranch) await this.git(["git", "branch", "-D", fix.branch], fix.workspace);
-    this.linked.delete(fix.id);
   }
 }

@@ -91,12 +91,18 @@ export interface DriveNextResponse {
 export interface DriveAlertsRequest { workspace: string; gh?: boolean }
 export interface DriveAlertsResponse { workspace: string; signals: DriveSignal[]; checkedAt: string }
 /// Work made in its own git worktree and branch so the user's checkout is
-/// untouched until they apply it: a fix for a breakage, or a Next proposal.
+/// untouched until they apply it: a fix for a breakage, a Next proposal, or
+/// a /drive mission.
 export type DriveFixStatus = "starting" | "running" | "ready" | "failed" | "applied" | "pr" | "discarded";
 export interface DriveFix {
   id: string; workspace: string; title: string; signals: DriveSignal[];
   /// Set when this is a Next proposal you ran rather than a breakage fix.
   proposal?: DriveFixProposal;
+  /// Set for a /drive mission: the mission text. Drive's planner submits its
+  /// turns to the worktree session, and finishing it commits the result.
+  mission?: string;
+  /// Ignored paths linked into the worktree (shared node_modules), never committed.
+  linked?: string[];
   branch: string; path: string; base: string;
   sessionId: string | null; turnId: string | null;
   status: DriveFixStatus; startedAt: string; finishedAt: string | null;
@@ -111,8 +117,10 @@ export interface DriveFix {
   unchanged?: boolean;
 }
 export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "why">;
-/// A breakage fix sends 1-5 signals; a proposal sends the signals it cites (0-5).
-export interface DriveFixRequest { workspace: string; signals: DriveSignal[]; proposal?: DriveFixProposal }
+/// A breakage fix sends 1-5 signals; a proposal sends the signals it cites
+/// (0-5); a mission sends none.
+export interface DriveFixRequest { workspace: string; signals: DriveSignal[]; proposal?: DriveFixProposal; mission?: string }
+export interface DriveFixFinishRequest { summary?: string }
 export interface DriveFixesResponse { fixes: DriveFix[] }
 export type DriveFixAction = "apply" | "pr" | "discard";
 export interface DriveRequest {
@@ -496,14 +504,21 @@ export function parseDriveFixRequest(value: unknown): DriveFixRequest {
     if (!isRecord(item) || !["fix", "investigate", "tidy"].includes(String(item.kind))) invalid("proposal", "expected a proposal");
     proposal = { id: text(item.id, 200, "proposal.id"), kind: item.kind as DriveProposal["kind"], title: text(item.title, 300, "proposal.title"), why: text(item.why, 2000, "proposal.why") };
   }
-  if (!Array.isArray(value.signals) || (!proposal && !value.signals.length) || value.signals.length > 5) invalid("signals", proposal ? "expected at most 5 signals" : "expected 1-5 signals");
+  const mission = value.mission === undefined ? undefined : text(value.mission, 8000, "mission");
+  if (mission !== undefined && proposal) invalid("mission", "expected a mission or a proposal, not both");
+  if (!Array.isArray(value.signals) || (!proposal && !mission && !value.signals.length) || value.signals.length > 5) invalid("signals", proposal || mission ? "expected at most 5 signals" : "expected 1-5 signals");
   const sources = ["checks", "git", "github", "sessions", "telemetry", "code"];
   const signals = value.signals.map((item, index) => {
     const path = `signals[${index}]`;
     if (!isRecord(item) || !sources.includes(String(item.source))) invalid(path, "expected a signal");
     return { id: text(item.id, 200, `${path}.id`), source: item.source as DriveSignal["source"], title: text(item.title, 300, `${path}.title`), detail: text(item.detail, 1000, `${path}.detail`, true), urgent: item.urgent === true };
   });
-  return { workspace: text(value.workspace, 4096, "workspace"), signals, ...(proposal ? { proposal } : {}) };
+  return { workspace: text(value.workspace, 4096, "workspace"), signals, ...(proposal ? { proposal } : {}), ...(mission !== undefined ? { mission } : {}) };
+}
+export function parseDriveFixFinishRequest(value: unknown): DriveFixFinishRequest {
+  if (value === null || value === undefined) return {};
+  if (!isRecord(value)) invalid("request", "expected an object");
+  return value.summary === undefined ? {} : { summary: text(value.summary, 4000, "summary", true) };
 }
 function parseProjectMemory(value: unknown): DriveMemoryEntry[] {
   if (!Array.isArray(value) || value.length > 60) invalid("projectMemory", "expected at most 60 entries");

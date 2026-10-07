@@ -52,9 +52,6 @@
   color: var(--muted);
   font-size: 12px;
 }
-.workspace header {
-  min-height: 35px;
-}
 .header-state {
   display: flex;
   align-items: center;
@@ -1488,9 +1485,6 @@ button:disabled {
     gap: 10px;
     padding: 8px 12px;
   }
-  .identity span {
-    max-width: 40vw;
-  }
   .live-app:not(.start) .hints {
     display: none;
   }
@@ -1801,13 +1795,6 @@ button:disabled {
 .live-app:not(.start) .composer.queued .composer-bar .send {
   margin-left: auto;
 }
-.identity {
-  min-width: 0;
-}
-.identity span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .header-state {
   flex-shrink: 0;
 }
@@ -1892,13 +1879,6 @@ button:disabled {
 }
 .panel-heading + .panel-body > .panel-detail {
   padding-top: 6px;
-}
-.identity .session-title {
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--paper);
-  max-width: 40%;
-  flex: 0 1 auto;
 }
 /* Review and inspection controls extend the existing Figma panel chrome. */
 #panel {

@@ -39,6 +39,8 @@ body.desktop { overflow: hidden; }
 #desktop-project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--paper); }
 .desktop-project-caret { color: var(--muted); }
 .desktop-project-path { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#desktop-toolbar header { flex: none; border: 0; padding: 0; gap: 0; }
+#desktop-toolbar .header-state { font-size: 12px; margin-right: 8px; }
 .desktop-toolbar-open { flex: none; display: flex; align-items: center; gap: 8px; color: var(--secondary); }
 .desktop-toolbar-open:hover { color: var(--electric); }
 .desktop-project-menu { position: absolute; left: 0; top: calc(100% + 7px); width: 360px; max-height: min(480px, 75vh); overflow-y: auto; padding: 6px; border: 1px solid var(--borderBright); border-radius: 6px; background: var(--surface); box-shadow: 0 8px 28px #0005; }

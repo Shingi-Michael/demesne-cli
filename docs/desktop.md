@@ -65,7 +65,9 @@ bun run build:desktop
 
 This produces a `.app` bundle on macOS or a `.deb` package on Linux under `apps/desktop/src-tauri/target/release/bundle/`. The bundle includes the compiled desktop-host sidecar, daemon, frontend assets, and native image dependencies. End users of the bundle do not need Bun or Rust installed. Model servers and configured external command/MCP dependencies remain separate software.
 
-This is a source-build/development preview rather than a signed release channel. Developer ID signing, notarization, Windows installers, and automatic updates are not implemented by this milestone. Keep packaged resources together; copying only the executable omits its backend dependencies.
+Tagged releases build the same bundles in CI and attach them: `Demesne-darwin-arm64.app.tar.gz` (Apple silicon) and `demesne-desktop-linux-x64.deb` (built on Ubuntu 22.04, so it also installs on 24.04), each with a `.sha256`. `scripts/install.sh` installs the Mac app to `~/Applications` (`DEMESNE_APP_DIR` changes that, `DEMESNE_NO_APP=1` skips it). The builds are unsigned: an app downloaded through a browser is quarantined by macOS, so either use the install script or run `xattr -dr com.apple.quarantine Demesne.app` once. Intel Macs and Windows build from source.
+
+These are preview builds rather than a signed release channel. Developer ID signing, notarization, Windows installers, and automatic updates are not implemented by this milestone. Keep packaged resources together; copying only the executable omits its backend dependencies.
 
 ## Closing the app and stopping work
 

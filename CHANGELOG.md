@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Added
 
+- Releases ship the desktop app: an Apple silicon `Demesne.app` (installed to `~/Applications` by `scripts/install.sh`) and an Ubuntu `.deb`, unsigned preview builds with checksums.
 - Label a GitHub issue `drive` to queue it for Drive: open ones become Next proposals, and the PR Drive opens for one says `Closes #n`.
 - Away mode: **Run top 3 away** (a link in the Next heading) has the daemon work through Drive's top proposals one after another, each in its own worktree. Finished branches fold into one "While you were away" card, a line each; click one to open its Apply / Open PR / Discard.
 - Drive keeps working when you close the window: a running mission is handed to a background process with no window, which carries it to the end and commits a worktree mission for review. Opening the project again takes it back and resumes it in the window.

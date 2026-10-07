@@ -77,6 +77,8 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 <details>
 <summary><b>Desktop app</b> (macOS and Ubuntu 22.04/24.04, unsigned preview builds)</summary>
 
+Each [release](https://github.com/Shingi-Michael/demesne-cli/releases) carries the app: `Demesne-darwin-arm64.app.tar.gz` for Apple silicon and `demesne-desktop-linux-x64.deb` for Ubuntu (`sudo apt install ./demesne-desktop-linux-x64.deb`). On a Mac, the install script below puts it in `~/Applications` along with the terminal commands. Or build it yourself:
+
 ```sh
 bun run desktop          # run from source
 bun run build:desktop    # build an app bundle
@@ -88,6 +90,14 @@ It needs [Rust and a few platform packages](docs/desktop.md#prerequisites). The 
 <details>
 <summary><b>Terminal</b> (<code>demesne</code> opens the desktop window on the current folder)</summary>
 
+On macOS, install the latest release (the commands and, on Apple silicon, the desktop app):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Shingi-Michael/demesne-cli/main/scripts/install.sh | sh
+```
+
+Or build from source:
+
 ```sh
 bun run build
 bun run build:desktop
@@ -96,7 +106,7 @@ bun run build:desktop
 ./dist/demesne
 ```
 
-Keep `dist/node_modules` next to the binaries. To use demesne in other projects, link `dist/demesne` and `dist/demesned` onto your PATH and run `demesne` from the project folder. It opens the desktop window on that folder. `demesne chat "message"` also sends a first message. It looks for the app in `/Applications` on macOS, then `demesne-desktop` on your PATH, then this checkout's build. `DEMESNE_DESKTOP_BIN` points it at a different app. If you're working on demesne itself, `bun run demesne` does the same from source. More in [command reference](docs/cli-reference.md) and [troubleshooting](docs/troubleshooting.md).
+Keep `dist/node_modules` next to the binaries. To use demesne in other projects, link `dist/demesne` and `dist/demesned` onto your PATH and run `demesne` from the project folder. It opens the desktop window on that folder. `demesne chat "message"` also sends a first message. It looks for the app in `/Applications` and `~/Applications` on macOS, then `demesne-desktop` on your PATH, then this checkout's build. `DEMESNE_DESKTOP_BIN` points it at a different app. If you're working on demesne itself, `bun run demesne` does the same from source. More in [command reference](docs/cli-reference.md) and [troubleshooting](docs/troubleshooting.md).
 </details>
 
 <details>

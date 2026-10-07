@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Added
 
+- Drive mission receipts: the review card shows how many tasks the recorded checks verify, and Copy receipt / Open PR carry a Markdown receipt that separates verified work from claims.
 - `/drive` missions work in their own git worktree and session, then commit the result for Apply / Open PR / Discard and return you to your session. `--here` keeps a mission in the current session.
 - Drive Next's **Run** works in its own git worktree and branch, with the breakage-fix card's Apply / Open PR / Discard. Your checkout is untouched until you apply it; outside git it falls back to a bounded mission.
 

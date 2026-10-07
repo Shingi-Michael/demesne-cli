@@ -76,6 +76,16 @@ A new `/drive` mission doesn't touch your checkout either. Drive creates a git w
 
 When the mission settles (completed, idle or stopped), demesne commits what changed on the branch and shows the review card: diff size, files, the checks the mission ran and its summary, with **Apply to my branch**, **Open PR** and **Discard**. Applying or discarding takes you back to the session you started from. If you resume a settled mission, it keeps working in the same worktree, and the next settle adds a commit.
 
+### Mission receipts
+
+The review card leads with a receipt headline such as "2 of 3 tasks verified · 4 checks passing", and **Copy receipt** copies the full receipt as Markdown. **Open PR** puts it at the top of the pull request. The receipt is built from the [task ledger](#project-memory-and-task-ledger) and recorded checks, not from the model's summary:
+
+- ✓ **verified**: the task's latest completion has recorded checks, all passing and current for the final files (or it was a question that was answered).
+- △ **claimed, not verified**: the task was marked complete, but a check failed, went stale or never ran.
+- ○ **not finished**.
+
+Each task lists its acceptance criteria, result, checks (failed and stale ones are named) and files, and the receipt ends with the mission's usage: coder requests, planning cycles, active minutes and an estimated token count.
+
 While a mission's worktree is open, no other worktree job (a breakage fix or a proposal Run) starts in that project: apply or discard it first. A daemon restart keeps the worktree open; the mission reopens paused as usual.
 
 `/drive --here MISSION` runs in the current session instead. So does any mission outside a git repository, in one with no commits, or under `DEMESNE_DRIVE_CONTROL=ui`. The worktree links your `node_modules` rather than reinstalling, so a coder that installs packages there changes your checkout's dependencies too.

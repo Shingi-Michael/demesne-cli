@@ -46,6 +46,8 @@ export class BreakageWatch {
     applied: () => void;
     /// A mission's worktree was applied, opened as a PR or discarded.
     closed?: (fix: DriveFix) => void;
+    /// Copies text to the clipboard (a mission's receipt).
+    copy?: (text: string) => Promise<void>;
   }) {}
 
   async start() {
@@ -129,9 +131,9 @@ export class BreakageWatch {
   }
 
   /// A mission settled: commit its changes and show them for review.
-  async finishMission(id: string, summary: string) {
+  async finishMission(id: string, summary: string, receipt?: { markdown: string; headline: string }) {
     try {
-      const { fix } = await this.options.client().finishDriveMission(id, summary.slice(0, 4000));
+      const { fix } = await this.options.client().finishDriveMission(id, { summary: summary.slice(0, 4000), ...(receipt ? { receipt: receipt.markdown, headline: receipt.headline.slice(0, 300) } : {}) });
       if (this.state.fix?.id === id) this.state.fix = fix;
     } catch (error) {
       this.state.message = { text: error instanceof Error ? error.message : String(error), tone: "error" };
@@ -164,6 +166,13 @@ export class BreakageWatch {
       return this.options.publish();
     }
     if (method === "breakage-close") { this.state.message = null; return this.options.publish(); }
+    if (method === "breakage-receipt") {
+      const receipt = this.state.fix?.receipt;
+      if (!receipt || !this.options.copy) return;
+      await this.options.copy(receipt);
+      this.state.message = { text: "Copied the mission receipt (Markdown).", tone: "ok" };
+      return this.options.publish();
+    }
     if (method === "breakage-open") {
       const url = this.state.message?.url;
       if (url) await this.options.open(url);

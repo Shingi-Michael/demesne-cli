@@ -453,7 +453,7 @@ export function createDaemonApp(options: {
       }
       if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "drive" && path[2] === "fixes" && path[4] === "finish") {
         const body = parseDriveFixFinishRequest(await readJson(request));
-        try { return json({ fix: await driveFixes.finishMission(path[3]!, body.summary) }); }
+        try { return json({ fix: await driveFixes.finishMission(path[3]!, body.summary, body.receipt, body.headline) }); }
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not finish the mission", 409); }
       }
       if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "drive" && path[2] === "fixes" && ["apply", "pr", "discard"].includes(path[4]!)) {

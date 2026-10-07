@@ -200,8 +200,8 @@ test("a /drive mission gets its own worktree session, survives a daemon restart,
     expect(readFileSync(join(mission.path, "parser.ts"), "utf8")).toBe("export const strict = true;\n");
     expect(readFileSync(join(workspace, "parser.ts"), "utf8")).toBe("export const strict = false;\n");
 
-    const finished = await call(`/v1/drive/fixes/${mission.id}/finish`, { method: "POST", body: JSON.stringify({ summary: "Parser is strict now." }) });
-    expect(finished.body.fix).toMatchObject({ status: "ready", summary: "Parser is strict now.", diff: { files: 1, paths: ["parser.ts"] } });
+    const finished = await call(`/v1/drive/fixes/${mission.id}/finish`, { method: "POST", body: JSON.stringify({ summary: "Parser is strict now.", receipt: "### Drive mission receipt\n\n> Make the parser strict", headline: "1 of 1 task verified · 1 check passing" }) });
+    expect(finished.body.fix).toMatchObject({ status: "ready", summary: "Parser is strict now.", headline: "1 of 1 task verified · 1 check passing", receipt: "### Drive mission receipt\n\n> Make the parser strict", diff: { files: 1, paths: ["parser.ts"] } });
     // The linked node_modules survived the restart as an exclusion, so it isn't committed.
     expect(out(workspace, "show", "--stat", "--format=%s", mission.branch)).not.toContain("node_modules");
     expect(out(workspace, "log", "-1", "--format=%s", mission.branch)).toBe("Make the parser strict");

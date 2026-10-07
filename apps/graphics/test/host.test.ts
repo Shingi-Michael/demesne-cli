@@ -230,6 +230,9 @@ test("/drive moves the mission into its own worktree session, and returns you af
     await host.drive!.handle("drive-control", { control: "stop" });
     await eventually(() => host.breakage.state.fix?.status === "failed", 5000);
     expect(host.breakage.state.fix?.unchanged).toBe(true);
+    // The receipt comes from the task ledger: one task, not finished, no checks.
+    expect(host.breakage.state.fix?.headline).toBe("0 of 1 task verified · no checks recorded");
+    expect(host.breakage.state.fix?.receipt).toContain("#### ○ Make the README friendlier");
 
     await host.handle("breakage-discard", { sessionId: fix.sessionId });
     await eventually(() => host.current?.session.id === home, 5000);

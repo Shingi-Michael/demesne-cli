@@ -1,10 +1,16 @@
-import { cpSync, mkdirSync, readFileSync, readdirSync, writeFileSync, realpathSync } from "node:fs";
+import { cpSync, mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve, relative } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
-const build = Bun.spawn([process.execPath, "build", "apps/daemon/src/main.ts", "--compile", "--outfile", "dist/demesned"], { cwd: root, stdout: "inherit", stderr: "inherit" });
+// `--target=bun-darwin-x64` cross-builds for a release. The target's sharp
+// binaries must be installed (`bun install --os=darwin --cpu='*'`); packages
+// for other platforms are left out.
+const target = process.argv.slice(2).find((arg) => arg.startsWith("--target="))?.slice("--target=".length);
+const [, os = process.platform, cpu = process.arch] = target?.match(/^bun-(\w+)-(\w+)/) ?? [];
+const build = Bun.spawn([process.execPath, "build", "apps/daemon/src/main.ts", "--compile", ...(target ? [`--target=${target}`] : []), "--outfile", "dist/demesned"], { cwd: root, stdout: "inherit", stderr: "inherit" });
 if (await build.exited !== 0) process.exit(1);
+rmSync(join(root, "dist/node_modules"), { recursive: true, force: true });
 const copied = new Set<string>();
 const locations: { source: string; target: string }[] = [];
 function copyDependency(name: string, require: NodeJS.Require): void {
@@ -20,7 +26,9 @@ function copyDependency(name: string, require: NodeJS.Require): void {
   const local = createRequire(metadata);
   for (const dependency of Object.keys(pkg.dependencies ?? {})) copyDependency(dependency, local);
   for (const dependency of Object.keys(pkg.optionalDependencies ?? {})) {
-    try { local.resolve(`${dependency}/package.json`); } catch { continue; }
+    let optional: { os?: string[]; cpu?: string[] };
+    try { optional = JSON.parse(readFileSync(local.resolve(`${dependency}/package.json`), "utf8")); } catch { continue; }
+    if (optional.os && !optional.os.includes(os) || optional.cpu && !optional.cpu.includes(cpu)) continue;
     copyDependency(dependency, local);
   }
 }
@@ -50,4 +58,8 @@ for (const location of locations) {
   }
   rewrite(location.source, location.target);
 }
-console.log(`Packaged ${copied.size} native image runtime packages in dist/node_modules`);
+if (![...copied].some((name) => name.startsWith(`@img/sharp-${os}-${cpu}`))) {
+  console.error(`No sharp binary for ${os}-${cpu} is installed. Run \`bun install --os=${os} --cpu='*'\` first.`);
+  process.exit(1);
+}
+console.log(`Packaged ${copied.size} native image runtime packages for ${os}-${cpu} in dist/node_modules`);

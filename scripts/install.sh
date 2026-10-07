@@ -6,7 +6,8 @@
 #
 # Environment:
 #   DEMESNE_VERSION       Release tag to install (default: latest)
-#   DEMESNE_INSTALL_DIR   Destination directory (default: ~/.local/bin)
+#   DEMESNE_INSTALL_DIR   Where the demesne commands are linked (default: ~/.local/bin)
+#   DEMESNE_LIB_DIR       Where the CLI and its runtime live (default: ~/.local/lib/demesne)
 #   DEMESNE_APP_DIR       Where the desktop app goes (default: ~/Applications)
 #   DEMESNE_NO_APP=1      Skip the desktop app
 
@@ -14,6 +15,7 @@ set -eu
 
 REPOSITORY="Shingi-Michael/demesne-cli"
 INSTALL_DIR="${DEMESNE_INSTALL_DIR:-$HOME/.local/bin}"
+LIB_DIR="${DEMESNE_LIB_DIR:-$HOME/.local/lib/demesne}"
 APP_DIR="${DEMESNE_APP_DIR:-$HOME/Applications}"
 
 case "$(uname -s)" in
@@ -61,12 +63,18 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
   exit 1
 fi
 
-tar -xzf "${TEMP_DIR}/${ARTIFACT}" -C "$TEMP_DIR"
-mkdir -p "$INSTALL_DIR"
-install -m 0755 "${TEMP_DIR}/demesne" "${INSTALL_DIR}/demesne"
-install -m 0755 "${TEMP_DIR}/demesned" "${INSTALL_DIR}/demesned"
+# The daemon loads its native image runtime (node_modules) from beside its
+# real path, so the files stay together and PATH gets symlinks.
+mkdir -p "${TEMP_DIR}/cli"
+tar -xzf "${TEMP_DIR}/${ARTIFACT}" -C "${TEMP_DIR}/cli"
+rm -rf "$LIB_DIR"
+mkdir -p "$(dirname "$LIB_DIR")" "$INSTALL_DIR"
+mv "${TEMP_DIR}/cli" "$LIB_DIR"
+chmod 0755 "${LIB_DIR}/demesne" "${LIB_DIR}/demesned"
+ln -sf "${LIB_DIR}/demesne" "${INSTALL_DIR}/demesne"
+ln -sf "${LIB_DIR}/demesned" "${INSTALL_DIR}/demesned"
 
-echo "Installed demesne and demesned to ${INSTALL_DIR}."
+echo "Installed demesne and demesned to ${LIB_DIR}, linked from ${INSTALL_DIR}."
 
 # The desktop app, which `demesne` opens. Releases ship it for Apple silicon.
 APP_ARTIFACT="demesne-desktop-darwin-${ARCH}.zip"

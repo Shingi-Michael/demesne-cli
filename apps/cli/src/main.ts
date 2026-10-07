@@ -432,14 +432,15 @@ async function run(command: string[]): Promise<void> {
   if (command[0] === "drive") {
     const pr = takeOption(command, "--pr");
     if (pr !== undefined && !/^[1-9]\d*$/.test(pr)) throw new Error("--pr takes a pull request number");
+    const workflow = takeOption(command, "--workflow");
     let mission = command.slice(1).join(" ").trim();
-    if (!mission || mission === "-") mission = (await Bun.stdin.text()).trim();
-    if (!mission.replace(/(^|\s)--(here|bounded)(?=\s|$)/g, "").trim()) throw new Error("Usage: demesne drive [--pr <number>] [--here] <mission>");
+    if (!workflow && (!mission || mission === "-")) mission = (await Bun.stdin.text()).trim();
+    if (!workflow && !mission.replace(/(^|\s)--(here|bounded)(?=\s|$)/g, "").trim()) throw new Error("Usage: demesne drive [--pr <number>] [--here] [--workflow <name>] <mission>");
     await ensureDaemonOrExit();
     const workspace = realpathSync(process.cwd());
-    const session = await createSessionWithTrust({ title: `Drive: ${mission}`.slice(0, 200), workspacePath: workspace });
+    const session = await createSessionWithTrust({ title: `Drive: ${workflow ? `${workflow} ${mission}` : mission}`.trim().slice(0, 200), workspacePath: workspace });
     const { runHeadlessDrive } = await import("../../graphics/headless-drive.ts");
-    const result = await runHeadlessDrive({ workspace, sessionId: session.session.id, mission, server: explicitServer(), settings,
+    const result = await runHeadlessDrive({ workspace, sessionId: session.session.id, mission, ...(workflow ? { workflow } : {}), server: explicitServer(), settings,
       log: (line) => console.error(paintLog.dim(sanitizeTerminalLine(`  ${line}`))) });
     const markdown = result.receipt.markdown + (result.branch ? `\n\n<sub>The change is committed on \`${result.branch}\`.</sub>` : "");
     console.log(markdown);
@@ -1304,8 +1305,8 @@ function printUsage(): void {
   demesne daemon start|stop|status|logs
   demesne ps [--watch] [--json]
   demesne prompt [--session <session-id>] [--permission ask|deny] [--output text|json|stream-json] [--plan] <text>
-  demesne drive [--pr <number>] [--here] <mission>
-      Runs a Drive mission with no window and prints its receipt; --pr posts it to that pull request (needs gh). Exits 0 only when every task is verified.
+  demesne drive [--pr <number>] [--here] [--workflow <name>] <mission>
+      Runs a Drive mission with no window and prints its receipt; --pr posts it to that pull request (needs gh). --workflow runs .demesne/workflows/<name>.md with the mission as its goal. Exits 0 only when every task is verified.
   demesne compact <session-id> [instructions]
   demesne session list
   demesne session create [--workspace <path>] [title]

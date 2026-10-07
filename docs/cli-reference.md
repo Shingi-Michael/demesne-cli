@@ -111,7 +111,7 @@ In text fields, ordinary browser editing applies. The old ANSI workbench's readl
 
 ## Custom commands and mentions
 
-Markdown files in `~/.demesne/commands/` and `<workspace>/.demesne/commands/` become slash commands. Project commands override user commands; built-ins cannot be replaced.
+Markdown files in `~/.demesne/commands/` and `<workspace>/.demesne/commands/` become slash commands that send their text as a prompt. Project commands override user commands; built-ins cannot be replaced.
 
 ```markdown
 ---
@@ -119,5 +119,27 @@ description: Review a path
 ---
 Review $ARGUMENTS and report concrete findings with file references.
 ```
+
+### Workflows
+
+A workflow is a fixed sequence of steps that runs as one Drive mission. Markdown files in `~/.demesne/workflows/` and `<workspace>/.demesne/workflows/` become slash commands tagged "workflow" (project files win). Each `##` heading is a step, and the text under it is what the coder is asked to do. A `check:` line is a command Drive runs itself in the mission's worktree before the step counts as done; add `expect: fail` when the step must prove something is broken.
+
+```markdown
+---
+description: Reproduce a bug with a test, fix it, prove it
+---
+## Reproduce
+Write a test that fails because of: $ARGUMENTS
+check: bun test   expect: fail
+
+## Fix
+Make the smallest change that makes the new test pass.
+check: bun test
+
+## Review
+Read your own diff as a reviewer and list anything risky.
+```
+
+`/bugfix greeting ignores GREETING when it is empty` starts the mission. See [Agent Drive](agent-drive.md#workflows) for how steps and checks run.
 
 Type `@` to select workspace files. File-viewer **Attach lines** inserts the loaded text and its path/range into the draft. Fenced code remains literal, including `@` characters. Mentions and file tools use the [sensitive-path policy](../SECURITY.md).

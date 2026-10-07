@@ -42,8 +42,9 @@ export function driveSince(iso: string, now: number): string {
 /// The mission's tasks as a plain checklist: finished, current, then still
 /// to do. No record IDs or criteria (those stay under Details), and a task
 /// named twice (ledger and planner list) appears once.
-export function driveTaskList(state: Pick<import("@demesne/protocol").DriveState, "ledger" | "autonomy" | "completed" | "remaining" | "status">):
+export function driveTaskList(state: Pick<import("@demesne/protocol").DriveState, "ledger" | "autonomy" | "completed" | "remaining" | "status" | "workflow">):
   { mark: string; text: string; tone: DriveStepTone }[] {
+  if (state.workflow?.steps.length) return workflowStepList(state.workflow);
   const tasks: { mark: string; text: string; tone: DriveStepTone }[] = [];
   const seen = new Set<string>();
   const task = (mark: string, text: string | undefined, tone: DriveStepTone) => {
@@ -57,4 +58,20 @@ export function driveTaskList(state: Pick<import("@demesne/protocol").DriveState
   task("◌", state.autonomy?.task, "paper");
   if (state.status !== "completed") for (const item of state.remaining) task("·", item, "muted");
   return tasks.slice(-6);
+}
+
+/// A workflow mission lists every step, each with the check Drive runs for
+/// it and how that last went.
+export function workflowStepList(run: import("@demesne/protocol").DriveWorkflowRun): { mark: string; text: string; tone: DriveStepTone }[] {
+  return run.steps.map((step, index) => {
+    const done = index < run.current, current = index === run.current;
+    const check = step.check
+      ? step.result
+        ? `${step.check.command} ${step.result.ok ? (step.check.expect === "fail" ? "failed as expected" : "passed") : step.result.exitCode === null ? "didn't finish" : step.check.expect === "fail" ? "passed, needs to fail" : "failed"}`
+        : step.check.command
+      : "no check";
+    const failed = current && step.result && !step.result.ok;
+    return { mark: done ? "✓" : failed ? "×" : current ? "◌" : "·", text: `${words(step.title)} · ${words(check)}`,
+      tone: done ? "secondary" : failed ? "signal" : current ? "paper" : "muted" };
+  });
 }

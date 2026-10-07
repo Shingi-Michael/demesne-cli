@@ -169,6 +169,10 @@ export interface DriveRequest {
   autonomy?: DriveAutonomy;
   inspection?: DriveInspection;
   review?: DriveReview;
+  /// The current step of a workflow mission. Drive runs its check itself when
+  /// the step completes, so the coder's own failing runs (a step that has to
+  /// prove a bug) don't block completing it.
+  workflowStep?: { title: string; check?: { command: string; expect: "pass" | "fail" } };
   checkIn?: { turnId: string; cursor: number; freshEvidence?: boolean; reason?: DriveCheckpointReason };
   /// Whether the model thinks for this decision. The client decides: judging
   /// a finished turn does; navigation, waiting and check-ins don't.
@@ -229,7 +233,20 @@ export interface DriveProtection {
   };
   trip?: { kind: "budget" | "loop" | "journal"; reason: string; at: number };
 }
+/// A workflow file's step, fixed when the mission starts: the coder works
+/// on `prompt`, and Drive runs `check` itself before the step counts.
+export interface DriveWorkflowStep {
+  title: string; prompt: string;
+  check?: { command: string; expect: "pass" | "fail" };
+  /// The last time Drive ran this step's check.
+  result?: { ok: boolean; exitCode: number | null; output: string; at: string };
+  taskId?: string;
+}
+/// A mission started from `.demesne/workflows/<name>.md`: its steps run in
+/// order, one ledger task each.
+export interface DriveWorkflowRun { name: string; current: number; steps: DriveWorkflowStep[] }
 export interface DriveState extends DriveMemory {
+  workflow?: DriveWorkflowRun;
   mode?: DriveMode; ledger?: DriveLedger; facts?: DriveFacts;
   id: string; mission: string; homeSessionId: string; workspace: string; status: DriveStatus;
   activity: string; step: number; model: string | null; updatedAt: string;
@@ -416,7 +433,7 @@ export function validateDriveDecisionContext(decision: DriveDecision, request: D
   if (request.facts) {
     const turn = request.facts.selectedTurn;
     if (!turn || turn.status !== "completed" || (task?.workerTurns.length && !task.workerTurns.includes(turn.id))) invalid("action.complete", "inspect a completed worker turn for this task; a cancelled, failed or unrelated turn is not completion");
-    if (action.basis !== "answer" && request.facts.checks.some(check => check.turnId === turn.id && (check.status !== "completed" || check.freshness !== "current"))) invalid("action.complete", "this turn has failed, running or outdated checks; inspect the current results before finishing");
+    if (action.basis !== "answer" && !request.workflowStep && request.facts.checks.some(check => check.turnId === turn.id && (check.status !== "completed" || check.freshness !== "current"))) invalid("action.complete", "this turn has failed, running or outdated checks; inspect the current results before finishing");
   }
   if (request.autonomy?.phase === "discovering") invalid("action.complete", "the previous task is already finished. Ask the coding agent about next improvements, inspect its answer, then use next_task or idle");
   if (decision.remaining.length) invalid("action.complete", "remaining must be empty before finishing; inspect or finish the outstanding items first");
@@ -444,6 +461,13 @@ export function parseDriveInspection(value: unknown): DriveInspection {
   if (pages.reduce((sum, page) => sum + page.rows.reduce((n, row) => n + row.length, 0), 0) > 24_000) invalid("inspection.pages", "visible evidence exceeds 24,000 characters");
   return { sessionId: text(value.sessionId, 100, "inspection.sessionId"), document: text(value.document, 100, "inspection.document"), turn: text(value.turn, 100, "inspection.turn"),
     target: value.target as DriveInspectAction["target"], pages, truncated: value.truncated, actions: coordinate(value.actions, 65, "inspection.actions"), result: text(value.result, 2000, "inspection.result") };
+}
+function parseWorkflowStep(value: unknown): NonNullable<DriveRequest["workflowStep"]> {
+  if (!isRecord(value)) invalid("workflowStep", "expected an object");
+  const title = text(value.title, 200, "workflowStep.title");
+  if (value.check === undefined) return { title };
+  if (!isRecord(value.check) || !["pass", "fail"].includes(String(value.check.expect))) invalid("workflowStep.check", "expected a command and expect pass or fail");
+  return { title, check: { command: text(value.check.command, 500, "workflowStep.check.command"), expect: value.check.expect as "pass" | "fail" } };
 }
 export function parseDriveRequest(value: unknown): DriveRequest {
   if (!isRecord(value) || !isRecord(value.observation) || !isRecord(value.memory)) invalid("request", "expected observation and memory objects");
@@ -514,6 +538,7 @@ export function parseDriveRequest(value: unknown): DriveRequest {
     ...(value.autonomy !== undefined ? { autonomy: parseDriveAutonomy(value.autonomy) } : {}),
     ...(value.inspection !== undefined ? { inspection: parseDriveInspection(value.inspection) } : {}),
     ...(value.review !== undefined ? {review:parseDriveReview(value.review)} : {}),
+    ...(value.workflowStep !== undefined ? { workflowStep: parseWorkflowStep(value.workflowStep) } : {}),
     ...(value.projectMemory !== undefined ? { projectMemory: parseProjectMemory(value.projectMemory) } : {}),
     ...(value.checkIn !== undefined ? { checkIn: parseDriveCheckIn(value.checkIn) } : {}),
     ...(typeof value.thinking === "boolean" ? { thinking: value.thinking } : {}),

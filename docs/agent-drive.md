@@ -106,6 +106,14 @@ While a mission's worktree is open, no other worktree job (a breakage fix or a p
 
 `/drive --here MISSION` runs in the current session instead. So does any mission outside a git repository, in one with no commits, or under `DEMESNE_DRIVE_CONTROL=ui`. The worktree links your `node_modules` rather than reinstalling, so a coder that installs packages there changes your checkout's dependencies too.
 
+## Workflows
+
+A [workflow file](cli-reference.md#workflows) turns a process you repeat (reproduce, fix, tidy, review) into a mission with fixed steps. `/<workflow> <goal>` starts it like `/drive`, in its own worktree, always bounded.
+
+Each step is one task in the [task ledger](#project-memory-and-task-ledger), and the planner works only on the current one. When the planner says a step is done, Drive runs that step's `check:` command itself in the mission's workspace. The step passes only on the command's real exit code: zero, or non-zero for `expect: fail` (a missing command or a timeout never counts). A failed check rejects the completion and tells the planner what failed, with the end of the output, so it sends the coder back. Checks are copied into the mission when it starts, so editing the file or the coder changing it mid-mission doesn't change them. Checks stop after 10 minutes.
+
+The live block lists the steps with each step's check and its last result, and the review card's receipt headline counts steps, for example "bugfix · 3 of 3 steps passed · 2 checks". A step without a check counts once it is finished. `demesne drive --workflow bugfix "<goal>"` runs one with no window and exits 0 only when every step passed.
+
 ## Drive keeps working when you close the window
 
 Closing the window doesn't stop a running mission. The window's host hands it to a small background process with no window (the same desktop host, started with `--drive-away`). That process resumes the mission on the same session and keeps going until the mission settles. A worktree mission is then committed for review, just as it would be with the window open, and the process exits. When you open the project again, the window stops the background process and resumes the mission itself, so you're back in the same session with Drive still working. A mission that settled while you were away shows its review card.

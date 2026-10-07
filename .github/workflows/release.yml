@@ -31,7 +31,8 @@ jobs:
       - run: sudo mkdir -p /usr/local/bin && sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
       # The tools tests exercise search_files with and without ripgrep.
       - run: command -v rg || brew install ripgrep
-      - run: bun install --frozen-lockfile
+      # Both Mac architectures' sharp binaries, so the x64 daemon can carry its own.
+      - run: bun install --frozen-lockfile --os=darwin --cpu='*'
       - run: bun run typecheck
       - run: bun test
 
@@ -39,21 +40,27 @@ jobs:
         run: |
           mkdir -p release
           bun build apps/cli/src/main.ts --compile --target=${{ matrix.target }} --outfile release/demesne
-          bun build apps/daemon/src/main.ts --compile --target=${{ matrix.target }} --outfile release/demesned
+          # The daemon loads sharp from node_modules beside its real path.
+          bun run scripts/build-daemon.ts --target=${{ matrix.target }}
+          cp dist/demesned release/demesned
+          cp -R dist/node_modules release/node_modules
+          test -f release/node_modules/sharp/dist/index.cjs
 
       # The arm64 runner can execute the arm64 artifact natively. The x64
       # artifact is only syntax-checked here; signing and a native smoke test
       # belong to the notarization step once release credentials exist.
+      # The daemon check boots it through a symlink, as install.sh lays it out.
       - name: Smoke test native artifact
         if: matrix.smoke
         run: |
           ./release/demesne --version
-          ./release/demesned --help 2>&1 || true
+          mkdir -p "$RUNNER_TEMP/bin" && ln -sf "$PWD/release/demesned" "$RUNNER_TEMP/bin/demesned"
+          bun scripts/check-desktop-backend.ts "$RUNNER_TEMP/bin/demesned" --beside
 
       - name: Package and checksum
         run: |
           cd release
-          tar -czf "../${{ matrix.artifact }}.tar.gz" demesne demesned
+          tar -czf "../${{ matrix.artifact }}.tar.gz" demesne demesned node_modules
           cd ..
           shasum -a 256 "${{ matrix.artifact }}.tar.gz" > "${{ matrix.artifact }}.tar.gz.sha256"
           cat "${{ matrix.artifact }}.tar.gz.sha256"

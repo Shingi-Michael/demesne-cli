@@ -36,7 +36,7 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 
 ## See it
 
-<a href="docs/assets/demesne-drive.png"><img src="docs/assets/demesne-drive.png" alt="A finished coding turn with its edits and passing check, beside the Drive panel proposing the next tasks" width="100%"></a>
+<a href="docs/assets/demesne-drive.png"><img src="docs/assets/demesne-drive.png" alt="A finished coding turn folded into one receipt line, with Drive’s next three ideas unfolded above the composer" width="100%"></a>
 
 <table>
 <tr>

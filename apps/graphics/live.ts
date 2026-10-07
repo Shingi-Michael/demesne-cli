@@ -275,6 +275,12 @@ const expanded = new Set<string>(),
       views: Map<number, MarkdownView>;
     }
   >();
+/// The Drive popover under the top bar's Drive word; the briefing line's
+/// unfolded parts above the composer; turns whose steps are open.
+let drivePopOpen = false,
+  driveShown = false,
+  ideasShown = false;
+const stepsOpen = new Set<string>();
 let paneSignature = "",
   overlaySignature = "",
   approvalSignature = "",
@@ -361,26 +367,38 @@ function renderStatus() {
     state.session?.autoApprove,
     pane,
     state.session?.workspace?.gitBranch,
-    state.activeTurnId
-      ? Math.floor((Date.now() - Date.parse(state.session!.createdAt)) / 1000)
-      : state.session?.createdAt,
     state.runs.length,
     inSession(),
+    driveWord(),
+    drivePopOpen,
   ]);
   if (signature === statusSignature) return;
   statusSignature = signature;
   // A quiet footer: a spinner while working, a word only when the state
   // needs attention (failed, approval, offline…). "ready" says nothing.
   const working = Boolean(state.activeTurnId) && !["approval", "waiting", "failed"].includes(phase);
-  // The start screen names the model under its heading, so a ready status
-  // bar would only repeat it there.
+  // The composer names the model and the context used, and a session's top
+  // bar carries its live state, so a session has no status bar.
   el("status").dataset.quiet = String(phase === "ready");
+  el("status").hidden = inSession();
+  const c2 = c.percentage == null ? "" : `<span class="muted">·</span> ${c.percentage}% context`;
+  el("composer-model").innerHTML = `${h(state.model.displayName ?? state.model.id) || "Choose a model"} <span class="muted">⌄</span>`;
+  el("composer-context").innerHTML = c2;
+  el("composer-context").hidden = !inSession() || !c2;
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
-  // The desktop toolbar already names the project and its path; the header
-  // carries only the session's live state.
+  // The desktop toolbar already names the project; the header carries the
+  // session's live state and, in a session, its four places as words.
+  const word = driveWord();
+  const places = inSession()
+    ? `<nav class="header-nav" aria-label="Panels">${PLACES.map((place) =>
+        place.name === "drive"
+          ? `<button type="button" id="drive-word" class="${drivePopOpen || pane === "drive" ? "active" : ""}" data-action="drive-pop" aria-haspopup="dialog" aria-expanded="${drivePopOpen}">Drive${word.needs ? `<b class="count" aria-label="${word.needs} need you">${word.needs}</b>` : word.live ? '<i class="live" aria-label="working"></i>' : ""}</button>`
+          : `<button type="button" class="${(place.views as readonly string[]).includes(pane ?? "") ? "active" : ""}" data-action="panel" data-args="${h(JSON.stringify({ name: place.name }))}" data-drive="panel-${place.name}">${place.label}</button>`,
+      ).join("")}</nav>`
+    : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true);
   el("header").innerHTML =
-    `<div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "pill auto-approve") : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}${state.runs.length ? `<span class="age">· ${duration(Date.now() - Date.parse(state.session!.createdAt))}</span>` : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true)}</div>`;
+    `<div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "pill auto-approve") : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}</div>${places}`;
 }
 function totals(run: GraphicsRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -494,12 +512,16 @@ function runHTML(run: GraphicsRun, index: number) {
       "folded-turn",
       true,
     );
+  // A finished turn reads as its answer: thinking and tool steps fold into
+  // the receipt line under it, and open from there.
+  const fold = run.status === "completed" && !stepsOpen.has(run.id);
   let body = "";
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!,
       key = `${run.id}:${entry.id}`;
     if (entry.type === "assistant")
       body += `<div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div>`;
+    if (fold && (entry.type === "reasoning" || entry.type === "tool")) continue;
     if (entry.type === "reasoning") {
       const live = active(run) && i === run.entries.length - 1;
       // The trace leads; its activity/toggle row follows underneath. Preserve
@@ -549,13 +571,10 @@ function runHTML(run: GraphicsRun, index: number) {
       (tool) => tool.state === "failed" || tool.state === "denied",
     ),
     stopped = checks.some((tool) => tool.state === "stopped");
+  // One receipt line: what changed, the checks, the steps behind it, the
+  // time, and the model only when it isn't the one in the composer.
   let footer = "";
   if (!active(run)) {
-    const ctx = receipt?.context,
-      percentage =
-        ctx?.used != null && ctx.capacity
-          ? Math.round((ctx.used / ctx.capacity) * 100)
-          : null;
     const closed = run.entries.findLast(
       (e) => e.type === "notice" && e.closesTurn,
     );
@@ -565,8 +584,25 @@ function runHTML(run: GraphicsRun, index: number) {
         : ["cancelled", "interrupted"].includes(run.status)
           ? `Stopped by you · ${items.filter((t) => t.state === "stopped").length} command${items.filter((t) => t.state === "stopped").length === 1 ? "" : "s"} interrupted`
           : "";
-    const meta = `${receipt?.mode ?? (run.planOnly ? "Plan" : "Build")} · ${h(receipt?.model ?? state!.model.id)} · ${duration(receipt?.durationMs)} · ${receipt?.tokensPerSecond == null ? "—" : receipt.tokensPerSecond.toFixed(1)} tok/s · ctx ${percentage == null ? `${num(ctx?.used)}/${num(ctx?.capacity)}` : `${percentage}%`}`;
-    footer = `<div class="turn-footer">${error ? `<span class="${run.status === "failed" ? "danger" : ""}">${run.status === "failed" ? "×" : "■"} ${h(error)}</span>` : `<span>${meta}</span>`}<span class="links">${error ? `<span>${meta}</span>` : ""}${btn("copy-answer", "copy", { id: run.id }, "copy-answer")}${files ? btn("panel", `${files} file${files === 1 ? "" : "s"} changed ▸`, { name: "changes", turnId: run.id }, "", true) : ""}${checks.length ? btn("panel", `${passed ? "✓" : failed ? "×" : stopped ? "■" : "·"} checks ${passed ? "passed" : failed ? "failed" : stopped ? "stopped" : "unknown"} ▸`, { name: "verification", turnId: run.id }, passed ? "success" : failed ? "danger" : "", true) : ""}${error ? btn("panel", "log ▸", { name: "log", turnId: run.id }, "", true) : ""}</span></div>`;
+    const changed = items.filter((t) => t.phase === "change" && t.state === "done");
+    const paths = [...new Set(changed.flatMap((t) => t.changes?.map((c) => c.path) ?? [String(t.input.path ?? t.detail ?? "")]))];
+    const total = changed.reduce((sum, t) => { const each = totals(run, t); return { added: sum.added + each.added, removed: sum.removed + each.removed }; }, { added: 0, removed: 0 });
+    const steps = items.length, thought = run.entries.some((e) => e.type === "reasoning");
+    const model = receipt?.model && receipt.model !== state!.model.id ? receipt.model.split("/").at(-1)! : "";
+    const sep = '<span class="sep">·</span>';
+    const parts = [
+      error ? `<span class="${run.status === "failed" ? "danger" : ""}">${h(error)}</span>` : "",
+      files ? `<span class="receipt-files">${files === 1 ? h(paths[0]!.split(/[\\/]/).at(-1) ?? paths[0]) : `${files} files`} ${counts(total)}</span>` : "",
+      checks.length ? btn("panel", `${passed ? "checks passed" : failed ? "checks failed" : stopped ? "checks stopped" : "checks unknown"}`, { name: "verification", turnId: run.id }, passed ? "success" : failed ? "danger" : "", true) : "",
+      run.status === "completed" && (steps || thought)
+        ? btn("toggle-steps", fold ? (steps ? `${steps} step${steps === 1 ? "" : "s"}` : "thinking") : "hide steps", { id: run.id }, "receipt-steps")
+        : "",
+      receipt?.mode === "Plan" || run.planOnly ? "plan" : "",
+      model ? h(model) : "",
+      duration(receipt?.durationMs),
+    ].filter(Boolean);
+    const mark = run.status === "completed" ? '<span class="success">✓</span>' : run.status === "failed" ? '<span class="danger">×</span>' : "<span>■</span>";
+    footer = `<div class="turn-receipt">${mark}${parts.join(sep)}${files ? btn("panel", "review ›", { name: "changes", turnId: run.id }, "receipt-review", true) : ""}${error ? btn("panel", "log ›", { name: "log", turnId: run.id }, "receipt-review", true) : ""}${btn("copy-answer", "copy", { id: run.id }, "copy-answer")}</div>`;
   }
   const latestTool = items.findLast(
       (tool) => tool.state === "running" || tool.waiting,
@@ -587,7 +623,7 @@ function runHTML(run: GraphicsRun, index: number) {
   const activity = active(run) && !thinkingLive
     ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
     : "";
-  return `<div class="request"><span class="mark">▶</span><span class="text">${h(run.content)}</span><time>${clock(run.createdAt).slice(0, 5)}</time></div><div class="response ${active(run) ? "running" : run.status === "failed" ? "failed" : ""}"><div class="speaker"><span>demesne</span><time>${clock(run.entries.find((e) => e.type === "assistant")?.type === "assistant" ? (run.entries.find((e) => e.type === "assistant") as any).at : run.createdAt)}${active(run) ? " · live" : ""}</time></div>${body}${footer}${activity}</div>`;
+  return `<div class="request"><span class="text">${h(run.content)}</span><time>${clock(run.createdAt).slice(0, 5)}</time></div><div class="response ${active(run) ? "running" : run.status === "failed" ? "failed" : ""}">${body}${footer}${activity}</div>`;
 }
 /** Text deltas keep the response shell, tool rows and finished Markdown blocks.
  * Structural transitions (tools, fold/unfold, receipts) rebuild only the shell
@@ -640,6 +676,7 @@ function renderConversation() {
     const signature = JSON.stringify([
       index === state.runs.length - 1,
       expanded.has(run.id),
+      stepsOpen.has(run.id),
       state.questions.length > 0,
     ]);
     let saved = runNodes.get(run.id);
@@ -706,7 +743,7 @@ function renderHero() {
     next = state.driveNext,
     away = state.breakage.away,
     driveBusy = Boolean(state.breakage.fix && (state.breakage.fix.status === "starting" || state.breakage.fix.status === "running")) || away?.status === "running",
-    signature = JSON.stringify([state.workspace, state.model.id, state.model.displayName, review.map((job) => job.id), away?.status, driveBusy, reviewShown, next.proposals, next.signals.length]);
+    signature = JSON.stringify([state.workspace, review.map((job) => job.id), away?.status, driveBusy, reviewShown, next.proposals, next.signals.length]);
   if (signature === heroSignature) return;
   heroSignature = signature;
   const composer = el("composer-slot");
@@ -715,8 +752,6 @@ function renderHero() {
   const waiting = review.length
     ? `<p>${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ›`, {}, "link", true)}<span class="muted"> · ${away && away.status !== "running" ? "Drive ran them while you were away" : "each in its own worktree"}</span></p>`
     : "";
-  const signal = new Map(next.signals.map((item) => [item.id, item]));
-  const minutes = (value: number) => (value < 60 ? `${value} min` : `${Math.round(value / 6) / 10} h`);
   const top = next.proposals.slice(0, 3);
   const words = ["", "it", "both", "all three"];
   const footer = [
@@ -728,17 +763,24 @@ function renderHero() {
       // Drive's Next queue, ready when you open demesne: the top three, each
       // with the evidence it rests on; the full queue is in the Drive panel.
       top.length
-        ? `<section class="proposals"><h2>DRIVE WOULD DO NEXT</h2><div class="proposal-list">${top
-            .map((item) => {
-              const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
-              return `<div class="proposal-row"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b title="${h(item.why)}">${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}${evidence ? ` · ${h(evidence)}` : ""}</small>${btn("next-run", "Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan", { id: item.id })}</div>`;
-            })
-            .join("")}</div>${footer ? `<p class="proposals-footer">${footer}</p>` : ""}</section>`
+        ? `<section class="proposals"><h2>DRIVE WOULD DO NEXT</h2>${proposalRows(top)}${footer ? `<p class="proposals-footer">${footer}</p>` : ""}</section>`
         : ""
     }`;
   // The composer is detached while the hero is rebuilt.
-  composer.querySelector("#composer-model")!.innerHTML = `${h(state.model.displayName ?? state.model.id) || "Choose a model"} <span class="muted">⌄</span>`;
   el("hero-composer").append(composer);
+}
+/// Drive's proposals as rows: kind, title, estimate and the evidence it rests
+/// on, with Run and Plan. The start screen shows three; a session's briefing
+/// line unfolds them in place.
+function proposalRows(items: Snapshot["driveNext"]["proposals"]) {
+  const signal = new Map(state!.driveNext.signals.map((item) => [item.id, item]));
+  const minutes = (value: number) => (value < 60 ? `${value} min` : `${Math.round(value / 6) / 10} h`);
+  return `<div class="proposal-list">${items
+    .map((item) => {
+      const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
+      return `<div class="proposal-row"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b title="${h(item.why)}">${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}${evidence ? ` · ${h(evidence)}` : ""}</small>${btn("next-run", "Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan", { id: item.id })}</div>`;
+    })
+    .join("")}</div>`;
 }
 let composerSignature = "",
   composerFiles: Snapshot["files"] | null = null,
@@ -894,14 +936,14 @@ let awayOpen: string | null = null;
 function renderBreakage() {
   if (!state) return;
   const { signals, fix, busy, message } = state.breakage;
-  // On the start screen finished branches are a line under the project
-  // name; their cards show once you open that line.
-  const folding = !inSession() && !reviewShown;
-  const signature = JSON.stringify([folding, signals, fix, state.breakage.inbox, state.breakage.away, awayOpen, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0]);
+  // Finished branches are one line (under the project name on the start
+  // screen, above the composer in a session); their cards show once you open
+  // it. In a session, work still running folds behind "Drive is working".
+  const folding = !reviewShown, running = !inSession() || driveShown;
+  const signature = JSON.stringify([folding, running, signals, fix, state.breakage.inbox, state.breakage.away, awayOpen, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0]);
   if (signature === breakageSignature) return;
   breakageSignature = signature;
-  // Both shells (Ghostty and desktop) carry #breakage; never let a missing
-  // one stop the rest of the render.
+  // Never let a missing #breakage stop the rest of the render.
   const node = document.getElementById("breakage");
   if (!node) return;
   const cards: string[] = [];
@@ -914,11 +956,12 @@ function renderBreakage() {
     const running = fix && ["starting", "running"].includes(fix.status);
     cards.push(`<div class="breakage-card alert"><div class="breakage-head"><span class="breakage-mark">✕</span><span class="breakage-text">${signals.length === 1 ? "Something just broke" : `${signals.length} things just broke`}</span>${close("breakage-dismiss", "Not now")}</div><ul class="breakage-list">${signals.map((signal) => `<li><b>${h(signal.title)}</b><span>${h(signal.detail.replace(/^Latest run exit (\S+) at \S+\.\s*/, "exit $1 · "))}</span></li>`).join("")}</ul><p class="breakage-note">${running ? `${fix.mission ? "A Drive mission is working in a worktree" : "A fix is already running"}; this one waits until it finishes.` : "Drive can fix it in a separate git worktree. Your files and this conversation stay as they are until you choose to apply it."}</p><div class="breakage-actions">${running ? "" : btn("breakage-fix", doing("fix", "Starting…", "▶ Fix in a worktree"), {}, "primary", true, Boolean(busy))}${btn("breakage-dismiss", "Not now", {}, "quiet", true)}${btn("breakage-never", "Never for this", {}, "quiet", true)}</div></div>`);
   }
-  // A running mission shows in the Drive panel; its card comes when it settles.
+  // A running mission shows on the briefing line; its card comes when it settles.
   const fixCard = (fix: NonNullable<Snapshot["breakage"]["fix"]>) => {
     const elapsed = duration((fix.finishedAt ? Date.parse(fix.finishedAt) : Date.now()) - Date.parse(fix.startedAt));
     const branch = `<code class="breakage-branch">${h(fix.branch)}</code>`;
     if (fix.status === "starting" || fix.status === "running") {
+      if (!running) return;
       const activity = fix.activity ? `${fix.activity.steps} step${fix.activity.steps === 1 ? "" : "s"}${fix.activity.last ? ` · ${h(fix.activity.last)}` : ""}` : "Creating the worktree…";
       cards.push(`<div class="breakage-card running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">${fix.proposal ? "Working in a worktree" : "Fixing in a worktree"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><div class="breakage-meta">${branch}<span>${activity}</span></div><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Stopping…", "Stop and discard"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
     } else if (fix.status === "ready") {
@@ -935,7 +978,7 @@ function renderBreakage() {
   const away = state.breakage.away;
   const open = new Map([fix, ...state.breakage.inbox].filter((item): item is NonNullable<typeof fix> => Boolean(item)).map((item) => [item.id, item]));
   const folded = new Set(away ? away.items.flatMap((item) => (item.fixId ? [item.fixId] : [])) : []);
-  if (away && !(folding && away.status !== "running")) {
+  if (away && !(folding && away.status !== "running") && !(away.status === "running" && !running)) {
     const done = away.items.filter((item) => !["queued", "running"].includes(item.state)).length;
     const waiting = away.items.filter((item) => item.fixId && open.has(item.fixId) && ["ready", "unchanged", "failed"].includes(item.state)).length;
     const rows = away.items.map((item) => {
@@ -986,13 +1029,13 @@ function selectedRun() {
 function panelHeader(title: string, subject = "", back?: { name: PaneName; label: string }, subjectTone = "") {
   return `<div class="panel-heading">${back ? btn("panel", `‹ ${back.label}`, { name: back.name }, "back", true) : ""}<strong class="title">${h(title)}</strong><span class="subject${subjectTone ? ` tone-${subjectTone}` : ""}">${h(subject)}</span>${btn("close-panel", "×", {}, "close", true)}</div>`;
 }
-/// The panel's four places. Each view belongs to one; the rail lights it.
-const RAIL_ICON = (path: string) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+/// The panel's four places, as words in the top bar. Each view belongs to
+/// one, and its word lights while the view is open.
 const PLACES = [
-  { name: "changes", label: "Review", views: ["changes", "verification", "log"], icon: RAIL_ICON('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h11"/>') },
-  { name: "files", label: "Files", views: ["files", "preview"], icon: RAIL_ICON('<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/>') },
-  { name: "drive", label: "Drive", views: ["drive"], icon: RAIL_ICON('<path d="M7 5l11 7-11 7z"/>') },
-  { name: "history", label: "Session", views: ["history", "context"], icon: RAIL_ICON('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>') },
+  { name: "changes", label: "Review", views: ["changes", "verification", "log"] },
+  { name: "files", label: "Files", views: ["files", "preview"] },
+  { name: "drive", label: "Drive", views: ["drive"] },
+  { name: "history", label: "Session", views: ["history", "context"] },
 ] as const;
 /// `bun run check`, not `/opt/homebrew/Cellar/bun/1.4.0/bin/bun run check`.
 const commandLabel = (argv: readonly string[]) => [String(argv[0] ?? "").split("/").pop(), ...argv.slice(1)].join(" ");
@@ -1316,6 +1359,140 @@ function contextBody() {
 let driveTab: "next" | "done" = "next";
 let nextOpen: string | null = null;
 const DRIVE_PINNED = ["running", "waiting", "paused", "blocked"];
+const missionTitle = (drive: NonNullable<Snapshot["drive"]>) => drive.mission.split("\n")[0]!.replace(/^--(bounded|continuous)\s+/, "");
+/// A mission still in play: running, waiting on its coder, paused or
+/// blocked (a mission stopped at a limit is finished unless it asks for you).
+function pinnedMission() {
+  const drive = state?.drive;
+  return drive && DRIVE_PINNED.includes(drive.status) && (!drive.protection?.trip || drive.status === "blocked") ? drive : null;
+}
+/// A worktree run that isn't a mission: a fix, one proposal, or the away list.
+function worktreeRun() {
+  const fix = state?.breakage.fix, away = state?.breakage.away;
+  return {
+    fix: fix && !fix.mission && (fix.status === "starting" || fix.status === "running") ? fix : null,
+    away: away?.status === "running" ? away : null,
+  };
+}
+const activeMinutes = (drive: NonNullable<Snapshot["drive"]>) => {
+  const ms = drive.protection?.used.activeMs;
+  return ms == null ? "" : ms < 3_600_000 ? `${Math.max(1, Math.round(ms / 60_000))} min` : `${Math.floor(ms / 3_600_000)}h ${Math.round((ms % 3_600_000) / 60_000)}m`;
+};
+/// What waits on you from Drive, most pressing first: a blocked mission, its
+/// finished branches, and blockers it recorded in the last day.
+function needsYou() {
+  if (!state) return [];
+  const rows: { mark: string; tone: string; title: string; detail: string; action: string }[] = [];
+  const pinned = pinnedMission();
+  if (pinned?.status === "blocked")
+    rows.push({ mark: "◌", tone: "thinking", title: missionTitle(pinned), detail: (pinned.activity?.trim() || pinned.steps.at(-1)?.note || "").split("\n")[0]!, action: btn("drive-control", "resume", { control: "resume" }, "link") });
+  for (const job of reviewJobs())
+    rows.push(job.status === "ready"
+      ? { mark: "✓", tone: "citron", title: job.title, detail: job.diff ? `+${job.diff.additions} −${job.diff.deletions}` : "", action: btn("review-open", "review ›", { show: true }, "link") }
+      : { mark: "!", tone: "signal", title: job.title, detail: job.unchanged ? "no changes" : "couldn't finish", action: btn("review-open", "open ›", { show: true }, "link") });
+  const blocked = pinned ? missionTitle(pinned).toLowerCase() : "", day = Date.now() - 86_400_000;
+  for (const entry of [...state.driveMemory].reverse())
+    if (entry.source === "drive" && entry.kind === "blocker" && Date.parse(entry.at) > day && !(blocked && entry.text.toLowerCase().startsWith(blocked)) && rows.length < 5)
+      rows.push({ mark: "◌", tone: "thinking", title: entry.text, detail: age(entry.at), action: "" });
+  return rows;
+}
+/// The top bar's Drive word: a count of what needs you, or a dot while it works.
+function driveWord() {
+  const run = worktreeRun(), pinned = pinnedMission();
+  return { needs: needsYou().length, live: Boolean(run.fix || run.away || (pinned && pinned.status !== "paused" && pinned.status !== "blocked")) };
+}
+/// The Drive popover: what needs you, then what Drive finished, then how its
+/// picks have turned out here. The full history is in the Drive panel.
+let drivePopSignature = "";
+function renderDrivePop() {
+  const node = el("drive-pop");
+  if (!state || !drivePopOpen || !inSession()) {
+    drivePopOpen = false;
+    node.hidden = true;
+    drivePopSignature = "";
+    return;
+  }
+  const pinned = pinnedMission(), run = worktreeRun(), next = state.driveNext;
+  const needs = needsYou();
+  const finished = state.drive && !pinned && state.drive.status === "completed" ? state.drive : null;
+  const finishedTitle = finished ? missionTitle(finished).toLowerCase() : "";
+  const outcomes = [...state.driveMemory].reverse().filter((entry) => entry.source === "drive" && entry.kind === "outcome" && !(finishedTitle && entry.text.toLowerCase().startsWith(finishedTitle)));
+  const done = [
+    ...(finished ? [{ title: missionTitle(finished), detail: "mission" }] : []),
+    ...outcomes.map((entry) => ({ title: entry.text, detail: age(entry.at) })),
+  ];
+  const status = pinned?.status === "blocked" ? ["needs you", "thinking"] : pinned?.status === "paused" ? ["paused", "secondary"]
+    : pinned || run.fix || run.away ? ["working", "citron"] : ["idle", ""];
+  const calibration = next.calibration;
+  const signature = JSON.stringify([needs, done.slice(0, 4), status, calibration, next.generatedAt && age(next.generatedAt)]);
+  if (signature !== drivePopSignature) {
+    drivePopSignature = signature;
+    const row = (item: { mark: string; tone: string; title: string; detail: string; action?: string }) =>
+      `<div class="pop-row"><span class="tone-${item.tone}">${h(item.mark)}</span><span class="pop-title" title="${h(item.title)}">${h(item.title)}</span><span class="pop-detail">${h(item.detail)}${item.detail && item.action ? " · " : ""}${item.action ?? ""}</span></div>`;
+    node.innerHTML =
+      `<div class="pop-head"><b>Drive</b><span class="${status[1] ? `tone-${status[1]}` : ""}">${status[0]}</span>${next.generatedAt ? `<span>· looked ${age(next.generatedAt)}</span>` : ""}</div>` +
+      (needs.length ? `<h3>NEEDS YOU</h3>${needs.map(row).join("")}` : "") +
+      (done.length ? `<h3>DONE</h3>${done.slice(0, 3).map((item) => row({ mark: "✓", tone: "citron", ...item })).join("")}${done.length > 3 ? `<div class="pop-more">${btn("drive-log", `${done.length - 3} more ›`, {}, "link")}</div>` : ""}` : "") +
+      (!needs.length && !done.length ? '<p class="pop-empty">Nothing needs you. What Drive finishes shows here.</p>' : "") +
+      `<div class="pop-foot"><span>${calibration?.total ? `Picks landed ${calibration.landed} of ${calibration.total}${calibration.timeRatio === 1 ? "" : ` · runs take ~${calibration.timeRatio}× its estimates`}` : ""}</span>${btn("drive-log", "all runs ›", {}, "link")}</div>`;
+  }
+  node.hidden = false;
+  // Under the Drive word, kept inside the window.
+  const anchor = document.getElementById("drive-word")?.getBoundingClientRect();
+  if (anchor) {
+    const width = node.offsetWidth || 460;
+    node.style.top = `${Math.round(anchor.bottom + 6)}px`;
+    node.style.left = `${Math.round(Math.max(12, Math.min(anchor.left + anchor.width / 2 - width / 2, innerWidth - width - 12)))}px`;
+  }
+}
+/// One line above the composer in a session: branches waiting for review,
+/// and what Drive is doing or would do next. Each part unfolds in place.
+let briefingSignature = "";
+function renderBriefing() {
+  if (!state) return;
+  const node = el("briefing");
+  const review = reviewJobs(), pinned = pinnedMission(), run = worktreeRun(), away = state.breakage.away, next = state.driveNext;
+  if (!review.length) reviewShown = false;
+  const signature = JSON.stringify([
+    inSession(), review.map((job) => [job.id, job.status, job.title, job.diff]), reviewShown, away?.status,
+    pinned && (driveShown ? [pinned, detailsOpen.has("drive-details"), Math.floor(Date.now() / 10_000)] : [pinned.status, pinned.mission, activeMinutes(pinned)]),
+    run.fix && [run.fix.title, run.fix.status], run.away && run.away.items.map((item) => item.state),
+    driveShown, ideasShown, next.proposals, next.loading, next.generatedAt && age(next.generatedAt),
+  ]);
+  if (signature === briefingSignature) return;
+  briefingSignature = signature;
+  const parts: string[] = [];
+  let unfolded = "";
+  if (review.length) {
+    const only = review.length === 1 ? review[0]! : null;
+    const about = only ? `${only.title}${only.diff ? ` · +${only.diff.additions} −${only.diff.deletions}` : ""}` : away && away.status !== "running" ? "Drive ran them while you were away" : "";
+    parts.push(`${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ${reviewShown ? "⌄" : "›"}`, {}, "link", true)}${about ? `<span class="muted">${h(about)}</span>` : ""}`);
+  }
+  if (pinned) {
+    const label = pinned.status === "blocked" ? "Drive needs you" : pinned.status === "paused" ? "Drive is paused" : "Drive is working";
+    const time = activeMinutes(pinned);
+    parts.push(`${btn("drive-show", `${label} ${driveShown ? "⌄" : "›"}`, {}, `link${pinned.status === "blocked" ? " amber" : ""}`)}<span class="muted">${h(missionTitle(pinned))}${time ? ` · ${time}` : ""}</span>`);
+    if (driveShown) unfolded = `<div class="drive-live">${pinnedCard(pinned)}</div>`;
+  } else if (run.fix || run.away) {
+    const about = run.fix ? run.fix.title : `Drive's list · ${run.away!.items.filter((item) => !["queued", "running"].includes(item.state)).length} of ${run.away!.items.length} done`;
+    parts.push(`${btn("drive-show", `Drive is working ${driveShown ? "⌄" : "›"}`, {}, "link")}<span class="muted">${h(about)}</span>`);
+  } else if (next.proposals.length) {
+    const count = next.proposals.length;
+    parts.push(btn("ideas-show", `Drive has ${count} idea${count === 1 ? "" : "s"} ${ideasShown ? "⌄" : "›"}`, {}, "link"));
+    if (ideasShown) {
+      const top = next.proposals.slice(0, 5), words = ["", "it", "both", "all three", "all four", "all five"];
+      const away = Math.min(3, top.length);
+      unfolded = `<div class="briefing-ideas">${proposalRows(top)}<p class="proposals-footer">${[
+        btn("next-away", `Run ${words[away]} overnight ›`, { count: away }, "link", true),
+        btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", false, next.loading),
+        next.generatedAt ? `<span class="muted">looked ${age(next.generatedAt)}</span>` : "",
+        count > 5 ? btn("panel", `${count - 5} more in Drive`, { name: "drive" }, "", true) : "",
+      ].filter(Boolean).join('<span class="muted"> · </span>')}</p></div>`;
+    }
+  }
+  node.innerHTML = parts.length ? `<p class="briefing-line">${parts.join('<span class="muted sep">·</span>')}</p>${unfolded}` : "";
+  node.hidden = !inSession() || !parts.length;
+}
 /// One model's scoreboard line in the model picker: how it has done on your
 /// own recorded work over the last 30 days.
 function scoreLine(score: ModelScore) {
@@ -1396,7 +1573,7 @@ function missionParts(drive: NonNullable<Snapshot["drive"]>) {
     drive.protection ? section("BUDGET", `<p class="muted">${Math.floor(drive.protection.used.activeMs / 60_000)}/${drive.protection.limits.maxActiveMinutes} active min · ${drive.protection.used.cycles}/${drive.protection.limits.maxCycles} cycles · ${drive.protection.used.workerRequests}/${drive.protection.limits.maxWorkerRequests} coder requests</p>`) : "",
     ledger.some((task) => task.status === "completed") ? `<p class="muted">Reopen a finished task: /drive reopen &lt;task-id&gt; &lt;reason&gt;<br>${ledger.filter((task) => task.status === "completed").slice(-4).map((task) => `${h(task.id.slice(0, 8))} · ${h(task.title)}`).join("<br>")}</p>` : "",
   ].join("");
-  const title = drive.mission.split("\n")[0]!.replace(/^--(bounded|continuous)\s+/, "");
+  const title = missionTitle(drive);
   return {
     mark, label, tone, summary, title, stats,
     tasks: tasks.length ? `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>` : "",
@@ -1427,16 +1604,18 @@ function blockedCard(drive: NonNullable<Snapshot["drive"]>) {
     evidence.length ? section("EVIDENCE", evidence.map((item) => `<blockquote class="drive-quote">${h(item.quote.length > 400 ? `${item.quote.slice(0, 399)}…` : item.quote)}</blockquote>`).join("")) : ""}${
     section("WHAT YOU CAN DO", `<p class="drive-hint">${h(hint)}</p>`)}${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("drive-control", "Resume", { control: "resume" }, "primary")}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>${parts.details}</section>`;
 }
+/// The live (or paused, or blocked) mission's card: in the Drive panel, and
+/// unfolded from the briefing line above the composer.
+function pinnedCard(pinned: NonNullable<Snapshot["drive"]>) {
+  if (pinned.status === "blocked") return blockedCard(pinned);
+  const parts = missionParts(pinned), live = pinned.status === "running" || pinned.status === "waiting";
+  return `<section class="drive-pinned tone-border-${parts.tone}" aria-label="Live mission"><div class="drive-pinned-title">${h(parts.title)}</div><div class="drive-status"><strong class="tone-${parts.tone}">${parts.mark} ${h(parts.label)}</strong>${parts.summary ? `<span class="drive-summary">${h(parts.summary)}</span>` : ""}</div>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("drive-control", live ? "Pause" : "Resume", { control: live ? "pause" : "resume" })}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>${parts.details}</section>`;
+}
 function driveBody() {
   const drive = state!.drive;
-  const pinned = drive && DRIVE_PINNED.includes(drive.status) && (!drive.protection?.trip || drive.status === "blocked") ? drive : null;
+  const pinned = pinnedMission();
   const finished = drive && !pinned ? drive : null;
-  let card = "";
-  if (pinned?.status === "blocked") card = blockedCard(pinned);
-  else if (pinned) {
-    const parts = missionParts(pinned), live = pinned.status === "running" || pinned.status === "waiting";
-    card = `<section class="drive-pinned tone-border-${parts.tone}" aria-label="Live mission"><div class="drive-pinned-title">${h(parts.title)}</div><div class="drive-status"><strong class="tone-${parts.tone}">${parts.mark} ${h(parts.label)}</strong>${parts.summary ? `<span class="drive-summary">${h(parts.summary)}</span>` : ""}</div>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("drive-control", live ? "Pause" : "Resume", { control: live ? "pause" : "resume" })}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>${parts.details}</section>`;
-  }
+  const card = pinned ? pinnedCard(pinned) : "";
   // The finished mission is shown in full at the top of Done; its own
   // outcome line in memory would only repeat it.
   const finishedTitle = finished ? missionParts(finished).title.toLowerCase() : "";
@@ -1673,7 +1852,6 @@ document.addEventListener(
   },
   true,
 );
-let railSignature = "";
 function renderPanels() {
   if (!state) return;
   if (pointerHeld) {
@@ -1682,15 +1860,6 @@ function renderPanels() {
   }
   renderStatus();
   el("panel").hidden = !pane;
-  el("rail").hidden = !inSession();
-  const railHTML = `<span class="rail-state ${state.activeTurnId ? "running" : ""}"></span><hr>${PLACES.map(
-    (place) =>
-      `<button type="button" class="${(place.views as readonly string[]).includes(pane ?? "") ? "active" : ""}" title="${place.label}" aria-label="${place.label}" data-action="panel" data-args="${h(JSON.stringify({ name: place.name }))}" data-drive="panel-${place.name}">${place.icon}<span>${place.label}</span>${place.name === "drive" && state!.drive && ["running", "waiting", "blocked"].includes(state!.drive.status) ? '<img class="dot" src="assets/rail-badge.svg" alt="">' : place.name === "drive" && state!.driveNext.proposals.length ? `<b class="count" aria-label="${state!.driveNext.proposals.length} proposed">${state!.driveNext.proposals.length}</b>` : ""}</button>`,
-  ).join("")}`;
-  if (railHTML !== railSignature) {
-    railSignature = railHTML;
-    el("rail").innerHTML = railHTML;
-  }
   filesView.setActive(pane === "files");
   if (pane === "files") filesView.update(state.files);
   if (!pane) {
@@ -2619,8 +2788,11 @@ async function submitText(value = editor.value) {
       return;
     }
     if (id === "drive") {
-      await openPanel("drive");
-      if (argument) await api("drive", { text: argument });
+      // A new mission unfolds on the briefing line; /drive alone opens the panel.
+      if (argument) {
+        driveShown = true;
+        await api("drive", { text: argument });
+      } else await openPanel("drive");
       clear();
       return;
     }
@@ -2691,6 +2863,11 @@ async function dispatch(
     if(open){detailsOpen.delete(args.id);detailsClosed.add(args.id);}
     else{detailsClosed.delete(args.id);detailsOpen.add(args.id);}
     content.hidden=open;toggle.setAttribute("aria-expanded",String(!open));reportObservation();return;
+  }
+  if (drivePopOpen && target?.closest("#drive-pop")) {
+    drivePopOpen = false;
+    renderStatus();
+    renderDrivePop();
   }
   if (action === "question-control") return questionAction(args.action);
   if (action === "auto-approve" && driveNavigating)
@@ -2908,10 +3085,34 @@ async function dispatch(
     return;
   }
   if (action === "review-open") {
-    reviewShown = !reviewShown;
+    reviewShown = args.show ? true : !reviewShown;
     heroSignature = breakageSignature = "";
-    renderHero();
+    if (inSession()) renderBriefing();
+    else renderHero();
     renderBreakage();
+    return;
+  }
+  if (action === "drive-show" || action === "ideas-show") {
+    if (action === "drive-show") driveShown = !driveShown;
+    else ideasShown = !ideasShown;
+    renderBriefing();
+    renderBreakage();
+    return;
+  }
+  if (action === "drive-pop") {
+    drivePopOpen = !drivePopOpen;
+    renderStatus();
+    renderDrivePop();
+    return;
+  }
+  if (action === "drive-log") {
+    driveTab = "done";
+    return openPanel("drive");
+  }
+  if (action === "toggle-steps") {
+    stepsOpen.has(args.id) ? stepsOpen.delete(args.id) : stepsOpen.add(args.id);
+    follow = false;
+    renderConversation();
     return;
   }
   if (action === "away-open") {
@@ -3237,8 +3438,10 @@ function renderState(next: Snapshot) {
   renderComposer();
   renderApproval();
   renderQuestion();
+  renderBriefing();
   renderBreakage();
   renderPanels();
+  renderDrivePop();
   renderOverlay();
   renderCompletion();
   renderSetup();
@@ -3270,6 +3473,11 @@ function renderState(next: Snapshot) {
 }
 new ResizeObserver(() => renderComposer()).observe(editor);
 document.addEventListener("click", (event) => {
+  if (drivePopOpen && !(event.target as Element).closest("#drive-pop, #drive-word")) {
+    drivePopOpen = false;
+    renderStatus();
+    renderDrivePop();
+  }
   const summary = (event.target as Element).closest("summary");
   if (summary instanceof HTMLElement && summary.closest("#approval")) summary.focus({ preventScroll: true });
   const detail = summary?.parentElement as HTMLDetailsElement | undefined;
@@ -3438,6 +3646,12 @@ document.addEventListener("keydown", (event) => {
     return;
   if (key === "escape") {
     run(() => {
+      if (drivePopOpen) {
+        drivePopOpen = false;
+        renderStatus();
+        renderDrivePop();
+        return;
+      }
       if (overlay) {
         overlay = null;
         renderOverlay();
@@ -3945,7 +4159,8 @@ function renderSetup() {
   const setup = state?.setup;
   setupRoot.hidden = !setup;
   el("workspace").hidden = Boolean(setup);
-  el("status").hidden = Boolean(setup);
+  // A session has no status bar; the composer and top bar carry its state.
+  el("status").hidden = Boolean(setup) || inSession();
   if (!setup) {
     setupSignature = "";
     return;
@@ -4161,7 +4376,7 @@ function observeUI(): DriveObservation {
       !parent ||
       !node.textContent?.trim() ||
       parent.closest(
-        "#status,header,#rail,.drive-pane,#overlay[hidden],#completion[hidden],time,script,style,textarea",
+        "#status,header,.drive-pane,.drive-live,#drive-pop,#overlay[hidden],#completion[hidden],time,script,style,textarea",
       )
     )
       continue;
@@ -4240,7 +4455,7 @@ function observeUI(): DriveObservation {
   )) {
     if (
       !driveAllowed.has(element.dataset.action!) ||
-      element.closest(".drive-pane")
+      element.closest(".drive-pane, .drive-live, #drive-pop")
     )
       continue;
     const box = geometry(element);

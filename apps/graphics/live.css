@@ -39,9 +39,6 @@
 .intro .link {
   color: var(--electric);
 }
-#composer-model {
-  display: none;
-}
 .live-app.start #composer-model {
   display: flex;
   gap: 6px;
@@ -2955,3 +2952,281 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
   border-radius: 4px;
   padding: 1px 10px;
 }
+
+/* A session reads as one column, like the start screen: your ask, the
+   answer, a receipt line under it, then one briefing line and the composer.
+   Nothing floats over the conversation. */
+.live-app:not(.start) #conversation,
+.live-app:not(.start) #input-area {
+  width: 100%;
+  max-width: 780px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.live-app:not(.start) #conversation {
+  padding: 18px 0 10px;
+}
+.request {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 8px 0 12px;
+  color: var(--strong);
+}
+.request time {
+  visibility: hidden;
+}
+.turn:hover .request time {
+  visibility: visible;
+}
+.response,
+.response.running,
+.response.failed {
+  border-left: 0;
+  padding-left: 0;
+}
+.turn-receipt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+}
+.turn-receipt .sep {
+  color: var(--muted);
+}
+.turn-receipt .receipt-files {
+  color: var(--secondary);
+}
+.turn-receipt button {
+  font-size: 12px;
+  color: var(--muted);
+}
+.turn-receipt button:hover,
+.turn-receipt .receipt-review {
+  color: var(--electric);
+}
+.turn-receipt .success {
+  color: var(--citron);
+}
+.turn-receipt .danger {
+  color: var(--signal);
+}
+.turn:hover .copy-answer,
+.copy-answer:focus-visible {
+  opacity: 1;
+}
+/* The composer shows the model and the context used, at the left of its bar. */
+#composer-model {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--secondary);
+  white-space: nowrap;
+}
+#composer-model:hover,
+#composer-context:hover {
+  color: var(--electric);
+}
+#composer-context {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+#tokens {
+  display: none;
+}
+.live-app:not(.start) .composer {
+  padding: 10px 14px 8px;
+  gap: 10px;
+}
+.live-app:not(.start) .composer textarea {
+  padding-right: 0;
+}
+.live-app:not(.start) .composer-bar,
+.live-app:not(.start) .composer.queued .composer-bar,
+.live-app:not(.start) .composer.restored .composer-bar {
+  position: static;
+  justify-content: flex-start;
+  gap: 8px;
+}
+.live-app:not(.start) .composer .hints,
+.live-app:not(.start) .composer .send {
+  order: 0;
+  margin-left: auto;
+}
+.live-app:not(.start) .composer .hints:not([hidden]) + .send {
+  margin-left: 6px;
+}
+/* The briefing line: branches to review, and what Drive is doing or would
+   do next. Each part unfolds above the composer. */
+#briefing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.briefing-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+  padding: 0 2px;
+}
+.briefing-line .link {
+  color: var(--electric);
+  font-size: 12px;
+}
+.briefing-line .link.amber {
+  color: var(--thinking);
+}
+.briefing-line .muted {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+.briefing-line .sep {
+  max-width: none;
+}
+.briefing-ideas .proposals-footer {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+#briefing .drive-live {
+  max-height: 42vh;
+  overflow-y: auto;
+}
+#briefing .drive-pinned {
+  margin: 0;
+}
+.live-app:not(.start) #breakage {
+  position: static;
+  width: 100%;
+  max-height: 44vh;
+  margin-bottom: 8px;
+}
+.live-app:not(.start) #breakage .breakage-card {
+  box-shadow: none;
+}
+/* The top bar's places, as words; Drive opens its popover. */
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-left: 14px;
+  margin-left: 4px;
+  border-left: 1px solid var(--borderBright);
+  font-size: 12px;
+  line-height: 18px;
+}
+.header-nav button {
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.header-nav button:hover,
+.header-nav button.active {
+  color: var(--electric);
+}
+.header-nav .count {
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--thinking);
+}
+.header-nav .live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--citron);
+}
+#drive-pop {
+  position: fixed;
+  z-index: 95;
+  width: 460px;
+  max-width: calc(100vw - 24px);
+  max-height: min(520px, 70vh);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--borderBright);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px #0007;
+  padding: 10px 14px 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+}
+#drive-pop .pop-head {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+#drive-pop .pop-head b {
+  color: var(--strong);
+}
+#drive-pop h3 {
+  font-size: 10px;
+  letter-spacing: 0.7px;
+  font-weight: 400;
+  color: var(--muted);
+  margin: 10px 0 2px;
+}
+#drive-pop .pop-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+}
+#drive-pop .pop-row > span:first-child {
+  width: 12px;
+  flex: none;
+  text-align: center;
+}
+#drive-pop .pop-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--strong);
+  font-size: 13px;
+}
+#drive-pop .pop-detail {
+  white-space: nowrap;
+  display: flex;
+  gap: 4px;
+}
+#drive-pop .link {
+  color: var(--electric);
+  font-size: 12px;
+}
+#drive-pop .pop-more {
+  padding: 2px 0 0 20px;
+}
+#drive-pop .pop-empty {
+  padding: 10px 0 4px;
+}
+#drive-pop .pop-foot {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+}
+#drive-pop .tone-citron { color: var(--citron); }
+#drive-pop .tone-thinking { color: var(--thinking); }
+#drive-pop .tone-signal { color: var(--signal); }
+#drive-pop .tone-secondary { color: var(--secondary); }

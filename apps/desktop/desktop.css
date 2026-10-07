@@ -106,3 +106,7 @@ body.desktop { overflow: hidden; }
     --signal: #b3302a;
   }
 }
+/* The project button names the project and shows its path as a tooltip. */
+.desktop-project-path { display: none; }
+#desktop-toolbar header { margin-left: auto; display: flex; align-items: center; }
+#desktop-toolbar .header-nav { margin-right: 14px; padding-right: 14px; border-right: 1px solid var(--borderBright); }

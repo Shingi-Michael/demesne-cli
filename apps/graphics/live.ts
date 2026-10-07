@@ -885,10 +885,12 @@ function renderApproval() {
 /// Breakage alerts: a card over the conversation when something newly
 /// breaks, then the worktree fix as it runs and when it's ready to review.
 let breakageSignature = "";
+/// The away-run branch whose full card is open (one at a time).
+let awayOpen: string | null = null;
 function renderBreakage() {
   if (!state) return;
   const { signals, fix, busy, message } = state.breakage;
-  const signature = JSON.stringify([signals, fix, state.breakage.inbox, state.breakage.away, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0]);
+  const signature = JSON.stringify([signals, fix, state.breakage.inbox, state.breakage.away, awayOpen, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0]);
   if (signature === breakageSignature) return;
   breakageSignature = signature;
   // Both shells (Ghostty and desktop) carry #breakage; never let a missing
@@ -920,18 +922,35 @@ function renderBreakage() {
       cards.push(`<div class="breakage-card failed"><div class="breakage-head"><span class="breakage-mark">${(fix.proposal || fix.mission) && fix.unchanged ? "○" : "!"}</span><span class="breakage-text">${fix.proposal || fix.mission ? (fix.unchanged ? "Finished without changes" : "Couldn't finish it") : "Couldn't fix it"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><p class="breakage-summary">${h(fix.error ?? (fix.proposal || fix.mission ? "It failed." : "The fix failed."))}${fix.summary ? ` ${h(fix.summary)}` : ""}</p><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Discarding…", "Discard the worktree"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
     }
   };
+  // An away run is one card: a line per proposal, and a finished branch opens
+  // its full card only when you pick it, so at most one card covers the
+  // conversation.
   const away = state.breakage.away;
+  const open = new Map([fix, ...state.breakage.inbox].filter((item): item is NonNullable<typeof fix> => Boolean(item)).map((item) => [item.id, item]));
+  const folded = new Set(away ? away.items.flatMap((item) => (item.fixId ? [item.fixId] : [])) : []);
   if (away) {
     const done = away.items.filter((item) => !["queued", "running"].includes(item.state)).length;
-    const count = (kind: string, label: string) => { const n = away.items.filter((item) => item.state === kind).length; return n ? `${n} ${label}` : ""; };
-    const tally = [count("ready", "ready to review"), count("unchanged", "changed nothing"), count("failed", "couldn't finish"), count("skipped", "didn't start")].filter(Boolean).join(" · ");
-    const rows = away.items.map((item) => `<li class="away-${item.state}"><span class="away-mark">${({ queued: "○", running: "◌", ready: "✓", unchanged: "–", failed: "!", skipped: "·" } as Record<string, string>)[item.state]}</span><span>${h(item.proposal.title)}</span>${item.note && item.state !== "ready" ? `<small>${h(item.note.split("\n")[0]!.slice(0, 160))}</small>` : ""}</li>`).join("");
+    const waiting = away.items.filter((item) => item.fixId && open.has(item.fixId) && ["ready", "unchanged", "failed"].includes(item.state)).length;
+    const rows = away.items.map((item) => {
+      const job = item.fixId ? open.get(item.fixId) : undefined;
+      const mark = ({ queued: "○", running: "◌", ready: "✓", unchanged: "–", failed: "!", skipped: "·" } as Record<string, string>)[item.state];
+      const detail = item.state === "running" && job?.activity ? `${job.activity.steps} step${job.activity.steps === 1 ? "" : "s"}${job.activity.last ? ` · ${h(job.activity.last)}` : ""}`
+        : item.state === "ready" && job?.diff ? `<span class="add">+${job.diff.additions}</span> <span class="del">−${job.diff.deletions}</span> · ${job.diff.files} file${job.diff.files === 1 ? "" : "s"}`
+        : item.state === "ready" && !job ? "handled" : item.note ? h(item.note.split("\n")[0]!.slice(0, 160)) : item.state === "skipped" ? "didn't start" : "";
+      const title = job && !["queued", "running"].includes(item.state)
+        ? btn("away-open", h(item.proposal.title), { id: job.id }, `away-title${awayOpen === job.id ? " open" : ""}`)
+        : `<span class="away-title">${h(item.proposal.title)}</span>`;
+      return `<li class="away-${item.state}"><span class="away-mark">${mark}</span>${title}${detail ? `<small>${detail}</small>` : ""}</li>`;
+    }).join("");
     cards.push(away.status === "running"
-      ? `<div class="breakage-card away running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">Working through Drive's list</span><small>${done} of ${away.items.length} done</small></div><ul class="away-list">${rows}</ul><p class="breakage-note">Each one runs in its own worktree. Nothing reaches your checkout until you apply it.</p><div class="breakage-actions">${btn("breakage-away-stop", "Stop after this one", {}, "quiet", true, Boolean(busy))}</div></div>`
-      : `<div class="breakage-card away"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text">While you were away</span>${close("breakage-away-close", "Dismiss")}</div><p class="breakage-note">${tally || "Nothing ran."}</p><ul class="away-list">${rows}</ul>${away.reason ? `<p class="breakage-note">${h(away.reason)}</p>` : ""}</div>`);
+      ? `<div class="breakage-card away running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">Working through Drive's list</span><small>${done} of ${away.items.length} done</small></div><ul class="away-list">${rows}</ul><div class="breakage-actions">${btn("breakage-away-stop", "Stop after this one", {}, "quiet", true, Boolean(busy))}</div></div>`
+      : `<div class="breakage-card away"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text">While you were away</span><small>${waiting ? `${waiting} to review` : ""}</small>${close("breakage-away-close", "Dismiss")}</div><ul class="away-list">${rows}</ul>${away.reason ? `<p class="breakage-note">${h(away.reason)}</p>` : ""}</div>`);
   }
-  for (const item of [fix, ...state.breakage.inbox])
-    if (item && !(item.mission && (item.status === "starting" || item.status === "running"))) fixCard(item);
+  for (const item of [fix, ...state.breakage.inbox]) {
+    if (!item || (item.mission && (item.status === "starting" || item.status === "running"))) continue;
+    if (folded.has(item.id) && item.id !== awayOpen) continue;
+    fixCard(item);
+  }
   node.innerHTML = cards.join("");
   node.hidden = !cards.length;
 }
@@ -1327,9 +1346,9 @@ function nextQueueHTML(busy = false) {
     .join("");
   // Away mode: the top few run one after another, each in its own worktree.
   const awayCount = Math.min(3, next.proposals.length);
-  const awayRow = awayCount && !busy && state!.breakage.away?.status !== "running"
-    ? `<div class="next-away">${btn("next-away", `▶ Run the top ${awayCount === 1 ? "one" : awayCount} while I'm away`, { count: awayCount }, "", true)}<span class="muted">One after another, each in its own worktree. They wait for your review.</span></div>` : "";
-  return `<div class="next-heading"><span class="muted next-rank">${calibrationLine(next.calibration)}</span><span class="muted next-age">${next.loading ? "Reading…" : next.generatedAt ? age(next.generatedAt) : ""}</span>${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${awayRow}${
+  const awayLink = awayCount && !busy && state!.breakage.away?.status !== "running"
+    ? btn("next-away", `Run top ${awayCount} away`, { count: awayCount }, "link next-away", true).replace("<button ", `<button title="Run the top ${awayCount === 1 ? "proposal" : `${awayCount} proposals`} one after another while you're away, each in its own worktree. They wait for your review." `) : "";
+  return `<div class="next-heading"><span class="muted next-rank">${calibrationLine(next.calibration)}</span><span class="muted next-age">${next.loading ? "Reading…" : next.generatedAt ? age(next.generatedAt) : ""}</span>${awayLink}${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${
     next.error ? `<p class="next-error">${h(next.error)}</p>` : ""
   }${rows || (next.loading ? "" : '<p class="muted next-empty">Nothing worth proposing right now. Drive looks again after your next turn, or press ↻.</p>')}`;
 }
@@ -2879,6 +2898,12 @@ async function dispatch(
   if (action === "drive-tab") {
     driveTab = args.tab === "done" ? "done" : "next";
     renderPanels();
+    return;
+  }
+  if (action === "away-open") {
+    awayOpen = awayOpen === args.id ? null : args.id;
+    breakageSignature = "";
+    renderBreakage();
     return;
   }
   if (action === "next-open") {

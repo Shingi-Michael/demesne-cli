@@ -6,7 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Added
 
-- Away mode: **Run the top 3 while I'm away** has the daemon work through Drive's top proposals one after another, each in its own worktree. Each finished branch waits under a "While you were away" summary, with its own Apply / Open PR / Discard.
+- Away mode: **Run top 3 away** (a link in the Next heading) has the daemon work through Drive's top proposals one after another, each in its own worktree. Finished branches fold into one "While you were away" card, a line each; click one to open its Apply / Open PR / Discard.
 - Drive keeps working when you close the window: a running mission is handed to a background process with no window, which carries it to the end and commits a worktree mission for review. Opening the project again takes it back and resumes it in the window.
 - Model scoreboard: the model picker shows how each model has done on your own work over the last 30 days (turns finished, tool calls without errors, speed, checks passing, Drive runs kept), and `demesne models scoreboard` prints it as a table, marking local models.
 - Drive learns its own accuracy: every proposal you Run records whether it landed and how long it took, and Next ranks with this project's landing rate per confidence level and scales time estimates by how far off they have been. The Next heading shows the hit rate.

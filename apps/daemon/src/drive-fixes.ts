@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import { splitNextPrompt, type CommandRecord, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveSignal, type Turn } from "@demesne/protocol";
+import { splitNextPrompt, type CommandRecord, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveFixStatus, type DriveSignal, type Turn } from "@demesne/protocol";
 
 /// Drive's unattended work, each piece in its own git worktree on its own
 /// branch: fixes for breakages, Next proposals you press Run on, and /drive
@@ -19,6 +19,9 @@ export interface FixHost {
   cancel(turnId: string): void;
   commands(sessionId: string): CommandRecord[];
   activity(turnId: string): { steps: number; last: string | null };
+  /// Called once a job is applied, opened as a PR, or discarded, with the
+  /// status it had before; Drive's calibration records proposal outcomes here.
+  settled?(fix: DriveFix, before: DriveFixStatus): void;
 }
 
 type Run = (argv: string[], cwd: string, timeoutMs?: number) => Promise<{ ok: boolean; out: string; err: string }>;
@@ -215,11 +218,13 @@ export class DriveFixes {
   async act(id: string, action: DriveFixAction): Promise<DriveFix> {
     const fix = this.get(id);
     if (!fix || !ACTIVE.has(fix.status)) throw new Error("That fix is no longer open.");
+    const before = fix.status;
     if (action === "discard") {
       if (fix.status === "running" && fix.turnId) { this.host.cancel(fix.turnId); await this.done.get(id); }
       await this.cleanup(fix, true);
       Object.assign(fix, { status: "discarded", finishedAt: fix.finishedAt ?? new Date().toISOString() });
       this.save();
+      this.settle(fix, before);
       return fix;
     }
     if (fix.status !== "ready") throw new Error(`The ${fix.proposal || fix.mission ? "change" : "fix"} isn't ready yet.`);
@@ -244,7 +249,12 @@ export class DriveFixes {
       fix.status = "pr";
     }
     this.save();
+    this.settle(fix, before);
     return fix;
+  }
+
+  private settle(fix: DriveFix, before: DriveFixStatus) {
+    try { this.host.settled?.(fix, before); } catch { /* recording an outcome never fails the action */ }
   }
 
   /// Removes the worktree, and the branch unless it was pushed.

@@ -92,10 +92,19 @@ test("/v1/drive/next: known workspaces only, cached until signals change, vetoes
     expect(first.body.cached).toBe(false);
     expect(first.body.proposals.map((item) => item.title)).toEqual(["Commit the draft"]);
     expect(first.body.signals.map((item) => item.id)).toContain("git:uncommitted");
-    // Same signals: served from cache, no model call.
+    expect(first.body.calibration).toBeNull();
+    const plain = first.body.proposals[0]!.score;
+    // Same signals: served from cache, no model call, but ranked with what
+    // Drive has since learned: its high-confidence picks keep missing here
+    // and take twice as long as estimated.
+    const missed = (minutes: number) => JSON.stringify({ at: "now", workspace, proposalId: "x", kind: "tidy", confidence: "high", minutes: 10, actualMinutes: minutes, outcome: "discarded" });
+    writeFileSync(join(root, "data", "drive-calibration.jsonl"), [missed(20), missed(20), missed(20), ""].join("\n"));
     const second = await post({ workspace, memory });
     expect(second.body.cached).toBe(true);
     expect(calls).toBe(1);
+    expect(second.body.calibration).toMatchObject({ landed: 0, total: 3, timeRatio: 2, levels: { high: { landed: 0, total: 3, weight: 0.5 } } });
+    expect(second.body.proposals[0]!.expectedMinutes).toBe(20);
+    expect(second.body.proposals[0]!.score).toBeLessThan(plain);
     // Force asks again.
     expect((await post({ workspace, memory, force: true })).body.cached).toBe(false);
     expect(calls).toBe(2);

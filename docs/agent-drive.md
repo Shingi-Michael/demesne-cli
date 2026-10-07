@@ -42,7 +42,7 @@ Run/Plan selections are hidden for six hours to avoid immediate repetition. Dism
 
 ```mermaid
 flowchart TD
-    Signals[Checks, Git, sessions, telemetry, TODOs, PRs and CI] --> Fingerprint[Fingerprint signals, memory and selected model]
+    Signals[Checks, Git, sessions, telemetry, TODOs, PRs, CI and drive issues] --> Fingerprint[Fingerprint signals, memory and selected model]
     Memory[Project memory and vetoes] --> Fingerprint
     Fingerprint --> Cache{Fresh matching queue?}
     Cache -->|yes| Queue[Ranked NEXT queue]
@@ -56,7 +56,9 @@ flowchart TD
     Choice -->|Not now or Never| Hide[Persist dismissal or veto]
 ```
 
-[Signal collection](../apps/daemon/src/drive-signals.ts) uses recent failed checks, unfinished failed/interrupted asks, agent telemetry, uncommitted files, old unmerged branches, tracked-code TODOs, open PRs, and the latest default-branch run for each CI workflow. It excludes protected files before searching and bounds command output. GitHub collection uses `gh` when available; missing Git/GitHub access does not prevent local signals.
+[Signal collection](../apps/daemon/src/drive-signals.ts) uses recent failed checks, unfinished failed/interrupted asks, agent telemetry, uncommitted files, old unmerged branches, tracked-code TODOs, open PRs, open GitHub issues labelled `drive`, and the latest default-branch run for each CI workflow. It excludes protected files before searching and bounds command output. GitHub collection uses `gh` when available; missing Git/GitHub access does not prevent local signals.
+
+To queue work for Drive, label a GitHub issue `drive`. Each open one (up to ten) becomes a signal with its title and description, and the planner proposes one item per issue unless a veto or recorded outcome covers it. It shows up in Next like any other proposal, so Run, Plan first and away mode all work on it. A PR Drive opens for it ends with `Closes #12`, so merging closes the issue. Issue text is treated as untrusted evidence, like every other signal, and only people with triage access can add a label.
 
 [Proposal generation](../apps/daemon/src/drive-next.ts) requires cited signal IDs and ranks value × confidence ÷ estimated cost, with an urgent-evidence boost. It returns at most six items. Estimates of minutes, confidence and coders are model estimates, not reservations of runtime capacity.
 

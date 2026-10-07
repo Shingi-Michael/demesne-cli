@@ -167,3 +167,25 @@ test("TODO discovery excludes protected files before searching their contents", 
   expect(searched).toHaveLength(1); expect(searched[0]!.slice(searched[0]!.indexOf("--") + 1)).toEqual([":(literal)safe.ts"]);
   expect(result.signals.find(s => s.source === "code")?.detail).toContain("safe.ts"); store.close();
 });
+
+test("open issues labelled drive become signals, but not when only checking for breakage", async () => {
+  const root = scratch(), store = new DemesneStore(join(root, "state.sqlite"));
+  const asked: string[][] = [];
+  const run = async (argv: string[]) => {
+    asked.push(argv);
+    if (argv[0] === "git" && argv[1] === "status") return "";
+    if (argv[0] === "gh" && argv[1] === "issue") return JSON.stringify([{ number: 12, title: "Retry uploads", body: "Uploads fail\non flaky wifi.", updatedAt: "2026-10-05T10:00:00Z" }, { number: 13, title: "Docs", body: "", updatedAt: "2026-10-06T10:00:00Z" }]);
+    return null;
+  };
+  try {
+    const { signals } = await collectDriveSignals(store.database, root, { run });
+    expect(asked.find((argv) => argv[1] === "issue")).toEqual(expect.arrayContaining(["--label", "drive", "--state", "open"]));
+    expect(signals.filter((signal) => signal.id.startsWith("issue:"))).toEqual([
+      { id: "issue:12", source: "github", title: "Issue #12 labelled drive: Retry uploads", detail: "Uploads fail on flaky wifi. · updated 2026-10-05" },
+      { id: "issue:13", source: "github", title: "Issue #13 labelled drive: Docs", detail: "(no description) · updated 2026-10-06" },
+    ]);
+    asked.length = 0;
+    await collectDriveSignals(store.database, root, { run, urgentOnly: true });
+    expect(asked.some((argv) => argv[1] === "issue")).toBe(false);
+  } finally { store.close(); }
+});

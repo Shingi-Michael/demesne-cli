@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DriveFix } from "@demesne/protocol";
 import { createDaemonApp } from "../src/app.ts";
+import { prBody } from "../src/drive-fixes.ts";
 import type { TurnProcessor } from "../src/processor.ts";
 
 const roots: string[] = [];
@@ -296,4 +297,18 @@ test("an away run stops starting work at its deadline", async () => {
   // A restart ends a run that was still going.
   const later = fixes.startAway({ workspace: "/x", items: [{ proposal, signals: [] }] });
   expect(new DriveFixes(join(root, "fixes.json"), join(root, "trees"), {} as never).away("/x")).toMatchObject({ id: later.id, status: "stopped" });
+});
+
+test("a PR for a proposal that cites issues labelled drive closes them", () => {
+  const fix = { id: "f", workspace: "/w", title: "Add retries", branch: "drive/b", path: "/p", base: "abc", status: "ready", summary: "Added retries.",
+    proposal: { id: "p", kind: "fix", title: "Add retries", why: "Issue #12 asks for it.", minutes: 10, confidence: "high" },
+    signals: [{ id: "issue:12", source: "github", title: "Issue #12 labelled drive: Add retries", detail: "Retry the upload." }, { id: "issue:12", source: "github", title: "dup", detail: "" }, { id: "git:uncommitted", source: "git", title: "1 uncommitted change", detail: "M a.ts" }],
+  } as unknown as DriveFix;
+  const body = prBody(fix);
+  expect(body).toContain("Drive proposed this and you ran it: Issue #12 asks for it.");
+  expect(body.endsWith("\n\nCloses #12")).toBe(true);
+  expect(body.match(/Closes/g)).toHaveLength(1);
+  expect(prBody({ ...fix, signals: [fix.signals[2]!] })).not.toContain("Closes");
+  // Even a receipt that fills the body keeps the line.
+  expect(prBody({ ...fix, receipt: "x".repeat(70_000) }).endsWith("Closes #12")).toBe(true);
 });

@@ -4,8 +4,9 @@ import type { Database } from "bun:sqlite";
 import type { DriveSignal } from "@demesne/protocol";
 
 /// What Drive knows about a workspace before anyone asks: failing checks,
-/// uncommitted and stale work, open PRs and red CI, asks that failed or were
-/// cancelled, and what the agent's own telemetry shows. Each signal is a
+/// uncommitted and stale work, open PRs and red CI, issues labelled `drive`,
+/// asks that failed or were cancelled, and what the agent's own telemetry
+/// shows. Each signal is a
 /// bounded, deterministic fact with a stable id that proposals must cite.
 
 const DAY = 86_400_000;
@@ -157,6 +158,14 @@ export async function collectDriveSignals(database: Database, workspace: string,
         add({ id: `pr:${pr.number}`, source: "github", urgent: failing, title: `Open PR #${pr.number}${failing ? " with failing CI" : ""}${pr.isDraft ? " (draft)" : ""}`, detail: `${clip(pr.title, 160)} · updated ${pr.updatedAt.slice(0, 10)}` });
       }
     } catch { /* no GitHub repo or gh unavailable */ }
+    // Issues labelled `drive`: work someone queued for Drive on purpose.
+    if (!options.urgentOnly) {
+      const issues = await exec(["gh", "issue", "list", "--state", "open", "--label", "drive", "--limit", "10", "--json", "number,title,body,updatedAt"], workspace);
+      try {
+        for (const issue of JSON.parse(issues ?? "[]") as { number: number; title: string; body?: string; updatedAt: string }[])
+          add({ id: `issue:${issue.number}`, source: "github", title: `Issue #${issue.number} labelled drive: ${clip(issue.title, 160)}`, detail: `${clip((issue.body ?? "").replace(/\s+/g, " ").trim() || "(no description)", 480)} · updated ${issue.updatedAt.slice(0, 10)}` });
+      } catch { /* no GitHub repo, no label, or gh unavailable */ }
+    }
     const ci = await exec(["gh", "run", "list", "--branch", defaultBranch, "--limit", "30", "--json", "conclusion,displayTitle,workflowName,workflowDatabaseId,headBranch,createdAt,status"], workspace);
     try {
       type Run = { conclusion: string; displayTitle: string; workflowName: string; workflowDatabaseId?: number; headBranch: string; createdAt: string; status?: string };

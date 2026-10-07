@@ -19,6 +19,7 @@ Rules:
 - title: an imperative, specific task under 90 characters. why: one or two plain sentences on the payoff and the evidence.
 - minutes: realistic hands-on time for the coding agent; coders: parallel coders it needs (1 unless the work clearly splits).
 - value 1-5 (payoff to the project), confidence high|medium|low (that doing it pays off).
+- Signals with ids like issue:12 are GitHub issues the user labelled drive: work they queued for you. Propose each one (one proposal per issue) unless a veto or recorded outcome covers it.
 - Follow memory preferences and decisions. Never propose anything a veto covers. Do not repeat a recorded outcome unless a signal shows it regressed.
 - Propose 3 to 6 items; fewer is fine when the signals are thin. Skip busywork and anything speculative.
 Call propose_next once.`;

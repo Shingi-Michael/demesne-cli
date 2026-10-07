@@ -16,7 +16,7 @@
   <a href="docs/README.md">Docs</a>
 </p>
 
-demesne is a coding agent that starts by reading your project. Its **Drive** looks at failing checks, red CI, open pull requests and work you left unfinished, then suggests what to do next. Press **Run** and Drive gives the coding agent a bounded task, checks the result and shows you the diff, the commands it ran and whether the checks passed. It remembers what you decided, so it won't suggest the same thing twice.
+demesne is a coding agent that starts by reading your project. Its **Drive** looks at failing checks, red CI, open pull requests, issues you labelled `drive` and work you left unfinished, then suggests what to do next. Press **Run** and Drive gives the coding agent a bounded task, checks the result and shows you the diff, the commands it ran and whether the checks passed. It remembers what you decided, so it won't suggest the same thing twice.
 
 ## Try it
 

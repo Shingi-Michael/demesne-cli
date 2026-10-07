@@ -70,6 +70,17 @@ End with two or three plain sentences: what you changed and how you checked it.`
 
 const slugOf = (text: string, fallback: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32).replace(/-$/, "") || fallback;
 
+/// The body of the PR Drive opens for a fix, proposal or mission.
+export function prBody(fix: DriveFix): string {
+  const body = fix.receipt ? [fix.receipt, ...(fix.diff ? ["", `<sub>Diff: +${fix.diff.additions} −${fix.diff.deletions} in ${fix.diff.files} file${fix.diff.files === 1 ? "" : "s"} on ${fix.branch}</sub>`] : [])].join("\n") : [...(fix.mission ? [`A Drive mission, worked in its own worktree:`, "", `> ${fix.mission.slice(0, 2000).replace(/\n/g, "\n> ")}`] : fix.proposal ? [`Drive proposed this and you ran it: ${fix.proposal.why}`, ...(fix.signals.length ? ["", "Evidence:"] : [])] : [`Fixes a breakage demesne noticed:`]),
+    ...fix.signals.map((signal) => `- **${signal.title}**: ${signal.detail}`), "", fix.summary ?? "",
+    ...(fix.checks?.length ? ["", "Checks run in the worktree:", ...fix.checks.map((check) => `- ${check.passed ? "✓" : "✕"} \`${check.command}\``)] : [])].join("\n");
+  // A PR for a queued issue closes it when it merges.
+  const closes = [...new Set(fix.signals.flatMap((signal) => /^issue:(\d+)$/.exec(signal.id)?.[1] ?? []))].map((n) => `Closes #${n}`);
+  // Kept last and outside the length cap so it always survives.
+  return closes.length ? `${body.slice(0, 59_000)}\n\n${closes.join("\n")}` : body.slice(0, 60_000);
+}
+
 /// How long an away run keeps starting new work, unless asked otherwise.
 export const AWAY_MINUTES = 8 * 60;
 
@@ -326,10 +337,7 @@ export class DriveFixes {
     } else {
       const pushed = await this.git(["git", "push", "-u", "origin", fix.branch], fix.path, 120_000);
       if (!pushed.ok) throw new Error(`Couldn't push ${fix.branch}: ${firstLine(pushed.err)}`);
-      const body = fix.receipt ? [fix.receipt, ...(fix.diff ? ["", `<sub>Diff: +${fix.diff.additions} −${fix.diff.deletions} in ${fix.diff.files} file${fix.diff.files === 1 ? "" : "s"} on ${fix.branch}</sub>`] : [])].join("\n") : [...(fix.mission ? [`A Drive mission, worked in its own worktree:`, "", `> ${fix.mission.slice(0, 2000).replace(/\n/g, "\n> ")}`] : fix.proposal ? [`Drive proposed this and you ran it: ${fix.proposal.why}`, ...(fix.signals.length ? ["", "Evidence:"] : [])] : [`Fixes a breakage demesne noticed:`]),
-        ...fix.signals.map((signal) => `- **${signal.title}**: ${signal.detail}`), "", fix.summary ?? "",
-        ...(fix.checks?.length ? ["", "Checks run in the worktree:", ...fix.checks.map((check) => `- ${check.passed ? "✓" : "✕"} \`${check.command}\``)] : [])].join("\n");
-      const pr = await this.git(["gh", "pr", "create", "--head", fix.branch, "--title", (fix.proposal || fix.mission ? fix.title : `Fix: ${fix.title}`).slice(0, 200), "--body", body.slice(0, 60_000)], fix.path, 120_000);
+      const pr = await this.git(["gh", "pr", "create", "--head", fix.branch, "--title", (fix.proposal || fix.mission ? fix.title : `Fix: ${fix.title}`).slice(0, 200), "--body", prBody(fix)], fix.path, 120_000);
       if (!pr.ok) throw new Error(`Pushed ${fix.branch}, but couldn't open the PR: ${firstLine(pr.err)}`);
       fix.prUrl = pr.out.split("\n").findLast((line) => /^https?:\/\//.test(line)) ?? pr.out;
       await this.cleanup(fix, false);

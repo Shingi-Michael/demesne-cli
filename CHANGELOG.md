@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Added
 
+- `demesne drive "mission"` runs Drive with no window, for CI: it prints the mission receipt, adds it to the GitHub job summary, posts it to a pull request with `--pr N`, and exits 0 only when every task is verified. Approvals are denied rather than left waiting.
 - Releases include the desktop app: `demesne-desktop-darwin-arm64.zip` for Apple silicon Macs and `demesne-desktop-linux-amd64.deb` for Ubuntu 22.04/24.04, so installing demesne no longer needs Bun or Rust.
 - Label a GitHub issue `drive` to queue it for Drive: open ones become Next proposals, and the PR Drive opens for one says `Closes #n`.
 - Away mode: **Run top 3 away** (a link in the Next heading) has the daemon work through Drive's top proposals one after another, each in its own worktree. Finished branches fold into one "While you were away" card, a line each; click one to open its Apply / Open PR / Discard.

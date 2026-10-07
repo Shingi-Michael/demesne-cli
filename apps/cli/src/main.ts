@@ -4,7 +4,7 @@ import { NextPromptFilter, splitNextPrompt } from "@demesne/protocol";
 import { isRecord, type CancelTurnResponse, type CreateSessionResponse, type EventEnvelope, type ModelDescriptor, type ModelScoreboardResponse, type PermissionDecision, type UserAnswer, type UserQuestion, parseUserQuestions, type RuntimeProfileStatus, type Session, type SessionStateResponse, type SubmitTurnResponse, type TokenUsage } from "@demesne/protocol";
 import { createPainter, formatAssistantHeader, formatDiffPreview, formatFooterLine, formatPermissionCard, formatToolPhaseHeader, formatToolResultLine, formatTurnReceipt, fileUrl, formatHyperlink, renderSpinner, resolveTheme, SPINNER_PERIOD_MS, sanitizeTerminalLine, sanitizeTerminalText, TerminalMarkdownStream, TerminalReasoningStream, toolKindBadge, type BeaconActivity, type PaletteColor } from "@demesne/brand";
 import { scoreboardTable } from "./model-scoreboard.ts";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { CliContextRail } from "./context-rail.ts";
@@ -424,6 +424,35 @@ async function run(command: string[]): Promise<void> {
     const result = await runHeadlessTurn({ sessionId, content, permissionMode, planOnly, output });
     if (result.status === "failed") process.exitCode = 1;
     else if (result.status === "cancelled" || result.status === "interrupted") process.exitCode = 130;
+    return;
+  }
+
+  // A Drive mission with no window, for CI: prints the mission receipt and
+  // can post it to a pull request. Exits 0 only when every task is verified.
+  if (command[0] === "drive") {
+    const pr = takeOption(command, "--pr");
+    if (pr !== undefined && !/^[1-9]\d*$/.test(pr)) throw new Error("--pr takes a pull request number");
+    let mission = command.slice(1).join(" ").trim();
+    if (!mission || mission === "-") mission = (await Bun.stdin.text()).trim();
+    if (!mission.replace(/(^|\s)--(here|bounded)(?=\s|$)/g, "").trim()) throw new Error("Usage: demesne drive [--pr <number>] [--here] <mission>");
+    await ensureDaemonOrExit();
+    const workspace = realpathSync(process.cwd());
+    const session = await createSessionWithTrust({ title: `Drive: ${mission}`.slice(0, 200), workspacePath: workspace });
+    const { runHeadlessDrive } = await import("../../graphics/headless-drive.ts");
+    const result = await runHeadlessDrive({ workspace, sessionId: session.session.id, mission, server: explicitServer(), settings,
+      log: (line) => console.error(paintLog.dim(sanitizeTerminalLine(`  ${line}`))) });
+    const markdown = result.receipt.markdown + (result.branch ? `\n\n<sub>The change is committed on \`${result.branch}\`.</sub>` : "");
+    console.log(markdown);
+    console.error(`Drive ${result.status}: ${result.receipt.headline}${result.branch ? ` · branch ${result.branch}` : ""}`);
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      try { appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`); } catch {}
+    }
+    if (pr) {
+      const posted = Bun.spawnSync(["gh", "pr", "comment", pr, "--body-file", "-"], { cwd: workspace, stdin: new TextEncoder().encode(markdown), stdout: "pipe", stderr: "pipe" });
+      if (posted.exitCode !== 0) throw new Error(`Couldn't post the receipt to PR #${pr}: ${posted.stderr.toString().trim().split("\n")[0] || "gh failed"}`);
+      console.error(`Posted the receipt to PR #${pr}.`);
+    }
+    if (!result.verified) process.exitCode = 1;
     return;
   }
 
@@ -1275,6 +1304,8 @@ function printUsage(): void {
   demesne daemon start|stop|status|logs
   demesne ps [--watch] [--json]
   demesne prompt [--session <session-id>] [--permission ask|deny] [--output text|json|stream-json] [--plan] <text>
+  demesne drive [--pr <number>] [--here] <mission>
+      Runs a Drive mission with no window and prints its receipt; --pr posts it to that pull request (needs gh). Exits 0 only when every task is verified.
   demesne compact <session-id> [instructions]
   demesne session list
   demesne session create [--workspace <path>] [title]

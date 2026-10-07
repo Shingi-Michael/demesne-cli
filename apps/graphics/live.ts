@@ -402,7 +402,7 @@ function renderStatus() {
           ? `<button type="button" id="drive-word" class="${drivePopOpen || pane === "drive" ? "active" : ""}" data-action="drive-pop" aria-haspopup="dialog" aria-expanded="${drivePopOpen}">Drive${word.needs ? `<b class="count" aria-label="${word.needs} need you">${word.needs}</b>` : word.live ? '<i class="live" aria-label="working"></i>' : ""}</button>`
           : `<button type="button" class="${(place.views as readonly string[]).includes(pane ?? "") ? "active" : ""}" data-action="panel" data-args="${h(JSON.stringify({ name: place.name }))}" data-drive="panel-${place.name}">${place.label}</button>`,
       ).join("")}</nav>`
-    : btn("panel", `${k("Alt+H")} history`, { name: "history" }, "key-action", true);
+    : btn("panel", "Sessions", { name: "history" }, "sessions-word", true).replace("<button ", '<button title="Past sessions (Alt+H)" ');
   el("header").innerHTML =
     `<div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "pill auto-approve") : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}</div>${places}`;
 }
@@ -794,11 +794,12 @@ function renderHero() {
   const footer = [
     top.length && !driveBusy ? btn("next-away", `Run ${words[top.length]} overnight ›`, { count: top.length }, "link", true).replace("<button ", `<button title="Run ${top.length === 1 ? "it" : "them"} one after another while you're away, each in its own worktree. They wait for your review." `) : "",
     next.proposals.length > 3 ? btn("panel", `${next.proposals.length - 3} more in Drive`, { name: "drive" }, "", true) : "",
+    top.length ? '<span class="muted">why these? hover a row</span>' : "",
   ].filter(Boolean).join('<span class="muted"> · </span>');
   el("hero").innerHTML =
-    `<div class="intro"><h1>${h(name)}</h1>${waiting}</div><div id="hero-composer"></div>${
-      // Drive's Next queue, ready when you open demesne: the top three, each
-      // with the evidence it rests on; the full queue is in the Drive panel.
+    `<div class="intro"><h1>What should we do in ${h(name)}?</h1>${waiting}</div><div id="hero-composer"></div>${
+      // Drive's Next queue, ready when you open demesne: the top three, with
+      // the reason and evidence on hover; the full queue is in the Drive panel.
       top.length
         ? `<section class="proposals"><h2>DRIVE WOULD DO NEXT</h2>${proposalRows(top)}${footer ? `<p class="proposals-footer">${footer}</p>` : ""}</section>`
         : ""
@@ -806,8 +807,8 @@ function renderHero() {
   // The composer is detached while the hero is rebuilt.
   el("hero-composer").append(composer);
 }
-/// Drive's proposals as rows: kind, title, estimate and the evidence it rests
-/// on, with Run and Plan. The start screen shows three; a session's briefing
+/// Drive's proposals as rows: kind, title and estimate, with Run and Plan. The
+/// reason and the evidence it rests on show on hover. The start screen shows three; a session's briefing
 /// line unfolds them in place.
 function proposalRows(items: Snapshot["driveNext"]["proposals"]) {
   const signal = new Map(state!.driveNext.signals.map((item) => [item.id, item]));
@@ -815,7 +816,8 @@ function proposalRows(items: Snapshot["driveNext"]["proposals"]) {
   return `<div class="proposal-list">${items
     .map((item) => {
       const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
-      return `<div class="proposal-row"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b title="${h(item.why)}">${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}${evidence ? ` · ${h(evidence)}` : ""}</small>${btn("next-run", "Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan", { id: item.id })}</div>`;
+      const why = [item.why, evidence && `Evidence: ${evidence}`].filter(Boolean).join("\n");
+      return `<div class="proposal-row" title="${h(why)}"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b>${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}</small>${btn("next-run", "Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan", { id: item.id })}</div>`;
     })
     .join("")}</div>`;
 }
@@ -912,7 +914,7 @@ function renderComposer() {
     ? state.activeTurnId
       ? state.queue.trim() ? "Queue another follow-up…" : "Queue a follow-up…"
       : suggestion ? `${suggestion}   ⇥ Tab` : "Continue the conversation…"
-    : "What should we do?";
+    : state.driveNext.proposals.length ? "Describe a change, or pick one of Drive's ideas…" : "Describe a change…";
   editor.disabled =
     state.connection !== "online" ||
     state.busy ||
@@ -920,14 +922,15 @@ function renderComposer() {
     Boolean(answered);
   // Like the terminal: no stop hint while running (Esc Esc still stops; only
   // the armed confirmation shows). In a session, an empty composer shows
-  // / and @, and a draft shows ↵ send instead. The start screen keeps both.
+  // / and @, and a draft shows ↵ send instead. The start screen keeps / and
+  // @ and adds ↵ once there is something to send.
   const armed = Date.now() < stopArmed;
   const draft = Boolean(editor.value.trim()), session = inSession();
   // While a turn runs the send button is Stop; Enter queues what you type.
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${k("Enter")} ${asking ? "send instead" : "queue"}</span>` : ""}<span class="stop-word">■ Stop</span>`
     : "send";
-  form.querySelector<HTMLElement>(".send")!.hidden = question ? !draft : state.activeTurnId ? false : session && !draft;
+  form.querySelector<HTMLElement>(".send")!.hidden = question ? !draft : state.activeTurnId ? false : !draft;
   form.querySelector<HTMLElement>(".hints")!.hidden = Boolean(state.activeTurnId) || (session && draft);
   (form.querySelector(".send") as HTMLButtonElement).disabled =
     state.connection !== "online" || state.busy || answeringQuestion;
@@ -2886,10 +2889,8 @@ function changedDraft() {
       .catch(()=>{}),60);
     reportObservation();return;
   }
-  // Writing in the composer is what takes over from Drive; clicking,
-  // navigating and reading panels leave it running.
-  if (state?.drive && ["running", "waiting"].includes(state.drive.status))
-    void api("manual");
+  // Typing leaves Drive running (a "/" to look at commands is not a
+  // takeover); sending the message is what takes over, in the host.
   completionDismissed = false;
   completionAll = false;
   completionIndex = 0;

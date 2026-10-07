@@ -57,6 +57,7 @@ import { DriveNextCache, proposeNext } from "./drive-next.ts";
 import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { DriveFixes } from "./drive-fixes.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
+import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
@@ -102,6 +103,9 @@ export interface DaemonApp {
 
 export function createDaemonApp(options: {
   databasePath: string;
+  /// Provider ids served from your own machines (loopback, private or
+  /// Tailscale addresses), so the model scoreboard can mark local models.
+  localProviders?: string[];
   /// Re-reads provider config and credentials after signing in or out.
   reloadProviders?: () => Promise<{ switched: boolean; restored?: boolean; model: string; provider: string; previous: { model: string; provider: string } }>;
   processor?: TurnProcessor;
@@ -177,7 +181,9 @@ export function createDaemonApp(options: {
       } catch { /* a partial call */ }
       return { steps: rows.length, last };
     },
-    settled: (fix, before) => calibrationLog.settle(fix, before),
+    settled: (fix, before) => calibrationLog.settle(fix, before, fix.turnId
+      ? store.database.query("SELECT provider, model FROM provider_calls WHERE turn_id = ? ORDER BY rowid LIMIT 1").get(fix.turnId) as { provider: string; model: string } | null
+      : null),
   });
   const replay = new SessionReplay(store);
   const processor: TurnProcessor = options.processor ?? new PlaceholderTurnProcessor();
@@ -373,6 +379,14 @@ export function createDaemonApp(options: {
           const message = error instanceof Error ? error.message : "Model discovery failed";
           return apiError("provider_error", message, 502);
         }
+      }
+
+      // The model scoreboard: how each model has done on real work here.
+      if (request.method === "GET" && url.pathname === "/v1/models/scoreboard") {
+        const days = Number(url.searchParams.get("days") ?? 30);
+        if (!Number.isInteger(days) || days < 1 || days > 365) return apiError("invalid_request", "days must be 1-365", 400);
+        const workspace = url.searchParams.get("workspace") || null;
+        return json({ days, workspace, models: modelScoreboard(store.database, { days, workspace, drive: calibrationLog.records(workspace), localProviders: options.localProviders }) });
       }
 
       if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "sessions" && path[3] === "drive" && path[4] === "facts") {

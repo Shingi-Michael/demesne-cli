@@ -146,7 +146,14 @@ test("a Next proposal runs in its own worktree and branch, with no breakage need
     expect(out(workspace, "branch", "--list", "drive/*")).toBe("");
     // The outcome is recorded, which calibrates later Next rankings.
     const [record] = readFileSync(join(root, "data", "drive-calibration.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
-    expect(record).toMatchObject({ workspace, proposalId: "p1", kind: "tidy", confidence: "medium", minutes: 15, outcome: "landed" });
+    expect(record).toMatchObject({ workspace, proposalId: "p1", kind: "tidy", confidence: "medium", minutes: 15, outcome: "landed", provider: "test", model: "coder" });
+    // The model scoreboard counts the run for the model that did it.
+    // In the project's own view the run counts; its turn ran in the worktree's session.
+    const board = (await call(`/v1/models/scoreboard?workspace=${encodeURIComponent(workspace)}`)).body;
+    expect(board.models).toEqual([expect.objectContaining({ provider: "test", model: "coder", turns: 0, driveRuns: 1, driveLanded: 1 })]);
+    const all = (await call("/v1/models/scoreboard?days=7")).body;
+    expect(all.models).toEqual([expect.objectContaining({ provider: "test", model: "coder", turns: 1, finished: 1, driveRuns: 1, driveLanded: 1 })]);
+    expect((await call("/v1/models/scoreboard?days=0")).status).toBe(400);
     expect(record.actualMinutes).toBeGreaterThanOrEqual(0);
   } finally { server.stop(true); await app.close(); }
 });

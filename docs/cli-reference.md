@@ -23,6 +23,7 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 | `demesne doctor [--json]` | Inspect configuration and connectivity |
 | `demesne ps [--watch] [--json]` | Active turns, queues, and provider slot capacities |
 | `demesne models` | List provider model IDs |
+| `demesne models scoreboard [--days N] [--here]` | How each model has done on your own recorded work: turns finished, tool calls without errors, speed, checks, Drive runs kept |
 | `demesne session list` | List sessions |
 | `demesne session create [--workspace PATH] [title]` | Create a workspace-bound session (asks to trust a new folder) |
 | `demesne session auto-approve SESSION_ID on\|off\|status` | Enable, disable or inspect automatic approval for that session |

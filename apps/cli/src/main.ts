@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 
 import { NextPromptFilter, splitNextPrompt } from "@demesne/protocol";
-import { isRecord, type CancelTurnResponse, type CreateSessionResponse, type EventEnvelope, type ModelDescriptor, type PermissionDecision, type UserAnswer, type UserQuestion, parseUserQuestions, type RuntimeProfileStatus, type Session, type SessionStateResponse, type SubmitTurnResponse, type TokenUsage } from "@demesne/protocol";
+import { isRecord, type CancelTurnResponse, type CreateSessionResponse, type EventEnvelope, type ModelDescriptor, type ModelScoreboardResponse, type PermissionDecision, type UserAnswer, type UserQuestion, parseUserQuestions, type RuntimeProfileStatus, type Session, type SessionStateResponse, type SubmitTurnResponse, type TokenUsage } from "@demesne/protocol";
 import { createPainter, formatAssistantHeader, formatDiffPreview, formatFooterLine, formatPermissionCard, formatToolPhaseHeader, formatToolResultLine, formatTurnReceipt, fileUrl, formatHyperlink, renderSpinner, resolveTheme, SPINNER_PERIOD_MS, sanitizeTerminalLine, sanitizeTerminalText, TerminalMarkdownStream, TerminalReasoningStream, toolKindBadge, type BeaconActivity, type PaletteColor } from "@demesne/brand";
-import { existsSync, readFileSync } from "node:fs";
+import { scoreboardTable } from "./model-scoreboard.ts";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { CliContextRail } from "./context-rail.ts";
@@ -235,6 +236,14 @@ async function run(command: string[]): Promise<void> {
     for (const session of result.sessions) {
       console.log(sanitizeTerminalText(`${session.id}\t${session.title}\t${session.workspace?.root ?? "no workspace"}`));
     }
+    return;
+  }
+
+  if (command[0] === "models" && command[1] === "scoreboard") {
+    const days = takeNumberOption(command, "--days") ?? 30;
+    const here = command.includes("--here");
+    const result = await request<ModelScoreboardResponse>(`/v1/models/scoreboard?days=${days}${here ? `&workspace=${encodeURIComponent(realpathSync(process.cwd()))}` : ""}`);
+    console.log(scoreboardTable(result));
     return;
   }
 
@@ -1289,6 +1298,7 @@ function printUsage(): void {
   demesne session show <session-id>
   demesne session auto-approve <session-id> on|off|status
   demesne models
+  demesne models scoreboard [--days 30] [--here]
   demesne cancel <turn-id>
   demesne events <session-id> [--after <event-id>]
   demesne --version

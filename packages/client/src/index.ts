@@ -88,6 +88,11 @@ export class DemesneClient {
     try { return parseDriveFacts(await this.request(`/v1/sessions/${sessionId}/drive/facts`, { method: "POST", body: JSON.stringify({turnId,paths}), signal })); }
     catch(error) { if (error instanceof ApiRequestError && error.status === 404) throw new Error("Drive needs the updated daemon for recorded task facts. Restart the rebuilt daemon after current work finishes."); throw error; }
   }
+  /// How each model has done on this daemon's recorded work.
+  async modelScoreboard(options: { days?: number; workspace?: string } = {}): Promise<import("@demesne/protocol").ModelScoreboardResponse> {
+    const query = new URLSearchParams({ ...(options.days ? { days: String(options.days) } : {}), ...(options.workspace ? { workspace: options.workspace } : {}) });
+    return this.request(`/v1/models/scoreboard${query.size ? `?${query}` : ""}`);
+  }
   /// Drive's Next queue for a workspace: cached unless its signals changed.
   async driveNext(request: import("@demesne/protocol").DriveNextRequest, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveNextResponse> {
     try { return await this.request("/v1/drive/next", { method: "POST", body: JSON.stringify(request), signal }); }

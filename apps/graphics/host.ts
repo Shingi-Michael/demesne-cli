@@ -1157,6 +1157,8 @@ export class GraphicsHost {
       return;
     }
     if (method === "models") return this.models();
+    // The model scoreboard, across projects, for the model picker.
+    if (method === "model-scores") return this.client.modelScoreboard({ days: 30 });
     if (method === "model") {
       const id = string(args.id, "model", 1000);
       const reasoning = args.reasoning === undefined ? undefined : string(args.reasoning, "reasoning", 16);

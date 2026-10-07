@@ -1,6 +1,6 @@
 # Themefy and saved themes
 
-Type **`/themefy`** in the normal composer in the [desktop app](desktop.md) or [Ghostty interface](../apps/graphics/README.md). The selected model asks a short series of questions about the mood, appearance, accents and details you want. Type each answer in that same composer and press Enter. Follow-ups adapt to your answers, and refinements replace earlier preferences. Usually two to four questions are enough.
+Type **`/themefy`** in the normal composer in the [desktop app](desktop.md). The selected model asks a short series of questions about the mood, appearance, accents and details you want. Type each answer in that same composer and press Enter. Follow-ups adapt to your answers, and refinements replace earlier preferences. Usually two to four questions are enough.
 
 You can start with a direction, such as `/themefy warm forest colours`. That informs the interview; it does not skip the questions. [Pause, Resume and Cancel interview](questions.md#pause-resume-and-cancel) work normally. Closing the app leaves the daemon's interview alive. After a daemon restart, the saved question resumes only when you explicitly answer it, retaining its earlier preferences.
 
@@ -32,4 +32,4 @@ Cancellation, model failure before application, and rejected colors leave the cu
 - `POST /v1/themes` accepts `{ "action": "select", "name": "…" }` or `{ "action": "undo" }`.
 - Answers use the [question protocol](questions.md#protocol). Restart continuations retain the Themefy scope and exact chain of recorded answers.
 
-Source: [palette validation](../packages/brand/src/custom-theme.ts), [theme storage](../apps/daemon/src/themes.ts), [interview prompt and tool schema](../apps/daemon/src/themefy.ts), [restricted engine](../apps/daemon/src/engine.ts), and [live graphics host](../apps/graphics/host.ts).
+Source: [palette validation](../packages/brand/src/custom-theme.ts), [theme storage](../apps/daemon/src/themes.ts), [interview prompt and tool schema](../apps/daemon/src/themefy.ts), [restricted engine](../apps/daemon/src/engine.ts), and [interface host](../apps/graphics/host.ts).

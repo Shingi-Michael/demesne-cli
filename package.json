@@ -22,10 +22,6 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "fake:provider": "bun run scripts/fake-provider.ts",
-    "graphics": "bun apps/graphics/terminal.ts --live",
-    "graphics:setup": "bun scripts/setup-graphics.ts",
-    "graphics:check": "bun apps/graphics/check-live.ts",
-    "build:graphics": "bun scripts/build-graphics.ts",
     "desktop": "bun scripts/run-desktop.ts",
     "build:desktop": "bun scripts/build-desktop.ts",
     "desktop:check": "bun scripts/check-desktop.ts"

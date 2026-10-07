@@ -26,7 +26,7 @@ bun install --frozen-lockfile
 bun run desktop
 ```
 
-Choose a project, connect a model and open **Drive**. You need [Bun 1.4](https://bun.sh), plus [Rust](docs/desktop.md#prerequisites) for the desktop window. The model can run on your machine, come from your ChatGPT plan, or be an OpenRouter account. To run demesne in the terminal or from a script, see [Install](#install).
+Choose a project, connect a model and open **Drive**. You need [Bun 1.4](https://bun.sh), plus [Rust](docs/desktop.md#prerequisites) for the desktop window. The model can run on your machine, come from your ChatGPT plan, or be an OpenRouter account. To start demesne from the terminal or run it from a script, see [Install](#install).
 
 ## How Drive works
 
@@ -66,7 +66,7 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 </tr>
 <tr>
 <td valign="top"><b>Next prompt</b><br>After each turn the composer suggests what to ask next. Press <b>Tab</b> to use it.</td>
-<td valign="top"><b>Desktop or terminal</b><br>The same interface runs in its own window or inside Ghostty.</td>
+<td valign="top"><b>Start from the terminal</b><br>Run <code>demesne</code> in a project folder and the desktop window opens on it. <code>demesne prompt</code> runs without a window.</td>
 </tr>
 </table>
 
@@ -86,29 +86,17 @@ It needs [Rust and a few platform packages](docs/desktop.md#prerequisites). The 
 </details>
 
 <details>
-<summary><b>Ghostty</b> (the full interface in your terminal)</summary>
+<summary><b>Terminal</b> (<code>demesne</code> opens the desktop window on the current folder)</summary>
 
 ```sh
 bun run build
-bun run build:graphics
+bun run build:desktop
 ./dist/demesne setup
 ./dist/demesne daemon start
 ./dist/demesne
 ```
 
-Keep `dist/graphics` and `dist/node_modules` next to the binaries. To use demesne in other projects, link `dist/demesne` and `dist/demesned` onto your PATH and run `demesne` from the project folder. If you're working on demesne itself, use `bun run graphics:setup` and `bun run demesne`. More in [graphics setup](apps/graphics/README.md) and [troubleshooting](docs/troubleshooting.md).
-</details>
-
-<details>
-<summary><b>Linux</b> (Ghostty in a desktop session, as your normal user)</summary>
-
-```sh
-bun run demesne setup
-bun run demesne daemon start
-bun run graphics
-```
-
-If you see “The SUID sandbox helper binary was found, but is not configured correctly”, run `bun run graphics:setup --install-sandbox` and launch again. It only asks for administrator access to set up the sandbox helper. The [Linux guide](docs/linux.md) has more.
+Keep `dist/node_modules` next to the binaries. To use demesne in other projects, link `dist/demesne` and `dist/demesned` onto your PATH and run `demesne` from the project folder. It opens the desktop window on that folder. `demesne chat "message"` also sends a first message. It looks for the app in `/Applications` on macOS, then `demesne-desktop` on your PATH, then this checkout's build. `DEMESNE_DESKTOP_BIN` points it at a different app. If you're working on demesne itself, `bun run demesne` does the same from source. More in [command reference](docs/cli-reference.md) and [troubleshooting](docs/troubleshooting.md).
 </details>
 
 <details>
@@ -132,9 +120,9 @@ Output can be text, JSON or a stream of events. Anything that would need your ap
 | Changes / files / checks | Alt+D / Alt+O / Alt+T |
 | Drive / history | Alt+J / Alt+H |
 | Back to live output | Ctrl+G |
-| Stop | Ctrl+C, or double Esc |
-| Zoom (desktop) | ⌘= / ⌘- / ⌘0 |
-| Quit the UI (work continues) | Ctrl+Q |
+| Stop | Double Esc |
+| Zoom | ⌘= / ⌘- / ⌘0 |
+| Quit the window (work continues) | Ctrl+Q |
 
 [All commands](docs/cli-reference.md)
 </details>

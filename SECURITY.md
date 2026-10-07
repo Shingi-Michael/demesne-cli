@@ -10,7 +10,7 @@ Native workspace file tools validate paths, reject symlink escapes and exclude p
 
 ### Workspace trust
 
-A workspace's `DEMESNE.md`/`AGENTS.md`, `.demesne/commands/` and `.demesne/config.toml` can steer the agent, so the daemon refuses to create a session in a folder you haven't trusted (`403 workspace_untrusted`). The graphics UI and an interactive CLI ask "Do you trust the files in this folder?"; a headless run must pass `--trust-workspace`. Trust is stored in `<data_dir>/trusted-workspaces.json` (mode `0600`), applies to the folder and its subfolders, and is removed by editing that file. Directory ownership and mode bits are not checked; trust is your decision about the content, not about the filesystem.
+A workspace's `DEMESNE.md`/`AGENTS.md`, `.demesne/commands/` and `.demesne/config.toml` can steer the agent, so the daemon refuses to create a session in a folder you haven't trusted (`403 workspace_untrusted`). The desktop window and an interactive CLI ask "Do you trust the files in this folder?"; a headless run must pass `--trust-workspace`. Trust is stored in `<data_dir>/trusted-workspaces.json` (mode `0600`), applies to the folder and its subfolders, and is removed by editing that file. Directory ownership and mode bits are not checked; trust is your decision about the content, not about the filesystem.
 
 - Writes and commands use the permission broker unless an applicable explicit grant exists. Session grants and persistent config grants are different lifetimes.
 - Command grants match argv in their allowed scope; a trailing wildcard deliberately broadens the allowed arguments.
@@ -34,21 +34,15 @@ ChatGPT OAuth uses PKCE, state, nonce, a loopback callback and verified identity
 
 Session journals, command output, memory and image artifacts may contain project content. They are durable local data, not encrypted storage. Treat backups and exported sessions accordingly. Authenticated model requests send the selected conversation/tool evidence to the selected provider; image hydration may also send preview pixels.
 
-## Graphics boundary
-
-The graphics host owns daemon tokens, auth and filesystem operations. The Electron page is sandboxed and receives public state through a narrow preload bridge, without Node access or direct daemon/network access. Rendered Markdown is sanitized. Terminal tile transfer uses private temporary files when supported, with inline transfer as fallback. See [graphics architecture](apps/graphics/README.md#boundaries).
-
-Linux startup verifies sandboxed rendering. The explicit `--install-sandbox` repair requests administrator access only to install a hash-verified, root-owned helper under `/usr/local/lib/demesne/sandbox`; it does not run the application as root or disable its sandbox. See [Linux setup](docs/linux.md).
-
-These are defense boundaries, not a promise that untrusted generated code is safe to execute. Review requested actions and keep grants specific to the intended work.
-
 ## Desktop boundary
 
-The [Tauri desktop client](apps/desktop/README.md#process-boundary) loads local authored assets in the system webview and uses a restricted native bridge. Commands require the main-window label and local application origin; remote navigation and creation of new webviews are denied. The page only has backend event-subscription capabilities, without general shell/filesystem plugin permissions. Its compiled Bun host owns daemon credentials, configuration and Drive; the page receives public snapshots and named actions. It has no general shell/filesystem bridge or direct authenticated daemon HTTP access. External links open in the system browser, and rendered Markdown is sanitized.
+The [Tauri desktop client](apps/desktop/README.md#process-boundary) is Demesne's interface. It loads local authored assets in the system webview and uses a restricted native bridge. Commands require the main-window label and local application origin; remote navigation and creation of new webviews are denied. The page only has backend event-subscription capabilities, without general shell/filesystem plugin permissions. Its compiled Bun host owns daemon credentials, configuration and Drive; the page receives public snapshots and named actions. It has no general shell/filesystem bridge or direct authenticated daemon HTTP access. External links open in the system browser, and rendered Markdown is sanitized.
 
 Native project selection validates the canonical directory and existing workspace ownership/write-permission rules. Choosing a project does not authorize commands or relax daemon tool approval. Closing the window ends its host without killing daemon-owned work. Linux WebKit/WebDriver integration tests use private fixture data and ordinary browser automation; no production test endpoint or renderer-side privileged testing API is added.
 
 System webviews receive platform security updates separately from Demesne. The desktop bundle does not yet provide signing/notarization or automatic updates. See [desktop prerequisites and limits](docs/desktop.md).
+
+These are defense boundaries, not a promise that untrusted generated code is safe to execute. Review requested actions and keep grants specific to the intended work.
 
 ## Reporting a vulnerability
 

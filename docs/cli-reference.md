@@ -1,6 +1,6 @@
 # Commands and keyboard
 
-[Documentation index](README.md) · [Configuration](configuration.md) · [Graphics guide](../apps/graphics/README.md)
+[Documentation index](README.md) · [Configuration](configuration.md) · [Desktop app](desktop.md)
 
 ## Executable commands
 
@@ -8,12 +8,11 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 
 | Command | Purpose |
 | --- | --- |
-| `demesne` | Open the graphics UI in an interactive terminal |
-| `demesne chat "message"` | Open the UI and submit the opening message; headless without a TTY |
-| `demesne --session ID` | Resume a session in the UI |
+| `demesne` | Open the desktop window on the current folder from an interactive terminal |
+| `demesne chat "message"` | Open the window and submit the opening message; headless without a TTY |
+| `demesne --session ID` | Resume a session in the window |
 | `demesne --workspace PATH --model ID` | Open a workspace and select a configured model |
-| `demesne graphics` / `demesne --graphics` | Explicit graphics entry point |
-| `demesne --setup` | Open graphics setup |
+| `demesne --setup` | Open setup in the window |
 | `demesne setup` | Terminal provider/model/review wizard |
 | `demesne auth login chatgpt` | Continue with ChatGPT |
 | `demesne auth login chatgpt --model gpt-6.1-sol` | Connect directly to Sol; verify account access when it is absent from the catalog |
@@ -33,7 +32,7 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 | `demesne events SESSION_ID [--after EVENT_ID]` | Stream journal events |
 | `demesne --version` | Show version; interactive use also checks for updates (`--no-check` disables it) |
 
-`--server URL` selects the daemon. Graphics supports `--scale auto` or `--scale 0.5` through `3`; auto follows terminal cell size. Use the explicit `graphics` entry point for graphics diagnostic flags described in the [graphics guide](../apps/graphics/README.md).
+`--server URL` selects the daemon. The window opens on the current folder unless `--workspace` names another. To find the app, `demesne` checks `DEMESNE_DESKTOP_BIN`, then `Demesne.app` in `/Applications` or `~/Applications` on macOS, then `demesne-desktop` on PATH, then a build in this checkout under `apps/desktop/src-tauri/target`. From a checkout with Cargo it falls back to `bun run desktop`. If none of these is found, it says to build with `bun run build:desktop` or use `demesne prompt`. See the [desktop guide](desktop.md). The old `demesne graphics` command still works and opens the window too.
 
 ChatGPT uses the public Responses API directly. [Authentication](authentication.md#continue-with-chatgpt) explains account selection, Sol verification and plan usage.
 
@@ -58,7 +57,7 @@ A new session in a folder you haven't trusted yet asks "Do you trust the files i
 
 ## Slash commands
 
-These commands are handled by the graphics host. The canonical grammar is in [the brand package](../packages/brand/src/index.ts), with dispatch in [host.ts](../apps/graphics/host.ts).
+These commands are handled by the interface host. The canonical grammar is in [the brand package](../packages/brand/src/index.ts), with dispatch in [host.ts](../apps/graphics/host.ts).
 
 | Command | Action |
 | --- | --- |
@@ -90,24 +89,24 @@ There is no separate `/thinking` command. Settings and the model picker expose s
 
 ## Keyboard and focus
 
-| Input | Current graphics behavior |
+| Input | Current behavior |
 | --- | --- |
 | Enter / Shift+Enter | Send / newline; Enter does not resubmit a running turn |
 | Tab with an empty composer / Ctrl+K | Settings |
 | Esc | Close the current popup/panel first; otherwise arm turn cancellation |
 | Esc twice within 1.5 seconds | Cancel an active turn when no panel/popup consumes Escape |
-| Ctrl+C / Ctrl+Q | Interrupt work or exit when idle / close UI |
+| Ctrl+Q (⌘Q on macOS) | Close the window; daemon work continues |
+| Ctrl+O (⌘O on macOS) | Open another project |
 | Ctrl+B / Ctrl+G | Execution log / follow live |
 | Alt+D / Alt+O / Alt+T | Changes / Files / Verification |
 | Alt+C / Alt+V / Alt+J / Alt+H | Context / Preview / Drive / History |
 | Alt+Enter | Expand/restore an open panel |
-| Ctrl+Y | Copy the browser selection |
 | `y`, `n`, `a`, `s` outside a text field | Allow once, deny, session grant, saved grant for an approval |
 | `p`, `s` with Drive panel focused | Pause/resume or stop Drive |
 | `[` / `]` in Changes | Previous/next diff hunk |
 | Ctrl+F / Ctrl+L in the file viewer | Find text / go to line |
 
-Mouse selection, wheel input, paste and resize are forwarded to the hidden browser. In text fields, ordinary browser editing applies. The old ANSI workbench's readline shortcuts and Session/Activity/Transcript view cycling are not a graphics keyboard reference. See [input dispatch](../apps/graphics/live.ts) and [terminal decoding](../apps/graphics/terminal.ts).
+In text fields, ordinary browser editing applies. The old ANSI workbench's readline shortcuts and Session/Activity/Transcript view cycling no longer apply. See [input dispatch](../apps/graphics/live.ts).
 
 ## Custom commands and mentions
 

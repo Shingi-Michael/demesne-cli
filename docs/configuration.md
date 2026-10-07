@@ -8,7 +8,7 @@ The [config loader](../packages/config/src/index.ts) merges defaults, user TOML,
 
 | Consumer | Configuration it uses |
 | --- | --- |
-| CLI/graphics host | User + project + environment; explicit `--server` wins for the client |
+| CLI/desktop host | User + project + environment; explicit `--server` wins for the client |
 | Production daemon | User + environment (`includeProject: false`) |
 | Drive controller | Client-loaded `[drive]` limits when starting a new mission |
 | Workspace instructions | `DEMESNE.md` or `AGENTS.md`, read for the coding turn |
@@ -47,7 +47,7 @@ allow = []
 
 A configured model needs a context capacity and output allowance, either explicitly or through a supported runtime profile. The output allowance must be smaller than the context. These are operational limits, not a claim about the model's theoretical maximum.
 
-`daemon.auto_start` is `prompt`, `always`, or `never`. The graphics UI offers **Start daemon** when offline; `always` attempts an automatic start. The daemon binds only to loopback. A client `server` override does not make the daemon a remotely exposed service.
+`daemon.auto_start` is `prompt`, `always`, or `never`. The desktop window offers **Start daemon** when offline; `always` attempts an automatic start. The daemon binds only to loopback. A client `server` override does not make the daemon a remotely exposed service.
 
 ## Provider fields
 
@@ -171,7 +171,7 @@ Each MCP server may also supply an `env` table. Tools are named `mcp__SERVER__TO
 - `theme`: `auto`, `demesne`, `demesne-light`, `dracula`, `tokyo-night`, `tokyo-night-storm`, `nord`, `gruvbox-dark`, `catppuccin-mocha`, `catppuccin-latte`, `github-light`. This supplies the initial palette. `/theme` persists a live selection in the daemon's `themes.json`; that selection takes precedence on subsequent launches. [`/themefy`](themes.md) creates custom palettes through an interview and adds them to the picker.
 - `[permissions] allow`: scoped rules such as `edit_file:src` or `run_command:git status`. Command rules match exact argv; a terminal ` *` explicitly permits additional arguments. Avoid broad execution grants.
 - `[notifications] enabled` and `minimum_duration_ms` configure supported notification paths (default true / 30000 ms).
-- `[ui] intro` and `hyperlinks` remain parsed client settings; they are not switches back to the removed text workbench. Graphics motion uses `prefers-reduced-motion` in the browser.
+- `[ui] intro` and `hyperlinks` remain parsed client settings; they are not switches back to the removed text workbench. Interface motion uses `prefers-reduced-motion` in the webview.
 
 ## Environment overrides
 
@@ -188,7 +188,7 @@ The exported [environment map](../packages/config/src/index.ts) is authoritative
 | Agent | `DEMESNE_MAX_MODEL_ROUNDS`, `DEMESNE_MAX_TOOL_CALLS`, `DEMESNE_SUBAGENT_MODEL` |
 | Images | `DEMESNE_IMAGE_URL`, `DEMESNE_IMAGE_MODEL`, `DEMESNE_IMAGE_API_KEY`, `DEMESNE_IMAGE_REQUEST_TIMEOUT_MS` |
 | OpenRouter login | `OPENROUTER_API_KEY` |
-| Graphics diagnostics | `DEMESNE_GRAPHICS_FILES`, `DEMESNE_GRAPHICS_GPU`, `DEMESNE_GRAPHICS_TRACE` |
+| Desktop launch | `DEMESNE_DESKTOP_BIN` (the desktop app `demesne` opens; see [troubleshooting](troubleshooting.md#the-desktop-window-doesnt-open)) |
 | Drive transport | `DEMESNE_DRIVE_CONTROL=ui` selects the compatibility UI-control path |
 
 `DEMESNE_NO_INTRO` and `DEMESNE_NO_HYPERLINKS` are also read by the config loader. `NO_COLOR` and `DEMESNE_REDUCED_MOTION` affect the plain terminal output utilities; they are not general CSS feature switches.
@@ -201,4 +201,4 @@ demesne daemon stop
 demesne daemon start
 ```
 
-Stop only when active work can be interrupted. Provider config edits require daemon restart; `/model`, reasoning selection, and `/subagent` have runtime routes. Reopen the graphics UI after replacing its build. [Troubleshooting](troubleshooting.md#rebuilds-and-running-processes) explains binary resolution and background-service caveats.
+Stop only when active work can be interrupted. Provider config edits require daemon restart; `/model`, reasoning selection, and `/subagent` have runtime routes. Reopen the desktop window after replacing its build. [Troubleshooting](troubleshooting.md#rebuilds-and-running-processes) explains binary resolution and background-service caveats.

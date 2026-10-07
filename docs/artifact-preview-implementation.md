@@ -13,12 +13,11 @@ flowchart LR
     Validate --> Preview[Normalized PNG preview]
     Validate --> Descriptor[(SQLite artifact descriptor)]
     Descriptor --> Event[Artifact-created journal event]
-    Event --> Host[Graphics host reconciles artifact metadata]
+    Event --> Host[Interface host reconciles artifact metadata]
     Original --> API[Authenticated content API]
     Preview --> API
     Host --> API
-    API --> Browser[Preview image in sandboxed UI]
-    Browser --> Tiles[Electron raster and terminal tiles]
+    API --> Browser[Preview image in the desktop webview]
     Descriptor --> Vision[Opt-in image hydration for model context]
     Preview --> Vision
 ```
@@ -63,7 +62,7 @@ All routes require production daemon authentication. Content responses include M
 
 ## UI state and model input
 
-The graphics host fetches authenticated images and supplies safe data to the sandboxed page. Loading an artifact does not expose the daemon token. Request identities prevent stale asynchronous loads from replacing a newer selection.
+The interface host fetches authenticated images and supplies safe data to the webview page. Loading an artifact does not expose the daemon token. Request identities prevent stale asynchronous loads from replacing a newer selection.
 
 Selection, pin/follow, zoom, pan, comparison opacity and reference choice are frontend state. Daemon metadata/content survive restart; not every viewing preference is persisted. Pane navigation is remembered within a session, and panel width is saved in `graphics-ui.json`.
 
@@ -71,7 +70,7 @@ Vision hydration selects the last two retained image IDs in tool messages, resol
 
 ## Rendering and packaging
 
-Images are rendered as part of the HTML interface. Electron's full UI frame is converted into changed tiles, so Preview does not run a competing terminal-output loop. Resizing advances the tile generation; stale transfers are discarded. [Graphics lifecycle](../apps/graphics/README.md#boundaries) covers compression, backpressure, and disconnect cleanup.
+Images are rendered as part of the HTML interface in the [desktop window](desktop.md).
 
 Compiled daemons load native image dependencies beside the real executable, outside Bun's embedded filesystem. Keep `dist/node_modules` with `demesned`; building only the executable and omitting those codecs is incomplete packaging.
 
@@ -80,9 +79,6 @@ Compiled daemons load native image dependencies beside the real executable, outs
 ```sh
 bun test apps/daemon/test/artifacts.test.ts apps/daemon/test/image-inputs.test.ts apps/daemon/test/image-generation.test.ts
 bun test packages/storage/test apps/graphics/test/panel-api.test.ts
-bun apps/graphics/check-panels.ts /tmp/demesne-panels
-bun apps/graphics/check-panels.ts /tmp/demesne-panels-retina --retina
-bun run graphics:check
 ```
 
-Coverage includes immutable originals, MIME/size rejection, authenticated/session-scoped access, duplicate delivery, model hydration, replay, reference import, unequal-size comparison, fit/100% geometry, pan/zoom, and panel lifecycle. Tests with fake producers do not establish a live provider's model availability or image-generation entitlement.
+Coverage includes immutable originals, MIME/size rejection, authenticated/session-scoped access, duplicate delivery, model hydration, replay, reference import, and the panel API. Tests with fake producers do not establish a live provider's model availability or image-generation entitlement.

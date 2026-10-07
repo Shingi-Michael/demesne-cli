@@ -88,7 +88,7 @@ export function captureWindowTool(deps: WindowCaptureDependencies = nativeWindow
       images: [{ data, mimeType: "image/png", filename: "window-screenshot.png" }] };
   }
   return {
-    definition: { name: "capture_window", description: "Capture a visible native macOS application window into Preview for visual inspection. Demesne is a terminal UI, normally in Ghostty: use application Ghostty and title demesne. Do not search web-server ports for Demesne. If several windows match, returns window IDs to select explicitly; never captures the whole desktop.",
+    definition: { name: "capture_window", description: "Capture a visible native macOS application window into Preview for visual inspection. Demesne is a native desktop app: use application Demesne. Do not search web-server ports for Demesne. If several windows match, returns window IDs to select explicitly; never captures the whole desktop.",
       inputSchema: { type: "object", properties: { application: { type: "string" }, title: { type: "string", description: "Exact window title, case-insensitive. Omit to list ambiguous windows." }, windowId: { type: "integer", minimum: 1 } }, required: ["application"], additionalProperties: false } },
     permission: () => ({ kind: "execute", summary: "Capture a native application window" }),
     execute: async () => { throw new Error("capture_window requires artifact-aware execution"); },

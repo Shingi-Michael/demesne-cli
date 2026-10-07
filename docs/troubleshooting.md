@@ -1,6 +1,6 @@
 # Troubleshooting
 
-[Documentation index](README.md) · [Configuration](configuration.md) · [Graphics](../apps/graphics/README.md)
+[Documentation index](README.md) · [Configuration](configuration.md) · [Desktop app](desktop.md)
 
 ## Start with the running state
 
@@ -16,10 +16,10 @@ Check the active daemon, provider/model, context and output limits, and inferenc
 ```sh
 bun install --frozen-lockfile
 bun run build
-bun run build:graphics
+bun run build:desktop
 ```
 
-The CLI/daemon build does not package the graphics runtime. Keep the complete `dist` layout together. `runGraphics` prefers the packaged host when present, so rebuilding only source assets can leave normal launch on an older package.
+The CLI/daemon build does not package the desktop app. `bun run build:desktop` builds it separately and needs Rust. Keep the complete `dist` layout together.
 
 When active work can be interrupted, stop the old daemon and explicitly start the rebuilt one:
 
@@ -29,44 +29,19 @@ DEMESNE_DAEMON_BIN="$PWD/dist/demesned" bun run demesne daemon start
 ./dist/demesne
 ```
 
-Close existing graphics sessions and reopen them to replace their Electron renderer. A daemon restart alone does not refresh the UI. Conversely, exiting the UI does not stop daemon-owned work. A system service/launch agent may relaunch its configured binary; inspect that service’s executable path if the old version immediately returns. PATH may resolve an installed `demesned` before the source entry point, so use the explicit override when validating a build.
+Close the desktop window and reopen it to load a rebuilt interface. A daemon restart alone does not refresh the UI. Conversely, closing the window does not stop daemon-owned work. A system service/launch agent may relaunch its configured binary; inspect that service’s executable path if the old version immediately returns. PATH may resolve an installed `demesned` before the source entry point, so use the explicit override when validating a build.
 
-## Linux sandbox errors
+## The desktop window doesn't open
 
-Linux startup probes a sandboxed renderer before opening the UI, identifies common display/library failures, and offers an explicit helper repair. See [Linux setup](linux.md) for the commands and administrator boundary.
+`demesne` in a terminal opens the desktop window on the current folder. It looks for the app in this order:
 
-## EPIPE or an Electron error dialog
+1. `DEMESNE_DESKTOP_BIN`.
+2. On macOS, `/Applications/Demesne.app` or `~/Applications/Demesne.app`.
+3. `demesne-desktop` on PATH.
+4. A build in this checkout under `apps/desktop/src-tauri/target/release` or `target/debug`.
+5. `bun run desktop` from this checkout, when Cargo is installed. The first build takes a while.
 
-`write EPIPE` at `renderer.cjs` means the renderer tried to write after its receiving pipe closed. Older builds did not handle the stream’s asynchronous error, so Electron displayed an uncaught-exception dialog. Current code shuts down through the pipe-writer lifecycle and stops late frame/ACK writes.
-
-Dismiss an existing old-process dialog, rebuild both packages, then reopen the UI. This is a renderer transport failure; it does not establish that the model or session database failed. Check daemon state before retrying a request that might already have executed.
-
-```sh
-bun apps/graphics/check-disconnect.ts
-bun apps/graphics/check-subagent-shutdown.ts
-```
-
-These checks use synthetic/fake work and do not load another real model.
-
-## Tiny UI, missing pixels or slow scrolling
-
-Run directly in Ghostty with working Kitty graphics and cell-size replies. Start with automatic scaling:
-
-```sh
-demesne graphics --scale auto
-```
-
-Terminal font size and Retina density affect scale. An explicit value from `0.5` to `3` overrides automatic scale. Unsupported or filtered terminal replies can prevent startup; a multiplexer or remote hop may alter those capabilities.
-
-The fast local path transfers tile filenames after a successful capability probe. Remote/unsupported file transfer uses inline bytes and can cost more. For diagnosis:
-
-```sh
-DEMESNE_GRAPHICS_FILES=0 bun run graphics
-DEMESNE_GRAPHICS_GPU=0 bun run graphics
-DEMESNE_GRAPHICS_TRACE=/tmp/demesne-frames.jsonl bun run graphics
-```
-
-These are separate diagnostic runs, not a recommended permanent combination. Trace stages distinguish input, paint, encoding and terminal writes. The [graphics benchmarks](../apps/graphics/README.md#boundaries) exclude final terminal presentation latency.
+If none is found, build the app with `bun run build:desktop` or set `DEMESNE_DESKTOP_BIN`. Over headless SSH or in a script, use [`demesne prompt`](cli-reference.md#headless-output) instead. On Linux the window needs a desktop session; see [desktop prerequisites](desktop.md#prerequisites).
 
 ## ChatGPT sign-in or incomplete tool calls
 

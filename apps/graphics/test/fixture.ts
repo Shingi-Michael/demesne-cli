@@ -12,7 +12,15 @@ import { createDaemonApp } from "../../daemon/src/app.ts";
 import { serveDaemon } from "../../daemon/src/http-server.ts";
 import type { TurnProcessor } from "../../daemon/src/processor.ts";
 import { loadCliSettings } from "../../cli/src/cli-config.ts";
-import { graphicsEnvironment } from "../runtime.ts";
+
+/// What a child process (the desktop sidecar, a UI check) inherits: the
+/// session it draws in, never provider credentials.
+function sessionEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  return Object.fromEntries([
+    "HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR",
+    "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "XDG_SESSION_TYPE",
+  ].flatMap(key => env[key] ? [[key, env[key]!]] : []));
+}
 
 export async function fixture(
   processor?: TurnProcessor,
@@ -69,7 +77,7 @@ export async function fixture(
     client,
     settings,
     env: {
-      ...graphicsEnvironment(),
+      ...sessionEnvironment(),
       HOME: home,
       PATH: process.env.PATH!,
       TERM: "xterm-256color",

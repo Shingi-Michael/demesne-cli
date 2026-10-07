@@ -1,6 +1,6 @@
 # Image preview: user guide
 
-[Documentation index](README.md) · [Pipeline implementation](artifact-preview-implementation.md) · [Graphics panels](../apps/graphics/README.md#review-panel-upgrades)
+[Documentation index](README.md) · [Pipeline implementation](artifact-preview-implementation.md) · [Review panels](../apps/graphics/README.md#review-panel-upgrades)
 
 **Implemented.** This file retains its original name for existing links. It describes the shipped image feature, not a pending delivery plan.
 
@@ -22,7 +22,7 @@ Image-producing tools must be configured/available. Enabling `vision`, image gen
 
 Open **Alt+V** or Preview in the rail. The panel offers artifact history, **Pin**, **Follow latest**, **Open original**, fit/100% zoom, and drag-to-pan. Manual selection/pinning takes precedence over newly arriving artifacts; Follow latest opts back into automatic selection. New images do not automatically reopen a dismissed panel or change the draft.
 
-Choose an existing image as a reference or import a PNG/JPEG/WebP workspace export. **Compare** overlays images with an opacity control. Unequal dimensions are labeled and aligned at the top left without stretching. At 100%, one image pixel maps to one terminal pixel, including Retina density.
+Choose an existing image as a reference or import a PNG/JPEG/WebP workspace export. **Compare** overlays images with an opacity control. Unequal dimensions are labeled and aligned at the top left without stretching.
 
 An import requires a workspace-bound session with at least one conversation turn. Imported references remain session artifacts; missing viewport metadata is shown as unknown rather than inferred. Closing/reopening the client retains the daemon's artifacts, but current pin, zoom, comparison and selection are local UI state—not a promise that every viewing preference survives process restart.
 
@@ -43,7 +43,7 @@ The chat model's identity, the image-generation model's identity, and the tool t
 - This is an image-artifact viewer, not arbitrary HTML/app execution, video playback, an arcade, or an interactive website preview.
 - There is no universal durable image-operation lifecycle declaring every producer to be “generating.” Tool progress and completed artifacts supply the available evidence.
 - View/compare controls do not perform image editing. Reference-based generation is a separate approved tool call.
-- The current interactive UI requires a graphics-capable terminal; headless commands remain available separately.
+- The interactive UI is the [desktop window](desktop.md); headless commands remain available separately.
 - OS screenshot permission is still required for native capture. A denied permission is not bypassed by another capture path.
 
-[Verification commands](artifact-preview-implementation.md#verification) exercise persistence, HTTP retrieval, image inputs, preview controls, and terminal rendering.
+[Verification commands](artifact-preview-implementation.md#verification) exercise persistence, HTTP retrieval, image inputs, and the panel API.

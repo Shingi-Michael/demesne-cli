@@ -4,7 +4,7 @@
 
 ## Two separate credentials
 
-The CLI/graphics host authenticates to the local daemon with `daemon.token`. Providers have their own credentials. The browser renderer gets neither credential; the privileged host and daemon perform authenticated requests.
+The CLI and desktop host authenticate to the local daemon with `daemon.token`. Providers have their own credentials. The desktop webview gets neither credential; the privileged host and daemon perform authenticated requests.
 
 ## Signing in and out in the app
 

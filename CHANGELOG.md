@@ -32,6 +32,10 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 - Documentation now separates current behavior, configuration, auth, concurrency, previews, operations and historical notes, with linked source references and flow diagrams.
 - Removed the separate Codex runtime provider, CLI auth commands and executable dependency. Legacy `auth = "codex"` sections are retired during config loading; remaining providers and saved sessions are preserved, and the next config write backs up the original.
 
+### Removed
+
+- The Ghostty terminal interface is removed, along with its Electron renderer and Kitty image transport. The desktop window is now the interface. `demesne` in a terminal opens it on the current folder, and `demesne prompt` remains for scripts.
+
 ### Fixed
 
 - Linux graphics startup now installs a missing source runtime, verifies sandboxed rendering, preserves desktop authentication variables, and diagnoses sandbox/display/library failures. Explicit helper repair uses a protected, verified copy; workspace permission errors name the folder and a non-recursive remedy. Linux graphics CI covers Ubuntu 20.04/24.04 userlands and packaged startup.

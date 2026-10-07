@@ -76,6 +76,14 @@ When it finishes, demesne commits the change on that branch and shows the same c
 
 Outside a git repository, or in one with no commits yet, Run falls back to a **bounded** mission in the current session.
 
+## Away mode: work through the list while you're away
+
+**Run the top 3 while I'm away** sits above the Next queue. Pressing it hands the top proposals (up to three) to the daemon, which runs them one after another, each exactly as if you had pressed **Run**: its own git worktree and branch, one coding turn, and a commit. Your own Run or a breakage fix goes first; the list waits its turn. The daemon owns the list, so closing the window doesn't stop it.
+
+While it works, a card shows each proposal's state, with **Stop after this one**. When you come back, a **While you were away** card sums it up ("2 ready to review · 1 changed nothing") and every finished branch waits below it with its own **Apply to my branch**, **Open PR** and **Discard**. The summary goes away once you've dealt with everything it lists, or when you dismiss it. Each run records its outcome for [calibration](#drive-learns-its-own-accuracy) like any other Run.
+
+No new run starts after eight hours. One that is already running finishes. A daemon restart ends the list, and the run it interrupted is marked failed. If a `/drive` mission opens a worktree in the meantime, the rest waits for you. API: `POST /v1/drive/away` (`workspace`, up to six `items` of `{ proposal, signals }`, optional `minutes`), `GET /v1/drive/away?workspace=…` and `POST /v1/drive/away/stop`. [Implementation](../apps/daemon/src/drive-fixes.ts)
+
 ## Missions work in a worktree
 
 A new `/drive` mission doesn't touch your checkout either. Drive creates a git worktree on a branch named after the mission (`drive/mission-…`), opens a session rooted there and moves you into it. The planner, check-ins and every coding turn then run in that session, with the same limits and evidence as before. Your original session and files stay as they were.

@@ -888,7 +888,7 @@ let breakageSignature = "";
 function renderBreakage() {
   if (!state) return;
   const { signals, fix, busy, message } = state.breakage;
-  const signature = JSON.stringify([signals, fix, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0]);
+  const signature = JSON.stringify([signals, fix, state.breakage.inbox, state.breakage.away, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0]);
   if (signature === breakageSignature) return;
   breakageSignature = signature;
   // Both shells (Ghostty and desktop) carry #breakage; never let a missing
@@ -906,20 +906,32 @@ function renderBreakage() {
     cards.push(`<div class="breakage-card alert"><div class="breakage-head"><span class="breakage-mark">✕</span><span class="breakage-text">${signals.length === 1 ? "Something just broke" : `${signals.length} things just broke`}</span>${close("breakage-dismiss", "Not now")}</div><ul class="breakage-list">${signals.map((signal) => `<li><b>${h(signal.title)}</b><span>${h(signal.detail.replace(/^Latest run exit (\S+) at \S+\.\s*/, "exit $1 · "))}</span></li>`).join("")}</ul><p class="breakage-note">${running ? `${fix.mission ? "A Drive mission is working in a worktree" : "A fix is already running"}; this one waits until it finishes.` : "Drive can fix it in a separate git worktree. Your files and this conversation stay as they are until you choose to apply it."}</p><div class="breakage-actions">${running ? "" : btn("breakage-fix", doing("fix", "Starting…", "▶ Fix in a worktree"), {}, "primary", true, Boolean(busy))}${btn("breakage-dismiss", "Not now", {}, "quiet", true)}${btn("breakage-never", "Never for this", {}, "quiet", true)}</div></div>`);
   }
   // A running mission shows in the Drive panel; its card comes when it settles.
-  if (fix && !(fix.mission && (fix.status === "starting" || fix.status === "running"))) {
+  const fixCard = (fix: NonNullable<Snapshot["breakage"]["fix"]>) => {
     const elapsed = duration((fix.finishedAt ? Date.parse(fix.finishedAt) : Date.now()) - Date.parse(fix.startedAt));
     const branch = `<code class="breakage-branch">${h(fix.branch)}</code>`;
     if (fix.status === "starting" || fix.status === "running") {
       const activity = fix.activity ? `${fix.activity.steps} step${fix.activity.steps === 1 ? "" : "s"}${fix.activity.last ? ` · ${h(fix.activity.last)}` : ""}` : "Creating the worktree…";
-      cards.push(`<div class="breakage-card running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">${fix.proposal ? "Working in a worktree" : "Fixing in a worktree"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><div class="breakage-meta">${branch}<span>${activity}</span></div><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Stopping…", "Stop and discard"), {}, "quiet", true, Boolean(busy))}</div></div>`);
+      cards.push(`<div class="breakage-card running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">${fix.proposal ? "Working in a worktree" : "Fixing in a worktree"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><div class="breakage-meta">${branch}<span>${activity}</span></div><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Stopping…", "Stop and discard"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
     } else if (fix.status === "ready") {
       const diff = fix.diff ? `<span class="add">+${fix.diff.additions}</span> <span class="del">−${fix.diff.deletions}</span> · ${fix.diff.files} file${fix.diff.files === 1 ? "" : "s"}` : "";
       const checks = (fix.checks ?? []).map((check) => `<li class="${check.passed ? "pass" : "fail"}">${check.passed ? "✓" : "✕"} <code>${h(check.command)}</code></li>`).join("");
-      cards.push(`<div class="breakage-card ready"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text">${fix.mission ? "Mission ready to review" : fix.proposal ? "Ready to review" : "Fix ready to review"}</span><small>${diff}</small></div><p class="breakage-title">${h(fix.title)}</p>${fix.headline ? `<p class="breakage-receipt">${h(fix.headline)} ${btn("breakage-receipt", "Copy receipt", {}, "link", true)}</p>` : ""}${fix.summary ? `<p class="breakage-summary">${h(fix.summary)}</p>` : ""}${checks ? `<ul class="breakage-checks">${checks}</ul>` : '<p class="breakage-note">No checks ran in the worktree.</p>'}<div class="breakage-meta">${branch}<span>${(fix.diff?.paths ?? []).map(h).join(" · ")}</span></div><div class="breakage-actions">${btn("breakage-apply", doing("apply", "Applying…", "Apply to my branch"), {}, "primary", true, Boolean(busy))}${btn("breakage-pr", doing("pr", "Opening…", "Open PR"), {}, "", true, Boolean(busy))}${btn("breakage-discard", doing("discard", "Discarding…", "Discard"), {}, "quiet", true, Boolean(busy))}</div></div>`);
+      cards.push(`<div class="breakage-card ready"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text">${fix.mission ? "Mission ready to review" : fix.proposal ? "Ready to review" : "Fix ready to review"}</span><small>${diff}</small></div><p class="breakage-title">${h(fix.title)}</p>${fix.headline ? `<p class="breakage-receipt">${h(fix.headline)} ${btn("breakage-receipt", "Copy receipt", { id: fix.id }, "link", true)}</p>` : ""}${fix.summary ? `<p class="breakage-summary">${h(fix.summary)}</p>` : ""}${checks ? `<ul class="breakage-checks">${checks}</ul>` : '<p class="breakage-note">No checks ran in the worktree.</p>'}<div class="breakage-meta">${branch}<span>${(fix.diff?.paths ?? []).map(h).join(" · ")}</span></div><div class="breakage-actions">${btn("breakage-apply", doing("apply", "Applying…", "Apply to my branch"), { id: fix.id }, "primary", true, Boolean(busy))}${btn("breakage-pr", doing("pr", "Opening…", "Open PR"), { id: fix.id }, "", true, Boolean(busy))}${btn("breakage-discard", doing("discard", "Discarding…", "Discard"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
     } else if (fix.status === "failed") {
-      cards.push(`<div class="breakage-card failed"><div class="breakage-head"><span class="breakage-mark">${(fix.proposal || fix.mission) && fix.unchanged ? "○" : "!"}</span><span class="breakage-text">${fix.proposal || fix.mission ? (fix.unchanged ? "Finished without changes" : "Couldn't finish it") : "Couldn't fix it"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><p class="breakage-summary">${h(fix.error ?? (fix.proposal || fix.mission ? "It failed." : "The fix failed."))}${fix.summary ? ` ${h(fix.summary)}` : ""}</p><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Discarding…", "Discard the worktree"), {}, "quiet", true, Boolean(busy))}</div></div>`);
+      cards.push(`<div class="breakage-card failed"><div class="breakage-head"><span class="breakage-mark">${(fix.proposal || fix.mission) && fix.unchanged ? "○" : "!"}</span><span class="breakage-text">${fix.proposal || fix.mission ? (fix.unchanged ? "Finished without changes" : "Couldn't finish it") : "Couldn't fix it"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><p class="breakage-summary">${h(fix.error ?? (fix.proposal || fix.mission ? "It failed." : "The fix failed."))}${fix.summary ? ` ${h(fix.summary)}` : ""}</p><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Discarding…", "Discard the worktree"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
     }
+  };
+  const away = state.breakage.away;
+  if (away) {
+    const done = away.items.filter((item) => !["queued", "running"].includes(item.state)).length;
+    const count = (kind: string, label: string) => { const n = away.items.filter((item) => item.state === kind).length; return n ? `${n} ${label}` : ""; };
+    const tally = [count("ready", "ready to review"), count("unchanged", "changed nothing"), count("failed", "couldn't finish"), count("skipped", "didn't start")].filter(Boolean).join(" · ");
+    const rows = away.items.map((item) => `<li class="away-${item.state}"><span class="away-mark">${({ queued: "○", running: "◌", ready: "✓", unchanged: "–", failed: "!", skipped: "·" } as Record<string, string>)[item.state]}</span><span>${h(item.proposal.title)}</span>${item.note && item.state !== "ready" ? `<small>${h(item.note.split("\n")[0]!.slice(0, 160))}</small>` : ""}</li>`).join("");
+    cards.push(away.status === "running"
+      ? `<div class="breakage-card away running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">Working through Drive's list</span><small>${done} of ${away.items.length} done</small></div><ul class="away-list">${rows}</ul><p class="breakage-note">Each one runs in its own worktree. Nothing reaches your checkout until you apply it.</p><div class="breakage-actions">${btn("breakage-away-stop", "Stop after this one", {}, "quiet", true, Boolean(busy))}</div></div>`
+      : `<div class="breakage-card away"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text">While you were away</span>${close("breakage-away-close", "Dismiss")}</div><p class="breakage-note">${tally || "Nothing ran."}</p><ul class="away-list">${rows}</ul>${away.reason ? `<p class="breakage-note">${h(away.reason)}</p>` : ""}</div>`);
   }
+  for (const item of [fix, ...state.breakage.inbox])
+    if (item && !(item.mission && (item.status === "starting" || item.status === "running"))) fixCard(item);
   node.innerHTML = cards.join("");
   node.hidden = !cards.length;
 }
@@ -1313,7 +1325,11 @@ function nextQueueHTML(busy = false) {
       return `<div class="next-item first"><div class="next-top">${tag}<span class="next-title">${h(item.title)}</span>${btn("next-open", "▾", { id: "" }, "next-collapse")}</div><p class="next-why">${h(item.why)}</p><div class="next-facts">${item.evidence.map((id) => `<span title="${h(signal.get(id)?.detail ?? "")}">${item.urgent && signal.get(id)?.urgent ? "! " : ""}${h(signal.get(id)?.title ?? id)}</span>`).join("")}<span${item.expectedMinutes ? ` title="Drive estimated ${minutes(item.minutes)}; runs here take ${next.calibration?.timeRatio ?? 1}× its estimates"` : ""}>~${minutes(item.expectedMinutes ?? item.minutes)} · ${item.coders} coder${item.coders === 1 ? "" : "s"}</span><span class="confidence-${item.confidence}">confidence ${item.confidence}</span></div><div class="next-actions">${busy ? '<span class="muted next-after">Runs after this mission</span>' : btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id }, "quiet")}${btn("next-never", "Never", { id: item.id }, "quiet")}</div></div>`;
     })
     .join("");
-  return `<div class="next-heading"><span class="muted next-rank">${calibrationLine(next.calibration)}</span><span class="muted next-age">${next.loading ? "Reading…" : next.generatedAt ? age(next.generatedAt) : ""}</span>${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${
+  // Away mode: the top few run one after another, each in its own worktree.
+  const awayCount = Math.min(3, next.proposals.length);
+  const awayRow = awayCount && !busy && state!.breakage.away?.status !== "running"
+    ? `<div class="next-away">${btn("next-away", `▶ Run the top ${awayCount === 1 ? "one" : awayCount} while I'm away`, { count: awayCount }, "", true)}<span class="muted">One after another, each in its own worktree. They wait for your review.</span></div>` : "";
+  return `<div class="next-heading"><span class="muted next-rank">${calibrationLine(next.calibration)}</span><span class="muted next-age">${next.loading ? "Reading…" : next.generatedAt ? age(next.generatedAt) : ""}</span>${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${awayRow}${
     next.error ? `<p class="next-error">${h(next.error)}</p>` : ""
   }${rows || (next.loading ? "" : '<p class="muted next-empty">Nothing worth proposing right now. Drive looks again after your next turn, or press ↻.</p>')}`;
 }
@@ -2822,6 +2838,7 @@ async function dispatch(
   }
   if (action === "new-session") return api("new-session", {});
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never"].includes(action)) return api(action, args);
+  if (action === "next-away") return act(() => api(action, args));
   if (action.startsWith("breakage-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
   if (["cleanup-toggle", "cleanup-delete"].includes(action)) return act(() => api(action, args));

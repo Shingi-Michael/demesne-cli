@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import { splitNextPrompt, type CommandRecord, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveFixStatus, type DriveSignal, type Turn } from "@demesne/protocol";
+import { splitNextPrompt, type CommandRecord, type DriveAway, type DriveAwayRequest, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveFixStatus, type DriveSignal, type Turn } from "@demesne/protocol";
 
 /// Drive's unattended work, each piece in its own git worktree on its own
 /// branch: fixes for breakages, Next proposals you press Run on, and /drive
@@ -70,12 +70,27 @@ End with two or three plain sentences: what you changed and how you checked it.`
 
 const slugOf = (text: string, fallback: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32).replace(/-$/, "") || fallback;
 
+/// How long an away run keeps starting new work, unless asked otherwise.
+export const AWAY_MINUTES = 8 * 60;
+
 export class DriveFixes {
   private fixes: DriveFix[] = [];
   private done = new Map<string, Promise<void>>();
+  /// Away runs, newest last per workspace, and the loops working them.
+  private aways: DriveAway[] = [];
+  private awayLoops = new Map<string, Promise<void>>();
+  private readonly awayFile: string;
 
-  constructor(private readonly stateFile: string, private readonly worktreeRoot: string, private readonly host: FixHost, private readonly git: Run = run) {
+  constructor(private readonly stateFile: string, private readonly worktreeRoot: string, private readonly host: FixHost, private readonly git: Run = run,
+    private readonly now: () => number = Date.now) {
     try { this.fixes = JSON.parse(readFileSync(stateFile, "utf8")) as DriveFix[]; } catch { this.fixes = []; }
+    this.awayFile = join(dirname(stateFile), "drive-away.json");
+    try { this.aways = JSON.parse(readFileSync(this.awayFile, "utf8")) as DriveAway[]; } catch { this.aways = []; }
+    // Its loop lived in the daemon: an away run doesn't survive a restart.
+    for (const away of this.aways) if (away.status === "running") {
+      for (const item of away.items) if (item.state === "running") Object.assign(item, { state: "failed", note: "The daemon restarted while this was running." });
+      this.endAway(away, "stopped", "The daemon restarted, so the rest didn't run.", false);
+    }
     // A fix that was working when the daemon stopped can't resume. A mission
     // can: its planner lives in the client and resumes paused.
     let changed = false;
@@ -143,6 +158,78 @@ export class DriveFixes {
       await this.cleanup(fix, true);
     }
     return fix;
+  }
+
+  /// Away mode: runs the proposals one after another, each as if you pressed
+  /// Run, until they're done or the deadline passes. Each finished one waits
+  /// for review like any other worktree job.
+  startAway(request: DriveAwayRequest): DriveAway {
+    const { workspace } = request;
+    if (this.away(workspace)?.status === "running") throw new Error("Drive is already working through a list for this project.");
+    if (this.fixes.some((fix) => fix.workspace === workspace && fix.mission && ACTIVE.has(fix.status))) throw new Error("A Drive mission's worktree is still open for this project. Apply or discard it first.");
+    const started = this.now();
+    const away: DriveAway = { id: randomUUID().slice(0, 8), workspace, status: "running", startedAt: new Date(started).toISOString(), finishedAt: null,
+      deadline: new Date(started + (request.minutes ?? AWAY_MINUTES) * 60_000).toISOString(),
+      items: request.items.map((item) => ({ proposal: item.proposal, signals: item.signals, state: "queued" as const })) };
+    this.aways = [...this.aways.filter((item) => item.workspace !== workspace), away];
+    this.saveAway();
+    const loop = this.workAway(away).catch((error) => this.endAway(away, "stopped", error instanceof Error ? error.message : String(error))).finally(() => this.awayLoops.delete(away.id));
+    this.awayLoops.set(away.id, loop);
+    return away;
+  }
+
+  away(workspace: string): DriveAway | null { return this.aways.findLast((item) => item.workspace === workspace) ?? null; }
+
+  /// Starts nothing more. A run already working finishes and waits for review.
+  stopAway(workspace: string): DriveAway | null {
+    const away = this.away(workspace);
+    if (away?.status === "running") this.endAway(away, "stopped", "You stopped it.");
+    return away;
+  }
+
+  /// Waits for an away run's loop (tests and shutdown).
+  async awaySettled(id: string) { await this.awayLoops.get(id); }
+
+  private async workAway(away: DriveAway) {
+    for (const item of away.items) {
+      if (away.status !== "running") break;
+      // Your own Run or a breakage fix goes first; this waits its turn.
+      for (let other = this.busy(away.workspace); other && away.status === "running"; other = this.busy(away.workspace)) {
+        if (other.mission) return this.endAway(away, "stopped", "A Drive mission opened a worktree here, so the rest waits for you.");
+        await (this.done.get(other.id) ?? new Promise((resolve) => setTimeout(resolve, 1000)));
+      }
+      if (away.status !== "running") break;
+      if (this.now() >= Date.parse(away.deadline)) return this.endAway(away, "finished", "Time ran out before the rest could start.");
+      item.state = "running";
+      this.saveAway();
+      let fix: DriveFix;
+      try { fix = await this.start(away.workspace, item.signals, item.proposal); }
+      catch (error) { Object.assign(item, { state: "failed", note: error instanceof Error ? error.message : String(error) }); this.saveAway(); continue; }
+      item.fixId = fix.id;
+      await this.done.get(fix.id);
+      Object.assign(item, fix.status === "ready" ? { state: "ready" } : fix.unchanged ? { state: "unchanged", note: fix.summary } : { state: "failed", note: fix.error });
+      this.saveAway();
+    }
+    if (away.status === "running") this.endAway(away, "finished");
+  }
+
+  private busy(workspace: string) {
+    return this.fixes.find((fix) => fix.workspace === workspace && (fix.status === "starting" || fix.status === "running" || (fix.mission && ACTIVE.has(fix.status))));
+  }
+
+  private endAway(away: DriveAway, status: "finished" | "stopped", reason?: string, save = true) {
+    if (away.status !== "running") return;
+    Object.assign(away, { status, finishedAt: new Date(this.now()).toISOString(), ...(reason ? { reason } : {}) });
+    for (const item of away.items) if (item.state === "queued") item.state = "skipped";
+    if (save) this.saveAway();
+  }
+
+  private saveAway() {
+    mkdirSync(dirname(this.awayFile), { recursive: true, mode: 0o700 });
+    // The latest run per workspace is all anyone looks at.
+    const temp = `${this.awayFile}.${process.pid}.tmp`;
+    writeFileSync(temp, JSON.stringify(this.aways.slice(-20)), { mode: 0o600 });
+    renameSync(temp, this.awayFile);
   }
 
   /// node_modules folders aren't in git: link the user's into the worktree so

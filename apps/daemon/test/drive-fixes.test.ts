@@ -223,3 +223,77 @@ test("a /drive mission gets its own worktree session, survives a daemon restart,
     expect((await call(`/v1/drive/fixes/${mission.id}/finish`, { method: "POST", body: "{}" })).status).toBe(409);
   } finally { server.stop(true); await app.close(); }
 });
+
+test("away mode runs proposals one after another, each in its own worktree, and leaves an inbox", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "drive-away-"))); roots.push(root);
+  const workspace = join(root, "repo");
+  mkdirSync(workspace, { recursive: true });
+  writeFileSync(join(workspace, "a.txt"), "a\n");
+  git(workspace, "init", "-q", "-b", "main"); git(workspace, "add", "-A"); git(workspace, "commit", "-qm", "init");
+  let running = 0, overlapped = false;
+  // "Tidy A" edits a file, "Look into B" changes nothing, "Tidy C" edits another.
+  const processor: TurnProcessor = { providerId: "test", modelId: "coder", async listModels() { return []; },
+    async *stream(messages) {
+      const last = messages.at(-1)!, task = String(messages.find((message) => message.role === "user")?.content ?? "");
+      if (last.role === "user") {
+        if (++running > 1) overlapped = true;
+        await Bun.sleep(20);
+        const file = task.includes("Tidy A") ? "a.txt" : task.includes("Tidy C") ? "c.txt" : null;
+        if (file) { yield { type: "tool_call_delta" as const, index: 0, idDelta: "w", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: file, content: "tidied\n" }) }; yield { type: "finish" as const, reason: "tool_calls" }; running--; return; }
+      }
+      running = Math.max(0, running - (last.role === "user" ? 1 : 0));
+      yield { type: "text_delta" as const, delta: task.includes("Look into B") ? "B is fine; nothing to change." : "Tidied it." };
+      yield { type: "finish" as const, reason: "stop" };
+    } };
+  const app = createDaemonApp({ databasePath: join(root, "data", "state.sqlite"), processor });
+  const server = Bun.serve({ port: 0, fetch: app.fetch });
+  const call = async (path: string, init?: RequestInit) => {
+    const response = await fetch(new URL(path, server.url), { headers: { "Content-Type": "application/json" }, ...init });
+    return { status: response.status, body: await response.json() as any };
+  };
+  const item = (id: string, kind: string, title: string) => ({ proposal: { id, kind, title, why: `${title} is worth doing.`, minutes: 5, confidence: "high" }, signals: [] });
+  try {
+    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) });
+    expect((await call(`/v1/drive/away?workspace=${encodeURIComponent(workspace)}`)).body.away).toBeNull();
+    const started = await call("/v1/drive/away", { method: "POST", body: JSON.stringify({ workspace, items: [item("a", "tidy", "Tidy A"), item("b", "investigate", "Look into B"), item("c", "tidy", "Tidy C")] }) });
+    expect(started.status).toBe(201);
+    expect(started.body.away).toMatchObject({ status: "running", items: [{ state: "running" }, { state: "queued" }, { state: "queued" }] });
+    // One list at a time.
+    expect((await call("/v1/drive/away", { method: "POST", body: JSON.stringify({ workspace, items: [item("d", "tidy", "Tidy D")] }) })).status).toBe(409);
+    let away: any;
+    for (let i = 0; i < 400 && away?.status !== "finished"; i++) { await Bun.sleep(25); away = (await call(`/v1/drive/away?workspace=${encodeURIComponent(workspace)}`)).body.away; }
+    expect(away.status).toBe("finished");
+    expect(away.items.map((entry: any) => entry.state)).toEqual(["ready", "unchanged", "ready"]);
+    expect(overlapped).toBe(false);
+    // The inbox: each finished one is its own branch, waiting for review; your checkout is untouched.
+    const fixes = (await call(`/v1/drive/fixes?workspace=${encodeURIComponent(workspace)}`)).body.fixes as DriveFix[];
+    const ready = fixes.filter((fix) => fix.status === "ready");
+    expect(ready.map((fix) => fix.title)).toEqual(["Tidy A", "Tidy C"]);
+    expect(new Set(ready.map((fix) => fix.branch)).size).toBe(2);
+    expect(readFileSync(join(workspace, "a.txt"), "utf8")).toBe("a\n");
+    expect((await call(`/v1/drive/fixes/${ready[1]!.id}/apply`, { method: "POST" })).body.fix.status).toBe("applied");
+    expect(readFileSync(join(workspace, "c.txt"), "utf8")).toBe("tidied\n");
+
+    // Stopping starts nothing more.
+    const second = (await call("/v1/drive/away", { method: "POST", body: JSON.stringify({ workspace, items: [item("e", "tidy", "Tidy A again"), item("f", "tidy", "Tidy C again")] }) })).body.away;
+    const stopped = (await call("/v1/drive/away/stop", { method: "POST", body: JSON.stringify({ workspace }) })).body.away;
+    expect(stopped).toMatchObject({ id: second.id, status: "stopped", reason: "You stopped it." });
+    expect(stopped.items[1].state).toBe("skipped");
+  } finally { server.stop(true); }
+});
+
+test("an away run stops starting work at its deadline", async () => {
+  const { DriveFixes } = await import("../src/drive-fixes.ts");
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "drive-away-"))); roots.push(root);
+  let now = 1000;
+  // The first one fails (no git) after its minute is up, so the second never starts.
+  const fixes = new DriveFixes(join(root, "fixes.json"), join(root, "trees"), {} as never, async () => { now += 61_000; return { ok: false, out: "", err: "no git" }; }, () => now);
+  const proposal = { id: "a", kind: "tidy" as const, title: "Tidy", why: "Why" };
+  const away = fixes.startAway({ workspace: "/w", items: [{ proposal, signals: [] }, { proposal: { ...proposal, id: "b" }, signals: [] }], minutes: 1 });
+  await fixes.awaySettled(away.id);
+  expect(fixes.away("/w")).toMatchObject({ status: "finished", reason: "Time ran out before the rest could start.",
+    items: [{ state: "failed", note: "Fixing in a worktree needs a git repository." }, { state: "skipped" }] });
+  // A restart ends a run that was still going.
+  const later = fixes.startAway({ workspace: "/x", items: [{ proposal, signals: [] }] });
+  expect(new DriveFixes(join(root, "fixes.json"), join(root, "trees"), {} as never).away("/x")).toMatchObject({ id: later.id, status: "stopped" });
+});

@@ -1,5 +1,5 @@
 import type { DemesneClient } from "@demesne/client";
-import type { DriveFix, DriveFixAction, DriveFixProposal, DriveSignal } from "@demesne/protocol";
+import type { DriveAway, DriveAwayRequest, DriveFix, DriveFixAction, DriveFixProposal, DriveSignal } from "@demesne/protocol";
 
 /// Breakage alerts: notices when something newly breaks (a check starts
 /// failing, CI on the default branch turns red, an open PR's CI fails) and
@@ -13,6 +13,10 @@ export interface BreakageState {
   signals: DriveSignal[];
   /// The fix being made, or ready for review.
   fix: DriveFix | null;
+  /// Other finished work waiting for review (an away run leaves several).
+  inbox: DriveFix[];
+  /// The latest away run: proposals worked one after another while you're away.
+  away: DriveAway | null;
   /// The action in flight (fix, apply, pr, discard).
   busy: string | null;
   /// The outcome of the last action, or why it failed.
@@ -24,12 +28,14 @@ const OPEN = new Set(["starting", "running", "ready", "failed"]);
 export const neverAlert = (signal: Pick<DriveSignal, "title">) => `Never alert: ${signal.title}`;
 
 export class BreakageWatch {
-  state: BreakageState = { signals: [], fix: null, busy: null, message: null };
+  state: BreakageState = { signals: [], fix: null, inbox: [], away: null, busy: null, message: null };
   /// Urgent signals at the last check; null until the first (the baseline).
   private seen: Map<string, DriveSignal> | null = null;
   private lastGitHub = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private fixTimer: ReturnType<typeof setTimeout> | null = null;
+  private awayTimer: ReturnType<typeof setTimeout> | null = null;
+  private dismissedAway: string | null = null;
   private checking = false;
   private unsupported = false;
 
@@ -54,10 +60,10 @@ export class BreakageWatch {
     this.stop();
     this.seen = null; this.lastGitHub = 0; this.unsupported = false;
     try {
-      const { fixes } = await this.options.client().driveFixes(this.options.workspace());
-      this.state.fix = fixes.filter((fix) => OPEN.has(fix.status)).at(-1) ?? null;
+      await this.refreshOpen();
       if (this.state.fix && ["starting", "running"].includes(this.state.fix.status) && !this.state.fix.mission) this.watchFix();
     } catch { this.unsupported = true; return; }
+    if (this.state.away?.status === "running") this.watchAway();
     this.options.publish();
     await this.check();
     this.timer = setInterval(() => void this.check(), LOCAL_EVERY);
@@ -66,7 +72,50 @@ export class BreakageWatch {
   stop() {
     if (this.timer) clearInterval(this.timer);
     if (this.fixTimer) clearTimeout(this.fixTimer);
-    this.timer = this.fixTimer = null;
+    if (this.awayTimer) clearTimeout(this.awayTimer);
+    this.timer = this.fixTimer = this.awayTimer = null;
+  }
+
+  /// Reloads the open worktree work: the one on the card (running first, else
+  /// the one already shown, else the newest), and the rest as an inbox.
+  private async refreshOpen() {
+    const client = this.options.client(), workspace = this.options.workspace();
+    const { fixes } = await client.driveFixes(workspace);
+    let away: DriveAway | null = null;
+    try { away = (await client.driveAway(workspace)).away; } catch { /* an older daemon */ }
+    const open = fixes.filter((fix) => OPEN.has(fix.status));
+    // A finished run stays up while any of its work waits for review, until dismissed.
+    this.state.away = away && away.id !== this.dismissedAway && (away.status === "running" || away.items.some((item) => open.some((fix) => fix.id === item.fixId))) ? away : null;
+    const fix = open.find((item) => item.status === "starting" || item.status === "running")
+      ?? open.find((item) => item.id === this.state.fix?.id) ?? open.at(-1) ?? null;
+    this.state.fix = fix;
+    this.state.inbox = open.filter((item) => item !== fix).reverse();
+    this.options.publish();
+  }
+
+  /// While an away run works, keeps its progress and the inbox current.
+  private watchAway() {
+    if (this.awayTimer) clearTimeout(this.awayTimer);
+    this.awayTimer = setTimeout(async () => {
+      this.awayTimer = null;
+      try { await this.refreshOpen(); } catch { /* try again */ }
+      if (this.state.away?.status === "running") this.watchAway();
+    }, FIX_EVERY);
+  }
+
+  /// Away mode: Drive runs these proposals one after another, each in its own
+  /// worktree, and they wait here for review.
+  async startAway(items: DriveAwayRequest["items"], minutes?: number) {
+    const { away } = await this.options.client().startDriveAway({ workspace: this.options.workspace(), items, ...(minutes ? { minutes } : {}) });
+    this.state.away = away; this.state.message = null;
+    await this.refreshOpen().catch(() => {});
+    this.watchAway();
+  }
+
+  async stopAway() {
+    const { away } = await this.options.client().stopDriveAway(this.options.workspace());
+    this.state.away = away;
+    this.options.publish();
   }
 
   /// Looks for new breakages; GitHub at most every five minutes.
@@ -107,6 +156,11 @@ export class BreakageWatch {
       } catch { /* try again */ }
       this.watchFix();
     }, FIX_EVERY);
+  }
+
+  /// The open work an action names (by id), else the one on the card.
+  private byId(id: unknown) {
+    return typeof id === "string" && id ? [this.state.fix, ...this.state.inbox].find((fix) => fix?.id === id) ?? null : this.state.fix;
   }
 
   /// Whether this daemon makes worktree fixes (older ones don't).
@@ -166,8 +220,10 @@ export class BreakageWatch {
       return this.options.publish();
     }
     if (method === "breakage-close") { this.state.message = null; return this.options.publish(); }
+    if (method === "breakage-away-stop") return this.stopAway();
+    if (method === "breakage-away-close") { this.dismissedAway = this.state.away?.id ?? null; this.state.away = null; return this.options.publish(); }
     if (method === "breakage-receipt") {
-      const receipt = this.state.fix?.receipt;
+      const receipt = this.byId(args.id)?.receipt;
       if (!receipt || !this.options.copy) return;
       await this.options.copy(receipt);
       this.state.message = { text: "Copied the mission receipt (Markdown).", tone: "ok" };
@@ -190,9 +246,13 @@ export class BreakageWatch {
         if (fix.status === "failed") this.state.message = { text: fix.error ?? "The fix couldn't start.", tone: "error" };
         else this.watchFix();
       } else if (["apply", "pr", "discard"].includes(action)) {
-        const id = this.state.fix?.id ?? String(args.id ?? "");
+        const id = this.byId(args.id)?.id ?? String(args.id ?? "");
         const { fix } = await this.options.client().driveFixAction(id, action as DriveFixAction);
-        this.state.fix = null;
+        if (this.state.fix?.id === id) this.state.fix = null;
+        this.state.inbox = this.state.inbox.filter((item) => item.id !== id);
+        // The next one waiting for review takes the card.
+        if (!this.state.fix && this.state.inbox.length) this.state.fix = this.state.inbox.shift()!;
+        if (this.state.away && this.state.away.status !== "running" && !this.state.away.items.some((item) => [this.state.fix, ...this.state.inbox].some((open) => open?.id === item.fixId))) this.state.away = null;
         if (fix.mission) this.options.closed?.(fix);
         if (action === "apply") { this.state.message = { text: `Applied to your branch: ${fix.title}`, tone: "ok" }; this.options.applied(); }
         if (action === "pr") this.state.message = { text: `Opened a pull request from ${fix.branch}`, tone: "ok", ...(fix.prUrl ? { url: fix.prUrl } : {}) };

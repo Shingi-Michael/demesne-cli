@@ -16,12 +16,12 @@ import {
   parseUndoSessionRequest,
   parseUpdateSessionRequest,
   ProtocolValidationError,
-  parseDriveRequest, parseDriveNextRequest, parseDeleteSessionsRequest, parseDriveAlertsRequest, parseDriveFixRequest, parseDriveFixFinishRequest,
+  parseDriveRequest, parseDriveNextRequest, parseDeleteSessionsRequest, parseDriveAlertsRequest, parseDriveFixRequest, parseDriveFixFinishRequest, parseDriveAwayRequest,
   type DeleteSessionsResponse,
   type SessionCleanupResponse,
   type DriveAlertsResponse,
   type DriveFixAction,
-  type DriveFixesResponse,
+  type DriveFixesResponse, type DriveAwayResponse,
   type ApiErrorBody,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
@@ -469,6 +469,23 @@ export function createDaemonApp(options: {
         if (!workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
         try { return json({ fix: await driveFixes.start(body.workspace, body.signals, body.proposal, body.mission) }, 201); }
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start the fix", 409); }
+      }
+      // Away mode: Next proposals run one after another while you're away.
+      if (request.method === "GET" && url.pathname === "/v1/drive/away") {
+        const response: DriveAwayResponse = { away: driveFixes.away(url.searchParams.get("workspace") ?? "") };
+        return json(response);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/drive/away") {
+        const body = parseDriveAwayRequest(await readJson(request));
+        if (!store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace)) return apiError("not_found", "Unknown workspace", 404);
+        if (!workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
+        try { return json({ away: driveFixes.startAway(body) } satisfies DriveAwayResponse, 201); }
+        catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start", 409); }
+      }
+      if (request.method === "POST" && url.pathname === "/v1/drive/away/stop") {
+        const body = await readJson(request) as { workspace?: unknown };
+        if (typeof body?.workspace !== "string") return apiError("invalid_request", "Expected a workspace", 400);
+        return json({ away: driveFixes.stopAway(body.workspace) } satisfies DriveAwayResponse);
       }
       if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "drive" && path[2] === "fixes" && path[4] === "finish") {
         const body = parseDriveFixFinishRequest(await readJson(request));

@@ -239,3 +239,51 @@ test("/drive moves the mission into its own worktree session, and returns you af
     expect(host.breakage.state.fix).toBeNull();
   } finally { host.dispose(); await f.close(); }
 });
+
+test("away mode works through the top proposals and leaves each one to review", async () => {
+  Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "a@b", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "a@b" });
+  const f = await fixture({ providerId: "test", modelId: "test", contextCapacity: 262144, async listModels() { return []; },
+    async *stream(messages) {
+      const last = messages.at(-1)!, task = String(messages.find((message) => message.role === "user")?.content ?? "");
+      const name = /Task: Tidy (\w)/.exec(task)?.[1];
+      if (last.role === "user" && name) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "w", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: `${name}.txt`, content: "tidied\n" }) };
+        yield { type: "finish", reason: "tool_calls" }; return;
+      }
+      yield { type: "text_delta", delta: "Done." }; yield { type: "finish", reason: "stop" };
+    } });
+  for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-qm", "init"]]) Bun.spawnSync(["git", ...args], { cwd: f.workspace, env: process.env });
+  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, command: () => {} });
+  try {
+    await host.connect();
+    await eventually(() => Boolean(host.current), 5000);
+    await host.breakageStarted;
+    // The fixture daemon proposes nothing; this stands in for its queue.
+    await eventually(() => !host.nextQueue.loading, 5000);
+    const proposal = (id: string) => ({ id, kind: "tidy" as const, title: `Tidy ${id}`, why: "It's untidy.", evidence: [], minutes: 5, confidence: "high" as const, coders: 1, urgent: false, value: 1, cost: 1 });
+    host.nextQueue = { ...host.nextQueue, proposals: [proposal("A"), proposal("B"), proposal("C"), proposal("D")] as never };
+    const sessionId = host.current!.session.id;
+    await host.handle("next-away", { sessionId, count: 3 });
+    expect(host.breakage.state.away?.items.map((item) => item.proposal.title)).toEqual(["Tidy A", "Tidy B", "Tidy C"]);
+    // They leave the queue while they run; the fourth stays.
+    expect(host.snapshot().driveNext.proposals.map((item) => item.id)).toEqual(["D"]);
+    await eventually(() => host.breakage.state.away?.status === "finished", 15000);
+    await eventually(() => host.breakage.state.fix?.status === "ready" && host.breakage.state.inbox.length === 2, 5000);
+    expect(host.breakage.state.away?.items.map((item) => item.state)).toEqual(["ready", "ready", "ready"]);
+    // Newest on the card, the rest below it; each acts on its own branch.
+    const [b] = host.breakage.state.inbox;
+    expect(b!.title).toBe("Tidy B");
+    await host.handle("breakage-apply", { sessionId, id: b!.id });
+    expect(readFileSync(join(f.workspace, "B.txt"), "utf8")).toBe("tidied\n");
+    expect(existsSync(join(f.workspace, "A.txt"))).toBe(false);
+    expect(host.breakage.state.inbox.map((fix) => fix.title)).toEqual(["Tidy A"]);
+    await host.handle("breakage-discard", { sessionId, id: host.breakage.state.fix!.id });
+    expect(host.breakage.state.fix?.title).toBe("Tidy A");
+    expect(host.breakage.state.inbox).toEqual([]);
+    // The summary stays while any of its work waits for review.
+    expect(host.breakage.state.away?.status).toBe("finished");
+    await host.handle("breakage-discard", { sessionId, id: host.breakage.state.fix!.id });
+    expect(host.breakage.state.fix).toBeNull();
+    expect(host.breakage.state.away).toBeNull();
+  } finally { host.dispose(); await f.close(); }
+});

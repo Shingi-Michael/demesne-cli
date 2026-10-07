@@ -14,6 +14,8 @@ import type {
 } from "../cli/src/workbench/entries.ts";
 import type {
   ModelDescriptor,
+  ModelScore,
+  ModelScoreboardResponse,
   DriveState,
   DriveObservation,
   ReviewScope,
@@ -204,6 +206,8 @@ let overlay: OverlayName | null = null,
   overlayQuery = "",
   overlayIndex = 0,
   models: ModelDescriptor[] = [],
+  /// The model scoreboard, by provider and model id.
+  modelScores = new Map<string, ModelScore>(),
   modelsLoading = false,
   overlayRows: {
     label: string;
@@ -1274,6 +1278,19 @@ function contextBody() {
 let driveTab: "next" | "done" = "next";
 let nextOpen: string | null = null;
 const DRIVE_PINNED = ["running", "waiting", "paused", "blocked"];
+/// One model's scoreboard line in the model picker: how it has done on your
+/// own recorded work over the last 30 days.
+function scoreLine(score: ModelScore) {
+  const ended = score.finished + score.failed;
+  return [
+    `${score.turns} turn${score.turns === 1 ? "" : "s"}${ended ? ` · ${Math.round((100 * score.finished) / ended)}% finished` : ""}`,
+    score.toolCalls ? `${Math.round((100 * (score.toolCalls - score.toolErrors)) / score.toolCalls)}% tool calls ok` : "",
+    score.tokensPerSecond !== null ? `${Math.round(score.tokensPerSecond)} tok/s` : "",
+    score.firstTokenMs !== null ? `first token ${score.firstTokenMs < 1000 ? `${score.firstTokenMs} ms` : `${(score.firstTokenMs / 1000).toFixed(1)} s`}` : "",
+    score.checkedTurns ? `checks passing ${score.passingTurns}/${score.checkedTurns}` : "",
+    score.driveRuns ? `Drive runs kept ${score.driveLanded}/${score.driveRuns}` : "",
+  ].filter(Boolean).join(" · ");
+}
 /// The Next heading: how the queue is ranked and, once any proposal has
 /// run, how Drive's picks have actually turned out here.
 function calibrationLine(calibration: import("@demesne/protocol").DriveCalibration | null | undefined) {
@@ -2005,9 +2022,10 @@ async function openOverlay(name: OverlayName, query = "") {
     modelLevels.clear();
     // Opens at once with the last list; the host answers from its cache.
     modelsLoading = true;
-    const result = await act(() => api<ModelDescriptor[]>("models"));
+    const [result, scores] = await Promise.all([act(() => api<ModelDescriptor[]>("models")), api<ModelScoreboardResponse>("model-scores").catch(() => null)]);
     modelsLoading = false;
     if (Array.isArray(result)) models = result;
+    if (scores) modelScores = new Map(scores.models.map((score) => [`${score.provider}\u0000${score.model}`, score]));
     overlaySignature = "";
     if (overlay === "models") renderOverlay();
   }
@@ -2145,10 +2163,13 @@ function renderOverlay() {
     subtitle = `current: ${state.model.id}`;
     noun = "models";
     footerNote = "Tab next group";
+    const scoreOf = (model: ModelDescriptor) => modelScores.get(`${model.provider}\u0000${model.id}`);
+    // Models you have used come first in each provider, most used first.
     const all = [...models]
-      .sort((a, b) => a.provider.localeCompare(b.provider))
+      .sort((a, b) => a.provider.localeCompare(b.provider) || (scoreOf(b)?.turns ?? 0) - (scoreOf(a)?.turns ?? 0))
       .map((model) => {
         const level = modelLevel(model);
+        const score = scoreOf(model);
         const current = model.id === state!.model.id && (level ?? "") === (state!.reasoning ?? model.defaultReasoningLevel ?? level ?? "");
         return {
         label: model.displayName ?? model.id,
@@ -2165,6 +2186,7 @@ function renderOverlay() {
         action: "model",
         data: { id: model.id, ...(level ? { reasoning: level } : {}) },
         hint: [model.reasoningLevels?.length ? "←→ thinking" : "", current ? "● current" : ""].filter(Boolean).join("  "),
+        ...(score ? { description: scoreLine(score) } : {}),
         };
       });
     // A large catalog (OpenRouter's hundreds) collapses to one row until a

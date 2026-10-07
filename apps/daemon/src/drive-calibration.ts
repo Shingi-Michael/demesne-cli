@@ -19,6 +19,8 @@ export interface CalibrationRecord {
   minutes: number | null;
   actualMinutes: number | null;
   outcome: "landed" | "discarded" | "failed" | "unchanged";
+  /// The model that did the run, for the model scoreboard.
+  provider?: string | null; model?: string | null;
 }
 
 /// The model's own confidence, and the prior each level starts from.
@@ -82,12 +84,13 @@ export function applyCalibration(proposals: DriveProposal[], calibration: DriveC
 export class CalibrationLog {
   constructor(private readonly path: string) {}
 
-  records(workspace: string): CalibrationRecord[] {
+  /// One workspace's outcomes, or every workspace's.
+  records(workspace?: string | null): CalibrationRecord[] {
     if (!existsSync(this.path)) return [];
     const out: CalibrationRecord[] = [];
     for (const line of readFileSync(this.path, "utf8").split("\n")) {
       if (!line.trim()) continue;
-      try { const record = JSON.parse(line) as CalibrationRecord; if (record.workspace === workspace) out.push(record); } catch { /* a torn line */ }
+      try { const record = JSON.parse(line) as CalibrationRecord; if (!workspace || record.workspace === workspace) out.push(record); } catch { /* a torn line */ }
     }
     return out;
   }
@@ -98,14 +101,15 @@ export class CalibrationLog {
   }
 
   /// Records a proposal run that just ended, if it says anything.
-  settle(fix: DriveFix, before: DriveFix["status"]) {
+  settle(fix: DriveFix, before: DriveFix["status"], by?: { provider: string; model: string } | null) {
     if (!fix.proposal) return;
     const outcome = outcomeOf(fix, before);
     if (!outcome) return;
     const finished = fix.finishedAt ? Date.parse(fix.finishedAt) : NaN;
     const actualMinutes = Number.isFinite(finished) ? Math.max(0, Math.round((finished - Date.parse(fix.startedAt)) / 6_000) / 10) : null;
     const record: CalibrationRecord = { at: new Date().toISOString(), workspace: fix.workspace, proposalId: fix.proposal.id, kind: fix.proposal.kind,
-      confidence: fix.proposal.confidence ?? null, minutes: fix.proposal.minutes ?? null, actualMinutes: outcome === "landed" || outcome === "discarded" ? actualMinutes : null, outcome };
+      confidence: fix.proposal.confidence ?? null, minutes: fix.proposal.minutes ?? null, actualMinutes: outcome === "landed" || outcome === "discarded" ? actualMinutes : null, outcome,
+      ...(by ? { provider: by.provider, model: by.model } : {}) };
     mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     appendFileSync(this.path, `${JSON.stringify(record)}\n`, { mode: 0o600 });
   }

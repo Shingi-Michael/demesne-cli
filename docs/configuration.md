@@ -125,6 +125,18 @@ Additional providers require model, context and output settings, plus a URL for 
 
 The example grants Qwen three slots and leaves the hosted provider at one. It does not reconfigure the server: the server must actually support three simultaneous requests and 32K per slot. Runtime profiles that require one slot reject an incompatible override. `demesne ps --json` reports `providerInferenceSlots`; `inferenceSlots` describes the currently selected provider. See [the concurrency guide](subagents.md#three-slot-qwen-example).
 
+### Model scoreboard
+
+Benchmarks say little about how a model does on your projects, so demesne keeps score from your own work. The model picker shows a line under each model you've used in the last 30 days, and `demesne models scoreboard` prints the same as a table (`--here` for the current project only, `--days N` for another window):
+
+- **Turns and finished:** the turns it answered, and the share that completed rather than failed or were interrupted. Turns you stopped count in neither.
+- **Tool calls ok:** its tool calls that didn't end in an error.
+- **Speed:** median tokens per second after the first token, and median wait for the first token. Replies under 16 tokens aren't timed.
+- **Checks passing:** of the turns that ran a check (tests, typecheck, lint), how many ended on a passing one.
+- **Drive runs kept:** of the Drive proposals it ran, how many you applied or opened as a PR.
+
+A turn belongs to the model that answered its first request. Models on providers at loopback, private or Tailscale addresses are marked local. Everything comes from the daemon's own records; nothing is sent anywhere.
+
 ## Agent and Drive limits
 
 `[agent] max_model_rounds` and `max_tool_calls` default to 64 and 256. A final status round reports incomplete work when the allowance is spent. Subagents have separate fixed research limits documented in [subagents](subagents.md#limits).

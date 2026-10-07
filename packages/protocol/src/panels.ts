@@ -65,3 +65,23 @@ export interface CommandsResponse {
   fingerprint: WorkspaceFingerprint;
   unchanged?: boolean;
 }
+
+/// How one model has actually done in this daemon's recorded work: real
+/// turns, tool calls, speed, checks and Drive runs, not a benchmark.
+export interface ModelScore {
+  provider: string; model: string;
+  /// Served from this machine (Ollama, LM Studio, llama.cpp).
+  local: boolean;
+  /// Turns it answered, and how they ended. Turns you stopped count in neither.
+  turns: number; finished: number; failed: number;
+  toolCalls: number; toolErrors: number;
+  /// Medians over its requests: generation speed after the first token, and
+  /// the wait for that first token.
+  tokensPerSecond: number | null; firstTokenMs: number | null;
+  /// Turns that ran a check, and how many of those ended on a passing one.
+  checkedTurns: number; passingTurns: number;
+  /// Drive proposals it ran, and how many you applied or opened as a PR.
+  driveRuns: number; driveLanded: number;
+  lastUsed: string;
+}
+export interface ModelScoreboardResponse { days: number; workspace: string | null; models: ModelScore[] }

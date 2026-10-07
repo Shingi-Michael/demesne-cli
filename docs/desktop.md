@@ -57,6 +57,10 @@ Run `demesne` in a project folder and the desktop window opens on that folder. `
 
 Without a terminal, such as in a pipe or a script, `demesne chat "message"` runs like `demesne prompt`. See the [command reference](cli-reference.md).
 
+## Download an app
+
+Each [release](https://github.com/Shingi-Michael/demesne-cli/releases) carries `demesne-desktop-darwin-arm64.zip` (Apple silicon) and `demesne-desktop-linux-amd64.deb` (Ubuntu 22.04 and 24.04), each with a `.sha256` checksum. They're built by the [release workflow](../.github/workflows/release.yml) and need neither Bun nor Rust. The macOS app isn't signed yet, so after moving `Demesne.app` to `/Applications`, run `xattr -dr com.apple.quarantine /Applications/Demesne.app` once. There's no Intel Mac or Windows build yet.
+
 ## Build an app
 
 ```sh

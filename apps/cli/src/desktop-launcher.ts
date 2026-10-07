@@ -65,7 +65,7 @@ export function desktopLaunch(args: string[], probe: DesktopProbe = realProbe())
 
 export async function runDesktop(args: string[]): Promise<number> {
   const launch = desktopLaunch(args);
-  if (!launch) throw new Error("The demesne desktop app isn't installed. Build it with `bun run build:desktop` (needs Rust; see docs/desktop.md), or use `demesne prompt` in the terminal.");
+  if (!launch) throw new Error("The demesne desktop app isn't installed. Download it from https://github.com/Shingi-Michael/demesne-cli/releases/latest, build it with `bun run build:desktop` (needs Rust; see docs/desktop.md), or use `demesne prompt` in the terminal.");
   if (launch.detached) {
     // The window outlives this command; its daemon work outlives both.
     const child = Bun.spawn(launch.argv, { cwd: launch.cwd, stdin: "ignore", stdout: "ignore", stderr: "ignore", env: process.env });

@@ -44,6 +44,7 @@ import {
 import { GraphicsDrive, type GraphicsUICommand } from "./drive-controller.ts";
 import { ProviderAccounts, type ProviderEntry } from "./providers.ts";
 import { BreakageWatch } from "./breakage.ts";
+import { missionReceipt } from "../cli/src/drive-receipt.ts";
 import { GraphicsSetup } from "./setup-controller.ts";
 import { GraphicsSession } from "./session-model.ts";
 
@@ -140,6 +141,7 @@ export class GraphicsHost {
     open: (url) => this.open(url),
     applied: () => { void this.refreshFiles().catch(() => {}); void this.refreshProcesses(); },
     closed: (fix) => void this.leaveMission(fix),
+    copy: (text) => this.copy(text),
   });
   /// The session you were in when a mission opened its worktree session.
   private missionReturn: string | null = null;
@@ -443,7 +445,7 @@ export class GraphicsHost {
     if (!fix || this.missionFinishing.has(key)) return;
     this.missionFinishing.add(key);
     const summary = state.answer || state.completed.join("\n") || state.activity;
-    void this.breakage.finishMission(fix.id, summary);
+    void this.breakage.finishMission(fix.id, summary, missionReceipt(state, fix));
   }
 
   /// A mission's worktree is gone: go back to the session you started from.

@@ -115,12 +115,15 @@ export interface DriveFix {
   prUrl?: string; error?: string;
   /// The turn finished but changed nothing (for a proposal, often the right answer).
   unchanged?: boolean;
+  /// A mission's receipt (Markdown built from its task ledger and recorded
+  /// checks) and its one-line headline; the receipt opens the PR body.
+  receipt?: string; headline?: string;
 }
 export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "why">;
 /// A breakage fix sends 1-5 signals; a proposal sends the signals it cites
 /// (0-5); a mission sends none.
 export interface DriveFixRequest { workspace: string; signals: DriveSignal[]; proposal?: DriveFixProposal; mission?: string }
-export interface DriveFixFinishRequest { summary?: string }
+export interface DriveFixFinishRequest { summary?: string; receipt?: string; headline?: string }
 export interface DriveFixesResponse { fixes: DriveFix[] }
 export type DriveFixAction = "apply" | "pr" | "discard";
 export interface DriveRequest {
@@ -518,7 +521,11 @@ export function parseDriveFixRequest(value: unknown): DriveFixRequest {
 export function parseDriveFixFinishRequest(value: unknown): DriveFixFinishRequest {
   if (value === null || value === undefined) return {};
   if (!isRecord(value)) invalid("request", "expected an object");
-  return value.summary === undefined ? {} : { summary: text(value.summary, 4000, "summary", true) };
+  return {
+    ...(value.summary === undefined ? {} : { summary: text(value.summary, 4000, "summary", true) }),
+    ...(value.receipt === undefined ? {} : { receipt: text(value.receipt, 16_000, "receipt", true) }),
+    ...(value.headline === undefined ? {} : { headline: text(value.headline, 300, "headline", true) }),
+  };
 }
 function parseProjectMemory(value: unknown): DriveMemoryEntry[] {
   if (!Array.isArray(value) || value.length > 60) invalid("projectMemory", "expected at most 60 entries");

@@ -108,8 +108,8 @@ export class DemesneClient {
     return this.request(`/v1/drive/fixes/${encodeURIComponent(id)}/${action}`, { method: "POST" });
   }
   /// A Drive mission in a worktree settled: commit what it changed for review.
-  async finishDriveMission(id: string, summary?: string): Promise<{ fix: import("@demesne/protocol").DriveFix }> {
-    return this.request(`/v1/drive/fixes/${encodeURIComponent(id)}/finish`, { method: "POST", body: JSON.stringify(summary ? { summary } : {}) });
+  async finishDriveMission(id: string, request: import("@demesne/protocol").DriveFixFinishRequest = {}): Promise<{ fix: import("@demesne/protocol").DriveFix }> {
+    return this.request(`/v1/drive/fixes/${encodeURIComponent(id)}/finish`, { method: "POST", body: JSON.stringify(request) });
   }
   async decideDrive(request: DriveRequest, signal?: AbortSignal, progress?: (event: DriveProgress) => void): Promise<DriveResponse> {
     if (!progress) return this.request("/v1/drive/decide", { method: "POST", body: JSON.stringify(request), signal });

@@ -182,10 +182,12 @@ export class DriveFixes {
 
   /// A mission settled (completed, idle or stopped): commit what it changed
   /// for review. It can settle again after a resume, adding a commit.
-  async finishMission(id: string, summary?: string): Promise<DriveFix> {
+  async finishMission(id: string, summary?: string, receipt?: string, headline?: string): Promise<DriveFix> {
     const fix = this.get(id);
     if (!fix?.mission || !["running", "ready", "failed"].includes(fix.status)) throw new Error("That mission's worktree is no longer open.");
     if (summary?.trim()) fix.summary = summary.trim().slice(-1200);
+    if (receipt?.trim()) fix.receipt = receipt.trim();
+    if (headline?.trim()) fix.headline = headline.trim();
     fix.checks = this.checks(fix);
     delete fix.error; delete fix.unchanged;
     await this.commit(fix);
@@ -232,7 +234,7 @@ export class DriveFixes {
     } else {
       const pushed = await this.git(["git", "push", "-u", "origin", fix.branch], fix.path, 120_000);
       if (!pushed.ok) throw new Error(`Couldn't push ${fix.branch}: ${firstLine(pushed.err)}`);
-      const body = [...(fix.mission ? [`A Drive mission, worked in its own worktree:`, "", `> ${fix.mission.slice(0, 2000).replace(/\n/g, "\n> ")}`] : fix.proposal ? [`Drive proposed this and you ran it: ${fix.proposal.why}`, ...(fix.signals.length ? ["", "Evidence:"] : [])] : [`Fixes a breakage demesne noticed:`]),
+      const body = fix.receipt ? [fix.receipt, ...(fix.diff ? ["", `<sub>Diff: +${fix.diff.additions} −${fix.diff.deletions} in ${fix.diff.files} file${fix.diff.files === 1 ? "" : "s"} on ${fix.branch}</sub>`] : [])].join("\n") : [...(fix.mission ? [`A Drive mission, worked in its own worktree:`, "", `> ${fix.mission.slice(0, 2000).replace(/\n/g, "\n> ")}`] : fix.proposal ? [`Drive proposed this and you ran it: ${fix.proposal.why}`, ...(fix.signals.length ? ["", "Evidence:"] : [])] : [`Fixes a breakage demesne noticed:`]),
         ...fix.signals.map((signal) => `- **${signal.title}**: ${signal.detail}`), "", fix.summary ?? "",
         ...(fix.checks?.length ? ["", "Checks run in the worktree:", ...fix.checks.map((check) => `- ${check.passed ? "✓" : "✕"} \`${check.command}\``)] : [])].join("\n");
       const pr = await this.git(["gh", "pr", "create", "--head", fix.branch, "--title", (fix.proposal || fix.mission ? fix.title : `Fix: ${fix.title}`).slice(0, 200), "--body", body.slice(0, 60_000)], fix.path, 120_000);

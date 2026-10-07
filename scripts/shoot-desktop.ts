@@ -163,7 +163,7 @@ if (!readme) {
   // Run the top proposal in its worktree; the start screen then says a branch waits for review.
   await page.locator('#hero button[data-action="next-run"]').first().click();
   for (let i = 0; i < 60 && !(await page.locator('#hero button[data-action="review-open"]').count()); i++) {
-    const approve = page.locator("#approval button[data-action]").first();
+    const approve = page.locator(".approval-actions button.allow").first();
     if (await approve.count() && await approve.isVisible()) await approve.click();
     await page.waitForTimeout(500);
   }
@@ -177,7 +177,7 @@ if (!readme) {
 }
 await page.fill("textarea", prompt); await page.keyboard.press("Enter");
 for (let i = 0; i < 40; i++) {
-  const approve = page.locator("#approval button[data-action]").first();
+  const approve = page.locator(".approval-actions button.allow").first();
   if (await approve.count() && await approve.isVisible()) { await approve.click(); await page.waitForTimeout(500); }
   if (await page.evaluate(() => document.body.innerText.includes("falls back to"))) break;
   await page.waitForTimeout(500);

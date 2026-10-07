@@ -710,15 +710,6 @@
   border-color: var(--composerRestoredBorder);
   color: var(--electric);
 }
-.approval-card {
-  border: 1px solid var(--composerQueuedBorder);
-  background: var(--surface);
-  border-radius: 8px;
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 .approval-title {
   display: flex;
   gap: 8px;
@@ -730,24 +721,6 @@
   font-size: 12px;
   color: var(--muted);
   margin-left: auto;
-}
-.approval-description {
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--secondary);
-}
-.approval-scope {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 18px;
-}
-.settings-description {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 18px;
-  padding: 0 16px 8px;
-  margin: 0;
 }
 .approval-details > summary {
   color: var(--muted);
@@ -804,10 +777,6 @@
   color: var(--signal);
   background: var(--errorSurface);
   border-color: var(--composerStoppedBorder);
-}
-.approval-actions .auto-approve {
-  color: var(--thinking);
-  border-color: var(--composerQueuedBorder);
 }
 .approval-actions .quiet {
   padding: 0;
@@ -1540,9 +1509,8 @@ button:disabled {
     top: 40px;
     max-height: calc(100% - 80px);
   }
-  .approval-card {
-    max-height: 65vh;
-    overflow: auto;
+  .approval-card .command-inset {
+    max-height: 30vh;
   }
   .live-app.start .stage {
     padding-top: 20px;
@@ -2444,29 +2412,17 @@ button:disabled {
   font-size: 12px;
   color: var(--secondary);
 }
-.session-context,
-.session-model {
-  padding: 4px 16px 6px;
+.session-context {
+  padding: 10px 16px 6px;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 8px;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
-}
-.session-context strong {
-  color: var(--strong);
-  font-size: 16px;
-  font-weight: 600;
+  white-space: nowrap;
 }
 .session-context .meter {
-  flex-basis: 100%;
-  width: 100%;
-}
-.session-model .name {
-  color: var(--strong);
-}
-.session-model small {
-  flex-basis: 100%;
+  flex: 1;
+  min-width: 40px;
 }
 /* The changed-file list takes the rows it has (it scrolls past eight). */
 .file-list {
@@ -3347,4 +3303,214 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 .composer .queue-hint {
   color: var(--muted);
   margin-right: 12px;
+}
+
+/* Overlays: the model picker is a small popover above its chip; the rest
+   are a centred sheet instead of spanning the window. */
+.modal.sheet {
+  left: 50%;
+  right: auto;
+  width: min(600px, calc(100% - 24px));
+  transform: translateX(-50%);
+  top: 72px;
+}
+.modal.sheet .modal-title span:last-child {
+  margin-left: auto;
+}
+@media (max-height: 580px) {
+  .modal.sheet {
+    top: 40px;
+  }
+}
+.modal.sheet .menu-row {
+  min-height: 34px;
+}
+.modal.sheet .menu-row .name {
+  width: 170px;
+}
+.modal.anchored {
+  top: auto;
+  right: auto;
+  width: min(440px, calc(100% - 24px));
+}
+.modal.anchored .filter-wrap {
+  padding: 10px 10px 6px;
+}
+.model-row {
+  flex-wrap: wrap;
+  row-gap: 0;
+  padding: 6px 14px;
+}
+.model-row .name {
+  width: auto;
+  max-width: none;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-row .model-stats {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.model-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 8px;
+  border-top: 1px solid var(--rule);
+}
+.model-thinking .section-label {
+  padding: 0;
+  margin-right: 6px;
+}
+.model-thinking .levels {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.model-thinking .levels button {
+  color: var(--secondary);
+}
+.model-thinking .levels button:hover,
+.model-thinking .levels button.on {
+  color: var(--electric);
+}
+.model-thinking .keys {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+/* Opened steps read like the trail: an indented list under a hairline,
+   "verb target" in one run, the result quiet on the right. */
+.tool-row {
+  min-height: 24px;
+  padding: 2px 10px 2px 14px;
+  gap: 8px;
+  border-radius: 0;
+  border-left: 1px solid var(--rule);
+}
+.tool-row .verb {
+  width: auto;
+  color: var(--secondary);
+}
+.tool-row .target {
+  flex: 0 1 auto;
+}
+.tool-row .result {
+  margin-left: auto;
+}
+.tool-row .result:empty {
+  display: none;
+}
+.tool-row .result:empty + .time {
+  margin-left: auto;
+}
+.tool-row .time .electric {
+  color: var(--electric);
+}
+/* Consecutive steps close the response's gap so the hairline runs on. */
+.response > .tool-row + .tool-row {
+  margin-top: -10px;
+}
+
+/* An approval is the composer asking: amber edge, the question on its top
+   line, Allow / Deny / always allow in its bar beside Stop. */
+.composer.asking {
+  border-color: var(--composerQueuedBorder);
+  background: color-mix(in srgb, var(--thinking) 4%, var(--surface));
+}
+.composer .approval-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.composer .approval-card[hidden],
+.composer .approval-actions[hidden] {
+  display: none;
+}
+.composer .approval-title {
+  font-size: 13px;
+  line-height: 20px;
+}
+.composer .approval-question {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer .approval-question code {
+  font: inherit;
+  color: var(--strong);
+}
+.composer .approval-title small {
+  white-space: nowrap;
+}
+.composer .approval-details > summary {
+  margin-left: 16px;
+}
+.composer .approval-diff .del,
+.composer .approval-diff .add,
+.composer .approval-diff .muted {
+  display: block;
+}
+.composer .approval-diff .del {
+  color: var(--signal);
+  background: var(--errorSurface);
+}
+.composer .approval-diff .add {
+  color: var(--citron);
+  background: color-mix(in srgb, var(--citron) 10%, transparent);
+}
+.composer.asking #composer-model,
+.composer.asking #composer-context,
+.composer.asking .hints {
+  display: none;
+}
+.composer .approval-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.composer .approval-actions button {
+  font-size: 12px;
+  line-height: 18px;
+  padding: 2px 10px;
+  gap: 6px;
+  border-radius: 4px;
+}
+.composer .approval-actions .allow {
+  color: var(--electric);
+  border-color: var(--composerRestoredBorder);
+  background: var(--menuSelection);
+}
+.composer .approval-actions .deny {
+  color: var(--paper);
+  background: none;
+  border-color: var(--borderBright);
+}
+.composer .approval-actions .deny kbd,
+.composer .approval-actions .allow kbd {
+  color: var(--muted);
+}
+.composer .approval-actions .quiet {
+  margin-left: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer .approval-actions .quiet b {
+  color: var(--secondary);
+  font-weight: 400;
+}
+.composer .approval-actions .quiet:hover,
+.composer .approval-actions .quiet:hover b {
+  color: var(--electric);
 }

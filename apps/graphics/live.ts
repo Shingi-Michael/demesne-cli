@@ -208,6 +208,8 @@ let overlay: OverlayName | null = null,
   /// The model scoreboard, by provider and model id.
   modelScores = new Map<string, ModelScore>(),
   modelsLoading = false,
+  /// The model picker opens on the current model once the list arrives.
+  modelIndexPending = false,
   overlayRows: {
     label: string;
     value: string;
@@ -464,7 +466,7 @@ function toolRow(run: GraphicsRun, tool: ToolEntry) {
           ? tool.drafting
             ? "drafting"
             : tool.state === "done"
-              ? "applied"
+              ? ""
               : tool.state
           : tool.exitCode != null
             ? `exit ${tool.exitCode}`
@@ -475,7 +477,7 @@ function toolRow(run: GraphicsRun, tool: ToolEntry) {
                 : tool.state;
   return btn(
     "tool",
-    `<span class="${tone(tool.state)}">${tool.state === "running" ? spinner() : h(mark(tool.state))}</span><span class="verb">${h(verb(tool))}</span><span class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</span><span class="result ${tool.phase === "change" && tool.state === "done" ? "success" : "muted"}">${h(result)}</span>${tool.phase === "change" ? counts(totals(run, tool)) : ""}<span class="time">${tool.phase === "change" ? "open ▸" : duration(tool.durationMs)}</span>`,
+    `<span class="${tone(tool.state)}">${tool.state === "running" ? spinner() : h(mark(tool.state))}</span><span class="verb">${h(verb(tool).toLowerCase())}</span><span class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</span>${tool.phase === "change" ? counts(totals(run, tool)) : ""}<span class="result muted">${h(result)}</span><span class="time">${tool.phase === "change" ? '<span class="electric">open ›</span>' : duration(tool.durationMs)}</span>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""}`,
     true,
@@ -897,7 +899,10 @@ function renderComposer() {
   el("queue-label").innerHTML =
     `<span>${queued ? 'Queued <span class="muted">sends when this turn completes</span>' : 'Restored · not sent <span class="muted">the turn did not finish</span>'}</span>${btn("clear-queue", "Clear ×")}`;
   const suggestion = nextSuggestion();
-  editor.placeholder = question
+  const asking = state.approvals.length > 0 && !question;
+  editor.placeholder = asking
+    ? "Say what to do instead, or press Enter to allow…"
+    : question
     ? answered ? "Your answers are saved. Choose Resume to continue." : question.status === "paused" ? "Type your answer to resume the interview…" : "Type your answer here…"
     : inSession()
     ? state.activeTurnId
@@ -908,10 +913,7 @@ function renderComposer() {
     state.connection !== "online" ||
     state.busy ||
     answeringQuestion ||
-    Boolean(answered) ||
-    state.approvals.length > 0;
-  el("composer-slot").hidden =
-    state.approvals.length > 0;
+    Boolean(answered);
   // Like the terminal: no stop hint while running (Esc Esc still stops; only
   // the armed confirmation shows). In a session, an empty composer shows
   // / and @, and a draft shows ↵ send instead. The start screen keeps both.
@@ -919,7 +921,7 @@ function renderComposer() {
   const draft = Boolean(editor.value.trim()), session = inSession();
   // While a turn runs the send button is Stop; Enter queues what you type.
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
-    ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${k("Enter")} queue</span>` : ""}<span class="stop-word">■ Stop</span>`
+    ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${k("Enter")} ${asking ? "send instead" : "queue"}</span>` : ""}<span class="stop-word">■ Stop</span>`
     : "send";
   form.querySelector<HTMLElement>(".send")!.hidden = question ? !draft : state.activeTurnId ? false : session && !draft;
   form.querySelector<HTMLElement>(".hints")!.hidden = Boolean(state.activeTurnId) || (session && draft);
@@ -939,27 +941,88 @@ function renderComposer() {
     .map((path) => btn("remove-mention", `${h(path)} ×`, { path }, "chip"))
     .join("");
 }
+/// An approval turns the composer into the question: its top line asks
+/// ("Run bun run check?"), "show" opens the full command or the diff, and
+/// the bar holds Allow, Deny and a scoped always-allow beside Stop. Typing
+/// says what to do instead.
 function renderApproval() {
   if (!state) return;
   const approval = state.approvals[0],
-    signature = JSON.stringify(approval);
+    signature = JSON.stringify([approval, state.workspace]);
   if (signature === approvalSignature) return;
   approvalSignature = signature;
+  const form = el("composer") as HTMLFormElement,
+    bar = form.querySelector<HTMLElement>(".composer-bar")!;
+  let card = form.querySelector<HTMLElement>(".approval-card"),
+    actions = bar.querySelector<HTMLElement>(".approval-actions");
+  if (!card) {
+    card = document.createElement("div");
+    card.className = "approval-card";
+    form.insertBefore(card, form.querySelector("textarea"));
+  }
+  if (!actions) {
+    actions = document.createElement("div");
+    actions.className = "approval-actions";
+    bar.prepend(actions);
+  }
+  form.classList.toggle("asking", Boolean(approval));
+  card.hidden = actions.hidden = !approval;
   if (!approval) {
-    el("approval").innerHTML = "";
+    card.innerHTML = actions.innerHTML = "";
     return;
   }
-  const command = Array.isArray(approval.input.argv)
-      ? approval.input.argv.join(" ")
-      : JSON.stringify(approval.input, null, 2),
-    run = state.runs.find((run) => run.id === approval.turnId),
+  const input = approval.input as Record<string, unknown>,
     isCommand = approval.name === "run_command",
-    preview = `<div class="command-inset"><pre>${isCommand ? "$ " : ""}${h(command)}</pre><small>in ${h(approval.input.cwd ?? state.workspace)}${isCommand ? ' · <span class="amber">runs on your machine, not sandboxed</span>' : ""}</small></div>`,
-    description = isCommand
-      ? `<details class="approval-details"><summary>Command details</summary>${preview}</details>`
-      : `<p class="approval-description">${h(approval.summary)}</p>${preview}`;
-  el("approval").innerHTML =
-    `<div class="approval-card"><div class="approval-title"><span class="amber">!</span> Allow this ${isCommand ? "command" : "action"}?<small>${isCommand ? "" : `${h(approval.name)} · `}Turn ${run?.number ?? "—"}</small></div>${description}<div class="approval-actions">${btn("permission", `${k("y")} Allow once`, { id: approval.id, decision: "allow_once" })}${btn("permission", `${k("n")} Deny`, { id: approval.id, decision: "deny" }, "deny")}${!isCommand ? btn("permission", "a &nbsp; allow this session", { id: approval.id, decision: "allow_session" }, "quiet") : ""}${approval.rule ? btn("permission", "s &nbsp; always allow", { id: approval.id, decision: "allow_always" }, "quiet") : ""}${btn("auto-approve", "Auto-approve all · this session", { autoApprove: true }, "auto-approve")}</div><p class="approval-scope">With Auto-approve all, edits, commands, deletions and publishing run without asking.</p></div>`;
+    relative = (path: unknown) => {
+      const text = String(path ?? "");
+      return text.startsWith(`${state!.workspace}/`) ? text.slice(state!.workspace.length + 1) : text;
+    },
+    folder = relative(input.cwd ?? "") || state.workspace.split("/").pop() || "";
+  const command = Array.isArray(input.argv) ? input.argv.join(" ") : String(input.command ?? ""),
+    // The program by name in the question; the full path stays in "show".
+    short = Array.isArray(input.argv) && input.argv.length ? [String(input.argv[0]).split("/").at(-1), ...input.argv.slice(1)].join(" ") : command;
+  // An edit's hunks as removed and added lines; anything else shows its input.
+  const hunks = approval.name === "edit_file"
+    ? (Array.isArray(input.edits) ? (input.edits as { oldText?: string; newText?: string }[]) : [{ oldText: String(input.oldText ?? ""), newText: String(input.newText ?? "") }])
+    : null;
+  const lines = (text: string | undefined) => (text ? text.replace(/\n$/, "").split("\n") : []);
+  const removed = hunks ? hunks.reduce((n, hunk) => n + lines(hunk.oldText).length, 0) : 0,
+    added = hunks ? hunks.reduce((n, hunk) => n + lines(hunk.newText).length, 0) : 0;
+  const preview = isCommand
+    ? `<pre>$ ${h(command)}</pre><small>in ${h(folder)}${approval.summary && approval.summary !== command && !approval.summary.startsWith("host command") ? ` · ${h(approval.summary)}` : ""}</small>`
+    : hunks
+      ? `<pre class="approval-diff">${hunks.map((hunk) => [...lines(hunk.oldText).map((line) => `<span class="del">- ${h(line)}</span>`), ...lines(hunk.newText).map((line) => `<span class="add">+ ${h(line)}</span>`)].join("")).join('<span class="muted">⋯</span>')}</pre>`
+      : `<pre>${h(JSON.stringify(input, null, 2))}</pre>`;
+  const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
+  const question = isCommand
+    ? `Run <code>${h(clip(short, 64))}</code>?`
+    : hunks
+      ? `${input.mode === "append" ? "Append to" : "Edit"} <code>${h(relative(input.path))}</code>?`
+      : `${h((approval.summary || approval.name).replace(/^./, (c) => c.toUpperCase()))}?`;
+  const where = isCommand ? `in ${h(folder)} · not sandboxed` : hunks ? `${counts({ added, removed })}` : h(approval.name);
+  card.innerHTML =
+    `<div class="approval-title"><span class="amber">!</span><span class="approval-question">${question}</span><small>${where}</small></div><details class="approval-details"><summary>show ${isCommand ? "command" : hunks ? "diff" : "details"}</summary><div class="command-inset">${preview}</div></details>`;
+  // The always-allow scope in words: the exact command, or the folder.
+  const rule = approval.rule ? approval.rule.slice(approval.rule.indexOf(":") + 1).replace(/ \*$/, " …") : "";
+  const scope = isCommand
+    ? `always allow <b>${h(command && rule.startsWith(command) ? short + rule.slice(command.length) : rule)}</b>`
+    : hunks ? `always allow edits to <b>${h(rule && rule !== "." ? relative(rule) : "this project")}</b>` : "always allow";
+  actions.innerHTML =
+    btn("permission", `Allow ${k("↵")}`, { id: approval.id, decision: "allow_once" }, "allow") +
+    btn("permission", `Deny ${k("Esc")}`, { id: approval.id, decision: "deny" }, "deny") +
+    (approval.rule ? btn("permission", scope, { id: approval.id, decision: "allow_always" }, "quiet").replace("<button ", `<button title="Saved to your config: ${h(approval.rule)}" `) : "");
+}
+/// Enter with text during an approval: deny, then stop the turn and send what
+/// you typed as the next message.
+async function denyInstead(text: string) {
+  const approval = state?.approvals[0];
+  if (!approval) return;
+  clearTimeout(draftTimer);
+  editor.value = "";
+  renderComposer();
+  await api("permission", { id: approval.id, decision: "deny" });
+  await api("submit", { text });
+  await api("queue-action", { action: "now" });
 }
 /// Breakage alerts: a card over the conversation when something newly
 /// breaks, then the worktree fix as it runs and when it's ready to review.
@@ -1531,11 +1594,11 @@ function renderBriefing() {
 function scoreLine(score: ModelScore) {
   const ended = score.finished + score.failed;
   return [
-    `${score.turns} turn${score.turns === 1 ? "" : "s"}${ended ? ` · ${Math.round((100 * score.finished) / ended)}% finished` : ""}`,
-    score.toolCalls ? `${Math.round((100 * (score.toolCalls - score.toolErrors)) / score.toolCalls)}% tool calls ok` : "",
+    `${score.turns} turn${score.turns === 1 ? "" : "s"}${ended ? ` · ${score.failed ? `${Math.round((100 * score.finished) / ended)}% finished` : "all finished"}` : ""}`,
+    score.toolCalls ? (score.toolErrors ? `${Math.round((100 * (score.toolCalls - score.toolErrors)) / score.toolCalls)}% tool calls ok` : "tool calls ok") : "",
     score.tokensPerSecond !== null ? `${Math.round(score.tokensPerSecond)} tok/s` : "",
     score.firstTokenMs !== null ? `first token ${score.firstTokenMs < 1000 ? `${score.firstTokenMs} ms` : `${(score.firstTokenMs / 1000).toFixed(1)} s`}` : "",
-    score.checkedTurns ? `checks passing ${score.passingTurns}/${score.checkedTurns}` : "",
+    score.checkedTurns ? `checks ${score.passingTurns}/${score.checkedTurns}` : "",
     score.driveRuns ? `Drive runs kept ${score.driveLanded}/${score.driveRuns}` : "",
   ].filter(Boolean).join(" · ");
 }
@@ -1989,16 +2052,12 @@ function renderPanels() {
 
   if (pane === "history") {
     const c = context(),
-      usage = state.provider?.usage,
-      metrics = state.provider?.metrics,
-      rate = usage?.outputTokens != null && metrics?.durationMs ? usage.outputTokens / (metrics.durationMs / 1000) : null,
-      cached = usage?.cachedInputTokens != null && usage.inputTokens ? Math.round((100 * usage.cachedInputTokens) / usage.inputTokens) : null,
       others = state.sessions.filter((item) => item.id !== state!.session?.id && item.turns > 0).slice(0, 5);
     header = panelHeader("Session", state.session?.title ?? "");
     body =
       `<div class="panel-actions">${btn("overlay", "Rename", { name: "rename" })}${btn("compact", "Compact")}${btn("new-session", "New session")}</div>` +
-      `<div class="panel-section">CONTEXT ${btn("panel", "Details ›", { name: "context" }, "link", true)}</div><div class="session-context"><strong>${c.estimated ? "~" : ""}${num(c.used)}</strong><span class="muted"> of ${num(c.capacity)}${c.percentage == null ? "" : ` · ${c.percentage}%`}</span><div class="meter"><i style="--usage:${Math.min(100, c.percentage ?? 0)}%"></i></div></div>` +
-      `<div class="panel-section">MODEL ${btn("overlay", "Change", { name: "models" }, "link")}</div><div class="session-model"><span class="name">${h(state.model.displayName ?? state.model.id)}</span><span class="muted">${h(state.model.provider)}${state.reasoning ? ` · thinking ${h(state.reasoning)}` : ""}</span><small class="muted">${[rate != null ? `${rate.toFixed(1)} tok/s` : "", metrics?.timeToFirstTokenMs != null ? `first token ${(metrics.timeToFirstTokenMs / 1000).toFixed(1)}s` : "", cached != null ? `cached ${cached}%` : ""].filter(Boolean).join(" · ")}</small></div>` +
+      // Context on one line; the model lives in the composer.
+      `<div class="session-context"><span class="muted">context</span><span>${c.estimated ? "~" : ""}${num(c.used)} of ${c.capacity ? tokensShort(c.capacity) : "—"}</span><div class="meter" title="${c.percentage == null ? "" : `${c.percentage}% used`}"><i style="--usage:${Math.min(100, c.percentage ?? 0)}%"></i></div>${btn("panel", "details ›", { name: "context" }, "link", true)}</div>` +
       `<div class="panel-section">TURNS</div>${[...state.runs]
         .reverse()
         .map((item, index) =>
@@ -2023,7 +2082,7 @@ function renderPanels() {
             .join("")}`
         : "") +
       (others.length
-        ? `<div class="panel-section">OTHER SESSIONS ${btn("overlay", "Clean up", { name: "cleanup" }, "link")}${btn("overlay", "All ›", { name: "sessions" }, "link")}</div>${others
+        ? `<div class="panel-section">OTHER SESSIONS ${btn("overlay", "all ›", { name: "sessions" }, "link")}</div>${others
             .map((item) =>
               btn(
                 "select-session",
@@ -2263,6 +2322,7 @@ async function openOverlay(name: OverlayName, query = "") {
   if (name === "cleanup") void act(() => api("cleanup-scan"));
   if (name === "models") {
     modelLevels.clear();
+    modelIndexPending = true;
     // Opens at once with the last list; the host answers from its cache.
     modelsLoading = true;
     const [result, scores] = await Promise.all([act(() => api<ModelDescriptor[]>("models")), api<ModelScoreboardResponse>("model-scores").catch(() => null)]);
@@ -2280,9 +2340,63 @@ async function openOverlay(name: OverlayName, query = "") {
   }
   reportObservation();
 }
+/// "262k": context sizes in the picker, rounded the way people say them.
+function tokensShort(value: number) {
+  return value >= 1e6 ? `${+(value / 1e6).toFixed(1)}m` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value);
+}
+/// The model picker opens just above the composer's model chip, as a small
+/// popover; every other overlay is a centred sheet. Without a visible chip
+/// the picker falls back to the sheet.
+function placeOverlay() {
+  const box = el("overlay"),
+    chip = document.getElementById("composer-model"),
+    anchor = overlay === "models" && chip && chip.offsetParent ? chip.getBoundingClientRect() : null;
+  box.classList.toggle("anchored", !!anchor);
+  box.classList.toggle("sheet", !!overlay && !anchor);
+  if (!anchor) {
+    box.style.left = box.style.bottom = box.style.maxHeight = "";
+    return;
+  }
+  const main = el("main").getBoundingClientRect(),
+    width = Math.min(440, main.width - 24);
+  box.style.left = `${Math.max(12, Math.min(anchor.left - main.left - 10, main.width - width - 12))}px`;
+  box.style.bottom = `${main.bottom - anchor.top + 8}px`;
+  box.style.maxHeight = `${Math.max(160, anchor.top - main.top - 20)}px`;
+}
+function renderModelPopover(hidden: number) {
+  const groups = new Set(overlayRows.map((row) => row.group));
+  let lastGroup = "";
+  const rows = overlayRows
+    .map((row, index) => {
+      const label = groups.size > 1 && row.group && row.group !== lastGroup ? `<div class="section-label">${h(row.group)}</div>` : "";
+      lastGroup = row.group ?? "";
+      const selected = index === overlayIndex;
+      return (
+        label +
+        btn(
+          "choose-row",
+          `<span class="name">${h(row.label)}</span><span class="hint">${h(row.hint ?? "")}</span>${selected && row.description ? `<small class="model-stats">${row.description.split(" · ").map((part) => h(part).replaceAll(" ", "&nbsp;")).join(" · ")}</small>` : ""}`,
+          { index },
+          `menu-row model-row ${selected ? "selected" : ""}`,
+        ).replace("<button ", row.value ? `<button title="${h(row.value)}" ` : "<button ")
+      );
+    })
+    .join("");
+  const row = overlayRows[overlayIndex],
+    model = row?.action === "model" ? models.find((item) => item.id === row.data.id) : undefined,
+    levels = model?.reasoningLevels ?? [],
+    level = model ? modelLevel(model) : undefined;
+  const thinking = model && levels.length
+    ? `<div class="model-thinking"><span class="section-label">THINKING</span><span class="levels">${levels.map((item) => btn("model", h(item), { id: model.id, reasoning: item }, item === level ? "on" : "")).join('<span class="muted">·</span>')}</span><span class="muted keys">←→</span></div>`
+    : "";
+  el("overlay").innerHTML =
+    `<div class="filter-wrap"><input id="chooser-filter" placeholder="filter models" aria-label="Filter models" value="${h(overlayQuery)}" autocomplete="off"></div><div class="menu-list">${rows || `<div class="empty">${modelsLoading && !models.length ? "Loading models…" : "No matches."}</div>`}${hidden ? `<div class="empty">${hidden} more · keep typing to narrow</div>` : ""}</div>${thinking}<div class="menu-footer">${k("↑↓")} select ${k("↵")} switch ${btn("close-overlay", `${k("Esc")} close`)}<span class="right">${overlayQuery ? `${overlayRows.length} of ` : ""}${models.length || ""}${models.length ? " models" : ""}</span></div>`;
+  el("overlay").querySelector(".menu-row.selected")?.scrollIntoView({ block: "nearest" });
+}
 function renderOverlay() {
   if (!state) return;
   el("overlay").hidden = !overlay;
+  placeOverlay();
   if (!overlay) return;
   const focused = el("overlay").querySelector<HTMLInputElement>("input"),
     hasFocus = focused === document.activeElement,
@@ -2309,31 +2423,25 @@ function renderOverlay() {
     filter = true,
     footerNote = "";
   if (overlay === "settings") {
+    // The model lives in the composer; the rest of the old list is one
+    // command away, so Settings keeps only what you change here.
     title = "Settings";
     subtitle = "this session";
     filter = false;
-    footerNote = `Tab or ${shortcut("Ctrl+K")} opens this`;
+    footerNote = "model is in the composer · all commands /";
+    const signedIn = state.providers.items.filter((item) => item.status === "signed-in").map((item) => item.label);
     overlayRows = [
       {
         label: "Mode",
         value: state.planOnly ? "Plan · read only" : "Build · edits allowed",
-        group: "SESSION",
         action: "mode",
         data: { planOnly: !state.planOnly },
         hint: `to ${state.planOnly ? "Build" : "Plan"} ↵`,
-      },
-      {
-        label: "Model",
-        value: state.reasoning ? `${state.model.id} · thinking ${state.reasoning}` : state.model.id,
-        group: "SESSION",
-        action: "overlay",
-        data: { name: "models" },
-        hint: "/model",
+        description: "Plan reads and proposes without changing files; Build may edit.",
       },
       {
         label: "Approvals",
         value: state.session?.autoApprove ? "Auto-approve all" : "Ask first",
-        group: "SESSION",
         action: "auto-approve",
         data: { autoApprove: !state.session?.autoApprove },
         hint: state.session?.autoApprove ? "turn off ↵" : "turn on ↵",
@@ -2342,50 +2450,23 @@ function renderOverlay() {
       {
         label: "Theme",
         value: state.theme,
-        group: "APPEARANCE",
         action: "overlay",
         data: { name: "themes" },
         hint: "/theme",
       },
       {
-        label: "Sessions",
-        value: `${state.sessions.filter((item) => item.turns > 0 && item.id !== state!.session?.id).slice(0, 3).length} recent · ${state.sessions.length} total`,
-        group: "NAVIGATE",
-        action: "overlay",
-        data: { name: "sessions" },
-        hint: "/sessions",
-      },
-      {
-        label: "Clean up sessions",
-        value: "delete empty, quick and old ones",
-        group: "NAVIGATE",
-        action: "overlay",
-        data: { name: "cleanup" },
-        hint: "/cleanup",
-      },
-      {
-        label: "All commands",
-        value: `${state.commands.length} commands`,
-        group: "NAVIGATE",
-        action: "insert-command",
-        data: {},
-        hint: "/",
-      },
-      {
         label: "Providers",
-        value: state.providers.items.length ? `${state.providers.items.filter((item) => item.status === "signed-in").length} signed in` : "sign in · sign out",
-        group: "CONNECTION",
+        value: signedIn.length ? `${signedIn.join(", ")} · signed in` : state.providers.items.length ? "none signed in" : "sign in · sign out",
         action: "overlay",
         data: { name: "providers" },
         hint: "/providers",
       },
       {
-        label: "Provider setup",
-        value: state.model.provider,
-        group: "CONNECTION",
-        action: "setup",
-        data: {},
-        hint: "setup",
+        label: "Sessions",
+        value: `${state.sessions.filter((item) => item.turns > 0 && item.id !== state!.session?.id).slice(0, 3).length} recent · ${state.sessions.length} total`,
+        action: "overlay",
+        data: { name: "sessions" },
+        hint: "/sessions",
       },
       // The ChatGPT plan lives here, not in the status bar.
       ...(state.model.provider === "ChatGPT"
@@ -2393,7 +2474,6 @@ function renderOverlay() {
             {
               label: "ChatGPT plan",
               value: state.chatgptAccount?.email ?? state.chatgptAccount?.label ?? "signed in",
-              group: "CONNECTION",
               action: "open-link",
               data: { url: "https://chatgpt.com/settings/usage" },
               hint: "manage usage ↗",
@@ -2403,9 +2483,7 @@ function renderOverlay() {
     ];
   } else if (overlay === "models") {
     title = "Switch model";
-    subtitle = `current: ${state.model.id}`;
     noun = "models";
-    footerNote = "Tab next group";
     const scoreOf = (model: ModelDescriptor) => modelScores.get(`${model.provider}\u0000${model.id}`);
     // Models you have used come first in each provider, most used first.
     const all = [...models]
@@ -2416,19 +2494,11 @@ function renderOverlay() {
         const current = model.id === state!.model.id && (level ?? "") === (state!.reasoning ?? model.defaultReasoningLevel ?? level ?? "");
         return {
         label: model.displayName ?? model.id,
-        value: [
-          model.contextWindow
-            ? `${num(model.contextWindow)} ctx`
-            : "context unknown",
-          model.maxOutputTokens ? `${num(model.maxOutputTokens)} out` : "",
-          level ? `thinking ${level}` : "",
-        ]
-          .filter(Boolean)
-          .join(" · "),
+        value: [model.contextWindow ? `${tokensShort(model.contextWindow)} context` : "", model.maxOutputTokens ? `${tokensShort(model.maxOutputTokens)} out` : ""].filter(Boolean).join(" · "),
         group: model.provider.toUpperCase(),
         action: "model",
         data: { id: model.id, ...(level ? { reasoning: level } : {}) },
-        hint: [model.reasoningLevels?.length ? "←→ thinking" : "", current ? "● current" : ""].filter(Boolean).join("  "),
+        hint: [model.contextWindow ? tokensShort(model.contextWindow) : "", current ? "● current" : ""].filter(Boolean).join(" "),
         ...(score ? { description: scoreLine(score) } : {}),
         };
       });
@@ -2441,7 +2511,12 @@ function renderOverlay() {
     if (!overlayQuery)
       for (const group of large)
         overlayRows.push({ label: `All ${sizes.get(models.find((model) => model.provider.toUpperCase() === group)!.provider)} models`, value: "type to search", group, action: "focus-filter", data: {}, hint: "" });
-    if (!models.length && modelsLoading) footerNote = "Loading models…";
+    if (modelIndexPending && !overlayQuery) {
+      // Opens on the model you are using, so ←→ changes its thinking.
+      const at = overlayRows.findIndex((row) => row.data.id === state!.model.id);
+      if (at >= 0) overlayIndex = at;
+      if (models.length) modelIndexPending = false;
+    }
   } else if (overlay === "providers") {
     title = "Providers";
     subtitle = state.providers.loading ? "checking…" : `using ${state.model.provider}`;
@@ -2459,6 +2534,7 @@ function renderOverlay() {
         hint: signing ? "cancel ↵" : item.status === "signed-in" ? "sign out ↵" : item.status === "signed-out" ? "sign in ↗" : "",
       };
     });
+    overlayRows.push({ label: "Provider setup", value: state.model.provider, group: "SETUP", action: "setup", data: {}, hint: "setup ↵" });
   } else if (overlay === "cleanup") {
     const { candidates, selected, loading, armed, message, staleDays } = state.cleanup;
     const chosen = new Set(selected);
@@ -2518,6 +2594,8 @@ function renderOverlay() {
       data: { id: session.id },
       hint: session.id === state!.session?.id ? "● current" : "",
     }));
+    // Cleanup sits at the end of the list it tidies.
+    if (!overlayQuery) overlayRows.push({ label: "Clean up sessions", value: "delete empty, quick and old ones", action: "overlay", data: { name: "cleanup" }, hint: "/cleanup" });
   } else if (overlay === "rename") {
     el("overlay").innerHTML =
       `<div class="modal-title">Rename session</div><form id="rename-form"><div class="filter-wrap"><input name="title" aria-label="Session title" value="${h(overlayQuery || state.session?.title)}" maxlength="200"></div><div class="menu-footer"><button type="submit">${k("Enter")} save</button>${btn("close-overlay", `${k("Esc")} cancel`)}</div></form>`;
@@ -2568,12 +2646,13 @@ function renderOverlay() {
           { index },
           `menu-row ${index === overlayIndex ? "selected" : ""}`,
           overlay === "sessions",
-        ) + (row.description ? `<p class="settings-description">${h(row.description)}</p>` : "")
+        ).replace("<button ", row.description ? `<button title="${h(row.description)}" ` : "<button ")
       );
     })
     .join("");
-  el("overlay").innerHTML =
-    `<div class="modal-title">${title} <span>${h(subtitle)}</span>${noun ? `<small>${overlayQuery ? `${overlayRows.length} of ` : ""}${allCount} ${noun}</small>` : ""}</div>${filter ? `<div class="filter-wrap"><input id="chooser-filter" placeholder="filter" aria-label="Filter ${title}" value="${h(overlayQuery)}" autocomplete="off"></div>` : ""}<div class="menu-list">${rows || `<div class="empty">${overlay === "models" && modelsLoading && !models.length ? "Loading models…" : "No matches."}</div>`}${hidden ? `<div class="empty">${hidden} more · keep typing to narrow</div>` : ""}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} ${overlay === "models" ? "switch" : "change"} ${btn("close-overlay", `${k("Esc")} cancel`)}<span class="right">${footerNote}</span></div>`;
+  if (overlay === "models") renderModelPopover(hidden);
+  else el("overlay").innerHTML =
+    `<div class="modal-title">${title} <span>${h(subtitle)}</span>${noun ? `<small>${overlayQuery ? `${overlayRows.length} of ` : ""}${allCount} ${noun}</small>` : ""}</div>${filter ? `<div class="filter-wrap"><input id="chooser-filter" placeholder="filter" aria-label="Filter ${title}" value="${h(overlayQuery)}" autocomplete="off"></div>` : ""}<div class="menu-list">${rows || `<div class="empty">No matches.</div>`}${hidden ? `<div class="empty">${hidden} more · keep typing to narrow</div>` : ""}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} change ${btn("close-overlay", `${k("Esc")} close`)}<span class="right">${footerNote}</span></div>`;
   if (hasFocus) {
     const input = el("overlay").querySelector<HTMLInputElement>("input");
     input?.focus({ preventScroll: true });
@@ -3087,6 +3166,8 @@ async function dispatch(
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
   if (["cleanup-toggle", "cleanup-delete"].includes(action)) return act(() => api(action, args));
   if (action === "drive-forget") return api("drive", { text: `forget ${args.id}` });
+  // The opener toggles: a second click on the model chip closes its picker.
+  if (action === "overlay" && overlay === args.name && !args.query) return dispatch("close-overlay", {});
   if (action === "overlay") return openOverlay(args.name, args.query ?? "");
   if (action === "close-overlay") {
     overlay = null;
@@ -3528,7 +3609,7 @@ document.addEventListener("click", (event) => {
     renderDrivePop();
   }
   const summary = (event.target as Element).closest("summary");
-  if (summary instanceof HTMLElement && summary.closest("#approval")) summary.focus({ preventScroll: true });
+  if (summary instanceof HTMLElement && summary.closest(".approval-card")) summary.focus({ preventScroll: true });
   const detail = summary?.parentElement as HTMLDetailsElement | undefined;
   if (detail?.dataset.detail) {
     const id = detail.dataset.detail;
@@ -3676,7 +3757,7 @@ document.addEventListener("keydown", (event) => {
     ctrl = event.ctrlKey || event.metaKey;
   // Native details and buttons must keep Enter/Space when a side panel is open.
   if (!ctrl && !event.altKey && (key === "enter" || key === " ") && event.target instanceof Element) {
-    const control = event.target.closest<HTMLElement>("#approval summary, #approval button, .thinking-toggle");
+    const control = event.target.closest<HTMLElement>(".approval-card summary, .approval-actions button, .thinking-toggle");
     if (control) { event.preventDefault(); control.click(); return; }
   }
   const run = (task: () => Promise<unknown> | void) => {
@@ -3718,6 +3799,8 @@ document.addEventListener("keydown", (event) => {
       if (pane) {
         return dispatch("close-panel", {});
       }
+      if (state!.approvals.length && !pendingQuestion())
+        return api("permission", { id: state!.approvals[0]!.id, decision: "deny" });
       if (state!.activeTurnId) {
         if (Date.now() < stopArmed) {
           stopArmed = 0;
@@ -3841,7 +3924,10 @@ document.addEventListener("keydown", (event) => {
     }
   }
   if (event.target === editor && key === "enter" && !event.shiftKey) {
-    run(() => submitText());
+    // During an approval Enter allows; with text it denies and says why.
+    const approval = !pendingQuestion() ? state.approvals[0] : undefined;
+    if (approval) run(() => (editor.value.trim() ? denyInstead(editor.value) : api("permission", { id: approval.id, decision: "allow_once" })));
+    else run(() => submitText());
     return;
   }
   if (
@@ -4049,8 +4135,8 @@ window.demesneInspect = () => ({
   })),
   approvals: state?.approvals.length,
   autoApprove: state?.session?.autoApprove === true,
-  approvalText: el("approval").innerText,
-  approvalDetailsOpen: el("approval").querySelector<HTMLDetailsElement>("details")?.open ?? false,
+  approvalText: el("composer").querySelector<HTMLElement>(".approval-card")?.innerText ?? "",
+  approvalDetailsOpen: el("composer").querySelector<HTMLDetailsElement>(".approval-card details")?.open ?? false,
   questions: state?.questions.length,
   queue: state?.queue,
   pane,
@@ -4840,8 +4926,16 @@ let panelDrag: { startX: number; width: number } | null = null,
     left: number;
     top: number;
   } | null = null;
+window.addEventListener("resize", () => {
+  if (overlay) placeOverlay();
+});
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as HTMLElement;
+  // A click outside the open picker or sheet closes it.
+  if (overlay && target.isConnected && !target.closest("#overlay, [data-action='overlay']")) {
+    overlay = null;
+    renderOverlay();
+  }
   if (target.id === "panel-resizer") {
     event.preventDefault();
     panelDrag = {

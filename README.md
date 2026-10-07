@@ -54,7 +54,7 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 <table>
 <tr>
 <td width="50%" valign="top"><b>Models</b><br>Use a local server, your ChatGPT plan or OpenRouter. ChatGPT connects directly to OpenAI's Responses API, including GPT-6.1 Sol for eligible accounts: <code>demesne auth login chatgpt --model gpt-6.1-sol</code>. You can sign in and out under <b>Settings › Providers</b> without restarting. The model picker keeps score from your own work (turns finished, tool errors, speed, checks passing), so you can see whether a local model is good enough for a project. <a href="docs/authentication.md">Providers and model access</a></td>
-<td width="50%" valign="top"><b>Sessions</b><br>A local daemon runs every turn, so closing the window doesn't stop the work. Open it again and carry on. <code>/compact</code> shortens a long session.</td>
+<td width="50%" valign="top"><b>Sessions</b><br>A local daemon runs every turn, so closing the window doesn't stop the work. A running Drive mission keeps going in the background too. Open it again and carry on. <code>/compact</code> shortens a long session.</td>
 </tr>
 <tr>
 <td valign="top"><b>Sub-agents</b><br>Read-only helpers that look into things in parallel, each with its own context, on a model you pick. <a href="docs/subagents.md">Sub-agents</a></td>

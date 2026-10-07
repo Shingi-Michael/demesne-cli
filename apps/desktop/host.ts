@@ -5,6 +5,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { loadCliSettings } from "../cli/src/cli-config.ts";
 import { daemonAddress, GraphicsHost } from "../graphics/host.ts";
 import { StateEncoder, type GraphicsSnapshot } from "../graphics/state-wire.ts";
+import { driveJournalPath } from "../graphics/drive-controller.ts";
+import { awayPlan, handOffDrive, reclaimDrive, runDriveAway } from "./drive-away.ts";
 import { MAX_INPUT_BYTES, parseDesktopInput, type DesktopBootstrap, type DesktopInput, type DesktopOutput, type DesktopRequest } from "./host-protocol.ts";
 
 /** Validate before persisting the selection, even when the daemon is offline. */
@@ -59,6 +61,10 @@ export interface DesktopHostOptions {
   send: (message: DesktopOutput) => void;
   close: () => void;
   nativeTimeoutMs?: number;
+  /// How to run this host again (the compiled binary, or bun and this
+  /// script). With it, a Drive mission still running when the window closes
+  /// carries on in the background; see drive-away.ts.
+  self?: string[];
 }
 /** One privileged Bun host per desktop process. EOF disposes the UI controller;
  * daemon-owned turns and commands stay alive and can be recovered next launch. */
@@ -103,6 +109,10 @@ export class DesktopHost {
       const settings = loadCliSettings({ workspaceRoot: workspace, serverOverride: this.options.server });
       const savedSession = this.prefs.lastSessions[sessionKey(settings.server, workspace)];
       const selectedSession = this.options.sessionId ?? savedSession;
+      // A mission carried on in the background since the window closed comes
+      // back to the window before it loads the journal.
+      const reclaimed = await reclaimDrive(
+        driveJournalPath(settings.dataDirectory, daemonAddress(this.options.server ?? settings.server), workspace));
       candidate = new GraphicsHost({
         workspace, server: this.options.server, sessionId: selectedSession, settings,
         changed: state => { if (this.generation === generation && !this.closed) {
@@ -128,6 +138,12 @@ export class DesktopHost {
           candidate.connection = "online";
           candidate.error = null;
         } catch {}
+      }
+      if (reclaimed && candidate.drive && candidate.driveState?.status === "paused" && candidate.connection === "online") {
+        try {
+          if (candidate.current?.session.id !== reclaimed.sessionId) await candidate.select(reclaimed.sessionId);
+          candidate.drive.agent.control("resume");
+        } catch { /* it stays paused; Resume shows why */ }
       }
       if (candidate.settings.theme === "auto" && !candidate.hasSavedTheme) candidate.theme = this.darkAppearance ? "demesne" : "demesne-light";
       if (this.closed) { candidate.dispose(); return this.bootstrap(); }
@@ -224,8 +240,11 @@ export class DesktopHost {
   dispose() {
     if (this.closed) return;
     this.closed = true;
+    const away = this.host && this.options.self ? awayPlan(this.host) : null;
     try { this.host?.dispose(); }
     finally {
+      // Disposing paused the mission; the background process resumes it.
+      if (away) handOffDrive(away, this.options.self!);
       for (const pending of this.pendingNative.values()) { clearTimeout(pending.timer); pending.reject(new Error("Desktop closed")); }
       this.pendingNative.clear();
       this.options.close();
@@ -266,8 +285,10 @@ export function runDesktopHost(args = process.argv.slice(2)) {
     });
   };
   const model = option(args, "model"), prompt = option(args, "prompt");
+  // A compiled host runs itself; from source it is bun and this script.
+  const self = Bun.main.endsWith(".ts") ? [process.execPath, Bun.main] : [process.execPath];
   const host = new DesktopHost({ workspace: option(args, "workspace"), server: option(args, "server"), sessionId: option(args, "session"),
-    ...(model || prompt ? { startup: { model, prompt } } : {}), setup: args.includes("--setup"), send, close });
+    ...(model || prompt ? { startup: { model, prompt } } : {}), setup: args.includes("--setup"), send, close, self });
   process.stdout.on("error", () => host.dispose());
   process.stdout.on("close", () => host.dispose());
   process.stdin.on("error", () => host.dispose());
@@ -299,7 +320,13 @@ export function runDesktopHost(args = process.argv.slice(2)) {
   });
   return host;
 }
-if (import.meta.main) {
+if (import.meta.main && process.argv.includes("--drive-away")) {
+  const args = process.argv.slice(2), workspace = option(args, "workspace"), sessionId = option(args, "session");
+  if (!workspace || !sessionId) { process.stderr.write("Demesne Drive: --drive-away needs --workspace and --session\n"); process.exit(2); }
+  runDriveAway({ workspace, sessionId, server: option(args, "server") }).then(
+    (code) => process.exit(code),
+    (error) => { process.stderr.write(`Demesne Drive: ${error instanceof Error ? error.message : String(error)}\n`); process.exit(1); });
+} else if (import.meta.main) {
   try { runDesktopHost(); }
   catch (error) { process.stderr.write(`Demesne desktop: ${error instanceof Error ? error.message : String(error)}\n`); process.exit(1); }
 }

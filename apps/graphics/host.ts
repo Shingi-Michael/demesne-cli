@@ -63,6 +63,10 @@ export interface GraphicsHostOptions {
   /// Applied once, the first time the daemon is online: `demesne --model <id>`
   /// and `demesne "<message>"`.
   startup?: { model?: string; prompt?: string };
+  /// A host with no window, carrying on a Drive mission after the window
+  /// closed: it skips the work that only feeds the screen (model discovery,
+  /// Drive's Next queue).
+  headless?: boolean;
 }
 const string = (value: unknown, label: string, max = 128000) => {
   if (typeof value !== "string" || value.length > max)
@@ -148,6 +152,10 @@ export class GraphicsHost {
   /// The session you were in when a mission opened its worktree session.
   private missionReturn: string | null = null;
   private missionFinishing = new Set<string>();
+  /// The commit of a settled worktree mission, while it is being made.
+  missionFinish: Promise<void> | null = null;
+  /// Breakage alerts and the open worktree (a mission's) have loaded.
+  breakageStarted: Promise<void> = Promise.resolve();
   /// Proposals you hid: until a time (Not now, or while running) or for good.
   private nextHidden: Record<string, number | "never"> = {};
   private nextRequested = 0;
@@ -367,10 +375,12 @@ export class GraphicsHost {
         }
       }
       // Discovery across providers takes seconds; do it before /model asks.
-      void this.models().catch(() => {});
-      this.loadNextHidden();
-      void this.refreshNext();
-      void this.breakage.start();
+      if (!this.options.headless) {
+        void this.models().catch(() => {});
+        this.loadNextHidden();
+        void this.refreshNext();
+      }
+      this.breakageStarted = this.breakage.start().catch(() => {});
       await this.applyStartup();
     } catch (error) {
       if (!this.autoStarted && this.settings.autoStart === "always") {
@@ -447,7 +457,7 @@ export class GraphicsHost {
     if (!fix || this.missionFinishing.has(key)) return;
     this.missionFinishing.add(key);
     const summary = state.answer || state.completed.join("\n") || state.activity;
-    void this.breakage.finishMission(fix.id, summary, missionReceipt(state, fix));
+    this.missionFinish = this.breakage.finishMission(fix.id, summary, missionReceipt(state, fix));
   }
 
   /// A mission's worktree is gone: go back to the session you started from.
@@ -547,7 +557,7 @@ export class GraphicsHost {
         if (
           /^turn\.(completed|failed|cancelled|interrupted)$/.test(event.type)
         ) {
-          if (Date.now() - this.nextRequested > 30 * 60_000) void this.refreshNext();
+          if (!this.options.headless && Date.now() - this.nextRequested > 30 * 60_000) void this.refreshNext();
           // After the turn settles, look for anything it (or anyone) broke.
           setTimeout(() => void this.breakage.check(), 1500);
           const queued = this.queue;

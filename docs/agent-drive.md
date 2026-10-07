@@ -96,6 +96,12 @@ While a mission's worktree is open, no other worktree job (a breakage fix or a p
 
 `/drive --here MISSION` runs in the current session instead. So does any mission outside a git repository, in one with no commits, or under `DEMESNE_DRIVE_CONTROL=ui`. The worktree links your `node_modules` rather than reinstalling, so a coder that installs packages there changes your checkout's dependencies too.
 
+## Drive keeps working when you close the window
+
+Closing the window doesn't stop a running mission. The window's host hands it to a small background process with no window (the same desktop host, started with `--drive-away`). That process resumes the mission on the same session and keeps going until the mission settles. A worktree mission is then committed for review, just as it would be with the window open, and the process exits. When you open the project again, the window stops the background process and resumes the mission itself, so you're back in the same session with Drive still working. A mission that settled while you were away shows its review card.
+
+Only a running mission is handed off. Pause or Stop it before closing if you want it to wait. Its limits still apply, and its active time keeps counting while it works in the background. Approvals still ask: a mission waiting on one waits until you reopen the window. The process writes to `drive/away.log` in the data directory, and `<journal>.away.json` next to the mission journal records which process has it. The screen-driven route (`DEMESNE_DRIVE_CONTROL=ui`) needs the window, so it still pauses on close. [Implementation](../apps/desktop/drive-away.ts)
+
 ## Breakage alerts: fix it in a worktree
 
 When something **newly** breaks, a card pops up over the conversation: a check that starts failing, CI on the default branch turning red, or an open pull request whose CI fails. Only changes alert. Whatever was already broken when demesne opened stays in the Next queue, and nothing pops up while a turn is running. Local checks are looked at every two minutes and after each turn; GitHub at most every five minutes. No model runs until you choose:
@@ -185,7 +191,7 @@ max_check_ins = 24
 max_redirects = 3
 ```
 
-These client-loaded limits apply to **new** missions. Task/submission histories are bounded at 64 tasks/256 worker requests. Active time excludes explicit pauses and time with the client closed. Tokens use receipts where available and estimates until then; the budget is not a billing quote or a zero-overshoot guarantee.
+These client-loaded limits apply to **new** missions. Task/submission histories are bounded at 64 tasks/256 worker requests. Active time excludes explicit pauses, but counts time a mission works in the background with the window closed. Tokens use receipts where available and estimates until then; the budget is not a billing quote or a zero-overshoot guarantee.
 
 [Loop protection](../apps/cli/src/drive-protection.ts) detects unchanged repeated submissions, recurring navigation cycles, and overlap with completed goals. It uses recorded file/check outcomes, not clocks or newly generated prose, as progress. A protection stop persists across restarts and ordinary Resume. Review the reason and start a deliberate new mission if the scope should change.
 

@@ -717,24 +717,12 @@ function renderHero() {
             )
             .join("")}</div></section>`
         : ""
-    }<section class="operations"><h2>START FROM</h2><div class="grid">${[
-      ["Explore", "Trace a call flow end to end"],
-      ["Debug", "Find and fix a failing behavior"],
-      ["Build", "Implement a feature with tests"],
-      ["Learn", "Map the architecture"],
-    ]
-      .map(([label, prompt], i) =>
-        btn(
-          "operation",
-          `<span>${i + 1}</span><b>${label}</b><small>${prompt}</small>`,
-          { text: prompt },
-          `operation ${i === 0 ? "selected" : ""}`,
-          true,
-        ),
-      )
-      .join(
-        "",
-      )}</div></section><section class="recent"><h2>RECENT</h2><div class="list">${recent.length ? recent.map((session) => btn("select-session", `<span class="${tone(session.status ?? "")}">${mark(session.status ?? "")}</span><b>${h(session.title)}</b><span class="meta">${session.turns} turns · ${h(session.status ?? "")}</span><small>${age(session.updatedAt)}</small>`, { id: session.id })).join("") : '<div class="empty">Your sessions will appear here.</div>'}</div><p class="recent-footer">${btn("overlay", "Alt+H all sessions", { name: "sessions" }, "", true)} · /resume &lt;name&gt;</p></section>`;
+    }${
+      // Hidden until there is a session to go back to.
+      recent.length
+        ? `<section class="recent"><h2>RECENT</h2><div class="list">${recent.map((session) => btn("select-session", `<span class="${tone(session.status ?? "")}">${mark(session.status ?? "")}</span><b>${h(session.title)}</b><span class="meta">${session.turns} turns · ${h(session.status ?? "")}</span><small>${age(session.updatedAt)}</small>`, { id: session.id })).join("")}</div><p class="recent-footer">${btn("overlay", "Alt+H all sessions", { name: "sessions" }, "", true)} · /resume &lt;name&gt;</p></section>`
+        : ""
+    }`;
   el("hero-composer").append(composer);
 }
 let composerSignature = "",
@@ -2845,7 +2833,6 @@ async function dispatch(
     await loadReference();
     return;
   }
-  if (action === "operation") return setDraft(String(args.text));
   if (action === "panel") return openPanel(args.name, args.turnId ?? "");
   // A check row in Review opens that check in Checks.
   if (action === "open-check") {

@@ -2678,7 +2678,7 @@ button:disabled {
   font-weight: 600;
 }
 
-/* Start screen: Drive's top proposals above "Start from". */
+/* Start screen: Drive's top proposals under the composer. */
 .proposals h2 {
   display: flex;
   justify-content: space-between;
@@ -2716,6 +2716,11 @@ button:disabled {
   font-size: 12px;
   color: var(--paper);
   white-space: nowrap;
+}
+/* A row's buttons appear on the row you point at or move to; the first
+   row keeps them so the start screen still shows what a proposal offers. */
+.proposal-row:not(:first-child):not(:hover):not(:focus-within) button {
+  visibility: hidden;
 }
 .proposal-row button.primary {
   background: var(--menuSelection);

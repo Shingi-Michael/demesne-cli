@@ -69,7 +69,7 @@ This is a source-build/development preview rather than a signed release channel.
 
 ## Closing the app and stopping work
 
-Closing the desktop window ends its host and Drive orchestration. It does not stop an independent daemon-owned coding turn or background command. Reopen Demesne to return to the last project and session and inspect recorded progress. This selection is stored in private `desktop-ui.json` preferences, keyed by project and daemon; missing or archived sessions open a new session instead. An unfinished Drive mission returns paused; resume it deliberately.
+Closing the desktop window ends its host. It does not stop an independent daemon-owned coding turn or background command, and a running Drive mission [keeps working in the background](agent-drive.md#drive-keeps-working-when-you-close-the-window) until it settles. Reopen Demesne to return to the last project and session and inspect recorded progress. This selection is stored in private `desktop-ui.json` preferences, keyed by project and daemon; missing or archived sessions open a new session instead. A mission that was still working is taken back and resumed in the window; a paused one stays paused.
 
 Use the conversation's cancel control to interrupt a coding turn. Use Drive's pause/stop controls for its mission. Stopping the daemon is a separate operation and interrupts daemon-owned work.
 

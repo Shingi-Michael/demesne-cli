@@ -21,13 +21,13 @@ flowchart LR
 
 The [CLI entry point](../apps/cli/src/main.ts) opens the desktop window from an interactive terminal through the [desktop launcher](../apps/cli/src/desktop-launcher.ts) and exposes headless commands. The [shared host](../apps/graphics/host.ts) owns the authenticated client, local UI state, config writes, and browser opening; the [desktop host](../apps/desktop/host.ts) runs it beside the window. The web page has no Node API, daemon token, or unrestricted network access.
 
-The [daemon](../apps/daemon/src/app.ts) owns turns and background commands. Closing the UI does not stop daemon-owned coding work. Drive's orchestration loop is client-owned; its journal is saved and an unfinished mission resumes paused. The [store](../packages/storage/src/index.ts) marks interrupted daemon work on restart instead of replaying side effects.
+The [daemon](../apps/daemon/src/app.ts) owns turns and background commands. Closing the UI does not stop daemon-owned coding work. Drive's orchestration loop is client-owned; its journal is saved, and a running mission carries on in a background host when the window closes ([below](#desktop-process-boundary)). The [store](../packages/storage/src/index.ts) marks interrupted daemon work on restart instead of replaying side effects.
 
 ## Desktop process boundary
 
 The [Tauri desktop preview](desktop.md) displays the shared UI in the system webview. Its Rust core supplies native project selection, clipboard, and external opening, while a compiled Bun host owns the authenticated daemon client and Drive controller. Public state and named actions cross private process pipes and the restricted Tauri bridge; daemon/provider credentials stay outside the webview. Native commands check both the main-window label and local origin; remote navigation and new webviews are denied.
 
-Closing the window ends its host and Drive orchestration. Daemon-owned turns continue, and the project/session can be reopened. See the [desktop implementation](../apps/desktop/README.md#process-boundary).
+Closing the window ends its host. A running Drive mission is handed to a detached host process with no window, which resumes it and exits once it settles; reopening the project stops that process and resumes the mission in the window ([Drive keeps working](agent-drive.md#drive-keeps-working-when-you-close-the-window)). Daemon-owned turns continue, and the project/session can be reopened. See the [desktop implementation](../apps/desktop/README.md#process-boundary).
 
 ## One coding turn
 

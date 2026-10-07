@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fixture, eventually } from "../../graphics/test/fixture.ts";
 import { parseDesktopInput, type DesktopOutput, type DesktopBootstrap } from "../host-protocol.ts";
 
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 type Response = Extract<DesktopOutput, { kind: "response" }>;
 class Sidecar {
   child: Bun.Subprocess<"pipe", "pipe", "pipe">;
@@ -251,24 +252,42 @@ test("desktop recovery falls back cleanly after its saved session is archived", 
   } finally { await first.close(); if (second) await second.close(); await f.close(); }
 });
 
-test("desktop closing pauses and saves Drive without silently switching projects", async () => {
+test("closing the window hands a running Drive mission to the background, and reopening takes it back", async () => {
   const f = await fixture(), other = join(f.root, "other");
   mkdirSync(other);
   const sidecar = new Sidecar(f, ["--workspace", f.workspace]);
-  let recovered: Sidecar | undefined;
+  let recovered: Sidecar | undefined, away: number | undefined;
   try {
     const selected = bootstrap(await sidecar.value("desktop-bootstrap")), sessionId = selected.snapshot!.session!.id;
     await sidecar.value("drive", { sessionId, text: "--bounded Inspect the workspace" });
     expect(await sidecar.request("desktop-open-project", { path: other })).toMatchObject({ ok: false, error: "Pause Drive before changing projects" });
     expect(await sidecar.close()).toBe(0);
     const key = createHash("sha256").update(`${f.server.url.href}\n${f.workspace}`).digest("hex");
-    const journal = JSON.parse(readFileSync(join(f.settings.dataDirectory, "drive", `${key}.json`), "utf8"));
-    expect(journal.status).toBe("paused");
+    const journalPath = join(f.settings.dataDirectory, "drive", `${key}.json`);
+    // A background process with no window carries the mission on.
+    const marker = JSON.parse(readFileSync(`${journalPath}.away.json`, "utf8"));
+    away = marker.pid;
+    expect(marker.sessionId).toBe(sessionId);
+    await eventually(() => { try { return readFileSync(`${journalPath}.lock`, "utf8") === String(marker.pid); } catch { return false; } }, 10000);
+    const journal = JSON.parse(readFileSync(journalPath, "utf8"));
     expect(journal.mission).toBe("Inspect the workspace");
+    expect(["running", "waiting"]).toContain(journal.status);
+    // Opening the project again stops it and resumes the mission in the window.
     recovered = new Sidecar(f);
-    expect(bootstrap(await recovered.value("desktop-bootstrap")).snapshot!.drive!.status).toBe("paused");
-    expect((await f.client.health()).model).toBe("qwen3.8-27b");
-  } finally { await sidecar.close(); if (recovered) await recovered.close(); await f.close(); }
+    expect(["running", "waiting"]).toContain(bootstrap(await recovered.value("desktop-bootstrap")).snapshot!.drive!.status);
+    expect(existsSync(`${journalPath}.away.json`)).toBe(false);
+    expect(alive(marker.pid)).toBe(false);
+    expect(readFileSync(`${journalPath}.lock`, "utf8")).not.toBe(String(marker.pid));
+    // Pausing first means closing leaves it paused, with nothing in the background.
+    await recovered.value("drive-control", { sessionId, control: "pause" });
+    expect(await recovered.close()).toBe(0);
+    expect(existsSync(`${journalPath}.away.json`)).toBe(false);
+    expect(JSON.parse(readFileSync(journalPath, "utf8")).status).toBe("paused");
+  } finally {
+    await sidecar.close(); if (recovered) await recovered.close();
+    if (away && alive(away)) process.kill(away, "SIGKILL");
+    await f.close();
+  }
 });
 
 

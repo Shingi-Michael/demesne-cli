@@ -34,7 +34,7 @@ bun run build:desktop
 
 The host and daemon are compiled with Bun and included as resources/sidecars alongside native image codecs. The frontend's HTML/CSS/assets and live UI come from `apps/graphics`.
 
-The desktop process owns the window and its host. The independent daemon owns coding turns. Window exit disposes client streams and Drive without killing the daemon. Private `desktop-ui.json` preferences remember the last project and session per canonical project/daemon pair; missing or archived sessions fall back to a new session. A project change creates a host for that selected workspace; existing session work remains daemon-owned.
+The desktop process owns the window and its host. The independent daemon owns coding turns. Window exit disposes client streams without killing the daemon. A running Drive mission is handed to the same host binary run with `--drive-away` (no window, its own process session), which carries it to the end; reopening the project takes it back ([drive-away.ts](drive-away.ts)). Private `desktop-ui.json` preferences remember the last project and session per canonical project/daemon pair; missing or archived sessions fall back to a new session. A project change creates a host for that selected workspace; existing session work remains daemon-owned.
 
 ## Verification
 

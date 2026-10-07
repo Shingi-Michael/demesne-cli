@@ -18,6 +18,12 @@ export interface GraphicsUICommand {
   observationId: string;
   action: DriveAction;
 }
+/// Where a workspace's mission journal lives (one per daemon and project).
+export function driveJournalPath(dataDirectory: string, server: string, workspace: string) {
+  const key = createHash("sha256").update(`${server}\n${workspace}`).digest("hex");
+  return join(dataDirectory, "drive", `${key}.json`);
+}
+
 /** Drive works the daemon directly by default (recorded session state in,
  * API submissions out); the UI only shows it. DEMESNE_DRIVE_CONTROL=ui keeps
  * the original route: clipped, visible DOM observations and authored UI
@@ -27,8 +33,10 @@ export class GraphicsDrive {
   /// This workspace's project memory, and its entries for the UI.
   readonly memory: ProjectMemory;
   memoryEntries: DriveMemoryEntry[] = [];
-  /// Direct control (the default) can move a mission into its own worktree session.
-  private direct = false;
+  /// Direct control (the default) can move a mission into its own worktree
+  /// session, and needs no screen, so it can carry on with the window closed.
+  direct = false;
+  readonly journalPath: string;
   private observed: DriveObservation | null = null;
   private pending = new Map<
     string,
@@ -46,6 +54,7 @@ export class GraphicsDrive {
   ) {
     const key = createHash("sha256").update(`${host.api.server}\n${host.workspace}`).digest("hex");
     this.memory = new ProjectMemory(join(host.settings.dataDirectory, "drive", `${key}.memory.jsonl`));
+    this.journalPath = driveJournalPath(host.settings.dataDirectory, host.api.server, host.workspace);
     this.refreshMemory(false);
     const direct =
       process.env.DEMESNE_DRIVE_CONTROL === "ui"
@@ -80,7 +89,7 @@ export class GraphicsDrive {
           signal,
         ),
       limits: host.settings.loaded.config.drive,
-      path: join(host.settings.dataDirectory, "drive", `${key}.json`),
+      path: this.journalPath,
       memory: {
         forPlanner: () => this.memory.forPlanner(),
         add: (entry) => {

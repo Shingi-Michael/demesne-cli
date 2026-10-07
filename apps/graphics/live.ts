@@ -372,6 +372,9 @@ function renderStatus() {
   // A quiet footer: a spinner while working, a word only when the state
   // needs attention (failed, approval, offline…). "ready" says nothing.
   const working = Boolean(state.activeTurnId) && !["approval", "waiting", "failed"].includes(phase);
+  // The start screen names the model under its heading, so a ready status
+  // bar would only repeat it there.
+  el("status").dataset.quiet = String(phase === "ready");
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   // The desktop toolbar already names the project and its path; the header
@@ -705,7 +708,7 @@ function renderHero() {
   const composer = el("composer-slot");
   composer.remove();
   el("hero").innerHTML =
-    `<div class="intro"><h1>What are we working on?</h1><p>${h(state.model.id || "Choose a model")} · ctx ${num(state.model.contextWindow)} · ${state.planOnly ? "Plan" : "Build"} mode</p></div><div id="hero-composer"></div>${
+    `<div class="intro"><h1>What are we working on?</h1><p>${btn("overlay", h(state.model.id || "Choose a model"), { name: "models" }, "model-link", true)} · ctx ${num(state.model.contextWindow)} · ${state.planOnly ? "Plan" : "Build"} mode</p></div><div id="hero-composer"></div>${
       // Drive's Next queue, ready when you open demesne: the top three, with
       // the full queue in the Drive panel.
       state.driveNext.proposals.length

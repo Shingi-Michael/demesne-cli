@@ -23,6 +23,12 @@
 .live-app.start .workspace > main {
   gap: 0;
 }
+.live-app.start > .status[data-quiet="true"] {
+  display: none;
+}
+.intro .model-link:hover {
+  color: var(--electric);
+}
 .live-app.start #rail {
   display: none;
 }

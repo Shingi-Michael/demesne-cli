@@ -80,7 +80,10 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 Download it from the [latest release](https://github.com/Shingi-Michael/demesne-cli/releases/latest): `demesne-desktop-darwin-arm64.zip` for Apple silicon Macs, `demesne-desktop-linux-amd64.deb` for Ubuntu. You don't need Bun or Rust to run it.
 
 ```sh
-# macOS: unzip, move to Applications, and clear the unsigned-download flag
+# macOS: the install script puts the app in ~/Applications and demesne on your PATH
+curl -fsSL https://raw.githubusercontent.com/Shingi-Michael/demesne-cli/main/scripts/install.sh | sh
+
+# macOS by hand: unzip, move to Applications, and clear the unsigned-download flag
 unzip demesne-desktop-darwin-arm64.zip && mv Demesne.app /Applications/
 xattr -dr com.apple.quarantine /Applications/Demesne.app
 

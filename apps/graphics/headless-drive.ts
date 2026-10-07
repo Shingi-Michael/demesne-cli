@@ -18,7 +18,7 @@ export interface HeadlessDriveResult {
   verified: boolean;
 }
 
-export async function runHeadlessDrive(options: { workspace: string; sessionId: string; mission: string; server?: string; settings: CliSettings; log?: (line: string) => void },
+export async function runHeadlessDrive(options: { workspace: string; sessionId: string; mission: string; workflow?: string; server?: string; settings: CliSettings; log?: (line: string) => void },
   test: { client?: GraphicsHostOptions["client"]; pollMs?: number; started?: (host: GraphicsHost) => void } = {}): Promise<HeadlessDriveResult> {
   const log = options.log ?? (() => {});
   const host = new GraphicsHost({
@@ -40,7 +40,7 @@ export async function runHeadlessDrive(options: { workspace: string; sessionId: 
     await host.breakageStarted;
     const drive = host.drive;
     if (!drive) throw new Error("Drive is unavailable here.");
-    await drive.handle("drive", { text: options.mission });
+    await drive.handle("drive", { text: options.mission, ...(options.workflow ? { workflow: options.workflow } : {}) });
     test.started?.(host);
     let activity = "";
     const denied = new Set<string>();

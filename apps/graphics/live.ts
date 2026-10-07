@@ -1062,7 +1062,11 @@ function renderBreakage() {
       cards.push(`<div class="breakage-card running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">${fix.proposal ? "Working in a worktree" : "Fixing in a worktree"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><div class="breakage-meta">${branch}<span>${activity}</span></div><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Stopping…", "Stop and discard"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
     } else if (fix.status === "ready") {
       const diff = fix.diff ? `<span class="add">+${fix.diff.additions}</span> <span class="del">−${fix.diff.deletions}</span> · ${fix.diff.files} file${fix.diff.files === 1 ? "" : "s"}` : "";
-      const checks = (fix.checks ?? []).map((check) => `<li class="${check.passed ? "pass" : "fail"}">${check.passed ? "✓" : "✕"} <code>${h(check.command)}</code></li>`).join("");
+      // A workflow mission lists its steps, each with the check Drive ran for it.
+      const run = state!.drive?.workflow && state!.drive.homeSessionId === fix.sessionId ? state!.drive.workflow : null;
+      const checks = run
+        ? run.steps.map((step, index) => { const ok = index < run.current && (!step.check || step.result?.ok); return `<li class="${ok ? "pass" : "fail"}">${ok ? "✓" : "✕"} ${h(step.title)}${step.check ? ` · <code>${h(step.check.command)}</code>${step.check.expect === "fail" ? " failed as expected" : ""}` : ""}</li>`; }).join("")
+        : (fix.checks ?? []).map((check) => `<li class="${check.passed ? "pass" : "fail"}">${check.passed ? "✓" : "✕"} <code>${h(check.command)}</code></li>`).join("");
       cards.push(`<div class="breakage-card ready"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text">${fix.mission ? "Mission ready to review" : fix.proposal ? "Ready to review" : "Fix ready to review"}</span><small>${diff}</small></div><p class="breakage-title">${h(fix.title)}</p>${fix.headline ? `<p class="breakage-receipt">${h(fix.headline)} ${btn("breakage-receipt", "Copy receipt", { id: fix.id }, "link", true)}</p>` : ""}${fix.summary ? `<p class="breakage-summary">${h(fix.summary)}</p>` : ""}${checks ? `<ul class="breakage-checks">${checks}</ul>` : '<p class="breakage-note">No checks ran in the worktree.</p>'}<div class="breakage-meta">${branch}<span>${(fix.diff?.paths ?? []).map(h).join(" · ")}</span></div><div class="breakage-actions">${btn("breakage-apply", doing("apply", "Applying…", "Apply to my branch"), { id: fix.id }, "primary", true, Boolean(busy))}${btn("breakage-pr", doing("pr", "Opening…", "Open PR"), { id: fix.id }, "", true, Boolean(busy))}${btn("breakage-discard", doing("discard", "Discarding…", "Discard"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
     } else if (fix.status === "failed") {
       cards.push(`<div class="breakage-card failed"><div class="breakage-head"><span class="breakage-mark">${(fix.proposal || fix.mission) && fix.unchanged ? "○" : "!"}</span><span class="breakage-text">${fix.proposal || fix.mission ? (fix.unchanged ? "Finished without changes" : "Couldn't finish it") : "Couldn't fix it"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><p class="breakage-summary">${h(fix.error ?? (fix.proposal || fix.mission ? "It failed." : "The fix failed."))}${fix.summary ? ` ${h(fix.summary)}` : ""}</p><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Discarding…", "Discard the worktree"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
@@ -1656,7 +1660,7 @@ function missionParts(drive: NonNullable<Snapshot["drive"]>) {
   const used = drive.protection?.used;
   const active = used ? (used.activeMs < 3_600_000 ? `${Math.round(used.activeMs / 60_000)}m` : `${Math.floor(used.activeMs / 3_600_000)}h ${Math.round((used.activeMs % 3_600_000) / 60_000)}m`) : "";
   const planner = trace?.source === "controller" ? "Local controller" : (drive.model ?? state!.model.id).split("/").at(-1)!.trim();
-  const stats = [`step ${drive.step}`, active, used ? `${num(used.planningTokens + used.workerTokens)} tokens` : "", drive.mode === "continuous" ? "continuous" : "bounded", planner].filter(Boolean).join(" · ");
+  const stats = [drive.workflow ? `${drive.workflow.name} · step ${Math.min(drive.workflow.current + 1, drive.workflow.steps.length)} of ${drive.workflow.steps.length}` : `step ${drive.step}`, active, used ? `${num(used.planningTokens + used.workerTokens)} tokens` : "", drive.mode === "continuous" ? "continuous" : "bounded", planner].filter(Boolean).join(" · ");
   const ledger = Array.isArray(drive.ledger?.tasks) ? drive.ledger.tasks.filter((task) => task && typeof task.id === "string") : [];
   const section = (title: string, body: string) => body ? `<div class="drive-heading">${title}</div>${body}` : "";
   const details = [
@@ -1664,7 +1668,7 @@ function missionParts(drive: NonNullable<Snapshot["drive"]>) {
     steps.length ? section("TIMELINE", `<ol class="drive-timeline">${steps.map((step) => `<li class="tone-${step.tone}"><span>${h(step.mark)}</span><span class="drive-step">${h(step.text)}</span><time>${h(step.when)}</time></li>`).join("")}</ol>`) : "",
     section("REASONING", trace?.reasoning ? `<pre>${h(trace.reasoning)}</pre>` : `<p class="muted">No reasoning recorded.</p>`),
     trace?.text || trace?.action ? section("OUTPUT", `<pre>${h(trace.text || trace.action)}</pre>`) : "",
-    section("MISSION", `<p>${h(drive.mission)}</p><p class="muted">${drive.mode === "continuous" ? "Continuous: finishes each task, chooses worthwhile next work, then goes idle." : "Bounded: finishes after one verified task."}</p>`),
+    section("MISSION", `<p>${h(drive.mission)}</p><p class="muted">${drive.workflow ? `Workflow ${h(drive.workflow.name)}: each step's check must pass before the next step starts.` : drive.mode === "continuous" ? "Continuous: finishes each task, chooses worthwhile next work, then goes idle." : "Bounded: finishes after one verified task."}</p>`),
     drive.notes ? section("NOTES", `<pre>${h(drive.notes)}</pre>`) : "",
     drive.protection ? section("BUDGET", `<p class="muted">${Math.floor(drive.protection.used.activeMs / 60_000)}/${drive.protection.limits.maxActiveMinutes} active min · ${drive.protection.used.cycles}/${drive.protection.limits.maxCycles} cycles · ${drive.protection.used.workerRequests}/${drive.protection.limits.maxWorkerRequests} coder requests</p>`) : "",
     ledger.some((task) => task.status === "completed") ? `<p class="muted">Reopen a finished task: /drive reopen &lt;task-id&gt; &lt;reason&gt;<br>${ledger.filter((task) => task.status === "completed").slice(-4).map((task) => `${h(task.id.slice(0, 8))} · ${h(task.title)}`).join("<br>")}</p>` : "",
@@ -2705,7 +2709,7 @@ function renderCompletion() {
       .map((item) => ({
         label: item.name,
         description: item.description,
-        hint: item.aliases.join(" "),
+        hint: item.detail ?? item.aliases.join(" "),
         group: item.section.toUpperCase(),
         value: item.name,
         kind: "command",
@@ -2750,7 +2754,7 @@ function renderCompletion() {
     })
     .join("");
   el("completion").innerHTML =
-    `<div class="menu-list">${rows}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} ${mention ? "insert" : "run"} ${!mention ? `${k("Tab")} complete` : ""} ${k("Esc")} close <span class="right">${mention ? "files with spaces are skipped" : `${completionItems.length} commands`}</span></div>`;
+    `<div class="menu-list">${rows}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} ${mention ? "insert" : "run"} ${!mention ? `${k("Tab")} complete` : ""} ${k("Esc")} close <span class="right">${mention ? "files with spaces are skipped" : h(state!.commands.find((command) => command.name === completionItems[completionIndex]?.value)?.preview ?? `${completionItems.length} commands`)}</span></div>`;
   el("completion")
     .querySelector(".selected")
     ?.scrollIntoView({ block: "nearest" });
@@ -2837,6 +2841,23 @@ async function submitText(value = editor.value) {
     )?.id;
     if (!id) {
       notice(`Unknown command: ${name}`);
+      return;
+    }
+    if (id.startsWith("workflow:")) {
+      // A workflow runs as a Drive mission and unfolds on the briefing line.
+      driveShown = true;
+      await api("drive", { text: argument, workflow: id.slice("workflow:".length) });
+      editor.value = "";
+      void api("draft", { text: "" });
+      renderComposer();
+      return;
+    }
+    if (id.startsWith("custom:")) {
+      followLatest();
+      await api("custom-command", { name: id.slice("custom:".length), argument });
+      editor.value = "";
+      void api("draft", { text: "" });
+      renderComposer();
       return;
     }
     const clear = () => {

@@ -86,3 +86,10 @@ test("a running coder or pending approval is observed as such, not as ready inpu
   (pending.control as unknown as { host: { current: { approvals: Map<string, unknown> } } }).host.current.approvals.set("a", {});
   expect(pending.control.observe().mode).toBe("approval");
 });
+
+test("a mission's worktree session is observed at its own root, which the daemon requires", () => {
+  const plain = host();
+  expect(plain.control.observe().workspace).toBe("/work");
+  const { control } = host({ current: { session: { id: "s2", title: "Mission", workspace: { root: "/worktrees/work-1a2b" } }, approvals: new Map(), questions: new Map(), runs: () => [] } });
+  expect(control.observe().workspace).toBe("/worktrees/work-1a2b");
+});

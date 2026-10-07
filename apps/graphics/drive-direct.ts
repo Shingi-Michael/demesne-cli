@@ -88,7 +88,8 @@ export class DirectDriveControl {
     return {
       id,
       sessionId: session.session.id,
-      workspace: this.host.workspace,
+      // The session's own root: a mission's worktree, not the project it came from.
+      workspace: session.session.workspace?.root ?? this.host.workspace,
       title: session.session.title,
       mode,
       ready: mode === "input" && !this.host.busy && this.host.connection === "online",

@@ -10,6 +10,7 @@ import { AgentDrive } from "../cli/src/agent-drive.ts";
 import { ProjectMemory } from "../cli/src/drive-memory.ts";
 import { inspectDrive } from "../cli/src/drive-inspection.ts";
 import { parseDriveStart } from "../cli/src/drive-tasks.ts";
+import { loadWorkflows, runWorkflowCheck, workflowMission, workflowRun } from "../cli/src/workflows.ts";
 import { DirectDriveControl } from "./drive-direct.ts";
 import type { GraphicsHost } from "./host.ts";
 
@@ -110,6 +111,7 @@ export class GraphicsDrive {
         signal.throwIfAborted();
         return (await host.api.cancelTurn(turnId)).turn.status === "cancelled";
       },
+      runCheck: (command, cwd, signal) => runWorkflowCheck(command, cwd, signal),
       inspect: (action, observation, signal, activity) =>
         direct
           ? direct.inspect(action, observation, signal, activity)
@@ -270,6 +272,10 @@ export class GraphicsDrive {
     if (method === "drive") {
       if (typeof args.text !== "string") throw new Error("Enter a mission");
       if (args.observation) this.report(args.observation);
+      if (typeof args.workflow === "string") {
+        await this.startWorkflow(args.workflow, args.text);
+        return;
+      }
       const value = args.text.trim();
       if (["pause", "resume", "stop"].includes(value)) {
         this.agent.control(value as "pause" | "resume" | "stop");
@@ -300,18 +306,30 @@ export class GraphicsDrive {
   /// A new mission works in its own git worktree and session, so your
   /// checkout stays as it is until you apply the result. `--here` (or no git
   /// repository with commits) keeps it in the current session.
-  private async startMission(value: string) {
+  private async startMission(value: string, workflow?: import("@demesne/protocol").DriveWorkflowRun) {
     const here = /(^|\s)--here(?=\s|$)/.test(value);
     const text = value.replace(/(^|\s)--here(?=\s|$)/g, " ").trim();
     if (!here && this.direct && this.host.breakage.supported) {
-      const { mission } = parseDriveStart(text);
+      const mission = workflow ? text : parseDriveStart(text).mission;
       if (!mission.trim() || mission.length > 8000) throw new Error("Use /drive <mission> (up to 8,000 characters).");
       try { await this.host.openMissionWorktree(mission); }
       catch (error) {
         if (!/needs a git repository|no commits yet/.test(error instanceof Error ? error.message : "")) throw error;
       }
     }
-    this.agent.start(text);
+    this.agent.start(text, workflow);
+  }
+  /// `/<workflow> [goal]`: the workflow file's steps as one bounded mission.
+  /// Read from the project you're in, before any worktree is made.
+  async startWorkflow(name: string, argument: string) {
+    const workflow = loadWorkflows(this.host.workspace).find((item) => item.name.toLowerCase() === name.toLowerCase());
+    if (!workflow) throw new Error(`No workflow named ${name}. Add .demesne/workflows/${name}.md.`);
+    const here = /(^|\s)--here(?=\s|$)/.test(argument);
+    const goal = argument.replace(/(^|\s)--here(?=\s|$)/g, " ").trim();
+    if (!goal && workflow.steps.some((step) => step.prompt.includes("$ARGUMENTS")))
+      throw new Error(`Say what it's for: /${workflow.name} <goal>.`);
+    const run = workflowRun(workflow, goal);
+    await this.startMission(`${here ? "--here " : ""}${workflowMission(workflow, run, goal)}`, run);
   }
   /// Adds to project memory and shows it.
   addMemory(entry: Pick<DriveMemoryEntry, "kind" | "text" | "source">) {

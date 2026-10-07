@@ -152,7 +152,7 @@ function buildPainter(enabled: boolean, initial: Theme): Painter {
 export type SlashCommandId =
   | "new" | "sessions" | "resume" | "rename" | "delete" | "cleanup" | "model" | "subagent" | "export" | "plan"
   | "status" | "context" | "diff" | "undo" | "compact" | "drive" | "clear" | "help" | "theme" | "themefy" | "providers" | "exit"
-  | `custom:${string}`;
+  | `custom:${string}` | `workflow:${string}`;
 export type SlashCommandArgument = "none" | "optional" | "required";
 export type SlashCommandSection = "session" | "inspect" | "control";
 
@@ -163,6 +163,10 @@ export interface SlashCommand {
   argument: SlashCommandArgument;
   argumentLabel?: string;
   description: string;
+  /// A short tag shown beside the command in menus, e.g. "workflow · 4 steps".
+  detail?: string;
+  /// One line about what running it does, shown while it is selected.
+  preview?: string;
   section: SlashCommandSection;
 }
 

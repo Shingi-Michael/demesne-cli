@@ -18,6 +18,7 @@ import {
   type ThemeLibrary,
   resolveTheme,
   SLASH_COMMANDS,
+  type SlashCommand,
 } from "@demesne/brand";
 import {
   isRecord,
@@ -45,6 +46,8 @@ import { GraphicsDrive, type GraphicsUICommand } from "./drive-controller.ts";
 import { ProviderAccounts, type ProviderEntry } from "./providers.ts";
 import { BreakageWatch } from "./breakage.ts";
 import { missionReceipt } from "../cli/src/drive-receipt.ts";
+import { expandCustomCommand, loadCustomCommands, mergeSlashCommands, type CustomCommand } from "../cli/src/custom-commands.ts";
+import { loadWorkflows, workflowCommand } from "../cli/src/workflows.ts";
 import { GraphicsSetup } from "./setup-controller.ts";
 import { GraphicsSession } from "./session-model.ts";
 
@@ -258,6 +261,19 @@ export class GraphicsHost {
   get active() {
     return this.current?.active ?? null;
   }
+  private commandCache: { at: number; root: string; commands: SlashCommand[]; customs: CustomCommand[] } | null = null;
+  /// Built-ins, then your workflow and custom command files (project ones
+  /// win), re-read every few seconds so a new file shows up without a restart.
+  slashCommands() {
+    const root = this.current?.session.workspace?.root ?? this.workspace;
+    if (this.commandCache && this.commandCache.root === root && Date.now() - this.commandCache.at < 3000) return this.commandCache.commands;
+    let customs: CustomCommand[] = [], workflows: SlashCommand[] = [];
+    try { customs = loadCustomCommands(root); } catch { /* unreadable folders add nothing */ }
+    try { workflows = loadWorkflows(root).map(workflowCommand); } catch { /* as above */ }
+    const commands = mergeSlashCommands(SLASH_COMMANDS, [...workflows.map((command) => ({ command, body: "", source: "" })), ...customs.filter((custom) => !workflows.some((command) => command.name === custom.command.name))]);
+    this.commandCache = { at: Date.now(), root, commands, customs };
+    return commands;
+  }
   snapshot() {
     return {
       revision: this.revision,
@@ -305,7 +321,7 @@ export class GraphicsHost {
       themes: this.themeLibrary?.themes.map(t=>t.name) ?? themeNames(),
       themeOptions: this.themeLibrary?.themes ?? [],
       themeCanUndo: this.themeLibrary?.canUndo ?? false,
-      commands: SLASH_COMMANDS,
+      commands: this.slashCommands(),
       workspace: this.current?.session.workspace?.root ?? this.workspace,
       drive: this.driveState,
       // Drive's project memory for this workspace (shown in Session).
@@ -1171,6 +1187,14 @@ export class GraphicsHost {
       return;
     }
     if (method === "submit") return this.submit(string(args.text, "prompt"));
+    if (method === "custom-command") {
+      this.commandCache = null;
+      this.slashCommands();
+      const name = string(args.name, "command", 100).replace(/^\//, "").toLowerCase();
+      const custom = this.commandCache!.customs.find((item) => item.command.name.slice(1).toLowerCase() === name);
+      if (!custom) throw new Error(`Unknown command: /${name}`);
+      return this.submit(expandCustomCommand(custom, typeof args.argument === "string" ? args.argument : ""));
+    }
     if (method === "cancel") return this.interrupt();
     if (method === "queue-action") {
       const action = string(args.action, "queue action", 10);

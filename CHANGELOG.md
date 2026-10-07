@@ -6,6 +6,8 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Added
 
+- Workflows: a markdown file in `.demesne/workflows/` (or `~/.demesne/workflows/`) lists steps, and `/<name> <goal>` runs them in order as one Drive mission in its own worktree. A step's `check:` command is run by Drive itself and must pass (or fail, with `expect: fail`) before the next step starts. The live block shows each step's check, and the receipt counts steps. `demesne drive --workflow <name>` runs one with no window.
+
 - `demesne drive "mission"` runs Drive with no window, for CI: it prints the mission receipt, adds it to the GitHub job summary, posts it to a pull request with `--pr N`, and exits 0 only when every task is verified. Approvals are denied rather than left waiting.
 - Releases include the desktop app: `demesne-desktop-darwin-arm64.zip` for Apple silicon Macs and `demesne-desktop-linux-amd64.deb` for Ubuntu 22.04/24.04, so installing demesne no longer needs Bun or Rust.
 - Label a GitHub issue `drive` to queue it for Drive: open ones become Next proposals, and the PR Drive opens for one says `Closes #n`.
@@ -43,6 +45,8 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Fixed
 
+- A `/drive` mission in its own worktree no longer stops at its first decision with "Drive observations must belong to the mission's workspace": Drive now observes the worktree session at the worktree's root.
+- Custom commands in `.demesne/commands/` show in the desktop app's slash list and send their prompt; the desktop app didn't load them before.
 - Linux graphics startup now installs a missing source runtime, verifies sandboxed rendering, preserves desktop authentication variables, and diagnoses sandbox/display/library failures. Explicit helper repair uses a protected, verified copy; workspace permission errors name the folder and a non-recursive remedy. Linux graphics CI covers Ubuntu 20.04/24.04 userlands and packaged startup.
 
 - Responses streams with completed output items but empty terminal output no longer lose their tool calls. Truly incomplete or malformed tool calls are still rejected before execution.

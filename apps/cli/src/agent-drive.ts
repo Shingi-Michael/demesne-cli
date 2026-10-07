@@ -4,7 +4,8 @@ import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "
 import { dirname } from "node:path";
 import { driveFailureKind, DrivePlanningError, isRecord, parseDriveAutonomy, parseDriveDecision, validateDriveDecisionContext, type DriveReview, type DriveCheckpointReason, type DriveFacts, type DriveMode, type DriveAction, type DriveInspectAction, type DriveInspection, type DriveLimits, type DriveObservation, type DriveProgress, type DriveRequest, type DriveResponse, type DriveState, type ReplayEvent, type SessionStateResponse } from "@demesne/protocol";
 import { beginDriveTrace, restoreDriveTraces, settleDriveTrace, updateDriveTrace } from "./drive-trace.ts";
-import type { DriveMemoryEntry } from "@demesne/protocol";
+import type { DriveMemoryEntry, DriveWorkflowRun } from "@demesne/protocol";
+import { checkSatisfied, stepCriteria, stepTaskTitle } from "./workflows.ts";
 import { chargeDriveTokens, driveBudgetReason, driveIntent, driveResultRows, fingerprint, newDriveProtection, newTokenMeter, observeDriveProgress, protectDriveDecision, restoreDriveProtection, similarIntent, workerText } from "./drive-protection.ts";
 
 export type DriveControl = "pause" | "resume" | "stop";
@@ -36,6 +37,9 @@ export interface DriveServices {
     forPlanner(): DriveMemoryEntry[];
     add(entry: Pick<DriveMemoryEntry, "kind" | "text" | "source">): unknown;
   };
+  /// Runs a workflow step's check in the mission's workspace. Without it a
+  /// workflow step with a check can't be finished.
+  runCheck?(command: string, cwd: string, signal: AbortSignal): Promise<{ exitCode: number | null; output: string }>;
 }
 
 /// A mission journal is private, atomically replaced and never automatically
@@ -151,18 +155,21 @@ export class AgentDrive {
     return false;
   }
 
-  start(mission: string): void {
-    const parsed=parseDriveStart(mission,this.services.continuous === false ? "bounded" : "continuous");
+  /// A workflow mission is always bounded: its steps are the whole plan.
+  start(mission: string, workflow?: DriveWorkflowRun): void {
+    const parsed=workflow ? { mission, mode: "bounded" as const } : parseDriveStart(mission,this.services.continuous === false ? "bounded" : "continuous");
     mission=parsed.mission;
     if (!mission || mission.length > 8000) throw new Error("Use /drive <mission> (up to 8,000 characters).");
     const observed = this.services.observe();
     if (!observed.workspace || !observed.sessionId) throw new Error("Open a workspace session before starting Drive.");
     this.halt(); this.journal?.acquire();
     this.lastSubmission = ""; this.duplicateSubmissions = 0; this.repeated = { signature: "", count: 0 }; this.allowance = 256; this.judged.clear();
-    const task=newDriveTask(mission);
-    this.state = { mode:parsed.mode, ledger:{version:1,currentTaskId:task.id,tasks:[task]}, id: crypto.randomUUID(), mission, homeSessionId: observed.sessionId, workspace: observed.workspace, status: "running",
+    const run=workflow && structuredClone(workflow);
+    const task=newDriveTask(run ? stepTaskTitle(run,0) : mission);
+    if (run) { task.criteria=stepCriteria(run.steps[0]!); run.current=0; run.steps[0]!.taskId=task.id; }
+    this.state = { ...(run ? { workflow: run } : {}), mode:parsed.mode, ledger:{version:1,currentTaskId:task.id,tasks:[task]}, id: crypto.randomUUID(), mission, homeSessionId: observed.sessionId, workspace: observed.workspace, status: "running",
       activity: "Recovering the mission from the conversation.", step: 0, model: null, updatedAt: new Date().toISOString(),
-      notes: "", completed: [], remaining: [mission.slice(0, 1000)], evidence: [], steps: [], protection: newDriveProtection(this.services.limits),
+      notes: "", completed: [], remaining: [task.title.slice(0, 1000)], evidence: [], steps: [], protection: newDriveProtection(this.services.limits),
       ...(parsed.mode === "continuous" ? { autonomy: { phase: "working", task: mission, cycle: 1, consulted: false, history: [] } as const } : {}) };
     this.startGuardClock(); this.publish(); this.schedule();
   }
@@ -564,6 +571,39 @@ export class AgentDrive {
     } finally { if (this.pending === controller) this.pending = null; this.schedule(); }
   }
 
+  /// Before a workflow step counts as done, Drive runs its check itself; the
+  /// planner's word and the coder's own runs aren't enough. A failed check
+  /// rejects the completion, so the planner sends the coder back.
+  private async checkStep(state: DriveState, signal: AbortSignal): Promise<void> {
+    const run = state.workflow!, step = run.steps[run.current];
+    if (!step?.check) return;
+    if (!this.services.runCheck) throw new Error(`This client can't run the "${step.title}" check (${step.check.command}).`);
+    const cwd = state.facts?.workspace ?? state.workspace;
+    state.activity = `Running the ${step.title} check: ${step.check.command}`; this.publish(false);
+    const result = await this.services.runCheck(step.check.command, cwd, signal);
+    const ok = checkSatisfied(step.check, result.exitCode);
+    step.result = { ok, exitCode: result.exitCode, output: result.output.slice(-2000), at: new Date().toISOString() };
+    if (ok) return;
+    const outcome = result.exitCode === null ? "didn't finish" : step.check.expect === "fail"
+      ? result.exitCode === 0 ? "passed, but this step needs it to fail" : `couldn't run (exit ${result.exitCode})`
+      : `failed (exit ${result.exitCode})`;
+    throw new DrivePlanningError(`Step "${step.title}" isn't done: Drive ran \`${step.check.command}\` and it ${outcome}. Send the coder back to finish this step, then complete again. Output ends with:\n${result.output.slice(-1200)}`, "decision");
+  }
+  /// The step passed: its ledger task is complete, so the next step becomes
+  /// the current task and the mission carries on.
+  private nextStep(state: DriveState, record: { result: string }): void {
+    const run = state.workflow!, done = run.steps[run.current]!;
+    run.current++;
+    const task = newDriveTask(stepTaskTitle(run, run.current));
+    task.criteria = stepCriteria(run.steps[run.current]!);
+    run.steps[run.current]!.taskId = task.id;
+    state.ledger!.tasks.push(task); state.ledger!.currentTaskId = task.id;
+    state.status = "running"; state.remaining = [task.title]; state.evidence = [];
+    state.activity = `Step ${run.current + 1} of ${run.steps.length}: ${run.steps[run.current]!.title}`;
+    record.result = `${done.title} passed${done.check ? ` (${done.check.command} ${done.check.expect === "fail" ? "failed as expected" : "passed"})` : ""}. ${state.activity}.`;
+    this.allowance = 256; this.lastSubmission = ""; this.duplicateSubmissions = 0; this.repeated = { signature: "", count: 0 };
+  }
+
   /// One observe → decide → visible action cycle. No turn or workspace tool API
   /// is available here. Tests can step deterministically through real UI routes.
   async step(): Promise<void> {
@@ -643,6 +683,7 @@ export class AgentDrive {
       const request: DriveRequest = { mode:state.mode, ledger:structuredClone(state.ledger), facts:state.facts, ...this.projectMemory(), mission: state.mission, homeSessionId: state.homeSessionId,
         ...(state.autonomy ? { autonomy: structuredClone(state.autonomy) } : {}),
         ...(this.inspection ? { inspection: this.inspection } : {}),
+        ...(state.workflow?.steps[state.workflow.current] ? { workflowStep: (({ title, check }) => ({ title, ...(check ? { check } : {}) }))(state.workflow.steps[state.workflow.current]!) } : {}),
         memory: { notes: state.notes, completed: state.completed, remaining: state.remaining, evidence: state.evidence, steps: state.steps.slice(-12), ...(state.feedback ? { feedback: state.feedback } : {}) }, observation,
         thinking: this.thinkingFor(observation, state, recovering) };
       state.protection!.planning = newTokenMeter(Math.ceil(JSON.stringify(request).length / 4));
@@ -679,7 +720,9 @@ export class AgentDrive {
         if (fresh.progress!==request.facts?.progress || fresh.latestTurn?.id!==request.facts?.latestTurn?.id) throw new DrivePlanningError("Recorded results changed while planning. Reinspect the current task before acting.","decision");
         state.facts=fresh; request.facts=fresh;
       }
-      if (decision.action.kind === "next_task" || decision.action.kind === "compose" && state.autonomy?.phase !== "discovering") {
+      // A workflow's steps are distinct by construction; a later step that
+      // reads like an earlier one (fix, then tidy the same file) is not a redo.
+      if (!state.workflow && (decision.action.kind === "next_task" || decision.action.kind === "compose" && state.autonomy?.phase !== "discovering")) {
         const text=decision.action.kind === "next_task" ? decision.action.task : workerText(decision.action.text);
         const completed=text && completedOverlap(state,text);
         if (completed) throw new DrivePlanningError(`Task ${completed.id} is already complete: ${completed.title}. Use reopen_task only with changed recorded evidence; otherwise choose unfinished work or idle.`,"decision");
@@ -690,6 +733,10 @@ export class AgentDrive {
       const protection = protectDriveDecision(state.protection!, decision, observation, state.autonomy?.phase === "discovering", this.services.facts ? driveTaskScope(state) : undefined);
       if (protection) { this.protectionStop(protection, protection.startsWith("Mission") ? "budget" : "loop"); return; }
       validateDriveDecisionContext(decision, request);
+      if (decision.action.kind === "complete" && state.workflow) {
+        await this.checkStep(state, controller.signal);
+        if (epoch !== this.epoch || controller.signal.aborted || !this.active) return;
+      }
       const confirmed = decision.evidence;
       // Planner progress includes finished subtasks of the still-active task.
       // Keep it between decisions without allowing it to erase verified ledger
@@ -735,7 +782,7 @@ export class AgentDrive {
       if (decision.action.kind === "complete" || decision.action.kind === "blocked") {
         state.status = decision.action.kind === "complete" ? "completed" : "blocked"; record.result = decision.note;
         if (decision.action.kind === "blocked") this.remember("blocker", `${currentDriveTask(state)?.title ?? state.mission}: ${decision.note}`);
-        if (decision.action.kind === "complete" && decision.action.basis === "answer") state.answer = decision.answer ?? decision.note;
+        if (decision.action.kind === "complete" && decision.action.basis === "answer" && (!state.workflow || state.workflow.current >= state.workflow.steps.length - 1)) state.answer = decision.answer ?? decision.note;
         settleDriveTrace(state, decision.action.kind === "complete" ? "completed" : "failed", decision.note);
         // An answered question (basis: answer) ends the mission; finished work
         // (verified-work) moves on to finding the next useful task.
@@ -749,10 +796,13 @@ export class AgentDrive {
         if (decision.action.kind === "complete") {
           const task=currentDriveTask(state)!;
           task.completions.push(completionRecord(task,decision,state.facts)); task.status="completed";
-          if (decision.action.basis !== "answer") this.remember("outcome", `${task.title}: ${decision.note}`);
+          const run=state.workflow, last=!run || run.current >= run.steps.length-1;
+          if (decision.action.basis !== "answer" && last) this.remember("outcome", `${run ? state.mission.split("\n")[0] : task.title}: ${decision.note}`);
           state.completed=state.ledger!.tasks.filter(task=>task.status==="completed").map(task=>task.title.slice(0,1000)).slice(-32);
           state.remaining=[]; state.protection!.stalledCycles=0; state.protection!.navigation=[];
           state.protection!.used.tasks++; state.protection!.tasks.push(driveIntent(state.autonomy?.task ?? state.mission));
+          if (!last) this.nextStep(state, record);
+          else if (run) run.current = run.steps.length;
         }
         this.recoveryAttempts = 0; this.nextAttemptAt = 0;
         this.publish(); if (!this.active) this.journal?.release(); return;

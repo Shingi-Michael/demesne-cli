@@ -811,7 +811,7 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; definitions
     !options.planOnly && options.autoApprove
       ? "Session auto-approve is enabled: the user authorizes all tool approvals, including file changes, host commands and publishing, within the requested task. Execute necessary actions without requesting tool approval. Follow explicit read-only or no-edit instructions; workspace restrictions and tool validation still apply." : null,
     options.definitions.some((tool) => tool.name === "capture_window")
-      ? "Demesne is a native terminal UI, not a website. To screenshot Demesne, use capture_window for its terminal application (normally Ghostty), title demesne. If its window cannot be identified, ask the user to make it visible; do not scan web-server ports or substitute another app." : null]
+      ? "Demesne is a native desktop app, not a website. To screenshot Demesne, use capture_window with application Demesne. If its window cannot be identified, ask the user to make it visible; do not scan web-server ports or substitute another app." : null]
     .filter((entry): entry is string => Boolean(entry)).join("\n");
   return guidance ? `${guided}\n${guidance}` : guided;
 }

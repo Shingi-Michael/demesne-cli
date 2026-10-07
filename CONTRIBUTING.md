@@ -12,38 +12,32 @@ bun run typecheck
 bun test
 ```
 
-Run the daemon and graphics client in separate terminals:
+Run the daemon and the desktop window in separate terminals:
 
 ```sh
 bun run daemon
 ```
 
 ```sh
-bun run graphics:setup
-bun run demesne
+bun run desktop
 ```
 
-Run the interactive UI directly in Ghostty. Without provider configuration the daemon uses a deterministic placeholder processor. Unit tests and graphics fixtures use deterministic/fake providers; normal verification does not need paid inference or a second local model process.
+The desktop window needs [Rust and the platform dependencies](docs/desktop.md#prerequisites). `bun run demesne` in a terminal opens the same window on the current folder. Without provider configuration the daemon uses a deterministic placeholder processor. Unit tests and desktop checks use deterministic/fake providers; normal verification does not need paid inference or a second local model process.
 
-For distributable binaries, build both components:
+For distributable binaries, build the CLI and daemon, then the desktop app:
 
 ```sh
 bun run build
-bun run build:graphics
-```
-
-Keep `dist/graphics` and the daemon’s native image dependencies with the CLI. Rebuilding does not replace an already-running daemon or Electron process. See [rebuilds and running processes](docs/troubleshooting.md#rebuilds-and-running-processes).
-
-## Desktop development
-
-The desktop frontend shares the authored UI with the terminal interface and displays it directly in a Tauri system webview. Install [Rust and the platform dependencies](docs/desktop.md#prerequisites), then use:
-
-```sh
-bun run desktop
 bun run build:desktop
 ```
 
-Keep the authenticated daemon client and credentials in the backend. Native dialogs, clipboard operations, and external opening must pass through validated desktop commands. Changes to shared UI code should be checked in both desktop and terminal clients. See the [desktop implementation guide](apps/desktop/README.md) for the process boundary and test commands.
+Keep the daemon’s native image dependencies in `dist/node_modules` with the CLI. Rebuilding does not replace an already-running daemon or desktop window. See [rebuilds and running processes](docs/troubleshooting.md#rebuilds-and-running-processes).
+
+## Desktop development
+
+The desktop window shows the shared UI from `apps/graphics` directly in a Tauri system webview.
+
+Keep the authenticated daemon client and credentials in the backend. Native dialogs, clipboard operations, and external opening must pass through validated desktop commands. See the [desktop implementation guide](apps/desktop/README.md) for the process boundary and test commands.
 
 ## Repository map
 
@@ -52,7 +46,7 @@ Keep the authenticated daemon client and credentials in the backend. Native dial
 | `apps/daemon/` | HTTP API, coding turns, tools, approvals, scheduling, reviews, proposals and artifact ingestion |
 | `apps/cli/` | Commands, headless client, setup and reusable Drive controller |
 | `apps/desktop/` | Tauri window, restricted native bridge, Bun host sidecar, desktop integration checks |
-| `apps/graphics/` | Browser UI, authenticated host, terminal input/tile bridge and visual fixtures |
+| `apps/graphics/` | Shared interface code shown by the desktop window: browser UI, authenticated host, state wire and Markdown |
 | `packages/protocol/` | API/event types, validation and Drive/panel contracts |
 | `packages/client/` | Typed authenticated HTTP/SSE client |
 | `packages/config/` | TOML/environment loading, defaults and private config writes |
@@ -60,12 +54,12 @@ Keep the authenticated daemon client and credentials in the backend. Native dial
 | `packages/chatgpt-auth/` | Registration, OAuth callback, token verification, storage and refresh |
 | `packages/storage/` | SQLite sessions, journal, checkpoints, artifacts and command records |
 | `packages/brand/` | Themes, slash-command grammar and plain terminal formatting |
-| `scripts/` | Build, setup and deterministic provider utilities |
+| `scripts/` | Build, install, desktop launch and checks, and deterministic provider utilities |
 
 ## Implementation conventions
 
 - Keep protocol changes additive where possible. Bump `PROTOCOL_VERSION` for breaking changes, and update client/runtime validation together.
-- Keep credentials, filesystem and authenticated daemon requests in the host/daemon. The sandboxed browser receives public snapshots through its narrow preload bridge.
+- Keep credentials, filesystem and authenticated daemon requests in the host/daemon. The webview receives public snapshots and sends named actions through the restricted desktop bridge.
 - Prefer pure reducers/formatters and dependency injection for fetch, process spawning and clocks. Test boundaries rather than duplicating implementation details.
 - Keep rendering tied to recorded facts. A proposal, successful tool result, historical check and fresh verification are different states.
 - Do not silently broaden permissions, expose secrets, or treat host commands/MCP servers as sandboxed.
@@ -74,20 +68,18 @@ Keep the authenticated daemon client and credentials in the backend. Native dial
 
 ## Verification
 
-All code PRs run `bun run typecheck` and `bun test`. [CI](.github/workflows/ci.yml) installs with the frozen lockfile and runs tests under a temporary home on Linux. [Linux graphics CI](.github/workflows/graphics-linux.yml) separately checks Ubuntu 20.04/24.04 userlands, sandbox-helper repair, decoded terminal captures, and packaged startup. This uses Xvfb and software rendering, not a manual Ghostty/GPU/Wayland test. Native macOS graphics checks remain separate.
+All code PRs run `bun run typecheck` and `bun test`. [CI](.github/workflows/ci.yml) installs with the frozen lockfile and runs tests under a temporary home on Linux. The [desktop workflow](.github/workflows/desktop.yml) builds the app and runs the Linux WebDriver check under Xvfb. That is not a GPU or Wayland test. Native macOS checks remain separate.
 
 | Change | Additional relevant checks |
 | --- | --- |
-| Desktop UI/bridge/lifecycle | `bun run desktop:check`; Rust tests and desktop bundle build; shared graphics fixtures when applicable |
-| Graphics behavior/layout | `bun run graphics:check`; focused panel/file/scale fixtures |
-| Drive | Controller/unit tests, `check-drive-tasks.ts`, `check-drive-next.ts` |
-| Renderer lifecycle | `check-disconnect.ts`, `check-subagent-shutdown.ts` |
-| Streaming/render cost | `check-streaming.ts`; benchmark only when performance changes |
+| Desktop UI/bridge/lifecycle | `bun run desktop:check`; Rust tests and desktop bundle build |
+| Shared UI behavior/layout | `bun test apps/graphics/test`; `bun run desktop:check` |
+| Drive | Controller/unit tests; `bun run desktop:check` when the panel changes |
 | Packaging | Both builds and relevant checks against packaged assets |
 | Provider/auth/tool execution | Adapter, auth, engine and approval fixtures; never real credentials in test fixtures |
 | Documentation only | Validate relative links/anchors, source names, script commands and config examples; preview diagrams |
 
-Graphics check commands, output locations and Retina options are documented in the [graphics README](apps/graphics/README.md#verification). Benchmarks report their measurement boundary; input-to-decoded-pixels measurements do not include Ghostty presentation/display latency.
+Desktop check commands and output locations are documented in the [desktop implementation guide](apps/desktop/README.md#verification).
 
 ## Pull requests
 

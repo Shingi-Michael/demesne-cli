@@ -2,7 +2,7 @@
 
 [Desktop user guide](../../docs/desktop.md) · [Architecture](../../docs/architecture.md) · [Contributing](../../CONTRIBUTING.md)
 
-The Tauri 2 client displays Demesne's shared web frontend directly in a desktop window. Its Rust core starts a Bun host sidecar and supplies a restricted native bridge. The host reuses the authenticated daemon client, provider setup, session state, and Drive controller from the graphics interface.
+The Tauri 2 client is Demesne's interface. It displays the shared web frontend from [`apps/graphics`](../graphics/README.md) directly in a desktop window. Its Rust core starts a Bun host sidecar and supplies a restricted native bridge. The host reuses the authenticated daemon client, provider setup, session state, and Drive controller from that shared code. `demesne` in a terminal opens this window on the current folder through the [desktop launcher](../cli/src/desktop-launcher.ts).
 
 ## Process boundary
 
@@ -15,7 +15,7 @@ flowchart LR
     Rust --> Native[Project picker, clipboard and external opening]
     Daemon --> Store[(Sessions, checks and artifacts)]
     Daemon --> Models[Model providers]
-    CLI[CLI and terminal client] <-->|authenticated HTTP and SSE| Daemon
+    CLI[Headless CLI] <-->|authenticated HTTP and SSE| Daemon
 ```
 
 Credentials and authenticated requests stay in the host/daemon. The webview receives public snapshots and sends named, validated actions. Native commands require the main window and a local application origin. The window denies navigation to remote pages and creation of additional webviews; external links open through the validated native opener. Its capability file only permits backend event subscriptions, without renderer shell/filesystem plugin permissions. Rendered Markdown remains sanitized.
@@ -32,7 +32,7 @@ bun run desktop
 bun run build:desktop
 ```
 
-The host and daemon are compiled with Bun and included as resources/sidecars alongside native image codecs. The frontend's HTML/CSS/assets and live UI are shared with `apps/graphics`; changes should preserve terminal behavior as well as native-webview behavior.
+The host and daemon are compiled with Bun and included as resources/sidecars alongside native image codecs. The frontend's HTML/CSS/assets and live UI come from `apps/graphics`.
 
 The desktop process owns the window and its host. The independent daemon owns coding turns. Window exit disposes client streams and Drive without killing the daemon. Private `desktop-ui.json` preferences remember the last project and session per canonical project/daemon pair; missing or archived sessions fall back to a new session. A project change creates a host for that selected workspace; existing session work remains daemon-owned.
 

@@ -1,19 +1,18 @@
-# Terminal design contract
+# Interface design contract
 
-[Documentation index](README.md) · [Graphics implementation](../apps/graphics/README.md) · [Keyboard reference](cli-reference.md#keyboard-and-focus)
+[Documentation index](README.md) · [Shared interface code](../apps/graphics/README.md) · [Keyboard reference](cli-reference.md#keyboard-and-focus)
 
-The visual reference is [demesne UI redesign](https://www.figma.com/design/uR068XYXtxAz8gaNL2O9tr/demesne-UI-redesign). This document describes the **implemented graphics interface**, audited on 2026-10-03. It is not a new claim that every screen is pixel-identical to Figma. Earlier ANSI/cell-based adaptations and their `ui:session` preview commands have been removed.
+The visual reference is [demesne UI redesign](https://www.figma.com/design/uR068XYXtxAz8gaNL2O9tr/demesne-UI-redesign). This document describes the **implemented desktop interface**, audited on 2026-10-03. It is not a new claim that every screen is pixel-identical to Figma. Earlier ANSI/cell-based adaptations and their `ui:session` preview commands have been removed.
 
 ## Rendering contract
 
-The interface is HTML/CSS rendered offscreen by Electron/Chromium and transported into Ghostty as Kitty image tiles. Layout, typography, rounded corners, syntax highlighting, Markdown and math are browser pixels. The terminal forwards input; it does not approximate the UI using text-box characters.
+The interface is HTML/CSS shown in the [desktop app](desktop.md)'s system webview: WKWebView on macOS and WebKitGTK on Linux. Layout, typography, rounded corners, syntax highlighting, Markdown and math are rendered by the webview.
 
-- [live.html](../apps/graphics/live.html) defines the application structure; [live.ts](../apps/graphics/live.ts) projects recorded daemon state and handles interaction.
+- [index.html](../apps/desktop/index.html) defines the application structure; [live.ts](../apps/graphics/live.ts) projects recorded daemon state and handles interaction.
 - [ui.css](../apps/graphics/ui.css) and [live.css](../apps/graphics/live.css) define geometry and responsive behavior.
-- [theme.ts](../packages/brand/src/theme.ts) supplies shared semantic colors. The renderer maps them into CSS variables.
-- [display-scale.ts](../apps/graphics/display-scale.ts) reconciles cell size, physical pixels and browser scale. Automatic scale follows terminal font changes and Retina density; `--scale 0.5-3` is an explicit override.
+- [theme.ts](../packages/brand/src/theme.ts) supplies shared semantic colors. The interface maps them into CSS variables.
 
-Do not apply old fixed-cell geometry or ANSI redraw rules to this renderer. Verify the live screen and the decoded tile output at both normal and Retina density when changing layout.
+Do not apply old fixed-cell geometry or ANSI redraw rules to this interface. Check layout changes in the real desktop window.
 
 ## Surfaces and behavior
 
@@ -41,7 +40,7 @@ A check’s success is separate from its freshness. Verification labels outdated
 
 ## Interaction, follow and motion
 
-Keyboard, mouse, wheel, paste, selection and resize travel through the terminal bridge. Browser selection can be copied with Ctrl+Y. Manual conversation reading pauses follow; Ctrl+G returns to live. Menus and panels consume Escape before the two-press turn cancellation gesture.
+Keyboard, mouse, wheel, paste, selection and resize are handled by the webview. Manual conversation reading pauses follow; Ctrl+G returns to live. Menus and panels consume Escape before the two-press turn cancellation gesture.
 
 CSS uses `prefers-reduced-motion`. The plain-output `DEMESNE_REDUCED_MOTION` environment variable is not a general browser motion switch. Avoid introducing motion that obscures recorded state or moves a reader’s selected content unexpectedly.
 
@@ -50,15 +49,8 @@ Drive’s default control path uses daemon APIs. The displayed panel is a view o
 ## Visual acceptance
 
 ```sh
-bun run graphics:check
-bun apps/graphics/check-display-scale.ts
-bun apps/graphics/check-panels.ts
-bun apps/graphics/check-files.ts
-bun apps/graphics/check-drive-tasks.ts
-bun apps/graphics/check-drive-next.ts
-bun apps/graphics/check-auth-scene.ts
+bun test apps/graphics/test
+dbus-run-session -- xvfb-run -a bun run desktop:check
 ```
 
-These harnesses compare independently decoded terminal tiles with Chromium captures and exercise actual interactions. This verifies transport fidelity and application behavior; a comparison to Figma is a separate design review. Do not hide a compositor mismatch by masking content or relaxing tolerances. The NEXT/composer rounded-border mismatch was resolved with a stable compositor layer, without widening the pixel allowance.
-
-For changes affecting shipping assets, repeat the relevant check with the packaged renderer, using the arguments documented by its check script. See [graphics verification](../apps/graphics/README.md#verification) and [contribution workflow](../CONTRIBUTING.md).
+The unit tests cover shared state, panels and Markdown. The Linux desktop check drives the real WebKitGTK window through WebDriver with a deterministic model and saves screenshots under `test-results/desktop/`. This verifies application behavior; a comparison to Figma is a separate design review. macOS needs separate manual validation because WKWebView has no platform WebDriver. See [desktop verification](../apps/desktop/README.md#verification) and [contribution workflow](../CONTRIBUTING.md).

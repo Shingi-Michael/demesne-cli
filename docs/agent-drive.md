@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Subagents](subagents.md) · [Architecture](architecture.md)
 
-Drive is a separate planning context that coordinates coding turns, inspects recorded evidence, and decides whether a mission is complete. Its orchestration runs in the graphics host; the daemon owns model inference, coding tools, approvals, and durable session records.
+Drive is a separate planning context that coordinates coding turns, inspects recorded evidence, and decides whether a mission is complete. Its orchestration runs in the interface host; the daemon owns model inference, coding tools, approvals, and durable session records.
 
 ## Start and control a mission
 
@@ -66,7 +66,7 @@ Each proposal you **Run** leaves an outcome in `drive-calibration.jsonl` in the 
 
 [Calibration](../apps/daemon/src/drive-calibration.ts) then ranks the queue with this project's evidence instead of the model's word. For each confidence level, the weight is the observed landing rate smoothed toward the default (high 1, medium 0.7, low 0.4) as if that default were three earlier outcomes, so a single run moves it only a little. Once three runs are timed, estimates are scaled by the median ratio of real to estimated time (clamped to 0.25–4×), and the queue shows the scaled estimate. Only the 50 most recent outcomes per project count. The Next heading then reads, for example, "Drive's picks landed 7 of 9 here · runs take ~1.4× its estimates"; hover it for the breakdown by confidence. Cached queues are re-ranked on every request, so a new outcome changes the order without another model call.
 
-Queues are cached for up to 12 hours when signals, memory, and selected model match. The graphics host requests them on connection and after settled turns when its 30-minute refresh interval has elapsed; Refresh bypasses the cache. A new veto invalidates the prior cache. Exact matching titles are filtered; semantic veto instructions and task-overlap judgments are not a perfect paraphrase detector.
+Queues are cached for up to 12 hours when signals, memory, and selected model match. The interface host requests them on connection and after settled turns when its 30-minute refresh interval has elapsed; Refresh bypasses the cache. A new veto invalidates the prior cache. Exact matching titles are filtered; semantic veto instructions and task-overlap judgments are not a perfect paraphrase detector.
 
 ## Run works in a worktree
 
@@ -195,10 +195,7 @@ The UI exposes planning attempts, reasoning summaries when provided, decisions, 
 
 ```sh
 bun test apps/daemon/test/agent-drive.test.ts apps/daemon/test/drive-review.test.ts apps/daemon/test/drive-next.test.ts
-bun test apps/graphics/test/drive-direct.test.ts
-bun apps/graphics/check-drive-tasks.ts /tmp/demesne-drive-check
-bun apps/graphics/check-drive-tasks.ts /tmp/demesne-drive-retina --retina
-bun apps/graphics/check-drive-next.ts /tmp/demesne-next-check
+bun test apps/graphics/test/drive-direct.test.ts apps/graphics/test/drive-facts.test.ts
 ```
 
-The graphics checks exercise real daemon APIs and terminal pixel transport with deterministic model fixtures. They do not demonstrate that an arbitrary model will make good autonomous decisions. Drive still depends on model judgment and the operator's approval policy.
+These tests use deterministic model fixtures. They do not demonstrate that an arbitrary model will make good autonomous decisions. Drive still depends on model judgment and the operator's approval policy.

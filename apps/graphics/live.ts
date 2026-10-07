@@ -75,8 +75,7 @@ const h = (value: unknown) =>
         char
       ]!,
   );
-const desktop = window.demesne.mode === "desktop";
-const shortcut = (key: string) => desktop && /Mac/i.test(navigator.platform) ? key.replace(/^Ctrl\+/, "⌘") : key;
+const shortcut = (key: string) => /Mac/i.test(navigator.platform) ? key.replace(/^Ctrl\+/, "⌘") : key;
 const k = (key: string) => `<kbd>${h(shortcut(key))}</kbd>`;
 /// A session view, not the start screen: it has turns, or Drive is working
 /// it (Drive plans before its first turn).
@@ -1561,9 +1560,8 @@ function applyPreviewLayout() {
   if (!canvas || !plane || !item) return;
   const width = Math.max(item.width, reference?.width ?? 0),
     height = Math.max(item.height, reference?.height ?? 0),
-    // Desktop zoom follows CSS pixels, including Retina displays. Terminal
-    // 100% maps image pixels to the terminal's physical output pixels.
-    density = desktop ? 1 : window.devicePixelRatio || 1;
+    // Zoom follows CSS pixels, including on Retina displays.
+    density = 1;
   const zoom = previewFit
     ? Math.min(canvas.clientWidth / width, canvas.clientHeight / height)
     : previewZoom / density;
@@ -3352,7 +3350,7 @@ el("stage").addEventListener("scroll", () => {
   reportObservation();
 });
 document.addEventListener("scroll", () => reportObservation(), true);
-if (desktop) document.addEventListener("demesne:open-settings", () => {
+document.addEventListener("demesne:open-settings", () => {
   if (state && !state.setup) void act(() => openOverlay("settings"));
 });
 document.addEventListener("keydown", (event) => {
@@ -3946,7 +3944,7 @@ function renderSetup() {
         "chatgpt",
         "custom",
       ] as const;
-    body = `<h1>Where should demesne run its model?</h1><p>${probes.filter((p) => p.reachable).length ? `Found ${probes.filter((p) => p.reachable).length} local server${probes.filter((p) => p.reachable).length === 1 ? "" : "s"}.` : "No local servers detected."} ${desktop ? "You can change this later in Settings." : "You can change this later with demesne setup."}</p>${list(options.map((option, index) => (typeof option === "string" ? row(index, option === "chatgpt" ? "Continue with ChatGPT" : option === "openrouter" ? "OpenRouter" : "Custom URL", option === "chatgpt" ? "Use your ChatGPT plan · browser sign-in" : option === "openrouter" ? "Hosted models · sign in with your browser" : "Any OpenAI-compatible endpoint", "", index === setup.providerIndex) : row(index, h(option.target.label), `${h(option.target.url)} · ${option.reachable ? `${option.models.length} models` : "not reachable"}`, option.reachable ? '<span class="muted">detected</span>' : "", index === setup.providerIndex))))}<p class="setup-note">${setup.probes === null ? "Checking local servers…" : "Unreachable servers stay listed so you can start them and press r to rescan."}</p>`;
+    body = `<h1>Where should demesne run its model?</h1><p>${probes.filter((p) => p.reachable).length ? `Found ${probes.filter((p) => p.reachable).length} local server${probes.filter((p) => p.reachable).length === 1 ? "" : "s"}.` : "No local servers detected."} You can change this later in Settings.</p>${list(options.map((option, index) => (typeof option === "string" ? row(index, option === "chatgpt" ? "Continue with ChatGPT" : option === "openrouter" ? "OpenRouter" : "Custom URL", option === "chatgpt" ? "Use your ChatGPT plan · browser sign-in" : option === "openrouter" ? "Hosted models · sign in with your browser" : "Any OpenAI-compatible endpoint", "", index === setup.providerIndex) : row(index, h(option.target.label), `${h(option.target.url)} · ${option.reachable ? `${option.models.length} models` : "not reachable"}`, option.reachable ? '<span class="muted">detected</span>' : "", index === setup.providerIndex))))}<p class="setup-note">${setup.probes === null ? "Checking local servers…" : "Unreachable servers stay listed so you can start them and press r to rescan."}</p>`;
     left = `${k("↑↓")} choose ${button("r", `${k("r")} rescan`)} ${button("escape", `${k("Esc")} quit`)}`;
   }
   if (step === "model") {
@@ -3998,7 +3996,7 @@ function renderSetup() {
       [
         "Theme",
         setup.review.theme,
-        setup.review.theme === "auto" ? desktop ? "follows your system appearance" : "follows your terminal" : "",
+        setup.review.theme === "auto" ? "follows your system appearance" : "",
       ],
     ];
     body = `<h1>Ready to write your config</h1><p>Detected values are filled in. Select a line and press e to change it.</p>${list(rows.map(([label, value, note], index) => (setup.editing && index === setup.reviewIndex ? `<form id="setup-form" class="setup-review-row selected"><span>${label}</span><input name="review" inputmode="numeric" value="${h(setup.editing.text)}"><button type="submit">Save ${k("Enter")}</button></form>` : button("", `<span>${label}</span><strong>${h(value)}</strong><small>${h(note)}</small>${index >= 2 && index === setup.reviewIndex ? `<span data-action="setup-action" data-args="{&quot;key&quot;:&quot;e&quot;}">e edit</span>` : ""}`, { index }, `setup-review-row ${index === setup.reviewIndex ? "selected" : ""}`))))}${setup.editing?.error ? `<p class="danger">${h(setup.editing.error)}</p>` : ""}<p class="setup-note">Writes ${h(setup.configPath)} · an existing file is backed up first.</p>`;
@@ -4011,21 +4009,17 @@ function renderSetup() {
     );
   }
   if (step === "done") {
-    body = `<h1><span class="success">✓</span> demesne is ready</h1><p>Connected to ${h(setup.provider?.target.label)} · ${h(model)} · ${num(setup.review.contextWindow)} context</p><div class="saved"><span class="success">Saved</span><span>${h(setup.configPath)}</span>${setup.saved?.backup ? `<small>previous file → ${h(setup.saved.backup.split("/").at(-1))}</small>` : ""}</div><div class="setup-next"><div class="muted">NEXT</div>${(desktop ? [
+    body = `<h1><span class="success">✓</span> demesne is ready</h1><p>Connected to ${h(setup.provider?.target.label)} · ${h(model)} · ${num(setup.review.contextWindow)} context</p><div class="saved"><span class="success">Saved</span><span>${h(setup.configPath)}</span>${setup.saved?.backup ? `<small>previous file → ${h(setup.saved.backup.split("/").at(-1))}</small>` : ""}</div><div class="setup-next"><div class="muted">NEXT</div>${[
       ["Open project", "start a session in your selected project"],
       ["Settings", "change your provider, model, or theme"],
-    ] : [
-      ["demesne graphics", "start a session in the current folder"],
-      ["demesne doctor", "check the connection any time"],
-      ["demesne graphics --setup", "change provider or model later"],
-    ])
+    ]
       .map(
         ([cmd, description]) =>
           `<div><code>${cmd}</code><span>${description}</span></div>`,
       )
       .join("")}</div>`;
     left = button("q", `${k("q")} close`);
-    right = button("return", `${desktop ? "Open project" : "Open demesne here"} ${k("Enter")}`);
+    right = button("return", `Open project ${k("Enter")}`);
   }
   setupRoot.innerHTML = `<header><span><b>demesne</b> <span class="muted">setup</span></span><div class="setup-steps">${["Provider", "Model", "Review"].map((label, index) => `<span class="${index < stepIndex ? "success" : index === stepIndex ? "electric" : "muted"}">${index < stepIndex ? "✓" : index + 1} ${label}</span>`).join('<span class="muted">──</span>')}</div></header><div class="setup-body"><div class="setup-column">${body}${setup.error ? `<p class="danger">× ${h(setup.error)}</p>` : ""}</div></div><footer><div>${left}</div><span class="right">${right}</span></footer>`;
   const input = setupRoot.querySelector<HTMLInputElement>("input");
@@ -4564,29 +4558,6 @@ document.addEventListener("pointermove", (event) => {
       previewDrag.top + previewDrag.y - event.clientY;
   }
 });
-// Copy on select, like a terminal: a drag or a double/triple click that leaves
-// text highlighted puts it on the clipboard. The composer keeps the usual
-// behaviour so selecting text to replace it doesn't overwrite the clipboard.
-// The desktop window uses the platform's own copy (⌘C / Ctrl+C) instead.
-let selectFrom: { x: number; y: number } | null = null;
-document.addEventListener("mousedown", (event) => {
-  selectFrom = !desktop && event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
-}, true);
-document.addEventListener("mouseup", (event) => {
-  const from = selectFrom;
-  selectFrom = null;
-  if (!from || (event.detail < 2 && Math.hypot(event.clientX - from.x, event.clientY - from.y) < 4)) return;
-  setTimeout(() => {
-    const selection = getSelection();
-    const text = (selection?.toString() ?? "").replace(/\s+$/, "");
-    const anchor = selection?.anchorNode instanceof Element ? selection.anchorNode : selection?.anchorNode?.parentElement;
-    if (!text.trim() || anchor?.closest("input, textarea, [contenteditable=true]")) return;
-    void act(async () => {
-      await api("copy", { text });
-      notice(`Copied ${text.length > 40 ? `${text.trim().split(/\s+/).length} words` : `“${text.trim()}”`}`);
-    });
-  });
-}, true);
 document.addEventListener("pointerup", () => {
   if (panelDrag) {
     panelDrag = null;

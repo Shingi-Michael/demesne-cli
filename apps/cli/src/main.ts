@@ -36,7 +36,7 @@ import { runChatGPTAuthCommand } from "./chatgpt-auth.ts";
 import { beginOpenRouterLogin, configureOpenRouter } from "./openrouter-auth.ts";
 import { updateUserConfig } from "@demesne/config";
 import { createInterface } from "node:readline/promises";
-import { runGraphics } from "./graphics-launcher.ts";
+import { desktopArgs, runDesktop } from "./desktop-launcher.ts";
 
 const args = process.argv.slice(2);
 // Headless runs can't answer the trust question, so they confirm it up front.
@@ -156,15 +156,12 @@ try {
   const chatFlags = first !== undefined
     && first.startsWith("--")
     && !["--version", "--help"].includes(first);
-  if (first === "graphics" || args.includes("--graphics")) {
-    const graphicsArgs = process.argv.slice(2);
-    if (first === "graphics") graphicsArgs.splice(graphicsArgs.indexOf("graphics"), 1);
-    process.exitCode = await runGraphics(graphicsArgs.filter(arg => arg !== "--graphics"));
-  } else if (args.length === 0 || first === "chat" || chatFlags) {
-    const chatArgs = first === "chat" ? args.slice(1) : args;
-    // demesne is the graphics UI. Without a terminal (a pipe or a script),
-    // the message runs like `demesne prompt`.
-    if (process.stdin.isTTY && process.stdout.isTTY) process.exitCode = await runGraphics(graphicsChatArgs(chatArgs));
+  if (args.length === 0 || first === "chat" || first === "graphics" || chatFlags) {
+    // `demesne graphics` once opened the Ghostty interface; it opens the desktop now.
+    const chatArgs = (first === "chat" || first === "graphics" ? args.slice(1) : args).filter((arg) => arg !== "--graphics");
+    // demesne is the desktop window, opened on this project. Without a
+    // terminal (a pipe or a script), the message runs like `demesne prompt`.
+    if (process.stdin.isTTY && process.stdout.isTTY) process.exitCode = await runDesktop(desktopArgs(chatArgs, { cwd: process.cwd(), server: explicitServer() }));
     else {
       const model = takeOption(chatArgs, "--model");
       if (model) {
@@ -274,7 +271,7 @@ async function run(command: string[]): Promise<void> {
       console.log(paint.dim(`    The running daemon still uses ${sanitizeTerminalText(status.health?.model ?? "the previous model")}. Run \`demesne daemon stop\`, then \`demesne\`.`));
       return;
     }
-    process.exitCode = await runGraphics([]);
+    process.exitCode = await runDesktop(desktopArgs([], { cwd: process.cwd(), server: explicitServer() }));
     return;
   }
 
@@ -490,23 +487,9 @@ async function submitAndRender(
   });
 }
 
-/// `demesne [chat] [message] [options]` as graphics UI arguments: options it
-/// understands pass through, and the words become its opening message.
-function graphicsChatArgs(command: string[]): string[] {
-  const out: string[] = [], words: string[] = [];
-  if (process.argv.includes("--server") || process.argv.some((arg) => arg.startsWith("--server="))) out.push("--server", settings.server);
-  for (let index = 0; index < command.length; index++) {
-    const arg = command[index]!;
-    if (arg === "--setup") out.push(arg);
-    else if (["--session", "--workspace", "--scale", "--model"].includes(arg)) {
-      const value = command[++index];
-      if (!value || value.startsWith("--")) throw new Error(`${arg} requires a value`);
-      out.push(arg, value);
-    } else if (arg.startsWith("--")) throw new Error(`Unknown option ${arg}. Run demesne --help.`);
-    else words.push(arg);
-  }
-  const prompt = words.join(" ").trim();
-  return prompt ? [...out, "--prompt", prompt] : out;
+/// The daemon address, when one was given on the command line.
+function explicitServer(): string | undefined {
+  return process.argv.includes("--server") || process.argv.some((arg) => arg.startsWith("--server=")) ? settings.server : undefined;
 }
 
 function notificationOptions(interactive: boolean): NotificationOptions {
@@ -1282,8 +1265,8 @@ async function runCommandCapture(command: string[]): Promise<{ code: number; std
 
 function printUsage(): void {
   console.log(`Usage:
-  demesne [chat <message>] [--model <id>] [--workspace <path>] [--session <id>] [--scale auto|0.5-3] [--setup]
-      Opens demesne in Ghostty (Kitty graphics), sending <message> first. Without a terminal, runs it like demesne prompt.
+  demesne [chat <message>] [--model <id>] [--workspace <path>] [--session <id>] [--setup]
+      Opens the demesne desktop window on this project, sending <message> first. Without a terminal, runs it like demesne prompt.
   demesne setup [--provider-url <url> --model <id>] [--context-window <n>] [--max-output-tokens <n>] [--theme auto|dark|light] [--yes]
   demesne auth login <chatgpt|openrouter> [--model <id>] [--no-browser]
   demesne auth accounts|status|use|logout chatgpt [--account <id>]

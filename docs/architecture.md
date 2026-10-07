@@ -6,11 +6,10 @@
 
 ```mermaid
 flowchart LR
-    Person[User in Ghostty] --> Host[Bun graphics host]
-    Host <-->|JSON snapshots and input| Electron[Electron main process]
-    Electron <-->|narrow preload bridge| Page[Sandboxed HTML UI]
-    Electron -->|compressed pixel tiles| Host
-    Host -->|Kitty graphics| Person
+    Person[User] --> Page[Local HTML UI in system webview]
+    Page <-->|named actions and public snapshots| Rust[Tauri Rust core]
+    Rust <-->|private process pipes| Host[Bun desktop host]
+    Rust --> Native[Project picker, clipboard and external opening]
     Host <-->|authenticated HTTP and SSE| Daemon[Local daemon]
     CLI[Headless CLI] <-->|HTTP and SSE| Daemon
     Daemon --> Store[(SQLite and artifact files)]
@@ -20,7 +19,7 @@ flowchart LR
     Daemon --> MCP[Configured MCP processes]
 ```
 
-The [CLI entry point](../apps/cli/src/main.ts) routes interactive chat to graphics and exposes headless commands. The [graphics host](../apps/graphics/host.ts) owns the authenticated client, local UI state, config writes, and browser opening. [Electron](../apps/graphics/renderer.cjs) renders offscreen and forwards only authored bridge requests. The browser page has no Node API, daemon token, or unrestricted network access.
+The [CLI entry point](../apps/cli/src/main.ts) opens the desktop window from an interactive terminal through the [desktop launcher](../apps/cli/src/desktop-launcher.ts) and exposes headless commands. The [shared host](../apps/graphics/host.ts) owns the authenticated client, local UI state, config writes, and browser opening; the [desktop host](../apps/desktop/host.ts) runs it beside the window. The web page has no Node API, daemon token, or unrestricted network access.
 
 The [daemon](../apps/daemon/src/app.ts) owns turns and background commands. Closing the UI does not stop daemon-owned coding work. Drive's orchestration loop is client-owned; its journal is saved and an unfinished mission resumes paused. The [store](../packages/storage/src/index.ts) marks interrupted daemon work on restart instead of replaying side effects.
 
@@ -28,7 +27,7 @@ The [daemon](../apps/daemon/src/app.ts) owns turns and background commands. Clos
 
 The [Tauri desktop preview](desktop.md) displays the shared UI in the system webview. Its Rust core supplies native project selection, clipboard, and external opening, while a compiled Bun host owns the authenticated daemon client and Drive controller. Public state and named actions cross private process pipes and the restricted Tauri bridge; daemon/provider credentials stay outside the webview. Native commands check both the main-window label and local origin; remote navigation and new webviews are denied.
 
-Closing the window ends its host and Drive orchestration. Daemon-owned turns continue, and the project/session can be reopened. The terminal client retains its existing Electron and Kitty graphics path. See the [desktop implementation](../apps/desktop/README.md#process-boundary).
+Closing the window ends its host and Drive orchestration. Daemon-owned turns continue, and the project/session can be reopened. See the [desktop implementation](../apps/desktop/README.md#process-boundary).
 
 ## One coding turn
 
@@ -133,6 +132,5 @@ The default data directory is `~/.demesne`, overridden by `data_dir` or `DEMESNE
 | Desktop project/session preferences | `desktop-ui.json` |
 | Panel preferences | `graphics-ui.json` |
 | Open-original preview copies | `preview-cache/` |
-| Pixel transfers and browser cache | Private temporary directories |
 
-The renderer and terminal host stop writing when their pipes close. The renderer exits cleanly on EOF, EPIPE, quit or termination; snapshot notifications flush before exit. See [graphics lifecycle](../apps/graphics/README.md#boundaries) and [troubleshooting](troubleshooting.md).
+The desktop host exits cleanly on EOF or quit and disposes its client streams and Drive without stopping the daemon. See the [desktop implementation](../apps/desktop/README.md#process-boundary) and [troubleshooting](troubleshooting.md).

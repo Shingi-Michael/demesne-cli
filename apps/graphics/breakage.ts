@@ -173,6 +173,9 @@ export class BreakageWatch {
     if (this.state.busy) throw new Error("Wait for the current worktree action to finish.");
     const { fix } = await this.options.client().startDriveFix({ workspace: this.options.workspace(), signals: [], mission });
     if (fix.status === "failed" || !fix.sessionId) throw new Error(fix.error ?? "Couldn't open a worktree for the mission.");
+    // A branch still waiting for review keeps its place in the inbox.
+    const waiting = this.state.fix;
+    if (waiting && waiting.id !== fix.id && (waiting.status === "ready" || waiting.status === "failed") && !this.state.inbox.some((item) => item.id === waiting.id)) this.state.inbox.unshift(waiting);
     this.state.fix = fix; this.state.message = null;
     this.options.publish();
     return fix;

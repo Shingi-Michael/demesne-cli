@@ -1286,11 +1286,14 @@ export class GraphicsHost {
       if (!["turn", "session", "workspace"].includes(scope))
         throw new Error("Unknown change scope");
       const turnId = typeof args.turnId === "string" ? args.turnId : undefined;
-      const key = `${this.current!.session.id}:${scope}:${turnId ?? ""}`;
+      // Another session's changes (a worktree branch waiting for review)
+      // are read without switching to it.
+      const sessionId = typeof args.branchSession === "string" && args.branchSession ? string(args.branchSession, "session id", 200) : this.current!.session.id;
+      const key = `${sessionId}:${scope}:${turnId ?? ""}`;
       let review = args.force !== true ? this.reviewCache.get(key) : undefined;
       if (!review) {
         review = await this.client.review(
-          this.current!.session.id,
+          sessionId,
           scope,
           turnId,
         );
@@ -1300,7 +1303,7 @@ export class GraphicsHost {
         ...file,
         ...codeDiff(file.before ?? "", file.after ?? ""),
       }));
-      if (scope === "turn" && turnId)
+      if (scope === "turn" && turnId && sessionId === this.current!.session.id)
         for (const draft of this.current!.changes(turnId).filter(
           (file) =>
             file.state === "drafting" ||

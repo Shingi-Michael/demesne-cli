@@ -269,6 +269,9 @@ test("closing the window hands a running Drive mission to the background, and re
     away = marker.pid;
     expect(marker.sessionId).toBe(sessionId);
     await eventually(() => { try { return readFileSync(`${journalPath}.lock`, "utf8") === String(marker.pid); } catch { return false; } }, 10000);
+    // The closing window saved the mission paused; the background process
+    // takes the lock before it resumes the mission and saves it again.
+    await eventually(() => { try { return JSON.parse(readFileSync(journalPath, "utf8")).status !== "paused"; } catch { return false; } }, 10000);
     const journal = JSON.parse(readFileSync(journalPath, "utf8"));
     expect(journal.mission).toBe("Inspect the workspace");
     expect(["running", "waiting"]).toContain(journal.status);

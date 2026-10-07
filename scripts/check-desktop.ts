@@ -157,10 +157,10 @@ try {
   await open(true);
   await capture("01-start");
   await type(prompt);
-  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["edit_file"]), "file approval visible");
+  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["Edit "]), "file approval visible");
   await click("permission", { decision: "allow_once" });
-  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["Allow this command?"]), "command approval visible");
-  assert(await evaluate<boolean>("const details = document.querySelector('.approval-card .approval-details'); return !!details && !details.open;"), "Command details start collapsed");
+  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["Run "]), "command approval visible");
+  assert(await evaluate<boolean>("const details = document.querySelector('.approval-card .approval-details'); return !!details && !details.open;"), "The full command starts folded");
   const commandDetails = await find(".approval-card .approval-details > summary");
   await request("POST", `/session/${session}/element/${elementId(commandDetails)}/click`, {});
   await until(() => evaluate<boolean>("const details = document.querySelector('.approval-card .approval-details'); return !!details?.open && details.innerText.includes('run check');"), "command details can be inspected");

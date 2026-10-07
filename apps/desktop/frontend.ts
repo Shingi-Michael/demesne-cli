@@ -36,7 +36,6 @@ const request = <T>(method: string, args: Record<string, unknown> = {}) =>
 const listeners: (() => void)[] = [];
 const mac = /Mac/i.test(navigator.platform);
 const openShortcut = mac ? "⌘O" : "Ctrl+O";
-el("desktop-open-shortcut").textContent = openShortcut;
 let workspace: string | null = null, mounted = false, busy = true, fatal = false;
 let recentProjects: string[] = [];
 const bridge = createDesktopBridge(invoke, showError);
@@ -182,7 +181,7 @@ async function openProject(path?: string) {
     setBusy(false);
   }
 }
-for (const id of ["desktop-choose-project", "desktop-open-button", "desktop-error-choose"])
+for (const id of ["desktop-choose-project", "desktop-error-choose"])
   el(id).addEventListener("click", () => { void openProject(); });
 el("desktop-retry").addEventListener("click", () => window.location.reload());
 projectButton.addEventListener("click", () => {

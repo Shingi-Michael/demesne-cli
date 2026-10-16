@@ -98,7 +98,7 @@ export class SessionCompactor {
     }
     signal.throwIfAborted();
     const checkpoint: SessionCheckpoint = { id: crypto.randomUUID(), sessionId: session.id, turnId, createdAt: new Date().toISOString(),
-      summary: checkpointMessage!.content!, instructions, firstRetainedMessageId: retained[0]!.firstMessageId,
+      summary: checkpointMessage!.content!, instructions, firstRetainedMessageId: retained[0]!.firstMessageId, firstRetainedTurnId: retained[0]!.id,
       summarizedTurns: (previous?.summarizedTurns ?? 0) + prefix.length, retainedTurns: retained.length,
       beforeTokens: before.estimatedInputTokens, afterTokens: after.estimatedInputTokens, contextPlan: after };
     const report = `Context compacted: ~${checkpoint.beforeTokens.toLocaleString("en-US")} → ~${checkpoint.afterTokens.toLocaleString("en-US")} tokens (estimated).\n`

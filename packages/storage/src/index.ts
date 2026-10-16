@@ -789,7 +789,16 @@ export class DemesneStore {
   getSessionCheckpoint(sessionId: string): SessionCheckpoint | null {
     const row = this.database.query(`SELECT c.descriptor FROM session_checkpoints c
       JOIN sessions s ON s.checkpoint_id = c.id WHERE s.id = ?`).get(sessionId) as { descriptor: string } | null;
-    return row ? JSON.parse(row.descriptor) as SessionCheckpoint : null;
+    if (!row) return null;
+    const checkpoint = JSON.parse(row.descriptor) as SessionCheckpoint;
+    // Older saved checkpoints predate the desktop's collapsed-history view.
+    if (!checkpoint.firstRetainedTurnId) {
+      const retained = this.database.query(`SELECT m.turn_id FROM model_messages m
+        JOIN turns t ON t.id = m.turn_id WHERE m.id = ? AND t.session_id = ?`)
+        .get(checkpoint.firstRetainedMessageId, sessionId) as { turn_id: string } | null;
+      if (retained) checkpoint.firstRetainedTurnId = retained.turn_id;
+    }
+    return checkpoint;
   }
 
   modelContextVersion(sessionId: string): number {

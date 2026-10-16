@@ -1,49 +1,18 @@
-/**
- * Screenshots of the desktop UI: the real Bun desktop host and an isolated
- * daemon with a scripted model, drawn in Chromium instead of the native
- * webview. `bun scripts/shoot-desktop.ts [dir]` writes every view to dir;
- * `--readme` retakes docs/assets/demesne-{start,drive,review}.png.
- * Needs Playwright (set PLAYWRIGHT_MODULE to its path if it is not installed here).
+/** Capture the real Electron app against an isolated deterministic daemon.
+ * bun scripts/shoot-desktop.ts [dir]; --readme updates the published images.
+ * Run bun scripts/prepare-desktop.ts first.
  */
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { join, resolve, extname } from "node:path";
+import { join, resolve } from "node:path";
 import { fixture } from "../apps/graphics/test/fixture.ts";
 
 const root = resolve(import.meta.dir, ".."), desktop = join(root, "apps/desktop"), graphics = join(root, "apps/graphics");
 const readme = process.argv.includes("--readme");
 const output = readme ? join(root, "docs/assets") : resolve(process.argv.slice(2).find(arg => !arg.startsWith("--")) ?? "test-results/shots");
-const pw = process.env.PLAYWRIGHT_MODULE ?? "playwright";
-const { chromium } = await import(pw);
+const { _electron: electron } = await import("playwright");
 mkdirSync(output, { recursive: true });
-
-// The same page prepare-desktop builds, minus the native sidecars.
-const web = mkdtempSync(join(tmpdir(), "demesne-shots-web-"));
-const bundle = await Bun.build({ entrypoints: [join(desktop, "frontend.ts")], outdir: web, target: "browser", splitting: true });
-if (!bundle.success) throw new Error(bundle.logs.map(String).join("\n"));
-writeFileSync(join(web, "ui.css"), readFileSync(join(graphics, "ui.css"), "utf8").replaceAll("node_modules/@fontsource/jetbrains-mono/files/", "vendor/fonts/"));
-cpSync(join(graphics, "live.css"), join(web, "live.css"));
-cpSync(join(desktop, "desktop.css"), join(web, "desktop.css"));
-cpSync(join(graphics, "assets"), join(web, "assets"), { recursive: true });
-mkdirSync(join(web, "vendor/fonts"), { recursive: true });
-for (const weight of [400, 500]) cpSync(join(graphics, "node_modules/@fontsource/jetbrains-mono/files", `jetbrains-mono-latin-${weight}-normal.woff2`), join(web, "vendor/fonts", `jetbrains-mono-latin-${weight}-normal.woff2`));
-cpSync(join(graphics, "node_modules/katex/dist"), join(web, "vendor/katex"), { recursive: true });
-writeFileSync(join(web, "index.html"), readFileSync(join(desktop, "index.html"), "utf8")
-  .replaceAll("node_modules/katex/dist/katex.min.css", "vendor/katex/katex.min.css")
-  .replace('<script type="module" src="frontend.js">', '<script src="shim.js"></script><script type="module" src="frontend.js">'));
-// window.__TAURI__ over HTTP: invoke posts to the host, events arrive by SSE.
-writeFileSync(join(web, "shim.js"), `
-const handlers = {};
-const source = new EventSource("/events");
-source.onmessage = (m) => { const { event, payload } = JSON.parse(m.data); for (const h of handlers[event] || []) h({ payload }); };
-window.__TAURI__ = {
-  core: { invoke: async (command, args) => {
-    const r = await fetch("/invoke", { method: "POST", body: JSON.stringify(args) });
-    const v = await r.json(); if (!v.ok) throw new Error(v.error); return v.value;
-  } },
-  event: { listen: async (event, h) => { (handlers[event] ||= []).push(h); return () => { handlers[event] = handlers[event].filter(x => x !== h); }; } },
-};`);
 
 const prompt = "Make the greeting configurable and check it";
 // A fixed, readable project path for the published images.
@@ -98,58 +67,13 @@ const git = (...values: string[]) => execFileSync("git", ["-C", f.workspace, ...
 git("init", "-q"); git("add", ".");
 git("-c", "user.name=Shots", "-c", "user.email=shots@example.com", "commit", "-qm", "Baseline");
 
-const host = Bun.spawn([process.execPath, join(desktop, "host.ts"), `--workspace=${f.workspace}`, `--server=${f.server.url}`], {
-  env: { ...f.env, XDG_CONFIG_HOME: join(f.home, ".config") }, stdin: "pipe", stdout: "pipe", stderr: "inherit",
-});
-let nextId = 1;
-const pending = new Map<number, (value: { ok: boolean; value?: unknown; error?: string }) => void>();
-const streams = new Set<ReadableStreamDefaultController<string>>();
-const emit = (event: string, payload: unknown) => { for (const c of streams) c.enqueue(`data: ${JSON.stringify({ event, payload })}\n\n`); };
-const write = (value: unknown) => { host.stdin.write(JSON.stringify(value) + "\n"); host.stdin.flush(); };
-(async () => {
-  let buffer = "";
-  for await (const chunk of host.stdout) {
-    buffer += new TextDecoder().decode(chunk);
-    let newline: number;
-    while ((newline = buffer.indexOf("\n")) >= 0) {
-      const message = JSON.parse(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1);
-      if (message.kind === "response") { pending.get(message.id)?.(message); pending.delete(message.id); }
-      else if (message.kind === "update") emit("demesne:update", message.update);
-      else if (message.kind === "command") emit("demesne:command", message.command);
-      else if (message.kind === "native") write({ kind: "native-response", id: message.id, ok: true, value: null });
-      else if (message.kind === "protocol-error") emit("demesne:desktop-error", { message: message.error });
-    }
-  }
-})();
-const types: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".png": "image/png", ".ttf": "font/ttf", ".woff": "font/woff" };
-const server = Bun.serve({
-  hostname: "127.0.0.1", port: 0, idleTimeout: 0,
-  async fetch(request) {
-    const url = new URL(request.url);
-    if (url.pathname === "/invoke") {
-      const { method, args } = await request.json() as { method: string; args: Record<string, unknown> };
-      if (method === "desktop-ready" || method === "quit" || method === "desktop-quit") return Response.json({ ok: true, value: null });
-      const id = nextId++;
-      const result = await new Promise(done => { pending.set(id, done); write({ kind: "request", id, method, args: args ?? {} }); });
-      return Response.json(result);
-    }
-    if (url.pathname === "/events") {
-      let self: ReadableStreamDefaultController<string>;
-      return new Response(new ReadableStream<string>({ start(c) { self = c; streams.add(c); c.enqueue(": open\n\n"); }, cancel() { streams.delete(self); } }),
-        { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } });
-    }
-    const path = join(web, url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname));
-    if (!path.startsWith(web) || !existsSync(path)) return new Response("missing", { status: 404 });
-    return new Response(Bun.file(path), { headers: { "content-type": types[extname(path)] ?? "application/octet-stream" } });
-  },
-});
-
-const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
-const theme = (process.env.THEME ?? "dark") as "dark" | "light";
-const page = await browser.newPage({ viewport: readme ? { width: 1280, height: 800 } : { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: theme });
+const browser = await electron.launch({ args: [join(desktop, "build/app"), `--user-data-dir=${join(f.root, "electron")}`, `--workspace=${f.workspace}`, `--server=${f.server.url}`], env: { ...f.env, XDG_CONFIG_HOME: join(f.home, ".config") } });
+try {
+const page = await browser.firstWindow();
+await browser.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0]!.setSize(size.width, size.height), readme ? { width: 1280, height: 800 } : { width: 1440, height: 900 });
+await page.emulateMedia({ colorScheme: (process.env.THEME ?? "dark") as "dark" | "light" });
 const pageErrors: string[] = [];
 page.on("pageerror", (error: Error) => { pageErrors.push(error.message); console.error("page:", error.message); });
-await page.goto(server.url.href);
 await page.waitForSelector("#app:not([hidden])", { timeout: 30_000 });
 await page.waitForTimeout(3000);
 const shot = async (name: string) => { await page.screenshot({ path: join(output, `${name}.png`) }); console.log("shot", name); };
@@ -228,6 +152,4 @@ if (!readme) {
   const stray = [...(await page.evaluate(() => (window as unknown as { notices: string[] }).notices)), ...pageErrors.slice(before)].filter((text) => text.includes("session changed"));
   if (stray.length) throw new Error(`Stray error after starting a workflow: ${stray.join(" | ")}`);
 }
-await browser.close();
-host.kill(); server.stop(true); await f.close(); rmSync(web, { recursive: true, force: true });
-process.exit(0);
+} finally { await browser.close(); await f.close(); }

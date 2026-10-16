@@ -656,7 +656,7 @@ export class AgentEngine {
     const snapshotTargets = this.captureSnapshot(turnId, sessionId, workspaceRoot, call.name, input);
     try {
       const questions = permissionMode === "deny" ? undefined : this.options.questions;
-      const output = await (tool.executeWithArtifacts ?? tool.execute)(input, { workspaceRoot, signal, sessionId,
+      const output = await (tool.executeWithArtifacts ?? tool.execute)(input, { workspaceRoot, signal, sessionId, turnId,
         commands:this.options.commands?.reporter(sessionId,turnId,toolCallId,workspaceRoot),
         ...(questions ? { ask: async (asked: UserQuestion[], mode?: import("@demesne/protocol").QuestionMode) => {
           const { questionId,event } = this.store.requestQuestions(toolCallId, asked,mode,false);

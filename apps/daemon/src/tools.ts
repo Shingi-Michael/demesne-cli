@@ -27,6 +27,7 @@ const LIST_FILES_PATH_BUDGET_BYTES = 28 * 1024;
 export interface ToolContext {
   commands?: CommandReporter;
   sessionId?: string;
+  turnId?: string;
   workspaceRoot: string;
   signal: AbortSignal;
   /// Puts questions to the person at the terminal and waits for the answers.

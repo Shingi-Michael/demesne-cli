@@ -10,7 +10,7 @@ These guides describe the current implementation, including direct ChatGPT infer
 | [Commands and keyboard](cli-reference.md) | CLI, slash commands, headless output, current shortcuts |
 | [Configuration](configuration.md) | File precedence, providers, limits, environment variables |
 | [Authentication](authentication.md) | ChatGPT accounts, OpenRouter, API keys, credential ownership |
-| [Desktop app](desktop.md) | The interface: Tauri window, opening from the terminal, native project picker, development, bundles, lifecycle |
+| [Desktop app](desktop.md) | The interface: Electron window, opening from the terminal, native project picker, development, bundles, lifecycle |
 | [Subagents and concurrency](subagents.md) | Routing, read-only tools, provider slots, Qwen sizing |
 | [Agent Drive](agent-drive.md) | NEXT, missions, project memory, check-ins, loop protection |
 | [Questions and interviews](questions.md) | Typed composer answers, adaptive follow-ups, saved drafts, pause and recovery |

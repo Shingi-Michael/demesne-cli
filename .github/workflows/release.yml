@@ -87,6 +87,8 @@ jobs:
           # Built on 22.04 so the package also installs on 24.04.
           - os: ubuntu-22.04
             artifact: demesne-desktop-linux-amd64.deb
+          - os: windows-latest
+            artifact: demesne-desktop-windows-x64.exe
     steps:
       - uses: actions/checkout@v4
         with:
@@ -94,45 +96,42 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
         with:
-          workspaces: apps/desktop/src-tauri
+          node-version: '22'
       - run: bun install --frozen-lockfile
-
-      # A tag sets the app's version; a manual run keeps tauri.conf.json's.
       - name: Build app bundle
+        shell: bash
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            bun run build:desktop -- --config "{\"version\":\"${GITHUB_REF_NAME#v}\"}"
-          else
-            bun run build:desktop
+            export DEMESNE_BUILD_VERSION="${GITHUB_REF_NAME#v}"
           fi
+          bun run build:desktop
 
       # Check each bundle carries its backend, since copying only the
       # executable would leave the app without a daemon.
       - name: Package macOS app
         if: runner.os == 'macOS'
         run: |
-          app=apps/desktop/src-tauri/target/release/bundle/macos/Demesne.app
-          for file in demesne-desktop-host demesned; do test -x "$app/Contents/MacOS/$file"; done
-          test -d "$app/Contents/Resources/runtime/node_modules/sharp"
+          app=apps/desktop/release/mac-arm64/Demesne.app
+          for file in demesne-desktop-host demesned; do test -x "$app/Contents/Resources/backend/$file"; done
+          test -d "$app/Contents/Resources/backend/node_modules/sharp"
           ditto -c -k --keepParent "$app" "${{ matrix.artifact }}"
       - name: Package Linux app
         if: runner.os == 'Linux'
         run: |
-          cp apps/desktop/src-tauri/target/release/bundle/deb/*.deb "${{ matrix.artifact }}"
+          cp apps/desktop/release/*.deb "${{ matrix.artifact }}"
           contents=$(dpkg-deb -c "${{ matrix.artifact }}")
-          for file in usr/bin/demesne-desktop usr/bin/demesne-desktop-host usr/bin/demesned runtime/node_modules/sharp/; do grep -q "$file" <<<"$contents"; done
+          for file in usr/bin/demesne-desktop resources/backend/demesne-desktop-host resources/backend/demesned resources/backend/node_modules/sharp/; do grep -q "$file" <<<"$contents"; done
           sudo apt-get install -y "./${{ matrix.artifact }}"
           command -v demesne-desktop
+      - name: Package Windows app
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cp apps/desktop/release/*.exe "${{ matrix.artifact }}"
       - name: Checksum
-        run: shasum -a 256 "${{ matrix.artifact }}" > "${{ matrix.artifact }}.sha256" && cat "${{ matrix.artifact }}.sha256"
+        shell: bash
+        run: bun -e 'const p=process.argv[1]; const bytes=await Bun.file(p).arrayBuffer(); await Bun.write(p+".sha256",new Bun.CryptoHasher("sha256").update(bytes).digest("hex")+"  "+p+"\n")' "${{ matrix.artifact }}"
 
       - uses: actions/upload-artifact@v4
         with:

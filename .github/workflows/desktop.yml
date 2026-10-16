@@ -1,5 +1,4 @@
 name: Desktop
-
 on:
   push:
     branches: [main]
@@ -7,64 +6,60 @@ on:
   pull_request:
     paths: ['apps/**', 'packages/**', 'scripts/**', 'package.json', 'bun.lock', '.github/workflows/desktop.yml']
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: desktop-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   build-and-check:
-    name: Tauri / ${{ matrix.os }}
+    name: Electron / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04, macos-14]
+        os: [ubuntu-22.04, ubuntu-24.04, macos-14, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Linux build and WebDriver dependencies
+      - name: Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb dbus-x11 fonts-dejavu-core
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop/src-tauri
-          cache-on-failure: true
-      # Approved workspace commands use a fixed system PATH; check fixtures call bun.
+          sudo apt-get install -y libgtk-3-0 libnss3 libasound2 libgbm1 xvfb dbus-x11 fonts-dejavu-core
+          # Ubuntu 24.04 restricts unprivileged user namespaces by default.
+          # Permit Chromium's sandbox in this disposable CI VM; never disable it in the app.
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - name: Expose Bun for approved command fixtures
+        if: runner.os != 'Windows'
         run: sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
       - run: bun install --frozen-lockfile
-      - name: Build desktop test executable and sidecars
-        run: bun run build:desktop -- --debug --no-bundle
+      - run: bun scripts/prepare-desktop.ts
+      - run: bun test apps/desktop/test/electron-policy.test.ts apps/desktop/test/electron-backend.test.ts
       - name: Compiled host protocol and lifecycle tests
-        env:
-          DEMESNE_TEST_DESKTOP_HOST: ${{ github.workspace }}/apps/desktop/src-tauri/target/debug/demesne-desktop-host
-        run: bun test apps/desktop/test/host.test.ts
+        if: runner.os != 'Windows'
+        run: DEMESNE_TEST_DESKTOP_HOST="$PWD/apps/desktop/build/backend/demesne-desktop-host" bun test apps/desktop/test
       - name: Shipped daemon and native image runtime
         run: bun scripts/check-desktop-backend.ts
-      - name: Rust boundary tests
-        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
-      - name: Install native WebDriver bridge
+      - name: Electron desktop lifecycle and coding turn (Linux)
         if: runner.os == 'Linux'
-        run: cargo install tauri-driver --locked
-      # Real WebKitGTK, private test config/workspace/provider, no production test API.
-      # No Chromium --no-sandbox flag or privileged container is involved here.
-      - name: Real desktop lifecycle and coding turn
-        if: runner.os == 'Linux'
-        env:
-          LIBGL_ALWAYS_SOFTWARE: '1'
         run: dbus-run-session -- xvfb-run -a bun run desktop:check
+      - name: Electron desktop lifecycle and coding turn (macOS)
+        if: runner.os == 'macOS'
+        run: bun run desktop:check
       - name: Build platform bundle
         run: bun run build:desktop
       - uses: actions/upload-artifact@v4
@@ -72,7 +67,7 @@ jobs:
         with:
           name: desktop-${{ matrix.os }}
           path: |
-            apps/desktop/src-tauri/target/release/bundle/
+            apps/desktop/release/
             test-results/desktop/
           if-no-files-found: ignore
           retention-days: 7

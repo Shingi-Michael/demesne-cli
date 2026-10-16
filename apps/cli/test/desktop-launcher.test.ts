@@ -17,16 +17,16 @@ test("terminal words and options become the desktop's launch options for this pr
   expect(() => desktopArgs(["--model"], { cwd: "/w" })).toThrow("--model requires a value");
 });
 
-test("the desktop app is found where it was installed or built, then from source with Rust", () => {
+test("the desktop app is found where it was installed or built, then from source with Electron", () => {
   const args = ["--workspace=/w"];
   expect(desktopLaunch(args, probe({ env: { DEMESNE_DESKTOP_BIN: "/opt/d" } }))).toEqual({ argv: ["/opt/d", ...args], detached: true });
   expect(desktopLaunch(args, probe({ platform: "darwin", files: ["/home/me/Applications/Demesne.app"] })))
     .toEqual({ argv: ["open", "-n", "-a", "/home/me/Applications/Demesne.app", "--args", ...args], detached: false });
   expect(desktopLaunch(args, probe({ commands: { "demesne-desktop": "/usr/bin/demesne-desktop" } }))!.argv[0]).toBe("/usr/bin/demesne-desktop");
-  expect(desktopLaunch(args, probe({ files: ["/src/demesne/apps/desktop/src-tauri/target/debug/demesne-desktop"] }))!.argv[0])
-    .toBe("/src/demesne/apps/desktop/src-tauri/target/debug/demesne-desktop");
-  expect(desktopLaunch(args, probe({ files: ["/src/demesne/scripts/run-desktop.ts"], commands: { cargo: "/usr/bin/cargo" } })))
+  expect(desktopLaunch(args, probe({ files: ["/src/demesne/apps/desktop/release/linux-unpacked/demesne-desktop"] }))!.argv[0])
+    .toBe("/src/demesne/apps/desktop/release/linux-unpacked/demesne-desktop");
+  expect(desktopLaunch(args, probe({ files: ["/src/demesne/scripts/run-desktop.ts", "/src/demesne/node_modules/electron/package.json"] })))
     .toEqual({ argv: ["/usr/bin/bun", "/src/demesne/scripts/run-desktop.ts", "--", ...args], detached: false, cwd: "/src/demesne" });
-  // A checkout without Rust, or nothing installed: no way to open it.
+  // A checkout without installed Electron, or nothing installed: no way to open it.
   expect(desktopLaunch(args, probe({ files: ["/src/demesne/scripts/run-desktop.ts"] }))).toBeNull();
 });

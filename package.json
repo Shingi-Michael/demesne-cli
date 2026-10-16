@@ -27,8 +27,10 @@
     "desktop:check": "bun scripts/check-desktop.ts"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2",
     "@types/bun": "1.4.0",
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3",
+    "playwright": "^1.64.1",
     "sharp": "^0.35.4",
     "typescript": "7.0.2"
   }

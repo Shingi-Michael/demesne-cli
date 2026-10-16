@@ -6,10 +6,10 @@
 
 ```mermaid
 flowchart LR
-    Person[User] --> Page[Local HTML UI in system webview]
-    Page <-->|named actions and public snapshots| Rust[Tauri Rust core]
-    Rust <-->|private process pipes| Host[Bun desktop host]
-    Rust --> Native[Project picker, clipboard and external opening]
+    Person[User] --> Page[Sandboxed Chromium renderer]
+    Page <-->|named actions and public snapshots| Main[Electron main process]
+    Main <-->|private process pipes| Host[Bun desktop host]
+    Main --> Native[Project picker, clipboard and external opening]
     Host <-->|authenticated HTTP and SSE| Daemon[Local daemon]
     CLI[Headless CLI] <-->|HTTP and SSE| Daemon
     Daemon --> Store[(SQLite and artifact files)]
@@ -25,9 +25,9 @@ The [daemon](../apps/daemon/src/app.ts) owns turns and background commands. Clos
 
 ## Desktop process boundary
 
-The [Tauri desktop preview](desktop.md) displays the shared UI in the system webview. Its Rust core supplies native project selection, clipboard, and external opening, while a compiled Bun host owns the authenticated daemon client and Drive controller. Public state and named actions cross private process pipes and the restricted Tauri bridge; daemon/provider credentials stay outside the webview. Native commands check both the main-window label and local origin; remote navigation and new webviews are denied.
+The [Electron desktop app](desktop.md) displays the shared UI in bundled Chromium. Its main process supplies native project selection, clipboard and external opening. The existing compiled Bun host owns the authenticated daemon client and Drive controller. Public state and named actions cross private process pipes and a context-isolated preload bridge. IPC validates the main frame and local `demesne://app` origin. The sandboxed renderer has no Node integration or credentials; remote navigation, new windows and embedded webviews are denied.
 
-Closing the window ends its host. A running Drive mission is handed to a detached host process with no window, which resumes it and exits once it settles; reopening the project stops that process and resumes the mission in the window ([Drive keeps working](agent-drive.md#drive-keeps-working-when-you-close-the-window)). Daemon-owned turns continue, and the project/session can be reopened. See the [desktop implementation](../apps/desktop/README.md#process-boundary).
+Quitting ends its UI host; closing the window on macOS hides it. A running Drive mission is handed to a detached host process with no window, which resumes it and exits once it settles; reopening the project stops that process and resumes the mission in the window ([Drive keeps working](agent-drive.md#drive-keeps-working-when-you-close-the-window)). Daemon-owned turns continue, and the project/session can be reopened. See the [desktop implementation](../apps/desktop/README.md#process-boundary).
 
 ## One coding turn
 

@@ -2,29 +2,17 @@
 
 [Desktop user guide](../../docs/desktop.md) · [Architecture](../../docs/architecture.md) · [Contributing](../../CONTRIBUTING.md)
 
-The Tauri 2 client is Demesne's interface. It displays the shared web frontend from [`apps/graphics`](../graphics/README.md) directly in a desktop window. Its Rust core starts a Bun host sidecar and supplies a restricted native bridge. The host reuses the authenticated daemon client, provider setup, session state, and Drive controller from that shared code. `demesne` in a terminal opens this window on the current folder through the [desktop launcher](../cli/src/desktop-launcher.ts).
+Electron displays the shared HTML/CSS/TypeScript interface from `apps/graphics` in bundled Chromium on macOS, Linux, and Windows. The main process starts the existing compiled Bun host over private JSON-line pipes. That host retains the authenticated daemon client, project/session preferences, provider setup, and Drive controller. The independent daemon continues to own coding turns.
 
 ## Process boundary
 
-```mermaid
-flowchart LR
-    Person[Desktop user] --> Page[Local HTML UI in system webview]
-    Page <-->|authored actions and snapshots| Rust[Tauri Rust core]
-    Rust <-->|private process pipes| Host[Bun desktop host]
-    Host <-->|authenticated HTTP and SSE| Daemon[Demesne daemon]
-    Rust --> Native[Project picker, clipboard and external opening]
-    Daemon --> Store[(Sessions, checks and artifacts)]
-    Daemon --> Models[Model providers]
-    CLI[Headless CLI] <-->|authenticated HTTP and SSE| Daemon
-```
+The sandboxed renderer has no Node.js integration or credentials. Its context-isolated preload exposes only a named request function and four public event subscriptions. The main process validates IPC senders against the main frame and `demesne://app` origin, bounds requests, and implements folder selection, clipboard, validated external opening, menus, and persisted zoom. Remote navigation, new windows, embedded webviews, downloads, and permission requests are denied. A restrictive CSP applies to packaged local assets; rendered Markdown remains sanitized.
 
-Credentials and authenticated requests stay in the host/daemon. The webview receives public snapshots and sends named, validated actions. Native commands require the main window and a local application origin. The window denies navigation to remote pages and creation of additional webviews; external links open through the validated native opener. Its capability file only permits backend event subscriptions, without renderer shell/filesystem plugin permissions. Rendered Markdown remains sanitized.
-
-The frontend has no general shell, filesystem, or authenticated daemon HTTP API. Approved commands still run as the user's OS account in the daemon; moving to Tauri does not sandbox agent tools. See [security boundaries](../../SECURITY.md).
+`electron/backend.ts` manages host framing, response correlation, request deadlines, native action replies, failure recovery, and shutdown. Quitting closes the host's input pipe so its existing disposal logic hands a running Drive mission to a detached host. It never stops the daemon. Closing the window on macOS hides it; Dock activation brings it back. Closing on Linux/Windows quits.
 
 ## Run and package
 
-From the repository root, after installing [platform prerequisites](../../docs/desktop.md#prerequisites):
+Install Bun and Node.js (for packaging tools), then from the repository root:
 
 ```sh
 bun install --frozen-lockfile
@@ -32,32 +20,21 @@ bun run desktop
 bun run build:desktop
 ```
 
-The host and daemon are compiled with Bun and included as resources/sidecars alongside native image codecs. The frontend's HTML/CSS/assets and live UI come from `apps/graphics`.
+Preparation bundles renderer/main/preload code into `build/app`, compiles the existing Bun host and daemon into `build/backend`, and copies native image dependencies beside them. Electron Builder packages those backends outside ASAR under `resources/backend`. No Rust toolchain or system webview is required. The normal build packages only the current host platform and architecture, ensuring Bun and sharp match it.
 
-The desktop process owns the window and its host. The independent daemon owns coding turns. Window exit disposes client streams without killing the daemon. A running Drive mission is handed to the same host binary run with `--drive-away` (no window, its own process session), which carries it to the end; reopening the project takes it back ([drive-away.ts](drive-away.ts)). Private `desktop-ui.json` preferences remember the last project and session per canonical project/daemon pair; missing or archived sessions fall back to a new session. A project change creates a host for that selected workspace; existing session work remains daemon-owned.
+Outputs are under `apps/desktop/release`: `mac-arm64/Demesne.app` (or `mac/Demesne.app` on Intel), a Linux `.deb`, or a Windows NSIS installer. `--dir` builds an unpacked application. Builds are unsigned until release signing credentials are configured.
 
 ## Verification
 
 ```sh
-bun run typecheck
-bun test
-bun run build:desktop -- --debug --no-bundle
-DEMESNE_TEST_DESKTOP_HOST="$PWD/apps/desktop/src-tauri/target/debug/demesne-desktop-host" \
-  bun test apps/desktop/test/host.test.ts
+bun scripts/prepare-desktop.ts
+bun test apps/desktop/test apps/cli/test/desktop-launcher.test.ts
+DEMESNE_TEST_DESKTOP_HOST="$PWD/apps/desktop/build/backend/demesne-desktop-host" bun test apps/desktop/test/host.test.ts
 bun scripts/check-desktop-backend.ts
-cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+bun run desktop:check
+bun run build:desktop
 ```
 
-The compiled-host tests cover validated IPC, malformed messages, native response correlation, project/session restoration, and EOF/quit cleanup. The backend check boots the bundled daemon with its relocated native image runtime under disposable configuration. Neither check opens a window or uses a real provider.
+On headless Linux run `dbus-run-session -- xvfb-run -a bun run desktop:check`. The Electron Playwright check creates private fixture configuration and a deterministic daemon; it never stops the user's daemon or uses a paid model. It verifies actual renderer isolation, approvals, edits and commands, Markdown/code/math, review and history panels, project/session restoration, and daemon work continuing after app exit. Screenshots and logs go to `test-results/desktop`.
 
-On Linux with the WebDriver dependencies installed:
-
-```sh
-dbus-run-session -- xvfb-run -a bun run desktop:check
-```
-
-The Linux desktop check uses disposable configuration, workspace, and deterministic inference. It submits a turn through the composer, approves an actual file edit and check, verifies Markdown/code/math and review panels, reopens the saved project/session, and confirms daemon work finishes after the app closes. Screenshots and logs are written to `test-results/desktop/`. It exercises the application boundary without a real account or model. Tests must clean up their own app/host/daemon processes and must never stop a user's active daemon.
-
-The native WebDriver route is Linux-only in this milestone; macOS needs separate native app validation because WKWebView has no platform WebDriver. On Linux, the real-webview check needs `webkit2gtk-driver`, `xvfb`, and `tauri-driver`. The [desktop CI workflow](../../.github/workflows/desktop.yml) supplies these dependencies. This follows [Tauri's native WebDriver testing route](https://v2.tauri.app/develop/tests/webdriver/manual-setup/), without a production test server or privileged renderer test API.
-
-The first desktop milestone preserves current product behavior; it does not implement an updater, tray background mode, signing/notarization, or validated Windows packaging. Native capture remains macOS-only. Render and performance claims must identify the tested platform and complete process boundary.
+Host tests additionally cover Drive handoff/reclaim, native reply correlation, malformed IPC, draft preservation and theme persistence. CI builds macOS, Linux and Windows packages; real desktop lifecycle checks currently run on macOS and Linux. Native window capture remains macOS-only. Windows integration still needs validation beyond packaging/backend checks. Automatic updates, tray mode and release signing are not implemented.

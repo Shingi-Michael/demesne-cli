@@ -2,19 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>Demesne</title>
   <link rel="stylesheet" href="node_modules/katex/dist/katex.min.css">
   <link rel="stylesheet" href="ui.css">
   <link rel="stylesheet" href="live.css">
   <link rel="stylesheet" href="desktop.css">
+  <link rel="stylesheet" href="workspace.css">
 </head>
 <body class="desktop">
   <div id="desktop-shell">
-    <div id="desktop-toolbar" hidden>
-      <span class="desktop-wordmark">demesne</span>
-      <span class="desktop-toolbar-rule" aria-hidden="true"></span>
+    <aside id="desktop-sidebar" aria-label="Workspace navigation" hidden>
+      <div class="sidebar-brand"><span class="brand-symbol" aria-hidden="true">d.</span><span>Demesne</span><span class="sidebar-preview">WORKSPACE</span></div>
       <div class="desktop-project-control">
         <button id="desktop-project-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="desktop-project-menu" title="Switch project">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7.5V5h6l2 2h10v12H3V7.5Z"/></svg>
@@ -24,15 +24,31 @@
         <div id="desktop-project-menu" class="desktop-project-menu" role="menu" aria-label="Projects" hidden></div>
       </div>
       <span id="desktop-project-path" class="desktop-project-path"></span>
+
+      <button type="button" class="sidebar-new" data-action="new-session"><span aria-hidden="true">＋</span> New conversation</button>
+      <nav class="sidebar-tools" aria-label="Workspace tools">
+        <button type="button" data-action="panel" data-args='{"name":"drive"}'><span aria-hidden="true">↗</span> Agent Drive <span class="sidebar-tool-note">Plan & run</span></button>
+        <button type="button" data-action="panel" data-args='{"name":"files"}'><span aria-hidden="true">▤</span> Project files</button>
+      </nav>
+      <div class="sidebar-section-heading">Conversations <button type="button" data-action="overlay" data-args='{"name":"sessions"}' aria-label="Browse all sessions" title="Browse all sessions">⌕</button></div>
+      <label class="sidebar-search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg><input id="sidebar-search" type="search" placeholder="Find a conversation" aria-label="Find a conversation" autocomplete="off"></label>
+      <div id="sidebar-sessions" role="navigation" aria-label="Conversations"></div>
+      <div class="sidebar-projects"><div class="sidebar-section-heading">Recent projects</div><div id="sidebar-projects"></div><button type="button" id="sidebar-open-project"><span aria-hidden="true">＋</span> Open project</button></div>
+      <div class="sidebar-footer"><button type="button" data-action="overlay" data-args='{"name":"settings"}'><span aria-hidden="true">⚙</span> Settings</button><span id="sidebar-connection" role="status"></span></div>
+    </aside>
+    <div id="desktop-toolbar" hidden>
+      <button id="desktop-toggle-sidebar" type="button" title="Toggle sidebar" aria-label="Toggle sidebar" aria-expanded="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
+      <div id="workspace-title" class="workspace-title">New conversation</div>
       <header id="header"></header>
     </div>
     <section id="desktop-home" class="desktop-home" aria-labelledby="desktop-home-title">
       <div class="desktop-home-content">
-        <span class="desktop-home-wordmark">demesne</span>
-        <h1 id="desktop-home-title">A place to build.</h1>
-        <p id="desktop-home-description">Choose a project. Bring your model. Make something.</p>
+        <span class="desktop-home-wordmark"><span class="brand-symbol" aria-hidden="true">d.</span> Demesne</span>
+        <span class="hero-eyebrow">FROM AN IDEA TO WORKING CODE</span>
+        <h1 id="desktop-home-title">Make room for your next idea.</h1>
+        <p id="desktop-home-description">One workspace for your conversations, code, and agent work. Open a project to get started.</p>
         <button id="desktop-choose-project" type="button" class="desktop-primary">Open a project <span aria-hidden="true">↗</span></button>
-        <p class="desktop-home-note">Your conversations, reviews, and agent work stay with the project.</p>
+        <div class="welcome-features"><div><strong>Your project</strong><p>Work directly with your files and Git history.</p></div><div><strong>Your model</strong><p>Connect a local model or a hosted provider.</p></div><div><strong>Your decisions</strong><p>Review changes and approve what runs.</p></div></div>
         <section id="desktop-recent" class="desktop-recent" aria-labelledby="desktop-recent-title" hidden>
           <h2 id="desktop-recent-title">RECENT PROJECTS</h2>
           <div id="desktop-recent-list"></div>
@@ -42,7 +58,7 @@
     </section>
     <section id="desktop-error" class="desktop-error" aria-labelledby="desktop-error-title" hidden>
       <div class="desktop-error-content">
-        <span class="desktop-home-wordmark">demesne</span>
+        <span class="desktop-home-wordmark"><span class="brand-symbol" aria-hidden="true">d.</span> Demesne</span>
         <h1 id="desktop-error-title">Couldn’t open Demesne.</h1>
         <p id="desktop-error-message" role="alert"></p>
         <div class="desktop-error-actions">

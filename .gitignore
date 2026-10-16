@@ -8,9 +8,14 @@ dist/
 *.sqlite-shm
 *.sqlite-wal
 
-# Tauri desktop generated assets and platform binaries
+# Ignore legacy build output left by earlier installations
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/binaries/
 apps/desktop/src-tauri/resources/
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/icons/
+
+# Electron generated application, native backends, and bundles
+apps/desktop/build/
+apps/desktop/release/
+test-results/

@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 
 /// `demesne` in a terminal opens the desktop window on this project. The app
 /// is found where it was installed or built; from a checkout without a build,
-/// `bun run desktop` builds and runs it (that needs Rust).
+/// `bun run desktop` builds and runs it (requires installed dependencies).
 
 export interface DesktopLaunch { argv: string[]; detached: boolean; cwd?: string }
 export interface DesktopProbe {
@@ -52,20 +52,30 @@ export function desktopLaunch(args: string[], probe: DesktopProbe = realProbe())
     const app = [join("/Applications", "Demesne.app"), join(probe.home, "Applications", "Demesne.app")].find(probe.exists);
     if (app) return { argv: ["open", "-n", "-a", app, "--args", ...args], detached: false };
   }
+  if (probe.platform === "win32") {
+    const installed = [
+      join(probe.env.LOCALAPPDATA ?? join(probe.home, "AppData", "Local"), "Programs", "Demesne", "demesne-desktop.exe"),
+      join(probe.env.ProgramFiles ?? "C:\\Program Files", "Demesne", "demesne-desktop.exe"),
+    ].find(probe.exists);
+    if (installed) return { argv: [installed, ...args], detached: true };
+  }
   const installed = probe.which("demesne-desktop");
   if (installed) return { argv: [installed, ...args], detached: true };
-  const target = join(probe.source, "apps", "desktop", "src-tauri", "target");
-  const built = ["release", "debug"].map((profile) => join(target, profile, "demesne-desktop")).find(probe.exists);
+  const release = join(probe.source, "apps", "desktop", "release");
+  const candidates = probe.platform === "darwin"
+    ? ["mac-arm64", "mac"].map(dir => join(release, dir, "Demesne.app", "Contents", "MacOS", "Demesne"))
+    : probe.platform === "win32" ? [join(release, "win-unpacked", "demesne-desktop.exe")]
+    : ["linux-unpacked", "linux-arm64-unpacked"].map(dir => join(release, dir, "demesne-desktop"));
+  const built = candidates.find(probe.exists);
   if (built) return { argv: [built, ...args], detached: true };
-  // A checkout with Rust: build and run it (the first build takes a while).
-  if (probe.exists(join(probe.source, "scripts", "run-desktop.ts")) && probe.which("cargo"))
+  if (probe.exists(join(probe.source, "scripts", "run-desktop.ts")) && probe.exists(join(probe.source, "node_modules", "electron", "package.json")))
     return { argv: [probe.bun, join(probe.source, "scripts", "run-desktop.ts"), "--", ...args], detached: false, cwd: probe.source };
   return null;
 }
 
 export async function runDesktop(args: string[]): Promise<number> {
   const launch = desktopLaunch(args);
-  if (!launch) throw new Error("The demesne desktop app isn't installed. Download it from https://github.com/Shingi-Michael/demesne-cli/releases/latest, build it with `bun run build:desktop` (needs Rust; see docs/desktop.md), or use `demesne prompt` in the terminal.");
+  if (!launch) throw new Error("The demesne desktop app isn't installed. Download it from https://github.com/Shingi-Michael/demesne-cli/releases/latest, build it with `bun run build:desktop` (see docs/desktop.md), or use `demesne prompt` in the terminal.");
   if (launch.detached) {
     // The window outlives this command; its daemon work outlives both.
     const child = Bun.spawn(launch.argv, { cwd: launch.cwd, stdin: "ignore", stdout: "ignore", stderr: "ignore", env: process.env });

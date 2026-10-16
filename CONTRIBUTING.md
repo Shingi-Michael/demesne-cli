@@ -22,7 +22,7 @@ bun run daemon
 bun run desktop
 ```
 
-The desktop window needs [Rust and the platform dependencies](docs/desktop.md#prerequisites). `bun run demesne` in a terminal opens the same window on the current folder. Without provider configuration the daemon uses a deterministic placeholder processor. Unit tests and desktop checks use deterministic/fake providers; normal verification does not need paid inference or a second local model process.
+The desktop window needs [Electron and the platform dependencies](docs/desktop.md#prerequisites). `bun run demesne` in a terminal opens the same window on the current folder. Without provider configuration the daemon uses a deterministic placeholder processor. Unit tests and desktop checks use deterministic/fake providers; normal verification does not need paid inference or a second local model process.
 
 For distributable binaries, build the CLI and daemon, then the desktop app:
 
@@ -35,7 +35,7 @@ Keep the daemon’s native image dependencies in `dist/node_modules` with the CL
 
 ## Desktop development
 
-The desktop window shows the shared UI from `apps/graphics` directly in a Tauri system webview.
+The desktop window shows the shared UI from `apps/graphics` directly in a sandboxed Electron renderer.
 
 Keep the authenticated daemon client and credentials in the backend. Native dialogs, clipboard operations, and external opening must pass through validated desktop commands. See the [desktop implementation guide](apps/desktop/README.md) for the process boundary and test commands.
 
@@ -45,7 +45,7 @@ Keep the authenticated daemon client and credentials in the backend. Native dial
 | --- | --- |
 | `apps/daemon/` | HTTP API, coding turns, tools, approvals, scheduling, reviews, proposals and artifact ingestion |
 | `apps/cli/` | Commands, headless client, setup and reusable Drive controller |
-| `apps/desktop/` | Tauri window, restricted native bridge, Bun host sidecar, desktop integration checks |
+| `apps/desktop/` | Electron window, restricted native bridge, Bun host sidecar, desktop integration checks |
 | `apps/graphics/` | Shared interface code shown by the desktop window: browser UI, authenticated host, state wire and Markdown |
 | `packages/protocol/` | API/event types, validation and Drive/panel contracts |
 | `packages/client/` | Typed authenticated HTTP/SSE client |
@@ -59,7 +59,7 @@ Keep the authenticated daemon client and credentials in the backend. Native dial
 ## Implementation conventions
 
 - Keep protocol changes additive where possible. Bump `PROTOCOL_VERSION` for breaking changes, and update client/runtime validation together.
-- Keep credentials, filesystem and authenticated daemon requests in the host/daemon. The webview receives public snapshots and sends named actions through the restricted desktop bridge.
+- Keep credentials, filesystem and authenticated daemon requests in the host/daemon. The sandboxed renderer receives public snapshots and sends named actions through the restricted desktop bridge.
 - Prefer pure reducers/formatters and dependency injection for fetch, process spawning and clocks. Test boundaries rather than duplicating implementation details.
 - Keep rendering tied to recorded facts. A proposal, successful tool result, historical check and fresh verification are different states.
 - Do not silently broaden permissions, expose secrets, or treat host commands/MCP servers as sandboxed.
@@ -72,7 +72,7 @@ All code PRs run `bun run typecheck` and `bun test`. [CI](.github/workflows/ci.y
 
 | Change | Additional relevant checks |
 | --- | --- |
-| Desktop UI/bridge/lifecycle | `bun run desktop:check`; Rust tests and desktop bundle build |
+| Desktop UI/bridge/lifecycle | `bun run desktop:check`; Electron boundary tests and desktop bundle build |
 | Shared UI behavior/layout | `bun test apps/graphics/test`; `bun run desktop:check` |
 | Drive | Controller/unit tests; `bun run desktop:check` when the panel changes |
 | Packaging | Both builds and relevant checks against packaged assets |

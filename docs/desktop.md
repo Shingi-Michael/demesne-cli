@@ -1,65 +1,29 @@
-# Desktop app preview
+# Desktop app
 
 [Documentation index](README.md) · [Implementation](../apps/desktop/README.md) · [Configuration](configuration.md) · [Security](../SECURITY.md)
 
-Demesne's interface is a Tauri 2 desktop window that shows its HTML/CSS/TypeScript UI. Conversations, file inspection, diffs, verification, previews, authentication, subagents, and Drive all run in it, backed by the local daemon. `demesne prompt` remains for scripts and headless use.
-
-The desktop window renders directly in the system webview: WKWebView on macOS and WebKitGTK on Linux.
+Demesne uses Electron and bundled Chromium on macOS, Linux and Windows. Its existing HTML/CSS/TypeScript interface retains conversations, file inspection, diffs, verification, previews, authentication, subagents and Drive. The existing Bun daemon owns coding turns and session data; `demesne prompt` remains available for headless use.
 
 ## Prerequisites
 
-For development, install [Bun 1.4.0](https://bun.sh), Rust with Cargo, and the platform tools listed by [Tauri's prerequisite guide](https://v2.tauri.app/start/prerequisites/).
+For development, install [Bun 1.4.0](https://bun.sh) and Node.js 22 or newer for packaging tools. No Rust or system webview development libraries are needed. Build on the target operating system and architecture so the compiled Bun backends and native image codecs match the package.
 
-### macOS
-
-Install Xcode command-line tools and a stable Rust toolchain. Full Xcode can also provide the required SDK.
-
-```sh
-xcode-select --install
-```
-
-### Linux
-
-The initial desktop build targets Ubuntu 22.04 and 24.04, which provide WebKitGTK 4.1 in their standard repositories. Build on the oldest target distribution for compatibility with its libraries. [Tauri's Linux distribution guidance](https://v2.tauri.app/distribute/debian/#limitations)
-
-```sh
-sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
-  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-```
-
-A desktop session is required to show the app. A terminal over headless SSH does not supply a window server; use [headless CLI commands](cli-reference.md#headless-output) there. Native window capture remains macOS-only.
-
-Ubuntu 20.04 is not supported. It lacks WebKitGTK 4.1, which Tauri 2 needs.
-
-Windows is not validated in this first milestone.
+On macOS, install Xcode command-line tools for packaging. Linux needs a graphical session and Chromium runtime libraries (GTK 3, NSS, ALSA, GBM); CI checks Ubuntu 22.04 and 24.04. Windows packaging uses NSIS. Native window capture remains macOS-only; Windows end-to-end behavior is not yet verified.
 
 ## Run from source
-
-From the repository root:
 
 ```sh
 bun install --frozen-lockfile
 bun run desktop
 ```
 
-The desktop launcher prepares the shared frontend and Bun backend resources, then starts the Tauri development build.
-
-Use **Open project** to choose a workspace through the native folder picker. The first time you open a folder, Demesne asks whether you trust its files, with **Trust folder** and **Quit**; see [workspace trust](../SECURITY.md#workspace-trust). Folder ownership and permissions aren't checked.
-
-Connect a provider through the setup interface or reuse an existing Demesne configuration. ChatGPT browser sign-in, OpenRouter, and local OpenAI-compatible providers use the existing [authentication](authentication.md) and [configuration](configuration.md) implementations.
+Use **Open project** to select a folder. Existing workspace trust, provider setup, authentication and configuration behavior is retained. Your sessions and private `desktop-ui.json` preferences remain in the same daemon data directory.
 
 ## Open from the terminal
 
-Run `demesne` in a project folder and the desktop window opens on that folder. `demesne chat "fix the failing test"` opens it and sends the words as the first message. `--model`, `--session`, `--workspace` and `--setup` pass through to the window.
+Run `demesne` in a project directory. `demesne chat "fix the failing test"` opens the app and sends the initial message. `--model`, `--session`, `--workspace` and `--setup` pass through to the host.
 
-`demesne` looks for the app in this order: `DEMESNE_DESKTOP_BIN`; on macOS, `Demesne.app` in `/Applications` or `~/Applications`; `demesne-desktop` on PATH; a build in this checkout under `apps/desktop/src-tauri/target`. From a checkout with Cargo installed, it falls back to `bun run desktop`. Otherwise it says to build the app with `bun run build:desktop` or use `demesne prompt`.
-
-Without a terminal, such as in a pipe or a script, `demesne chat "message"` runs like `demesne prompt`. See the [command reference](cli-reference.md).
-
-## Download an app
-
-Each [release](https://github.com/Shingi-Michael/demesne-cli/releases) carries `demesne-desktop-darwin-arm64.zip` (Apple silicon) and `demesne-desktop-linux-amd64.deb` (Ubuntu 22.04 and 24.04), each with a `.sha256` checksum. They're built by the [release workflow](../.github/workflows/release.yml) and need neither Bun nor Rust. The macOS app isn't signed yet, so after moving `Demesne.app` to `/Applications`, run `xattr -dr com.apple.quarantine /Applications/Demesne.app` once. There's no Intel Mac or Windows build yet.
+The launcher checks `DEMESNE_DESKTOP_BIN`, installed application locations, `demesne-desktop` on PATH, and Electron bundles in `apps/desktop/release`. A source checkout with Electron dependencies installed falls back to `bun run desktop`. Without a terminal, `demesne chat` uses headless output.
 
 ## Build an app
 
@@ -67,22 +31,26 @@ Each [release](https://github.com/Shingi-Michael/demesne-cli/releases) carries `
 bun run build:desktop
 ```
 
-This produces a `.app` bundle on macOS or a `.deb` package on Linux under `apps/desktop/src-tauri/target/release/bundle/`. The bundle includes the compiled desktop-host sidecar, daemon, frontend assets, and native image dependencies. End users of the bundle do not need Bun or Rust installed. Model servers and configured external command/MCP dependencies remain separate software.
+Outputs under `apps/desktop/release` are a macOS `.app`, Linux `.deb`, or Windows NSIS `.exe`. Use `bun run build:desktop -- --dir` for an unpacked package. The package includes Chromium, the Bun host and daemon, frontend assets and native image dependencies. End users do not need Bun, Node.js or Rust. Configured external tools and model servers remain separate dependencies.
 
-This is a source-build/development preview rather than a signed release channel. Developer ID signing, notarization, Windows installers, and automatic updates are not implemented by this milestone. Keep packaged resources together; copying only the executable omits its backend dependencies.
+The release workflow produces platform artifacts and checksums. These source changes do not replace artifacts already published on GitHub. Release signing, notarization and automatic updates still need configuration. Keep the complete application together; copying a single executable loses required resources.
 
 ## Closing the app and stopping work
 
-Closing the desktop window ends its host. It does not stop an independent daemon-owned coding turn or background command, and a running Drive mission [keeps working in the background](agent-drive.md#drive-keeps-working-when-you-close-the-window) until it settles. Reopen Demesne to return to the last project and session and inspect recorded progress. This selection is stored in private `desktop-ui.json` preferences, keyed by project and daemon; missing or archived sessions open a new session instead. A mission that was still working is taken back and resumed in the window; a paused one stays paused.
+On macOS the window's close button hides it; click the Dock icon to return. Quit exits the app and its UI host. On Linux and Windows, closing the window quits. Daemon-owned turns continue after app exit. A running Drive mission is handed to a detached Bun host; reopening the project reclaims it. Use the session cancel and Drive pause/stop controls to stop work. Stopping the daemon is a separate operation.
 
-Use the conversation's cancel control to interrupt a coding turn. Use Drive's pause/stop controls for its mission. Stopping the daemon is a separate operation and interrupts daemon-owned work.
+The last project and session are restored on launch. Missing or archived sessions open a new session instead. Avoid opening two clients that orchestrate the same Drive mission.
 
-The desktop and CLI use the same configured data directory and daemon. Avoid launching two clients that both orchestrate the same Drive mission.
+## Verification
 
-## Verification and current limits
+See the [implementation guide](../apps/desktop/README.md#verification). Electron lifecycle checks exercise the real Chromium renderer with a disposable workspace and deterministic model, including approvals, edits, persisted sessions and background work. No personal credentials or production test endpoint are used. Tests currently run on macOS and Linux; Windows packaging and backend checks do not establish full UI compatibility. Virtual displays do not establish performance on every physical GPU.
 
-The [desktop workflow](../.github/workflows/desktop.yml) builds platform resources and runs the relevant Rust and desktop integration checks. Linux checks use Xvfb and real WebKitGTK through Tauri's native WebDriver route, with a disposable workspace and deterministic provider. They do not use personal credentials or real model requests. See the [implementation guide](../apps/desktop/README.md#verification) for commands and the exact coverage.
+## Compacted conversation
 
-Virtual X11/software rendering does not establish performance on every physical GPU or Wayland compositor. WKWebView and WebKitGTK can render fonts, scrolling, and CSS differently from each other, so a Linux screenshot is not proof of macOS visual fidelity.
+After successful compaction, the conversation shows the saved summary in place of older turns. The retained recent turns and subsequent messages stay visible. Use **Expand full history** on the summary card to restore the complete chronological conversation, then **Collapse older conversation** to return to the summary. Expansion stays in effect during streaming updates; reopening a session or creating a new checkpoint starts collapsed. This changes only the view; the complete transcript remains saved. Failed or cancelled compaction does not create a new collapsed section.
 
-No tray-resident mode, automatic updates, or release signing is implied by the app bundle.
+## Workspace layout
+
+The left sidebar keeps project switching, recent conversations, conversation search, Agent Drive, Files and Settings within reach. **New conversation** starts a session in the current project. The toolbar toggle collapses the sidebar and remembers the preference. The main header shows the active conversation; Review, Files, Drive and Session open alongside it.
+
+Conversations use a proportional system font for reading and retain monospace for code and diffs. The composer holds model selection and context details. Settings, provider setup, model selection, approvals and inspection panels share the same spacing and theme roles; existing dark, light and custom themes remain available.

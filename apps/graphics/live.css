@@ -3764,3 +3764,11 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 #header .sessions-word:hover {
   color: var(--paper);
 }
+
+/* Saved context replaces the older conversation, which remains expandable. */
+.compaction-card { margin: 20px 0 28px; padding: 18px 20px; border: 1px solid var(--borderBright); border-radius: 8px; background: var(--surface); }
+.compaction-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.compaction-heading strong { color: var(--strong); font-weight: 500; }
+.compaction-heading span { font-size: 11px; }
+.compaction-summary { overflow-wrap: anywhere; }
+.compaction-toggle { margin-top: 14px; color: var(--electric); text-align: left; }

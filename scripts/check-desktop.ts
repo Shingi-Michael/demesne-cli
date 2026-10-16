@@ -1,4 +1,5 @@
-/** Real Linux WebKitGTK smoke test; all app actions use normal WebDriver input. */
+/** Real Electron smoke test with disposable daemon, workspace, and credentials. */
+import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -6,16 +7,9 @@ import { join, resolve } from "node:path";
 import sharp from "sharp";
 import { fixture } from "../apps/graphics/test/fixture.ts";
 
-if (process.platform !== "linux") {
-  console.error("desktop:check uses Linux WebKitWebDriver. Run it in a Linux desktop or under dbus-run-session + xvfb-run; macOS requires native app validation.");
-  process.exit(1);
-}
-const args = process.argv.slice(2).filter(arg => arg !== "--");
-const application = resolve(args[0] ?? "apps/desktop/src-tauri/target/debug/demesne-desktop");
-assert(existsSync(application), `Build the test executable first: bun run build:desktop -- --debug --no-bundle\nMissing: ${application}`);
-assert(Bun.which("tauri-driver"), "Install the native bridge with cargo install tauri-driver --locked");
-assert(Bun.which("WebKitWebDriver"), "Install webkit2gtk-driver before running desktop:check");
-assert(process.env.DISPLAY || process.env.WAYLAND_DISPLAY, "A graphical session is required. In CI use dbus-run-session -- xvfb-run -a bun run desktop:check");
+const packagedExecutable = process.argv[2];
+const application = resolve("apps/desktop/build/app");
+assert(existsSync(join(application, "main.cjs")), "Run bun scripts/prepare-desktop.ts first");
 const output = resolve("test-results/desktop");
 mkdirSync(output, { recursive: true });
 const prompt = "Desktop smoke: update hello.ts and run its check";
@@ -25,10 +19,20 @@ const afterClose = "Daemon work completed after the window closed.";
 let round = 0, release: (() => void) | undefined;
 const gate = new Promise<void>(done => { release = done; });
 const f = await fixture({
-  providerId: "test", modelId: "desktop-test", contextCapacity: 262144,
+  providerId: "test", modelId: "desktop-test", contextCapacity: 262144, maxOutputTokens: 1024,
   async listModels() { return [{ id: "desktop-test", provider: "test", contextWindow: 262144 }]; },
   async *stream(messages, _tools, signal) {
     const user = messages.findLast(message => message.role === "user")?.content;
+    if (messages[0]?.content?.includes("immutable coding-session checkpoints")) {
+      yield { type: "text_delta", delta: JSON.stringify({ schemaVersion: 1, goal: "Continue desktop work", currentState: "Older turns summarized", constraints: [], decisions: [], files: [], validation: [], unresolved: [] }) };
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
+    if (typeof user === "string" && user.startsWith("Compaction fixture")) {
+      yield { type: "text_delta", delta: "Historical evidence. ".repeat(1200) };
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
     if (user === followUp) {
       yield { type: "text_delta", delta: "The daemon is still working.\n\n" };
       await gate;
@@ -63,106 +67,86 @@ const git = (...values: string[]) => execFileSync("git", ["-C", f.workspace, ...
 git("init", "-q"); git("add", ".");
 git("-c", "user.name=Desktop Test", "-c", "user.email=test@example.com", "commit", "-qm", "Fixture baseline");
 
-// Reserve two ephemeral loopback ports before spawning this test's driver.
-// tauri-driver itself binds loopback. Never attach to an existing automation service.
-const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("reserved") });
-const nativeReservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("reserved") });
-const port = reservation.port, nativePort = nativeReservation.port;
-await reservation.stop(true); await nativeReservation.stop(true);
-const endpoint = `http://127.0.0.1:${port}`;
-const driver = Bun.spawn(["tauri-driver", "--port", String(port), "--native-port", String(nativePort)], {
-  env: { ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache") },
-  stdin: "ignore", stdout: "pipe", stderr: "pipe",
-});
-let log = "", session = "";
-async function collect(stream: ReadableStream<Uint8Array>) {
-  for await (const bytes of stream) log = (log + new TextDecoder().decode(bytes)).slice(-64 * 1024);
-}
-const collectors = [collect(driver.stdout), collect(driver.stderr)];
-async function request<T = unknown>(method: string, path: string, body?: unknown, timeout = 20_000): Promise<T> {
-  const response = await fetch(endpoint + path, {
-    method, headers: body === undefined ? {} : { "content-type": "application/json" },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(timeout),
-  });
-  const result = await response.json() as { value: T & { error?: string; message?: string } };
-  if (!response.ok || result.value?.error) throw new Error(`WebDriver ${method} ${path}: ${JSON.stringify(result.value)}`);
-  return result.value;
-}
+let desktop: ElectronApplication | undefined, page: Page;
+let log = "";
 async function until<T>(check: () => Promise<T>, label: string, timeout = 15_000): Promise<T> {
   const deadline = Date.now() + timeout;
   let lastError: unknown;
   while (Date.now() < deadline) {
     try { const value = await check(); if (value) return value; } catch (error) { lastError = error; }
-    if (driver.exitCode !== null) throw new Error(`WebDriver exited (${driver.exitCode}): ${log}`);
     await Bun.sleep(100);
   }
   throw new Error(`${label} did not settle: ${String(lastError ?? "condition false")}\n${log}`);
 }
-const evaluate = <T = unknown>(script: string, values: unknown[] = []) => request<T>("POST", `/session/${session}/execute/sync`, { script, args: values });
-interface ElementReference { "element-6066-11e4-a52e-4f735466cecf": string }
-const elementId = (element: ElementReference) => element["element-6066-11e4-a52e-4f735466cecf"];
-async function find(selector: string): Promise<ElementReference> {
-  return request("POST", `/session/${session}/element`, { using: "css selector", value: selector });
-}
+const evaluate = <T = unknown>(script: string, values: unknown[] = []): Promise<T> =>
+  page.evaluate(({script, values}) => new Function(script).apply(null, values), {script, values});
 async function click(action: string, expected: Record<string, unknown> = {}) {
   await until(async () => {
-    const element = await evaluate<ElementReference | null>(`
-      return Array.from(document.querySelectorAll('button[data-action]')).find(element => {
-        if (element.dataset.action !== arguments[0] || element.disabled || !element.getBoundingClientRect().width) return false;
-        const data = JSON.parse(element.dataset.args || '{}');
-        return Object.entries(arguments[1]).every(([key,value]) => data[key] === value);
-      }) || null;`, [action, expected]);
-    if (!element) return false;
-    await request("POST", `/session/${session}/element/${elementId(element)}/click`, {});
-    return true;
-  }, `click ${action} ${JSON.stringify(expected)}`);
+    const buttons = page.locator(`button[data-action="${action}"]`);
+    for (const button of await buttons.all()) {
+      const data = JSON.parse(await button.getAttribute("data-args") ?? "{}");
+      if (Object.entries(expected).every(([key, value]) => data[key] === value) && await button.isVisible() && await button.isEnabled()) { await button.click(); return true; }
+    }
+    return false;
+  }, `click ${action}`);
 }
-async function type(text: string) {
-  const editor = await find("textarea");
-  await request("POST", `/session/${session}/element/${elementId(editor)}/value`, { text, value: Array.from(text) });
-  await request("POST", `/session/${session}/element/${elementId(editor)}/value`, { text: "\uE007", value: ["\uE007"] });
-}
+async function type(text: string) { await page.locator("textarea").fill(text); await page.locator("textarea").press("Enter"); }
 async function textIncludes(text: string) {
-  return until(() => evaluate<boolean>("return document.body.innerText.includes(arguments[0]);", [text]), `visible text ${text}`);
+  return until(() => page.locator("body").innerText().then(body => body.includes(text)), `visible text ${text}`);
 }
 async function capture(name: string) {
-  const encoded = await request<string>("GET", `/session/${session}/screenshot`);
-  const bytes = Buffer.from(encoded, "base64"), metadata = await sharp(bytes).metadata(), statistics = await sharp(bytes).stats();
-  assert(metadata.width && metadata.width >= 900 && metadata.height && metadata.height >= 500, "Desktop capture has the expected usable viewport");
-  assert(statistics.channels.slice(0, 3).some(channel => channel.stdev > 5), "Desktop capture contains rendered content rather than a blank surface");
+  const bytes = await page.screenshot({ animations: "disabled" }), metadata = await sharp(bytes).metadata(), statistics = await sharp(bytes).stats();
+  assert(metadata.width && metadata.width >= 900 && metadata.height && metadata.height >= 500);
+  assert(statistics.channels.slice(0, 3).some(channel => channel.stdev > 5), "Nonblank Chromium rendering");
   writeFileSync(join(output, `${name}.png`), bytes);
 }
-async function open(workspace = false) {
-  const result = await request<{ sessionId: string }>("POST", "/session", {
-    capabilities: { alwaysMatch: { browserName: "wry", "tauri:options": { application, args: [...(workspace ? [`--workspace=${f.workspace}`] : []), `--server=${f.server.url}`] } } },
-  }, 45_000);
-  session = result.sessionId;
-  assert(session, "WebDriver created a desktop application session");
-  await request("POST", `/session/${session}/window/rect`, { width: 1280, height: 900 });
+async function open(workspace = false, welcome = false) {
+  desktop = await electron.launch({ ...(packagedExecutable ? { executablePath: resolve(packagedExecutable) } : {}), args: [...(packagedExecutable ? [] : [application]), `--user-data-dir=${join(f.root, "electron")}`, ...(workspace ? [`--workspace=${f.workspace}`] : []), `--server=${f.server.url}`], env: {
+    ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache"),
+  }, timeout: 30_000 });
+  desktop.process().stderr?.on("data", bytes => { log = (log + String(bytes)).slice(-64 * 1024); });
+  page = await desktop.firstWindow();
+  page.on("pageerror", error => { log += String(error); });
+  if (welcome) {
+    await page.getByRole("heading", { name: "Make room for your next idea." }).waitFor();
+    await capture("00-welcome");
+    // Stub only the OS picker result; project opening still goes through the
+    // real preload, main process, and canonical host workspace validation.
+    await desktop.evaluate(({ dialog }, workspace) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
+    }, f.workspace);
+    await page.getByRole("button", { name: "Open a project", exact: false }).click();
+  }
   await until(() => evaluate<boolean>("const editor=document.querySelector('textarea');return !!editor && editor.getBoundingClientRect().width>0 && document.body.innerText.includes('desktop-test');"), "connected desktop project", 30_000);
   assert.equal(await evaluate("return document.getElementById('desktop-project-path')?.textContent;"), f.workspace);
+  assert.equal(await page.evaluate(() => typeof (window as any).require), "undefined", "No Node in the renderer");
+  assert.equal(await page.evaluate(() => typeof (window as any).process), "undefined", "No process or environment in the renderer");
+  const isolation = await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.getLastWebPreferences());
+  assert(isolation.sandbox && isolation.contextIsolation && !isolation.nodeIntegration && !isolation.webviewTag);
+  const zoom = await desktop.evaluate(({ BrowserWindow, Menu }) => {
+    const item = Menu.getApplicationMenu()!.items.find(item => item.label === "View")!.submenu!.items.find(item => item.label === "Zoom In")!;
+    item.click();
+    return BrowserWindow.getAllWindows()[0]!.webContents.getZoomFactor();
+  });
+  assert.equal(zoom, 1.1, "Native zoom menu is connected");
+  await desktop.evaluate(({ Menu }) => Menu.getApplicationMenu()!.items.find(item => item.label === "View")!.submenu!.items.find(item => item.label === "Actual Size")!.click());
 }
 async function close() {
-  if (!session) return;
-  const closing = session; session = "";
-  // Closing the native window exercises normal application lifecycle. WebKit
-  // may delete its session when the last window closes, so DELETE can then 404.
-  await request("DELETE", `/session/${closing}/window`, undefined, 10_000);
-  try { await request("DELETE", `/session/${closing}`, undefined, 3000); }
-  catch (error) { if (!/invalid session id|no such window/i.test(String(error))) throw error; }
+  if (!desktop) return;
+  const closing = desktop; desktop = undefined;
+  // Exercise the normal quit path, including host EOF and Drive handoff.
+  await closing.close();
 }
 let sessionId = "";
 try {
-  await until(async () => { const value = await request<{ ready: boolean }>("GET", "/status", undefined, 1000); return value.ready; }, "native WebDriver ready", 15_000);
-  await open(true);
+  await open(false, true);
   await capture("01-start");
   await type(prompt);
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["Edit "]), "file approval visible");
   await click("permission", { decision: "allow_once" });
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["Run "]), "command approval visible");
   assert(await evaluate<boolean>("const details = document.querySelector('.approval-card .approval-details'); return !!details && !details.open;"), "The full command starts folded");
-  const commandDetails = await find(".approval-card .approval-details > summary");
-  await request("POST", `/session/${session}/element/${elementId(commandDetails)}/click`, {});
+  await page.locator(".approval-card .approval-details > summary").click();
   await until(() => evaluate<boolean>("const details = document.querySelector('.approval-card .approval-details'); return !!details?.open && details.innerText.includes('run check');"), "command details can be inspected");
   await capture("02-command-approval");
   await click("permission", { decision: "allow_once" });
@@ -175,19 +159,101 @@ try {
   assert.equal(completedSession.turns.at(-1)?.status, "completed");
   const commands = await f.client.commands(sessionId);
   assert(commands.commands.some(command => command.status === "completed" && command.exitCode === 0 && command.stdout.includes("DESKTOP_CHECK_PASSED")), "Approved command output was recorded");
-  assert(await evaluate<boolean>("return !!document.querySelector('.katex') && !!document.querySelector('pre code');"), "Markdown, code and math rendered in WebKit");
+  assert(await evaluate<boolean>("return !!document.querySelector('.katex') && !!document.querySelector('pre code');"), "Markdown, code and math rendered in Chromium");
+  await until(() => page.locator(".sidebar-session[aria-current='page']").innerText().then(text => text.includes("Desktop smoke")), "sidebar tracks the current conversation title");
+  await page.getByRole("searchbox", { name: "Find a conversation" }).fill("no-such-conversation");
+  await textIncludes("No matching conversations");
+  await page.getByRole("searchbox", { name: "Find a conversation" }).fill("");
+  await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+  assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "false");
+  await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+  await page.getByRole("button", { name: "New conversation", exact: true }).click();
+  await page.getByRole("heading", { name: "What would you like to build?" }).waitFor();
+  await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
+  await textIncludes(completed);
   await capture("02-completed");
+  await page.locator(".sidebar-footer button").click();
+  await page.locator('#overlay[data-screen="settings"]').waitFor();
+  await capture("02-settings");
+  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Theme", { exact: true }) }).click();
+  await page.locator('#overlay[data-screen="themes"]').waitFor();
+  await capture("02-themes");
+  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Demesne Light", { exact: true }) }).click();
+  await page.locator("#overlay").waitFor({ state: "hidden" });
+  await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#F6F8FA");
+  await capture("02-light-conversation");
+  await page.locator(".sidebar-footer button").click();
+  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Theme", { exact: true }) }).click();
+  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Demesne", { exact: true }) }).click();
+  await page.locator("#overlay").waitFor({ state: "hidden" });
+  await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#0B1218");
+  await page.locator(".sidebar-footer button").click();
+  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Providers", { exact: true }) }).click();
+  await page.locator('#overlay[data-screen="providers"]').waitFor();
+  await capture("02-providers");
+  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Provider setup", { exact: true }) }).click();
+  await page.locator("#setup:not([hidden])").waitFor();
+  await capture("02-setup");
+  await page.keyboard.press("Escape");
+  await page.locator("#setup").waitFor({ state: "hidden" });
+  if (await page.locator("#overlay").isVisible()) await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await page.locator("#composer-model").click();
+  await page.getByRole("textbox", { name: "Filter models" }).waitFor();
+  await capture("02-models");
+  await page.keyboard.press("Escape");
+
+
   await click("panel", { name: "changes" });
   await textIncludes("hello.ts");
   await until(() => evaluate<boolean>("return document.getElementById('panel')?.innerText.includes('after');"), "recorded diff visible");
   await capture("03-changes");
+  await desktop!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(900, 680));
+  await until(() => page.evaluate(() => window.innerWidth <= 900), "narrow desktop size");
+  assert(await page.locator("textarea").isVisible(), "Composer remains available beside Review at minimum window size");
+  assert(await page.locator("#panel").isVisible());
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "Workspace does not overflow horizontally");
+  await capture("03-narrow-review");
+  await desktop!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1180, 820));
   await click("panel", { name: "history" });
   await textIncludes("TURNS");
   await capture("04-history");
+  // Keep the Context panel open while real compaction completes over SSE.
+  for (let i = 0; i < 3; i++) {
+    const text = `Compaction fixture ${i}`;
+    await type(text);
+    await until(async () => {
+      const turn = (await f.client.getSessionState(sessionId)).session.turns.at(-1);
+      return turn?.content === text && turn.status === "completed";
+    }, "history ready for compaction");
+  }
+  await click("panel", { name: "context" });
+  await click("compact");
+  await textIncludes("SAVED COMPACTION");
+  const compacted = (await f.client.getSessionState(sessionId)).checkpoint!;
+  assert(compacted && compacted.afterTokens < compacted.beforeTokens);
+  const percentage = Math.round(compacted.afterTokens / 262144 * 100);
+  await until(() => page.locator(".context-top").innerText().then(text => text.includes(`${percentage}%`)), "context panel updates without reopening");
+  await until(() => page.locator("#composer-context").innerText().then(text => text.includes(`${percentage}%`)), "composer context meter updates");
+  await until(() => page.locator(".compaction-card").count().then(count => count === 1), "conversation summary visible");
+  const firstTurnId = completedSession.turns.find(turn => turn.content === prompt)!.id;
+  assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Older conversation is unmounted by default");
+  assert.equal(await page.locator(`#turn-${compacted.firstRetainedTurnId}`).count(), 1, "Retained turns stay visible");
+  await page.getByRole("button", { name: "Expand full history", exact: true }).click();
+  assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 1, "Full history can be expanded");
+  assert.equal(await page.locator("#conversation > article").first().getAttribute("id"), `turn-${firstTurnId}`, "Expansion restores chronological order");
+  await page.getByRole("button", { name: "Collapse older conversation", exact: true }).click();
+  assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0);
+  await capture("04-compacted");
+  await click("panel", { name: "history" });
+  await until(() => page.locator(".session-context .meter").getAttribute("title").then(title => title === `${percentage}% used`), "session view shows reduced context");
   await close();
   assert.equal((await f.client.health()).model, "desktop-test", "Closing the app leaves the daemon alive");
   await open(); // No workspace/session args: private preferences must restore both.
+  await page.getByRole("button", { name: "Expand full history", exact: true }).waitFor();
+  assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Reopening starts with compacted history collapsed");
+  await page.getByRole("button", { name: "Expand full history", exact: true }).click();
   await textIncludes(completed);
+  await page.getByRole("button", { name: "Collapse older conversation", exact: true }).click();
   const preferences = JSON.parse(readFileSync(join(f.home, ".demesne/desktop-ui.json"), "utf8"));
   assert.equal(preferences.lastWorkspace, f.workspace);
   await capture("05-restored");
@@ -200,20 +266,16 @@ try {
   await open();
   await textIncludes(afterClose);
   await capture("06-work-survived-close");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native WebKit rendering", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "changes and history panels", "persisted project/session restore", "daemon work survives app closure"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "changes and history panels", "persisted project/session restore", "daemon work survives app closure"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
-  if (session) {
+  if (desktop) {
     try { writeFileSync(join(output, "failure.txt"), await evaluate<string>("return document.body.innerText;")); await capture("failure"); } catch {}
   }
   throw error;
 } finally {
   release?.();
   try { await close(); } catch {}
-  driver.kill("SIGTERM");
-  await Promise.race([driver.exited, Bun.sleep(5000)]);
-  if (driver.exitCode === null) { driver.kill("SIGKILL"); await driver.exited; }
-  await Promise.allSettled(collectors);
-  writeFileSync(join(output, "webdriver.log"), log);
+  writeFileSync(join(output, "electron.log"), log);
   await f.close();
 }

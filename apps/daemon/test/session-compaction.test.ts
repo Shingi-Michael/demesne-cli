@@ -94,6 +94,7 @@ test("manual compaction preserves the journal and tool pairs, persists a summary
     expect(requests[0]?.[1]?.content).not.toContain("OLD_SOURCE_3");
     const state = await client.getSessionState(id);
     const checkpoint = state.checkpoint!;
+    expect(checkpoint.firstRetainedTurnId).toBe(state.session.turns.filter(turn => turn.kind !== "compaction").at(-2)!.id);
     expect(checkpoint.retainedTurns).toBe(2);
     expect(checkpoint.summarizedTurns).toBe(3);
     expect(checkpoint.afterTokens).toBeLessThan(checkpoint.beforeTokens);
@@ -103,6 +104,11 @@ test("manual compaction preserves the journal and tool pairs, persists a summary
     expect(db.query("SELECT * FROM model_messages WHERE turn_id <> ? ORDER BY id").all(submitted.turn.id)).toEqual(initialMessages);
     expect(state.session.turns.map((turn) => turn.id).slice(0, -1)).toEqual(originalTurns);
     expect(await client.exportSession(id)).toContain("Answer 0");
+    // A checkpoint saved by an older daemon has only the model-message cursor.
+    const legacy = { ...checkpoint }; delete legacy.firstRetainedTurnId;
+    const writer = new Database(db.filename);
+    writer.query("UPDATE session_checkpoints SET descriptor = ? WHERE id = ?").run(JSON.stringify(legacy), checkpoint.id);
+    writer.close();
     await restart();
     expect((await client.getSessionState(id)).checkpoint).toEqual(checkpoint);
     await consume(await client.submitTurn(id, { content: "Continue the task" }));
@@ -309,4 +315,94 @@ test("shutdown cancels a summary without publishing a checkpoint", async () => {
     await client.compactSession(id); await ready; await close(); await restart();
     expect((await client.getSessionState(id)).checkpoint).toBeNull();
   });
+});
+
+test("agent compact_session schedules one checkpoint after the calling turn completes", async () => {
+  await fixture(async ({ client, id, consume, setStream, requests }) => {
+    let calls = 0;
+    setStream(async function* (messages, tools) {
+      if (messages[0]?.content?.includes("immutable coding-session checkpoints")) {
+        yield { type: "text_delta", delta: summary };
+      } else if (++calls === 1) {
+        expect(tools.some(tool => tool.name === "compact_session")).toBe(true);
+        yield { type: "tool_call_delta", index: 0, idDelta: "compact", nameDelta: "compact_session", argumentsDelta: '{"instructions":"Preserve parser tests"}' };
+        yield { type: "tool_call_delta", index: 1, idDelta: "compact-again", nameDelta: "compact_session", argumentsDelta: '{}' };
+        yield { type: "finish", reason: "tool_calls" };
+        return;
+      } else {
+        expect(messages.some(message => message.role === "tool" && message.content?.includes('"status":"scheduled"'))).toBe(true);
+        expect((await client.getSessionState(id)).session.turns.at(-1)?.kind).not.toBe("compaction");
+        yield { type: "text_delta", delta: "Compaction scheduled." };
+      }
+      yield { type: "finish", reason: "stop" };
+    });
+    const submitted = await client.submitTurn(id, { content: "Compact the session", permissionMode: "allow" });
+    expect((await consume(submitted)).at(-1)?.type).toBe("turn.completed");
+    for (let i = 0; i < 100; i++) {
+      if ((await client.getSessionState(id)).checkpoint) break;
+      await Bun.sleep(10);
+    }
+    const state = await client.getSessionState(id);
+    expect(state.checkpoint?.instructions).toBe("Preserve parser tests");
+    expect(state.session.turns.filter(turn => turn.kind === "compaction")).toHaveLength(1);
+    expect(requests.at(-1)?.[1]?.content).toContain("Preserve parser tests");
+  }, { undo: true });
+});
+
+test("cancelling the calling turn discards scheduled agent compaction", async () => {
+  await fixture(async ({ client, id, consume, setStream }) => {
+    let calls = 0;
+    const ready = Promise.withResolvers<void>();
+    setStream(async function* (_messages, _tools, signal) {
+      if (++calls === 1) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "compact", nameDelta: "compact_session", argumentsDelta: '{}' };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        ready.resolve();
+        await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      }
+    });
+    const submitted = await client.submitTurn(id, { content: "Compact", permissionMode: "allow" });
+    await ready.promise;
+    await client.cancelTurn(submitted.turn.id);
+    await consume(submitted);
+    await Bun.sleep(20);
+    const state = await client.getSessionState(id);
+    expect(state.checkpoint).toBeNull();
+    expect(state.session.turns.some(turn => turn.kind === "compaction")).toBe(false);
+  }, { undo: true });
+});
+test("invalid agent compaction arguments cannot target another session", async () => {
+  await fixture(async ({ client, id, consume, setStream }) => {
+    let calls = 0;
+    setStream(async function* (messages) {
+      if (++calls === 1) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "compact", nameDelta: "compact_session", argumentsDelta: '{"sessionId":"another-session"}' };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        expect(messages.some(message => message.role === "tool" && message.content?.includes("Only compaction instructions"))).toBe(true);
+        yield { type: "text_delta", delta: "Invalid request rejected." };
+        yield { type: "finish", reason: "stop" };
+      }
+    });
+    await consume(await client.submitTurn(id, { content: "Compact", permissionMode: "allow" }));
+    expect((await client.getSessionState(id)).session.turns.some(turn => turn.kind === "compaction")).toBe(false);
+  }, { undo: true });
+});
+
+test("failure of the calling turn discards scheduled compaction", async () => {
+  await fixture(async ({ client, id, consume, setStream }) => {
+    let calls = 0;
+    setStream(async function* () {
+      if (++calls === 1) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "compact", nameDelta: "compact_session", argumentsDelta: '{}' };
+        yield { type: "finish", reason: "tool_calls" };
+      } else throw new Error("Injected failure after scheduling");
+    });
+    const events = await consume(await client.submitTurn(id, { content: "Compact", permissionMode: "allow" }));
+    expect(events.at(-1)?.type).toBe("turn.failed");
+    const state = await client.getSessionState(id);
+    expect(state.checkpoint).toBeNull();
+    expect(state.session.turns.some(turn => turn.kind === "compaction")).toBe(false);
+  }, { undo: true });
 });

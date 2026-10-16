@@ -32,7 +32,7 @@ Panels preserve navigation within a session; changing sessions clears session-sp
 
 Use theme roles such as `paper`, `secondary`, `muted`, `rule`, `electric`, `thinking`, `citron` and `signal`. Blue identifies primary interaction, amber ongoing reasoning/attention, green successful evidence and red failure. Preserve text labels and icons so color is not the only signal. Source syntax colors remain distinct from added/removed diff markings.
 
-The main thinking trace appears first, with the spinner, “Thinking” label and duration in a separate row underneath it. Like subagent traces, it opens while working, respects a reader's manual collapse during streaming, and folds when finished unless explicitly expanded. The bottom row toggles the trace with a click, Enter or Space. Reasoning text and headings stay in the trace body.
+The main thinking trace stays collapsed by default, including while working. Only the spinner, “Thinking” label and duration appear until the reader expands it with a click, Enter or Space. An expanded trace appears above that toggle row; streaming updates and completion preserve the reader's choice. Subagent traces still open while working unless manually collapsed. Reasoning text and headings stay in the trace body.
 
 Markdown is sanitized; code fences use syntax highlighting and math uses KaTeX. In-progress Markdown is reparsed for correctness while unchanged rendered blocks retain their nodes. Code attached from Files remains literal, including `@` characters. Recorded file changes use immutable before/after evidence; the Files viewer explicitly shows current workspace contents.
 
@@ -54,3 +54,9 @@ dbus-run-session -- xvfb-run -a bun run desktop:check
 ```
 
 The unit tests cover shared state, panels and Markdown. The Linux desktop check drives the real WebKitGTK window through WebDriver with a deterministic model and saves screenshots under `test-results/desktop/`. This verifies application behavior; a comparison to Figma is a separate design review. macOS needs separate manual validation because WKWebView has no platform WebDriver. See [desktop verification](../apps/desktop/README.md#verification) and [contribution workflow](../CONTRIBUTING.md).
+
+## Session compaction
+
+Use **Compact session** in the Context panel, **Compact** in History, or `/compact [instructions]` in the composer. Desktop controls wait for the current turn to finish; compaction preserves the full transcript in History and keeps the latest two conversation turns in model context.
+
+The agent can call `compact_session` with optional preservation instructions (up to 4000 characters). The tool schedules one compaction after its calling turn completes successfully, rather than trying to rewrite context mid-turn. A scheduled result is not a completed checkpoint. Cancellation or failure of the calling turn discards the request. Compaction itself remains cancellable, and a failed or non-shrinking summary leaves the previous context active.

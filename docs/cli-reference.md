@@ -33,7 +33,7 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 | `demesne events SESSION_ID [--after EVENT_ID]` | Stream journal events |
 | `demesne --version` | Show version; interactive use also checks for updates (`--no-check` disables it) |
 
-`--server URL` selects the daemon. The window opens on the current folder unless `--workspace` names another. To find the app, `demesne` checks `DEMESNE_DESKTOP_BIN`, then `Demesne.app` in `/Applications` or `~/Applications` on macOS, then `demesne-desktop` on PATH, then a build in this checkout under `apps/desktop/src-tauri/target`. From a checkout with Cargo it falls back to `bun run desktop`. If none of these is found, it says to build with `bun run build:desktop` or use `demesne prompt`. See the [desktop guide](desktop.md). The old `demesne graphics` command still works and opens the window too.
+`--server URL` selects the daemon. The window opens on the current folder unless `--workspace` names another. To find the app, `demesne` checks `DEMESNE_DESKTOP_BIN`, then `Demesne.app` in `/Applications` or `~/Applications` on macOS, then `demesne-desktop` on PATH, then a build in this checkout under `apps/desktop/release`. From a checkout with Electron installed it falls back to `bun run desktop`. If none of these is found, it says to build with `bun run build:desktop` or use `demesne prompt`. See the [desktop guide](desktop.md). The old `demesne graphics` command still works and opens the window too.
 
 ChatGPT uses the public Responses API directly. [Authentication](authentication.md#continue-with-chatgpt) explains account selection, Sol verification and plan usage.
 

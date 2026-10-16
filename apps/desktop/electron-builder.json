@@ -1,0 +1,53 @@
+{
+  "appId": "com.demesne.desktop",
+  "productName": "Demesne",
+  "directories": {
+    "app": "apps/desktop/build/app",
+    "output": "apps/desktop/release"
+  },
+  "files": [
+    "**/*"
+  ],
+  "asar": true,
+  "npmRebuild": false,
+  "extraResources": [
+    {
+      "from": "apps/desktop/build/backend",
+      "to": "backend"
+    },
+    {
+      "from": "apps/desktop/build/backend/node_modules",
+      "to": "backend/node_modules",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
+  "icon": "apps/desktop/build/icon.png",
+  "mac": {
+    "target": [
+      "dir"
+    ],
+    "category": "public.app-category.developer-tools",
+    "identity": null
+  },
+  "linux": {
+    "target": [
+      "deb"
+    ],
+    "category": "Development",
+    "executableName": "demesne-desktop",
+    "maintainer": "Demesne contributors"
+  },
+  "win": {
+    "target": [
+      "nsis"
+    ],
+    "executableName": "demesne-desktop"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  },
+  "artifactName": "demesne-desktop-${os}-${arch}.${ext}"
+}

@@ -204,6 +204,26 @@ export function createDaemonApp(options: {
   const subagentModels = () => processor.availableModels?.() ?? [{ id: processor.modelId, provider: processor.providerId }];
   const scheduler = new InferenceSchedulers(new InferenceScheduler(primarySlots, undefined, options.inferenceBoundaryHook), processor.providerId, options.providerInferenceSlots, inferenceSlots);
   const tools = new ToolRegistry();
+  const pendingCompactions = new Map<string, { instructions: string; inference: TurnInference }>();
+  tools.register({
+    definition: {
+      name: "compact_session",
+      description: "Request compaction of the current session after this turn completes successfully. Use when the user asks to compact the conversation. Summarizes older context, retains recent turns and preserves the full transcript in History. This schedules compaction; it does not mean compaction has finished. Finish this turn with a short acknowledgment. Optional instructions identify facts to preserve.",
+      inputSchema: { type: "object", properties: { instructions: { type: "string", maxLength: 4000 } }, additionalProperties: false },
+    },
+    permission: () => null,
+    async execute(input, context) {
+      const body = parseCompactSessionRequest(input);
+      context.signal.throwIfAborted();
+      const turn = context.turnId ? store.getTurn(context.turnId) : undefined;
+      if (!turn || turn.sessionId !== context.sessionId || turn.status !== "running" || turn.kind === "compaction")
+        throw new Error("Compaction requires the current running conversation turn");
+      if (!pendingCompactions.has(turn.id)) pendingCompactions.set(turn.id, {
+        instructions: body.instructions ?? "", inference: snapshotTurnInference(processor, false),
+      });
+      return JSON.stringify({ status: "scheduled", message: "Compaction will run after this turn completes successfully. Full transcript remains in History." });
+    },
+  });
   if (options.providerVision || options.images?.model || Object.keys(options.mcpServers ?? {}).length) {
     tools.register(viewImageTool());
     if (process.platform === "darwin") tools.register(captureWindowTool());
@@ -277,6 +297,16 @@ export function createDaemonApp(options: {
       }
     } finally {
       scheduler.finishTurn(turn.id);
+      const pending = pendingCompactions.get(turn.id);
+      pendingCompactions.delete(turn.id);
+      if (pending && !signal.aborted && !closing && store.getTurn(turn.id)?.status === "completed") {
+        try {
+          const submitted = store.createTurn(turn.sessionId, `/compact${pending.instructions ? ` ${pending.instructions}` : ""}`, "deny", false, false, "compaction");
+          queueTurn(submitted.turn, pending.inference);
+        } catch (error) {
+          console.error(`Could not schedule compaction after turn ${turn.id}`, error);
+        }
+      }
     }
   }
 

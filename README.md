@@ -26,7 +26,7 @@ bun install --frozen-lockfile
 bun run desktop
 ```
 
-Choose a project, connect a model and open **Drive**. You need [Bun 1.4](https://bun.sh), plus [Rust](docs/desktop.md#prerequisites) to build the window from source, or [download the app](#install) instead. The model can run on your machine, come from your ChatGPT plan, or be an OpenRouter account. To start demesne from the terminal or run it from a script, see [Install](#install).
+Choose a project, connect a model and open **Drive**. You need [Bun 1.4](https://bun.sh), plus [Node.js](docs/desktop.md#prerequisites) to build the window from source, or [download the app](#install) instead. The model can run on your machine, come from your ChatGPT plan, or be an OpenRouter account. To start demesne from the terminal or run it from a script, see [Install](#install).
 
 ## How Drive works
 
@@ -77,7 +77,7 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 <details>
 <summary><b>Desktop app</b> (macOS and Ubuntu 22.04/24.04, unsigned preview builds)</summary>
 
-Download it from the [latest release](https://github.com/Shingi-Michael/demesne-cli/releases/latest): `demesne-desktop-darwin-arm64.zip` for Apple silicon Macs, `demesne-desktop-linux-amd64.deb` for Ubuntu. You don't need Bun or Rust to run it.
+Download it from the [latest release](https://github.com/Shingi-Michael/demesne-cli/releases/latest): `demesne-desktop-darwin-arm64.zip` for Apple silicon Macs, `demesne-desktop-linux-amd64.deb` for Ubuntu. You don't need Bun or Node.js to run it.
 
 ```sh
 # macOS: the install script puts the app in ~/Applications and demesne on your PATH
@@ -91,7 +91,7 @@ xattr -dr com.apple.quarantine /Applications/Demesne.app
 sudo apt install ./demesne-desktop-linux-amd64.deb
 ```
 
-To run it from source instead, use `bun run desktop` (needs [Rust and a few platform packages](docs/desktop.md#prerequisites)). The [desktop guide](docs/desktop.md) has more.
+To run it from source instead, use `bun run desktop` (needs [Node.js and a few platform packages](docs/desktop.md#prerequisites)). The [desktop guide](docs/desktop.md) has more.
 </details>
 
 <details>

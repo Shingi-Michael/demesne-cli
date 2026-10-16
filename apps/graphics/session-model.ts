@@ -220,9 +220,14 @@ export class GraphicsSession {
         queueDurationMs:
           typeof p.queueDurationMs === "number" ? p.queueDurationMs : null,
       };
-    if (event.type === "session.compacted" && isRecord(p.checkpoint))
-      this.state.checkpoint =
-        p.checkpoint as unknown as SessionStateResponse["checkpoint"];
+    if (event.type === "session.compacted" && isRecord(p.checkpoint)) {
+      const checkpoint = p.checkpoint as unknown as NonNullable<SessionStateResponse["checkpoint"]>;
+      this.state.checkpoint = checkpoint;
+      // The summarizer's request consumed the old history. The context meter
+      // must now describe the saved summary plus retained turns, just as the
+      // persisted session snapshot does. Keep actual provider usage intact.
+      if (this.provider) this.provider = { ...this.provider, contextPlan: checkpoint.contextPlan };
+    }
     this.permissions(event);
     return true;
   }

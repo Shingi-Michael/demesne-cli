@@ -1,3 +1,4 @@
+import { compactedConversation } from "./compacted-conversation.ts";
 import { FilesView } from "./files-view.ts";
 import { sourceLocations } from "./file-navigation.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
@@ -176,6 +177,7 @@ const verb = (tool: ToolEntry) =>
   ({
     run_command: "Run",
     ask_user: "Ask",
+    compact_session: "Compact",
     apply_theme: "Apply theme",
     view_image: "View",
     read_file: "Read",
@@ -287,6 +289,9 @@ let drivePopOpen = false,
   driveShown = false,
   ideasShown = false;
 const stepsOpen = new Set<string>();
+const expandedCompactions = new Set<string>();
+let compactionCard: HTMLElement | null = null;
+let compactionCardSignature = "";
 let paneSignature = "",
   overlaySignature = "",
   approvalSignature = "",
@@ -335,9 +340,32 @@ function context() {
       used != null && capacity ? Math.round((used / capacity) * 100) : null,
   };
 }
+let sidebarSignature = "";
+function renderSidebar() {
+  const list = document.getElementById("sidebar-sessions");
+  if (!state || !list) return;
+  const query = (document.getElementById("sidebar-search") as HTMLInputElement | null)?.value.trim().toLowerCase() ?? "";
+  const sessions = state.sessions.filter(item => item.workspace === state!.workspace || item.id === state!.session?.id);
+  const signature = JSON.stringify([sessions, state.session?.id, state.session?.title, state.connection, state.activeTurnId, query]);
+  if (signature === sidebarSignature) return;
+  sidebarSignature = signature;
+  const current = state.session;
+  const rows = sessions.filter(item => item.title.toLowerCase().includes(query)).slice(0, 60);
+  list.innerHTML = rows.length ? rows.map(item => {
+    const selected = item.id === current?.id;
+    const working = selected ? Boolean(state!.activeTurnId) : item.status === "running" || item.status === "queued";
+    return btn("select-session", `<span class="sidebar-session-mark ${working ? "working" : ""}" aria-hidden="true">${working ? "●" : "◌"}</span><span class="sidebar-session-name">${h(selected ? inSession() ? current!.title : "New conversation" : item.turns ? item.title : "New conversation")}</span><span class="sidebar-session-age">${h(age(item.updatedAt))}</span>`, { id: item.id }, `sidebar-session${selected ? " selected" : ""}`).replace("<button ", `<button title="${h(item.title)}"${selected ? ' aria-current="page"' : ""} `);
+  }).join("") : `<p class="sidebar-empty">${query ? "No matching conversations" : "Your conversations will appear here."}</p>`;
+  const title = document.getElementById("workspace-title");
+  if (title) { title.textContent = inSession() ? current?.title ?? "Conversation" : "New conversation"; title.title = title.textContent; }
+  const connection = document.getElementById("sidebar-connection");
+  if (connection) { connection.textContent = state.connection === "online" ? "Connected" : state.connection === "connecting" ? "Connecting…" : "Offline"; connection.dataset.state = state.connection; }
+}
+document.getElementById("sidebar-search")?.addEventListener("input", renderSidebar);
 let statusSignature = "";
 function renderStatus() {
   if (!state) return;
+  renderSidebar();
   const c = context(),
     last = state.runs.at(-1),
     phase = state.approvals.length
@@ -530,9 +558,9 @@ function runHTML(run: GraphicsRun, index: number) {
     if (fold && (entry.type === "reasoning" || entry.type === "tool")) continue;
     if (entry.type === "reasoning") {
       const live = active(run) && i === run.entries.length - 1;
-      // The trace leads; its activity/toggle row follows underneath. Preserve
-      // the same live-open and manual collapse behavior as subagent traces.
-      const open=(live && !detailsClosed.has(key)) || detailsOpen.has(key);
+      // Keep reasoning out of the conversation until the reader asks for it.
+      // Explicit expansion survives streaming updates and completion.
+      const open = detailsOpen.has(key);
       body += `<div class="thinking thinking-main ${live ? "live" : ""}"><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${live ? spinner() : "◇"} ${live ? "Thinking" : "Thought"} <span class="muted">${duration(entry.durationMs)}</span></button></div>`;
     }
     if (entry.type === "tool") {
@@ -698,6 +726,12 @@ function patchStream(
   }
   return true;
 }
+function revealCompactedTurn(id: string) {
+  if (!state?.checkpoint) return;
+  const compacted = compactedConversation(state.runs, state.checkpoint);
+  if (compacted && (compacted.hiddenIds.has(id) || state.checkpoint.turnId === id))
+    expandedCompactions.add(state.checkpoint.id);
+}
 function renderConversation() {
   if (!state) return;
   const root = el("conversation"),
@@ -706,7 +740,28 @@ function renderConversation() {
     liveBefore = follow;
   const ids = new Set<string>();
   let changed = false;
+  const checkpoint = state.checkpoint;
+  const compacted = compactedConversation(state.runs, checkpoint);
+  const historyOpen = checkpoint ? expandedCompactions.has(checkpoint.id) : false;
+  if (compacted && checkpoint) {
+    if (!compactionCard) {
+      compactionCard = document.createElement("section");
+      compactionCard.className = "compaction-card";
+      compactionCard.setAttribute("aria-label", "Conversation summary");
+      root.prepend(compactionCard);
+    }
+    const signature = JSON.stringify([checkpoint.id, historyOpen, compacted.summary, compacted.count]);
+    if (signature !== compactionCardSignature) {
+      compactionCard.innerHTML = `<div class="compaction-heading"><strong>Conversation summary</strong><span class="muted">${compacted.count} earlier turns ${historyOpen ? "expanded" : "collapsed"}</span></div><div class="compaction-summary">${markdown(compacted.summary)}</div><button type="button" data-action="toggle-compacted-history" aria-expanded="${historyOpen}" class="compaction-toggle">${historyOpen ? "Collapse older conversation" : "Expand full history"}</button>`;
+      compactionCardSignature = signature;
+      changed = true;
+    }
+  } else if (compactionCard) {
+    compactionCard.remove(); compactionCard = null; compactionCardSignature = ""; changed = true;
+  }
+  let position = compactionCard ? 1 : 0;
   for (const [index, run] of state.runs.entries()) {
+    if (compacted && !historyOpen && (compacted.hiddenIds.has(run.id) || run.id === checkpoint!.turnId)) continue;
     ids.add(run.id);
     const signature = JSON.stringify([
       index === state.runs.length - 1,
@@ -725,6 +780,9 @@ function renderConversation() {
       saved = { node, signature: "", views: new Map() };
       runNodes.set(run.id, saved);
     }
+    // Expanding inserts earlier turns before the retained turns already mounted.
+    if (root.children[position] !== saved.node) root.insertBefore(saved.node, root.children[position] ?? null);
+    position++;
     if (saved.signature === signature && saved.run === run) continue;
     if (saved.signature !== signature || !patchStream(saved, run)) {
       const template = document.createElement("template");
@@ -797,11 +855,11 @@ function renderHero() {
     top.length ? '<span class="muted">why these? hover a row</span>' : "",
   ].filter(Boolean).join('<span class="muted"> · </span>');
   el("hero").innerHTML =
-    `<div class="intro"><h1>What should we do in ${h(name)}?</h1>${waiting}</div><div id="hero-composer"></div>${
+    `<div class="intro"><span class="hero-eyebrow">YOUR WORKSPACE, READY.</span><h1>What would you like to build?</h1><p>Start a conversation in <strong>${h(name)}</strong>, or let Drive find the next step.</p>${waiting}</div><div id="hero-composer"></div>${
       // Drive's Next queue, ready when you open demesne: the top three, with
       // the reason and evidence on hover; the full queue is in the Drive panel.
       top.length
-        ? `<section class="proposals"><h2>DRIVE WOULD DO NEXT</h2>${proposalRows(top)}${footer ? `<p class="proposals-footer">${footer}</p>` : ""}</section>`
+        ? `<section class="proposals"><h2>Suggested by Drive</h2>${proposalRows(top)}${footer ? `<p class="proposals-footer">${footer}</p>` : ""}</section>`
         : ""
     }`;
   // The composer is detached while the hero is rebuilt.
@@ -1456,7 +1514,7 @@ function contextBody() {
     usage?.outputTokens != null && metrics?.durationMs
       ? usage.outputTokens / (metrics.durationMs / 1000)
       : null;
-  return `<div class="context-details"><div class="context-section">CONTEXT PLAN <span>estimated before request</span></div><div class="context-top">${c.estimated ? "~" : ""}${num(c.used)} <span class="muted">of ${num(c.capacity)}${c.percentage == null ? "" : ` · ${c.percentage}%`}</span></div>${amounts ? `<div class="stack">${amounts.map((n, i) => `<span style="width:${Math.min(100, (n / c.capacity!) * 100)}%;background:${colors[i]}"></span>`).join("")}</div><div class="legend">${amounts.map((n, i) => `<span><i style="background:${colors[i]}"></i>${labels[i]} ~${num(n)}</span>`).join("")}</div>` : '<p class="muted">Context breakdown has not been reported.</p>'}${kv("reserves", plan ? `output ${num(plan.reserves.outputTokens)} · results ${num(plan.reserves.toolResultTokens)} · safety ${num(plan.reserves.safetyTokens)}` : "—")}${kv("reductions", plan?.actions.length ? `<span class="success">${plan.actions.length} applied · saved ~${num(plan.actions.reduce((sum, a) => sum + a.estimatedTokensSaved, 0))}</span>` : "none")}<div class="context-section">LAST REQUEST <span>reported by provider</span></div>${kv("tokens", `${num(usage?.inputTokens)} in · ${num(usage?.outputTokens)} out · ${num(usage?.cachedInputTokens)} cached`)}${kv("timing", `queue ${duration(metrics?.queueDurationMs)} · first token ${duration(metrics?.timeToFirstTokenMs)} · request ${duration(metrics?.durationMs)}`)}${kv(
+  return `<div class="context-details"><div class="context-section">CONTEXT PLAN <span>estimated model context</span></div><div class="context-top">${c.estimated ? "~" : ""}${num(c.used)} <span class="muted">of ${num(c.capacity)}${c.percentage == null ? "" : ` · ${c.percentage}%`}</span></div>${amounts ? `<div class="stack">${amounts.map((n, i) => `<span style="width:${Math.min(100, (n / c.capacity!) * 100)}%;background:${colors[i]}"></span>`).join("")}</div><div class="legend">${amounts.map((n, i) => `<span><i style="background:${colors[i]}"></i>${labels[i]} ~${num(n)}</span>`).join("")}</div>` : '<p class="muted">Context breakdown has not been reported.</p>'}${kv("reserves", plan ? `output ${num(plan.reserves.outputTokens)} · results ${num(plan.reserves.toolResultTokens)} · safety ${num(plan.reserves.safetyTokens)}` : "—")}${kv("reductions", plan?.actions.length ? `<span class="success">${plan.actions.length} applied · saved ~${num(plan.actions.reduce((sum, a) => sum + a.estimatedTokensSaved, 0))}</span>` : "none")}<div class="context-section">LAST REQUEST <span>reported by provider</span></div>${kv("tokens", `${num(usage?.inputTokens)} in · ${num(usage?.outputTokens)} out · ${num(usage?.cachedInputTokens)} cached`)}${kv("timing", `queue ${duration(metrics?.queueDurationMs)} · first token ${duration(metrics?.timeToFirstTokenMs)} · request ${duration(metrics?.durationMs)}`)}${kv(
     "speed",
     `${rate == null ? "—" : rate.toFixed(1)} tok/s${(() => {
       const rates = state!.runs
@@ -1467,7 +1525,7 @@ function contextBody() {
         ? `<span class="spark" title="Recent turn throughput">${rates.map((rate) => `<i style="height:${Math.max(2, Math.round((rate / Math.max(...rates)) * 18))}px"></i>`).join("")}</span>`
         : "";
     })()}`,
-  )}<div class="context-section">TURN</div>${kv("status", state!.activeTurnId ? `<span class="amber">◌ running · ${duration(Date.now() - Date.parse(state!.runs.at(-1)!.createdAt))}</span>` : h(state!.runs.at(-1)?.status ?? "ready"))}${kv("thinking", "provider default")}${state!.checkpoint ? kv("compaction", `~${num(state!.checkpoint.beforeTokens)} → ~${num(state!.checkpoint.afterTokens)}`) : ""}</div>`;
+  )}<div class="context-section">TURN</div>${kv("status", state!.activeTurnId ? `<span class="amber">◌ running · ${duration(Date.now() - Date.parse(state!.runs.at(-1)!.createdAt))}</span>` : h(state!.runs.at(-1)?.status ?? "ready"))}${kv("thinking", "provider default")}${state!.checkpoint ? `<div class="context-section">SAVED COMPACTION</div>${kv("context", `~${num(state!.checkpoint.beforeTokens)} → ~${num(state!.checkpoint.afterTokens)}`)}${kv("saved", h(new Date(state!.checkpoint.createdAt).toLocaleString()))}<p class="muted">${state!.checkpoint.summarizedTurns} older turns summarized · ${state!.checkpoint.retainedTurns} recent turns kept in full. Older conversation is collapsed into a summary. Expand full history to read it.</p>` : ""}<div class="panel-actions">${btn("compact", "Compact session", {}, "", false, Boolean(state!.activeTurnId))}</div><p class="muted">Summarize older context and keep recent turns. Full transcript remains in History.${state!.activeTurnId ? " Wait for the current turn to finish." : ""}</p></div>`;
 }
 /// The Next queue: Drive's ranked proposals, each with its evidence and the
 /// four ways to answer it.
@@ -2075,9 +2133,11 @@ function renderPanels() {
             ]),
             state.sessions,
             state.driveMemory,
+            state.provider,
+            state.checkpoint,
           ]
         : pane === "context"
-          ? [state.provider, state.checkpoint, state.activeTurnId]
+          ? [state.provider, state.checkpoint, state.activeTurnId, state.runs.at(-1)?.status]
           : pane === "drive"
             ? [state.drive, state.driveNext, state.driveMemory, driveTab, nextOpen]
             : pane === "preview"
@@ -2488,12 +2548,15 @@ function renderModelPopover(hidden: number) {
     ? `<div class="model-thinking"><span class="section-label">THINKING</span><span class="levels">${levels.map((item) => btn("model", h(item), { id: model.id, reasoning: item }, item === level ? "on" : "")).join('<span class="muted">·</span>')}</span><span class="muted keys">←→</span></div>`
     : "";
   el("overlay").innerHTML =
-    `<div class="filter-wrap"><input id="chooser-filter" placeholder="filter models" aria-label="Filter models" value="${h(overlayQuery)}" autocomplete="off"></div><div class="menu-list">${rows || `<div class="empty">${modelsLoading && !models.length ? "Loading models…" : "No matches."}</div>`}${hidden ? `<div class="empty">${hidden} more · keep typing to narrow</div>` : ""}</div>${thinking}<div class="menu-footer">${k("↑↓")} select ${k("↵")} switch ${btn("close-overlay", `${k("Esc")} close`)}<span class="right">${overlayQuery ? `${overlayRows.length} of ` : ""}${models.length || ""}${models.length ? " models" : ""}</span></div>`;
+    `<div class="model-picker-heading"><strong>Choose a model</strong><span>For this conversation</span></div><div class="filter-wrap"><input id="chooser-filter" placeholder="Search models…" aria-label="Filter models" value="${h(overlayQuery)}" autocomplete="off"></div><div class="menu-list">${rows || `<div class="empty">${modelsLoading && !models.length ? "Loading models…" : "No matches."}</div>`}${hidden ? `<div class="empty">${hidden} more · keep typing to narrow</div>` : ""}</div>${thinking}<div class="menu-footer">${k("↑↓")} select ${k("↵")} switch ${btn("close-overlay", `${k("Esc")} close`)}<span class="right">${overlayQuery ? `${overlayRows.length} of ` : ""}${models.length || ""}${models.length ? " models" : ""}</span></div>`;
   el("overlay").querySelector(".menu-row.selected")?.scrollIntoView({ block: "nearest" });
 }
 function renderOverlay() {
   if (!state) return;
   el("overlay").hidden = !overlay;
+  el("overlay").dataset.screen = overlay ?? "";
+  el("overlay").setAttribute("role", "dialog");
+  el("overlay").setAttribute("aria-label", overlay === "models" ? "Choose a model" : overlay ?? "Dialog");
   placeOverlay();
   if (!overlay) return;
   const focused = el("overlay").querySelector<HTMLInputElement>("input"),
@@ -2524,13 +2587,14 @@ function renderOverlay() {
     // The model lives in the composer; the rest of the old list is one
     // command away, so Settings keeps only what you change here.
     title = "Settings";
-    subtitle = "this session";
+    subtitle = "Make this workspace yours";
     filter = false;
     footerNote = "model is in the composer · all commands /";
     const signedIn = state.providers.items.filter((item) => item.status === "signed-in").map((item) => item.label);
     overlayRows = [
       {
         label: "Mode",
+        group: "Session behavior",
         value: state.planOnly ? "Plan · read only" : "Build · edits allowed",
         action: "mode",
         data: { planOnly: !state.planOnly },
@@ -2539,6 +2603,7 @@ function renderOverlay() {
       },
       {
         label: "Approvals",
+        group: "Session behavior",
         value: state.session?.autoApprove ? "Auto-approve all" : "Ask first",
         action: "auto-approve",
         data: { autoApprove: !state.session?.autoApprove },
@@ -2547,6 +2612,7 @@ function renderOverlay() {
       },
       {
         label: "Theme",
+        group: "Appearance",
         value: state.theme,
         action: "overlay",
         data: { name: "themes" },
@@ -2554,6 +2620,7 @@ function renderOverlay() {
       },
       {
         label: "Providers",
+        group: "Connections",
         value: signedIn.length ? `${signedIn.join(", ")} · signed in` : state.providers.items.length ? "none signed in" : "sign in · sign out",
         action: "overlay",
         data: { name: "providers" },
@@ -2561,6 +2628,7 @@ function renderOverlay() {
       },
       {
         label: "Sessions",
+        group: "History",
         value: `${state.sessions.filter((item) => item.turns > 0 && item.id !== state!.session?.id).slice(0, 3).length} recent · ${state.sessions.length} total`,
         action: "overlay",
         data: { name: "sessions" },
@@ -2740,7 +2808,7 @@ function renderOverlay() {
         group +
         btn(
           "choose-row",
-          `<span class="name">${h(row.label)}</span><span class="value">${h(row.value)}</span><span class="hint">${h(row.hint ?? "")}${index === overlayIndex && overlay !== "settings" ? ` ${k("↵")}` : ""}</span>`,
+          `<span class="name">${h(row.label)}</span><span class="value">${h(row.value)}</span><span class="hint">${h(row.hint ?? "")}${index === overlayIndex && overlay !== "settings" ? ` ${k("↵")}` : ""}</span>${overlay === "settings" && row.description ? `<small class="setting-description">${h(row.description)}</small>` : ""}`,
           { index },
           `menu-row ${index === overlayIndex ? "selected" : ""}`,
           overlay === "sessions",
@@ -2750,7 +2818,7 @@ function renderOverlay() {
     .join("");
   if (overlay === "models") renderModelPopover(hidden);
   else el("overlay").innerHTML =
-    `<div class="modal-title">${title} <span>${h(subtitle)}</span>${noun ? `<small>${overlayQuery ? `${overlayRows.length} of ` : ""}${allCount} ${noun}</small>` : ""}</div>${filter ? `<div class="filter-wrap"><input id="chooser-filter" placeholder="filter" aria-label="Filter ${title}" value="${h(overlayQuery)}" autocomplete="off"></div>` : ""}<div class="menu-list">${rows || `<div class="empty">No matches.</div>`}${hidden ? `<div class="empty">${hidden} more · keep typing to narrow</div>` : ""}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} change ${btn("close-overlay", `${k("Esc")} close`)}<span class="right">${footerNote}</span></div>`;
+    `<div class="modal-title">${title} <span>${h(subtitle)}</span>${btn("close-overlay", "×", {}, "dialog-close").replace("<button ", '<button aria-label="Close dialog" ')}${noun ? `<small>${overlayQuery ? `${overlayRows.length} of ` : ""}${allCount} ${noun}</small>` : ""}</div>${filter ? `<div class="filter-wrap"><input id="chooser-filter" placeholder="filter" aria-label="Filter ${title}" value="${h(overlayQuery)}" autocomplete="off"></div>` : ""}<div class="menu-list">${rows || `<div class="empty">No matches.</div>`}${hidden ? `<div class="empty">${hidden} more · keep typing to narrow</div>` : ""}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} change ${btn("close-overlay", `${k("Esc")} close`)}<span class="right">${footerNote}</span></div>`;
   if (hasFocus) {
     const input = el("overlay").querySelector<HTMLInputElement>("input");
     input?.focus({ preventScroll: true });
@@ -3117,6 +3185,14 @@ async function dispatch(
   args: Record<string, any>,
   target?: HTMLElement,
 ) {
+  if (action === "toggle-compacted-history" && state?.checkpoint) {
+    const id = state.checkpoint.id;
+    if (expandedCompactions.has(id)) expandedCompactions.delete(id); else expandedCompactions.add(id);
+    follow = false; readingHeld = true;
+    renderConversation();
+    compactionCard?.querySelector<HTMLButtonElement>(".compaction-toggle")?.focus({ preventScroll: true });
+    reportObservation(); return;
+  }
   if(action === "toggle-thinking") {
     const content=document.getElementById(`thinking-body-${args.id}`), toggle=content?.nextElementSibling;
     if(!content || !(toggle instanceof HTMLButtonElement))return;
@@ -3426,6 +3502,7 @@ async function dispatch(
     return;
   }
   if (action === "jump-turn") {
+    revealCompactedTurn(args.id);
     expanded.add(args.id);
     paneTurn = args.id;
     if (!driveNavigating) readingHeld = true;
@@ -3701,9 +3778,11 @@ function renderState(next: Snapshot) {
     previewCompare = false;
     watchPanel();
     expanded.clear();
+    expandedCompactions.clear();
+    compactionCard?.remove(); compactionCard = null; compactionCardSignature = "";
     runNodes.forEach((item) => item.node.remove());
     runNodes.clear();
-    paneSignature = heroSignature = overlaySignature = "";
+    paneSignature = heroSignature = overlaySignature = sidebarSignature = "";
     reviewBranch = null;
   }
   const question=next.questions[0], slot=question ? `${question.id}:${question.answers?.length ?? 0}` : "chat";
@@ -4954,6 +5033,7 @@ window.demesne.commands(async (command) => {
       if (!current) throw new Error("No turn to inspect");
       if (action.target === "answer") {
         if (pane !== "drive") pane = null;
+        revealCompactedTurn(current.id);
         expanded.add(current.id);
         follow = false;
         readingHeld = false;

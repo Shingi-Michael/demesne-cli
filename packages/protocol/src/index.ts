@@ -323,6 +323,7 @@ export interface SessionCheckpoint {
   summary: string;
   instructions: string;
   firstRetainedMessageId: number;
+  firstRetainedTurnId?: string;
   summarizedTurns: number;
   retainedTurns: number;
   beforeTokens: number;

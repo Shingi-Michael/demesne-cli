@@ -1,6 +1,6 @@
 import { cpSync, mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve, relative } from "node:path";
+import { dirname, join, resolve, relative, sep } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 // `--target=bun-darwin-x64` cross-builds for a release. The target's sharp
@@ -8,7 +8,7 @@ const root = resolve(import.meta.dir, "..");
 // for other platforms are left out.
 const target = process.argv.slice(2).find((arg) => arg.startsWith("--target="))?.slice("--target=".length);
 const [, os = process.platform, cpu = process.arch] = target?.match(/^bun-(\w+)-(\w+)/) ?? [];
-const build = Bun.spawn([process.execPath, "build", "apps/daemon/src/main.ts", "--compile", ...(target ? [`--target=${target}`] : []), "--outfile", "dist/demesned"], { cwd: root, stdout: "inherit", stderr: "inherit" });
+const build = Bun.spawn([process.execPath, "build", "apps/daemon/src/main.ts", "--compile", ...(target ? [`--target=${target}`] : []), "--outfile", `dist/demesned${os === "windows" || os === "win32" ? ".exe" : ""}`], { cwd: root, stdout: "inherit", stderr: "inherit" });
 if (await build.exited !== 0) process.exit(1);
 rmSync(join(root, "dist/node_modules"), { recursive: true, force: true });
 const copied = new Set<string>();
@@ -47,10 +47,10 @@ for (const location of locations) {
         if (name.startsWith(".") || name.startsWith("node:")) return match;
         try {
           const resolved = realpathSync(local.resolve(name));
-          const owner = locations.find((item) => resolved.startsWith(item.source + "/"));
+          const owner = locations.find((item) => resolved.startsWith(item.source + sep));
           if (!owner) return match;
           const destination = join(owner.target, relative(owner.source, resolved));
-          return `require(${JSON.stringify("./" + relative(dirname(output), destination))})`;
+          return `require(${JSON.stringify("./" + relative(dirname(output), destination).split(sep).join("/"))})`;
         } catch { return match; }
       });
       writeFileSync(output, text);

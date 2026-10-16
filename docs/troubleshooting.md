@@ -19,7 +19,7 @@ bun run build
 bun run build:desktop
 ```
 
-The CLI/daemon build does not package the desktop app. `bun run build:desktop` builds it separately and needs Rust. Keep the complete `dist` layout together.
+The CLI/daemon build does not package the desktop app. `bun run build:desktop` builds it separately using Electron Builder. Keep the complete `dist` layout together.
 
 When active work can be interrupted, stop the old daemon and explicitly start the rebuilt one:
 
@@ -38,7 +38,7 @@ Close the desktop window and reopen it to load a rebuilt interface. A daemon res
 1. `DEMESNE_DESKTOP_BIN`.
 2. On macOS, `/Applications/Demesne.app` or `~/Applications/Demesne.app`.
 3. `demesne-desktop` on PATH.
-4. A build in this checkout under `apps/desktop/src-tauri/target/release` or `target/debug`.
+4. A build in this checkout under `apps/desktop/release`.
 5. `bun run desktop` from this checkout, when Cargo is installed. The first build takes a while.
 
 If none is found, build the app with `bun run build:desktop` or set `DEMESNE_DESKTOP_BIN`. Over headless SSH or in a script, use [`demesne prompt`](cli-reference.md#headless-output) instead. On Linux the window needs a desktop session; see [desktop prerequisites](desktop.md#prerequisites).

@@ -7,14 +7,14 @@ interface DesktopBootstrap {
   recentProjects: string[];
   snapshot: GraphicsSnapshot | null;
 }
-interface TauriGlobal {
+interface DesktopNative {
   core: { invoke: DesktopInvoke };
   event: {
     listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void>;
   };
 }
 declare global {
-  interface Window { __TAURI__?: TauriGlobal }
+  interface Window { demesneDesktop?: DesktopNative }
 }
 const el = <T extends HTMLElement = HTMLElement>(id: string) => {
   const element = document.getElementById(id);
@@ -26,7 +26,7 @@ const shell = el("desktop-shell"), home = el("desktop-home"), app = el("app"),
   startStatus = el("desktop-start-status"), menu = el("desktop-project-menu"),
   projectButton = el<HTMLButtonElement>("desktop-project-button"),
   chooser = el<HTMLButtonElement>("desktop-choose-project");
-const native = window.__TAURI__;
+const native = window.demesneDesktop;
 const invoke: DesktopInvoke = <T>(command: string, args?: Record<string, unknown>) => {
   if (!native) return Promise.reject(new Error("Open Demesne with its desktop launcher. This page requires the native application bridge."));
   return native.core.invoke<T>(command, args);
@@ -62,6 +62,7 @@ function showError(error: unknown) {
   fatal = true;
   closeMenu(false);
   app.hidden = toolbar.hidden = home.hidden = true;
+  el("desktop-sidebar").hidden = true;
   errorPanel.hidden = false;
   el("desktop-error-message").textContent = errorMessage(error);
   el("desktop-error-title").textContent = mounted ? "The desktop connection stopped." : "Couldn’t open Demesne.";
@@ -117,6 +118,8 @@ function renderProjects() {
   const list = el("desktop-recent-list");
   list.replaceChildren(...recentProjects.slice(0, 6).map((path) => recentButton(path, false)));
   el("desktop-recent").hidden = !recentProjects.length;
+  const projects = el("sidebar-projects");
+  projects.replaceChildren(...recentProjects.filter(path => path !== workspace).slice(0, 3).map(path => recentButton(path, false)));
   menu.replaceChildren();
   for (const path of recentProjects.filter((path) => path !== workspace).slice(0, 10))
     menu.append(recentButton(path, true));
@@ -146,6 +149,7 @@ async function applyBootstrap(result: DesktopBootstrap) {
   if (!workspace) {
     home.hidden = false;
     toolbar.hidden = app.hidden = errorPanel.hidden = true;
+    el("desktop-sidebar").hidden = true;
     setBusy(false, "");
     chooser.focus({ preventScroll: true });
     await request("desktop-ready");
@@ -160,6 +164,7 @@ async function applyBootstrap(result: DesktopBootstrap) {
   }
   home.hidden = errorPanel.hidden = true;
   toolbar.hidden = app.hidden = false;
+  el("desktop-sidebar").hidden = false;
   if (!mounted) {
     mounted = true;
     await import("../graphics/live.ts");
@@ -248,3 +253,17 @@ async function start() {
   } catch (error) { showError(error); }
 }
 void start();
+
+const sidebarToggle = el<HTMLButtonElement>("desktop-toggle-sidebar");
+function setSidebarCollapsed(collapsed: boolean) {
+  shell.classList.toggle("sidebar-collapsed", collapsed);
+  el("desktop-sidebar").inert = collapsed;
+  sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+}
+try { setSidebarCollapsed(localStorage.getItem("demesne-sidebar-collapsed") === "true"); } catch {}
+sidebarToggle.addEventListener("click", () => {
+  const collapsed = !shell.classList.contains("sidebar-collapsed");
+  setSidebarCollapsed(collapsed);
+  try { localStorage.setItem("demesne-sidebar-collapsed", String(collapsed)); } catch {}
+});
+el("sidebar-open-project").addEventListener("click", () => { void openProject(); });

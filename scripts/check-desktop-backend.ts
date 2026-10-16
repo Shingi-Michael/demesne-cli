@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-const daemon = resolve(process.argv[2] ?? "apps/desktop/src-tauri/target/debug/demesned");
+const daemon = resolve(process.argv[2] ?? `apps/desktop/build/backend/demesned${process.platform === "win32" ? ".exe" : ""}`);
 // `--beside` checks a CLI install: no runtime override, so the daemon must find
 // node_modules next to its real path, even when launched through a symlink.
 const beside = process.argv[3] === "--beside";
-const runtime = beside ? dirname(realpathSync(daemon)) : resolve(process.argv[3] ?? join(dirname(daemon), "runtime"));
+const runtime = beside ? dirname(realpathSync(daemon)) : resolve(process.argv[3] ?? dirname(daemon));
 assert(existsSync(daemon)); assert(existsSync(join(runtime, "node_modules/sharp/dist/index.cjs")));
 const directory = mkdtempSync(join(tmpdir(), "demesne-desktop-backend-"));
 const config = join(directory, "config.toml");

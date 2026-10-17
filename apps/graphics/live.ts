@@ -920,6 +920,12 @@ function renderConversation() {
       index === state.runs.length - 1,
       expanded.has(run.id),
       stepsOpen.has(run.id),
+      // Unfolded steps, and the recorded output a command's fold shows.
+      [...stepOpen].filter((key) => key.startsWith(`${run.id}:`)).map((key) => {
+        const tool = run.entries.find((entry) => entry.type === "tool" && String(entry.id) === key.slice(run.id.length + 1));
+        const record = tool?.type === "tool" && tool.name === "run_command" ? state!.processes.find((command) => command.toolCallId === tool.toolCallId) : null;
+        return record ? `${key}:${record.outputLoaded}:${record.stdout.length}:${record.stderr.length}` : key;
+      }),
       state.questions.length > 0,
       active(run) ? state.queue : "",
       state.activeTurnId,
@@ -1137,7 +1143,9 @@ function renderComposer() {
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${k("Enter")} ${asking ? "send instead" : "queue"}</span>` : ""}<span class="stop-word">■ Stop</span>`
     : "send";
-  form.querySelector<HTMLElement>(".send")!.hidden = question ? !draft : state.activeTurnId ? false : !draft;
+  // In a session the send square is always there (it reads Stop while a
+  // turn runs); the start screen shows it once there is something to send.
+  form.querySelector<HTMLElement>(".send")!.hidden = question ? !draft : state.activeTurnId || session ? false : !draft;
   form.querySelector<HTMLElement>(".hints")!.hidden = Boolean(state.activeTurnId) || (session && draft);
   (form.querySelector(".send") as HTMLButtonElement).disabled =
     state.connection !== "online" || state.busy || answeringQuestion;

@@ -7,28 +7,29 @@ body.desktop pre,
 body.desktop kbd { font-family: "JetBrains Mono", monospace; }
 #desktop-shell { display: grid; grid-template-columns: 256px minmax(0, 1fr); grid-template-rows: 48px minmax(0, 1fr); background: var(--ink); }
 #desktop-shell:has(#desktop-sidebar[hidden]) { grid-template-columns: 0 minmax(0, 1fr); }
-#desktop-sidebar { grid-column: 1; grid-row: 1 / -1; position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--side); padding: 14px 12px 12px; }
+#desktop-sidebar { grid-column: 1; grid-row: 1 / -1; position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--side); padding: 14px 12px 10px; }
 .ico { flex: none; display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-/* The project row: the mark, the project, one line of its pulse, and two quiet buttons. */
-.sidebar-project { position: relative; display: flex; align-items: center; gap: 2px; margin-bottom: 10px; }
-#desktop-project-button { display: flex; flex: 1; min-width: 0; align-items: center; gap: 11px; padding: 8px 4px 8px 10px; border-radius: 10px; text-align: left; color: var(--t1); }
+/* The sidebar: search, three fixed rows, the chats, and the project at the
+   foot. Every row is one line at the same height: an icon and a word. */
+.sidebar-nav { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
+.sidebar-nav button, .sidebar-settings { display: flex; width: 100%; align-items: center; gap: 11px; height: 32px; padding: 0 10px; border-radius: 9px; color: var(--t2); font-size: 13.5px; text-align: left; }
+.sidebar-nav button:hover, .sidebar-settings:hover { background: var(--surface2); color: var(--t1); }
+.sidebar-nav button .ico, .sidebar-settings .ico { color: var(--t3); }
+#desktop-sidebar .sidebar-nav kbd, #desktop-sidebar .sidebar-settings kbd { margin-left: auto; border: 0; background: none; padding: 0; color: var(--t4); }
+.sidebar-pip { display: block; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--acc); }
+.sidebar-pip.warn { background: var(--warn); }
+.sidebar-foot { display: flex; flex-direction: column; gap: 1px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.sidebar-project { position: relative; }
+#desktop-project-button { display: flex; width: 100%; align-items: center; gap: 10px; height: 36px; padding: 0 8px; border-radius: 9px; text-align: left; color: var(--t1); }
 #desktop-project-button:hover, #desktop-project-button[aria-expanded="true"] { background: var(--surface2); }
-.project-mark { display: block; flex: none; width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(145deg, #3a5f94, #20344f); color: #dce9ff; font: 600 14px/30px "JetBrains Mono", monospace; text-align: center; letter-spacing: -0.02em; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset; }
-.project-text { display: flex; flex: 1; min-width: 0; flex-direction: column; }
-#desktop-project-name { font-size: 13.5px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-pulse { display: block; margin-top: 2px; color: var(--t3); font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.project-pulse::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 6px 1px 0; border-radius: 50%; background: var(--ok); }
-.project-pulse[data-tone="warn"]::before { background: var(--warn); }
-.project-pulse[data-tone="acc"]::before { background: var(--acc); }
-.project-pulse[data-tone="quiet"]::before { background: var(--t4); }
-.project-pulse:empty { display: none; }
+.project-mark { display: block; flex: none; width: 24px; height: 24px; border-radius: 7px; background: linear-gradient(145deg, #3a5f94, #20344f); color: #dce9ff; font: 600 11px/24px "JetBrains Mono", monospace; text-align: center; letter-spacing: -0.02em; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset; }
+#desktop-project-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #desktop-project-button .chev { width: 14px; height: 14px; color: var(--t4); }
-.project-actions { display: flex; flex: none; gap: 2px; }
-.project-actions button, .sidebar-footer button, .rail-button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--t3); }
-.project-actions button:hover, .rail-button:hover, #rail-expand:hover { background: var(--surface2); color: var(--t1); }
-.project-actions button[aria-expanded="true"] { background: var(--surface2); color: var(--t1); }
-/* The project switcher, under the project row. */
-.desktop-project-menu { position: absolute; left: 0; top: calc(100% + 6px); z-index: 150; width: 100%; max-height: min(480px, 70vh); overflow-y: auto; padding: 6px; border: 1px solid var(--line2); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
+.sidebar-sub { display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 10px 0 42px; color: var(--t3); font-size: 12px; white-space: nowrap; overflow: hidden; }
+.sidebar-sub .ico { width: 13px; height: 13px; color: var(--t4); }
+.sidebar-sub span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-settings { margin-top: 6px; }
+.desktop-project-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 150; width: 100%; max-height: min(480px, 70vh); overflow-y: auto; padding: 6px; border: 1px solid var(--line2); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
 .desktop-project-menu button { display: flex; width: 100%; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; text-align: left; color: var(--t1); }
 .desktop-project-menu button:hover, .desktop-project-menu button:focus-visible { background: var(--surface2); }
 .desktop-project-menu .project-mark { width: 24px; height: 24px; border-radius: 7px; font-size: 11px; line-height: 24px; }
@@ -43,65 +44,32 @@ body.desktop kbd { font-family: "JetBrains Mono", monospace; }
 .desktop-project-menu button.desktop-menu-open { color: var(--t3); font-size: 13px; padding: 9px 10px 6px; }
 .desktop-project-menu button.desktop-menu-open .ico { color: var(--t3); }
 body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); border: 1px solid var(--line2); border-radius: 5px; padding: 3px 5px; background: var(--surface); }
-/* Search unfolds from the magnifier; it stays hidden until asked for. */
-.sidebar-search { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--t4); }
+.sidebar-search { display: flex; align-items: center; gap: 9px; margin: 0 0 10px; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--t4); }
 .sidebar-search:focus-within { border-color: var(--line2); }
+.sidebar-search .ico { width: 15px; height: 15px; }
 .sidebar-search input { min-width: 0; width: 100%; background: transparent; border: 0; outline: none; color: var(--t1); font-size: 13px !important; }
 .sidebar-search input::placeholder { color: var(--t4); }
-/* One inbox-style list: a session that needs you gets a second, coloured
-   line; a settled one is a single quiet line with its time. */
+.sidebar-group { padding: 14px 10px 6px; color: var(--t4); font-size: 12px; }
 #sidebar-sessions { flex: 1; min-height: 70px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
-.sidebar-group { padding: 16px 12px 5px; color: var(--t4); font-size: 11px; font-weight: 500; letter-spacing: 0.02em; }
-.sidebar-group:first-child { padding-top: 4px; }
-.sidebar-session { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 7px 12px; border-radius: 9px; color: var(--t2); text-align: left; font-size: 13px; line-height: 18px; }
+.sidebar-session { display: flex; align-items: center; gap: 11px; width: 100%; height: 32px; padding: 0 10px; border-radius: 9px; color: var(--t2); text-align: left; font-size: 13.5px; white-space: nowrap; }
 .sidebar-session:hover { background: var(--surface2); }
 .sidebar-session.selected { background: var(--surface2); color: var(--t1); }
-.sidebar-session.needs { padding: 8px 12px; }
-.sidebar-session-mark { flex: none; width: 7px; height: 7px; margin-top: 7px; border-radius: 50%; background: var(--t4); }
-.sidebar-session-mark.done { background: var(--ok); }
-.sidebar-session-mark.warn { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent); }
+.sidebar-session-mark { flex: none; width: 6px; height: 6px; margin: 0 5px; border-radius: 50%; background: var(--t4); }
+.sidebar-session-mark.warn { background: var(--warn); }
 .sidebar-session-mark.acc { background: var(--acc); }
 .sidebar-session-mark.bad { background: var(--bad); }
-.sidebar-session-mark.working { width: 11px; height: 11px; margin: 5px -2px 0; border: 1.6px solid var(--line2); border-top-color: var(--acc); background: transparent; animation: sidebar-spin 900ms linear infinite; }
+.sidebar-session-mark.working { width: 10px; height: 10px; margin: 0 3px; border: 1.6px solid var(--line2); border-top-color: var(--acc); background: transparent; animation: sidebar-spin 900ms linear infinite; }
 @keyframes sidebar-spin { to { transform: rotate(360deg); } }
-.sidebar-session-body { display: flex; flex: 1; min-width: 0; flex-direction: column; }
-.sidebar-session-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sidebar-session.needs .sidebar-session-name { color: var(--t1); }
-.sidebar-session-line { margin-top: 1px; color: var(--t3); font-size: 11.5px; line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sidebar-session-line .warn { color: var(--warn); }
-.sidebar-session-line .acc { color: var(--acc); }
-.sidebar-session-line .bad { color: var(--bad); }
-.sidebar-session-line .mono { font-family: "JetBrains Mono", monospace; font-size: 11.5px; }
-.sidebar-session-line .ok { color: var(--ok); }
-.sidebar-session-age { flex: none; color: var(--t4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-/* A row's delete sits over its time, shown while you point at the row. */
+.sidebar-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-session-age { flex: none; color: var(--t4); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* Hovering a row swaps its time for a delete icon; one click archives it. */
 .sidebar-item { position: relative; }
 .sidebar-delete { position: absolute; top: 50%; right: 6px; display: grid; place-items: center; width: 24px; height: 24px; margin-top: -12px; border-radius: 6px; color: var(--t3); background: var(--surface2); opacity: 0; pointer-events: none; transition: opacity 120ms; }
 .sidebar-item:hover .sidebar-delete, .sidebar-delete:focus-visible { opacity: 1; pointer-events: auto; }
 .sidebar-item:hover .sidebar-session-age { visibility: hidden; }
 .sidebar-delete:hover { color: var(--bad); background: var(--bad-soft); }
 .sidebar-delete .ico { width: 14px; height: 14px; }
-.sidebar-empty { padding: 10px 12px; color: var(--t4); font-size: 12.5px; line-height: 1.5; }
-/* Drive as a short footer: what it is doing and how far it has got. */
-.sidebar-drive { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; padding: 12px 12px 10px; border-top: 1px solid var(--line); }
-.sidebar-drive-head { display: flex; align-items: center; gap: 8px; color: var(--t3); font-size: 12.5px; }
-.sidebar-drive-head b { color: var(--t1); font-weight: 500; }
-.sidebar-drive-head .spacer { flex: 1; }
-.sidebar-drive-head button { color: var(--acc); font-size: 12px; }
-.sidebar-drive-head .sidebar-session-mark { margin-top: 0; }
-.sidebar-drive-head .sidebar-session-mark.working { margin: 0 -2px; }
-.sidebar-drive-title { color: var(--t2); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sidebar-drive-steps { display: flex; align-items: center; gap: 5px; }
-.sidebar-drive-steps i { display: block; width: 18px; height: 3px; border-radius: 2px; background: var(--surface3); }
-.sidebar-drive-steps i.done { background: var(--acc); }
-.sidebar-drive-steps i.current { background: var(--acc); opacity: 0.45; }
-.sidebar-drive-steps small { margin-left: auto; color: var(--t4); font-size: 11.5px; white-space: nowrap; }
-.sidebar-footer { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 4px 0; border-top: 1px solid var(--line); color: var(--t2); font-size: 13px; }
-.sidebar-footer button { width: auto; height: 30px; display: flex; align-items: center; gap: 9px; padding: 0 8px; color: var(--t2); }
-.sidebar-footer button:hover { background: var(--surface2); color: var(--t1); }
-.sidebar-footer button .ico { color: var(--t3); }
-#sidebar-connection { margin-left: auto; padding-right: 6px; color: var(--t4); white-space: nowrap; font-size: 11px; }
-#sidebar-connection[data-state="online"]::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 5px 1px 0; border-radius: 50%; background: var(--ok); }
+.sidebar-empty { padding: 6px 10px; color: var(--t4); font-size: 12.5px; line-height: 1.5; }
 /* The rail: the sidebar folded to 60px, with dots for what needs you. */
 .sidebar-rail { display: none; }
 #desktop-shell.sidebar-collapsed { grid-template-columns: 60px minmax(0, 1fr); }

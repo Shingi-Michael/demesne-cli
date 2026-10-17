@@ -157,6 +157,7 @@ function renderProjects() {
   menu.append(open);
   if (workspace) {
     el("desktop-project-name").textContent = projectName(workspace);
+    el("desktop-project-path").querySelector("span")!.textContent = workspace;
     projectButton.title = workspace;
     document.title = `${projectName(workspace)} — Demesne`;
   }
@@ -287,19 +288,14 @@ function setSidebarCollapsed(collapsed: boolean) {
 try { setSidebarCollapsed(localStorage.getItem("demesne-sidebar-collapsed") === "true"); } catch {}
 sidebarToggle.addEventListener("click", () => setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")));
 for (const id of ["rail-expand", "rail-sessions"]) el(id).addEventListener("click", () => setSidebarCollapsed(false));
-// Search unfolds from the magnifier and folds away when emptied with Escape.
-const searchToggle = el<HTMLButtonElement>("sidebar-search-toggle"), searchField = el<HTMLInputElement>("sidebar-search"), searchBox = searchField.closest<HTMLElement>("label")!;
-function showSearch(open: boolean) {
-  searchBox.hidden = !open;
-  searchToggle.setAttribute("aria-expanded", String(open));
-  if (open) searchField.focus({ preventScroll: true });
-  else if (searchField.value) { searchField.value = ""; searchField.dispatchEvent(new Event("input")); }
-}
-searchToggle.addEventListener("click", () => showSearch(searchBox.hidden === true));
+// Search is always there; Escape clears it and gives the list back.
+const searchField = el<HTMLInputElement>("sidebar-search");
 searchField.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  showSearch(false);
-  searchToggle.focus({ preventScroll: true });
+  if (searchField.value) { searchField.value = ""; searchField.dispatchEvent(new Event("input")); }
+  searchField.blur();
 });
+el("sidebar-new-key").textContent = mac ? "⌘N" : "Ctrl+N";
+el("sidebar-settings-key").textContent = mac ? "⌘," : "Ctrl+,";

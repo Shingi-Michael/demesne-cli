@@ -342,60 +342,50 @@ function renderSidebar() {
   sidebarSignature = signature;
   const current = state.session;
   const dot = (tone: string) => `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`;
-  const row = (action: string, args: Record<string, unknown>, tone: string, title: string, line: string, extra = "", selected = false, age = "") =>
-    btn(action, `${dot(tone)}<span class="sidebar-session-body"><span class="sidebar-session-name">${h(title)}</span>${line ? `<span class="sidebar-session-line">${line}</span>` : ""}</span>${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, args, `sidebar-session${line ? " needs" : ""}${selected ? " selected" : ""}`)
-      .replace("<button ", `<button title="${h(title)}"${selected ? ' aria-current="page"' : ""}${extra} `);
-  // Drive's finished branches sit with the sessions: each is a decision.
-  const branches = query ? review.filter((job) => job.title.toLowerCase().includes(query)) : review;
-  const rows: string[] = branches.map((job) => job.status === "ready"
-    ? row("review-open", { show: true }, "acc", job.title, `<span class="acc">Ready to review</span>${job.diff ? ` · <span class="mono"><span class="ok">+${job.diff.additions}</span> <span class="bad">−${job.diff.deletions}</span></span>` : ""} · by Drive`)
-    : row("review-open", { show: true }, "bad", job.title, `<span class="bad">${job.unchanged ? "Finished with no changes" : "Couldn't finish"}</span> · by Drive`));
+  // One line per chat: a dot for its state, its title, its time. The dot is
+  // amber when the chat needs you, a spinner while it works, blue for a
+  // branch of Drive's that waits for review (those sit on the Branches row).
+  const row = (tone: string, title: string, selected: boolean, age: string, id: string) =>
+    btn("select-session", `${dot(tone)}<span class="sidebar-session-name">${h(title)}</span>${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, { id }, `sidebar-session${selected ? " selected" : ""}`)
+      .replace("<button ", `<button title="${h(title)}"${selected ? ' aria-current="page"' : ""} `);
   const matching = sessions.filter(item => item.title.toLowerCase().includes(query));
-  let group = "", shown = 0;
+  const rows: string[] = [];
+  let shown = 0;
   for (const item of matching) {
     if (shown >= SIDEBAR_ROWS) break;
     const selected = item.id === current?.id;
     const title = selected ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
     const working = selected ? Boolean(state.activeTurnId) && !waiting : item.status === "running" || item.status === "queued";
-    const needs = selected && waiting ? `<span class="warn">Waiting for your ${waiting}</span> · now` : working ? "Working · now" : selected && !inSession() ? "" : item.status === "failed" ? `<span class="bad">Stopped with an error</span> · ${h(shortAge(item.updatedAt))}` : "";
-    const bucket = needs ? "" : dayGroup(item.updatedAt);
-    if (bucket !== group && bucket) rows.push(`<div class="sidebar-group">${bucket}</div>`);
-    if (bucket) group = bucket;
+    const tone = selected && waiting ? "warn" : working ? "working" : item.status === "failed" ? "bad" : "";
     // Each row carries its own delete, shown on hover: no menu, no dialog.
     const remove = working ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" `);
-    rows.push(`<div class="sidebar-item">${row("select-session", { id: item.id }, needs ? (waiting && selected ? "warn" : working ? "working" : "bad") : item.turns ? "done" : "", title, needs, "", selected, needs ? "" : shortAge(item.updatedAt))}${remove}</div>`);
+    rows.push(`<div class="sidebar-item">${row(tone, title, selected, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id)}${remove}</div>`);
     shown++;
   }
   list.innerHTML = rows.length ? rows.join("") : `<p class="sidebar-empty">${query ? "No matching conversations" : "Your conversations will appear here."}</p>`;
   const title = document.getElementById("workspace-title");
   if (title) { title.textContent = inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
-  const connection = document.getElementById("sidebar-connection");
-  if (connection) { connection.textContent = state.connection === "online" ? "Connected" : state.connection === "connecting" ? "Connecting…" : "Offline"; connection.dataset.state = state.connection; }
-  // The project's pulse: its branch, then what most needs you in it.
-  const pulse = document.getElementById("desktop-project-pulse");
+  // Under the project: its branch, then what most needs you in it.
+  const pulse = document.getElementById("desktop-project-pulse")?.querySelector("span");
   if (pulse) {
     const branch = state.session?.workspace?.gitBranch ?? "";
     const needs = (waiting ? 1 : 0) + review.length;
-    const about = needs ? `${needs} waiting` : word.live ? "Drive working" : state.connection === "online" ? "quiet" : state.connection === "connecting" ? "connecting…" : "offline";
+    const about = needs ? `${needs} waiting` : word.live ? "Drive working" : state.connection === "online" ? "clean" : state.connection === "connecting" ? "connecting…" : "offline";
     pulse.textContent = [branch, about].filter(Boolean).join(" · ");
-    pulse.dataset.tone = needs ? "warn" : word.live ? "acc" : state.connection === "online" ? "ok" : "quiet";
   }
-  // Drive as a short footer: its mission, how far it has got, and its ideas.
-  const drive = document.getElementById("sidebar-drive");
-  if (drive) {
-    const live = pinned && pinned.status !== "paused" && pinned.status !== "blocked";
-    const steps = pinned ? driveTaskList(pinned) : [];
-    const done = steps.filter((step) => step.mark === "✓").length;
-    const tail = [steps.length > 1 ? `step ${Math.min(done + 1, steps.length)} of ${steps.length}` : "", ideas ? `${ideas} idea${ideas === 1 ? "" : "s"} waiting` : ""].filter(Boolean).join(" · ");
-    const open = btn("drive-open", "Open ›", {}, "", true);
-    if (pinned) {
-      const status = pinned.status === "blocked" ? "needs you" : pinned.status === "paused" ? "is paused" : pinned.status === "waiting" ? "is waiting" : "is working";
-      drive.innerHTML = `<div class="sidebar-drive-head">${dot(live ? "working" : pinned.status === "blocked" ? "warn" : "")}<b>Drive</b><span>${status}</span><span class="spacer"></span>${open}</div><div class="sidebar-drive-title" title="${h(missionTitle(pinned))}">${h(missionTitle(pinned))}</div>${steps.length > 1 || tail ? `<div class="sidebar-drive-steps">${steps.length > 1 ? steps.map((step, index) => `<i class="${step.mark === "✓" ? "done" : index === done ? "current" : ""}"></i>`).join("") : ""}<small>${h(tail)}</small></div>` : ""}`;
-      drive.hidden = false;
-    } else if (run.fix || run.away || ideas) {
-      drive.innerHTML = `<div class="sidebar-drive-head">${dot(run.fix || run.away ? "working" : "")}<b>Drive</b><span>${run.fix ? "is working" : run.away ? "is running the away list" : `has ${ideas} idea${ideas === 1 ? "" : "s"}`}</span><span class="spacer"></span>${open}</div>${run.fix ? `<div class="sidebar-drive-title" title="${h(run.fix.title)}">${h(run.fix.title)}</div>` : ""}`;
-      drive.hidden = false;
-    } else drive.hidden = true;
+  // Drive and Branches are two fixed rows: a dot on Drive when it has
+  // something for you, a count on Branches when its work waits for review.
+  const driveRow = document.getElementById("sidebar-drive"), pip = document.getElementById("sidebar-drive-pip");
+  if (driveRow && pip) {
+    const blocked = pinned?.status === "blocked";
+    pip.hidden = !(pinned || run.fix || run.away || ideas);
+    pip.className = `sidebar-pip${blocked ? " warn" : ""}`;
+    driveRow.title = blocked ? "Drive needs you" : pinned ? `Drive: ${missionTitle(pinned)}` : run.fix ? `Drive: ${run.fix.title}` : run.away ? "Drive is running the away list" : ideas ? `Drive has ${ideas} idea${ideas === 1 ? "" : "s"}` : "Drive";
+  }
+  const branchesRow = document.getElementById("sidebar-branches"), count = document.getElementById("sidebar-branches-count");
+  if (branchesRow && count) {
+    branchesRow.hidden = !review.length;
+    count.textContent = String(review.length);
   }
   // The rail: a dot where something waits, a ring for Drive's progress.
   const badge = document.getElementById("rail-sessions-badge"), ring = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");

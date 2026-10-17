@@ -289,6 +289,10 @@ let drivePopOpen = false,
   driveShown = false,
   ideasShown = false;
 const stepsOpen = new Set<string>();
+/// Steps whose diff or output is unfolded in place, keyed run:tool.
+const stepOpen = new Set<string>();
+/// The turn whose changes the undo confirmation reverts.
+let undoTurnId: string | null = null;
 const expandedCompactions = new Set<string>();
 let compactionCard: HTMLElement | null = null;
 let compactionCardSignature = "";
@@ -500,9 +504,11 @@ function renderStatus() {
   // bar carries its live state, so a session has no status bar.
   el("status").dataset.quiet = String(phase === "ready");
   el("status").hidden = inSession();
-  const c2 = c.percentage == null ? "" : `<span class="muted">·</span> ${c.percentage}% context`;
-  el("composer-model").innerHTML = `${h(state.model.displayName ?? state.model.id) || "Choose a model"} <span class="muted">⌄</span>`;
+  // The context used, as a small ring; the numbers wait in its tooltip.
+  const c2 = c.percentage == null ? "" : `<span class="ring" style="--usage:${Math.min(100, c.percentage)}%"></span>`;
+  el("composer-model").innerHTML = `${h(state.model.displayName ?? state.model.id) || "Choose a model"}${CHEVRON}`;
   el("composer-context").innerHTML = c2;
+  el("composer-context").title = c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`;
   el("composer-context").hidden = !inSession() || !c2;
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
@@ -564,34 +570,88 @@ function subagentSteps(tool: ToolEntry) {
   const steps = tool.name === "subagent" ? (tool.trace ?? []).filter((segment) => segment.kind === "step").length : 0;
   return steps ? `${steps} step${steps === 1 ? "" : "s"}` : "";
 }
+/// One quiet line per step: an icon for the kind of work, the verb, the
+/// target in mono, and what came of it on the right. An edit or a command
+/// carries a chevron and unfolds its diff or output under the row.
+const STEP_ICONS: Record<string, string> = {
+  read: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  edit: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  run: '<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>',
+  list: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  agent: '<path d="M12 3v2"/><path d="m5.6 5.6 1.4 1.4"/><path d="M3 12h2"/><path d="m18.4 5.6-1.4 1.4"/><path d="M21 12h-2"/><circle cx="12" cy="13" r="5"/><path d="M12 18v3"/>',
+  ask: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  other: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
+};
+const stepIcon = (tool: ToolEntry) => {
+  const kind = tool.name === "run_command" ? "run"
+    : tool.phase === "change" ? "edit"
+    : tool.name === "search_files" ? "search"
+    : tool.name === "list_files" ? "list"
+    : tool.name === "subagent" ? "agent"
+    : tool.name === "ask_user" ? "ask"
+    : ["read_file", "read_files", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
+    : "other";
+  return `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${STEP_ICONS[kind]}</svg>`;
+};
+const ICON_SHIELD = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>';
+const ICON_COPY = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+const ICON_UNDO = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>';
+const CHEVRON = '<svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+/// Whether a step has something to unfold: an edit's diff, a command's output.
+const foldable = (tool: ToolEntry) =>
+  (tool.phase === "change" && tool.state !== "running" && !tool.drafting && (Boolean(tool.changes?.length) || Boolean(tool.diff))) ||
+  (tool.name === "run_command" && !tool.waiting && !tool.drafting && Boolean(tool.toolCallId));
 function toolRow(run: GraphicsRun, tool: ToolEntry) {
-  const result =
-    tool.name === "run_command" &&
-    tool.input.background === true &&
-    tool.state === "done"
-      ? "background started"
-      : tool.waiting
-        ? tool.name === "ask_user" || state?.questions.some(q=>q.toolCallId===tool.toolCallId) ? "waiting for answer" : "awaiting approval"
-        : tool.phase === "change"
-          ? tool.drafting
-            ? "drafting"
-            : tool.state === "done"
-              ? ""
-              : tool.state
-          : tool.exitCode != null
-            ? `exit ${tool.exitCode}`
-            : tool.state === "done" && tool.name === "run_command"
-              ? "exit unknown"
-              : tool.state === "running"
-                ? subagentSteps(tool)
-                : tool.state;
-  return btn(
-    "tool",
-    `<span class="${tone(tool.state)}">${tool.state === "running" ? spinner() : h(mark(tool.state))}</span><span class="verb">${h(verb(tool).toLowerCase())}</span><span class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</span>${tool.phase === "change" ? counts(totals(run, tool)) : ""}<span class="result muted">${h(result)}</span><span class="time">${tool.phase === "change" ? '<span class="electric">open ›</span>' : duration(tool.durationMs)}</span>`,
+  const key = `${run.id}:${tool.id}`, open = stepOpen.has(key), canFold = foldable(tool);
+  const now = tool.state === "running" || tool.drafting;
+  const meta = tool.waiting
+    ? `<span class="amber">${tool.name === "ask_user" || state?.questions.some((q) => q.toolCallId === tool.toolCallId) ? "waiting for your answer" : "waiting for you"}</span>`
+    : tool.phase === "change"
+      ? tool.drafting ? "writing…" : tool.state === "done" ? counts(totals(run, tool)) : `<span class="${tone(tool.state)}">${h(tool.state)}</span>`
+      : tool.name === "run_command" && tool.input.background === true && tool.state === "done"
+        ? "background"
+        : now
+          ? subagentSteps(tool) || ""
+          : tool.state === "done"
+            ? `<span class="success">✓</span> ${tool.exitCode != null && tool.exitCode !== 0 ? `exit ${tool.exitCode} · ` : ""}${duration(tool.durationMs)}`
+            : tool.state === "failed" || tool.state === "denied"
+              ? `<span class="danger">×</span> ${tool.exitCode != null ? `exit ${tool.exitCode}` : h(tool.state)}`
+              : `<span class="muted">${h(mark(tool.state))}</span> ${h(tool.state)}`;
+  const row = btn(
+    canFold ? "step" : "tool",
+    `${now ? spinner() : stepIcon(tool)}<span class="verb">${h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
-    `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""}`,
+    `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
     true,
-  );
+  ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
+  return row + (open && canFold ? stepFold(run, tool) : "");
+}
+/// What unfolds under a step: the edit's diff with a little context, or
+/// the command's recorded output (its tail), loaded when first opened.
+function stepFold(run: GraphicsRun, tool: ToolEntry) {
+  if (tool.phase === "change") {
+    const files = tool.changes?.length ? tool.changes.map((change) => ({ path: change.path, before: change.before ?? "", after: change.after ?? "" })) : tool.diff ? [{ path: String(tool.input.path ?? tool.detail ?? ""), before: tool.diff.oldText, after: tool.diff.newText }] : [];
+    const blocks = files.map((file) => {
+      const rows = codeDiff(file.before, file.after).rows, keep = new Set<number>();
+      rows.forEach((row, index) => { if (row.kind !== "context") for (let i = Math.max(0, index - 2); i <= Math.min(rows.length - 1, index + 2); i++) keep.add(i); });
+      let out = "", last = -1, shown = 0;
+      for (let i = 0; i < rows.length && shown < 80; i++) {
+        if (!keep.has(i)) continue;
+        if (last >= 0 && i !== last + 1) out += '<div class="gap"><span></span><span>⋯</span><span></span></div>';
+        const row = rows[i]!;
+        out += `<div class="${row.kind === "added" ? "ad" : row.kind === "removed" ? "rm" : ""}"><span>${row.old ?? row.next ?? ""}</span><span>${row.kind === "added" ? "+" : row.kind === "removed" ? "−" : ""}</span><span>${h(row.text)}</span></div>`;
+        last = i; shown++;
+      }
+      if (shown >= 80) out += '<div class="gap"><span></span><span>⋯</span><span>longer diff folded</span></div>';
+      return `${files.length > 1 ? `<div class="fold-path">${h(file.path)}</div>` : ""}<div class="diff">${out || '<div><span></span><span></span><span class="muted">no change</span></div>'}</div>`;
+    });
+    return `<div class="step-fold">${blocks.join("")}</div>`;
+  }
+  const record = state!.processes.find((command) => command.toolCallId === tool.toolCallId);
+  const text = record ? `${record.stdout}${record.stderr ? `\n${record.stderr}` : ""}`.trim().split("\n").slice(-40).join("\n") : "";
+  const body = text ? `<pre class="out">${h(text)}</pre>` : `<div class="out muted">${record?.outputLoaded === false ? "Loading output…" : record ? "No output." : "Output not recorded."}</div>`;
+  return `<div class="step-fold"><div class="fold-cmd">$ ${h(String(tool.detail ?? "").replace(/^\$\s*/, ""))}</div>${body}</div>`;
 }
 /// A sub-agent's thinking and steps under its row: open while it works,
 /// collapsible like a thinking block afterwards.
@@ -619,27 +679,34 @@ function runHTML(run: GraphicsRun, index: number) {
   // A finished turn reads as its answer: thinking and tool steps fold into
   // the receipt line under it, and open from there. A running turn folds its
   // steps into one trail line and its thinking into one streaming line.
+  // A finished turn folds its steps behind the receipt; a running one lists
+  // them as they happen, each a quiet line on the guide.
   const live = active(run),
-    fold = (run.status === "completed" || live) && !stepsOpen.has(run.id);
+    fold = run.status === "completed" && !stepsOpen.has(run.id);
   const lastThought = run.entries.findLast((e) => e.type === "reasoning");
-  let body = "";
+  let body = "", steps = "";
+  const flush = () => { if (steps) { body += `<div class="steps">${steps}</div>`; steps = ""; } };
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!,
       key = `${run.id}:${entry.id}`;
-    if (entry.type === "assistant")
-      body += `<div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div>`;
-    if (fold && live && entry === lastThought) {
+    if (entry.type === "assistant") {
+      flush();
+      body += `<div class="answer"><span class="answer-mark" aria-hidden="true">d.</span><div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div></div>`;
+    }
+    if (live && entry === lastThought && i === run.entries.length - 1) {
+      flush();
       const open = detailsOpen.has(key), text = entry.raw.trim().split(/\n+/).at(-1) ?? "";
       body += `<div class="thinking thinking-line"><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div><button type="button" class="thinking-line-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({ id: key }))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">◇ thinking <i>${h(text.slice(-240))}</i></button></div>`;
       continue;
     }
     if (fold && (entry.type === "reasoning" || entry.type === "tool")) continue;
     if (entry.type === "reasoning") {
+      flush();
       const live = active(run) && i === run.entries.length - 1;
       // Keep reasoning out of the conversation until the reader asks for it.
       // Explicit expansion survives streaming updates and completion.
       const open = detailsOpen.has(key);
-      body += `<div class="thinking thinking-main ${live ? "live" : ""}"><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${live ? spinner() : "◇"} ${live ? "Thinking" : "Thought"} <span class="muted">${duration(entry.durationMs)}</span></button></div>`;
+      body += `<div class="thinking thinking-main ${live ? "live" : ""}"><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${live ? spinner() : CHEVRON}${live ? "Thinking" : `Thought for ${duration(entry.durationMs)}`}</button><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div></div>`;
     }
     if (entry.type === "tool") {
       const group: ToolEntry[] = [entry];
@@ -662,13 +729,16 @@ function runHTML(run: GraphicsRun, index: number) {
       if (group.length >= 3) {
         const sum = group.reduce((n, t) => n + (t.durationMs ?? 0), 0);
         const summary=run.kind === "themefy" ? `Theme interview · ${group.filter(tool=>tool.name === "ask_user").length} questions${group.some(tool=>tool.name === "apply_theme" && tool.state === "done")?" · palette applied":""}` : `Explored · ${group.length} reads`;
-        body += `<details class="explored" data-detail="${key}"${detailsOpen.has(key) ? " open" : ""}><summary>${summary} · ${duration(sum)}</summary><div>${group.map((tool) => toolRow(run, tool)).join("")}</div></details>`;
+        steps += `<details class="explored" data-detail="${key}"${detailsOpen.has(key) ? " open" : ""}><summary>${stepIcon(group[0]!)}<span class="verb">${h(summary)}</span><span class="sp"></span><small class="meta">${duration(sum)}</small></summary><div>${group.map((tool) => toolRow(run, tool)).join("")}</div></details>`;
         i = j - 1;
-      } else body += toolRow(run, entry) + subagentTrace(run, entry, key);
+      } else steps += toolRow(run, entry) + subagentTrace(run, entry, key);
     }
-    if (entry.type === "notice" && !entry.closesTurn)
+    if (entry.type === "notice" && !entry.closesTurn) {
+      flush();
       body += `<div class="system-band"><b>system</b><span>${h(entry.text)}</span></div>`;
+    }
   }
+  flush();
   const receipt = run.receipt,
     checks = items.filter(
       (tool) =>
@@ -700,23 +770,28 @@ function runHTML(run: GraphicsRun, index: number) {
     const paths = [...new Set(changed.flatMap((t) => t.changes?.map((c) => c.path) ?? [String(t.input.path ?? t.detail ?? "")]))];
     const total = changed.reduce((sum, t) => { const each = totals(run, t); return { added: sum.added + each.added, removed: sum.removed + each.removed }; }, { added: 0, removed: 0 });
     const steps = items.length, thought = run.entries.some((e) => e.type === "reasoning");
-    const model = receipt?.model && receipt.model !== state!.model.id ? receipt.model.split("/").at(-1)! : "";
-    const sep = '<span class="sep">·</span>';
+    const model = (receipt?.model ?? "").split("/").at(-1) ?? "";
+    const speed = receipt?.tokensPerSecond ? `${Math.round(receipt.tokensPerSecond)} tok/s` : "";
+    // "model · 1.7s · 38 tok/s", then what changed, the checks, the steps.
     const parts = [
       error ? `<span class="${run.status === "failed" ? "danger" : ""}">${h(error)}</span>` : "",
-      files ? `<span class="receipt-files">${files === 1 ? h(paths[0]!.split(/[\\/]/).at(-1) ?? paths[0]) : `${files} files`} ${counts(total)}</span>` : "",
+      [model ? h(model) : "", receipt?.durationMs != null ? duration(receipt.durationMs) : "", speed].filter(Boolean).join(" · "),
+      files ? `<span class="receipt-files" title="${h(paths.join(", "))}">${files === 1 ? "1 file changed" : `${files} files changed`} ${counts(total)}</span>` : "",
       checks.length ? btn("panel", `${passed ? "checks passed" : failed ? "checks failed" : stopped ? "checks stopped" : "checks unknown"}`, { name: "verification", turnId: run.id }, passed ? "success" : failed ? "danger" : "", true) : "",
       run.status === "completed" && (steps || thought)
         ? btn("toggle-steps", fold ? (steps ? `${steps} step${steps === 1 ? "" : "s"}` : "thinking") : "hide steps", { id: run.id }, "receipt-steps")
         : "",
       receipt?.mode === "Plan" || run.planOnly ? "plan" : "",
-      model ? h(model) : "",
-      duration(receipt?.durationMs),
     ].filter(Boolean);
-    const mark = run.status === "completed" ? '<span class="success">✓</span>' : run.status === "failed" ? '<span class="danger">×</span>' : "<span>■</span>";
+    const answered = run.entries.some((e) => e.type === "assistant");
+    const actions = [
+      answered ? btn("copy-answer", `${ICON_COPY}Copy`, { id: run.id }, "receipt-action copy-answer") : "",
+      files && !state!.activeTurnId ? btn("undo-turn", `${ICON_UNDO}Undo changes`, { id: run.id }, "receipt-action") : "",
+      error ? btn("panel", "log ›", { name: "log", turnId: run.id }, "receipt-action", true) : "",
+    ].filter(Boolean).join("");
     // A turn that only answered needs no receipt: its time is on the ask.
     const bare = run.status === "completed" && !files && !checks.length && !steps && !thought && !(receipt?.mode === "Plan" || run.planOnly) && !model;
-    footer = bare ? "" : `<div class="turn-receipt">${mark}${parts.join(sep)}${files ? btn("panel", "review ›", { name: "changes", turnId: run.id }, "receipt-review", true) : ""}${error ? btn("panel", "log ›", { name: "log", turnId: run.id }, "receipt-review", true) : ""}</div>`;
+    footer = bare ? "" : `<div class="turn-receipt">${parts.map((part) => `<span>${part}</span>`).join("")}${actions ? `<span class="receipt-actions">${actions}</span>` : ""}</div>`;
   }
   const latestTool = items.findLast(
       (tool) => tool.state === "running" || tool.waiting,
@@ -734,14 +809,14 @@ function runHTML(run: GraphicsRun, index: number) {
             : "Thinking";
   // The live thinking row already says "Thinking"; don't repeat it here.
   const thinkingLive = run.entries.at(-1)?.type === "reasoning" && !latestTool && !state!.questions.length;
-  const trail = !live || !items.length ? "" : fold ? stepTrail(run, items) : `<div class="step-trail">${btn("toggle-steps", "hide steps", { id: run.id }, "receipt-steps")}</div>`;
-  const activity = live && !thinkingLive && !(fold && items.length)
+  const trail = "";
+  const activity = live && !thinkingLive && !(latestTool && !latestTool.drafting)
     ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
     : "";
   const answered = run.entries.some((e) => e.type === "assistant");
-  const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}${answered ? btn("copy-answer", "copy", { id: run.id }, "copy-answer") : ""}</span>`;
+  const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}</span>`;
   const queued = live && state!.queue.trim() ? `<div class="next-line"><span class="next-label">NEXT</span><span class="next-text">${h(state!.queue.trim())}</span>${btn("queue-action", "edit", { action: "edit" })}${btn("queue-action", "send now", { action: "now" })}${btn("queue-action", "×", { action: "drop" }, "next-drop")}</div>` : "";
-  return `<div class="request"><span class="text">${h(run.content)}</span>${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></div><div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${activity}</div>${queued}`;
+  return `<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div><div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${activity}</div>${queued}`;
 }
 /** Whole seconds since a moment, for clocks that tick in place. */
 const elapsed = (since: string) => {
@@ -845,6 +920,12 @@ function renderConversation() {
       index === state.runs.length - 1,
       expanded.has(run.id),
       stepsOpen.has(run.id),
+      // Unfolded steps, and the recorded output a command's fold shows.
+      [...stepOpen].filter((key) => key.startsWith(`${run.id}:`)).map((key) => {
+        const tool = run.entries.find((entry) => entry.type === "tool" && String(entry.id) === key.slice(run.id.length + 1));
+        const record = tool?.type === "tool" && tool.name === "run_command" ? state!.processes.find((command) => command.toolCallId === tool.toolCallId) : null;
+        return record ? `${key}:${record.outputLoaded}:${record.stdout.length}:${record.stderr.length}` : key;
+      }),
       state.questions.length > 0,
       active(run) ? state.queue : "",
       state.activeTurnId,
@@ -1024,19 +1105,15 @@ function renderComposer() {
     question = pendingQuestion(),
     answered = question && (question.answers?.length ?? 0) >= question.questions.length,
     queued = false;
-  let approvalMode = form.querySelector<HTMLElement>(".approval-mode");
-  if (!approvalMode) {
-    approvalMode = document.createElement("div");
-    approvalMode.className = "approval-mode";
-    form.insertBefore(approvalMode, editor);
-  }
-  approvalMode.hidden = !state.session?.autoApprove;
-  approvalMode.innerHTML = state.session?.autoApprove
-    ? btn("overlay", `Auto-approve all · ${state.planOnly ? "Plan stays read only" : "this session"}`, { name: "settings" })
-    : "";
+  // The approval chip says how edits and commands are gated; it opens Settings.
+  const chip = el("composer-approval");
+  chip.classList.toggle("auto", Boolean(state.session?.autoApprove));
+  chip.innerHTML = `${ICON_SHIELD}${state.session?.autoApprove ? (state.planOnly ? "Auto-approve · plan only" : "Auto-approve") : "Ask before edits"}${CHEVRON}`;
+  chip.title = state.session?.autoApprove ? "Edits and commands run without asking this session. Change in Settings." : "Each edit and command asks first. Change in Settings.";
   form.classList.toggle("queued", queued);
   form.classList.toggle("restored", state.restored && !question);
   form.classList.toggle("stop-armed", Date.now() < stopArmed);
+  form.classList.toggle("stopping", Boolean(state.activeTurnId) && !question);
   el("queue-label").hidden = Boolean(question) || !queued && !state.restored;
   el("queue-label").innerHTML =
     `<span>${queued ? 'Queued <span class="muted">sends when this turn completes</span>' : 'Restored · not sent <span class="muted">the turn did not finish</span>'}</span>${btn("clear-queue", "Clear ×")}`;
@@ -1066,7 +1143,9 @@ function renderComposer() {
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${k("Enter")} ${asking ? "send instead" : "queue"}</span>` : ""}<span class="stop-word">■ Stop</span>`
     : "send";
-  form.querySelector<HTMLElement>(".send")!.hidden = question ? !draft : state.activeTurnId ? false : !draft;
+  // In a session the send square is always there (it reads Stop while a
+  // turn runs); the start screen shows it once there is something to send.
+  form.querySelector<HTMLElement>(".send")!.hidden = question ? !draft : state.activeTurnId || session ? false : !draft;
   form.querySelector<HTMLElement>(".hints")!.hidden = Boolean(state.activeTurnId) || (session && draft);
   (form.querySelector(".send") as HTMLButtonElement).disabled =
     state.connection !== "online" || state.busy || answeringQuestion;
@@ -1736,7 +1815,7 @@ function renderBriefing() {
       ].filter(Boolean).join('<span class="muted"> · </span>')}</p></div>`;
     }
   }
-  node.innerHTML = parts.length ? `<p class="briefing-line">${parts.join('<span class="muted sep">·</span>')}</p>${unfolded}` : "";
+  node.innerHTML = parts.length ? `<p class="briefing-line">${parts.map((part) => `<span class="pill">${part}</span>`).join("")}</p>${unfolded}` : "";
   node.hidden = !inSession() || !parts.length;
 }
 /// One model's scoreboard line in the model picker: how it has done on your
@@ -2834,9 +2913,9 @@ function renderOverlay() {
     title =
       overlay === "confirm-archive"
         ? "Archive this session?"
-        : "Undo the last turn’s changes?";
+        : undoTurnId && state!.runs.find((run) => run.id === undoTurnId) ? `Undo turn ${state!.runs.find((run) => run.id === undoTurnId)!.number}’s changes?` : "Undo the last turn’s changes?";
     el("overlay").innerHTML =
-      `<div class="modal-title">${title}</div><p class="empty">${overlay === "confirm-archive" ? "The session remains recoverable in the daemon archive." : "This reverts recorded file changes from the last turn. Changes made separately on disk may prevent a revert."}</p><div class="menu-footer">${btn(overlay === "confirm-archive" ? "archive" : "undo", "Confirm", {}, "danger")}${btn("close-overlay", `${k("Esc")} cancel`)}</div>`;
+      `<div class="modal-title">${title}</div><p class="empty">${overlay === "confirm-archive" ? "The session remains recoverable in the daemon archive." : "This reverts the file changes recorded for that turn. Changes made separately on disk may prevent a revert."}</p><div class="menu-footer">${btn(overlay === "confirm-archive" ? "archive" : "undo", "Confirm", overlay === "confirm-undo" && undoTurnId ? { turnId: undoTurnId } : {}, "danger")}${btn("close-overlay", `${k("Esc")} cancel`)}</div>`;
     return;
   } else {
     title = "Commands";
@@ -3541,6 +3620,27 @@ async function dispatch(
   if (action === "drive-log") {
     driveTab = "done";
     return openPanel("drive");
+  }
+  if (action === "step") {
+    const key = `${args.runId}:${args.id}`;
+    stepOpen.has(key) ? stepOpen.delete(key) : stepOpen.add(key);
+    follow = false;
+    renderConversation();
+    // A command's recorded output loads when its row first opens.
+    const run = state!.runs.find((run) => run.id === args.runId),
+      tool = run?.entries.find((entry) => entry.id === args.id);
+    if (stepOpen.has(key) && tool?.type === "tool" && tool.name === "run_command") {
+      const record = state!.processes.find((command) => command.toolCallId === tool.toolCallId);
+      if (record?.outputLoaded === false) {
+        await api("panel-watch", { panel: "log", command: record.id });
+        await api("processes");
+      }
+    }
+    return;
+  }
+  if (action === "undo-turn") {
+    undoTurnId = args.id;
+    return openOverlay("confirm-undo");
   }
   if (action === "approval-show") {
     approvalOpen = !approvalOpen;

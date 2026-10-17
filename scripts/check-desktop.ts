@@ -219,14 +219,14 @@ try {
   await page.keyboard.press("Escape");
 
 
-  await click("panel", { name: "changes" });
-  await textIncludes("hello.ts");
-  await until(() => evaluate<boolean>("return document.getElementById('panel')?.innerText.includes('after');"), "recorded diff visible");
+  // The receipt opens the turn's steps; the edit's row unfolds its diff in place.
+  await click("toggle-steps");
+  await click("step");
+  await until(() => evaluate<boolean>("return !!document.querySelector('.step-fold')?.innerText.includes('after');"), "inline diff visible");
   await capture("03-changes");
   await desktop!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(900, 680));
   await until(() => page.evaluate(() => window.innerWidth <= 900), "narrow desktop size");
-  assert(await page.locator("textarea").isVisible(), "Composer remains available beside Review at minimum window size");
-  assert(await page.locator("#panel").isVisible());
+  assert(await page.locator("textarea").isVisible(), "Composer remains available at minimum window size");
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "Workspace does not overflow horizontally");
   await capture("03-narrow-review");
   await desktop!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1180, 820));
@@ -251,7 +251,7 @@ try {
   assert(compacted && compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
   await until(() => page.locator(".context-top").innerText().then(text => text.includes(`${percentage}%`)), "context panel updates without reopening");
-  await until(() => page.locator("#composer-context").innerText().then(text => text.includes(`${percentage}%`)), "composer context meter updates");
+  await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
   await until(() => page.locator(".compaction-card").count().then(count => count === 1), "conversation summary visible");
   const firstTurnId = completedSession.turns.find(turn => turn.content === prompt)!.id;
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Older conversation is unmounted by default");
@@ -284,7 +284,7 @@ try {
   await open();
   await textIncludes(afterClose);
   await capture("06-work-survived-close");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "changes and history panels", "persisted project/session restore", "daemon work survives app closure"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the session view", "persisted project/session restore", "daemon work survives app closure"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

@@ -37,7 +37,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-0 libnss3 libasound2 libgbm1 xvfb dbus-x11 fonts-dejavu-core
+          sudo apt-get install -y libgtk-3-0 libnss3 libasound2t64 libgbm1 xvfb dbus-x11 fonts-dejavu-core
           # Ubuntu 24.04 restricts unprivileged user namespaces by default.
           # Permit Chromium's sandbox in this disposable CI VM; never disable it in the app.
           if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then

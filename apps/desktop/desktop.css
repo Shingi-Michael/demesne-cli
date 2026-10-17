@@ -33,21 +33,8 @@ body.desktop { overflow: hidden; }
 }
 .desktop-wordmark, .desktop-home-wordmark { color: var(--electric); font-weight: 500; }
 .desktop-toolbar-rule { height: 16px; border-left: 1px solid var(--borderBright); }
-.desktop-project-control { position: relative; flex: none; max-width: 45%; }
-#desktop-project-button { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 8px; border-radius: 4px; max-width: 100%; }
-#desktop-project-button:hover, #desktop-project-button[aria-expanded="true"] { background: var(--raised); color: var(--strong); }
-#desktop-project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--paper); }
-.desktop-project-caret { color: var(--muted); }
-.desktop-project-path { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #desktop-toolbar header { flex: none; border: 0; padding: 0; gap: 0; }
 #desktop-toolbar .header-state { font-size: 12px; margin-right: 8px; }
-.desktop-project-menu { position: absolute; left: 0; top: calc(100% + 7px); width: 360px; max-height: min(480px, 75vh); overflow-y: auto; padding: 6px; border: 1px solid var(--borderBright); border-radius: 6px; background: var(--surface); box-shadow: 0 8px 28px #0005; }
-.desktop-project-menu button { display: flex; width: 100%; flex-direction: column; gap: 1px; padding: 10px; text-align: left; border-radius: 4px; }
-.desktop-project-menu button:hover, .desktop-project-menu button:focus-visible { background: var(--accentSurface); }
-.desktop-project-menu button span { color: var(--strong); }
-.desktop-project-menu button small { color: var(--muted); font: inherit; font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
-.desktop-project-menu hr { border: 0; border-top: 1px solid var(--rule); margin: 5px 0; }
-.desktop-project-menu button.desktop-menu-open { flex-direction: row; align-items: center; justify-content: space-between; color: var(--electric); }
 .desktop-home, .desktop-error { display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center; overflow: auto; padding: 40px; }
 .desktop-home-content, .desktop-error-content { width: 540px; max-width: 100%; padding: 20px 0; }
 .desktop-home-wordmark { display: inline-block; font-size: 15px; margin-bottom: 32px; }
@@ -74,10 +61,6 @@ body.desktop { overflow: hidden; }
 .desktop-secondary { font-size: 12px; color: var(--secondary); }
 .desktop-secondary:hover { color: var(--electric); }
 #desktop-shell[aria-busy="true"] #desktop-toolbar button { opacity: 0.5; pointer-events: none; }
-@media (max-width: 1000px) {
-  .desktop-project-path { visibility: hidden; }
-  #desktop-toolbar { gap: 10px; }
-}
 @media (max-height: 680px) {
   .desktop-home, .desktop-error { align-items: flex-start; padding: 30px 40px; }
   .desktop-home-wordmark { margin-bottom: 22px; }
@@ -103,6 +86,51 @@ body.desktop { overflow: hidden; }
     --signal: #b3302a;
   }
 }
-/* The project button names the project and shows its path as a tooltip. */
-.desktop-project-path { display: none; }
-#desktop-toolbar header { margin-left: auto; display: flex; align-items: center; }
+
+/* Desktop tokens: the shell reads these; other themes derive them from their
+   roles, so a custom theme still colours the whole window. */
+body.desktop {
+  --side: var(--surface);
+  --surface2: var(--raised);
+  --surface3: var(--borderBright);
+  --line: var(--rule);
+  --line2: var(--borderBright);
+  --t1: var(--strong);
+  --t2: var(--paper);
+  --t3: var(--secondary);
+  --t4: var(--muted);
+  --acc: var(--electric);
+  --ok: var(--citron);
+  --bad: var(--signal);
+  --warn: var(--thinking);
+}
+/* Demesne's own desktop appearance: graphite, with one blue accent. The
+   terminal keeps the brand palette; the desktop maps the same roles here. */
+html[data-theme="demesne"] body.desktop {
+  --ink: #121315; --side: #161719; --surface: #1b1c1f; --surface2: #212226; --surface3: #27292d;
+  --line: #26282c; --line2: #303337; --rule: #26282c; --borderBright: #303337; --raised: #212226;
+  --t1: #ededef; --t2: #b3b7bd; --t3: #80858c; --t4: #595e65;
+  --strong: #ededef; --paper: #dcdee2; --secondary: #b3b7bd; --muted: #80858c;
+  --acc: #7eaef0; --ok: #71c994; --bad: #ef8b8b; --warn: #e7b96a;
+  --electric: #7eaef0; --electricBright: #8fc3ff; --citron: #71c994; --signal: #ef8b8b; --thinking: #e7b96a; --inspect: #7eaef0; --execute: #e7b96a;
+  --accentSurface: #1f2a3a; --menuSelection: #212226; --tileSelection: #26303d; --thinkingSurface: #26241d; --errorSurface: #2a1f1f;
+  --userSurface: #1b1c1f; --toolSurface: #1b1c1f; --toolActive: #212226;
+  --diffAddedSurface: #182319; --diffRemovedSurface: #2a1b1d;
+  --syntaxKeyword: #c3a6ff; --syntaxString: #9ed59a; --syntaxNumber: #e7b96a; --syntaxComment: #6f757c; --syntaxType: #7fc8d8; --syntaxFunction: #8fc3ff;
+  --contextMessages: #7eaef0; --contextTools: #c3a6ff; --contextReserved: #e7b96a; --contextFree: #595e65;
+  --composerQueuedBorder: #5a4a2c; --composerStoppedBorder: #6a3535; --composerRestoredBorder: #2c4a6e;
+}
+html[data-theme="demesne-light"] body.desktop {
+  --ink: #f7f7f5; --side: #efeeeb; --surface: #ffffff; --surface2: #f3f2ef; --surface3: #e9e8e4;
+  --line: #e4e3df; --line2: #d6d5d0; --rule: #e4e3df; --borderBright: #d6d5d0; --raised: #f3f2ef;
+  --t1: #1b1c1f; --t2: #4a4e55; --t3: #7a7f86; --t4: #a3a7ad;
+  --strong: #1b1c1f; --paper: #2a2d33; --secondary: #4a4e55; --muted: #7a7f86;
+  --acc: #2f6fd0; --ok: #2f9e5e; --bad: #d64e4e; --warn: #b87a12;
+  --electric: #2f6fd0; --electricBright: #1f63c9; --citron: #2f9e5e; --signal: #d64e4e; --thinking: #b87a12; --inspect: #2f6fd0; --execute: #b87a12;
+  --accentSurface: #e4ecf8; --menuSelection: #f3f2ef; --tileSelection: #e4ecf8; --thinkingSurface: #f5efe2; --errorSurface: #f8e8e8;
+  --userSurface: #ffffff; --toolSurface: #ffffff; --toolActive: #f3f2ef;
+  --diffAddedSurface: #e6f3ea; --diffRemovedSurface: #f8e8e8;
+  --syntaxKeyword: #7b4fd6; --syntaxString: #2e8a4a; --syntaxNumber: #b87a12; --syntaxComment: #8a8f96; --syntaxType: #1d7f94; --syntaxFunction: #1f63c9;
+  --contextMessages: #2f6fd0; --contextTools: #7b4fd6; --contextReserved: #b87a12; --contextFree: #a3a7ad;
+  --composerQueuedBorder: #e0c48a; --composerStoppedBorder: #e8a0a0; --composerRestoredBorder: #a9c4ea;
+}

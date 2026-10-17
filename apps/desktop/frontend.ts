@@ -93,17 +93,40 @@ function closeMenu(focus: boolean) {
   projectButton.setAttribute("aria-expanded", "false");
   if (focus) projectButton.focus({ preventScroll: true });
 }
+const icon = (paths: string, className = "ico") => {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", className);
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = paths;
+  return svg;
+};
+const FOLDER_ICON = '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>';
+/// "dc" for demesne-cli, "bl" for blog: the mark a project wears in the switcher.
+const projectMark = (name: string) => {
+  const words = name.split(/[-_ .]+/).filter(Boolean);
+  return (words.length > 1 ? words[0]![0]! + words[1]![0]! : name.slice(0, 2)).toLowerCase();
+};
+/// A path at home reads as ~/code/blog.
+const shortPath = (path: string) => path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
 function recentButton(path: string, inMenu: boolean) {
   const button = document.createElement("button");
   button.type = "button";
   if (inMenu) button.setAttribute("role", "menuitem");
   button.title = path;
-  const title = document.createElement(inMenu ? "span" : "strong");
+  const title = document.createElement(inMenu ? "b" : "strong");
   title.textContent = projectName(path);
   const detail = document.createElement("small");
-  detail.textContent = path;
-  if (inMenu) button.append(title, detail);
-  else {
+  detail.textContent = inMenu ? shortPath(path) : path;
+  if (inMenu) {
+    const mark = document.createElement("span"), copy = document.createElement("span");
+    mark.className = "project-mark";
+    mark.dataset.hue = String(1 + [...projectName(path)].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 3);
+    mark.textContent = projectMark(projectName(path));
+    mark.setAttribute("aria-hidden", "true");
+    copy.append(title, detail);
+    button.append(mark, copy);
+  } else {
     const copy = document.createElement("span"), arrow = document.createElement("span");
     copy.append(title, detail);
     arrow.className = "desktop-recent-arrow";
@@ -118,8 +141,6 @@ function renderProjects() {
   const list = el("desktop-recent-list");
   list.replaceChildren(...recentProjects.slice(0, 6).map((path) => recentButton(path, false)));
   el("desktop-recent").hidden = !recentProjects.length;
-  const projects = el("sidebar-projects");
-  projects.replaceChildren(...recentProjects.filter(path => path !== workspace).slice(0, 3).map(path => recentButton(path, false)));
   menu.replaceChildren();
   for (const path of recentProjects.filter((path) => path !== workspace).slice(0, 10))
     menu.append(recentButton(path, true));
@@ -128,14 +149,13 @@ function renderProjects() {
   open.type = "button";
   open.className = "desktop-menu-open";
   open.setAttribute("role", "menuitem");
-  label.textContent = "Open another project…";
+  label.textContent = "Open a folder…";
   key.textContent = openShortcut;
-  open.append(label, key);
+  open.append(icon(FOLDER_ICON), label, key);
   open.addEventListener("click", () => { void openProject(); });
   menu.append(open);
   if (workspace) {
     el("desktop-project-name").textContent = projectName(workspace);
-    el("desktop-project-path").textContent = workspace;
     projectButton.title = workspace;
     document.title = `${projectName(workspace)} — Demesne`;
   }
@@ -202,10 +222,11 @@ document.addEventListener("pointerdown", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.isComposing) return;
   const key = event.key.toLowerCase(), modifier = event.metaKey || event.ctrlKey;
-  if (modifier && !event.altKey && !event.shiftKey && ["o", "q"].includes(key)) {
+  if (modifier && !event.altKey && !event.shiftKey && ["o", "q", "n"].includes(key)) {
     event.preventDefault();
     event.stopImmediatePropagation();
     if (key === "o") void openProject();
+    else if (key === "n") { if (mounted && !fatal && !busy) el("desktop-sidebar").querySelector<HTMLButtonElement>('[data-action="new-session"]')?.click(); }
     else void request("desktop-quit").catch(showActionError);
     return;
   }
@@ -255,15 +276,28 @@ async function start() {
 void start();
 
 const sidebarToggle = el<HTMLButtonElement>("desktop-toggle-sidebar");
+/// Folded, the sidebar is a 60px rail: the mark, +, and dots for what waits.
 function setSidebarCollapsed(collapsed: boolean) {
   shell.classList.toggle("sidebar-collapsed", collapsed);
-  el("desktop-sidebar").inert = collapsed;
   sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+  try { localStorage.setItem("demesne-sidebar-collapsed", String(collapsed)); } catch {}
 }
 try { setSidebarCollapsed(localStorage.getItem("demesne-sidebar-collapsed") === "true"); } catch {}
-sidebarToggle.addEventListener("click", () => {
-  const collapsed = !shell.classList.contains("sidebar-collapsed");
-  setSidebarCollapsed(collapsed);
-  try { localStorage.setItem("demesne-sidebar-collapsed", String(collapsed)); } catch {}
+sidebarToggle.addEventListener("click", () => setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")));
+for (const id of ["rail-expand", "rail-sessions"]) el(id).addEventListener("click", () => setSidebarCollapsed(false));
+// Search unfolds from the magnifier and folds away when emptied with Escape.
+const searchToggle = el<HTMLButtonElement>("sidebar-search-toggle"), searchField = el<HTMLInputElement>("sidebar-search"), searchBox = searchField.closest<HTMLElement>("label")!;
+function showSearch(open: boolean) {
+  searchBox.hidden = !open;
+  searchToggle.setAttribute("aria-expanded", String(open));
+  if (open) searchField.focus({ preventScroll: true });
+  else if (searchField.value) { searchField.value = ""; searchField.dispatchEvent(new Event("input")); }
+}
+searchToggle.addEventListener("click", () => showSearch(searchBox.hidden === true));
+searchField.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  showSearch(false);
+  searchToggle.focus({ preventScroll: true });
 });
-el("sidebar-open-project").addEventListener("click", () => { void openProject(); });

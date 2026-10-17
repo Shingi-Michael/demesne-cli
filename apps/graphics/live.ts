@@ -298,17 +298,28 @@ let paneSignature = "",
   questionSignature = "",
   heroSignature = "";
 const diffCache = new Map<string, { added: number; removed: number }>();
+/// The last few requests and how they ended, for demesneInspect.
+const recentRequests: { method: string; at: number; outcome: string }[] = [];
 async function api<T = unknown>(
   method: string,
   args: Record<string, unknown> = {},
 ): Promise<T> {
-  return window.demesne.request<T>(method, {
-    ...args,
-    ...(["drive", "drive-control"].includes(method)
-      ? { observation: observeUI() }
-      : {}),
-    sessionId: state?.session?.id,
-  });
+  const entry = { method, at: Date.now(), outcome: "pending" };
+  if (recentRequests.push(entry) > 20) recentRequests.shift();
+  try {
+    const result = await window.demesne.request<T>(method, {
+      ...args,
+      ...(["drive", "drive-control"].includes(method)
+        ? { observation: observeUI() }
+        : {}),
+      sessionId: state?.session?.id,
+    });
+    entry.outcome = "ok";
+    return result;
+  } catch (error) {
+    entry.outcome = `error: ${error instanceof Error ? error.message : String(error)}`;
+    throw error;
+  }
 }
 function notice(message: string) {
   el("notice").textContent = message;
@@ -4365,7 +4376,7 @@ document.addEventListener("keydown", (event) => {
 });
 window.demesneInspect = () => ({
   // What the host last published: the session, its turn, queue and draft.
-  host: { session: state?.session?.id, active: state?.activeTurnId, busy: state?.busy, queue: state?.queue, draft: state?.draft, restored: state?.restored, connection: state?.connection, notice: el("notice").hidden ? "" : el("notice").textContent },
+  host: { session: state?.session?.id, active: state?.activeTurnId, busy: state?.busy, queue: state?.queue, draft: state?.draft, restored: state?.restored, connection: state?.connection, notice: el("notice").hidden ? "" : el("notice").textContent, requests: recentRequests.map((entry) => `${entry.method} ${entry.outcome}`) },
   // Whether the conversation follows new text, and where it is scrolled.
   stage: { follow, top: Math.round(el("stage").scrollTop), bottom: Math.round(el("stage").scrollHeight - el("stage").clientHeight) },
   selection: getSelection()?.toString() ?? "",

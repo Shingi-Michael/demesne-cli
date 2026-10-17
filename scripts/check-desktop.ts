@@ -236,6 +236,7 @@ try {
   for (let i = 0; i < 3; i++) {
     const text = `Compaction fixture ${i}`;
     await type(text);
+    await until(() => page.locator("#conversation").innerText().then(body => body.includes(text)), "the window shows the sent message");
     await until(async () => {
       const turn = (await f.client.getSessionState(sessionId)).session.turns.at(-1);
       if (turn?.content === text && turn.status === "completed") return true;

@@ -88,7 +88,7 @@ await shot(named("01-start", "start"));
 if (!readme) {
   // Drive's ideas unfold under the composer (there is no Drive panel); run
   // the top one in its worktree and the start screen says a branch waits.
-  await page.locator('#sidebar-drive button[data-action="drive-open"]').first().click(); await page.waitForTimeout(800);
+  await page.locator('#sidebar-drive').click(); await page.waitForTimeout(800);
   await shot(named("01-start-ideas", "start-ideas"));
   await page.locator('#hero .proposal-row button[data-action="next-run"]').first().click(); await page.waitForTimeout(400);
   for (let i = 0; i < 60 && !(await page.locator('#hero button[data-action="review-open"]').count()); i++) {

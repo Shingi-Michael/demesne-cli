@@ -185,6 +185,16 @@ try {
   await until(() => page.locator("#workspace-title").innerText().then(text => text === "New chat"), "the top bar names the new chat");
   await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
+  // Each row deletes itself from the sidebar, without a menu or a dialog;
+  // the list closes up and never shows more than six.
+  const before = await page.locator("#sidebar-sessions .sidebar-item").count();
+  const other = page.locator(`#sidebar-sessions .sidebar-item:not(:has([data-args*='${sessionId}']))`).first();
+  await other.hover();
+  await other.locator(".sidebar-delete").click();
+  assert.equal(await page.locator("#overlay:not([hidden])").count(), 0, "Deleting opens no menu or dialog");
+  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before - 1), "the deleted conversation leaves the list");
+  await until(async () => (await f.client.listSessions()).length === before - 1, "the daemon archived it");
+  assert(await page.locator("#sidebar-sessions .sidebar-item").count() <= 6, "The sidebar lists at most six conversations");
   await capture("02-completed");
   await page.locator(".sidebar-footer button").click();
   await page.locator('#overlay[data-screen="settings"]').waitFor();

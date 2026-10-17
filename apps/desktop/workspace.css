@@ -74,8 +74,13 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-session-line .mono { font-family: "JetBrains Mono", monospace; font-size: 11.5px; }
 .sidebar-session-line .ok { color: var(--ok); }
 .sidebar-session-age { flex: none; color: var(--t4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.sidebar-more { display: block; width: 100%; padding: 6px 12px 0; color: var(--t4); font-size: 12.5px; text-align: left; }
-.sidebar-more:hover { color: var(--t2); }
+/* A row's delete sits over its time, shown while you point at the row. */
+.sidebar-item { position: relative; }
+.sidebar-delete { position: absolute; top: 50%; right: 6px; display: grid; place-items: center; width: 24px; height: 24px; margin-top: -12px; border-radius: 6px; color: var(--t3); background: var(--surface2); opacity: 0; pointer-events: none; transition: opacity 120ms; }
+.sidebar-item:hover .sidebar-delete, .sidebar-delete:focus-visible { opacity: 1; pointer-events: auto; }
+.sidebar-item:hover .sidebar-session-age { visibility: hidden; }
+.sidebar-delete:hover { color: var(--bad); background: var(--bad-soft); }
+.sidebar-delete .ico { width: 14px; height: 14px; }
 .sidebar-empty { padding: 10px 12px; color: var(--t4); font-size: 12.5px; line-height: 1.5; }
 /* Drive as a short footer: what it is doing and how far it has got. */
 .sidebar-drive { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; padding: 12px 12px 10px; border-top: 1px solid var(--line); }

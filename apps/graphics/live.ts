@@ -325,8 +325,13 @@ const shortAge = (date: string) => {
   const ms = Date.now() - Date.parse(date);
   return ms < 60_000 ? "now" : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m` : ms < 86_400_000 ? `${Math.floor(ms / 3_600_000)}h` : ms < 7 * 86_400_000 ? `${Math.floor(ms / 86_400_000)}d` : new Date(date).toLocaleDateString([], { month: "short", day: "numeric" });
 };
-/// How many sessions the inbox lists before "N more ›" opens the full list.
-const SIDEBAR_ROWS = 14;
+/// How many conversations the sidebar lists. Deleting one moves the next up;
+/// search finds the older ones.
+const SIDEBAR_ROWS = 6;
+/// Conversations deleted from the sidebar, hidden at once while the daemon
+/// archives them.
+const deletedSessions = new Set<string>();
+const ICON_TRASH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg>';
 /// The sidebar: the project's pulse, one inbox-style list of sessions (a
 /// session that needs you gets a second, coloured line; a settled one is a
 /// single quiet line with its time), Drive as a short footer, and the rail's
@@ -335,11 +340,11 @@ function renderSidebar() {
   const list = document.getElementById("sidebar-sessions");
   if (!state || !list) return;
   const query = (document.getElementById("sidebar-search") as HTMLInputElement | null)?.value.trim().toLowerCase() ?? "";
-  const sessions = state.sessions.filter(item => item.workspace === state!.workspace || item.id === state!.session?.id);
+  const sessions = state.sessions.filter(item => (item.workspace === state!.workspace || item.id === state!.session?.id) && !deletedSessions.has(item.id));
   const review = reviewJobs(), pinned = pinnedMission(), run = worktreeRun(), word = driveWord();
   const ideas = state.driveNext.proposals.length;
   const waiting = state.approvals.length ? "approval" : state.questions.length ? "answer" : "";
-  const signature = JSON.stringify([sessions, state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([sessions, [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -363,11 +368,11 @@ function renderSidebar() {
     const bucket = needs ? "" : dayGroup(item.updatedAt);
     if (bucket !== group && bucket) rows.push(`<div class="sidebar-group">${bucket}</div>`);
     if (bucket) group = bucket;
-    rows.push(row("select-session", { id: item.id }, needs ? (waiting && selected ? "warn" : working ? "working" : "bad") : item.turns ? "done" : "", title, needs, "", selected, needs ? "" : shortAge(item.updatedAt)));
+    // Each row carries its own delete, shown on hover: no menu, no dialog.
+    const remove = working ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" `);
+    rows.push(`<div class="sidebar-item">${row("select-session", { id: item.id }, needs ? (waiting && selected ? "warn" : working ? "working" : "bad") : item.turns ? "done" : "", title, needs, "", selected, needs ? "" : shortAge(item.updatedAt))}${remove}</div>`);
     shown++;
   }
-  const more = matching.length - shown;
-  if (more > 0) rows.push(btn("overlay", `${more} more ›`, { name: "sessions" }, "sidebar-more"));
   list.innerHTML = rows.length ? rows.join("") : `<p class="sidebar-empty">${query ? "No matching conversations" : "Your conversations will appear here."}</p>`;
   const title = document.getElementById("workspace-title");
   if (title) { title.textContent = inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
@@ -2144,8 +2149,6 @@ function renderOverlay() {
       { label: "Rename", value: "", action: "overlay", data: { name: "rename" } },
       { label: "Compact", value: `${c.estimated ? "~" : ""}${num(c.used)} of ${c.capacity ? tokensShort(c.capacity) : "—"} context used${c.percentage == null ? "" : ` · ${c.percentage}%`}`, action: "compact", data: {}, hint: state.activeTurnId ? "after this turn" : "" },
       { label: "New chat", value: "", action: "new-session", data: {}, hint: "⌘N" },
-      { label: "All conversations", value: `${state.sessions.length}`, action: "overlay", data: { name: "sessions" } },
-      { label: "Archive", value: "stays recoverable", action: "overlay", data: { name: "confirm-archive" } },
       { label: "Settings", value: "", action: "overlay", data: { name: "settings" }, hint: "⌘," },
     ];
   } else if (overlay === "rename") {
@@ -2694,6 +2697,19 @@ async function dispatch(
         await api("panel-watch", { panel: "log", command: record.id });
         await api("processes");
       }
+    }
+    return;
+  }
+  if (action === "delete-session") {
+    // Gone from the list at once; the next conversation moves up.
+    deletedSessions.add(args.id);
+    renderSidebar();
+    try {
+      await api("archive", { id: args.id });
+    } catch (error) {
+      deletedSessions.delete(args.id);
+      renderSidebar();
+      throw error;
     }
     return;
   }

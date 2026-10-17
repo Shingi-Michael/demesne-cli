@@ -298,17 +298,28 @@ let paneSignature = "",
   questionSignature = "",
   heroSignature = "";
 const diffCache = new Map<string, { added: number; removed: number }>();
+/// The last few requests and how they ended, for demesneInspect.
+const recentRequests: { method: string; at: number; outcome: string }[] = [];
 async function api<T = unknown>(
   method: string,
   args: Record<string, unknown> = {},
 ): Promise<T> {
-  return window.demesne.request<T>(method, {
-    ...args,
-    ...(["drive", "drive-control"].includes(method)
-      ? { observation: observeUI() }
-      : {}),
-    sessionId: state?.session?.id,
-  });
+  const entry = { method, at: Date.now(), outcome: "pending" };
+  if (recentRequests.push(entry) > 20) recentRequests.shift();
+  try {
+    const result = await window.demesne.request<T>(method, {
+      ...args,
+      ...(["drive", "drive-control"].includes(method)
+        ? { observation: observeUI() }
+        : {}),
+      sessionId: state?.session?.id,
+    });
+    entry.outcome = "ok";
+    return result;
+  } catch (error) {
+    entry.outcome = `error: ${error instanceof Error ? error.message : String(error)}`;
+    throw error;
+  }
 }
 function notice(message: string) {
   el("notice").textContent = message;
@@ -341,25 +352,99 @@ function context() {
   };
 }
 let sidebarSignature = "";
+/// A day bucket for the inbox: today's rows carry no heading.
+const dayGroup = (date: string) => {
+  const ms = Date.now() - Date.parse(date);
+  return ms < 86_400_000 ? "" : ms < 172_800_000 ? "Yesterday" : ms < 7 * 86_400_000 ? "This week" : "Earlier";
+};
+/// "2h", "yesterday", "Oct 3": the quiet time beside a settled session.
+const shortAge = (date: string) => {
+  const ms = Date.now() - Date.parse(date);
+  return ms < 60_000 ? "now" : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m` : ms < 86_400_000 ? `${Math.floor(ms / 3_600_000)}h` : ms < 7 * 86_400_000 ? `${Math.floor(ms / 86_400_000)}d` : new Date(date).toLocaleDateString([], { month: "short", day: "numeric" });
+};
+/// How many sessions the inbox lists before "N more ›" opens the full list.
+const SIDEBAR_ROWS = 14;
+/// The sidebar: the project's pulse, one inbox-style list of sessions (a
+/// session that needs you gets a second, coloured line; a settled one is a
+/// single quiet line with its time), Drive as a short footer, and the rail's
+/// dots when the sidebar is folded.
 function renderSidebar() {
   const list = document.getElementById("sidebar-sessions");
   if (!state || !list) return;
   const query = (document.getElementById("sidebar-search") as HTMLInputElement | null)?.value.trim().toLowerCase() ?? "";
   const sessions = state.sessions.filter(item => item.workspace === state!.workspace || item.id === state!.session?.id);
-  const signature = JSON.stringify([sessions, state.session?.id, state.session?.title, state.connection, state.activeTurnId, query]);
+  const review = reviewJobs(), pinned = pinnedMission(), run = worktreeRun(), word = driveWord();
+  const ideas = state.driveNext.proposals.length;
+  const waiting = state.approvals.length ? "approval" : state.questions.length ? "answer" : "";
+  const signature = JSON.stringify([sessions, state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
-  const rows = sessions.filter(item => item.title.toLowerCase().includes(query)).slice(0, 60);
-  list.innerHTML = rows.length ? rows.map(item => {
+  const dot = (tone: string) => `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`;
+  const row = (action: string, args: Record<string, unknown>, tone: string, title: string, line: string, extra = "", selected = false, age = "") =>
+    btn(action, `${dot(tone)}<span class="sidebar-session-body"><span class="sidebar-session-name">${h(title)}</span>${line ? `<span class="sidebar-session-line">${line}</span>` : ""}</span>${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, args, `sidebar-session${line ? " needs" : ""}${selected ? " selected" : ""}`)
+      .replace("<button ", `<button title="${h(title)}"${selected ? ' aria-current="page"' : ""}${extra} `);
+  // Drive's finished branches sit with the sessions: each is a decision.
+  const branches = query ? review.filter((job) => job.title.toLowerCase().includes(query)) : review;
+  const rows: string[] = branches.map((job) => job.status === "ready"
+    ? row("review-open", { show: true }, "acc", job.title, `<span class="acc">Ready to review</span>${job.diff ? ` · <span class="mono"><span class="ok">+${job.diff.additions}</span> <span class="bad">−${job.diff.deletions}</span></span>` : ""} · by Drive`)
+    : row("review-open", { show: true }, "bad", job.title, `<span class="bad">${job.unchanged ? "Finished with no changes" : "Couldn't finish"}</span> · by Drive`));
+  const matching = sessions.filter(item => item.title.toLowerCase().includes(query));
+  let group = "", shown = 0;
+  for (const item of matching) {
+    if (shown >= SIDEBAR_ROWS) break;
     const selected = item.id === current?.id;
-    const working = selected ? Boolean(state!.activeTurnId) : item.status === "running" || item.status === "queued";
-    return btn("select-session", `<span class="sidebar-session-mark ${working ? "working" : ""}" aria-hidden="true">${working ? "●" : "◌"}</span><span class="sidebar-session-name">${h(selected ? inSession() ? current!.title : "New conversation" : item.turns ? item.title : "New conversation")}</span><span class="sidebar-session-age">${h(age(item.updatedAt))}</span>`, { id: item.id }, `sidebar-session${selected ? " selected" : ""}`).replace("<button ", `<button title="${h(item.title)}"${selected ? ' aria-current="page"' : ""} `);
-  }).join("") : `<p class="sidebar-empty">${query ? "No matching conversations" : "Your conversations will appear here."}</p>`;
+    const title = selected ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
+    const working = selected ? Boolean(state.activeTurnId) && !waiting : item.status === "running" || item.status === "queued";
+    const needs = selected && waiting ? `<span class="warn">Waiting for your ${waiting}</span> · now` : working ? "Working · now" : selected && !inSession() ? "" : item.status === "failed" ? `<span class="bad">Stopped with an error</span> · ${h(shortAge(item.updatedAt))}` : "";
+    const bucket = needs ? "" : dayGroup(item.updatedAt);
+    if (bucket !== group && bucket) rows.push(`<div class="sidebar-group">${bucket}</div>`);
+    if (bucket) group = bucket;
+    rows.push(row("select-session", { id: item.id }, needs ? (waiting && selected ? "warn" : working ? "working" : "bad") : item.turns ? "done" : "", title, needs, "", selected, needs ? "" : shortAge(item.updatedAt)));
+    shown++;
+  }
+  const more = matching.length - shown;
+  if (more > 0) rows.push(btn("overlay", `${more} more ›`, { name: "sessions" }, "sidebar-more"));
+  list.innerHTML = rows.length ? rows.join("") : `<p class="sidebar-empty">${query ? "No matching conversations" : "Your conversations will appear here."}</p>`;
   const title = document.getElementById("workspace-title");
-  if (title) { title.textContent = inSession() ? current?.title ?? "Conversation" : "New conversation"; title.title = title.textContent; }
+  if (title) { title.textContent = inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
   const connection = document.getElementById("sidebar-connection");
   if (connection) { connection.textContent = state.connection === "online" ? "Connected" : state.connection === "connecting" ? "Connecting…" : "Offline"; connection.dataset.state = state.connection; }
+  // The project's pulse: its branch, then what most needs you in it.
+  const pulse = document.getElementById("desktop-project-pulse");
+  if (pulse) {
+    const branch = state.session?.workspace?.gitBranch ?? "";
+    const needs = (waiting ? 1 : 0) + review.length;
+    const about = needs ? `${needs} waiting` : word.live ? "Drive working" : state.connection === "online" ? "quiet" : state.connection === "connecting" ? "connecting…" : "offline";
+    pulse.textContent = [branch, about].filter(Boolean).join(" · ");
+    pulse.dataset.tone = needs ? "warn" : word.live ? "acc" : state.connection === "online" ? "ok" : "quiet";
+  }
+  // Drive as a short footer: its mission, how far it has got, and its ideas.
+  const drive = document.getElementById("sidebar-drive");
+  if (drive) {
+    const live = pinned && pinned.status !== "paused" && pinned.status !== "blocked";
+    const steps = pinned ? driveTaskList(pinned) : [];
+    const done = steps.filter((step) => step.mark === "✓").length;
+    const tail = [steps.length > 1 ? `step ${Math.min(done + 1, steps.length)} of ${steps.length}` : "", ideas ? `${ideas} idea${ideas === 1 ? "" : "s"} waiting` : ""].filter(Boolean).join(" · ");
+    const open = btn("panel", "Open ›", { name: "drive" }, "", true);
+    if (pinned) {
+      const status = pinned.status === "blocked" ? "needs you" : pinned.status === "paused" ? "is paused" : pinned.status === "waiting" ? "is waiting" : "is working";
+      drive.innerHTML = `<div class="sidebar-drive-head">${dot(live ? "working" : pinned.status === "blocked" ? "warn" : "")}<b>Drive</b><span>${status}</span><span class="spacer"></span>${open}</div><div class="sidebar-drive-title" title="${h(missionTitle(pinned))}">${h(missionTitle(pinned))}</div>${steps.length > 1 || tail ? `<div class="sidebar-drive-steps">${steps.length > 1 ? steps.map((step, index) => `<i class="${step.mark === "✓" ? "done" : index === done ? "current" : ""}"></i>`).join("") : ""}<small>${h(tail)}</small></div>` : ""}`;
+      drive.hidden = false;
+    } else if (run.fix || run.away || ideas) {
+      drive.innerHTML = `<div class="sidebar-drive-head">${dot(run.fix || run.away ? "working" : "")}<b>Drive</b><span>${run.fix ? "is working" : run.away ? "is running the away list" : `has ${ideas} idea${ideas === 1 ? "" : "s"}`}</span><span class="spacer"></span>${open}</div>${run.fix ? `<div class="sidebar-drive-title" title="${h(run.fix.title)}">${h(run.fix.title)}</div>` : ""}`;
+      drive.hidden = false;
+    } else drive.hidden = true;
+  }
+  // The rail: a dot where something waits, a ring for Drive's progress.
+  const badge = document.getElementById("rail-sessions-badge"), ring = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
+  if (badge) badge.hidden = !waiting;
+  if (branchButton) branchButton.hidden = !review.length;
+  if (ring) {
+    const steps = pinned ? driveTaskList(pinned) : [];
+    ring.hidden = !pinned && !run.fix && !run.away;
+    ring.style.setProperty("--progress", `${steps.length ? Math.round(steps.filter((step) => step.mark === "✓").length / steps.length * 100) : run.fix || run.away ? 34 : 0}%`);
+  }
 }
 document.getElementById("sidebar-search")?.addEventListener("input", renderSidebar);
 let statusSignature = "";
@@ -421,18 +506,11 @@ function renderStatus() {
   el("composer-context").hidden = !inSession() || !c2;
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
-  // The desktop toolbar already names the project; the header carries the
-  // session's live state and, in a session, its four places as words.
-  const word = driveWord();
-  const places = inSession()
-    ? `<nav class="header-nav" aria-label="Panels">${PLACES.map((place) =>
-        place.name === "drive"
-          ? `<button type="button" id="drive-word" class="${drivePopOpen || pane === "drive" ? "active" : ""}" data-action="drive-pop" aria-haspopup="dialog" aria-expanded="${drivePopOpen}">Drive${word.needs ? `<b class="count" aria-label="${word.needs} need you">${word.needs}</b>` : word.live ? '<i class="live" aria-label="working"></i>' : ""}</button>`
-          : `<button type="button" class="${(place.views as readonly string[]).includes(pane ?? "") ? "active" : ""}" data-action="panel" data-args="${h(JSON.stringify({ name: place.name }))}" data-drive="panel-${place.name}">${place.label}</button>`,
-      ).join("")}</nav>`
-    : btn("panel", "Sessions", { name: "history" }, "sessions-word", true).replace("<button ", '<button title="Past sessions (Alt+H)" ');
+  // The top bar carries the session's branch and ⋯, which opens the
+  // session's own view (rename, compact, history). The sidebar shows what
+  // needs you; Drive lives in its footer.
   el("header").innerHTML =
-    `<div class="header-state">${state.session?.workspace?.gitBranch ? `<span>⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "pill auto-approve") : ""}${state.activeTurnId || state.approvals.length ? `<span class="pill ${state.approvals.length ? "approval" : "running"}">${state.approvals.length ? "approval" : "running"}</span>` : ""}</div>${places}`;
+    `<div class="header-state">${state.session?.workspace?.gitBranch ? `<span class="chip">⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "chip auto-approve") : ""}</div>${inSession() ? btn("panel", "⋯", { name: "history" }, `header-more${pane === "history" || pane === "context" ? " active" : ""}`, true).replace("<button ", '<button title="This session (Alt+H)" aria-label="This session" ') : ""}`;
 }
 function totals(run: GraphicsRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -965,7 +1043,7 @@ function renderComposer() {
   const suggestion = nextSuggestion();
   const asking = state.approvals.length > 0 && !question;
   editor.placeholder = asking
-    ? "Say what to do instead, or press Enter to allow…"
+    ? "Or tell demesne what to do instead…"
     : question
     ? answered ? "Your answers are saved. Choose Resume to continue." : question.status === "paused" ? "Type your answer to resume the interview…" : "Type your answer here…"
     : inSession()
@@ -1006,34 +1084,29 @@ function renderComposer() {
     .map((path) => btn("remove-mention", `${h(path)} ×`, { path }, "chip"))
     .join("");
 }
-/// An approval turns the composer into the question: its top line asks
-/// ("Run bun run check?"), "show" opens the full command or the diff, and
-/// the bar holds Allow, Deny and a scoped always-allow beside Stop. Typing
-/// says what to do instead.
+/// An approval is one amber row above the composer: what the model wants
+/// ("Run bun run check", "Edit hello.ts"), a short note, then Allow /
+/// Always / Deny. "command" or "diff" unfolds the whole thing under the row.
+/// Typing in the composer says what to do instead.
+const APPROVAL_ICONS = {
+  command: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>',
+  edit: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  other: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>',
+};
+/// Whether the row's command or diff is unfolded (folds again per approval).
+let approvalOpen = false;
 function renderApproval() {
   if (!state) return;
   const approval = state.approvals[0],
-    signature = JSON.stringify([approval, state.workspace]);
+    signature = JSON.stringify([approval, state.workspace, approvalOpen]);
   if (signature === approvalSignature) return;
   approvalSignature = signature;
-  const form = el("composer") as HTMLFormElement,
-    bar = form.querySelector<HTMLElement>(".composer-bar")!;
-  let card = form.querySelector<HTMLElement>(".approval-card"),
-    actions = bar.querySelector<HTMLElement>(".approval-actions");
-  if (!card) {
-    card = document.createElement("div");
-    card.className = "approval-card";
-    form.insertBefore(card, form.querySelector("textarea"));
-  }
-  if (!actions) {
-    actions = document.createElement("div");
-    actions.className = "approval-actions";
-    bar.prepend(actions);
-  }
-  form.classList.toggle("asking", Boolean(approval));
-  card.hidden = actions.hidden = !approval;
+  const slot = el("approval");
+  el("composer").classList.toggle("asking", Boolean(approval));
+  slot.hidden = !approval;
   if (!approval) {
-    card.innerHTML = actions.innerHTML = "";
+    slot.innerHTML = "";
+    approvalOpen = false;
     return;
   }
   const input = approval.input as Record<string, unknown>,
@@ -1044,7 +1117,7 @@ function renderApproval() {
     },
     folder = relative(input.cwd ?? "") || state.workspace.split("/").pop() || "";
   const command = Array.isArray(input.argv) ? input.argv.join(" ") : String(input.command ?? ""),
-    // The program by name in the question; the full path stays in "show".
+    // The program by name on the row; the full path waits in the fold.
     short = Array.isArray(input.argv) && input.argv.length ? [String(input.argv[0]).split("/").at(-1), ...input.argv.slice(1)].join(" ") : command;
   // An edit's hunks as removed and added lines; anything else shows its input.
   const hunks = approval.name === "edit_file"
@@ -1059,23 +1132,22 @@ function renderApproval() {
       ? `<pre class="approval-diff">${hunks.map((hunk) => [...lines(hunk.oldText).map((line) => `<span class="del">- ${h(line)}</span>`), ...lines(hunk.newText).map((line) => `<span class="add">+ ${h(line)}</span>`)].join("")).join('<span class="muted">⋯</span>')}</pre>`
       : `<pre>${h(JSON.stringify(input, null, 2))}</pre>`;
   const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
-  const question = isCommand
-    ? `Run <code>${h(clip(short, 64))}</code>?`
-    : hunks
-      ? `${input.mode === "append" ? "Append to" : "Edit"} <code>${h(relative(input.path))}</code>?`
-      : `${h((approval.summary || approval.name).replace(/^./, (c) => c.toUpperCase()))}?`;
-  const where = isCommand ? `in ${h(folder)} · not sandboxed` : hunks ? `${counts({ added, removed })}` : h(approval.name);
-  card.innerHTML =
-    `<div class="approval-title"><span class="amber">!</span><span class="approval-question">${question}</span><small>${where}</small></div><details class="approval-details"><summary>show ${isCommand ? "command" : hunks ? "diff" : "details"}</summary><div class="command-inset">${preview}</div></details>`;
+  const verb = isCommand ? "Run" : hunks ? (input.mode === "append" ? "Append to" : "Edit") : (approval.summary || approval.name).replace(/^./, (c) => c.toUpperCase()),
+    target = isCommand ? clip(short, 64) : hunks ? relative(input.path) : "",
+    note = isCommand ? `in ${h(folder)} · not sandboxed` : hunks ? counts({ added, removed }) : h(approval.name),
+    icon = isCommand ? APPROVAL_ICONS.command : hunks ? APPROVAL_ICONS.edit : APPROVAL_ICONS.other;
   // The always-allow scope in words: the exact command, or the folder.
   const rule = approval.rule ? approval.rule.slice(approval.rule.indexOf(":") + 1).replace(/ \*$/, " …") : "";
   const scope = isCommand
-    ? `always allow <b>${h(command && rule.startsWith(command) ? short + rule.slice(command.length) : rule)}</b>`
-    : hunks ? `always allow edits to <b>${h(rule && rule !== "." ? relative(rule) : "this project")}</b>` : "always allow";
-  actions.innerHTML =
+    ? `Always allow ${command && rule.startsWith(command) ? short + rule.slice(command.length) : rule}`
+    : hunks ? `Always allow edits to ${rule && rule !== "." ? relative(rule) : "this project"}` : "Always allow";
+  slot.innerHTML =
+    `<div class="approval-row" role="group" aria-label="Approval">${icon}<span class="approval-verb">${h(verb)}</span>${target ? `<code>${h(target)}</code>` : ""}<span class="approval-note">· ${note}</span><span class="approval-space"></span>` +
+    btn("approval-show", approvalOpen ? "hide" : isCommand ? "command" : hunks ? "diff" : "details", {}, `approval-show${approvalOpen ? " open" : ""}`) +
     btn("permission", `Allow ${k("↵")}`, { id: approval.id, decision: "allow_once" }, "allow") +
+    (approval.rule ? btn("permission", "Always", { id: approval.id, decision: "allow_always" }, "always").replace("<button ", `<button title="${h(scope)} · saved to your config (${h(approval.rule)})" `) : "") +
     btn("permission", `Deny ${k("Esc")}`, { id: approval.id, decision: "deny" }, "deny") +
-    (approval.rule ? btn("permission", scope, { id: approval.id, decision: "allow_always" }, "quiet").replace("<button ", `<button title="Saved to your config: ${h(approval.rule)}" `) : "");
+    `</div><div class="approval-fold command-inset"${approvalOpen ? "" : " hidden"}>${preview}</div>`;
 }
 /// Enter with text during an approval: deny, then stop the turn and send what
 /// you typed as the next message.
@@ -1203,14 +1275,6 @@ function selectedRun() {
 function panelHeader(title: string, subject = "", back?: { name: PaneName; label: string }, subjectTone = "") {
   return `<div class="panel-heading">${back ? btn("panel", `‹ ${back.label}`, { name: back.name }, "back", true) : ""}<strong class="title">${h(title)}</strong><span class="subject${subjectTone ? ` tone-${subjectTone}` : ""}">${h(subject)}</span>${btn("close-panel", "×", {}, "close", true)}</div>`;
 }
-/// The panel's four places, as words in the top bar. Each view belongs to
-/// one, and its word lights while the view is open.
-const PLACES = [
-  { name: "changes", label: "Review", views: ["changes", "verification", "log"] },
-  { name: "files", label: "Files", views: ["files", "preview"] },
-  { name: "drive", label: "Drive", views: ["drive"] },
-  { name: "history", label: "Session", views: ["history", "context"] },
-] as const;
 /// `bun run check`, not `/opt/homebrew/Cellar/bun/1.4.0/bin/bun run check`.
 const commandLabel = (argv: readonly string[]) => [String(argv[0] ?? "").split("/").pop(), ...argv.slice(1)].join(" ");
 /// A path inside the workspace, relative to it.
@@ -3478,6 +3542,11 @@ async function dispatch(
     driveTab = "done";
     return openPanel("drive");
   }
+  if (action === "approval-show") {
+    approvalOpen = !approvalOpen;
+    renderApproval();
+    return;
+  }
   if (action === "toggle-steps") {
     stepsOpen.has(args.id) ? stepsOpen.delete(args.id) : stepsOpen.add(args.id);
     follow = false;
@@ -3810,6 +3879,8 @@ function renderState(next: Snapshot) {
   if (renderedPalette !== next.palette) {
     for (const [name, color] of Object.entries(next.palette))
       document.documentElement.style.setProperty(`--${name}`, color);
+    // The desktop restyles its own themes by name (desktop.css).
+    document.documentElement.dataset.theme = next.theme;
     renderedPalette = next.palette;
   }
   // Drive working this session is a session, even before its first turn:
@@ -3872,7 +3943,6 @@ document.addEventListener("click", (event) => {
     renderPanels();
   }
   const summary = (event.target as Element).closest("summary");
-  if (summary instanceof HTMLElement && summary.closest(".approval-card")) summary.focus({ preventScroll: true });
   const detail = summary?.parentElement as HTMLDetailsElement | undefined;
   if (detail?.dataset.detail) {
     const id = detail.dataset.detail;
@@ -4020,7 +4090,7 @@ document.addEventListener("keydown", (event) => {
     ctrl = event.ctrlKey || event.metaKey;
   // Native details and buttons must keep Enter/Space when a side panel is open.
   if (!ctrl && !event.altKey && (key === "enter" || key === " ") && event.target instanceof Element) {
-    const control = event.target.closest<HTMLElement>(".approval-card summary, .approval-actions button, .thinking-toggle");
+    const control = event.target.closest<HTMLElement>(".approval-row button, .thinking-toggle");
     if (control) { event.preventDefault(); control.click(); return; }
   }
   const run = (task: () => Promise<unknown> | void) => {
@@ -4303,6 +4373,8 @@ document.addEventListener("keydown", (event) => {
   }
 });
 window.demesneInspect = () => ({
+  // What the host last published: the session, its turn, queue and draft.
+  host: { session: state?.session?.id, active: state?.activeTurnId, busy: state?.busy, queue: state?.queue, draft: state?.draft, restored: state?.restored, connection: state?.connection, notice: el("notice").hidden ? "" : el("notice").textContent, requests: recentRequests.map((entry) => `${entry.method} ${entry.outcome}`) },
   // Whether the conversation follows new text, and where it is scrolled.
   stage: { follow, top: Math.round(el("stage").scrollTop), bottom: Math.round(el("stage").scrollHeight - el("stage").clientHeight) },
   selection: getSelection()?.toString() ?? "",
@@ -4398,8 +4470,8 @@ window.demesneInspect = () => ({
   })),
   approvals: state?.approvals.length,
   autoApprove: state?.session?.autoApprove === true,
-  approvalText: el("composer").querySelector<HTMLElement>(".approval-card")?.innerText ?? "",
-  approvalDetailsOpen: el("composer").querySelector<HTMLDetailsElement>(".approval-card details")?.open ?? false,
+  approvalText: el("approval").innerText,
+  approvalDetailsOpen: !(el("approval").querySelector<HTMLElement>(".approval-fold")?.hidden ?? true),
   questions: state?.questions.length,
   queue: state?.queue,
   pane,

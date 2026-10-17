@@ -90,7 +90,12 @@ async function click(action: string, expected: Record<string, unknown> = {}) {
     return false;
   }, `click ${action}`);
 }
-async function type(text: string) { await page.locator("textarea").fill(text); await page.locator("textarea").press("Enter"); }
+async function type(text: string) {
+  // The daemon can finish a turn before the window hears of it; Enter while
+  // the window still shows a running turn would queue the text instead.
+  await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "composer idle");
+  await page.locator("textarea").fill(text); await page.locator("textarea").press("Enter");
+}
 async function textIncludes(text: string) {
   return until(() => page.locator("body").innerText().then(body => body.includes(text)), `visible text ${text}`);
 }
@@ -118,7 +123,7 @@ async function open(workspace = false, welcome = false) {
     await page.getByRole("button", { name: "Open a project", exact: false }).click();
   }
   await until(() => evaluate<boolean>("const editor=document.querySelector('textarea');return !!editor && editor.getBoundingClientRect().width>0 && document.body.innerText.includes('desktop-test');"), "connected desktop project", 30_000);
-  assert.equal(await evaluate("return document.getElementById('desktop-project-path')?.textContent;"), f.workspace);
+  assert.equal(await evaluate("return document.getElementById('desktop-project-button')?.title;"), f.workspace);
   assert.equal(await page.evaluate(() => typeof (window as any).require), "undefined", "No Node in the renderer");
   assert.equal(await page.evaluate(() => typeof (window as any).process), "undefined", "No process or environment in the renderer");
   const isolation = await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.getLastWebPreferences());
@@ -142,12 +147,13 @@ try {
   await open(false, true);
   await capture("01-start");
   await type(prompt);
-  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["Edit "]), "file approval visible");
+  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Edit"]), "file approval visible");
+  await capture("02-file-approval");
   await click("permission", { decision: "allow_once" });
-  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["Run "]), "command approval visible");
-  assert(await evaluate<boolean>("const details = document.querySelector('.approval-card .approval-details'); return !!details && !details.open;"), "The full command starts folded");
-  await page.locator(".approval-card .approval-details > summary").click();
-  await until(() => evaluate<boolean>("const details = document.querySelector('.approval-card .approval-details'); return !!details?.open && details.innerText.includes('run check');"), "command details can be inspected");
+  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Run"]), "command approval visible");
+  assert(await evaluate<boolean>("const fold = document.querySelector('#approval .approval-fold'); return !!fold && fold.hidden;"), "The full command starts folded");
+  await page.locator("#approval .approval-show").click();
+  await until(() => evaluate<boolean>("const fold = document.querySelector('#approval .approval-fold'); return !!fold && !fold.hidden && fold.innerText.includes('run check');"), "command details can be inspected");
   await capture("02-command-approval");
   await click("permission", { decision: "allow_once" });
   await textIncludes(completed);
@@ -161,14 +167,22 @@ try {
   assert(commands.commands.some(command => command.status === "completed" && command.exitCode === 0 && command.stdout.includes("DESKTOP_CHECK_PASSED")), "Approved command output was recorded");
   assert(await evaluate<boolean>("return !!document.querySelector('.katex') && !!document.querySelector('pre code');"), "Markdown, code and math rendered in Chromium");
   await until(() => page.locator(".sidebar-session[aria-current='page']").innerText().then(text => text.includes("Desktop smoke")), "sidebar tracks the current conversation title");
+  await page.getByRole("button", { name: "Find a conversation", exact: true }).click();
   await page.getByRole("searchbox", { name: "Find a conversation" }).fill("no-such-conversation");
   await textIncludes("No matching conversations");
-  await page.getByRole("searchbox", { name: "Find a conversation" }).fill("");
+  await page.getByRole("searchbox", { name: "Find a conversation" }).press("Escape");
+  assert(!await page.getByRole("searchbox", { name: "Find a conversation" }).isVisible(), "Escape folds the search away");
+  await until(() => page.locator(".sidebar-session[aria-current='page']").isVisible(), "the list is back after search");
   await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
   assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "false");
-  await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
-  await page.getByRole("button", { name: "New conversation", exact: true }).click();
+  assert(await page.locator("#rail-expand").isVisible(), "The folded sidebar is a rail");
+  assert(!await page.locator("#sidebar-sessions").isVisible(), "The rail hides the list");
+  await capture("02-rail");
+  await page.locator("#rail-expand").click();
+  assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "true");
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.getByRole("heading", { name: "What would you like to build?" }).waitFor();
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === "New chat"), "the top bar names the new chat");
   await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
   await capture("02-completed");
@@ -181,12 +195,14 @@ try {
   await page.locator("#overlay .menu-row").filter({ has: page.getByText("Demesne Light", { exact: true }) }).click();
   await page.locator("#overlay").waitFor({ state: "hidden" });
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#F6F8FA");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#f7f7f5", "The desktop wears its own light palette");
   await capture("02-light-conversation");
   await page.locator(".sidebar-footer button").click();
   await page.locator("#overlay .menu-row").filter({ has: page.getByText("Theme", { exact: true }) }).click();
   await page.locator("#overlay .menu-row").filter({ has: page.getByText("Demesne", { exact: true }) }).click();
   await page.locator("#overlay").waitFor({ state: "hidden" });
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#0B1218");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#121315", "The desktop wears its own dark palette");
   await page.locator(".sidebar-footer button").click();
   await page.locator("#overlay .menu-row").filter({ has: page.getByText("Providers", { exact: true }) }).click();
   await page.locator('#overlay[data-screen="providers"]').waitFor();
@@ -221,9 +237,11 @@ try {
   for (let i = 0; i < 3; i++) {
     const text = `Compaction fixture ${i}`;
     await type(text);
+    await until(() => page.locator("#conversation").innerText().then(body => body.includes(text)), "the window shows the sent message");
     await until(async () => {
       const turn = (await f.client.getSessionState(sessionId)).session.turns.at(-1);
-      return turn?.content === text && turn.status === "completed";
+      if (turn?.content === text && turn.status === "completed") return true;
+      throw new Error(`last turn: ${JSON.stringify({ content: turn?.content, status: turn?.status })}`);
     }, "history ready for compaction");
   }
   await click("panel", { name: "context" });
@@ -271,6 +289,12 @@ try {
 } catch (error) {
   if (desktop) {
     try { writeFileSync(join(output, "failure.txt"), await evaluate<string>("return document.body.innerText;")); await capture("failure"); } catch {}
+    try {
+      const sessions = (await f.client.listSessions()).map(session => ({ id: session.id, title: session.title, turns: session.turns.map(turn => [turn.content.slice(0, 40), turn.status]) }));
+      const state = JSON.stringify({ window: await evaluate("return window.demesneInspect?.().host;"), sessions }, null, 2);
+      writeFileSync(join(output, "failure-state.json"), state);
+      console.error(`Desktop state at failure:\n${state}`);
+    } catch {}
   }
   throw error;
 } finally {

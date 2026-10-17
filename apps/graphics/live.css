@@ -1509,7 +1509,7 @@ button:disabled {
     top: 40px;
     max-height: calc(100% - 80px);
   }
-  .approval-card .command-inset {
+  .approval-fold {
     max-height: 30vh;
   }
   .live-app.start .stage {
@@ -3419,101 +3419,121 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
   margin-top: -10px;
 }
 
-/* An approval is the composer asking: amber edge, the question on its top
-   line, Allow / Deny / always allow in its bar beside Stop. */
-.composer.asking {
-  border-color: var(--composerQueuedBorder);
-  background: color-mix(in srgb, var(--thinking) 4%, var(--surface));
-}
-.composer .approval-card {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.composer .approval-card[hidden],
-.composer .approval-actions[hidden] {
+/* An approval is one amber row above the composer: icon, verb, target and
+   a note, then command/diff, Allow, Always and Deny. The whole command or
+   diff unfolds under the row. */
+#approval[hidden] {
   display: none;
 }
-.composer .approval-title {
+#approval {
+  margin-bottom: 8px;
+}
+.approval-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 8px 0 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--thinking) 13%, transparent);
   font-size: 13px;
   line-height: 20px;
+  color: var(--paper);
 }
-.composer .approval-question {
+.approval-row .ico {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: var(--thinking);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.approval-verb {
+  color: var(--strong);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.approval-row code {
+  font-size: 12.5px;
+  color: var(--strong);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.composer .approval-question code {
-  font: inherit;
-  color: var(--strong);
-}
-.composer .approval-title small {
+.approval-note {
+  color: var(--muted);
+  font-size: 12px;
   white-space: nowrap;
 }
-.composer .approval-details > summary {
-  margin-left: 16px;
+.approval-space {
+  flex: 1;
 }
-.composer .approval-diff .del,
-.composer .approval-diff .add,
-.composer .approval-diff .muted {
+.approval-row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 18px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--paper);
+  white-space: nowrap;
+}
+.approval-row button:hover {
+  background: color-mix(in srgb, var(--strong) 8%, transparent);
+}
+.approval-row button:focus-visible {
+  outline: 1px solid var(--electric);
+  outline-offset: 1px;
+}
+.approval-row button kbd {
+  font-size: 11px;
+  color: var(--muted);
+}
+.approval-row .allow {
+  background: var(--strong);
+  color: var(--ink);
+}
+.approval-row .allow:hover {
+  background: color-mix(in srgb, var(--strong) 88%, var(--ink));
+}
+.approval-row .allow kbd {
+  color: inherit;
+  border-color: transparent;
+  background: rgba(0, 0, 0, 0.12);
+}
+.approval-row .deny,
+.approval-row .approval-show {
+  color: var(--secondary);
+}
+.approval-row .approval-show.open {
+  color: var(--strong);
+}
+.approval-fold {
+  margin-top: 4px;
+  max-height: 240px;
+}
+.approval-fold[hidden] {
+  display: none;
+}
+.approval-diff .del,
+.approval-diff .add,
+.approval-diff .muted {
   display: block;
 }
-.composer .approval-diff .del {
+.approval-diff .del {
   color: var(--signal);
   background: var(--errorSurface);
 }
-.composer .approval-diff .add {
+.approval-diff .add {
   color: var(--citron);
   background: color-mix(in srgb, var(--citron) 10%, transparent);
-}
-.composer.asking #composer-model,
-.composer.asking #composer-context,
-.composer.asking .hints {
-  display: none;
-}
-.composer .approval-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: nowrap;
-  min-width: 0;
-}
-.composer .approval-actions button {
-  font-size: 12px;
-  line-height: 18px;
-  padding: 2px 10px;
-  gap: 6px;
-  border-radius: 4px;
-}
-.composer .approval-actions .allow {
-  color: var(--electric);
-  border-color: var(--composerRestoredBorder);
-  background: var(--menuSelection);
-}
-.composer .approval-actions .deny {
-  color: var(--paper);
-  background: none;
-  border-color: var(--borderBright);
-}
-.composer .approval-actions .deny kbd,
-.composer .approval-actions .allow kbd {
-  color: var(--muted);
-}
-.composer .approval-actions .quiet {
-  margin-left: 6px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.composer .approval-actions .quiet b {
-  color: var(--secondary);
-  font-weight: 400;
-}
-.composer .approval-actions .quiet:hover,
-.composer .approval-actions .quiet:hover b {
-  color: var(--electric);
 }
 
 /* A mission homed in this session is the conversation's newest turn: the

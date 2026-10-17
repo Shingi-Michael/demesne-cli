@@ -77,7 +77,8 @@ page.on("pageerror", (error: Error) => { pageErrors.push(error.message); console
 await page.waitForSelector("#app:not([hidden])", { timeout: 30_000 });
 await page.waitForTimeout(3000);
 const shot = async (name: string) => { await page.screenshot({ path: join(output, `${name}.png`) }); console.log("shot", name); };
-const panel = async (name: string) => { await page.locator(`.header-nav button[data-args*='"${name}"']`).click(); await page.waitForTimeout(1500); };
+// Panels open from the conversation and the top bar's ⋯, or by their keys.
+const panel = async (name: string) => { if (name === "history") await page.locator(".header-more").click(); else await page.keyboard.press(name === "changes" ? "Alt+d" : "Alt+o"); await page.waitForTimeout(1500); };
 const toggle = async (selector: string, name: string) => {
   if (!(await page.locator(selector).count())) return;
   await page.locator(selector).first().click(); await page.waitForTimeout(800);
@@ -90,7 +91,7 @@ if (!readme) {
   // Run the top proposal in its worktree; the start screen then says a branch waits for review.
   await page.locator('#hero button[data-action="next-run"]').first().click();
   for (let i = 0; i < 60 && !(await page.locator('#hero button[data-action="review-open"]').count()); i++) {
-    const approve = page.locator(".approval-actions button.allow").first();
+    const approve = page.locator(".approval-row button.allow").first();
     if (await approve.count() && await approve.isVisible()) await approve.click();
     await page.waitForTimeout(500);
   }
@@ -104,7 +105,7 @@ if (!readme) {
 }
 await page.fill("textarea", prompt); await page.keyboard.press("Enter");
 for (let i = 0; i < 40; i++) {
-  const approve = page.locator(".approval-actions button.allow").first();
+  const approve = page.locator(".approval-row button.allow").first();
   if (await approve.count() && await approve.isVisible()) { await approve.click(); await page.waitForTimeout(500); }
   if (await page.evaluate(() => document.body.innerText.includes("falls back to"))) break;
   await page.waitForTimeout(500);
@@ -117,12 +118,16 @@ if (readme) {
   await page.locator('#briefing button[data-action="ideas-show"]').click(); await page.waitForTimeout(400);
 } else {
   await shot("02-turn");
-  // The briefing line above the composer, each part opened, then Drive's popover.
+  // The briefing line above the composer, each part opened; then the
+  // sidebar folded to its rail, and the project switcher.
   await toggle('#briefing button[data-action="review-open"]', "02-review-open");
   await toggle('#briefing button[data-action="ideas-show"]', "02-ideas");
   await toggle('.turn-receipt button[data-action="toggle-steps"]', "02-steps");
-  await page.locator("#drive-word").click(); await page.waitForTimeout(800);
-  await shot("02-drive-pop");
+  await page.locator("#desktop-toggle-sidebar").click(); await page.waitForTimeout(500);
+  await shot("02-rail");
+  await page.locator("#rail-expand").click(); await page.waitForTimeout(500);
+  await page.locator("#desktop-project-button").click(); await page.waitForTimeout(500);
+  await shot("02-projects");
   await page.keyboard.press("Escape"); await page.waitForTimeout(400);
   // The slash list: your workflows first, then what you used recently.
   await page.locator("textarea").click(); await page.keyboard.type("/"); await page.waitForTimeout(900);
@@ -136,7 +141,7 @@ for (const name of readme ? ["changes"] : ["changes", "files", "history"]) {
 }
 if (!readme) {
   // A workflow running as a Drive mission: the conversation's newest turn.
-  await page.locator(".header-nav button.active").click().catch(() => {});
+  await page.keyboard.press("Escape"); await page.waitForTimeout(400);
   // Starting a workflow switches sessions; nothing may fail or leave a
   // stray "The session changed" notice behind.
   const before = pageErrors.length;

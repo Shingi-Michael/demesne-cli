@@ -103,6 +103,7 @@ body.desktop {
   --ok: var(--citron);
   --bad: var(--signal);
   --warn: var(--thinking);
+  --acc-soft: color-mix(in srgb, var(--acc) 12%, transparent); --ok-soft: color-mix(in srgb, var(--ok) 12%, transparent); --bad-soft: color-mix(in srgb, var(--bad) 12%, transparent); --warn-soft: color-mix(in srgb, var(--warn) 13%, transparent);
 }
 /* Demesne's own desktop appearance: graphite, with one blue accent. The
    terminal keeps the brand palette; the desktop maps the same roles here. */
@@ -112,6 +113,7 @@ html[data-theme="demesne"] body.desktop {
   --t1: #ededef; --t2: #b3b7bd; --t3: #80858c; --t4: #595e65;
   --strong: #ededef; --paper: #dcdee2; --secondary: #b3b7bd; --muted: #80858c;
   --acc: #7eaef0; --ok: #71c994; --bad: #ef8b8b; --warn: #e7b96a;
+  --acc-soft: rgba(126, 174, 240, 0.12); --ok-soft: rgba(113, 201, 148, 0.12); --bad-soft: rgba(239, 139, 139, 0.12); --warn-soft: rgba(231, 185, 106, 0.13);
   --electric: #7eaef0; --electricBright: #8fc3ff; --citron: #71c994; --signal: #ef8b8b; --thinking: #e7b96a; --inspect: #7eaef0; --execute: #e7b96a;
   --accentSurface: #1f2a3a; --menuSelection: #212226; --tileSelection: #26303d; --thinkingSurface: #26241d; --errorSurface: #2a1f1f;
   --userSurface: #1b1c1f; --toolSurface: #1b1c1f; --toolActive: #212226;
@@ -126,6 +128,7 @@ html[data-theme="demesne-light"] body.desktop {
   --t1: #1b1c1f; --t2: #4a4e55; --t3: #7a7f86; --t4: #a3a7ad;
   --strong: #1b1c1f; --paper: #2a2d33; --secondary: #4a4e55; --muted: #7a7f86;
   --acc: #2f6fd0; --ok: #2f9e5e; --bad: #d64e4e; --warn: #b87a12;
+  --acc-soft: rgba(47, 111, 208, 0.1); --ok-soft: rgba(47, 158, 94, 0.12); --bad-soft: rgba(214, 78, 78, 0.1); --warn-soft: rgba(184, 122, 18, 0.12);
   --electric: #2f6fd0; --electricBright: #1f63c9; --citron: #2f9e5e; --signal: #d64e4e; --thinking: #b87a12; --inspect: #2f6fd0; --execute: #b87a12;
   --accentSurface: #e4ecf8; --menuSelection: #f3f2ef; --tileSelection: #e4ecf8; --thinkingSurface: #f5efe2; --errorSurface: #f8e8e8;
   --userSurface: #ffffff; --toolSurface: #ffffff; --toolActive: #f3f2ef;

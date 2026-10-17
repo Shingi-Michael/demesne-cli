@@ -147,12 +147,13 @@ try {
   await open(false, true);
   await capture("01-start");
   await type(prompt);
-  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["Edit "]), "file approval visible");
+  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Edit"]), "file approval visible");
+  await capture("02-file-approval");
   await click("permission", { decision: "allow_once" });
-  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('.approval-card .approval-title')).some(element => element.textContent.includes(arguments[0]));", ["Run "]), "command approval visible");
-  assert(await evaluate<boolean>("const details = document.querySelector('.approval-card .approval-details'); return !!details && !details.open;"), "The full command starts folded");
-  await page.locator(".approval-card .approval-details > summary").click();
-  await until(() => evaluate<boolean>("const details = document.querySelector('.approval-card .approval-details'); return !!details?.open && details.innerText.includes('run check');"), "command details can be inspected");
+  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Run"]), "command approval visible");
+  assert(await evaluate<boolean>("const fold = document.querySelector('#approval .approval-fold'); return !!fold && fold.hidden;"), "The full command starts folded");
+  await page.locator("#approval .approval-show").click();
+  await until(() => evaluate<boolean>("const fold = document.querySelector('#approval .approval-fold'); return !!fold && !fold.hidden && fold.innerText.includes('run check');"), "command details can be inspected");
   await capture("02-command-approval");
   await click("permission", { decision: "allow_once" });
   await textIncludes(completed);

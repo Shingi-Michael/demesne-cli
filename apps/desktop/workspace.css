@@ -250,10 +250,21 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .desktop .drive-details { border-radius: 8px; }
 .desktop #drive-pop { font-family: inherit; border-radius: 12px; padding: 16px; box-shadow: 0 12px 40px #0005; }
 .desktop #drive-turn { border: 1px solid var(--rule); background: var(--surface); padding: 18px; border-radius: 12px; }
-.desktop .composer.asking { border-color: var(--thinking); box-shadow: 0 0 0 2px color-mix(in srgb, var(--thinking) 8%, transparent); }
-.desktop .composer .approval-title { font-size: 14px; font-weight: 500; }
-.desktop .composer .approval-question { font-size: 15px; line-height: 1.6; }
-.desktop .composer .approval-actions button { padding: 8px 12px; border-radius: 7px; font-size: 12px; }
+/* The approval row: amber wash, one line, Allow as the one filled button. */
+.desktop #approval { margin-bottom: 10px; }
+.desktop .approval-row { background: var(--warn-soft); color: var(--t2); }
+.desktop .approval-row .ico { stroke: var(--warn); }
+.desktop .approval-verb, .desktop .approval-row code { color: var(--t1); }
+.desktop .approval-note { color: var(--t4); }
+.desktop .approval-row button { color: var(--t2); }
+.desktop .approval-row button:hover { background: color-mix(in srgb, var(--t1) 8%, transparent); }
+.desktop .approval-row button kbd { color: var(--t3); background: transparent; border-color: var(--line2); padding: 2px 4px; }
+.desktop .approval-row .allow { background: var(--t1); color: var(--ink); }
+.desktop .approval-row .allow:hover { background: color-mix(in srgb, var(--t1) 88%, var(--ink)); }
+.desktop .approval-row .allow kbd { color: var(--ink); border-color: transparent; background: rgba(0, 0, 0, 0.12); }
+.desktop .approval-row .deny, .desktop .approval-row .approval-show { color: var(--t3); }
+.desktop .approval-row .approval-show.open { color: var(--t1); }
+.desktop .approval-fold { border-radius: 8px; background: var(--surface); border-color: var(--line); }
 .desktop .question-card { border-radius: 12px; padding: 18px; }
 .desktop .question-card fieldset { border-radius: 8px; padding: 12px; }
 .desktop .question-card input { font-family: inherit; border-radius: 7px; }

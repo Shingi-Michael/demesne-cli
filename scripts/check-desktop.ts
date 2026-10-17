@@ -290,7 +290,9 @@ try {
     try { writeFileSync(join(output, "failure.txt"), await evaluate<string>("return document.body.innerText;")); await capture("failure"); } catch {}
     try {
       const sessions = (await f.client.listSessions()).map(session => ({ id: session.id, title: session.title, turns: session.turns.map(turn => [turn.content.slice(0, 40), turn.status]) }));
-      writeFileSync(join(output, "failure-state.json"), JSON.stringify({ window: await evaluate("return window.demesneInspect?.().host;"), sessions }, null, 2));
+      const state = JSON.stringify({ window: await evaluate("return window.demesneInspect?.().host;"), sessions }, null, 2);
+      writeFileSync(join(output, "failure-state.json"), state);
+      console.error(`Desktop state at failure:\n${state}`);
     } catch {}
   }
   throw error;

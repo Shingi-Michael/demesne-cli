@@ -174,12 +174,21 @@ try {
   assert(commands.commands.some(command => command.status === "completed" && command.exitCode === 0 && command.stdout.includes("DESKTOP_CHECK_PASSED")), "Approved command output was recorded");
   assert(await evaluate<boolean>("return !!document.querySelector('.katex') && !!document.querySelector('pre code');"), "Markdown, code and math rendered in Chromium");
   await until(() => page.locator(".sidebar-session[aria-current='page']").innerText().then(text => text.includes("Desktop smoke")), "sidebar tracks the current conversation title");
-  await page.getByRole("searchbox", { name: "Find a conversation" }).fill("no-such-conversation");
+  await page.getByRole("searchbox", { name: "Find a conversation or project" }).fill("no-such-conversation");
   await textIncludes("No matching conversations");
-  await page.getByRole("searchbox", { name: "Find a conversation" }).press("Escape");
-  assert.equal(await page.getByRole("searchbox", { name: "Find a conversation" }).inputValue(), "", "Escape clears the search");
+  await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
+  assert.equal(await page.getByRole("searchbox", { name: "Find a conversation or project" }).inputValue(), "", "Escape clears the search");
   await until(() => page.locator(".sidebar-session[aria-current='page']").isVisible(), "the list is back after search");
   assert(await page.locator("#sidebar-drive").isVisible(), "Drive is a fixed row in the sidebar");
+  // The project sits at the top as text; search switches projects, with no menu.
+  assert((await page.locator("#desktop-project-sub").innerText()).length > 0, "The project shows its folder under its name");
+  await page.getByRole("searchbox", { name: "Find a conversation or project" }).focus();
+  await until(() => page.locator("#sidebar-projects").isVisible(), "focusing search lists projects");
+  assert(await page.locator("#sidebar-projects").getByText("Open a folder…").isVisible(), "search can open another folder");
+  await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
+  await until(() => page.locator("#sidebar-projects").isHidden(), "leaving search hides projects");
+  // A settled chat carries no mark; double-clicking its title renames it in place.
+  assert.equal(await page.locator(".sidebar-session:not([aria-current]) .sidebar-session-mark").evaluateAll(marks => marks.filter(mark => getComputedStyle(mark).visibility === "visible").length), 0, "Settled chats carry no mark");
   await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
   assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "false");
   assert(await page.locator("#rail-expand").isVisible(), "The folded sidebar is a rail");
@@ -198,6 +207,11 @@ try {
   await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === 2), "the second conversation joins the list once it has a turn");
   await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
+  await page.locator(`.sidebar-session[data-args*='${sessionId}'] .sidebar-session-name`).dblclick();
+  await page.locator(".sidebar-rename input").fill("Desktop smoke, renamed");
+  await page.locator(".sidebar-rename input").press("Enter");
+  await until(async () => (await f.client.getSessionState(sessionId)).session.title === "Desktop smoke, renamed", "double-click renames the chat in place");
+  await until(() => page.locator(`.sidebar-session[data-args*='${sessionId}']`).innerText().then(text => text.includes("renamed")), "the row shows its new title");
   // Ctrl+Tab steps to the other chat and Ctrl+Shift+Tab steps back.
   const current = () => page.locator(".sidebar-session[aria-current='page']").getAttribute("data-args");
   await page.locator("textarea").focus();

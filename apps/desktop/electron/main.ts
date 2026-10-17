@@ -74,6 +74,12 @@ void app.whenReady().then(async () => {
     if (quitting) throw new Error("The desktop app is closing");
     if (method === "desktop-ready") { window?.show(); window?.focus(); return null; }
     if (method === "quit" || method === "desktop-quit") { void quit(); return null; }
+    // The Dock icon counts the chats that need you (macOS and Linux docks).
+    if (method === "desktop-badge") {
+      const count = Number((args as Record<string, unknown>).count);
+      app.setBadgeCount(Number.isInteger(count) && count > 0 && count < 1000 ? count : 0);
+      return null;
+    }
     if (method === "desktop-select-project") {
       const selected = await dialog.showOpenDialog(window!, { title: "Open a Demesne project", properties: ["openDirectory"] });
       return selected.canceled ? backend!.request("desktop-bootstrap") : backend!.request("desktop-open-project", { path: selected.filePaths[0] });

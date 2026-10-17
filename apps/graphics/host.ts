@@ -682,7 +682,9 @@ export class GraphicsHost {
   /// While another chat of this project is still working, look in on it now
   /// and then, so the sidebar shows when it asks for you or settles.
   private async checkBackground() {
-    const busy = this.sessions.filter((session) => session.id !== this.current?.session.id && session.workspace?.root === this.workspace && ["running", "queued"].includes(session.turns.at(-1)?.status ?? ""));
+    // This project's chats, and the ones Drive runs on their own branch.
+    const branched = new Set([this.breakage.state.fix, ...this.breakage.state.inbox].map((job) => job?.sessionId).filter(Boolean));
+    const busy = this.sessions.filter((session) => session.id !== this.current?.session.id && (session.workspace?.root === this.workspace || branched.has(session.id)) && ["running", "queued"].includes(session.turns.at(-1)?.status ?? ""));
     const waiting = new Set<string>();
     await Promise.all(busy.map(async (session) => {
       try {
@@ -1444,8 +1446,10 @@ export class GraphicsHost {
     if (method === "rename") {
       const title = string(args.title, "title", 200).trim();
       if (!title) throw new Error("Enter a title");
-      await this.client.updateSession(this.current!.session.id, { title });
-      this.current!.session.title = title;
+      // The sidebar renames any chat in place; the menu renames this one.
+      const id = args.id === undefined ? this.current!.session.id : string(args.id, "session", 200);
+      await this.client.updateSession(id, { title });
+      if (id === this.current?.session.id) this.current.session.title = title;
       await this.refreshSessions();
       return;
     }

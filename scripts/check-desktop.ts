@@ -181,7 +181,7 @@ try {
   await page.locator("#rail-expand").click();
   assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "true");
   await page.getByRole("button", { name: "New chat", exact: true }).click();
-  await page.getByRole("heading", { name: "What would you like to build?" }).waitFor();
+  await page.getByRole("heading", { name: /^What are we building/ }).waitFor();
   await until(() => page.locator("#workspace-title").innerText().then(text => text === "New chat"), "the top bar names the new chat");
   await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);

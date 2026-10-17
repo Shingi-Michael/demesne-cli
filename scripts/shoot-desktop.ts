@@ -88,8 +88,11 @@ const toggle = async (selector: string, name: string) => {
 const named = (scratch: string, published: string) => readme ? `demesne-${published}` : scratch;
 await shot(named("01-start", "start"));
 if (!readme) {
-  // Run the top proposal in its worktree; the start screen then says a branch waits for review.
-  await page.locator('#hero button[data-action="next-run"]').first().click();
+  // Run the top proposal (from the Drive panel) in its worktree; the start
+  // screen then says a branch waits for review.
+  await page.locator('#sidebar-drive button[data-action="panel"]').first().click(); await page.waitForTimeout(800);
+  await page.locator('#panel button[data-action="next-run"]').first().click(); await page.waitForTimeout(400);
+  await page.keyboard.press("Escape"); await page.waitForTimeout(400);
   for (let i = 0; i < 60 && !(await page.locator('#hero button[data-action="review-open"]').count()); i++) {
     const approve = page.locator(".approval-row button.allow").first();
     if (await approve.count() && await approve.isVisible()) await approve.click();

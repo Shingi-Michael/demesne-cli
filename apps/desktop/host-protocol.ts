@@ -7,6 +7,8 @@ export interface DesktopBootstrap {
   workspace: string | null;
   recentProjects: string[];
   snapshot: GraphicsSnapshot | null;
+  /// Your first name for the greeting: git's user.name, else the account.
+  userName?: string;
 }
 export interface DesktopRequest {
   kind: "request";

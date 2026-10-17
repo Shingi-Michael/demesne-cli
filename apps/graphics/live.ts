@@ -539,6 +539,10 @@ function totals(run: GraphicsRun, tool: ToolEntry) {
 }
 const counts = (value: { added: number; removed: number }) =>
   `<span class="counts"><span class="plus">+${value.added}</span><span class="minus">−${value.removed}</span></span>`;
+/// Drive's best idea, as the start screen's ghost text; Tab takes it.
+function driveSuggestion(): string | null {
+  return !inSession() && state ? state.driveNext.proposals[0]?.title ?? null : null;
+}
 /// The next prompt the model suggested at the end of the last finished turn.
 function nextSuggestion(): string | null {
   if (pendingQuestion()) return null;
@@ -594,6 +598,7 @@ const stepIcon = (tool: ToolEntry) => {
     : "other";
   return `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${STEP_ICONS[kind]}</svg>`;
 };
+const ICON_SPARK = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>';
 const ICON_SHIELD = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>';
 const ICON_COPY = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
 const ICON_UNDO = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>';
@@ -997,7 +1002,10 @@ function renderHero() {
     next = state.driveNext,
     away = state.breakage.away,
     driveBusy = Boolean(state.breakage.fix && (state.breakage.fix.status === "starting" || state.breakage.fix.status === "running")) || away?.status === "running",
-    signature = JSON.stringify([state.workspace, review.map((job) => job.id), away?.status, driveBusy, reviewShown, next.proposals, next.signals.length]);
+    user = document.body.dataset.user ?? "",
+    branch = state.session?.workspace?.gitBranch ?? "",
+    hour = new Date().getHours(),
+    signature = JSON.stringify([state.workspace, review.map((job) => job.id), away?.status, driveBusy, reviewShown, next.proposals, next.signals.length, user, branch, hour]);
   if (signature === heroSignature) return;
   heroSignature = signature;
   const composer = el("composer-slot");
@@ -1006,21 +1014,18 @@ function renderHero() {
   const waiting = review.length
     ? `<p>${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ›`, {}, "link", true)}<span class="muted"> · ${away && away.status !== "running" ? "Drive ran them while you were away" : "each in its own worktree"}</span></p>`
     : "";
-  const top = next.proposals.slice(0, 3);
-  const words = ["", "it", "both", "all three"];
-  const footer = [
-    top.length && !driveBusy ? btn("next-away", `Run ${words[top.length]} overnight ›`, { count: top.length }, "link", true).replace("<button ", `<button title="Run ${top.length === 1 ? "it" : "them"} one after another while you're away, each in its own worktree. They wait for your review." `) : "",
-    next.proposals.length > 3 ? btn("panel", `${next.proposals.length - 3} more in Drive`, { name: "drive" }, "", true) : "",
-    top.length ? '<span class="muted">why these? hover a row</span>' : "",
-  ].filter(Boolean).join('<span class="muted"> · </span>');
+  // A greeting and the composer, nothing else: Drive's best idea is the
+  // composer's ghost text (Tab takes it); the rest of its ideas wait in the
+  // Drive panel, one quiet line under the composer.
+  const day = new Date().toLocaleDateString(undefined, { weekday: "long" }),
+    when = `${day} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`,
+    where = branch ? `${h(name)} on ${h(branch)}` : h(name);
+  const ideas = next.proposals.length;
+  const drive = ideas || driveBusy
+    ? `<p class="hero-drive">${ICON_SPARK}<b>Drive</b>${driveBusy ? " is working" : ` has ${ideas} idea${ideas === 1 ? "" : "s"}`}${ideas ? ` <span class="muted">·</span> ${btn("panel", "Open ›", { name: "drive" }, "link", true)}` : ""}${ideas > 1 && !driveBusy ? ` <span class="muted">·</span> ${btn("next-away", `Run ${ideas === 2 ? "both" : `all ${Math.min(3, ideas)}`} overnight ›`, { count: Math.min(3, ideas) }, "link", true)}` : ""}</p>`
+    : "";
   el("hero").innerHTML =
-    `<div class="intro"><span class="hero-eyebrow">YOUR WORKSPACE, READY.</span><h1>What would you like to build?</h1><p>Start a conversation in <strong>${h(name)}</strong>, or let Drive find the next step.</p>${waiting}</div><div id="hero-composer"></div>${
-      // Drive's Next queue, ready when you open demesne: the top three, with
-      // the reason and evidence on hover; the full queue is in the Drive panel.
-      top.length
-        ? `<section class="proposals"><h2>Suggested by Drive</h2>${proposalRows(top)}${footer ? `<p class="proposals-footer">${footer}</p>` : ""}</section>`
-        : ""
-    }`;
+    `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${waiting}</div><div id="hero-composer"></div>${drive}`;
   // The composer is detached while the hero is rebuilt.
   el("hero-composer").append(composer);
 }
@@ -1091,6 +1096,7 @@ function renderComposer() {
     state.session?.autoApprove,
     state.planOnly,
     answeringQuestion,
+    driveSuggestion(),
   ]);
   if (
     signature === composerSignature &&
@@ -1127,7 +1133,7 @@ function renderComposer() {
     ? state.activeTurnId
       ? state.queue.trim() ? "Queue another follow-up…" : "Queue a follow-up…"
       : suggestion ? `${suggestion}   ⇥ Tab` : "Continue the conversation…"
-    : state.driveNext.proposals.length ? "Describe a change, or pick one of Drive's ideas…" : "Describe a change…";
+    : driveSuggestion() ? `Drive suggests: ${driveSuggestion()}   ⇥ Tab` : "Describe a change, paste an error, or drop a file…";
   editor.disabled =
     state.connection !== "online" ||
     state.busy ||
@@ -4369,8 +4375,9 @@ document.addEventListener("keydown", (event) => {
     event.target === editor &&
     !editor.value
   ) {
-    // The model's suggested next prompt, when one shows; else Settings.
-    const suggestion = nextSuggestion();
+    // The model's suggested next prompt, or Drive's idea on the start
+    // screen, when one shows; else Settings.
+    const suggestion = nextSuggestion() ?? driveSuggestion();
     run(() => (suggestion ? setDraft(suggestion) : openOverlay("settings")));
     return;
   }

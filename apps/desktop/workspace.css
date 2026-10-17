@@ -127,13 +127,20 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .desktop .workspace > main { padding: 0; gap: 0; }
 .desktop .live-app:not(.start) .stage { padding: 28px 32px 16px; }
 .desktop #conversation, .desktop #drive-turn { max-width: 780px; margin-left: auto; margin-right: auto; }
-.desktop .live-app.start .stage { padding: 48px 36px; }
-.desktop .hero { max-width: 720px; gap: 30px; }
-.desktop .live-app.start .intro { gap: 12px; }
-.hero-eyebrow { color: var(--electric); font-size: 10px; letter-spacing: 1.8px; font-weight: 600; }
-.desktop .live-app.start .intro h1 { font-size: clamp(26px, 3vw, 38px); line-height: 1.2; font-weight: 550; letter-spacing: -1.2px; }
-.desktop .live-app.start .intro p { font-size: 14px; line-height: 1.65; color: var(--secondary); }
-.desktop .intro strong { color: var(--paper); font-weight: 500; }
+.desktop .live-app.start .stage { padding: 48px 36px 96px; }
+.desktop .hero { max-width: 720px; gap: 22px; }
+.desktop .live-app.start .intro { gap: 6px; }
+.hero-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--t3); font-size: 13px; line-height: 20px; }
+.hero-eyebrow .ico { color: var(--t3); }
+.desktop .live-app.start .intro h1 { font-size: 30px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; color: var(--t1); }
+.desktop .live-app.start .intro p { font-size: 13.5px; line-height: 1.6; color: var(--t3); }
+.desktop .intro strong { color: var(--t2); font-weight: 500; }
+.hero-drive { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 2px; font-size: 13px; line-height: 20px; color: var(--t3); }
+.hero-drive .ico { color: var(--t3); }
+.hero-drive b { color: var(--t2); font-weight: 500; }
+.hero-drive .link { color: var(--acc); font-size: 13px; }
+.desktop .live-app.start .composer textarea::placeholder { color: var(--t4); }
+.desktop .live-app.start .hints button { font-size: 12.5px; color: var(--t3); }
 .desktop #input-area { padding: 12px 32px 22px; }
 .desktop #input-area > * { max-width: 780px; margin-left: auto; margin-right: auto; }
 .desktop .composer { border-radius: 16px; padding: 16px 18px 10px; gap: 10px; background: var(--surface); border-color: var(--line2); box-shadow: 0 5px 24px #00000012; }

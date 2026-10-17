@@ -94,7 +94,9 @@ test("saved theme selections survive project opening and OS appearance changes",
 test("desktop sidecar starts without a project and keeps malformed IPC recoverable", async () => {
   const f = await fixture(), sidecar = new Sidecar(f);
   try {
-    expect(bootstrap(await sidecar.value("desktop-bootstrap"))).toEqual({ workspace: null, recentProjects: [], snapshot: null });
+    const booted = bootstrap(await sidecar.value("desktop-bootstrap"));
+    expect(booted).toMatchObject({ workspace: null, recentProjects: [], snapshot: null });
+    expect(typeof booted.userName).toBe("string");
     expect(await f.client.listSessions()).toHaveLength(0);
     sidecar.raw("{broken json\n");
     sidecar.send({ kind: "request", id: 100, method: "submit", args: null });

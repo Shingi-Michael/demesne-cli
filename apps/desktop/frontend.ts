@@ -5,6 +5,7 @@ import type { GraphicsUICommand } from "../graphics/drive-controller.ts";
 interface DesktopBootstrap {
   workspace: string | null;
   recentProjects: string[];
+  userName?: string;
   snapshot: GraphicsSnapshot | null;
 }
 interface DesktopNative {
@@ -162,6 +163,7 @@ function renderProjects() {
 }
 async function applyBootstrap(result: DesktopBootstrap) {
   if (fatal) return;
+  document.body.dataset.user = result.userName ?? "";
   const previous = workspace;
   workspace = result.workspace;
   recentProjects = [...new Set(result.recentProjects.filter((path) => typeof path === "string"))];

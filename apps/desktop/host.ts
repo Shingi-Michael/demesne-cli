@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
+import { execFileSync } from "node:child_process";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { loadCliSettings } from "../cli/src/cli-config.ts";
@@ -68,6 +69,18 @@ export interface DesktopHostOptions {
 }
 /** One privileged Bun host per desktop process. EOF disposes the UI controller;
  * daemon-owned turns and commands stay alive and can be recovered next launch. */
+/// The first word of git's user.name, else the account name; read once.
+let firstName: string | undefined;
+function userFirstName(): string {
+  if (firstName !== undefined) return firstName;
+  let name = "";
+  try { name = execFileSync("git", ["config", "--global", "user.name"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2000 }).trim(); } catch {}
+  if (!name) { try { name = userInfo().username; } catch {} }
+  const first = (name.split(/\s+/)[0] ?? "").replace(/^[a-z]/, (c) => c.toUpperCase());
+  // An account with no real name greets nobody rather than "root".
+  firstName = /^(unknown|root|user|admin|ubuntu|runner)$/i.test(first) ? "" : first;
+  return firstName;
+}
 export class DesktopHost {
   host: GraphicsHost | null = null;
   private encoder = new StateEncoder();
@@ -93,7 +106,7 @@ export class DesktopHost {
   }
   private send(message: DesktopOutput) { if (!this.closed) this.options.send(message); }
   bootstrap(): DesktopBootstrap {
-    return { workspace: this.host?.workspace ?? null, recentProjects: [...this.prefs.recentProjects], snapshot: this.host?.snapshot() ?? null };
+    return { workspace: this.host?.workspace ?? null, recentProjects: [...this.prefs.recentProjects], snapshot: this.host?.snapshot() ?? null, userName: userFirstName() };
   }
   private async select(path: unknown): Promise<DesktopBootstrap> {
     const workspace = desktopWorkspace(path);

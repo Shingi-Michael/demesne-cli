@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
-import { APP_URL, assetPath, localAppURL, nextZoom, openTarget, validateRequest, ZOOM_LEVELS } from "./policy.ts";
+import { APP_URL, assetPath, localAppURL, nextZoom, openTarget, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
@@ -48,10 +48,9 @@ void app.whenReady().then(async () => {
   });
   const zoomPath = join(app.getPath("userData"), "zoom.json");
   let zoom = 1;
-  // Preserve the previous shell's zoom preference on first Electron launch.
-  const legacyZoom = process.platform === "darwin" ? join(app.getPath("appData"), "com.demesne.desktop", "zoom.json")
-    : join(process.env.XDG_CONFIG_HOME ?? join(app.getPath("home"), ".config"), "com.demesne.desktop", "zoom.json");
-  try { const saved = JSON.parse(readFileSync(existsSync(zoomPath) || userData ? zoomPath : legacyZoom, "utf8")).zoom; if (ZOOM_LEVELS.includes(saved)) zoom = saved; } catch {}
+  // Only a zoom chosen in this app counts: the redesign is drawn at its own
+  // size, so a level inherited from the previous shell is dropped once.
+  try { const saved = JSON.parse(readFileSync(zoomPath, "utf8")); if (saved.version === ZOOM_VERSION && ZOOM_LEVELS.includes(saved.zoom)) zoom = saved.zoom; } catch {}
   window = new BrowserWindow({
     width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#15171b",
     webPreferences: { preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true },
@@ -81,7 +80,7 @@ void app.whenReady().then(async () => {
     }
     return backend!.request(method, args as Record<string, unknown>);
   });
-  const applyZoom = (step: number) => { zoom = nextZoom(zoom, step); contents.setZoomFactor(zoom); try { mkdirSync(app.getPath("userData"), { recursive: true }); writeFileSync(zoomPath, JSON.stringify({ zoom })); } catch (error) { log(String(error)); } };
+  const applyZoom = (step: number) => { zoom = nextZoom(zoom, step); contents.setZoomFactor(zoom); try { mkdirSync(app.getPath("userData"), { recursive: true }); writeFileSync(zoomPath, JSON.stringify({ zoom, version: ZOOM_VERSION })); } catch (error) { log(String(error)); } };
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
     { label: "File", submenu: [{ label: "Open project…", accelerator: "CmdOrCtrl+O", click: () => emit("demesne:desktop-action", { action: "open-project" }) }, { label: "Settings…", accelerator: "CmdOrCtrl+,", click: () => emit("demesne:desktop-action", { action: "settings" }) }, { type: "separator" }, { role: process.platform === "darwin" ? "close" : "quit" }] },

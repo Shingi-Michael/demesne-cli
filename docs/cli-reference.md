@@ -94,18 +94,15 @@ There is no separate `/thinking` command. Settings and the model picker expose s
 | --- | --- |
 | Enter / Shift+Enter | Send / newline; Enter does not resubmit a running turn |
 | Tab with an empty composer / Ctrl+K | Settings |
-| Esc | Close the current popup/panel first; otherwise arm turn cancellation |
-| Esc twice within 1.5 seconds | Cancel an active turn when no panel/popup consumes Escape |
+| Esc | Close the current popup or the Drive panel first; otherwise arm turn cancellation |
+| Esc twice within 1.5 seconds | Cancel an active turn when no popup consumes Escape |
 | Ctrl+Q (⌘Q on macOS) | Close the window; daemon work continues |
 | Ctrl+O (⌘O on macOS) | Open another project |
-| Ctrl+B / Ctrl+G | Execution log / follow live |
-| Alt+D / Alt+O / Alt+T | Changes / Files / Verification |
-| Alt+C / Alt+V / Alt+J / Alt+H | Context / Preview / Drive / History |
-| Alt+Enter | Expand/restore an open panel |
+| Ctrl+G | Follow live output |
+| Alt+J | Drive |
+| ⋯ in the top bar | This conversation: rename, compact, archive, all conversations |
 | `y`, `n`, `a`, `s` outside a text field | Allow once, deny, session grant, saved grant for an approval |
 | `p`, `s` with Drive panel focused | Pause/resume or stop Drive |
-| `[` / `]` in Changes | Previous/next diff hunk |
-| Ctrl+F / Ctrl+L in the file viewer | Find text / go to line |
 
 In text fields, ordinary browser editing applies. The old ANSI workbench's readline shortcuts and Session/Activity/Transcript view cycling no longer apply. See [input dispatch](../apps/graphics/live.ts).
 

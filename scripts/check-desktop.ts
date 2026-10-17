@@ -230,10 +230,12 @@ try {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "Workspace does not overflow horizontally");
   await capture("03-narrow-review");
   await desktop!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1180, 820));
-  await click("panel", { name: "history" });
-  await textIncludes("TURNS");
-  await capture("04-history");
-  // Keep the Context panel open while real compaction completes over SSE.
+  // The top bar's ⋯ is the conversation's menu: rename, compact, archive…
+  await page.locator(".header-more").click();
+  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Compact", { exact: true }) }).waitFor();
+  await capture("04-menu");
+  await page.keyboard.press("Escape");
+  await page.locator("#overlay").waitFor({ state: "hidden" });
   for (let i = 0; i < 3; i++) {
     const text = `Compaction fixture ${i}`;
     await type(text);
@@ -244,13 +246,11 @@ try {
       throw new Error(`last turn: ${JSON.stringify({ content: turn?.content, status: turn?.status })}`);
     }, "history ready for compaction");
   }
-  await click("panel", { name: "context" });
-  await click("compact");
-  await textIncludes("SAVED COMPACTION");
+  await page.locator(".header-more").click();
+  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Compact", { exact: true }) }).click();
   const compacted = (await f.client.getSessionState(sessionId)).checkpoint!;
   assert(compacted && compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
-  await until(() => page.locator(".context-top").innerText().then(text => text.includes(`${percentage}%`)), "context panel updates without reopening");
   await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
   await until(() => page.locator(".compaction-card").count().then(count => count === 1), "conversation summary visible");
   const firstTurnId = completedSession.turns.find(turn => turn.content === prompt)!.id;
@@ -262,8 +262,10 @@ try {
   await page.getByRole("button", { name: "Collapse older conversation", exact: true }).click();
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0);
   await capture("04-compacted");
-  await click("panel", { name: "history" });
-  await until(() => page.locator(".session-context .meter").getAttribute("title").then(title => title === `${percentage}% used`), "session view shows reduced context");
+  await page.locator(".header-more").click();
+  await until(() => page.locator("#overlay .menu-row").filter({ has: page.getByText("Compact", { exact: true }) }).innerText().then(text => text.includes(`${percentage}%`)), "the menu shows the reduced context");
+  await page.keyboard.press("Escape");
+  await page.locator("#overlay").waitFor({ state: "hidden" });
   await close();
   assert.equal((await f.client.health()).model, "desktop-test", "Closing the app leaves the daemon alive");
   await open(); // No workspace/session args: private preferences must restore both.
@@ -284,7 +286,7 @@ try {
   await open();
   await textIncludes(afterClose);
   await capture("06-work-survived-close");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the session view", "persisted project/session restore", "daemon work survives app closure"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "daemon work survives app closure"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

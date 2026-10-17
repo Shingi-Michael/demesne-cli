@@ -1,6 +1,4 @@
 import { compactedConversation } from "./compacted-conversation.ts";
-import { FilesView } from "./files-view.ts";
-import { sourceLocations } from "./file-navigation.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
 import { splitNextPrompt } from "../../packages/protocol/src/next-prompt.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
@@ -8,7 +6,7 @@ import { codeDiff } from "../cli/src/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "../cli/src/workbench/drive-timeline.ts";
 import { subagentPhrase } from "../cli/src/workbench/subagent-phrases.ts";
 import type { GraphicsHost } from "./host.ts";
-import type { GraphicsRun, GraphicsChange } from "./session-model.ts";
+import type { GraphicsRun } from "./session-model.ts";
 import type {
   ToolEntry,
   WorkbenchEntry,
@@ -19,22 +17,13 @@ import type {
   ModelScoreboardResponse,
   DriveState,
   DriveObservation,
-  ReviewScope,
-  ReviewResponse,
   CommandRecord,
-  ImageArtifact,
 } from "@demesne/protocol";
 
 type Snapshot = ReturnType<GraphicsHost["snapshot"]>;
-type PaneName =
-  | "files"
-  | "changes"
-  | "log"
-  | "verification"
-  | "history"
-  | "context"
-  | "preview"
-  | "drive";
+/// The only side panel left: Drive. Everything else reads inline in the
+/// conversation (diffs and output under their steps, context in the ring).
+type PaneName = "drive";
 type OverlayName =
   | "settings"
   | "models"
@@ -43,6 +32,7 @@ type OverlayName =
   | "cleanup"
   | "sessions"
   | "rename"
+  | "session"
   | "confirm-archive"
   | "confirm-undo"
   | "help";
@@ -199,10 +189,11 @@ const tools = (run: GraphicsRun) =>
 let state: Snapshot | null = null,
   pane: PaneName | null = null,
   paneTurn = "",
-  paneIndex = 0,
-  paneDetail: number | null = null,
-  paneFilter = "all",
-  paneExpanded = false;
+  paneIndex = 0;
+/// What Drive is inspecting in the conversation (its diff, checks or log),
+/// and which check; the observation names that surface.
+let inspectSurface: "diff" | "review" | "log" | null = null,
+  inspectItem = "";
 let overlay: OverlayName | null = null,
   overlayQuery = "",
   overlayIndex = 0,
@@ -231,38 +222,6 @@ let completionItems: {
   }[] = [],
   completionIndex = 0,
   completionDismissed = false;
-let selectedImage = "",
-  previewPinned = false,
-  followImages = true,
-  previewData = "",
-  previewLoading = "";
-/// Whether the Review heading's scope menu is open.
-let reviewScopeMenu = false;
-/// A worktree branch shown in Review instead of this session's changes.
-let reviewBranch: { sessionId: string; title: string } | null = null;
-let reviewScope: ReviewScope = "turn",
-  reviewMeta: ReviewResponse | null = null,
-  reviewError = "",
-  reviewBusy = false,
-  reviewMode: "diff" | "before" | "after" = "diff",
-  hunkIndex = -1;
-let commandTab: "events" | "running" = "events",
-  commandSelection = "",
-  commandSearch = "";
-let referencePathDraft = "",
-  referenceViewportWidth = "",
-  referenceViewportHeight = "";
-let referenceImage = "",
-  referenceData = "",
-  referenceLoading = "",
-  previewCompare = false,
-  previewOpacity = 50,
-  previewFit = true,
-  previewZoom = 1;
-let previewObserver: ResizeObserver | undefined;
-let changes: GraphicsChange[] = [],
-  changesKey = "",
-  changesRequest = 0;
 let follow = true,
   readingHeld = false,
   driveNavigating = false,
@@ -511,12 +470,12 @@ function renderStatus() {
   el("composer-context").title = c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`;
   el("composer-context").hidden = !inSession() || !c2;
   el("status").innerHTML =
-    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div>${btn("panel", `<div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>`, { name: "context" })}${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
+    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   // The top bar carries the session's branch and ⋯, which opens the
   // session's own view (rename, compact, history). The sidebar shows what
   // needs you; Drive lives in its footer.
   el("header").innerHTML =
-    `<div class="header-state">${state.session?.workspace?.gitBranch ? `<span class="chip">⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "chip auto-approve") : ""}</div>${inSession() ? btn("panel", "⋯", { name: "history" }, `header-more${pane === "history" || pane === "context" ? " active" : ""}`, true).replace("<button ", '<button title="This session (Alt+H)" aria-label="This session" ') : ""}`;
+    `<div class="header-state">${state.session?.workspace?.gitBranch ? `<span class="chip">⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "chip auto-approve") : ""}</div>${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`, true).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
 }
 function totals(run: GraphicsRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -782,7 +741,7 @@ function runHTML(run: GraphicsRun, index: number) {
       error ? `<span class="${run.status === "failed" ? "danger" : ""}">${h(error)}</span>` : "",
       [model ? h(model) : "", receipt?.durationMs != null ? duration(receipt.durationMs) : "", speed].filter(Boolean).join(" · "),
       files ? `<span class="receipt-files" title="${h(paths.join(", "))}">${files === 1 ? "1 file changed" : `${files} files changed`} ${counts(total)}</span>` : "",
-      checks.length ? btn("panel", `${passed ? "checks passed" : failed ? "checks failed" : stopped ? "checks stopped" : "checks unknown"}`, { name: "verification", turnId: run.id }, passed ? "success" : failed ? "danger" : "", true) : "",
+      checks.length ? `<span class="receipt-checks ${passed ? "success" : failed ? "danger" : ""}" title="${h(checks.map((check) => check.detail ?? check.name).join("\n"))}">${passed ? "checks passed" : failed ? "checks failed" : stopped ? "checks stopped" : "checks unknown"}</span>` : "",
       run.status === "completed" && (steps || thought)
         ? btn("toggle-steps", fold ? (steps ? `${steps} step${steps === 1 ? "" : "s"}` : "thinking") : "hide steps", { id: run.id }, "receipt-steps")
         : "",
@@ -792,7 +751,6 @@ function runHTML(run: GraphicsRun, index: number) {
     const actions = [
       answered ? btn("copy-answer", `${ICON_COPY}Copy`, { id: run.id }, "receipt-action copy-answer") : "",
       files && !state!.activeTurnId ? btn("undo-turn", `${ICON_UNDO}Undo changes`, { id: run.id }, "receipt-action") : "",
-      error ? btn("panel", "log ›", { name: "log", turnId: run.id }, "receipt-action", true) : "",
     ].filter(Boolean).join("");
     // A turn that only answered needs no receipt: its time is on the ask.
     const bare = run.status === "completed" && !files && !checks.length && !steps && !thought && !(receipt?.mode === "Plan" || run.planOnly) && !model;
@@ -1349,10 +1307,6 @@ function renderQuestion() {
     : "";
 }
 function selectedRun() {
-  if (pane === "verification" && !paneTurn) {
-    const check = verificationChecks()[paneIndex];
-    if (check) return state?.runs.find((run) => run.id === check.turnId);
-  }
   return state?.runs.find((run) => run.id === paneTurn) ?? state?.runs.at(-1);
 }
 /// Every view's header: its title, one line of subject, and ×. A drill-down
@@ -1360,321 +1314,23 @@ function selectedRun() {
 function panelHeader(title: string, subject = "", back?: { name: PaneName; label: string }, subjectTone = "") {
   return `<div class="panel-heading">${back ? btn("panel", `‹ ${back.label}`, { name: back.name }, "back", true) : ""}<strong class="title">${h(title)}</strong><span class="subject${subjectTone ? ` tone-${subjectTone}` : ""}">${h(subject)}</span>${btn("close-panel", "×", {}, "close", true)}</div>`;
 }
-/// `bun run check`, not `/opt/homebrew/Cellar/bun/1.4.0/bin/bun run check`.
-const commandLabel = (argv: readonly string[]) => [String(argv[0] ?? "").split("/").pop(), ...argv.slice(1)].join(" ");
-/// A path inside the workspace, relative to it.
-const workspacePath = (path: string) => {
-  const root = state!.workspace.replace(/\/$/, "");
-  return path === root ? "" : path.startsWith(root + "/") ? path.slice(root.length + 1) : path;
-};
-const filesView = new FilesView({
-  request: api,
-  attach: (text) =>
-    setDraft(editor.value + (editor.value ? "\n\n" : "") + text + "\n\n"),
-  insert: (path) => {
-    void dispatch("insert-file", { path });
-  },
-  changed: () => reportObservation(),
-  error: notice,
-});
-function outputHTML(text: string, cwd?: string) {
-  const clean = text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
-  const locations = sourceLocations(
-    clean,
-    new Set(state?.files.map((f) => f.path)),
-    state?.workspace ?? "",
-    cwd,
-  );
-  let at = 0,
-    result = "";
-  for (const location of locations) {
-    result +=
-      h(clean.slice(at, location.start)) +
-      btn(
-        "source-location",
-        h(clean.slice(location.start, location.end)),
-        location,
-        "source-location",
-      );
-    at = location.end;
-  }
-  result += h(clean.slice(at));
-  const lines = clean.split("\n");
-  return result
-    .split("\n")
-    .map(
-      (html, i) =>
-        `<span class="${/^\s*(✓|\d+ pass)/.test(lines[i]!) ? "success" : /^\s*(×|error|\d+ fail)/i.test(lines[i]!) ? "failure" : ""}">${html}</span>`,
-    )
-    .join("\n");
-}
-async function openSource(path: string, line = 1, column?: number) {
-  const session = state?.session?.id;
-  if (pane !== "files") await openPanel("files");
-  if (pane !== "files" || session !== state?.session?.id) return;
-  await filesView.open({ path, line, column });
-}
-function panelScroll() {
-  return pane === "files"
-    ? (filesView.scrollElement() ?? el("panel-scroll"))
-    : el("panel-scroll");
-}
-
-type PanelMemory = {
-  turn: string;
-  index: number;
-  detail: number | null;
-  filter: string;
-  scroll: number;
-};
-const panelMemory = new Map<PaneName, PanelMemory>();
-function rememberPanel() {
-  if (pane)
-    panelMemory.set(pane, {
-      turn: paneTurn,
-      index: paneIndex,
-      detail: paneDetail,
-      filter: paneFilter,
-      scroll:
-        el("panel").querySelector<HTMLElement>("#panel-scroll")?.scrollTop ?? 0,
-    });
-}
 let panelWatchKey = "";
 function watchPanel() {
-  const command =
-    pane === "verification"
-      ? verificationChecks()[paneIndex]?.id
-      : pane === "log" && commandTab === "running"
-        ? commandSelection
-        : undefined;
-  const key = `${state?.session?.id}:${pane}:${command ?? "none"}`;
+  const key = `${state?.session?.id}:${pane}`;
   if (key === panelWatchKey) return;
   panelWatchKey = key;
-  void api("panel-watch", { panel: pane, command: command ?? "none" }).catch(
-    () => {},
-  );
+  void api("panel-watch", { panel: pane, command: "none" }).catch(() => {});
 }
-async function openPanel(
-  name: PaneName,
-  turnId = "",
-  detail: number | null = null,
-) {
-  rememberPanel();
-  if (name === "changes" && turnId) {
-    if (reviewMeta?.turnId !== turnId) {
-      changes = [];
-      reviewMeta = null;
-    }
-    reviewScope = "turn";
-    reviewMode = "diff";
-  }
-  const remembered =
-    !turnId && detail === null ? panelMemory.get(name) : undefined;
+async function openPanel(name: PaneName) {
   pane = name;
-  paneTurn = remembered?.turn ?? turnId;
-  paneDetail = remembered?.detail ?? detail;
-  paneIndex = remembered?.index ?? 0;
-  paneFilter = remembered?.filter ?? "all";
-  paneExpanded = false;
+  paneIndex = 0;
   overlay = null;
   paneSignature = "";
-  changesKey = "";
   renderPanels();
   watchPanel();
-  const scroll = el("panel").querySelector<HTMLElement>("#panel-scroll");
-  if (scroll && remembered) scroll.scrollTop = remembered.scroll;
-  if (name === "files") void act(() => api("files"));
-  if (name === "changes") await refreshChanges();
-  if (name === "preview") void loadPreview();
   el("panel").tabIndex = 0;
   el("panel").focus({ preventScroll: true });
   reportObservation();
-}
-let reviewPromise: Promise<void> | null = null;
-function refreshChanges(force = false): Promise<void> {
-  if (reviewPromise) return reviewPromise.then(() => refreshChanges(force));
-  reviewPromise = refreshChangesNow(force).finally(() => {
-    reviewPromise = null;
-  });
-  return reviewPromise;
-}
-async function refreshChangesNow(force = false) {
-  const run = selectedRun();
-  if (!state || pane !== "changes" || reviewBusy) return;
-  const branch = reviewBranch, scope = branch ? "session" : reviewScope;
-  if (scope === "turn" && !run) {
-    changes = [];
-    return;
-  }
-  const signature =
-    (branch ? `branch:${branch.sessionId}:` : "") +
-    reviewScope +
-    ":" +
-    (run?.id ?? "") +
-    ":" +
-    (reviewScope === "turn"
-      ? JSON.stringify(run && tools(run).filter((t) => t.phase === "change"))
-      : state.reviewRevision);
-  if (!force && signature === changesKey) return;
-  changesKey = signature;
-  reviewBusy = true;
-  reviewError = "";
-  const request = ++changesRequest,
-    session = state.session?.id;
-  try {
-    const result = await api<ReviewResponse & { files: GraphicsChange[] }>(
-      "changes",
-      branch ? { scope, branchSession: branch.sessionId, force } : { turnId: run?.id, scope, force },
-    );
-    if (
-      request === changesRequest &&
-      state?.session?.id === session &&
-      pane === "changes" &&
-      result.scope === scope &&
-      reviewBranch === branch
-    ) {
-      const path = changes[paneIndex]?.path;
-      reviewMeta = result;
-      changes = result.files;
-      paneIndex = Math.max(
-        0,
-        path
-          ? changes.findIndex((file) => file.path === path)
-          : Math.min(paneIndex, changes.length - 1),
-      );
-    }
-  } catch (error) {
-    if (request === changesRequest)
-      reviewError = error instanceof Error ? error.message : String(error);
-  } finally {
-    reviewBusy = false;
-    if (request === changesRequest && pane === "changes") {
-      paneSignature = "";
-      renderPanels();
-    }
-  }
-}
-async function loadPreview() {
-  if (!state || pane !== "preview") return;
-  if (followImages && !previewPinned)
-    selectedImage =
-      state.artifacts.findLast(
-        (item) => item.source.name !== "reference_import",
-      )?.id ?? "";
-  const item =
-    state.artifacts.find((image) => image.id === selectedImage) ??
-    state.artifacts.at(-1);
-  if (!item) return;
-  if (previewLoading === item.id) return;
-  selectedImage = item.id;
-  previewLoading = item.id;
-  previewData = "";
-  try {
-    const data = await api<string>("artifact", { id: item.id, original: true });
-    if (previewLoading === item.id) {
-      previewData = data;
-      paneSignature = "";
-      renderPanels();
-    }
-  } catch (error) {
-    notice(String(error));
-  }
-}
-function logRecords(run: GraphicsRun) {
-  return [
-    { id: 0, type: "request", text: run.content, at: run.createdAt } as any,
-    ...run.entries,
-  ];
-}
-function recordText(entry: any) {
-  return entry.type === "tool"
-    ? (entry.detail ?? entry.name)
-    : (entry.raw ?? entry.text ?? "");
-}
-function logBody(run: GraphicsRun) {
-  const all = logRecords(run),
-    records = all.filter(
-      (entry) =>
-        paneFilter === "all" ||
-        (paneFilter === "changes" && entry.phase === "change") ||
-        (paneFilter === "checks" && entry.phase === "verify") ||
-        (paneFilter === "failed" &&
-          (entry.state === "failed" || entry.state === "denied")),
-    );
-  const detail =
-    paneDetail == null ? null : all.find((entry) => entry.id === paneDetail);
-  if (detail) {
-    const index = all.indexOf(detail),
-      tool = detail.type === "tool" ? (detail as ToolEntry) : null;
-    return `<div class="panel-detail"><h3>${tool ? `<span class="${tone(tool.state)}">${mark(tool.state)} ${h(verb(tool))}</span> ` : ""}${h(tool ? (tool.detail ?? tool.name).replace(/^\$\s*/, "") : detail.type === "request" ? "Request" : detail.type === "assistant" ? "Response" : detail.type === "reasoning" ? "Thinking" : "Event")}</h3>${tool ? `<div><span class="pill ${tool.state === "failed" ? "failed" : ""}">${h(tool.state)}${tool.exitCode != null ? ` · exit ${tool.exitCode}` : ""}</span> &nbsp;${duration(tool.durationMs)} <span class="muted">· ${h(tool.input.cwd ?? state!.workspace)}</span></div><div class="output-label">OUTPUT <span>${(tool.message ?? "").split("\n").length} lines · stdout + stderr</span></div><pre class="output">${outputHTML(tool.message ?? (tool.state === "running" ? "Running…" : "No output recorded."), typeof tool.input.cwd === "string" ? tool.input.cwd : undefined)}</pre><details><summary>Arguments</summary><pre class="output">${h(JSON.stringify(tool.input, null, 2))}</pre></details>` : `<div class="markdown">${detail.type === "assistant" ? markdown(detail.raw) : `<pre class="output">${h(recordText(detail))}</pre>`}</div>`}</div>`;
-  }
-  paneIndex = Math.min(paneIndex, Math.max(0, records.length - 1));
-  const count = (filter: string) =>
-    all.filter(
-      (entry) =>
-        filter === "all" ||
-        (filter === "changes" && entry.phase === "change") ||
-        (filter === "checks" && entry.phase === "verify") ||
-        (filter === "failed" &&
-          (entry.state === "failed" || entry.state === "denied")),
-    ).length;
-  return `<div class="filters">${["all", "changes", "checks", "failed"].map((filter) => btn("log-filter", `${filter[0]!.toUpperCase() + filter.slice(1)} ${count(filter)}`, { filter }, paneFilter === filter ? "selected" : "", true)).join("")}</div><div class="panel-body" id="panel-scroll">${records
-    .map((entry, index) => {
-      const time = entry.startedAt ?? Date.parse(entry.at ?? "");
-      return btn(
-        "log-entry",
-        `<span class="offset">${Number.isFinite(time) ? `+${((time - Date.parse(run.createdAt)) / 1000).toFixed(1)}s` : ""}</span><span class="${tone(entry.state ?? "")}">${entry.type === "tool" ? mark(entry.state) : entry.type === "request" ? "▶" : entry.type === "reasoning" ? "◇" : "·"}</span><span class="verb">${h(entry.type === "tool" ? verb(entry) : entry.type === "assistant" ? "Response" : entry.type === "request" ? "Request" : entry.type === "reasoning" ? "Thinking" : "Event")}</span><span class="name">${h(recordText(entry).split("\n")[0])}</span><span class="right ${entry.state === "failed" ? "danger" : ""}">${entry.exitCode != null ? `exit ${entry.exitCode}` : entry.phase === "change" ? `${totals(run, entry).added ? `+${totals(run, entry).added}` : ""}` : ""} ${duration(entry.durationMs)}</span>`,
-        { id: entry.id, index },
-        `panel-row ${index === paneIndex ? "selected" : ""}`,
-        true,
-      );
-    })
-    .join("")}</div>`;
-}
-function contextBody() {
-  const c = context(),
-    plan = state!.provider?.contextPlan,
-    usage = state!.provider?.usage,
-    metrics = state!.provider?.metrics;
-  const amounts =
-    plan && plan.capacityTokens && plan.reserves.totalTokens != null
-      ? [
-          plan.estimatedMessageTokens,
-          plan.estimatedToolDefinitionTokens,
-          plan.reserves.totalTokens,
-          Math.max(
-            0,
-            plan.capacityTokens -
-              plan.estimatedInputTokens -
-              plan.reserves.totalTokens,
-          ),
-        ]
-      : null;
-  const colors = [
-      "var(--electric)",
-      "var(--syntaxType)",
-      "var(--thinking)",
-      "#22323d",
-    ],
-    labels = ["messages", "tool definitions", "reserved", "free"];
-  const kv = (label: string, value: string) =>
-    `<div class="kv"><span>${label}</span><span>${value}</span></div>`;
-  const rate =
-    usage?.outputTokens != null && metrics?.durationMs
-      ? usage.outputTokens / (metrics.durationMs / 1000)
-      : null;
-  return `<div class="context-details"><div class="context-section">CONTEXT PLAN <span>estimated model context</span></div><div class="context-top">${c.estimated ? "~" : ""}${num(c.used)} <span class="muted">of ${num(c.capacity)}${c.percentage == null ? "" : ` · ${c.percentage}%`}</span></div>${amounts ? `<div class="stack">${amounts.map((n, i) => `<span style="width:${Math.min(100, (n / c.capacity!) * 100)}%;background:${colors[i]}"></span>`).join("")}</div><div class="legend">${amounts.map((n, i) => `<span><i style="background:${colors[i]}"></i>${labels[i]} ~${num(n)}</span>`).join("")}</div>` : '<p class="muted">Context breakdown has not been reported.</p>'}${kv("reserves", plan ? `output ${num(plan.reserves.outputTokens)} · results ${num(plan.reserves.toolResultTokens)} · safety ${num(plan.reserves.safetyTokens)}` : "—")}${kv("reductions", plan?.actions.length ? `<span class="success">${plan.actions.length} applied · saved ~${num(plan.actions.reduce((sum, a) => sum + a.estimatedTokensSaved, 0))}</span>` : "none")}<div class="context-section">LAST REQUEST <span>reported by provider</span></div>${kv("tokens", `${num(usage?.inputTokens)} in · ${num(usage?.outputTokens)} out · ${num(usage?.cachedInputTokens)} cached`)}${kv("timing", `queue ${duration(metrics?.queueDurationMs)} · first token ${duration(metrics?.timeToFirstTokenMs)} · request ${duration(metrics?.durationMs)}`)}${kv(
-    "speed",
-    `${rate == null ? "—" : rate.toFixed(1)} tok/s${(() => {
-      const rates = state!.runs
-        .map((run) => run.receipt?.tokensPerSecond)
-        .filter((rate): rate is number => rate != null && Number.isFinite(rate))
-        .slice(-10);
-      return rates.length > 1
-        ? `<span class="spark" title="Recent turn throughput">${rates.map((rate) => `<i style="height:${Math.max(2, Math.round((rate / Math.max(...rates)) * 18))}px"></i>`).join("")}</span>`
-        : "";
-    })()}`,
-  )}<div class="context-section">TURN</div>${kv("status", state!.activeTurnId ? `<span class="amber">◌ running · ${duration(Date.now() - Date.parse(state!.runs.at(-1)!.createdAt))}</span>` : h(state!.runs.at(-1)?.status ?? "ready"))}${kv("thinking", "provider default")}${state!.checkpoint ? `<div class="context-section">SAVED COMPACTION</div>${kv("context", `~${num(state!.checkpoint.beforeTokens)} → ~${num(state!.checkpoint.afterTokens)}`)}${kv("saved", h(new Date(state!.checkpoint.createdAt).toLocaleString()))}<p class="muted">${state!.checkpoint.summarizedTurns} older turns summarized · ${state!.checkpoint.retainedTurns} recent turns kept in full. Older conversation is collapsed into a summary. Expand full history to read it.</p>` : ""}<div class="panel-actions">${btn("compact", "Compact session", {}, "", false, Boolean(state!.activeTurnId))}</div><p class="muted">Summarize older context and keep recent turns. Full transcript remains in History.${state!.activeTurnId ? " Wait for the current turn to finish." : ""}</p></div>`;
 }
 /// The Next queue: Drive's ranked proposals, each with its evidence and the
 /// four ways to answer it.
@@ -2030,31 +1686,17 @@ function driveBody() {
     let top = "";
     if (finished) {
       const parts = missionParts(finished);
-      top = `<div class="done-item first"><div class="done-top"><span class="tone-${parts.tone}">${parts.mark}</span><span class="done-title">${h(parts.title)}</span></div><p class="next-why">${h(finished.answer ?? parts.summary ?? parts.label)}</p>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${finished.homeSessionId && finished.homeSessionId !== state!.session?.id ? btn("select-session", "Open session", { id: finished.homeSessionId }, "primary") : ""}${btn("panel", "Review changes", { name: "changes" }, finished.homeSessionId && finished.homeSessionId !== state!.session?.id ? "" : "primary", true)}</div>${parts.details}</div>`;
+      top = `<div class="done-item first"><div class="done-top"><span class="tone-${parts.tone}">${parts.mark}</span><span class="done-title">${h(parts.title)}</span></div><p class="next-why">${h(finished.answer ?? parts.summary ?? parts.label)}</p>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${finished.homeSessionId && finished.homeSessionId !== state!.session?.id ? btn("select-session", "Open session", { id: finished.homeSessionId }, "primary") : ""}</div>${parts.details}</div>`;
     }
     const rows = memory.slice(0, 30).map((entry) => `<div class="done-row"><span class="${entry.kind === "blocker" ? "tone-thinking" : "tone-citron"}">${entry.kind === "blocker" ? "◌" : "✓"}</span><span class="done-text">${entry.kind === "blocker" ? '<b class="tone-thinking">Needs you:</b> ' : ""}${h(entry.text)}</span><time>${h(age(entry.at))}</time></div>`).join("");
     body = top || rows ? `<div class="next-heading"><span class="muted">newest first · outcomes also go to Drive memory</span></div>${top}${rows}` : '<p class="muted next-empty">Finished missions and what Drive learned from them appear here.</p>';
   }
   return `<div class="drive-content">${card}${tabs}<div class="drive-tab-body">${body}</div><p class="drive-foot muted">${pinned ? "Steer Drive by typing in the composer" : "Start your own mission: <code>/drive</code> in the composer"}</p></div>`;
 }
-function processError() {
-  return state?.processesError
-    ? `<div class="panel-error">${h(state.processesError)} ${btn("refresh-processes", "Retry")}<br><small>These panels require the updated daemon.</small></div>`
-    : "";
-}
-function checkLabel(command: CommandRecord) {
-  if (["running", "stopping"].includes(command.status)) return "running";
-  if (command.freshness === "outdated") return "outdated";
-  if (command.status === "failed") return "failed";
-  if (["stopped", "interrupted"].includes(command.status)) return "stopped";
-  return command.exitCode === 0 && command.freshness === "current"
-    ? "passed"
-    : "unverified";
-}
-function verificationChecks() {
+function verificationChecks(turnId = "") {
   if (!state) return [];
   const records = state.processes.filter(
-    (command) => command.check && (!paneTurn || command.turnId === paneTurn),
+    (command) => command.check && (!turnId || command.turnId === turnId),
   );
   const keys = new Set<string>();
   const checks: CommandRecord[] = [];
@@ -2065,7 +1707,7 @@ function verificationChecks() {
     checks.push(command);
   }
   for (const run of state.runs.filter(
-    (run) => !paneTurn || run.id === paneTurn,
+    (run) => !turnId || run.id === turnId,
   ))
     for (const tool of tools(run).filter(
       (tool) =>
@@ -2118,114 +1760,6 @@ function verificationChecks() {
     }
   return checks;
 }
-function verificationOverall(checks: CommandRecord[]) {
-  if (!checks.length) return "not run";
-  const statuses = checks.map(checkLabel);
-  return (
-    ["running", "failed", "outdated", "stopped", "unverified"].find((status) =>
-      statuses.some((value) => value === status),
-    ) ?? "passed"
-  );
-}
-function commandsBody() {
-  const all = state!.processes,
-    records = all.filter((command) =>
-      (command.argv.join(" ") + command.cwd + command.status)
-        .toLowerCase()
-        .includes(commandSearch.toLowerCase()),
-    );
-  const selected =
-    all.find((command) => command.id === commandSelection) ?? records[0];
-  if (selected) commandSelection = selected.id;
-  const run = state!.runs.at(-1),
-    waiting = state!.approvals.length
-      ? "Waiting for your approval"
-      : state!.questions.length
-        ? "Waiting for your answer"
-        : state!.queuePosition != null
-          ? `Queued for the model · position ${state!.queuePosition}`
-          : run?.status === "queued"
-            ? "Queued for the model"
-            : state!.activeTurnId
-              ? tools(run!).some((tool) => tool.state === "running")
-                ? "Executing tools"
-                : "Model request in progress"
-              : "Agent idle";
-  return (
-    processError() +
-    `<div class="panel-note">${h(waiting)}</div><div class="panel-filter"><input id="command-search" aria-label="Filter commands" placeholder="Filter commands…" value="${h(commandSearch)}"></div><div class="command-list">${records.map((command) => btn("command-select", `<span class="${command.status === "completed" ? "success" : command.status === "failed" ? "danger" : "amber"}">${command.status === "running" ? "◌" : command.status === "completed" ? "✓" : "·"}</span><span class="name">${h(command.argv.join(" "))}</span><span class="right">${command.background ? "background · " : ""}${h(command.status)}</span>`, { id: command.id }, `panel-row ${command.id === selected?.id ? "selected" : ""}`)).join("")}</div>${selected ? `<div class="panel-detail command-detail"><h3>${h(selected.argv.join(" "))}</h3><div class="panel-note">${h(selected.cwd)}<br>Turn ${state!.runs.find((run) => run.id === selected.turnId)?.number ?? "—"} · PID ${selected.pid ?? "—"} · ${selected.background ? "background" : "foreground"} · <span data-command-elapsed="${h(selected.id)}">${duration(Date.parse(selected.completedAt ?? new Date().toISOString()) - Date.parse(selected.startedAt))}</span><br><span data-command-output-age="${h(selected.id)}">${selected.lastOutputAt ? `Last output ${age(selected.lastOutputAt)}` : "No output yet"}</span> · ${selected.exitCode == null ? h(selected.status) : `exit ${selected.exitCode}`}${selected.timedOut ? " · timed out" : ""}</div><div class="panel-actions">${["running", "stopping"].includes(selected.status) ? btn("stop-command", "Stop command", { id: selected.id }, "danger") : ""}${btn("copy-command-output", "Copy output", { id: selected.id })}</div><div class="output-label">STDOUT ${selected.truncated ? "<span>Bounded tail · older output omitted</span>" : ""}</div><pre class="output command-output">${outputHTML(selected.stdout || (selected.outputLoaded === false ? "Loading recorded stdout…" : "No stdout recorded."), selected.cwd)}</pre>${selected.stderr ? `<div class="output-label">STDERR</div><pre class="output command-output">${outputHTML(selected.stderr, selected.cwd)}</pre>` : ""}</div>` : '<div class="empty">No command recordings. Commands launched with the updated daemon appear here.</div>'}`
-  );
-}
-async function loadReference() {
-  const id = referenceImage;
-  if (!id || id === referenceLoading) return;
-  referenceLoading = id;
-  referenceData = "";
-  try {
-    const data = await api<string>("artifact", { id, original: true });
-    if (referenceImage === id) {
-      referenceData = data;
-      paneSignature = "";
-      renderPanels();
-    }
-  } catch (error) {
-    notice(String(error));
-  }
-}
-function applyPreviewLayout() {
-  const canvas = el("panel").querySelector<HTMLElement>(".preview-canvas"),
-    plane = canvas?.querySelector<HTMLElement>(".preview-plane"),
-    item = state?.artifacts.find((image) => image.id === selectedImage),
-    reference = previewCompare
-      ? state?.artifacts.find((image) => image.id === referenceImage)
-      : undefined;
-  if (!canvas || !plane || !item) return;
-  const width = Math.max(item.width, reference?.width ?? 0),
-    height = Math.max(item.height, reference?.height ?? 0),
-    // Zoom follows CSS pixels, including on Retina displays.
-    density = 1;
-  const zoom = previewFit
-    ? Math.min(canvas.clientWidth / width, canvas.clientHeight / height)
-    : previewZoom / density;
-  plane.style.width = `${width * zoom}px`;
-  plane.style.height = `${height * zoom}px`;
-  for (const [selector, image] of [
-    [".preview-current", item],
-    [".preview-reference", reference],
-  ] as const) {
-    const element = plane.querySelector<HTMLElement>(selector);
-    if (element && image) {
-      element.style.width = `${image.width * zoom}px`;
-      element.style.height = `${image.height * zoom}px`;
-    }
-  }
-  plane.style.setProperty("--reference-opacity", String(previewOpacity / 100));
-}
-function commandClocks() {
-  for (const element of document.querySelectorAll<HTMLElement>(
-    "[data-command-elapsed]",
-  )) {
-    const command = state?.processes.find(
-      (command) => command.id === element.dataset.commandElapsed,
-    );
-    if (command)
-      element.textContent = duration(
-        Date.parse(command.completedAt ?? new Date().toISOString()) -
-          Date.parse(command.startedAt),
-      );
-  }
-  for (const element of document.querySelectorAll<HTMLElement>(
-    "[data-command-output-age]",
-  )) {
-    const command = state?.processes.find(
-      (command) => command.id === element.dataset.commandOutputAge,
-    );
-    if (command)
-      element.textContent = command.lastOutputAt
-        ? `Last output ${age(command.lastOutputAt)}`
-        : "No output yet";
-  }
-}
 
 let pointerHeld = false,
   pendingPanelRender = false;
@@ -2260,357 +1794,39 @@ function renderPanels() {
   }
   renderStatus();
   el("panel").hidden = !pane;
-  filesView.setActive(pane === "files");
-  if (pane === "files") filesView.update(state.files);
   if (!pane) {
     watchPanel();
     return;
   }
-  if (pane === "changes") void refreshChanges();
-  if (pane === "preview") void loadPreview();
-  const run = selectedRun();
-  const content =
-    pane === "files"
-      ? state.files
-      : pane === "history"
-        ? [
-            state.runs.map((run) => [
-              run.id,
-              run.status,
-              run.content,
-              run.receipt,
-            ]),
-            state.sessions,
-            state.driveMemory,
-            state.provider,
-            state.checkpoint,
-          ]
-        : pane === "context"
-          ? [state.provider, state.checkpoint, state.activeTurnId, state.runs.at(-1)?.status]
-          : pane === "drive"
-            ? [state.drive, state.driveNext, state.driveMemory, driveTab, nextOpen]
-            : pane === "preview"
-              ? [
-                  state.artifacts,
-                  selectedImage,
-                  previewPinned,
-                  previewData,
-                  referenceImage,
-                  referenceData,
-                  previewCompare,
-                  previewFit,
-                  previewZoom,
-                ]
-              : pane === "changes"
-                ? [
-                    changes,
-                    reviewScope,
-                    reviewMode,
-                    reviewMeta,
-                    reviewError,
-                    reviewBusy,
-                  ]
-                : pane === "verification"
-                  ? [
-                      run && tools(run).filter((t) => t.phase === "verify"),
-                      state.processes,
-                      state.verificationFingerprint,
-                      state.processesError,
-                      state.checkQueue,
-                    ]
-                  : [
-                      run,
-                      commandTab,
-                      commandSelection,
-                      commandSearch,
-                      state.processes,
-                      state.processesError,
-                      state.queuePosition,
-                    ];
   const signature = JSON.stringify([
     pane,
-    paneTurn,
     paneIndex,
-    paneDetail,
-    paneFilter,
-    paneExpanded,
-    content,
+    state.drive,
+    state.driveNext,
+    state.driveMemory,
+    driveTab,
+    nextOpen,
+    state.breakage,
+    state.session?.id,
   ]);
   if (signature === paneSignature) return;
   paneSignature = signature;
-  const focusedField =
-      el("panel").querySelector<HTMLInputElement>("input:focus"),
-    focusedId = focusedField?.id,
-    caret = focusedField?.selectionStart;
   const scroll =
     el("panel").querySelector<HTMLElement>("#panel-scroll")?.scrollTop ?? 0;
-  el("panel").className =
-    `${pane === "drive" ? "drive-pane" : pane === "files" ? "files-pane" : ""} ${paneExpanded ? "expanded" : ""}`;
-  let header = "",
-    body = "",
-    footer = "";
-  if (pane === "files") {
-    const images = state.artifacts.filter((image) => image.source.name !== "reference_import");
-    // Counts live in the search field and the list's own sections.
-    header = panelHeader("Files", state.workspace.split("/").pop() ?? "");
-    body = (images.length ? `<div class="panel-actions">${btn("panel", `Images ${images.length} ›`, { name: "preview" }, "", true)}</div>` : "") + '<div id="files-mount"></div>';
-  }
-
-  if (pane === "history") {
-    const c = context(),
-      others = state.sessions.filter((item) => item.id !== state!.session?.id && item.turns > 0).slice(0, 5);
-    header = panelHeader("Session", state.session?.title ?? "");
-    body =
-      `<div class="panel-actions">${btn("overlay", "Rename", { name: "rename" })}${btn("compact", "Compact")}${btn("new-session", "New session")}</div>` +
-      // Context on one line; the model lives in the composer.
-      `<div class="session-context"><span class="muted">context</span><span>${c.estimated ? "~" : ""}${num(c.used)} of ${c.capacity ? tokensShort(c.capacity) : "—"}</span><div class="meter" title="${c.percentage == null ? "" : `${c.percentage}% used`}"><i style="--usage:${Math.min(100, c.percentage ?? 0)}%"></i></div>${btn("panel", "details ›", { name: "context" }, "link", true)}</div>` +
-      `<div class="panel-section">TURNS</div>${[...state.runs]
-        .reverse()
-        .map((item, index) =>
-          btn(
-            "jump-turn",
-            `<span class="muted">${item.number}</span><span class="${tone(item.status)}">${mark(item.status)}</span><span class="name">${h(item.content)}</span><span class="right">${active(item) ? "running" : duration(item.receipt?.durationMs)}</span>`,
-            { id: item.id, index },
-            `panel-row ${index === paneIndex ? "selected" : ""}`,
-            true,
-          ),
-        )
-        .join("")}` +
-      // Drive memory and other sessions appear once they have something in them.
-      (state.driveMemory.length
-        ? `<div class="panel-section">DRIVE MEMORY <span>${state.driveMemory.length}</span></div>${[...state.driveMemory]
-            .reverse()
-            .slice(0, 12)
-            .map(
-              (item) =>
-                `<div class="check-row memory-row"><span class="${item.kind === "outcome" ? "success" : item.kind === "blocker" ? "danger" : "electric"}">${item.kind === "outcome" ? "✓" : item.kind === "blocker" ? "×" : "you"}</span><span class="name" title="${h(item.text)}">${h(item.text)}</span>${btn("drive-forget", "Forget", { id: item.id }, "link")}</div>`,
-            )
-            .join("")}`
-        : "") +
-      (others.length
-        ? `<div class="panel-section">OTHER SESSIONS ${btn("overlay", "all ›", { name: "sessions" }, "link")}</div>${others
-            .map((item) =>
-              btn(
-                "select-session",
-                `<span class="muted">→</span><span class="name">${h(item.title)}</span><span class="right">${age(item.updatedAt)}</span>`,
-                { id: item.id },
-                "panel-row",
-                true,
-              ),
-            )
-            .join("")}`
-        : "");
-  }
-  if (pane === "context") {
-    header = panelHeader("Context", `${state.model.id} · ${state.model.provider}`, { name: "history", label: "Session" });
-    body = contextBody();
-  }
-  if (pane === "log") {
-    const running = state.processes.filter((command) => ["running", "stopping"].includes(command.status)).length;
-    header =
-      commandTab === "running"
-        ? panelHeader("Commands", `${running} running`, { name: "changes", label: "Review" })
-        : panelHeader("Steps", run ? `Turn ${run.number} · ${logRecords(run).length} steps · ${duration(run.receipt?.durationMs)}` : "", { name: "changes", label: "Review" });
-    body =
-      `<div class="panel-tabs">${btn("command-tab", "Steps", { tab: "events" }, commandTab === "events" ? "selected" : "")}${btn("command-tab", `Commands ${running ? "●" : ""}`, { tab: "running" }, commandTab === "running" ? "selected" : "")}${btn("refresh-processes", "↻", {}, "right")}</div>` +
-      (commandTab === "running"
-        ? commandsBody()
-        : run
-          ? logBody(run)
-          : '<div class="empty">No recorded steps.</div>');
-    if (commandTab === "events" && run && paneDetail !== null) {
-      const all = logRecords(run),
-        index = all.findIndex((entry) => entry.id === paneDetail);
-      header = `<div class="panel-heading">${btn("log-back", "‹ Steps", {}, "back", true)}<strong class="title">Step ${index + 1} of ${all.length}</strong><span class="subject">Turn ${run.number}</span>${btn("log-next", "Next ›", {}, "link", true)}${btn("close-panel", "×", {}, "close", true)}</div>`;
-    }
-  }
-  if (pane === "changes" && reviewBranch && !reviewJobs().some((job) => job.sessionId === reviewBranch!.sessionId)) {
-    // The branch was applied or discarded: back to this session's changes.
-    reviewBranch = null;
-    changes = [];
-    changesKey = "";
-    void refreshChanges(true);
-  }
-  if (pane === "changes") {
-    const file = changes[paneIndex],
-      checks = verificationChecks();
-    // One heading line: the scope, how the checks went, refresh and close.
-    // The files follow, the open one with its diff right under it.
-    const scopeName = (scope: ReviewScope) => (scope === "turn" ? "this turn" : scope);
-    const failed = checks.filter((check) => checkLabel(check) === "failed").length,
-      passed = checks.filter((check) => checkLabel(check) === "passed").length;
-    const checkText = !checks.length ? ""
-      : failed ? `× ${checks.length === 1 ? commandLabel(checks[0]!.argv) : `${failed} of ${checks.length} checks failed`}`
-      : passed === checks.length ? `✓ ${checks.length === 1 ? commandLabel(checks[0]!.argv) : `${checks.length} checks`}`
-      : `◌ ${checks.length === 1 ? commandLabel(checks[0]!.argv) : `${checks.length - passed} of ${checks.length} checks ${verificationOverall(checks)}`}`;
-    const checkTone = failed ? "danger" : passed === checks.length ? "success" : "amber";
-    const checkLink = checks.length
-      ? btn("panel", h(checkText), { name: "verification" }, `review-check ${checkTone}`, true).replace("<button ", `<button title="${h(checks.map((check) => `${checkLabel(check)} · ${commandLabel(check.argv)}`).join("\n"))} · open Checks" `)
-      : "";
-    const scopeMenu = reviewScopeMenu
-      ? `<div class="review-scope-menu" role="menu">${(["turn", "session", "workspace"] as const).map((scope) => btn("review-scope", scope === "turn" ? (run ? `this turn <span class="muted">turn ${run.number}</span>` : "this turn") : scope === "session" ? "session <span class=\"muted\">every turn here</span>" : "workspace <span class=\"muted\">all uncommitted</span>", { scope }, `review-scope-option${scope === reviewScope && !reviewBranch ? " selected" : ""}`)).join("")}</div>`
-      : "";
-    const branch = reviewBranch;
-    const scopeButton = branch
-      ? btn("review-scope-menu", `${h(branch.title.length > 34 ? `${branch.title.slice(0, 33)}…` : branch.title)} ⌄`, {}, "review-scope-button branch").replace("<button ", `<button title="${h(`Branch waiting for review: ${branch.title}`)}" `)
-      : btn("review-scope-menu", `${scopeName(reviewScope)} ⌄`, {}, "review-scope-button");
-    header = `<div class="panel-heading review-heading"><strong class="title">Review</strong>${scopeButton}<span class="subject"></span>${branch ? "" : checkLink}${btn("refresh-review", reviewBusy ? "…" : "↻", {}, "review-refresh")}${btn("close-panel", "×", {}, "close", true)}${scopeMenu}</div>`;
-    let code = "";
-    if (file) {
-      if (reviewMode !== "diff") {
-        const text = reviewMode === "before" ? file.before : file.after;
-        code =
-          text == null
-            ? '<div class="empty">This side has no available text.</div>'
-            : text
-                .split("\n")
-                .map(
-                  (line, i) =>
-                    `<div class="diff-line context">${reviewMode === "after" ? btn("source-location", String(i + 1), { path: file.path, line: i + 1 }, "number") : `<span class="number">${i + 1}</span>`}<code>${h(line)}</code></div>`,
-                )
-                .join("");
-      } else {
-        // One gutter: the new line number, or the old one for a removed line.
-        let section = -1,
-          wasChanged = false;
-        code =
-          file.rows
-            .map((row) => {
-              const changed = row.kind === "added" || row.kind === "removed",
-                anchor =
-                  changed && !wasChanged ? ` data-hunk="${++section}"` : "";
-              wasChanged = changed;
-              return `<div class="diff-line ${row.kind}"${anchor}>${row.kind === "gap" ? h(row.text) : `${row.kind !== "removed" && row.next ? btn("source-location", String(row.next), { path: file.path, line: row.next }, "number") : `<span class="number">${row.old ?? ""}</span>`}<span class="marker">${row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " "}</span><code>${h(row.text)}</code>`}</div>`;
-            })
-            .join("") || '<div class="empty">No textual changes.</div>';
-      }
-    }
-    const sep = '<span class="muted">·</span>';
-    const fileBlock = file
-      ? `<div class="review-file"><div class="diff-code">${file.unavailable && reviewMode === "diff" ? `<div class="empty">${h(file.unavailable)}</div>` : code}</div>${reviewMeta?.truncated ? '<div class="panel-note">Some diff content is omitted.</div>' : ""}<div class="panel-actions review-modes">${(["diff", "before", "after"] as const).filter((mode) => mode !== reviewMode).map((mode) => btn("review-mode", mode, { mode })).join(sep)}${branch ? "" : `${sep}${btn("review-current", "open", { path: file.path })}${file.undo?.available ? btn("review-undo", "undo file", { path: file.path, turnId: file.undo.turnId }, "danger right") : ""}`}</div>${!branch && file.undo && !file.undo.available ? `<div class="panel-note">Undo unavailable: ${h(file.undo.reason)}</div>` : ""}</div>`
-      : "";
-    body =
-      (reviewError
-        ? `<div class="panel-error">${h(reviewError)} ${btn("refresh-review", "Retry")}</div>`
-        : "") +
-      (changes.length
-        ? `<div class="review-files">${changes.map((item, index) => btn("change-file", `<span class="name">${pathHTML(item.path)}</span>${item.state === "applied" ? "" : `<span class="muted">${h(item.state)}</span>`}<span class="right"></span>${counts(item)}`, { index }, `panel-row ${index === paneIndex ? "selected" : ""}`, true) + (index === paneIndex ? fileBlock : "")).join("")}</div>`
-        : `<div class="empty">${branch ? "No changes on this branch." : `No changes in ${h(scopeName(reviewScope))}.`}</div>`);
-    footer = "";
-  }
-  if (pane === "verification") {
-    const checks = verificationChecks(),
-      selected = checks[Math.min(paneIndex, Math.max(0, checks.length - 1))],
-      busy = Boolean(state.activeTurnId || state.processes.some((c) => ["running", "stopping"].includes(c.status)));
-    header = panelHeader("Checks", `${paneTurn && run ? `Turn ${run.number}` : "Session"} · ${verificationOverall(checks)}`, { name: "changes", label: "Review" });
-    const where = selected ? workspacePath(selected.cwd) : "";
-    body =
-      processError() +
-      `<div class="panel-actions">${btn("rerun-failed", "Rerun failed", {}, "", false, busy || !checks.some((c) => c.status === "failed"))}<span class="muted">${state.checkQueue.length ? `${state.checkQueue.length} queued` : ""}</span>${btn("refresh-processes", "↻", {}, "right")}</div>` +
-      checks
-        .map((check, index) =>
-          btn(
-            "check-select",
-            `<span class="${checkLabel(check) === "passed" ? "success" : checkLabel(check) === "failed" ? "danger" : "amber"}">${checkLabel(check) === "passed" ? "✓" : checkLabel(check) === "failed" ? "×" : checkLabel(check) === "running" ? "◌" : "·"}</span><span class="name">${h(commandLabel(check.argv))}</span><span class="right">${checkLabel(check)}</span>`,
-            { index },
-            `panel-row ${index === paneIndex ? "selected" : ""}`,
-            true,
-          ),
-        )
-        .join("") +
-      (selected
-        ? `<div class="panel-detail"><div class="panel-note">${where ? `${h(where)} · ` : ""}${selected.completedAt ? `ran ${clock(selected.completedAt)} · exit ${selected.exitCode ?? "—"}` : "running…"}${selected.freshness === "outdated" && selected.freshnessReason ? `<br>${h(selected.freshnessReason)}` : ""}</div><div class="panel-actions">${btn("command-open", "Open output", { id: selected.id }, "", true)}${selected.id.startsWith("legacy:") ? "" : btn("rerun-check", "Rerun", { id: selected.id }, "", false, busy)}</div><pre class="output">${outputHTML((selected.stdout + "\n" + selected.stderr).trim().split("\n").slice(-20).join("\n") || (selected.outputLoaded === false ? "Loading recorded output…" : "No recorded output."), selected.cwd)}</pre>${selected.truncated ? '<small class="muted">Output is a bounded excerpt.</small>' : ""}</div>`
-        : '<div class="empty">No checks have run.</div>');
-  }
-  if (pane === "preview") {
-    const item = state.artifacts.find((image) => image.id === selectedImage),
-      reference = state.artifacts.find((image) => image.id === referenceImage);
-    header = panelHeader(
-      "Image",
-      [item?.filename, item ? `${item.width} × ${item.height}` : "", previewPinned ? "pinned" : followImages ? "following new" : ""].filter(Boolean).join(" · "),
-      { name: "files", label: "Files" },
-    );
-    body =
-      `<div class="panel-actions">${btn("follow-images", "Follow new", {}, followImages && !previewPinned ? "selected" : "")}${btn("preview-fit", "Fit", {}, previewFit ? "selected" : "")}${btn("preview-zoom", "100%", { zoom: 1 }, !previewFit && previewZoom === 1 ? "selected" : "")}${btn("preview-zoom", "−", { step: -0.25 })}${btn("preview-zoom", "+", { step: 0.25 })}${btn("preview-compare", previewCompare ? "Hide comparison" : "Compare", {}, previewCompare ? "selected" : "")}</div>` +
-      (item
-        ? `<div class="preview-canvas" tabindex="0"><div class="preview-plane"><img class="preview-current" src="${h(previewData)}" alt="${h(item.filename)}" draggable="false">${previewCompare && referenceData ? `<img class="preview-reference" src="${h(referenceData)}" alt="Reference: ${h(reference?.filename)}" draggable="false">` : ""}</div></div>${previewCompare ? `<div class="compare-controls"><label>Reference opacity <input aria-label="Reference opacity" type="range" min="0" max="100" value="${previewOpacity}" id="reference-opacity"></label><span>${h(reference?.filename ?? "Choose a reference below")}${reference ? ` · ${reference.width} × ${reference.height} px · ${reference.viewport ? `${reference.viewport.width} × ${reference.viewport.height} viewport` : "viewport not recorded"}` : ""}</span></div>${reference && (reference.width !== item.width || reference.height !== item.height) ? '<div class="panel-note amber">Different image dimensions. Both are aligned at the top left; neither is stretched.</div>' : ""}` : ""}<div class="preview-actions">${btn("pin-image", previewPinned ? "Unpin" : "Pin")}${btn("expand-panel", paneExpanded ? "Restore" : "Expand")}${btn("open-image", "Open original")}</div>`
-        : '<div class="empty">Images will appear here when a tool creates them.</div>') +
-      `<details class="reference-picker"${!referenceImage ? " open" : ""}><summary>Reference ${reference ? `· ${h(reference.filename)}` : "image"}</summary><div class="preview-history">${state.artifacts
-        .filter((image) => image.id !== selectedImage)
-        .map((image) =>
-          btn(
-            "reference-image",
-            h(image.filename),
-            { id: image.id },
-            `chip ${image.id === referenceImage ? "selected" : ""}`,
-          ),
-        )
-        .join(
-          "",
-        )}</div><form id="reference-form"><label>Figma PNG/JPG/WebP export in this workspace<input id="reference-path" name="path" value="${h(referencePathDraft)}" placeholder="designs/reference.png" required></label><div class="viewport-inputs"><label>Viewport width (optional)<input id="reference-width" name="viewportWidth" inputmode="numeric" value="${h(referenceViewportWidth)}" placeholder="1200"></label><label>Height<input id="reference-height" name="viewportHeight" inputmode="numeric" value="${h(referenceViewportHeight)}" placeholder="720"></label></div><button type="submit" class="chip">Import reference</button></form></details><div class="preview-history">${state.artifacts
-        .filter((image) => image.source.name !== "reference_import")
-        .slice(-12)
-        .map((image) =>
-          btn(
-            "select-image",
-            h(image.filename),
-            { id: image.id },
-            `chip ${image.id === selectedImage ? "selected" : ""}`,
-          ),
-        )
-        .join("")}</div>`;
-
-  }
-  if (pane === "drive") {
-    const status = state.drive?.status;
-    // Drive's state, as in the design: idle when nothing runs, ● live while
-    // it works; the proposal count lives on the Next tab.
-    const [subject, tone] = status === "running" || status === "waiting" ? ["● live", "citron"]
-      : status === "paused" ? ["‖ paused", "secondary"]
-      : status === "blocked" ? ["× needs you", "signal"]
-      : ["idle", ""];
-    header = panelHeader("Drive", subject, undefined, tone);
-    body = driveBody();
-  }
-  const previewScroll =
-      el("panel").querySelector<HTMLElement>(".preview-canvas"),
-    panX = previewScroll?.scrollLeft ?? 0,
-    panY = previewScroll?.scrollTop ?? 0;
-  el("panel").style.setProperty(
-    "--panel-width",
-    state.panelWidth
-      ? `${state.panelWidth}px`
-      : pane === "drive"
-        ? "340px"
-        : "42%",
-  );
+  el("panel").className = "drive-pane";
+  const status = state.drive?.status;
+  // Drive's state, as in the design: idle when nothing runs, ● live while
+  // it works; the proposal count lives on the Next tab.
+  const [subject, tone] = status === "running" || status === "waiting" ? ["● live", "citron"]
+    : status === "paused" ? ["‖ paused", "secondary"]
+    : status === "blocked" ? ["× needs you", "signal"]
+    : ["idle", ""];
+  el("panel").style.setProperty("--panel-width", "340px");
   el("panel").innerHTML =
-    '<div id="panel-resizer" role="separator" aria-label="Resize panel" aria-orientation="vertical" tabindex="0"></div>' +
-    header +
-    (pane === "log" && paneDetail == null && commandTab === "events"
-      ? body
-      : `<div class="panel-body" id="panel-scroll">${body}</div>`) +
-    footer;
-  if (pane === "files") el("files-mount").replaceWith(filesView.element);
+    panelHeader("Drive", subject, undefined, tone) +
+    `<div class="panel-body" id="panel-scroll">${driveBody()}</div>`;
   const container = el("panel").querySelector<HTMLElement>("#panel-scroll");
   if (container) container.scrollTop = scroll;
-  if (focusedId) {
-    const input = document.getElementById(focusedId) as HTMLInputElement | null;
-    input?.focus({ preventScroll: true });
-    if (input && caret != null && !["range", "number"].includes(input.type))
-      input.setSelectionRange(caret, caret);
-  }
-  previewObserver?.disconnect();
-  if (pane === "preview") {
-    applyPreviewLayout();
-    const canvas = el("panel").querySelector<HTMLElement>(".preview-canvas");
-    if (canvas) {
-      canvas.scrollLeft = panX;
-      canvas.scrollTop = panY;
-      previewObserver = new ResizeObserver(applyPreviewLayout);
-      previewObserver.observe(canvas);
-    }
-  }
   watchPanel();
   reportObservation();
 }
@@ -2657,15 +1873,23 @@ function tokensShort(value: number) {
 function placeOverlay() {
   const box = el("overlay"),
     chip = document.getElementById("composer-model"),
-    anchor = overlay === "models" && chip && chip.offsetParent ? chip.getBoundingClientRect() : null;
+    more = document.querySelector<HTMLElement>(".header-more"),
+    anchor = overlay === "models" && chip && chip.offsetParent ? chip.getBoundingClientRect() : null,
+    below = overlay === "session" && more && more.offsetParent ? more.getBoundingClientRect() : null;
   box.classList.toggle("anchored", !!anchor);
-  box.classList.toggle("sheet", !!overlay && !anchor);
-  if (!anchor) {
-    box.style.left = box.style.bottom = box.style.maxHeight = "";
+  box.classList.toggle("dropped", !!below);
+  box.classList.toggle("sheet", !!overlay && !anchor && !below);
+  box.style.left = box.style.right = box.style.top = box.style.bottom = box.style.maxHeight = "";
+  const main = el("main").getBoundingClientRect();
+  if (below) {
+    // The ⋯ menu hangs from its button, at the right edge of the conversation.
+    box.style.right = `${Math.max(12, main.right - below.right)}px`;
+    box.style.top = `${below.bottom - main.top + 6}px`;
+    box.style.maxHeight = `${Math.max(160, main.bottom - below.bottom - 24)}px`;
     return;
   }
-  const main = el("main").getBoundingClientRect(),
-    width = Math.min(440, main.width - 24);
+  if (!anchor) return;
+  const width = Math.min(440, main.width - 24);
   box.style.left = `${Math.max(12, Math.min(anchor.left - main.left - 10, main.width - width - 12))}px`;
   box.style.bottom = `${main.bottom - anchor.top + 8}px`;
   box.style.maxHeight = `${Math.max(160, anchor.top - main.top - 20)}px`;
@@ -2911,6 +2135,19 @@ function renderOverlay() {
     }));
     // Cleanup sits at the end of the list it tidies.
     if (!overlayQuery) overlayRows.push({ label: "Clean up sessions", value: "delete empty, quick and old ones", action: "overlay", data: { name: "cleanup" }, hint: "/cleanup" });
+  } else if (overlay === "session") {
+    title = "This conversation";
+    subtitle = state.session?.title ?? "";
+    filter = false;
+    const c = context();
+    overlayRows = [
+      { label: "Rename", value: "", action: "overlay", data: { name: "rename" } },
+      { label: "Compact", value: `${c.estimated ? "~" : ""}${num(c.used)} of ${c.capacity ? tokensShort(c.capacity) : "—"} context used${c.percentage == null ? "" : ` · ${c.percentage}%`}`, action: "compact", data: {}, hint: state.activeTurnId ? "after this turn" : "" },
+      { label: "New chat", value: "", action: "new-session", data: {}, hint: "⌘N" },
+      { label: "All conversations", value: `${state.sessions.length}`, action: "overlay", data: { name: "sessions" } },
+      { label: "Archive", value: "stays recoverable", action: "overlay", data: { name: "confirm-archive" } },
+      { label: "Settings", value: "", action: "overlay", data: { name: "settings" }, hint: "⌘," },
+    ];
   } else if (overlay === "rename") {
     el("overlay").innerHTML =
       `<div class="modal-title">Rename session</div><form id="rename-form"><div class="filter-wrap"><input name="title" aria-label="Session title" value="${h(overlayQuery || state.session?.title)}" maxlength="200"></div><div class="menu-footer"><button type="submit">${k("Enter")} save</button>${btn("close-overlay", `${k("Esc")} cancel`)}</div></form>`;
@@ -3260,8 +2497,17 @@ async function submitText(value = editor.value) {
       clear();
       return;
     }
-    if (id === "diff" || id === "context" || id === "status") {
-      await openPanel(id === "diff" ? "changes" : "context");
+    if (id === "diff") {
+      // The latest turn's edits unfold in place.
+      const run = [...state!.runs].reverse().find((run) => tools(run).some((tool) => tool.phase === "change"));
+      if (run) void unfoldTurn(run, "change");
+      else notice("No edits in this conversation yet");
+      clear();
+      return;
+    }
+    if (id === "context" || id === "status") {
+      const c = context();
+      notice(`${c.estimated ? "~" : ""}${num(c.used)} of ${c.capacity ? tokensShort(c.capacity) : "—"} context used${c.percentage == null ? "" : ` · ${c.percentage}%`} · ${state!.model.displayName ?? state!.model.id}`);
       clear();
       return;
     }
@@ -3358,181 +2604,7 @@ async function dispatch(
   if (action === "question-control") return questionAction(args.action);
   if (action === "auto-approve" && driveNavigating)
     throw new Error("Only you can change session approvals.");
-  if (action === "review-scope-menu") {
-    reviewScopeMenu = !reviewScopeMenu;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "review-scope") {
-    reviewScopeMenu = false;
-    reviewBranch = null;
-    reviewScope = args.scope;
-    reviewMode = "diff";
-    paneIndex = 0;
-    changes = [];
-    changesKey = "";
-    reviewMeta = null;
-    await refreshChanges(true);
-    return;
-  }
-  if (action === "review-mode") {
-    reviewMode = args.mode;
-    hunkIndex = -1;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "refresh-review") {
-    await refreshChanges(true);
-    return;
-  }
-  if (["review-current", "source-location", "read-file"].includes(action)) {
-    await openSource(args.path, args.line ?? 1, args.column);
-    return;
-  }
-  if (action === "review-undo") {
-    const file = changes.find((file) => file.path === args.path);
-    if (!file?.undo?.available) return;
-    await openOverlay("confirm-undo");
-    el("overlay").querySelector(".confirm-copy")?.remove();
-    el("overlay").innerHTML =
-      `<div class="modal-title">Undo ${h(args.path)}</div><div class="panel-detail"><p>Restore this file to its contents before Turn ${state!.runs.find((run) => run.id === args.turnId)?.number ?? "—"}. Undo is refused if the file has changed since.</p><div class="panel-actions">${btn("review-undo-confirm", "Undo file", args, "danger")}${btn("close-overlay", "Cancel")}</div></div>`;
-    return;
-  }
-  if (action === "review-undo-confirm") {
-    await api("undo", args);
-    overlay = null;
-    renderOverlay();
-    changesKey = "";
-    await refreshChanges(true);
-    notice("File restored");
-    return;
-  }
-  if (action === "hunk") {
-    const hunks = [...el("panel").querySelectorAll<HTMLElement>("[data-hunk]")];
-    if (!hunks.length) return;
-    hunkIndex =
-      (hunkIndex + Number(args.direction) + hunks.length) % hunks.length;
-    hunks[hunkIndex]!.scrollIntoView({ block: "center" });
-    return;
-  }
-  if (action === "command-tab") {
-    commandTab = args.tab;
-    paneDetail = null;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "refresh-processes") {
-    await api("processes");
-    return;
-  }
-  if (action === "command-select") {
-    commandSelection = args.id;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "command-open") {
-    const legacy = String(args.id).startsWith("legacy:");
-    if (legacy) {
-      const check = verificationChecks().find((check) => check.id === args.id),
-        run = state!.runs.find((run) => run.id === check?.turnId),
-        tool =
-          run &&
-          tools(run).find((tool) => tool.toolCallId === check?.toolCallId);
-      if (tool) await openPanel("log", run!.id, tool.id);
-      return;
-    }
-    commandSelection = args.id;
-    commandTab = "running";
-    await openPanel("log");
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "stop-command") {
-    await api("stop-command", { id: args.id });
-    return;
-  }
-  if (action === "copy-command-output") {
-    const command = state!.processes.find((command) => command.id === args.id);
-    if (command) {
-      await api("copy", {
-        text:
-          command.stdout +
-          (command.stderr ? "\nSTDERR:\n" + command.stderr : ""),
-      });
-      notice("Copied recorded output");
-    }
-    return;
-  }
-  if (action === "rerun-check") {
-    await api("rerun-checks", { ids: [args.id] });
-    notice("Check queued");
-    return;
-  }
-  if (action === "rerun-failed") {
-    const ids = verificationChecks()
-      .filter(
-        (check) => check.status === "failed" && !check.id.startsWith("legacy:"),
-      )
-      .map((check) => check.id);
-    if (!ids.length) {
-      notice("No failed recorded checks to rerun");
-      return;
-    }
-    await api("rerun-checks", { ids });
-    return;
-  }
-  if (action === "preview-fit") {
-    previewFit = true;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "preview-zoom") {
-    previewFit = false;
-    previewZoom = Math.max(
-      0.25,
-      Math.min(4, args.zoom ?? previewZoom + args.step),
-    );
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "preview-compare") {
-    if (!referenceImage) {
-      notice("Choose or import a reference image below");
-      el("panel")
-        .querySelector<HTMLDetailsElement>(".reference-picker")
-        ?.setAttribute("open", "");
-      return;
-    }
-    previewCompare = !previewCompare;
-    void loadReference();
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "reference-image") {
-    referenceImage = args.id;
-    referenceLoading = "";
-    previewCompare = true;
-    await loadReference();
-    return;
-  }
-  if (action === "panel") return openPanel(args.name, args.turnId ?? "");
-  // A check row in Review opens that check in Checks.
-  if (action === "open-check") {
-    const turn = paneTurn;
-    await openPanel("verification", turn);
-    paneIndex = Number(args.index) || 0;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
+  if (action === "panel") return openPanel(args.name);
   if (action === "new-session") return api("new-session", {});
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never"].includes(action)) return api(action, args);
   if (action === "next-away") return act(() => api(action, args));
@@ -3550,24 +2622,21 @@ async function dispatch(
     return;
   }
   if (action === "close-panel") {
-    rememberPanel();
     pane = null;
+    inspectSurface = null;
+    inspectItem = "";
     watchPanel();
     renderPanels();
     editor.focus({ preventScroll: true });
     reportObservation();
     return;
   }
-  if (action === "expand-panel") {
-    paneExpanded = !paneExpanded;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
   if (action === "follow") {
     follow = true;
     readingHeld = false;
     paneTurn = "";
+    inspectSurface = null;
+    inspectItem = "";
     overlay = null;
     renderOverlay();
     renderConversation();
@@ -3586,22 +2655,6 @@ async function dispatch(
     if (inSession()) renderBriefing();
     else renderHero();
     renderBreakage();
-    return;
-  }
-  if (action === "review-diff") {
-    // A branch's diff opens in Review without leaving this session (which
-    // would pull a running Drive mission away from its window).
-    const job = reviewJobs().find((item) => item.sessionId === args.id);
-    if (!job?.sessionId) return;
-    reviewBranch = { sessionId: job.sessionId, title: job.title };
-    reviewScopeMenu = false;
-    reviewMode = "diff";
-    paneIndex = 0;
-    changes = [];
-    changesKey = "";
-    reviewMeta = null;
-    if (pane === "changes") await refreshChanges(true);
-    else await openPanel("changes");
     return;
   }
   if (action === "drive-details") {
@@ -3742,71 +2795,6 @@ async function dispatch(
     }
   }
   if (action === "complete-command") return setDraft(`${args.name} `);
-  if (action === "tool") {
-    const run = state!.runs.find((run) => run.id === args.runId),
-      tool = run?.entries.find((entry) => entry.id === args.id);
-    if (tool?.type === "tool" && tool.name === "run_command") {
-      const command = state!.processes.find(
-        (command) => command.toolCallId === tool.toolCallId,
-      );
-      if (command) return dispatch("command-open", { id: command.id });
-    }
-    if (tool?.type === "tool" && tool.phase === "change") {
-      await openPanel("changes", args.runId);
-      return;
-    }
-    return openPanel("log", args.runId, args.id);
-  }
-  if (action === "log-filter") {
-    paneFilter = args.filter;
-    paneIndex = 0;
-    paneDetail = null;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "log-entry") {
-    paneDetail = args.id;
-    paneIndex = args.index;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "log-next") {
-    const run = selectedRun();
-    if (run) {
-      const records = logRecords(run),
-        index = records.findIndex((entry) => entry.id === paneDetail);
-      paneDetail = records[(index + 1) % records.length]!.id;
-      paneSignature = "";
-      renderPanels();
-    }
-    return;
-  }
-  if (action === "log-back") {
-    paneDetail = null;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "change-file" || action === "check-select") {
-    paneIndex = args.index;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "changes-live") {
-    paneTurn = "";
-    changesKey = "";
-    void refreshChanges();
-    return;
-  }
-  if (action === "check-output") {
-    const check = verificationChecks()[paneIndex];
-    if (check) return dispatch("command-open", { id: check.id });
-    return;
-  }
-  if (action === "file-back") return filesView.action("back");
   if (action === "insert-file") {
     if (/\s/.test(args.path)) {
       notice(
@@ -3814,38 +2802,11 @@ async function dispatch(
       );
       return;
     }
-    pane = null;
-    renderPanels();
     return setDraft(
       editor.value +
         `${editor.value.endsWith(" ") || !editor.value ? "" : " "}@${args.path} `,
     );
   }
-  if (action === "select-image") {
-    selectedImage = args.id;
-    followImages = false;
-    previewLoading = "";
-    await loadPreview();
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "pin-image") {
-    previewPinned = !previewPinned;
-    if (!previewPinned) followImages = true;
-    paneSignature = "";
-    renderPanels();
-    return;
-  }
-  if (action === "follow-images") {
-    previewPinned = false;
-    followImages = true;
-    previewLoading = "";
-    await loadPreview();
-    return;
-  }
-  if (action === "open-image")
-    return api("open-artifact", { id: selectedImage });
   if (action === "copy-code") {
     const text =
       target?.closest("pre")?.querySelector("code")?.textContent ?? "";
@@ -3887,7 +2848,6 @@ async function dispatch(
   ) {
     overlay = null;
     renderOverlay();
-    rememberPanel();
     pane = null;
     watchPanel();
     renderPanels();
@@ -3918,6 +2878,34 @@ async function dispatch(
     return api(action, args);
 }
 
+/// The paths a turn's completed edits touched.
+function changedPaths(run: GraphicsRun) {
+  return [...new Set(tools(run).filter((t) => t.phase === "change" && t.state === "done").flatMap((t) => t.changes?.map((c) => c.path) ?? [String(t.input.path ?? t.detail ?? "")]))];
+}
+/// Opens a turn's steps and unfolds the ones asked for (its edits, its
+/// checks, or every step), loading a command's recorded output as a click
+/// on its row would; then scrolls the turn into view.
+async function unfoldTurn(run: GraphicsRun, phase: "change" | "verify" | "all", only?: ToolEntry, path?: string) {
+  revealCompactedTurn(run.id);
+  expanded.add(run.id);
+  stepsOpen.add(run.id);
+  follow = false;
+  const chosen = only ? [only] : tools(run).filter((tool) =>
+    (phase === "all" || tool.phase === phase) &&
+    (!path || (tool.changes?.some((c) => c.path === path) ?? String(tool.input.path ?? tool.detail ?? "") === path)));
+  const loads: Promise<unknown>[] = [];
+  for (const tool of chosen) {
+    if (!foldable(tool)) continue;
+    stepOpen.add(`${run.id}:${tool.id}`);
+    const record = tool.name === "run_command" ? state!.processes.find((command) => command.toolCallId === tool.toolCallId) : undefined;
+    if (record?.outputLoaded === false)
+      loads.push(api("panel-watch", { panel: "log", command: record.id }).then(() => api("processes")).catch(() => {}));
+  }
+  await Promise.all(loads);
+  renderConversation();
+  document.getElementById(`turn-${run.id}`)?.scrollIntoView({ block: "start" });
+}
+
 let renderedPalette: Snapshot["palette"] | null = null,
   bannerSignature = "";
 function renderState(next: Snapshot) {
@@ -3931,26 +2919,8 @@ function renderState(next: Snapshot) {
     readingHeld = false;
     pane = null;
     overlay = null;
-    panelMemory.clear();
-    filesView.reset();
-    commandSelection = "";
-    commandSearch = "";
-    reviewScope = "turn";
-    reviewMeta = null;
-    reviewError = "";
-    changes = [];
-    changesRequest++;
-    reviewBusy = false;
-    selectedImage =
-      referenceImage =
-      referenceLoading =
-      referenceData =
-      previewLoading =
-      previewData =
-        "";
-    previewPinned = false;
-    followImages = true;
-    previewCompare = false;
+    inspectSurface = null;
+    inspectItem = "";
     watchPanel();
     expanded.clear();
     expandedCompactions.clear();
@@ -3958,7 +2928,6 @@ function renderState(next: Snapshot) {
     runNodes.forEach((item) => item.node.remove());
     runNodes.clear();
     paneSignature = heroSignature = overlaySignature = sidebarSignature = "";
-    reviewBranch = null;
   }
   const question=next.questions[0], slot=question ? `${question.id}:${question.answers?.length ?? 0}` : "chat";
   if (slot !== composerSlot) {
@@ -4043,11 +3012,6 @@ document.addEventListener("click", (event) => {
     renderStatus();
     renderDrivePop();
   }
-  if (reviewScopeMenu && !(event.target as Element).closest(".review-scope-menu, .review-scope-button")) {
-    reviewScopeMenu = false;
-    paneSignature = "";
-    renderPanels();
-  }
   const summary = (event.target as Element).closest("summary");
   const detail = summary?.parentElement as HTMLDetailsElement | undefined;
   if (detail?.dataset.detail) {
@@ -4095,18 +3059,6 @@ document.addEventListener("input", (event) => {
     overlayIndex = 0;
     renderOverlay();
   }
-  if (input.id === "reference-path") referencePathDraft = input.value;
-  if (input.id === "reference-width") referenceViewportWidth = input.value;
-  if (input.id === "reference-height") referenceViewportHeight = input.value;
-  if (input.id === "command-search") {
-    commandSearch = input.value;
-    paneSignature = "";
-    renderPanels();
-  }
-  if (input.id === "reference-opacity") {
-    previewOpacity = Number(input.value);
-    applyPreviewLayout();
-  }
   if (input.closest("#setup")) setupInput(input);
 });
 document.addEventListener("submit", (event) => {
@@ -4126,24 +3078,6 @@ document.addEventListener("submit", (event) => {
       });
       overlay = null;
       renderOverlay();
-    }
-    if (form.id === "reference-form") {
-      const path = (form.elements.namedItem("path") as HTMLInputElement).value;
-      const width = (
-          form.elements.namedItem("viewportWidth") as HTMLInputElement
-        ).value,
-        height = (form.elements.namedItem("viewportHeight") as HTMLInputElement)
-          .value;
-      const image = await api<ImageArtifact>("import-reference", {
-        path,
-        ...(width || height
-          ? { viewport: { width: Number(width), height: Number(height) } }
-          : {}),
-      });
-      referenceImage = image.id;
-      referenceLoading = "";
-      previewCompare = true;
-      await loadReference();
     }
     if (form.id === "setup-form") await setupAction({ key: "return" });
   });
@@ -4207,13 +3141,6 @@ document.addEventListener("keydown", (event) => {
     handleSetupKey(event);
     return;
   }
-  if (
-    pane === "files" &&
-    !overlay &&
-    event.target !== editor &&
-    filesView.handleKey(event)
-  )
-    return;
   if (key === "escape") {
     run(() => {
       if (drivePopOpen) {
@@ -4233,8 +3160,6 @@ document.addEventListener("keydown", (event) => {
         renderCompletion();
         return;
       }
-      if (pane === "log" && paneDetail !== null)
-        return dispatch("log-back", {});
       if (pane) {
         return dispatch("close-panel", {});
       }
@@ -4256,37 +3181,12 @@ document.addEventListener("keydown", (event) => {
     run(() => openOverlay("settings"));
     return;
   }
-  if (ctrl && key === "b") {
-    run(() => openPanel("log"));
-    return;
-  }
   if (ctrl && key === "g") {
     run(() => dispatch("follow", {}));
     return;
   }
-  if (event.altKey && ["d", "o", "c", "v", "j", "t"].includes(key)) {
-    run(() =>
-      openPanel(
-        (
-          {
-            d: "changes",
-            o: "files",
-            c: "context",
-            v: "preview",
-            j: "drive",
-            t: "verification",
-          } as Record<string, PaneName>
-        )[key]!,
-      ),
-    );
-    return;
-  }
-  if (event.altKey && key === "h") {
-    run(() => openPanel("history"));
-    return;
-  }
-  if (event.altKey && key === "enter" && pane) {
-    run(() => dispatch("expand-panel", {}));
+  if (event.altKey && key === "j") {
+    run(() => (pane === "drive" ? dispatch("close-panel", {}) : openPanel("drive")));
     return;
   }
   if (state.approvals.length && !field && !ctrl && !event.altKey) {
@@ -4388,28 +3288,7 @@ document.addEventListener("keydown", (event) => {
       return;
     }
   }
-  if (
-    (event.target as HTMLElement).id === "panel-resizer" &&
-    ["arrowleft", "arrowright"].includes(key)
-  ) {
-    run(() => {
-      const width =
-        el("panel").getBoundingClientRect().width +
-        (key === "arrowleft" ? 16 : -16);
-      el("panel").style.setProperty("--panel-width", `${width}px`);
-      return api("panel-width", { width });
-    });
-    return;
-  }
-  if (pane === "changes" && !field && (key === "[" || key === "]")) {
-    run(() => dispatch("hunk", { direction: key === "[" ? -1 : 1 }));
-    return;
-  }
   if (pane && !field) {
-    if (pane === "log" && paneDetail !== null && key === "tab") {
-      run(() => dispatch("log-next", {}));
-      return;
-    }
     if (
       pane === "drive" &&
       state.drive?.status !== "completed" &&
@@ -4431,11 +3310,7 @@ document.addEventListener("keydown", (event) => {
     const rows = [
       ...el("panel").querySelectorAll<HTMLButtonElement>(".panel-row"),
     ];
-    if (
-      (key === "arrowdown" || key === "arrowup") &&
-      rows.length &&
-      pane !== "changes"
-    ) {
+    if ((key === "arrowdown" || key === "arrowup") && rows.length) {
       run(() => {
         paneIndex =
           (paneIndex + (key === "arrowdown" ? 1 : -1) + rows.length) %
@@ -4444,37 +3319,11 @@ document.addEventListener("keydown", (event) => {
           row.classList.toggle("selected", i === paneIndex),
         );
         rows[paneIndex]?.scrollIntoView({ block: "nearest" });
-        if (pane === "verification") {
-          paneSignature = "";
-          renderPanels();
-        }
       });
       return;
     }
     if (key === "enter" && rows[paneIndex]) {
       run(() => rows[paneIndex]!.click());
-      return;
-    }
-    if ((key === "arrowleft" || key === "arrowright") && pane === "changes") {
-      run(() => {
-        paneIndex = Math.max(
-          0,
-          Math.min(
-            changes.length - 1,
-            paneIndex + (key === "arrowright" ? 1 : -1),
-          ),
-        );
-        paneSignature = "";
-        renderPanels();
-      });
-      return;
-    }
-    if ((key === "arrowleft" || key === "arrowright") && pane === "preview") {
-      run(() => {
-        const index = state!.artifacts.findIndex((a) => a.id === selectedImage),
-          item = state!.artifacts[index + (key === "arrowright" ? 1 : -1)];
-        if (item) return dispatch("select-image", { id: item.id });
-      });
       return;
     }
   }
@@ -4494,7 +3343,7 @@ window.demesneInspect = () => ({
   requests: [...document.querySelectorAll<HTMLElement>(".request .text")].map((e) => { const r = e.getBoundingClientRect(); return { text: e.textContent, x: r.x, y: r.y, width: r.width, height: r.height }; }),
   controls: [
     ...document.querySelectorAll<HTMLElement>(
-      "button,input,textarea,summary,[role=separator],.preview-canvas",
+      "button,input,textarea,summary",
     ),
   ]
     .filter(
@@ -4545,27 +3394,8 @@ window.demesneInspect = () => ({
     stdout: c.stdout.slice(-2000),
     stderr: c.stderr.slice(-1000),
   })),
-  fileView: filesView.inspect(),
-  reviewScope,
-  reviewMode,
-  reviewPaths: changes.map((c) => c.path),
-  referenceImage,
-  previewCompare,
-  previewFit,
-  previewZoom,
-  panelWidth: el("panel").getBoundingClientRect().width,
-  previewGeometry: (() => {
-    const canvas = el("panel").querySelector<HTMLElement>(".preview-canvas"),
-      image = canvas?.querySelector<HTMLImageElement>("img");
-    return canvas && image
-      ? {
-          left: canvas.scrollLeft,
-          top: canvas.scrollTop,
-          imageWidth: image.getBoundingClientRect().width,
-          canvasWidth: canvas.clientWidth,
-        }
-      : null;
-  })(),
+  inspectSurface,
+  openSteps: [...stepOpen],
   connection: state?.connection,
   theme: state?.theme,
   sessionId: state?.session?.id,
@@ -4668,7 +3498,6 @@ setInterval(() => {
     const next = elapsed(span.dataset.since!);
     if (span.textContent !== next) span.textContent = next;
   }
-  if (pane === "log") commandClocks();
   if (state?.setup?.step === "auth") updateSetupTimer();
 }, 1000);
 
@@ -4889,19 +3718,10 @@ const driveControls = new Map<string, HTMLElement>();
 const driveAllowed = new Set([
   "panel",
   "close-panel",
-  "expand-panel",
   "expand-turn",
   "jump-turn",
-  "tool",
-  "log-filter",
-  "log-entry",
-  "log-back",
-  "change-file",
-  "check-select",
-  "check-output",
-  "read-file",
-  "file-back",
-  "changes-live",
+  "toggle-steps",
+  "step",
   "follow",
 ]);
 const fingerprint = (text: string) => {
@@ -5059,21 +3879,16 @@ function observeUI(): DriveObservation {
     if (controls.length >= 160) break;
   }
   const run = selectedRun(),
-    checks = run
-      ? verificationChecks().filter((check) => check.turnId === run.id)
-      : [],
-    surface =
-      pane === "changes"
-        ? "diff"
-        : pane === "verification"
-          ? "review"
-          : (pane ?? "response");
+    checks = run ? verificationChecks(run.id) : [],
+    surface = inspectSurface ?? pane ?? "response";
+  // Diffs, checks and logs unfold inside the conversation, so an inspection
+  // reads the stage under that surface's name.
   const panes: NonNullable<DriveObservation["panes"]> = [],
     scrollRegions: NonNullable<DriveObservation["scrollRegions"]> = [];
   for (const [element, name, scrollName] of [
     [el("stage"), "response", "response"],
-    ...(pane && pane !== "drive"
-      ? [[panelScroll(), surface, pane === "changes" ? "diff-code" : surface]]
+    ...(inspectSurface
+      ? [[el("stage"), inspectSurface, inspectSurface === "diff" ? "diff-code" : inspectSurface]]
       : []),
   ] as [HTMLElement, string, string][]) {
     if (!element) continue;
@@ -5133,13 +3948,9 @@ function observeUI(): DriveObservation {
           run.entries.some((e) => e.type === "assistant"),
       ),
       readingHeld,
-      files: changes.map((c) => c.path).slice(0, 128),
+      files: (run ? changedPaths(run) : []).slice(0, 128),
       checks: checks.map((c) => String(c.id)).slice(0, 128),
-      ...(pane === "changes" && changes[paneIndex]
-        ? { item: changes[paneIndex]!.path }
-        : pane === "verification" && checks[paneIndex]
-          ? { item: String(checks[paneIndex]!.id) }
-          : {}),
+      ...(inspectItem ? { item: inspectItem } : {}),
     },
   };
   observation.id = fingerprint(JSON.stringify(observation));
@@ -5229,64 +4040,38 @@ window.demesne.commands(async (command) => {
         }
         el("stage").focus();
       } else {
-        if (action.target === "diff") {
-          reviewScope = "turn";
-          reviewMode = "diff";
-        }
-        await openPanel(
-          action.target === "diff"
-            ? "changes"
-            : action.target === "checks"
-              ? "verification"
-              : "log",
-          current.id,
-        );
-        if (action.target === "diff") await refreshChanges();
-        if (action.item) {
-          paneIndex =
-            action.target === "diff"
-              ? Math.max(
-                  0,
-                  changes.findIndex((file) => file.path === action.item),
-                )
-              : Math.max(
-                  0,
-                  verificationChecks().findIndex(
-                    (check) => check.id === action.item,
-                  ),
-                );
-          paneSignature = "";
-          renderPanels();
-        }
+        // The diff, checks or log unfold under the turn's steps; the
+        // observation then reads the stage as that surface.
+        inspectSurface = action.target === "checks" ? "review" : action.target;
+        inspectItem = "";
+        if (pane !== "drive") pane = null;
+        renderPanels();
+        let only: ToolEntry | undefined;
+        if (action.target === "checks") {
+          const checks = verificationChecks(current.id),
+            check = (action.item && checks.find((check) => check.id === action.item)) || checks[0];
+          if (check) {
+            inspectItem = check.id;
+            only = tools(current).find((tool) => tool.toolCallId === check.toolCallId);
+            if (!check.id.startsWith("legacy:")) {
+              await api("panel-watch", { panel: "log", command: check.id });
+              await api("processes");
+              const deadline = performance.now() + 3000;
+              while (
+                state?.session?.id === observation.sessionId &&
+                state.processes.find((record) => record.id === check.id)?.outputLoaded === false &&
+                performance.now() < deadline
+              )
+                await new Promise((resolve) => setTimeout(resolve, 16));
+              const loaded = state?.processes.find((record) => record.id === check.id);
+              if (!loaded || loaded.outputLoaded === false || state?.processesError)
+                throw new Error(state?.processesError ?? "Check output has not loaded. Inspect this check again.");
+            }
+          }
+        } else if (action.target === "diff" && action.item) inspectItem = action.item;
+        await unfoldTurn(current, action.target === "diff" ? "change" : action.target === "checks" ? "verify" : "all", only, action.target === "diff" ? action.item : undefined);
       }
-      if (action.target === "checks") {
-        const check = verificationChecks()[paneIndex];
-        if (check && !check.id.startsWith("legacy:")) {
-          await api("panel-watch", {
-            panel: "verification",
-            command: check.id,
-          });
-          await api("processes");
-          const deadline = performance.now() + 3000;
-          while (
-            state?.session?.id === observation.sessionId &&
-            state.processes.find((record) => record.id === check.id)
-              ?.outputLoaded === false &&
-            performance.now() < deadline
-          )
-            await new Promise((resolve) => setTimeout(resolve, 16));
-          const loaded = state?.processes.find(
-            (record) => record.id === check.id,
-          );
-          if (!loaded || loaded.outputLoaded === false || state?.processesError)
-            throw new Error(
-              state?.processesError ??
-                "Check output has not loaded. Inspect this check again.",
-            );
-          renderPanels();
-        }
-      }
-      const scroll = pane ? panelScroll() : el("stage");
+      const scroll = el("stage");
       if (action.position === "end") scroll.scrollTop = scroll.scrollHeight;
       else if (action.position !== "continue") scroll.scrollTop = 0;
     } else if (action.kind === "scroll") {
@@ -5299,8 +4084,7 @@ window.demesne.commands(async (command) => {
       );
       if (!region)
         throw new Error("Scroll did not move; no scroll region here");
-      const scroll =
-        region.surface === "response" ? el("stage") : panelScroll();
+      const scroll = el("stage");
       const before = scroll.scrollTop;
       scroll.scrollTop += action.amount * 18;
       result =
@@ -5308,7 +4092,7 @@ window.demesne.commands(async (command) => {
           ? "Scroll did not move; boundary reached."
           : "Scrolled the visible view.";
     } else if (action.kind === "key") {
-      const scroll = pane && pane !== "drive" ? panelScroll() : el("stage");
+      const scroll = el("stage");
       if (
         ["up", "down", "pageup", "pagedown", "home", "end"].includes(action.key)
       ) {
@@ -5332,12 +4116,10 @@ window.demesne.commands(async (command) => {
             : "Scrolled the visible view.";
       } else if (action.key === "escape") await dispatch("close-panel", {});
       else if (action.key === "ctrl+g") await dispatch("follow", {});
-      else if (action.key === "ctrl+b") await openPanel("log");
-      else if (action.key === "alt+d") await openPanel("changes");
-      else if (action.key === "alt+v") await openPanel("verification");
-      else if (action.key === "alt+h") await openPanel("history");
-      else if (action.key === "alt+enter" && pane)
-        await dispatch("expand-panel", {});
+      else if (["ctrl+b", "alt+d", "alt+v", "alt+h", "alt+enter"].includes(action.key))
+        throw new Error(
+          "There are no side panels; inspect with target diff, checks or log to unfold the turn's result in the conversation.",
+        );
       else
         throw new Error(
           `Key ${action.key} is unavailable here; use a visible control.`,
@@ -5362,14 +4144,6 @@ window.demesne.commands(async (command) => {
   }
 });
 
-let panelDrag: { startX: number; width: number } | null = null,
-  previewDrag: {
-    canvas: HTMLElement;
-    x: number;
-    y: number;
-    left: number;
-    top: number;
-  } | null = null;
 window.addEventListener("resize", () => {
   if (overlay) placeOverlay();
 });
@@ -5380,54 +4154,4 @@ document.addEventListener("pointerdown", (event) => {
     overlay = null;
     renderOverlay();
   }
-  if (target.id === "panel-resizer") {
-    event.preventDefault();
-    panelDrag = {
-      startX: event.clientX,
-      width: el("panel").getBoundingClientRect().width,
-    };
-    target.setPointerCapture(event.pointerId);
-  } else {
-    const canvas = target.closest<HTMLElement>(".preview-canvas");
-    if (canvas && event.button === 0) {
-      event.preventDefault();
-      previewDrag = {
-        canvas,
-        x: event.clientX,
-        y: event.clientY,
-        left: canvas.scrollLeft,
-        top: canvas.scrollTop,
-      };
-      canvas.setPointerCapture(event.pointerId);
-      canvas.classList.add("panning");
-    }
-  }
-});
-document.addEventListener("pointermove", (event) => {
-  if (panelDrag) {
-    const width = Math.max(
-      300,
-      Math.min(
-        innerWidth - 280,
-        panelDrag.width + panelDrag.startX - event.clientX,
-      ),
-    );
-    el("panel").style.setProperty("--panel-width", `${width}px`);
-  }
-  if (previewDrag) {
-    previewDrag.canvas.scrollLeft =
-      previewDrag.left + previewDrag.x - event.clientX;
-    previewDrag.canvas.scrollTop =
-      previewDrag.top + previewDrag.y - event.clientY;
-  }
-});
-document.addEventListener("pointerup", () => {
-  if (panelDrag) {
-    panelDrag = null;
-    void act(() =>
-      api("panel-width", { width: el("panel").getBoundingClientRect().width }),
-    );
-  }
-  previewDrag?.canvas.classList.remove("panning");
-  previewDrag = null;
 });

@@ -337,12 +337,15 @@ const STATE_WORDS: Record<string, string> = { warn: "needs you", working: "worki
 /// and are archived after UNDO_MS, so ⌘Z can bring the last one back.
 const UNDO_MS = 5_000;
 const pendingDeletes = new Map<string, ReturnType<typeof setTimeout>>();
+/// The chat whose title is being renamed in place, in the sidebar.
+let renaming: string | null = null;
 /// How many conversations the sidebar lists. Deleting one moves the next up;
 /// search finds the older ones.
 const SIDEBAR_ROWS = 6;
 /// Conversations deleted from the sidebar, hidden at once while the daemon
 /// archives them.
 const deletedSessions = new Set<string>();
+const ICON_BRANCH = '<svg class="ico sidebar-branch" viewBox="0 0 24 24" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>';
 const ICON_TRASH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg>';
 /// The sidebar: the project's pulse, one inbox-style list of sessions (a
 /// session that needs you gets a second, coloured line; a settled one is a
@@ -351,12 +354,17 @@ const ICON_TRASH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><pat
 function renderSidebar() {
   const list = document.getElementById("sidebar-sessions");
   if (!state || !list) return;
+  // While a title is being renamed, the list holds still under the cursor.
+  if (renaming && list.querySelector(".sidebar-rename")) return;
   const query = (document.getElementById("sidebar-search") as HTMLInputElement | null)?.value.trim().toLowerCase() ?? "";
-  const sessions = state.sessions.filter(item => (item.workspace === state!.workspace || item.id === state!.session?.id) && !deletedSessions.has(item.id));
+  // A chat Drive runs on its own branch (a worktree) joins the list with a
+  // branch mark; its branch is in the tooltip.
+  const branches = new Map([state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId)).map((job) => [job.sessionId!, job.branch] as const));
+  const sessions = state.sessions.filter(item => (item.workspace === state!.workspace || item.id === state!.session?.id || branches.has(item.id)) && !deletedSessions.has(item.id));
   const review = reviewJobs(), pinned = pinnedMission(), run = worktreeRun(), word = driveWord();
   const ideas = state.driveNext.proposals.length;
   const waiting = state.approvals.length ? "approval" : state.questions.length ? "answer" : "";
-  const signature = JSON.stringify([sessions, [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([sessions, [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -367,16 +375,19 @@ function renderSidebar() {
   // branch of Drive's that waits for review (those sit on the Branches row).
   // The tooltip and the accessible name say in words what the dot shows.
   const row = (tone: string, title: string, selected: boolean, age: string, id: string, updatedAt: string) => {
-    const about = STATE_WORDS[tone] ?? "";
-    const tip = [title, about || fullTime(updatedAt)].join(" · ");
-    return btn("select-session", `${dot(tone)}<span class="sidebar-session-name">${h(title)}</span>${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, { id }, `sidebar-session${selected ? " selected" : ""}`)
+    const about = STATE_WORDS[tone] ?? "", branch = branches.get(id);
+    const tip = [title, about || fullTime(updatedAt), branch && `on ${branch}`].filter(Boolean).join(" · ");
+    const mark = branch ? ICON_BRANCH : "";
+    return btn("select-session", `${dot(tone)}<span class="sidebar-session-name">${h(title)}</span>${mark}${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, { id }, `sidebar-session${selected ? " selected" : ""}`)
       .replace("<button ", `<button title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
   };
   const matching = sessions.filter(item => item.title.toLowerCase().includes(query));
   const rows: string[] = [];
-  let shown = 0;
+  let shown = 0, more = 0;
+  // Searching shows more of what matches; the list itself stays at six.
+  const limit = query ? SIDEBAR_ROWS * 2 : SIDEBAR_ROWS;
   for (const item of matching) {
-    if (shown >= SIDEBAR_ROWS) break;
+    if (shown >= limit) { if (item.turns) more++; continue; }
     const selected = item.id === current?.id;
     const title = selected ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
     const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
@@ -393,24 +404,33 @@ function renderSidebar() {
     // The keyboard deletes with Delete on the row itself, so the trash
     // stays out of the tab order.
     const remove = working ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" tabindex="-1" `);
+    if (renaming === item.id) {
+      rows.push(`<div class="sidebar-item"><form class="sidebar-rename" data-id="${h(item.id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`);
+      shown++;
+      continue;
+    }
     rows.push(`<div class="sidebar-item">${row(tone, title, selected, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id, item.updatedAt)}${remove}</div>`);
     shown++;
   }
+  // Past six, one quiet row says how many more there are and opens search.
+  if (more && !query) rows.push(`<button type="button" class="sidebar-more" id="sidebar-more">${more} more</button>`);
   list.innerHTML = rows.length ? rows.join("") : `<p class="sidebar-empty">${query ? "No matching conversations" : "Your conversations will appear here."}</p>`;
+  const editing = list.querySelector<HTMLInputElement>(".sidebar-rename input");
+  if (editing && document.activeElement !== editing) { editing.focus(); editing.select(); }
   // A redraw keeps keyboard focus where it was, or on the row that moved up.
-  if (focused >= 0) {
+  if (focused >= 0 && !editing) {
     const buttons = list.querySelectorAll<HTMLElement>(".sidebar-session");
     (buttons[Math.min(focused, buttons.length - 1)] ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
   }
   const title = document.getElementById("workspace-title");
   if (title) { title.textContent = inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
-  // Under the project: its branch, then what most needs you in it.
-  const pulse = document.getElementById("desktop-project-pulse")?.querySelector("span");
-  if (pulse) {
+  // Under the project's name: its folder and branch, and the connection
+  // only when it is not there.
+  const sub = document.getElementById("desktop-project-sub");
+  if (sub) {
     const branch = state.session?.workspace?.gitBranch ?? "";
-    const needs = (waiting ? 1 : 0) + review.length;
-    const about = needs ? `${needs} waiting` : word.live ? "Drive working" : state.connection === "online" ? "clean" : state.connection === "connecting" ? "connecting…" : "offline";
-    pulse.textContent = [branch, about].filter(Boolean).join(" · ");
+    const link = state.connection === "online" ? "" : state.connection === "connecting" ? "connecting…" : "offline";
+    sub.textContent = [state.workspace.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~"), branch, link].filter(Boolean).join(" · ");
   }
   // Drive and Branches are two fixed rows: a dot on Drive when it has
   // something for you, a count on Branches when its work waits for review.
@@ -428,7 +448,11 @@ function renderSidebar() {
   }
   // The rail: a dot where something waits, a ring for Drive's progress.
   const badge = document.getElementById("rail-sessions-badge"), ring = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
-  if (badge) badge.hidden = !waiting;
+  // Chats that need you: the rail's chats icon wears the amber ring, and
+  // the Dock icon counts them.
+  const needsYou = sessions.filter((item) => item.id === current?.id ? Boolean(waiting) : item.waiting).length;
+  if (badge) badge.hidden = !needsYou;
+  document.dispatchEvent(new CustomEvent("demesne:needs-you", { detail: needsYou }));
   if (branchButton) branchButton.hidden = !review.length;
   if (ring) {
     const steps = pinned ? driveTaskList(pinned) : [];
@@ -464,6 +488,45 @@ function neighbourChat(step: number) {
   const at = ids.indexOf(state?.session?.id ?? "");
   return ids[at < 0 ? (step > 0 ? 0 : ids.length - 1) : (at + step + ids.length) % ids.length];
 }
+// Double-click a title to rename it in place: Enter or leaving the field
+// keeps it, Escape puts it back.
+// The first click opens the chat and redraws the row, so the second click
+// may not complete on the same element: the second press starts the rename.
+document.getElementById("sidebar-sessions")?.addEventListener("mousedown", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLElement>(".sidebar-session");
+  if (!button || event.detail < 2 || event.button !== 0) return;
+  event.preventDefault();
+  renaming = JSON.parse(button.dataset.args ?? "{}").id ?? null;
+  renderSidebar();
+}, true);
+document.getElementById("sidebar-sessions")?.addEventListener("click", (event) => {
+  if ((event.target as HTMLElement).closest("#sidebar-more")) document.getElementById("sidebar-search")?.focus();
+});
+function endRename(save: boolean) {
+  const form = document.querySelector<HTMLFormElement>(".sidebar-rename");
+  const id = renaming, title = form?.querySelector("input")?.value.trim() ?? "";
+  renaming = null;
+  sidebarSignature = "";
+  renderSidebar();
+  const was = state?.sessions.find((item) => item.id === id)?.title;
+  if (save && id && title && title !== was) void act(() => api("rename", { id, title }));
+}
+document.getElementById("sidebar-sessions")?.addEventListener("submit", (event) => { event.preventDefault(); endRename(true); });
+// A press anywhere else keeps the new title. Focus taken by the app itself
+// (the composer, as the chat opens) goes back to the field.
+document.addEventListener("pointerdown", (event) => {
+  if (renaming && !(event.target as HTMLElement).closest(".sidebar-rename")) endRename(true);
+}, true);
+document.getElementById("sidebar-sessions")?.addEventListener("focusout", (event) => {
+  const form = (event.target as HTMLElement).closest(".sidebar-rename");
+  if (!form || !renaming) return;
+  const next = (event as FocusEvent).relatedTarget as HTMLElement | null;
+  if (next?.matches("textarea")) setTimeout(() => { if (renaming && form.isConnected) form.querySelector("input")?.focus(); });
+  else if (next) endRename(true);
+});
+document.getElementById("sidebar-sessions")?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && (event.target as HTMLElement).closest(".sidebar-rename")) { event.preventDefault(); event.stopPropagation(); endRename(false); }
+}, true);
 /// Brings back the chat deleted last, while it still waits to be archived.
 function undoDelete() {
   const id = [...pendingDeletes.keys()].at(-1);

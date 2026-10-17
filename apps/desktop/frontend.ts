@@ -24,8 +24,8 @@ const el = <T extends HTMLElement = HTMLElement>(id: string) => {
 };
 const shell = el("desktop-shell"), home = el("desktop-home"), app = el("app"),
   toolbar = el("desktop-toolbar"), errorPanel = el("desktop-error"),
-  startStatus = el("desktop-start-status"), menu = el("desktop-project-menu"),
-  projectButton = el<HTMLButtonElement>("desktop-project-button"),
+  startStatus = el("desktop-start-status"), projectsList = el("sidebar-projects"), searchField = el<HTMLInputElement>("sidebar-search"),
+  projectHead = el("desktop-project-button"),
   chooser = el<HTMLButtonElement>("desktop-choose-project");
 const native = window.demesneDesktop;
 const invoke: DesktopInvoke = <T>(command: string, args?: Record<string, unknown>) => {
@@ -52,7 +52,7 @@ function setBusy(value: boolean, message?: string) {
   shell.setAttribute("aria-busy", String(value));
   for (const id of ["desktop-choose-project", "desktop-error-choose", "desktop-retry"])
     el<HTMLButtonElement>(id).disabled = value;
-  for (const button of menu.querySelectorAll<HTMLButtonElement>("button")) button.disabled = value;
+  for (const button of projectsList.querySelectorAll<HTMLButtonElement>("button")) button.disabled = value;
   for (const button of el("desktop-recent-list").querySelectorAll<HTMLButtonElement>("button")) button.disabled = value;
   if (message !== undefined) {
     startStatus.textContent = message;
@@ -61,7 +61,6 @@ function setBusy(value: boolean, message?: string) {
 }
 function showError(error: unknown) {
   fatal = true;
-  closeMenu(false);
   app.hidden = toolbar.hidden = home.hidden = true;
   el("desktop-sidebar").hidden = true;
   errorPanel.hidden = false;
@@ -88,12 +87,6 @@ function showActionError(error: unknown) {
     setTimeout(() => { notice.hidden = true; }, 6000);
   }
 }
-function closeMenu(focus: boolean) {
-  if (menu.hidden) return;
-  menu.hidden = true;
-  projectButton.setAttribute("aria-expanded", "false");
-  if (focus) projectButton.focus({ preventScroll: true });
-}
 const icon = (paths: string, className = "ico") => {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
@@ -110,57 +103,71 @@ const projectMark = (name: string) => {
 };
 /// A path at home reads as ~/code/blog.
 const shortPath = (path: string) => path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
-function recentButton(path: string, inMenu: boolean) {
+function recentButton(path: string) {
   const button = document.createElement("button");
   button.type = "button";
-  if (inMenu) button.setAttribute("role", "menuitem");
   button.title = path;
-  const title = document.createElement(inMenu ? "b" : "strong");
+  const title = document.createElement("strong");
   title.textContent = projectName(path);
   const detail = document.createElement("small");
-  detail.textContent = inMenu ? shortPath(path) : path;
-  if (inMenu) {
-    const mark = document.createElement("span"), copy = document.createElement("span");
-    mark.className = "project-mark";
-    mark.dataset.hue = String(1 + [...projectName(path)].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 3);
-    mark.textContent = projectMark(projectName(path));
-    mark.setAttribute("aria-hidden", "true");
-    copy.append(title, detail);
-    button.append(mark, copy);
-  } else {
-    const copy = document.createElement("span"), arrow = document.createElement("span");
-    copy.append(title, detail);
-    arrow.className = "desktop-recent-arrow";
-    arrow.textContent = "↗";
-    arrow.setAttribute("aria-hidden", "true");
-    button.append(copy, arrow);
-  }
+  detail.textContent = path;
+  const copy = document.createElement("span"), arrow = document.createElement("span");
+  copy.append(title, detail);
+  arrow.className = "desktop-recent-arrow";
+  arrow.textContent = "↗";
+  arrow.setAttribute("aria-hidden", "true");
+  button.append(copy, arrow);
   button.addEventListener("click", () => { void openProject(path); });
   return button;
 }
+/// A project in the sidebar's search results: one line, its mark and name,
+/// like a chat row.
+function projectRow(path: string) {
+  const button = document.createElement("button"), mark = document.createElement("span"), name = document.createElement("span");
+  button.type = "button";
+  button.className = "sidebar-project-row";
+  button.title = path;
+  mark.className = "project-mark";
+  mark.dataset.hue = String(1 + [...projectName(path)].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 3);
+  mark.textContent = projectMark(projectName(path));
+  mark.setAttribute("aria-hidden", "true");
+  name.textContent = projectName(path);
+  button.append(mark, name);
+  // A click must not blur the search first, or the row would vanish under it.
+  button.addEventListener("mousedown", (event) => event.preventDefault());
+  button.addEventListener("click", () => { void openProject(path); });
+  return button;
+}
+/// Search switches projects: while it has focus, your other projects that
+/// match show under the chats, with Open a folder… last. No menu.
+function renderProjectResults() {
+  const query = searchField.value.trim().toLowerCase(), open = document.activeElement === searchField || Boolean(query);
+  projectsList.hidden = !open;
+  if (!open) { projectsList.replaceChildren(); return; }
+  const matches = recentProjects.filter((path) => path !== workspace && (!query || projectName(path).toLowerCase().includes(query) || path.toLowerCase().includes(query))).slice(0, 5);
+  const label = document.createElement("div"), folder = document.createElement("button"), word = document.createElement("span"), key = document.createElement("kbd");
+  label.className = "sidebar-group";
+  label.textContent = "Projects";
+  folder.type = "button";
+  folder.className = "sidebar-project-row";
+  word.textContent = "Open a folder…";
+  key.textContent = openShortcut;
+  folder.append(icon(FOLDER_ICON), word, key);
+  folder.addEventListener("mousedown", (event) => event.preventDefault());
+  folder.addEventListener("click", () => { void openProject(); });
+  projectsList.replaceChildren(label, ...matches.map(projectRow), folder);
+}
 function renderProjects() {
   const list = el("desktop-recent-list");
-  list.replaceChildren(...recentProjects.slice(0, 6).map((path) => recentButton(path, false)));
+  list.replaceChildren(...recentProjects.slice(0, 6).map((path) => recentButton(path)));
   el("desktop-recent").hidden = !recentProjects.length;
-  menu.replaceChildren();
-  for (const path of recentProjects.filter((path) => path !== workspace).slice(0, 10))
-    menu.append(recentButton(path, true));
-  if (menu.children.length) menu.append(document.createElement("hr"));
-  const open = document.createElement("button"), label = document.createElement("span"), key = document.createElement("kbd");
-  open.type = "button";
-  open.className = "desktop-menu-open";
-  open.setAttribute("role", "menuitem");
-  label.textContent = "Open a folder…";
-  key.textContent = openShortcut;
-  open.append(icon(FOLDER_ICON), label, key);
-  open.addEventListener("click", () => { void openProject(); });
-  menu.append(open);
   if (workspace) {
     el("desktop-project-name").textContent = projectName(workspace);
-    el("desktop-project-path").querySelector("span")!.textContent = workspace;
-    projectButton.title = workspace;
+    projectHead.title = workspace;
+    projectHead.dataset.path = shortPath(workspace);
     document.title = `${projectName(workspace)} — Demesne`;
   }
+  renderProjectResults();
 }
 async function applyBootstrap(result: DesktopBootstrap) {
   if (fatal) return;
@@ -196,7 +203,6 @@ async function applyBootstrap(result: DesktopBootstrap) {
 }
 async function openProject(path?: string) {
   if (busy) return;
-  closeMenu(false);
   setBusy(true, "Opening project…");
   try {
     const result = await request<DesktopBootstrap>(path ? "desktop-open-project" : "desktop-select-project", path ? { path } : {});
@@ -212,16 +218,6 @@ async function openProject(path?: string) {
 for (const id of ["desktop-choose-project", "desktop-error-choose"])
   el(id).addEventListener("click", () => { void openProject(); });
 el("desktop-retry").addEventListener("click", () => window.location.reload());
-projectButton.addEventListener("click", () => {
-  if (busy) return;
-  const open = menu.hidden;
-  menu.hidden = !open;
-  projectButton.setAttribute("aria-expanded", String(open));
-  if (open) menu.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
-});
-document.addEventListener("pointerdown", (event) => {
-  if (event.target instanceof Node && !menu.contains(event.target) && !projectButton.contains(event.target)) closeMenu(false);
-}, true);
 document.addEventListener("keydown", (event) => {
   if (event.isComposing) return;
   const key = event.key.toLowerCase(), modifier = event.metaKey || event.ctrlKey;
@@ -233,21 +229,6 @@ document.addEventListener("keydown", (event) => {
     else void request("desktop-quit").catch(showActionError);
     return;
   }
-  if (menu.hidden) return;
-  if (key === "escape") {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    closeMenu(true);
-    return;
-  }
-  if (!["arrowdown", "arrowup", "home", "end", "enter", " "].includes(key) || modifier || event.altKey) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  const buttons = [...menu.querySelectorAll<HTMLButtonElement>("button")];
-  const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-  if (key === "enter" || key === " ") { buttons[index]?.click(); return; }
-  const next = key === "home" ? 0 : key === "end" ? buttons.length - 1 : (index + (key === "arrowup" ? -1 : 1) + buttons.length) % buttons.length;
-  buttons[next]?.focus({ preventScroll: true });
 }, true);
 window.addEventListener("beforeunload", () => {
   for (const unlisten of listeners.splice(0)) unlisten();
@@ -289,13 +270,23 @@ try { setSidebarCollapsed(localStorage.getItem("demesne-sidebar-collapsed") === 
 sidebarToggle.addEventListener("click", () => setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")));
 for (const id of ["rail-expand", "rail-sessions"]) el(id).addEventListener("click", () => setSidebarCollapsed(false));
 // Search is always there; Escape clears it and gives the list back.
-const searchField = el<HTMLInputElement>("sidebar-search");
+searchField.addEventListener("input", renderProjectResults);
+searchField.addEventListener("focus", renderProjectResults);
+searchField.addEventListener("blur", renderProjectResults);
 searchField.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   event.preventDefault();
   event.stopImmediatePropagation();
   if (searchField.value) { searchField.value = ""; searchField.dispatchEvent(new Event("input")); }
   searchField.blur();
+});
+// The Dock icon counts the chats that need you, so it shows from any app.
+let badge = -1;
+document.addEventListener("demesne:needs-you", (event) => {
+  const count = Number((event as CustomEvent<number>).detail) || 0;
+  if (count === badge) return;
+  badge = count;
+  void request("desktop-badge", { count }).catch(() => {});
 });
 el("sidebar-new-key").textContent = mac ? "⌘N" : "Ctrl+N";
 el("sidebar-settings-key").textContent = mac ? "⌘," : "Ctrl+,";

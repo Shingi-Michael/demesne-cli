@@ -9,8 +9,8 @@ body.desktop kbd { font-family: "JetBrains Mono", monospace; }
 #desktop-shell:has(#desktop-sidebar[hidden]) { grid-template-columns: 0 minmax(0, 1fr); }
 #desktop-sidebar { grid-column: 1; grid-row: 1 / -1; position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--side); padding: 14px 12px 10px; }
 .ico { flex: none; display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-/* The sidebar: search, three fixed rows, the chats, and the project at the
-   foot. Every row is one line at the same height: an icon and a word. */
+/* The sidebar: the project, search, two fixed rows, the chats, and
+   Settings at the foot. Every row is one line at the same height. */
 .sidebar-nav { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
 .sidebar-nav button, .sidebar-settings { display: flex; width: 100%; align-items: center; gap: 11px; height: 32px; padding: 0 10px; border-radius: 9px; color: var(--t2); font-size: 13.5px; text-align: left; }
 .sidebar-nav button:hover, .sidebar-settings:hover { background: var(--surface2); color: var(--t1); }
@@ -18,31 +18,15 @@ body.desktop kbd { font-family: "JetBrains Mono", monospace; }
 #desktop-sidebar .sidebar-nav kbd, #desktop-sidebar .sidebar-settings kbd { margin-left: auto; border: 0; background: none; padding: 0; color: var(--t4); }
 .sidebar-pip { display: block; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--acc); }
 .sidebar-pip.warn { background: var(--warn); }
-.sidebar-foot { display: flex; flex-direction: column; gap: 1px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
-.sidebar-project { position: relative; }
-#desktop-project-button { display: flex; width: 100%; align-items: center; gap: 10px; height: 36px; padding: 0 8px; border-radius: 9px; text-align: left; color: var(--t1); }
-#desktop-project-button:hover, #desktop-project-button[aria-expanded="true"] { background: var(--surface2); }
+.sidebar-foot { display: flex; flex-direction: column; gap: 1px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); }
+/* The project, at the top as plain text: its mark, name, folder and branch.
+   Search switches projects, so it opens no menu. */
+.sidebar-head { display: flex; align-items: center; gap: 10px; padding: 2px 8px 12px; min-width: 0; }
+.sidebar-head-copy { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+#desktop-project-name { font-size: 13.5px; font-weight: 500; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#desktop-project-sub { font-size: 11.5px; color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-mark { display: block; flex: none; width: 24px; height: 24px; border-radius: 7px; background: linear-gradient(145deg, #3a5f94, #20344f); color: #dce9ff; font: 600 11px/24px "JetBrains Mono", monospace; text-align: center; letter-spacing: -0.02em; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset; }
-#desktop-project-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#desktop-project-button .chev { width: 14px; height: 14px; color: var(--t4); }
-.sidebar-sub { display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 10px 0 42px; color: var(--t3); font-size: 12px; white-space: nowrap; overflow: hidden; }
-.sidebar-sub .ico { width: 13px; height: 13px; color: var(--t4); }
-.sidebar-sub span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-settings { margin-top: 6px; }
-.desktop-project-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 150; width: 100%; max-height: min(480px, 70vh); overflow-y: auto; padding: 6px; border: 1px solid var(--line2); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
-.desktop-project-menu button { display: flex; width: 100%; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; text-align: left; color: var(--t1); }
-.desktop-project-menu button:hover, .desktop-project-menu button:focus-visible { background: var(--surface2); }
-.desktop-project-menu .project-mark { width: 24px; height: 24px; border-radius: 7px; font-size: 11px; line-height: 24px; }
-.desktop-project-menu .project-mark[data-hue="1"] { background: linear-gradient(145deg, #4f7a5a, #2a4532); color: #dff5e4; }
-.desktop-project-menu .project-mark[data-hue="2"] { background: linear-gradient(145deg, #8a6b3a, #4e3a1b); color: #fbe9cc; }
-.desktop-project-menu .project-mark[data-hue="3"] { background: linear-gradient(145deg, #7a4f8a, #432a4e); color: #f0dff5; }
-.desktop-project-menu button > span:not(.project-mark) { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 1px; }
-.desktop-project-menu button b { font-weight: 500; font-size: 13.5px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desktop-project-menu button small { color: var(--t3); font: inherit; font-size: 11.5px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desktop-project-menu button kbd { margin-left: auto; }
-.desktop-project-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
-.desktop-project-menu button.desktop-menu-open { color: var(--t3); font-size: 13px; padding: 9px 10px 6px; }
-.desktop-project-menu button.desktop-menu-open .ico { color: var(--t3); }
 body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); border: 1px solid var(--line2); border-radius: 5px; padding: 3px 5px; background: var(--surface); }
 .sidebar-search { display: flex; align-items: center; gap: 9px; margin: 0 0 10px; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--t4); }
 .sidebar-search:focus-within { border-color: var(--line2); }
@@ -50,14 +34,34 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-search input { min-width: 0; width: 100%; background: transparent; border: 0; outline: none; color: var(--t1); font-size: 13px !important; }
 .sidebar-search input::placeholder { color: var(--t4); }
 .sidebar-group { padding: 14px 10px 6px; color: var(--t4); font-size: 12px; }
-#sidebar-sessions { flex: 1; min-height: 70px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+#sidebar-sessions { flex: 0 1 auto; min-height: 70px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
 .sidebar-session { display: flex; align-items: center; gap: 11px; width: 100%; height: 32px; padding: 0 10px; border-radius: 9px; color: var(--t2); text-align: left; font-size: 13.5px; white-space: nowrap; }
 .sidebar-session:hover { background: var(--surface2); }
 .sidebar-session.selected { background: var(--surface2); color: var(--t1); }
-.sidebar-session-mark { flex: none; width: 6px; height: 6px; margin: 0 5px; border-radius: 50%; background: var(--t4); }
-.sidebar-session-mark.warn { background: var(--warn); }
-.sidebar-session-mark.acc { background: var(--acc); }
-.sidebar-session-mark.bad { background: var(--bad); }
+/* Each state has its own shape, not only its own colour: a ring needs you,
+   a filled dot is a new reply, a spinner works, a cross failed. A settled
+   chat has no mark; its space stays so the titles line up. */
+.sidebar-session-mark { flex: none; position: relative; width: 10px; height: 10px; margin: 0 3px; border-radius: 50%; visibility: hidden; }
+.sidebar-session-mark.warn { visibility: visible; border: 2px solid var(--warn); }
+.sidebar-session-mark.acc { visibility: visible; width: 7px; height: 7px; margin: 0 4.5px; background: var(--acc); }
+.sidebar-session-mark.bad { visibility: visible; border-radius: 0; }
+.sidebar-session-mark.bad::before, .sidebar-session-mark.bad::after { content: ""; position: absolute; left: 50%; top: 50%; width: 11px; height: 2px; border-radius: 1px; background: var(--bad); transform: translate(-50%, -50%) rotate(45deg); }
+.sidebar-session-mark.bad::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.sidebar-branch { width: 12px; height: 12px; color: var(--t4); }
+.sidebar-more { display: flex; align-items: center; width: 100%; height: 28px; padding: 0 10px 0 34px; border-radius: 9px; color: var(--t3); font-size: 12.5px; text-align: left; }
+.sidebar-more:hover { color: var(--t1); background: var(--surface2); }
+.sidebar-rename { display: flex; align-items: center; gap: 11px; height: 32px; padding: 0 6px 0 10px; }
+.sidebar-rename input { flex: 1; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid var(--acc); border-radius: 6px; background: var(--surface); color: var(--t1); font-size: 13.5px !important; outline: none; }
+#sidebar-projects { flex: none; }
+.sidebar-project-row { display: flex; align-items: center; gap: 11px; width: 100%; height: 32px; padding: 0 10px; border-radius: 9px; color: var(--t2); font-size: 13.5px; text-align: left; white-space: nowrap; }
+.sidebar-project-row:hover, .sidebar-project-row:focus-visible { background: var(--surface2); color: var(--t1); }
+.sidebar-project-row > span:not(.project-mark) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-project-row .project-mark { width: 18px; height: 18px; border-radius: 5px; font-size: 9px; line-height: 18px; }
+.sidebar-project-row .project-mark[data-hue="1"] { background: linear-gradient(145deg, #4f7a5a, #2a4532); color: #dff5e4; }
+.sidebar-project-row .project-mark[data-hue="2"] { background: linear-gradient(145deg, #8a6b3a, #4e3a1b); color: #fbe9cc; }
+.sidebar-project-row .project-mark[data-hue="3"] { background: linear-gradient(145deg, #7a4f8a, #432a4e); color: #f0dff5; }
+.sidebar-project-row .ico { width: 16px; height: 16px; color: var(--t3); }
+#desktop-sidebar .sidebar-project-row kbd { margin-left: auto; border: 0; background: none; padding: 0; color: var(--t4); }
 .sidebar-session-mark.working { width: 10px; height: 10px; margin: 0 3px; border: 1.6px solid var(--line2); border-top-color: var(--acc); background: transparent; animation: sidebar-spin 900ms linear infinite; }
 @keyframes sidebar-spin { to { transform: rotate(360deg); } }
 .sidebar-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -88,8 +92,8 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 #rail-expand .project-mark { width: 32px; height: 32px; font-size: 14px; line-height: 32px; }
 .rail-button { position: relative; width: 36px; height: 36px; border-radius: 10px; }
 .rail-button.on { background: var(--surface2); color: var(--t1); }
-.rail-badge { position: absolute; right: 5px; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px var(--side); }
-.rail-badge.blue { background: var(--acc); }
+.rail-badge { position: absolute; right: 5px; top: 5px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--warn); background: var(--side); }
+.rail-badge.blue { width: 7px; height: 7px; border: 0; background: var(--acc); box-shadow: 0 0 0 2px var(--side); }
 .rail-foot { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: auto; }
 .rail-ring { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: conic-gradient(var(--acc) 0 var(--progress, 0%), var(--surface3) 0); }
 .rail-ring i { display: block; width: 28px; height: 28px; border-radius: 50%; background: var(--side); }

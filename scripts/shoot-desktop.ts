@@ -129,7 +129,7 @@ if (readme) {
   await page.locator("#desktop-toggle-sidebar").click(); await page.waitForTimeout(500);
   await shot("02-rail");
   await page.locator("#rail-expand").click(); await page.waitForTimeout(500);
-  await page.locator("#desktop-project-button").click(); await page.waitForTimeout(500);
+  await page.locator("#sidebar-search").focus(); await page.waitForTimeout(500);
   await shot("02-projects");
   await page.keyboard.press("Escape"); await page.waitForTimeout(400);
   // The slash list: your workflows first, then what you used recently.

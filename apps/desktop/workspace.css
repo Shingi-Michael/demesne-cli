@@ -61,12 +61,20 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-session-mark.working { width: 10px; height: 10px; margin: 0 3px; border: 1.6px solid var(--line2); border-top-color: var(--acc); background: transparent; animation: sidebar-spin 900ms linear infinite; }
 @keyframes sidebar-spin { to { transform: rotate(360deg); } }
 .sidebar-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.sidebar-session-age { flex: none; color: var(--t4); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sidebar-session-age { flex: none; color: var(--t3); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* The time is small, so it keeps 4.5:1 against the sidebar in light too. */
+html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 /* Hovering a row swaps its time for a delete icon; one click archives it. */
 .sidebar-item { position: relative; }
 .sidebar-delete { position: absolute; top: 50%; right: 6px; display: grid; place-items: center; width: 24px; height: 24px; margin-top: -12px; border-radius: 6px; color: var(--t3); background: var(--surface2); opacity: 0; pointer-events: none; transition: opacity 120ms; }
-.sidebar-item:hover .sidebar-delete, .sidebar-delete:focus-visible { opacity: 1; pointer-events: auto; }
-.sidebar-item:hover .sidebar-session-age { visibility: hidden; }
+/* The trash shows on hover, and when the keyboard is on the row, where
+   Delete works too. */
+.sidebar-item:hover .sidebar-delete, .sidebar-delete:focus-visible, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-delete { opacity: 1; pointer-events: auto; }
+.sidebar-item:hover .sidebar-session-age, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-session-age { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-session-mark.working { animation-duration: 2.4s; }
+  .sidebar-delete { transition: none; }
+}
 .sidebar-delete:hover { color: var(--bad); background: var(--bad-soft); }
 .sidebar-delete .ico { width: 14px; height: 14px; }
 .sidebar-empty { padding: 6px 10px; color: var(--t4); font-size: 12.5px; line-height: 1.5; }

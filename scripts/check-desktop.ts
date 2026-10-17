@@ -198,14 +198,34 @@ try {
   await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === 2), "the second conversation joins the list once it has a turn");
   await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
+  // Ctrl+Tab steps to the other chat and Ctrl+Shift+Tab steps back.
+  const current = () => page.locator(".sidebar-session[aria-current='page']").getAttribute("data-args");
+  await page.locator("textarea").focus();
+  await page.keyboard.press("Control+Tab");
+  await until(async () => !(await current())?.includes(sessionId), "Ctrl+Tab opens the next chat");
+  await page.keyboard.press("Control+Shift+Tab");
+  await until(async () => (await current())?.includes(sessionId), "Ctrl+Shift+Tab opens the one before");
+  await textIncludes(completed);
   // Each row deletes itself from the sidebar, without a menu or a dialog;
-  // the list closes up and never shows more than six.
+  // the list closes up and never shows more than six. ⌘Z brings it back
+  // while it waits to be archived.
   const before = await page.locator("#sidebar-sessions .sidebar-item").count();
   const other = page.locator(`#sidebar-sessions .sidebar-item:not(:has([data-args*='${sessionId}']))`).first();
+  const otherArgs = await other.locator(".sidebar-session").getAttribute("data-args");
   await other.hover();
   await other.locator(".sidebar-delete").click();
   assert.equal(await page.locator("#overlay:not([hidden])").count(), 0, "Deleting opens no menu or dialog");
   await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before - 1), "the deleted conversation leaves the list");
+  await page.locator("body").focus();
+  await page.keyboard.press("Control+z");
+  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before), "undo brings the conversation back");
+  assert.equal((await f.client.listSessions()).length, before, "An undone delete never reaches the daemon");
+  // The keyboard reaches the same delete: Delete on the focused row.
+  const row = page.locator(`#sidebar-sessions .sidebar-session[data-args='${otherArgs}']`);
+  await row.focus();
+  assert(await row.locator("xpath=..").locator(".sidebar-delete").evaluate(button => getComputedStyle(button).opacity === "1"), "The trash shows when the keyboard is on the row");
+  await page.keyboard.press("Delete");
+  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before - 1), "Delete on a row removes it");
   await until(async () => (await f.client.listSessions()).length === before - 1, "the daemon archived it");
   assert(await page.locator("#sidebar-sessions .sidebar-item").count() <= 6, "The sidebar lists at most six conversations");
   await capture("02-completed");

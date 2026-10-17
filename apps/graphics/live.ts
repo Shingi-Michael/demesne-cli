@@ -316,8 +316,27 @@ const dayGroup = (date: string) => {
 /// "2h", "yesterday", "Oct 3": the quiet time beside a settled session.
 const shortAge = (date: string) => {
   const ms = Date.now() - Date.parse(date);
-  return ms < 60_000 ? "now" : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m` : ms < 86_400_000 ? `${Math.floor(ms / 3_600_000)}h` : ms < 7 * 86_400_000 ? `${Math.floor(ms / 86_400_000)}d` : new Date(date).toLocaleDateString([], { month: "short", day: "numeric" });
+  return ms < 60_000 ? "now" : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m` : ms < 86_400_000 ? `${Math.floor(ms / 3_600_000)}h` : ms < 172_800_000 ? "yesterday" : ms < 7 * 86_400_000 ? `${Math.floor(ms / 86_400_000)}d` : new Date(date).toLocaleDateString([], { month: "short", day: "numeric" });
 };
+/// The full time, for a row's tooltip.
+const fullTime = (date: string) => new Date(date).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+/// When each chat was last looked at (its updatedAt then): a chat that has
+/// moved on since, while you were elsewhere, gets the blue "new reply" dot.
+const SEEN_KEY = "demesne.sidebar.seen";
+const seenChats: Record<string, string> = (() => {
+  try { return JSON.parse(localStorage.getItem(SEEN_KEY) ?? "{}") ?? {}; } catch { return {}; }
+})();
+function markSeen(id: string, updatedAt: string) {
+  if (seenChats[id] === updatedAt) return;
+  seenChats[id] = updatedAt;
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify(seenChats)); } catch { /* storage may be off */ }
+}
+/// What a row's dot means, in words: for its tooltip and screen readers.
+const STATE_WORDS: Record<string, string> = { warn: "needs you", working: "working", bad: "failed", acc: "new reply" };
+/// Chats deleted from the sidebar a moment ago: they leave the list at once
+/// and are archived after UNDO_MS, so ⌘Z can bring the last one back.
+const UNDO_MS = 5_000;
+const pendingDeletes = new Map<string, ReturnType<typeof setTimeout>>();
 /// How many conversations the sidebar lists. Deleting one moves the next up;
 /// search finds the older ones.
 const SIDEBAR_ROWS = 6;
@@ -342,12 +361,17 @@ function renderSidebar() {
   sidebarSignature = signature;
   const current = state.session;
   const dot = (tone: string) => `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`;
+  const focused = (document.activeElement as HTMLElement | null)?.closest?.("#sidebar-sessions") ? [...list.querySelectorAll(".sidebar-session")].indexOf(document.activeElement as Element) : -1;
   // One line per chat: a dot for its state, its title, its time. The dot is
   // amber when the chat needs you, a spinner while it works, blue for a
   // branch of Drive's that waits for review (those sit on the Branches row).
-  const row = (tone: string, title: string, selected: boolean, age: string, id: string) =>
-    btn("select-session", `${dot(tone)}<span class="sidebar-session-name">${h(title)}</span>${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, { id }, `sidebar-session${selected ? " selected" : ""}`)
-      .replace("<button ", `<button title="${h(title)}"${selected ? ' aria-current="page"' : ""} `);
+  // The tooltip and the accessible name say in words what the dot shows.
+  const row = (tone: string, title: string, selected: boolean, age: string, id: string, updatedAt: string) => {
+    const about = STATE_WORDS[tone] ?? "";
+    const tip = [title, about || fullTime(updatedAt)].join(" · ");
+    return btn("select-session", `${dot(tone)}<span class="sidebar-session-name">${h(title)}</span>${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, { id }, `sidebar-session${selected ? " selected" : ""}`)
+      .replace("<button ", `<button title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
+  };
   const matching = sessions.filter(item => item.title.toLowerCase().includes(query));
   const rows: string[] = [];
   let shown = 0;
@@ -355,17 +379,29 @@ function renderSidebar() {
     if (shown >= SIDEBAR_ROWS) break;
     const selected = item.id === current?.id;
     const title = selected ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
-    const working = selected ? Boolean(state.activeTurnId) && !waiting : item.status === "running" || item.status === "queued";
-    const tone = selected && waiting ? "warn" : working ? "working" : item.status === "failed" ? "bad" : "";
+    const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
+    const working = selected ? Boolean(state.activeTurnId) && !waiting : !asks && (item.status === "running" || item.status === "queued");
+    // Looking at a chat marks it seen; one that has moved on since, while
+    // you were elsewhere, carries the blue dot until you open it.
+    if (selected || !(item.id in seenChats)) markSeen(item.id, item.updatedAt);
+    const fresh = !selected && item.status === "completed" && seenChats[item.id] !== item.updatedAt;
+    const tone = asks ? "warn" : working ? "working" : item.status === "failed" ? "bad" : fresh ? "acc" : "";
     // An empty chat is the composer itself, and the New chat row above
     // already names it; it joins the list once it has a turn.
     if (title === "New chat" && !working && !waiting) continue;
     // Each row carries its own delete, shown on hover: no menu, no dialog.
-    const remove = working ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" `);
-    rows.push(`<div class="sidebar-item">${row(tone, title, selected, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id)}${remove}</div>`);
+    // The keyboard deletes with Delete on the row itself, so the trash
+    // stays out of the tab order.
+    const remove = working ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" tabindex="-1" `);
+    rows.push(`<div class="sidebar-item">${row(tone, title, selected, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id, item.updatedAt)}${remove}</div>`);
     shown++;
   }
   list.innerHTML = rows.length ? rows.join("") : `<p class="sidebar-empty">${query ? "No matching conversations" : "Your conversations will appear here."}</p>`;
+  // A redraw keeps keyboard focus where it was, or on the row that moved up.
+  if (focused >= 0) {
+    const buttons = list.querySelectorAll<HTMLElement>(".sidebar-session");
+    (buttons[Math.min(focused, buttons.length - 1)] ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
+  }
   const title = document.getElementById("workspace-title");
   if (title) { title.textContent = inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
   // Under the project: its branch, then what most needs you in it.
@@ -401,6 +437,43 @@ function renderSidebar() {
   }
 }
 document.getElementById("sidebar-search")?.addEventListener("input", renderSidebar);
+// The list moves with the arrow keys, Home and End; Delete or Backspace
+// deletes the focused chat, and ⌘Z brings the last one back.
+document.getElementById("sidebar-sessions")?.addEventListener("keydown", (event) => {
+  const rows = [...document.querySelectorAll<HTMLElement>("#sidebar-sessions .sidebar-session")];
+  const index = rows.indexOf(event.target as HTMLElement);
+  if (index < 0 || event.metaKey || event.ctrlKey || event.altKey) return;
+  const key = event.key;
+  if (key === "ArrowDown" || key === "ArrowUp" || key === "Home" || key === "End") {
+    event.preventDefault();
+    const next = key === "Home" ? 0 : key === "End" ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1, index + (key === "ArrowUp" ? -1 : 1)));
+    rows[next]?.focus({ preventScroll: true });
+    return;
+  }
+  if (key === "Delete" || key === "Backspace") {
+    const remove = rows[index]!.parentElement?.querySelector<HTMLElement>(".sidebar-delete");
+    if (!remove) return;
+    event.preventDefault();
+    remove.click();
+  }
+});
+/// The chat above or below the open one in the list, for Ctrl+Tab.
+function neighbourChat(step: number) {
+  const ids = [...document.querySelectorAll<HTMLElement>("#sidebar-sessions .sidebar-session")].map((row) => JSON.parse(row.dataset.args ?? "{}").id as string).filter(Boolean);
+  if (!ids.length) return undefined;
+  const at = ids.indexOf(state?.session?.id ?? "");
+  return ids[at < 0 ? (step > 0 ? 0 : ids.length - 1) : (at + step + ids.length) % ids.length];
+}
+/// Brings back the chat deleted last, while it still waits to be archived.
+function undoDelete() {
+  const id = [...pendingDeletes.keys()].at(-1);
+  if (!id) return false;
+  clearTimeout(pendingDeletes.get(id));
+  pendingDeletes.delete(id);
+  deletedSessions.delete(id);
+  renderSidebar();
+  return true;
+}
 let statusSignature = "";
 function renderStatus() {
   if (!state) return;
@@ -2487,6 +2560,17 @@ async function dispatch(
     // Gone from the list at once; the next conversation moves up.
     deletedSessions.add(args.id);
     renderSidebar();
+    // Another chat waits a moment before it is archived, so ⌘Z can undo it;
+    // the open one is replaced by a new chat, so it goes now.
+    if (args.id !== state?.session?.id) {
+      pendingDeletes.set(args.id, setTimeout(() => {
+        pendingDeletes.delete(args.id);
+        void act(async () => {
+          try { await api("archive", { id: args.id }); } catch (error) { deletedSessions.delete(args.id); renderSidebar(); throw error; }
+        });
+      }, UNDO_MS));
+      return;
+    }
     try {
       await api("archive", { id: args.id });
     } catch (error) {
@@ -2953,6 +3037,18 @@ document.addEventListener("keydown", (event) => {
   }
   if (ctrl && key === "k") {
     run(() => openOverlay("settings"));
+    return;
+  }
+  // Ctrl+Tab and Ctrl+Shift+Tab step through the chats in the sidebar.
+  if (event.ctrlKey && !event.metaKey && !event.altKey && key === "tab") {
+    const id = neighbourChat(event.shiftKey ? -1 : 1);
+    if (id && id !== state.session?.id) run(() => dispatch("select-session", { id }));
+    else event.preventDefault();
+    return;
+  }
+  if (ctrl && !event.shiftKey && !event.altKey && key === "z" && !field && pendingDeletes.size) {
+    event.preventDefault();
+    undoDelete();
     return;
   }
   if (ctrl && key === "g") {

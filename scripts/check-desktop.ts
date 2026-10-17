@@ -251,7 +251,7 @@ try {
   assert(compacted && compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
   await until(() => page.locator(".context-top").innerText().then(text => text.includes(`${percentage}%`)), "context panel updates without reopening");
-  await until(() => page.locator("#composer-context").innerText().then(text => text.includes(`${percentage}%`)), "composer context meter updates");
+  await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
   await until(() => page.locator(".compaction-card").count().then(count => count === 1), "conversation summary visible");
   const firstTurnId = completedSession.turns.find(turn => turn.content === prompt)!.id;
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Older conversation is unmounted by default");

@@ -361,12 +361,10 @@
   color: var(--secondary);
   list-style: none;
 }
-.explored > summary:before,
 .thinking > summary:before {
   content: "▸ ";
   color: var(--muted);
 }
-.explored[open] > summary:before,
 .thinking[open] > summary:before {
   content: "▾ ";
 }
@@ -425,8 +423,8 @@
   color: var(--electric);
 }
 .thinking-toggle { color: var(--secondary); cursor: pointer; }
-.thinking-toggle:before { content: "▸ "; color: var(--muted); }
-.thinking-toggle[aria-expanded="true"]:before { content: "▾ "; }
+.thinking-toggle .chev { transition: transform 120ms ease; }
+.thinking-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
 .thinking-content > pre,
 .thinking-content > .thinking-text { margin: 0 0 6px; }
 .live-activity {
@@ -3792,3 +3790,425 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 .compaction-heading span { font-size: 11px; }
 .compaction-summary { overflow-wrap: anywhere; }
 .compaction-toggle { margin-top: 14px; color: var(--electric); text-align: left; }
+
+/* The conversation as one column: your ask as a bubble on the right, a
+   "Thought for" line, each step one quiet line on a thin guide (an edit's
+   diff or a command's output unfolds under its row), the answer beside a
+   small mark, and a receipt line of what it cost and changed. */
+.ico {
+  flex: none;
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.live-app:not(.start) .turn + .turn {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+.live-app:not(.start) .request {
+  position: relative;
+  display: block;
+  align-self: flex-end;
+  margin: 8px 0 30px auto;
+  max-width: 78%;
+  width: fit-content;
+  padding: 11px 16px;
+  border-radius: 18px 18px 6px 18px;
+  background: var(--raised);
+  color: var(--strong);
+  font-size: 15px;
+  line-height: 1.55;
+}
+.request-meta {
+  position: absolute;
+  right: 4px;
+  bottom: -22px;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.request-meta time {
+  visibility: visible;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.turn:hover .request time {
+  visibility: visible;
+}
+.thinking-main .thinking-toggle,
+.thinking-line-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--secondary);
+}
+.thinking-main .thinking-toggle:hover {
+  color: var(--strong);
+}
+.thinking-main .thinking-content {
+  margin-top: 6px;
+}
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-left: 34px;
+  position: relative;
+}
+.steps::before {
+  content: "";
+  position: absolute;
+  left: -19px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--rule);
+}
+.steps .tool-row,
+.steps .explored > summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 26px;
+  margin: 0;
+  padding: 0 8px 0 0;
+  border: 0;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--secondary);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.steps .tool-row:hover,
+.steps .explored > summary:hover {
+  background: none;
+  color: var(--paper);
+}
+.steps .tool-row > .ico,
+.steps .explored > summary > .ico {
+  color: var(--muted);
+}
+.steps .tool-row .verb,
+.steps .explored > summary .verb {
+  width: auto;
+  flex: none;
+  color: var(--paper);
+  font-weight: 500;
+}
+.steps .tool-row .target {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--paper);
+  background: none;
+  padding: 0;
+}
+.steps .tool-row .chev {
+  width: 12px;
+  height: 12px;
+  margin-left: -3px;
+  color: var(--muted);
+  transition: transform 120ms ease;
+}
+.steps .tool-row.open .chev {
+  transform: rotate(180deg);
+}
+.steps .sp {
+  flex: 1;
+}
+.steps .meta {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.steps .meta .counts {
+  font-size: 12px;
+}
+.steps .tool-row.failed .verb {
+  color: var(--signal);
+}
+.steps .tool-row.waiting .verb {
+  color: var(--thinking);
+}
+.steps .tool-row .spin {
+  width: 14px;
+  text-align: center;
+  color: var(--electric);
+}
+.steps .explored {
+  font-size: 13px;
+}
+.steps .explored > div {
+  border: 0;
+  padding: 0 0 0 23px;
+  margin: 0;
+  gap: 1px;
+}
+.steps .explored .tool-row {
+  padding: 0 8px 0 0;
+  min-height: 26px;
+}
+.step-fold {
+  margin: 2px 0 6px 23px;
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.step-fold .fold-path,
+.step-fold .fold-cmd {
+  font-size: 12px;
+  line-height: 18px;
+  padding: 6px 12px 0;
+  color: var(--muted);
+}
+.step-fold .diff {
+  font-size: 12.5px;
+  line-height: 1.75;
+  padding: 4px 0;
+}
+.step-fold .diff > div {
+  display: grid;
+  grid-template-columns: 40px 14px 1fr;
+  padding-right: 14px;
+  white-space: pre;
+}
+.step-fold .diff > div > span:first-child {
+  color: var(--muted);
+  text-align: right;
+  padding-right: 10px;
+  user-select: none;
+}
+.step-fold .diff > div > span:nth-child(3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.step-fold .diff .rm {
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+}
+.step-fold .diff .rm > span:nth-child(2) {
+  color: var(--signal);
+}
+.step-fold .diff .ad {
+  background: color-mix(in srgb, var(--citron) 12%, transparent);
+}
+.step-fold .diff .ad > span:nth-child(2) {
+  color: var(--citron);
+}
+.step-fold .diff .gap {
+  color: var(--muted);
+}
+.step-fold .out {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.answer {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.answer-mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 3px;
+  border-radius: 7px;
+  background: linear-gradient(145deg, #3a5f94, #20344f);
+  color: #dce9ff;
+  font: 600 11px/22px "JetBrains Mono", monospace;
+  text-align: center;
+  letter-spacing: -0.02em;
+}
+.answer .markdown {
+  flex: 1;
+  min-width: 0;
+}
+.live-app:not(.start) .turn-receipt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-left: 34px;
+  font-size: 12.5px;
+  line-height: 20px;
+  color: var(--muted);
+}
+.turn-receipt .receipt-files {
+  color: var(--muted);
+}
+.turn-receipt .receipt-files .counts {
+  margin-left: 2px;
+}
+.turn-receipt .receipt-actions {
+  display: inline-flex;
+  gap: 14px;
+}
+.turn-receipt .receipt-action,
+.turn-receipt .receipt-steps {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--secondary);
+}
+.turn-receipt .receipt-action .ico {
+  width: 13px;
+  height: 13px;
+}
+.turn-receipt .receipt-action:hover,
+.turn-receipt .receipt-steps:hover {
+  color: var(--strong);
+}
+.turn-receipt .copy-answer {
+  opacity: 1;
+}
+.live-app:not(.start) .response {
+  gap: 14px;
+}
+/* What Drive is doing, as a pill above the composer. */
+.briefing-line {
+  gap: 8px;
+  padding: 0;
+}
+.briefing-line .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  color: var(--secondary);
+  font-size: 12.5px;
+  line-height: 18px;
+}
+.briefing-line .pill .link {
+  font-size: 12.5px;
+}
+/* The composer bar: a + for files, the approval chip, then the model, the
+   context ring and a square send that reads Stop while a turn runs. */
+.composer-bar .cb {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  line-height: 18px;
+  font-weight: 450;
+  color: var(--secondary);
+  padding: 5px 9px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.composer-bar .cb:hover {
+  background: var(--raised);
+  color: var(--strong);
+}
+.composer-bar .cb-plus {
+  padding: 5px 6px;
+}
+.composer-bar .cb-box {
+  border: 1px solid var(--rule);
+}
+.composer-bar .cb .chev {
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+}
+#composer-approval.auto {
+  color: var(--thinking);
+  border-color: color-mix(in srgb, var(--thinking) 40%, transparent);
+}
+.composer-bar .sp {
+  flex: 1;
+}
+#composer-model,
+#composer-context {
+  font-size: 12.5px;
+  color: var(--secondary);
+}
+#composer-context {
+  padding: 5px 7px;
+}
+.ring {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: conic-gradient(var(--electric) 0 var(--usage, 0%), var(--borderBright) 0);
+}
+.ring::after {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.live-app:not(.start) .composer .hints {
+  display: none;
+}
+.live-app:not(.start) .composer .send {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-left: 4px;
+  padding: 0;
+  border-radius: 10px;
+  border: 0;
+  background: var(--electric);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+.live-app:not(.start) .composer .send:hover {
+  background: color-mix(in srgb, var(--electric) 88%, var(--strong));
+}
+.live-app:not(.start) .composer .send .ico {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.2;
+}
+.live-app:not(.start) .composer .send kbd,
+.live-app:not(.start) .composer .send #send-label,
+.live-app:not(.start) .composer .send .send-stop {
+  display: none;
+}
+.live-app:not(.start) .composer.stopping .send {
+  background: var(--borderBright);
+  color: var(--paper);
+}
+.live-app:not(.start) .composer.stopping .send .send-arrow {
+  display: none;
+}
+.live-app:not(.start) .composer.stopping .send .send-stop {
+  display: block;
+  fill: currentColor;
+  stroke: none;
+}
+.live-app.start .composer .send .send-arrow,
+.live-app.start .composer .send .send-stop {
+  display: none;
+}

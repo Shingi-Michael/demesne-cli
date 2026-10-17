@@ -18,7 +18,7 @@ Drive is a separate planning context that coordinates coding turns, inspects rec
 
 **Every new mission works in its own git worktree** (see [Missions work in a worktree](#missions-work-in-a-worktree)). Add `--here` to keep it in the current session.
 
-**Plain `/drive MISSION` currently defaults to continuous mode.** Use `--bounded` for one verified task. A saved mission retains its mode. A question can finish when answered in either mode. `/drive` or Alt+J opens the panel.
+**Plain `/drive MISSION` currently defaults to continuous mode.** Use `--bounded` for one verified task. A saved mission retains its mode. A question can finish when answered in either mode. `/drive` or Alt+J shows what Drive is doing, or its ideas.
 
 - **Pause** stops planning; an already submitted coding turn can finish.
 - **Stop** also attempts to interrupt coding work in the mission session.
@@ -28,7 +28,7 @@ Drive is a separate planning context that coordinates coding turns, inspects rec
 
 ## NEXT: proposed work
 
-The Drive panel pins a live, paused or blocked mission at the top (status, tasks, stats, Pause/Resume, Stop, Details), with two tabs below it. **Next** is the ranked proposal queue as one-line rows; the top one, or the one you open, shows its reason, evidence, estimate and actions. **Done** shows the finished mission in full, then the outcomes and blockers Drive recorded in project memory, newest first. Missions start from `/drive` in the composer. The start screen shows the top three proposals, and the rail shows the available proposal count.
+Drive has no panel. A mission is the newest turn of the conversation it started from, with Pause/Resume, Stop and Details on it; from any other conversation the sidebar's Drive footer (Open ›) or Alt+J jumps there, and a fix or away run unfolds on the line above the composer. Drive's ranked ideas unfold in place too: under the composer on the start screen, or from "Drive has N ideas ›" above the composer in a conversation. Each idea is one row with Run and Plan, Not now on hover, and its reason and evidence in the tooltip. Outcomes and blockers Drive records go to project memory. Missions start from `/drive` in the composer.
 
 | Action | Result |
 | --- | --- |

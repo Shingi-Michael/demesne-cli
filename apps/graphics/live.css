@@ -65,8 +65,7 @@
 .proposals-footer button {
   color: var(--electric);
 }
-.proposals-footer button + span + button,
-.proposals-footer button[data-action="panel"] {
+.proposals-footer button + span + button {
   color: var(--muted);
 }
 .live-app.start #rail {
@@ -939,58 +938,6 @@
 .match {
   color: var(--electric);
 }
-#panel {
-  flex: none;
-  width: 42%;
-  max-width: 620px;
-  min-width: 340px;
-  border-left: 1px solid var(--rule);
-  background: var(--surface);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  outline: none;
-}
-#panel.drive-pane {
-  width: 340px;
-}
-
-.panel-heading {
-  padding: 14px 16px 10px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 12px;
-  line-height: 18px;
-  flex-wrap: wrap;
-  flex: none;
-}
-.panel-heading .label {
-  color: var(--muted);
-  letter-spacing: 0.6px;
-}
-.panel-heading .subject {
-  color: var(--secondary);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.panel-heading .meta {
-  font-size: 12px;
-  line-height: 18px;
-  text-align: right;
-  margin-left: auto;
-}
-.panel-heading button {
-  font-size: 12px;
-  color: var(--muted);
-}
-.panel-body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  scrollbar-width: thin;
-}
 
 .summary-line {
   display: flex;
@@ -1045,14 +992,6 @@
   margin-right: 5px;
 }
 
-.drive-content {
-  padding: 0 16px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  font-size: 13px;
-  line-height: 20px;
-}
 /* Drive panel: status + timeline. One status line and a short sentence,
    what Drive did, a plain checklist, one stats line; the rest under Details. */
 .drive-status {
@@ -1118,30 +1057,13 @@
 .tone-thinking { color: var(--thinking); }
 .tone-signal { color: var(--signal); }
 .tone-paper { color: var(--paper); }
-.drive-content details summary {
-  cursor: pointer;
-  color: var(--secondary);
-}
-.drive-content pre {
-  font:
-    12px/18px JetBrains Mono,
-    monospace;
-  white-space: pre-wrap;
-}
+
 .drive-meta {
   color: var(--muted);
   font-size: 12px;
   line-height: 18px;
 }
-.drive-content input {
-  width: 100%;
-  font: inherit;
-  background: var(--ink);
-  border: 1px solid var(--borderBright);
-  border-radius: 4px;
-  padding: 8px;
-  color: var(--paper);
-}
+
 .danger {
   color: var(--signal) !important;
 }
@@ -1156,9 +1078,7 @@ button:disabled {
   cursor: default;
 }
 @media (max-width: 1000px) {
-  #panel {
-    min-width: 300px;
-  }
+  
   .menu-footer .right {
     display: none;
   }
@@ -1171,16 +1091,7 @@ button:disabled {
   }
 }
 @media (max-width: 760px) {
-  #panel {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: calc(100% - 20px);
-    max-width: 620px;
-    z-index: 25;
-    box-shadow: -10px 0 30px #0006;
-  }
+  
   .workspace > main {
     padding-left: 12px;
     padding-right: 12px;
@@ -1546,9 +1457,7 @@ button:disabled {
   gap: 8px;
   padding: 14px 6px 12px;
 }
-#panel {
-  order: 1;
-}
+
 #rail button {
   font-size: 14px;
   line-height: 22px;
@@ -1587,11 +1496,6 @@ button:disabled {
 }
 
 /* Review and inspection controls extend the existing Figma panel chrome. */
-#panel {
-  position: relative;
-  width: var(--panel-width, 42%);
-  max-width: calc(100vw - 280px);
-}
 
 .compare-controls {
   padding: 8px 16px;
@@ -1611,33 +1515,10 @@ button:disabled {
   accent-color: var(--electric);
 }
 
-@media (max-width: 760px) {
-  #panel {
-    width: calc(100% - 20px);
-    max-width: none;
-  }
-  
-}
 .viewport-inputs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-}
-
-#panel.drive-pane:not(.expanded) {
-  width: var(--panel-width, 340px);
-}
-
-.panel-heading {
-  flex-wrap: nowrap;
-}
-.panel-heading .subject {
-  flex: 1;
-  min-width: 0;
-}
-.panel-heading .meta {
-  flex: 0 0 auto;
-  white-space: nowrap;
 }
 
 /* Files use the existing inspector palette and 12/20 source typography. */
@@ -1703,81 +1584,9 @@ button:disabled {
   right: 8px;
   top: 6px;
 }
-.panel-heading {
-  font-size: 13px;
-  line-height: 20px;
-  gap: 10px;
-  flex-wrap: nowrap;
-}
-.panel-heading .title {
-  color: var(--strong);
-  font-weight: 600;
-  flex: none;
-}
-.panel-heading .subject {
-  flex: 1;
-  min-width: 0;
-}
-.panel-heading .back,
-.panel-heading .link {
-  color: var(--electric);
-  font-size: 12px;
-  flex: none;
-}
-.panel-heading .close {
-  flex: none;
-  font-size: 15px;
-  color: var(--secondary);
-  margin-left: auto;
-}
 
 /* Drive's Next queue (design doc mockup). */
-.next-heading .next-away {
-  white-space: nowrap;
-  font-size: 11.5px;
-}
-.next-heading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.next-heading {
-  font-size: 11.5px;
-  padding-top: 4px;
-}
-.next-heading .next-rank {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.next-heading .next-age {
-  margin-left: auto;
-  white-space: nowrap;
-}
-.next-collapse {
-  margin-left: auto;
-  color: var(--muted);
-  padding: 0 2px;
-}
-.next-after {
-  font-size: 11.5px;
-  white-space: nowrap;
-}
-.next-item {
-  padding: 10px 16px 12px;
-  margin: 0 -16px;
-  border-left: 2px solid transparent;
-}
-.next-item.first {
-  background: var(--menuSelection);
-  border-left-color: var(--electric);
-}
-.next-top {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
+
 .next-kind {
   flex: none;
   font-size: 10.5px;
@@ -1789,24 +1598,7 @@ button:disabled {
 .next-kind.kind-fix { color: var(--signal); }
 .next-kind.kind-investigate { color: var(--thinking); }
 .next-kind.kind-tidy { color: var(--secondary); }
-.next-title {
-  color: var(--strong);
-  min-width: 0;
-}
-.next-why {
-  margin: 4px 0 0;
-  color: var(--secondary);
-}
-.next-facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 14px;
-  margin-top: 4px;
-  font-size: 11.5px;
-  color: var(--muted);
-}
-.next-facts .confidence-high { color: var(--citron); }
-.next-facts .confidence-medium { color: var(--thinking); }
+
 .next-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1825,9 +1617,7 @@ button:disabled {
   border-color: var(--composerRestoredBorder);
   color: var(--electric);
 }
-.next-error {
-  color: var(--thinking);
-}
+
 /* Drive panel: a pinned live mission, then Next and Done tabs. */
 .drive-pinned {
   margin: 0 -16px;
@@ -1857,98 +1647,19 @@ button:disabled {
   color: var(--secondary);
   white-space: pre-wrap;
 }
-.drive-pinned-title,
-.done-title {
+.drive-pinned-title {
   color: var(--strong);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.drive-tabs {
-  display: flex;
-  gap: 4px;
-  margin: 0 -8px;
-  border-bottom: 1px solid var(--rule);
-}
-.drive-tab {
-  padding: 6px 8px;
-  color: var(--muted);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-}
-.drive-tab.active {
-  color: var(--strong);
-  border-bottom-color: var(--electric);
-}
-.drive-tab .count {
-  color: var(--electric);
-}
-.drive-tab-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.next-row,
-.done-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: baseline;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--rule);
-}
-.next-row-title {
-  text-align: left;
-  color: var(--strong);
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.next-row-run {
-  border: 1px solid var(--borderBright);
-  border-radius: 4px;
-  padding: 0 8px;
-  color: var(--electric);
-}
+
 .next-actions button.quiet {
   border-color: transparent;
   color: var(--muted);
 }
-.done-item {
-  margin: 0 -16px;
-  padding: 10px 16px 12px;
-  background: var(--menuSelection);
-  border-left: 2px solid var(--electric);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.done-top {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-.done-title {
-  min-width: 0;
-}
-.done-text {
-  min-width: 0;
-  color: var(--paper);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.done-row time {
-  color: var(--muted);
-  font-size: 11.5px;
-}
-.drive-foot {
-  margin: 4px 0 0;
-  font-size: 11.5px;
-}
+
 #rail .count {
   position: absolute;
   top: 3px;
@@ -2014,6 +1725,14 @@ button:disabled {
 .proposal-row:not(:first-child):not(:hover):not(:focus-within) button {
   visibility: hidden;
 }
+/* Not now is only on the row you point at. */
+.proposal-row:not(:hover):not(:focus-within) .proposal-snooze {
+  display: none;
+}
+.proposal-row button.proposal-snooze {
+  border-color: transparent;
+  color: var(--muted);
+}
 .proposal-row button.primary {
   background: var(--menuSelection);
   border-color: var(--composerRestoredBorder);
@@ -2030,9 +1749,6 @@ button:disabled {
 .composer { transform: translateZ(0); }
 
 /* Drive's state in the panel heading: ● live, ‖ paused, × needs you. */
-.panel-heading .subject.tone-citron { color: var(--citron); }
-.panel-heading .subject.tone-signal { color: var(--signal); }
-.panel-heading .subject.tone-secondary { color: var(--secondary); }
 
 /* Breakage alerts: cards over the conversation, top right, under menus. */
 #breakage {
@@ -2335,85 +2051,7 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
   border-radius: 50%;
   background: var(--citron);
 }
-#drive-pop {
-  position: fixed;
-  z-index: 95;
-  width: 460px;
-  max-width: calc(100vw - 24px);
-  max-height: min(520px, 70vh);
-  overflow-y: auto;
-  background: var(--surface);
-  border: 1px solid var(--borderBright);
-  border-radius: 8px;
-  box-shadow: 0 12px 32px #0007;
-  padding: 10px 14px 8px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--muted);
-}
-#drive-pop .pop-head {
-  display: flex;
-  gap: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--rule);
-}
-#drive-pop .pop-head b {
-  color: var(--strong);
-}
-#drive-pop h3 {
-  font-size: 10px;
-  letter-spacing: 0.7px;
-  font-weight: 400;
-  color: var(--muted);
-  margin: 10px 0 2px;
-}
-#drive-pop .pop-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 0;
-}
-#drive-pop .pop-row > span:first-child {
-  width: 12px;
-  flex: none;
-  text-align: center;
-}
-#drive-pop .pop-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--strong);
-  font-size: 13px;
-}
-#drive-pop .pop-detail {
-  white-space: nowrap;
-  display: flex;
-  gap: 4px;
-}
-#drive-pop .link {
-  color: var(--electric);
-  font-size: 12px;
-}
-#drive-pop .pop-more {
-  padding: 2px 0 0 20px;
-}
-#drive-pop .pop-empty {
-  padding: 10px 0 4px;
-}
-#drive-pop .pop-foot {
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--rule);
-}
-#drive-pop .tone-citron { color: var(--citron); }
-#drive-pop .tone-thinking { color: var(--thinking); }
-#drive-pop .tone-signal { color: var(--signal); }
-#drive-pop .tone-secondary { color: var(--secondary); }
+
 /* Every turn stays readable: a hairline between turns, the ask's actions
    and time on hover. */
 .live-app:not(.start) .turn + .turn {

@@ -116,6 +116,9 @@ export function daemonCredential(
     : undefined;
 }
 
+/// How often the sidebar looks in on chats still working in the background.
+const BACKGROUND_POLL_MS = 4_000;
+
 /** All privileged operations stay here. The web renderer gets snapshots and a
  * fixed set of actions, never a daemon token, shell, arbitrary URL, or filesystem API. */
 export class GraphicsHost {
@@ -297,6 +300,7 @@ export class GraphicsHost {
         turns: session.turns.length,
         status: session.turns.at(-1)?.status,
         workspace: session.workspace?.root,
+        waiting: this.waitingSessions.has(session.id),
       })),
       runs: this.current?.runs() ?? [],
       cursor: this.current?.cursor ?? 0,
@@ -667,8 +671,28 @@ export class GraphicsHost {
   async refreshSessions() {
     try {
       this.sessions = await this.client.listSessions();
+      await this.checkBackground();
       this.publish();
     } catch {}
+  }
+  /// Chats in the background that wait on an approval or an answer: the
+  /// sidebar marks them amber, as it does the open one.
+  waitingSessions = new Set<string>();
+  private backgroundTimer: ReturnType<typeof setTimeout> | null = null;
+  /// While another chat of this project is still working, look in on it now
+  /// and then, so the sidebar shows when it asks for you or settles.
+  private async checkBackground() {
+    const busy = this.sessions.filter((session) => session.id !== this.current?.session.id && session.workspace?.root === this.workspace && ["running", "queued"].includes(session.turns.at(-1)?.status ?? ""));
+    const waiting = new Set<string>();
+    await Promise.all(busy.map(async (session) => {
+      try {
+        const state = await this.client.getSessionState(session.id);
+        if (state.pendingPermissions.length || state.pendingQuestions?.length) waiting.add(session.id);
+      } catch {}
+    }));
+    this.waitingSessions = waiting;
+    if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
+    this.backgroundTimer = busy.length && !this.disposed ? setTimeout(() => { this.backgroundTimer = null; void this.refreshSessions(); }, BACKGROUND_POLL_MS) : null;
   }
   private loadingFiles: Promise<void> | null = null;
   async refreshFiles() {
@@ -1576,6 +1600,7 @@ export class GraphicsHost {
     this.drive?.dispose();
     this.setup?.dispose();
     this.disposed = true;
+    if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
     this.generation++;
     this.stream?.abort();
     if (this.timer) clearTimeout(this.timer);

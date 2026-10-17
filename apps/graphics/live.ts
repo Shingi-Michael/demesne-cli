@@ -21,9 +21,6 @@ import type {
 } from "@demesne/protocol";
 
 type Snapshot = ReturnType<GraphicsHost["snapshot"]>;
-/// The only side panel left: Drive. Everything else reads inline in the
-/// conversation (diffs and output under their steps, context in the ring).
-type PaneName = "drive";
 type OverlayName =
   | "settings"
   | "models"
@@ -187,9 +184,7 @@ const verb = (tool: ToolEntry) =>
 const tools = (run: GraphicsRun) =>
   run.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
 let state: Snapshot | null = null,
-  pane: PaneName | null = null,
-  paneTurn = "",
-  paneIndex = 0;
+  paneTurn = "";
 /// What Drive is inspecting in the conversation (its diff, checks or log),
 /// and which check; the observation names that surface.
 let inspectSurface: "diff" | "review" | "log" | null = null,
@@ -242,10 +237,9 @@ const expanded = new Set<string>(),
       views: Map<number, MarkdownView>;
     }
   >();
-/// The Drive popover under the top bar's Drive word; the briefing line's
-/// unfolded parts above the composer; turns whose steps are open.
-let drivePopOpen = false,
-  driveShown = false,
+/// The briefing line's unfolded parts above the composer (on the start
+/// screen, Drive's ideas under it); turns whose steps are open.
+let driveShown = false,
   ideasShown = false;
 const stepsOpen = new Set<string>();
 /// Steps whose diff or output is unfolded in place, keyed run:tool.
@@ -255,8 +249,7 @@ let undoTurnId: string | null = null;
 const expandedCompactions = new Set<string>();
 let compactionCard: HTMLElement | null = null;
 let compactionCardSignature = "";
-let paneSignature = "",
-  overlaySignature = "",
+let overlaySignature = "",
   approvalSignature = "",
   questionSignature = "",
   heroSignature = "";
@@ -394,7 +387,7 @@ function renderSidebar() {
     const steps = pinned ? driveTaskList(pinned) : [];
     const done = steps.filter((step) => step.mark === "✓").length;
     const tail = [steps.length > 1 ? `step ${Math.min(done + 1, steps.length)} of ${steps.length}` : "", ideas ? `${ideas} idea${ideas === 1 ? "" : "s"} waiting` : ""].filter(Boolean).join(" · ");
-    const open = btn("panel", "Open ›", { name: "drive" }, "", true);
+    const open = btn("drive-open", "Open ›", {}, "", true);
     if (pinned) {
       const status = pinned.status === "blocked" ? "needs you" : pinned.status === "paused" ? "is paused" : pinned.status === "waiting" ? "is waiting" : "is working";
       drive.innerHTML = `<div class="sidebar-drive-head">${dot(live ? "working" : pinned.status === "blocked" ? "warn" : "")}<b>Drive</b><span>${status}</span><span class="spacer"></span>${open}</div><div class="sidebar-drive-title" title="${h(missionTitle(pinned))}">${h(missionTitle(pinned))}</div>${steps.length > 1 || tail ? `<div class="sidebar-drive-steps">${steps.length > 1 ? steps.map((step, index) => `<i class="${step.mark === "✓" ? "done" : index === done ? "current" : ""}"></i>`).join("") : ""}<small>${h(tail)}</small></div>` : ""}`;
@@ -452,12 +445,10 @@ function renderStatus() {
     state.workspace,
     state.session?.title,
     state.session?.autoApprove,
-    pane,
     state.session?.workspace?.gitBranch,
     state.runs.length,
     inSession(),
     driveWord(),
-    drivePopOpen,
   ]);
   if (signature === statusSignature) return;
   statusSignature = signature;
@@ -968,7 +959,7 @@ function renderHero() {
     user = document.body.dataset.user ?? "",
     branch = state.session?.workspace?.gitBranch ?? "",
     hour = new Date().getHours(),
-    signature = JSON.stringify([state.workspace, review.map((job) => job.id), away?.status, driveBusy, reviewShown, next.proposals, next.signals.length, user, branch, hour]);
+    signature = JSON.stringify([state.workspace, review.map((job) => job.id), away?.status, driveBusy, reviewShown, ideasShown, next.proposals, next.loading, next.signals.length, user, branch, hour]);
   if (signature === heroSignature) return;
   heroSignature = signature;
   const composer = el("composer-slot");
@@ -978,14 +969,14 @@ function renderHero() {
     ? `<p>${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ›`, {}, "link", true)}<span class="muted"> · ${away && away.status !== "running" ? "Drive ran them while you were away" : "each in its own worktree"}</span></p>`
     : "";
   // A greeting and the composer, nothing else: Drive's best idea is the
-  // composer's ghost text (Tab takes it); the rest of its ideas wait in the
-  // Drive panel, one quiet line under the composer.
+  // composer's ghost text (Tab takes it); the rest of its ideas unfold from
+  // one quiet line under the composer.
   const day = new Date().toLocaleDateString(undefined, { weekday: "long" }),
     when = `${day} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`,
     where = branch ? `${h(name)} on ${h(branch)}` : h(name);
   const ideas = next.proposals.length;
   const drive = ideas || driveBusy
-    ? `<p class="hero-drive">${ICON_SPARK}<b>Drive</b>${driveBusy ? " is working" : ` has ${ideas} idea${ideas === 1 ? "" : "s"}`}${ideas ? ` <span class="muted">·</span> ${btn("panel", "Open ›", { name: "drive" }, "link", true)}` : ""}${ideas > 1 && !driveBusy ? ` <span class="muted">·</span> ${btn("next-away", `Run ${ideas === 2 ? "both" : `all ${Math.min(3, ideas)}`} overnight ›`, { count: Math.min(3, ideas) }, "link", true)}` : ""}</p>`
+    ? `<p class="hero-drive">${ICON_SPARK}<b>Drive</b>${driveBusy ? " is working" : ` has ${ideas} idea${ideas === 1 ? "" : "s"}`}${ideas ? ` <span class="muted">·</span> ${btn("ideas-show", ideasShown ? "hide" : "show ›", {}, "link", true)}` : ""}${ideas > 1 && !driveBusy ? ` <span class="muted">·</span> ${btn("next-away", `Run ${ideas === 2 ? "both" : `all ${Math.min(3, ideas)}`} overnight ›`, { count: Math.min(3, ideas) }, "link", true)}` : ""}</p>${ideas && ideasShown ? `<div class="hero-ideas">${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", false, next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p></div>` : ""}`
     : "";
   el("hero").innerHTML =
     `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${waiting}</div><div id="hero-composer"></div>${drive}`;
@@ -1002,7 +993,7 @@ function proposalRows(items: Snapshot["driveNext"]["proposals"]) {
     .map((item) => {
       const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
       const why = [item.why, evidence && `Evidence: ${evidence}`].filter(Boolean).join("\n");
-      return `<div class="proposal-row" title="${h(why)}"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b>${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}</small>${btn("next-run", "Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan", { id: item.id })}</div>`;
+      return `<div class="proposal-row" title="${h(why)}"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b>${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}</small>${btn("next-run", "Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id }, "quiet proposal-snooze")}</div>`;
     })
     .join("")}</div>`;
 }
@@ -1314,37 +1305,11 @@ function renderQuestion() {
 function selectedRun() {
   return state?.runs.find((run) => run.id === paneTurn) ?? state?.runs.at(-1);
 }
-/// Every view's header: its title, one line of subject, and ×. A drill-down
-/// (Checks, Steps, Image, Context) leads with a link back to its place.
-function panelHeader(title: string, subject = "", back?: { name: PaneName; label: string }, subjectTone = "") {
-  return `<div class="panel-heading">${back ? btn("panel", `‹ ${back.label}`, { name: back.name }, "back", true) : ""}<strong class="title">${h(title)}</strong><span class="subject${subjectTone ? ` tone-${subjectTone}` : ""}">${h(subject)}</span>${btn("close-panel", "×", {}, "close", true)}</div>`;
-}
-let panelWatchKey = "";
-function watchPanel() {
-  const key = `${state?.session?.id}:${pane}`;
-  if (key === panelWatchKey) return;
-  panelWatchKey = key;
-  void api("panel-watch", { panel: pane, command: "none" }).catch(() => {});
-}
-async function openPanel(name: PaneName) {
-  pane = name;
-  paneIndex = 0;
-  overlay = null;
-  paneSignature = "";
-  renderPanels();
-  watchPanel();
-  el("panel").tabIndex = 0;
-  el("panel").focus({ preventScroll: true });
-  reportObservation();
-}
-/// The Next queue: Drive's ranked proposals, each with its evidence and the
-/// four ways to answer it.
-/// The Drive panel: a live (or paused, or blocked) mission pinned on top,
-/// then two tabs. Next is the ranked queue as one-line rows, one expanded at
-/// a time; Done is the finished mission and what Drive recorded as outcomes
-/// and blockers. Missions start from /drive in the composer.
-let driveTab: "next" | "done" = "next";
-let nextOpen: string | null = null;
+/// Stops the host polling command output that an unfolded check started.
+const unwatchOutput = () => void api("panel-watch", { panel: null }).catch(() => {});
+/// Drive has no panel. Its mission is a turn in the conversation it started
+/// from (or unfolds on the briefing line), and its ideas unfold under the
+/// composer, each a row with Run, Plan and Not now.
 const DRIVE_PINNED = ["running", "waiting", "paused", "blocked"];
 const missionTitle = (drive: NonNullable<Snapshot["drive"]>) => drive.mission.split("\n")[0]!.replace(/^--(bounded|continuous)\s+/, "");
 /// A mission still in play: running, waiting on its coder, paused or
@@ -1388,50 +1353,6 @@ function driveWord() {
   const run = worktreeRun(), pinned = pinnedMission();
   return { needs: needsYou().length, live: Boolean(run.fix || run.away || (pinned && pinned.status !== "paused" && pinned.status !== "blocked")) };
 }
-/// The Drive popover: what needs you, then what Drive finished, then how its
-/// picks have turned out here. The full history is in the Drive panel.
-let drivePopSignature = "";
-function renderDrivePop() {
-  const node = el("drive-pop");
-  if (!state || !drivePopOpen || !inSession()) {
-    drivePopOpen = false;
-    node.hidden = true;
-    drivePopSignature = "";
-    return;
-  }
-  const pinned = pinnedMission(), run = worktreeRun(), next = state.driveNext;
-  const needs = needsYou();
-  const finished = state.drive && !pinned && state.drive.status === "completed" ? state.drive : null;
-  const finishedTitle = finished ? missionTitle(finished).toLowerCase() : "";
-  const outcomes = [...state.driveMemory].reverse().filter((entry) => entry.source === "drive" && entry.kind === "outcome" && !(finishedTitle && entry.text.toLowerCase().startsWith(finishedTitle)));
-  const done = [
-    ...(finished ? [{ title: missionTitle(finished), detail: "mission" }] : []),
-    ...outcomes.map((entry) => ({ title: entry.text, detail: age(entry.at) })),
-  ];
-  const status = pinned?.status === "blocked" ? ["needs you", "thinking"] : pinned?.status === "paused" ? ["paused", "secondary"]
-    : pinned || run.fix || run.away ? ["working", "citron"] : ["idle", ""];
-  const calibration = next.calibration;
-  const signature = JSON.stringify([needs, done.slice(0, 4), status, calibration, next.generatedAt && age(next.generatedAt)]);
-  if (signature !== drivePopSignature) {
-    drivePopSignature = signature;
-    const row = (item: { mark: string; tone: string; title: string; detail: string; action?: string }) =>
-      `<div class="pop-row"><span class="tone-${item.tone}">${h(item.mark)}</span><span class="pop-title" title="${h(item.title)}">${h(item.title)}</span><span class="pop-detail">${h(item.detail)}${item.detail && item.action ? " · " : ""}${item.action ?? ""}</span></div>`;
-    node.innerHTML =
-      `<div class="pop-head"><b>Drive</b><span class="${status[1] ? `tone-${status[1]}` : ""}">${status[0]}</span>${next.generatedAt ? `<span>· looked ${age(next.generatedAt)}</span>` : ""}</div>` +
-      (needs.length ? `<h3>NEEDS YOU</h3>${needs.map(row).join("")}` : "") +
-      (done.length ? `<h3>DONE</h3>${done.slice(0, 3).map((item) => row({ mark: "✓", tone: "citron", ...item })).join("")}${done.length > 3 ? `<div class="pop-more">${btn("drive-log", `${done.length - 3} more ›`, {}, "link")}</div>` : ""}` : "") +
-      (!needs.length && !done.length ? '<p class="pop-empty">Nothing needs you. What Drive finishes shows here.</p>' : "") +
-      `<div class="pop-foot"><span>${calibration?.total ? `Picks landed ${calibration.landed} of ${calibration.total}${calibration.timeRatio === 1 ? "" : ` · runs take ~${calibration.timeRatio}× its estimates`}` : ""}</span>${btn("drive-log", "all runs ›", {}, "link")}</div>`;
-  }
-  node.hidden = false;
-  // Under the Drive word, kept inside the window.
-  const anchor = document.getElementById("drive-word")?.getBoundingClientRect();
-  if (anchor) {
-    const width = node.offsetWidth || 460;
-    node.style.top = `${Math.round(anchor.bottom + 6)}px`;
-    node.style.left = `${Math.round(Math.max(12, Math.min(anchor.left + anchor.width / 2 - width / 2, innerWidth - width - 12)))}px`;
-  }
-}
 /// One line above the composer in a session: branches waiting for review,
 /// and what Drive is doing or would do next. Each part unfolds in place.
 let briefingSignature = "";
@@ -1472,13 +1393,12 @@ function renderBriefing() {
     const count = next.proposals.length;
     parts.push(btn("ideas-show", `Drive has ${count} idea${count === 1 ? "" : "s"} ${ideasShown ? "⌄" : "›"}`, {}, "link"));
     if (ideasShown) {
-      const top = next.proposals.slice(0, 5), words = ["", "it", "both", "all three", "all four", "all five"];
+      const top = next.proposals, words = ["", "it", "both", "all three"];
       const away = Math.min(3, top.length);
       unfolded = `<div class="briefing-ideas">${proposalRows(top)}<p class="proposals-footer">${[
         btn("next-away", `Run ${words[away]} overnight ›`, { count: away }, "link", true),
         btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", false, next.loading),
         next.generatedAt ? `<span class="muted">looked ${age(next.generatedAt)}</span>` : "",
-        count > 5 ? btn("panel", `${count - 5} more in Drive`, { name: "drive" }, "", true) : "",
       ].filter(Boolean).join('<span class="muted"> · </span>')}</p></div>`;
     }
   }
@@ -1498,39 +1418,8 @@ function scoreLine(score: ModelScore) {
     score.driveRuns ? `Drive runs kept ${score.driveLanded}/${score.driveRuns}` : "",
   ].filter(Boolean).join(" · ");
 }
-/// The Next heading: how the queue is ranked and, once any proposal has
-/// run, how Drive's picks have actually turned out here.
-function calibrationLine(calibration: import("@demesne/protocol").DriveCalibration | null | undefined) {
-  if (!calibration?.total) return "ranked by value · confidence · cost";
-  const levels = (["high", "medium", "low"] as const).filter((level) => calibration.levels[level].total)
-    .map((level) => `${level} ${calibration.levels[level].landed}/${calibration.levels[level].total}`).join(", ");
-  const time = calibration.timeRatio === 1 ? "" : ` · runs take ~${calibration.timeRatio}× its estimates`;
-  return `<span title="Ranked by value · confidence · cost, with confidence and time taken from how Drive's proposals turned out here (landed by confidence: ${levels})">Drive's picks landed ${calibration.landed} of ${calibration.total} here${time}</span>`;
-}
-function nextQueueHTML(busy = false) {
-  const next = state!.driveNext;
-  const signal = new Map(next.signals.map((item) => [item.id, item]));
-  // null: the top proposal opens by itself; "": all collapsed.
-  const open = nextOpen === "" ? "" : next.proposals.some((item) => item.id === nextOpen) ? nextOpen : next.proposals[0]?.id;
-  const minutes = (value: number) => (value < 60 ? `${value} min` : `${Math.round(value / 6) / 10} h`);
-  const rows = next.proposals
-    .map((item) => {
-      const tag = `<span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span>`;
-      if (item.id !== open)
-        return `<div class="next-row">${tag}${btn("next-open", h(item.title), { id: item.id }, "next-row-title")}${busy ? '<span class="muted next-after">after this</span>' : btn("next-run", "▶", { id: item.id }, "next-row-run", true)}</div>`;
-      return `<div class="next-item first"><div class="next-top">${tag}<span class="next-title">${h(item.title)}</span>${btn("next-open", "▾", { id: "" }, "next-collapse")}</div><p class="next-why">${h(item.why)}</p><div class="next-facts">${item.evidence.map((id) => `<span title="${h(signal.get(id)?.detail ?? "")}">${item.urgent && signal.get(id)?.urgent ? "! " : ""}${h(signal.get(id)?.title ?? id)}</span>`).join("")}<span${item.expectedMinutes ? ` title="Drive estimated ${minutes(item.minutes)}; runs here take ${next.calibration?.timeRatio ?? 1}× its estimates"` : ""}>~${minutes(item.expectedMinutes ?? item.minutes)} · ${item.coders} coder${item.coders === 1 ? "" : "s"}</span><span class="confidence-${item.confidence}">confidence ${item.confidence}</span></div><div class="next-actions">${busy ? '<span class="muted next-after">Runs after this mission</span>' : btn("next-run", "▶ Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan first", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id }, "quiet")}${btn("next-never", "Never", { id: item.id }, "quiet")}</div></div>`;
-    })
-    .join("");
-  // Away mode: the top few run one after another, each in its own worktree.
-  const awayCount = Math.min(3, next.proposals.length);
-  const awayLink = awayCount && !busy && state!.breakage.away?.status !== "running"
-    ? btn("next-away", `Run top ${awayCount} away`, { count: awayCount }, "link next-away", true).replace("<button ", `<button title="Run the top ${awayCount === 1 ? "proposal" : `${awayCount} proposals`} one after another while you're away, each in its own worktree. They wait for your review." `) : "";
-  return `<div class="next-heading"><span class="muted next-rank">${calibrationLine(next.calibration)}</span><span class="muted next-age">${next.loading ? "Reading…" : next.generatedAt ? age(next.generatedAt) : ""}</span>${awayLink}${btn("next-refresh", "↻", {}, "link", false, next.loading)}</div>${
-    next.error ? `<p class="next-error">${h(next.error)}</p>` : ""
-  }${rows || (next.loading ? "" : '<p class="muted next-empty">Nothing worth proposing right now. Drive looks again after your next turn, or press ↻.</p>')}`;
-}
-/// The mission's status line, steps, tasks, stats and Details, shared by the
-/// pinned card and the finished mission at the top of Done.
+/// The mission's status line, steps, tasks, stats and Details, for the
+/// pinned card.
 function missionParts(drive: NonNullable<Snapshot["drive"]>) {
   const now = Date.now(), trace = drive.traces?.at(-1);
   const deciding = Boolean(trace && ["queued", "thinking", "drafting", "acting"].includes(trace.status));
@@ -1672,32 +1561,6 @@ function renderDriveTurn() {
   node.innerHTML = `${ask}<div class="response${live ? " running" : ""}"><ol class="drive-trail">${rows}</ol><div class="drive-turn-foot"><span class="drive-turn-meta">${meta}</span><span class="drive-turn-actions">${actions}</span></div>${open ? `<div class="drive-details">${parts.detailsBody}</div>` : ""}</div>`;
   if (bottom) stage.scrollTop = stage.scrollHeight;
 }
-function driveBody() {
-  const drive = state!.drive;
-  const pinned = pinnedMission();
-  const finished = drive && !pinned ? drive : null;
-  const card = pinned ? pinnedCard(pinned) : "";
-  // The finished mission is shown in full at the top of Done; its own
-  // outcome line in memory would only repeat it.
-  const finishedTitle = finished ? missionParts(finished).title.toLowerCase() : "";
-  const memory = state!.driveMemory.filter((entry) => entry.source === "drive" && (entry.kind === "outcome" || entry.kind === "blocker")
-    && !(finishedTitle && entry.text.toLowerCase().startsWith(finishedTitle))).slice().reverse();
-  const doneCount = memory.length + (finished ? 1 : 0);
-  const tab = (name: "next" | "done", label: string, count: number) => `<button type="button" role="tab" aria-selected="${driveTab === name}" class="drive-tab${driveTab === name ? " active" : ""}" data-action="drive-tab" data-args="${h(JSON.stringify({ tab: name }))}">${label}${count ? ` <span class="count">${count}</span>` : ""}</button>`;
-  const tabs = `<div class="drive-tabs" role="tablist">${tab("next", "Next", state!.driveNext.proposals.length)}${tab("done", "Done", doneCount)}</div>`;
-  let body: string;
-  if (driveTab === "next") body = nextQueueHTML(Boolean(pinned));
-  else {
-    let top = "";
-    if (finished) {
-      const parts = missionParts(finished);
-      top = `<div class="done-item first"><div class="done-top"><span class="tone-${parts.tone}">${parts.mark}</span><span class="done-title">${h(parts.title)}</span></div><p class="next-why">${h(finished.answer ?? parts.summary ?? parts.label)}</p>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${finished.homeSessionId && finished.homeSessionId !== state!.session?.id ? btn("select-session", "Open session", { id: finished.homeSessionId }, "primary") : ""}</div>${parts.details}</div>`;
-    }
-    const rows = memory.slice(0, 30).map((entry) => `<div class="done-row"><span class="${entry.kind === "blocker" ? "tone-thinking" : "tone-citron"}">${entry.kind === "blocker" ? "◌" : "✓"}</span><span class="done-text">${entry.kind === "blocker" ? '<b class="tone-thinking">Needs you:</b> ' : ""}${h(entry.text)}</span><time>${h(age(entry.at))}</time></div>`).join("");
-    body = top || rows ? `<div class="next-heading"><span class="muted">newest first · outcomes also go to Drive memory</span></div>${top}${rows}` : '<p class="muted next-empty">Finished missions and what Drive learned from them appear here.</p>';
-  }
-  return `<div class="drive-content">${card}${tabs}<div class="drive-tab-body">${body}</div><p class="drive-foot muted">${pinned ? "Steer Drive by typing in the composer" : "Start your own mission: <code>/drive</code> in the composer"}</p></div>`;
-}
 function verificationChecks(turnId = "") {
   if (!state) return [];
   const records = state.processes.filter(
@@ -1764,76 +1627,6 @@ function verificationChecks(turnId = "") {
       });
     }
   return checks;
-}
-
-let pointerHeld = false,
-  pendingPanelRender = false;
-function releasePanelPointer() {
-  pointerHeld = false;
-  if (pendingPanelRender) {
-    pendingPanelRender = false;
-    setTimeout(() => renderPanels(), 0);
-  }
-}
-document.addEventListener(
-  "pointerdown",
-  () => {
-    pointerHeld = true;
-  },
-  true,
-);
-document.addEventListener("pointerup", releasePanelPointer, true);
-document.addEventListener("pointercancel", releasePanelPointer, true);
-document.addEventListener(
-  "pointermove",
-  (event) => {
-    if (pointerHeld && event.buttons === 0) releasePanelPointer();
-  },
-  true,
-);
-function renderPanels() {
-  if (!state) return;
-  if (pointerHeld) {
-    pendingPanelRender = true;
-    return;
-  }
-  renderStatus();
-  el("panel").hidden = !pane;
-  if (!pane) {
-    watchPanel();
-    return;
-  }
-  const signature = JSON.stringify([
-    pane,
-    paneIndex,
-    state.drive,
-    state.driveNext,
-    state.driveMemory,
-    driveTab,
-    nextOpen,
-    state.breakage,
-    state.session?.id,
-  ]);
-  if (signature === paneSignature) return;
-  paneSignature = signature;
-  const scroll =
-    el("panel").querySelector<HTMLElement>("#panel-scroll")?.scrollTop ?? 0;
-  el("panel").className = "drive-pane";
-  const status = state.drive?.status;
-  // Drive's state, as in the design: idle when nothing runs, ● live while
-  // it works; the proposal count lives on the Next tab.
-  const [subject, tone] = status === "running" || status === "waiting" ? ["● live", "citron"]
-    : status === "paused" ? ["‖ paused", "secondary"]
-    : status === "blocked" ? ["× needs you", "signal"]
-    : ["idle", ""];
-  el("panel").style.setProperty("--panel-width", "340px");
-  el("panel").innerHTML =
-    panelHeader("Drive", subject, undefined, tone) +
-    `<div class="panel-body" id="panel-scroll">${driveBody()}</div>`;
-  const container = el("panel").querySelector<HTMLElement>("#panel-scroll");
-  if (container) container.scrollTop = scroll;
-  watchPanel();
-  reportObservation();
 }
 async function openOverlay(name: OverlayName, query = "") {
   overlay = name;
@@ -2515,11 +2308,12 @@ async function submitText(value = editor.value) {
       return;
     }
     if (id === "drive") {
-      // A new mission unfolds on the briefing line; /drive alone opens the panel.
+      // A new mission unfolds on the briefing line; /drive alone shows what
+      // Drive is doing, or its ideas.
       if (argument) {
         driveShown = true;
         await api("drive", { text: argument });
-      } else await openPanel("drive");
+      } else await dispatch("drive-open", {});
       clear();
       return;
     }
@@ -2599,15 +2393,9 @@ async function dispatch(
     else{detailsClosed.delete(args.id);detailsOpen.add(args.id);}
     content.hidden=open;toggle.setAttribute("aria-expanded",String(!open));reportObservation();return;
   }
-  if (drivePopOpen && target?.closest("#drive-pop")) {
-    drivePopOpen = false;
-    renderStatus();
-    renderDrivePop();
-  }
   if (action === "question-control") return questionAction(args.action);
   if (action === "auto-approve" && driveNavigating)
     throw new Error("Only you can change session approvals.");
-  if (action === "panel") return openPanel(args.name);
   if (action === "new-session") return api("new-session", {});
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never"].includes(action)) return api(action, args);
   if (action === "next-away") return act(() => api(action, args));
@@ -2624,32 +2412,18 @@ async function dispatch(
     editor.focus({ preventScroll: true });
     return;
   }
-  if (action === "close-panel") {
-    pane = null;
-    inspectSurface = null;
-    inspectItem = "";
-    watchPanel();
-    renderPanels();
-    editor.focus({ preventScroll: true });
-    reportObservation();
-    return;
-  }
   if (action === "follow") {
     follow = true;
     readingHeld = false;
     paneTurn = "";
     inspectSurface = null;
     inspectItem = "";
+    unwatchOutput();
     overlay = null;
     renderOverlay();
     renderConversation();
     el("stage").scrollTop = el("stage").scrollHeight;
     editor.focus({ preventScroll: true });
-    return;
-  }
-  if (action === "drive-tab") {
-    driveTab = args.tab === "done" ? "done" : "next";
-    renderPanels();
     return;
   }
   if (action === "review-open") {
@@ -2669,19 +2443,35 @@ async function dispatch(
   if (action === "drive-show" || action === "ideas-show") {
     if (action === "drive-show") driveShown = !driveShown;
     else ideasShown = !ideasShown;
-    renderBriefing();
+    if (inSession()) renderBriefing();
+    else {
+      heroSignature = "";
+      renderHero();
+    }
     renderBreakage();
     return;
   }
-  if (action === "drive-pop") {
-    drivePopOpen = !drivePopOpen;
-    renderStatus();
-    renderDrivePop();
+  if (action === "drive-open") {
+    // Drive in place: its mission's conversation, the mission unfolded on
+    // the briefing line, or its ideas under the composer. A toggle (Alt+J)
+    // folds it again.
+    const pinned = pinnedMission(), run = worktreeRun(), home = pinned?.homeSessionId;
+    if (home && home !== state!.session?.id) return dispatch("select-session", { id: home });
+    if (pinned && driveTurnMission()) {
+      follow = false;
+      document.getElementById("drive-turn")?.scrollIntoView({ block: "start" });
+      return;
+    }
+    const drive = inSession() && Boolean(pinned || run.fix || run.away);
+    if (drive) driveShown = args.toggle ? !driveShown : true;
+    else ideasShown = args.toggle ? !ideasShown : true;
+    if (inSession()) renderBriefing();
+    else {
+      heroSignature = "";
+      renderHero();
+    }
+    renderBreakage();
     return;
-  }
-  if (action === "drive-log") {
-    driveTab = "done";
-    return openPanel("drive");
   }
   if (action === "step") {
     const key = `${args.runId}:${args.id}`;
@@ -2732,11 +2522,6 @@ async function dispatch(
     awayOpen = awayOpen === args.id ? null : args.id;
     breakageSignature = "";
     renderBreakage();
-    return;
-  }
-  if (action === "next-open") {
-    nextOpen = args.id;
-    renderPanels();
     return;
   }
   if (action === "expand-turn") {
@@ -2864,9 +2649,6 @@ async function dispatch(
   ) {
     overlay = null;
     renderOverlay();
-    pane = null;
-    watchPanel();
-    renderPanels();
     return api(action, args);
   }
   if (action === "clear-queue") {
@@ -2933,17 +2715,17 @@ function renderState(next: Snapshot) {
     lastSession = next.session?.id ?? "";
     follow = true;
     readingHeld = false;
-    pane = null;
     overlay = null;
     inspectSurface = null;
     inspectItem = "";
-    watchPanel();
+    driveShown = ideasShown = false;
+    unwatchOutput();
     expanded.clear();
     expandedCompactions.clear();
     compactionCard?.remove(); compactionCard = null; compactionCardSignature = "";
     runNodes.forEach((item) => item.node.remove());
     runNodes.clear();
-    paneSignature = heroSignature = overlaySignature = sidebarSignature = "";
+    heroSignature = overlaySignature = sidebarSignature = "";
   }
   const question=next.questions[0], slot=question ? `${question.id}:${question.answers?.length ?? 0}` : "chat";
   if (slot !== composerSlot) {
@@ -2975,7 +2757,7 @@ function renderState(next: Snapshot) {
     renderedPalette = next.palette;
   }
   // Drive working this session is a session, even before its first turn:
-  // the start screen would sit beside the Drive panel.
+  // its mission is the conversation's turn.
   const start = !inSession(next);
   el("app").classList.toggle("start", start);
   el("hero").hidden = !start;
@@ -2990,14 +2772,11 @@ function renderState(next: Snapshot) {
   renderQuestion();
   renderBriefing();
   renderBreakage();
-  renderPanels();
-  renderDrivePop();
   renderOverlay();
   renderCompletion();
   renderSetup();
   if (
     !editor.disabled &&
-    !pane &&
     !overlay &&
     !next.setup &&
     (editorFocused || document.activeElement === document.body)
@@ -3023,11 +2802,6 @@ function renderState(next: Snapshot) {
 }
 new ResizeObserver(() => renderComposer()).observe(editor);
 document.addEventListener("click", (event) => {
-  if (drivePopOpen && !(event.target as Element).closest("#drive-pop, #drive-word")) {
-    drivePopOpen = false;
-    renderStatus();
-    renderDrivePop();
-  }
   const summary = (event.target as Element).closest("summary");
   const detail = summary?.parentElement as HTMLDetailsElement | undefined;
   if (detail?.dataset.detail) {
@@ -3159,12 +2933,6 @@ document.addEventListener("keydown", (event) => {
   }
   if (key === "escape") {
     run(() => {
-      if (drivePopOpen) {
-        drivePopOpen = false;
-        renderStatus();
-        renderDrivePop();
-        return;
-      }
       if (overlay) {
         overlay = null;
         renderOverlay();
@@ -3175,9 +2943,6 @@ document.addEventListener("keydown", (event) => {
         completionDismissed = true;
         renderCompletion();
         return;
-      }
-      if (pane) {
-        return dispatch("close-panel", {});
       }
       if (state!.approvals.length && !pendingQuestion())
         return api("permission", { id: state!.approvals[0]!.id, decision: "deny" });
@@ -3202,7 +2967,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.altKey && key === "j") {
-    run(() => (pane === "drive" ? dispatch("close-panel", {}) : openPanel("drive")));
+    run(() => dispatch("drive-open", { toggle: true }));
     return;
   }
   if (state.approvals.length && !field && !ctrl && !event.altKey) {
@@ -3304,45 +3069,6 @@ document.addEventListener("keydown", (event) => {
       return;
     }
   }
-  if (pane && !field) {
-    if (
-      pane === "drive" &&
-      state.drive?.status !== "completed" &&
-      !state.drive?.protection?.trip &&
-      (key === "p" || key === "s")
-    ) {
-      run(() =>
-        api("drive-control", {
-          control:
-            key === "s"
-              ? "stop"
-              : ["running", "waiting"].includes(state!.drive?.status ?? "")
-                ? "pause"
-                : "resume",
-        }),
-      );
-      return;
-    }
-    const rows = [
-      ...el("panel").querySelectorAll<HTMLButtonElement>(".panel-row"),
-    ];
-    if ((key === "arrowdown" || key === "arrowup") && rows.length) {
-      run(() => {
-        paneIndex =
-          (paneIndex + (key === "arrowdown" ? 1 : -1) + rows.length) %
-          rows.length;
-        rows.forEach((row, i) =>
-          row.classList.toggle("selected", i === paneIndex),
-        );
-        rows[paneIndex]?.scrollIntoView({ block: "nearest" });
-      });
-      return;
-    }
-    if (key === "enter" && rows[paneIndex]) {
-      run(() => rows[paneIndex]!.click());
-      return;
-    }
-  }
 });
 window.demesneInspect = () => ({
   // What the host last published: the session, its turn, queue and draft.
@@ -3427,7 +3153,6 @@ window.demesneInspect = () => ({
   approvalDetailsOpen: !(el("approval").querySelector<HTMLElement>(".approval-fold")?.hidden ?? true),
   questions: state?.questions.length,
   queue: state?.queue,
-  pane,
   overlay,
   setup: state?.setup,
   drive: state?.drive?.status,
@@ -3732,8 +3457,6 @@ function renderSetup() {
 
 const driveControls = new Map<string, HTMLElement>();
 const driveAllowed = new Set([
-  "panel",
-  "close-panel",
   "expand-turn",
   "jump-turn",
   "toggle-steps",
@@ -3795,7 +3518,7 @@ function observeUI(): DriveObservation {
       !parent ||
       !node.textContent?.trim() ||
       parent.closest(
-        "#status,header,.drive-pane,.drive-live,#drive-turn,#drive-pop,#overlay[hidden],#completion[hidden],time,script,style,textarea",
+        "#status,header,.drive-live,#drive-turn,#overlay[hidden],#completion[hidden],time,script,style,textarea",
       )
     )
       continue;
@@ -3874,7 +3597,7 @@ function observeUI(): DriveObservation {
   )) {
     if (
       !driveAllowed.has(element.dataset.action!) ||
-      element.closest(".drive-pane, .drive-live, #drive-turn, #drive-pop")
+      element.closest(".drive-live, #drive-turn")
     )
       continue;
     const box = geometry(element);
@@ -3896,7 +3619,7 @@ function observeUI(): DriveObservation {
   }
   const run = selectedRun(),
     checks = run ? verificationChecks(run.id) : [],
-    surface = inspectSurface ?? pane ?? "response";
+    surface = inspectSurface ?? "response";
   // Diffs, checks and logs unfold inside the conversation, so an inspection
   // reads the stage under that surface's name.
   const panes: NonNullable<DriveObservation["panes"]> = [],
@@ -4038,12 +3761,10 @@ window.demesne.commands(async (command) => {
       const current = selectedRun();
       if (!current) throw new Error("No turn to inspect");
       if (action.target === "answer") {
-        if (pane !== "drive") pane = null;
         revealCompactedTurn(current.id);
         expanded.add(current.id);
         follow = false;
         readingHeld = false;
-        renderPanels();
         renderConversation();
         const response = document
           .getElementById(`turn-${current.id}`)
@@ -4060,8 +3781,6 @@ window.demesne.commands(async (command) => {
         // observation then reads the stage as that surface.
         inspectSurface = action.target === "checks" ? "review" : action.target;
         inspectItem = "";
-        if (pane !== "drive") pane = null;
-        renderPanels();
         let only: ToolEntry | undefined;
         if (action.target === "checks") {
           const checks = verificationChecks(current.id),
@@ -4130,7 +3849,10 @@ window.demesne.commands(async (command) => {
           before === scroll.scrollTop
             ? "Scroll did not move; boundary reached."
             : "Scrolled the visible view.";
-      } else if (action.key === "escape") await dispatch("close-panel", {});
+      } else if (action.key === "escape") {
+        inspectSurface = null;
+        inspectItem = "";
+      }
       else if (action.key === "ctrl+g") await dispatch("follow", {});
       else if (["ctrl+b", "alt+d", "alt+v", "alt+h", "alt+enter"].includes(action.key))
         throw new Error(

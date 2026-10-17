@@ -18,8 +18,7 @@ The interface uses your existing config, daemon, models, workspace tools, sessio
 | Ctrl+G | Follow the current turn |
 | Alt+H | History |
 | `/` / `@` | Commands / workspace file completion |
-| ↑↓, Enter, Esc | Select, open, close menus and panels |
-| Alt+Enter | Expand or restore a panel |
+| ↑↓, Enter, Esc | Select, open, close menus |
 | y / n | Allow once / deny a pending approval |
 
 Drive uses direct daemon operations and recorded evidence by default. `DEMESNE_DRIVE_CONTROL=ui` selects its compatibility DOM-control path. Drive cannot answer permissions or questions; user intervention pauses it. See [Agent Drive](../../docs/agent-drive.md).
@@ -30,16 +29,16 @@ Drive uses direct daemon operations and recorded evidence by default. `DEMESNE_D
 
 `state-wire.ts` sends changed fields, changed turns, and appended text. The browser retains unchanged history locally. Revision and text-offset checks reject incomplete updates, buffer updates that overtake a bootstrap response, and request an authoritative snapshot before continuing. `markdown.ts` re-lexes the complete reply for Markdown correctness but only sanitizes, highlights, and replaces changed blocks; unchanged blocks retain their DOM nodes. Folded turns release those nodes, and static Markdown caching has a 2 MiB byte budget. The compatibility Drive path observes the page only on demand or at a bounded active cadence; the default direct path reads recorded daemon state.
 
-## Side panels
+## No side panels
 
-The desktop has one side panel, Drive. A turn's edits, commands and checks unfold in place under their steps in the conversation, and the top bar's **⋯** is the conversation's menu. The host still answers `files`, `changes`, `processes` and `rerun-checks` for other clients and tests; the desktop renderer no longer draws Files, Changes, Verification, Log, Context, History or Preview views.
+The desktop has no side panels. Drive lives in the conversation: a mission is a turn, and its ideas unfold above or under the composer. A turn's edits, commands and checks unfold in place under their steps in the conversation, and the top bar's **⋯** is the conversation's menu. The host still answers `files`, `changes`, `processes` and `rerun-checks` for other clients and tests; the desktop renderer no longer draws Files, Changes, Verification, Log, Context, History or Preview views.
 
 ## Drive completion
 
 `/drive --bounded <mission>` finishes after verification. Plain `/drive <mission>`
 is continuous by default; `--continuous` makes that explicit. The mission form
-also exposes **Keep choosing improvements**, and NEXT’s **Run** starts a bounded mission. The panel
-shows stable task IDs, criteria, and retained completion evidence. Resume does not
+also exposes **Keep choosing improvements**, and an idea's **Run** starts a bounded mission. The mission's details
+show stable task IDs, criteria, and retained completion evidence. Resume does not
 restart a completed task; `/drive reopen <task-id> <reason>` is an explicit request
 to revisit it. Automatic reopen requires relevant changed evidence. See
 [Agent Drive](../../docs/agent-drive.md) for the recorded-facts and loop rules.

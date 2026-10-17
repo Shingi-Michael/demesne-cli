@@ -14,6 +14,8 @@ const output = resolve("test-results/desktop");
 mkdirSync(output, { recursive: true });
 const prompt = "Desktop smoke: update hello.ts and run its check";
 const followUp = "Desktop smoke: continue while the window is closed";
+const aside = "Desktop smoke: a second conversation";
+const asideDone = "A second conversation is here.";
 const completed = "Verified the desktop change.";
 const afterClose = "Daemon work completed after the window closed.";
 let round = 0, release: (() => void) | undefined;
@@ -38,6 +40,11 @@ const f = await fixture({
       await gate;
       if (signal.aborted) throw signal.reason;
       yield { type: "text_delta", delta: afterClose };
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
+    if (user === aside) {
+      yield { type: "text_delta", delta: asideDone };
       yield { type: "finish", reason: "stop" };
       return;
     }
@@ -183,6 +190,12 @@ try {
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.getByRole("heading", { name: /^What are we building/ }).waitFor();
   await until(() => page.locator("#workspace-title").innerText().then(text => text === "New chat"), "the top bar names the new chat");
+  // The empty chat is the composer, not a row: New chat above already names
+  // it, so Chats only lists conversations that have a turn.
+  assert.equal(await page.locator("#sidebar-sessions .sidebar-session", { hasText: "New chat" }).count(), 0, "An empty chat is not listed under Chats");
+  await type(aside);
+  await textIncludes(asideDone);
+  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === 2), "the second conversation joins the list once it has a turn");
   await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
   // Each row deletes itself from the sidebar, without a menu or a dialog;

@@ -77,8 +77,6 @@ page.on("pageerror", (error: Error) => { pageErrors.push(error.message); console
 await page.waitForSelector("#app:not([hidden])", { timeout: 30_000 });
 await page.waitForTimeout(3000);
 const shot = async (name: string) => { await page.screenshot({ path: join(output, `${name}.png`) }); console.log("shot", name); };
-// Panels open from the conversation and the top bar's ⋯, or by their keys.
-const panel = async (name: string) => { if (name === "history") await page.locator(".header-more").click(); else await page.keyboard.press(name === "changes" ? "Alt+d" : "Alt+o"); await page.waitForTimeout(1500); };
 const toggle = async (selector: string, name: string) => {
   if (!(await page.locator(selector).count())) return;
   await page.locator(selector).first().click(); await page.waitForTimeout(800);
@@ -137,10 +135,15 @@ if (readme) {
   await shot("02-slash");
   await page.fill("textarea", ""); await page.keyboard.press("Escape"); await page.waitForTimeout(300);
 }
-for (const name of readme ? ["changes"] : ["changes", "files", "history"]) {
-  await panel(name);
-  await shot(named(`03-panel-${name}`, name === "changes" ? "review" : name));
-  if (name === "changes" && !readme) await toggle(".review-scope-button", "03-panel-scope");
+// The turn's steps open and the edit's row unfolds its diff in place; the
+// top bar's ⋯ is the conversation's menu.
+await page.locator('.turn-receipt button[data-action="toggle-steps"]').first().click(); await page.waitForTimeout(500);
+await page.locator('.steps button[data-action="step"]').first().click(); await page.waitForTimeout(800);
+await shot(named("03-inline-diff", "review"));
+if (!readme) {
+  await page.locator(".header-more").click(); await page.waitForTimeout(600);
+  await shot("03-menu");
+  await page.keyboard.press("Escape"); await page.waitForTimeout(300);
 }
 if (!readme) {
   // A workflow running as a Drive mission: the conversation's newest turn.

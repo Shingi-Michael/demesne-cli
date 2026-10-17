@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Pipeline implementation](artifact-preview-implementation.md) · [Review panels](../apps/graphics/README.md#review-panel-upgrades)
 
-**Implemented.** This file retains its original name for existing links. It describes the shipped image feature, not a pending delivery plan.
+**Implemented in the daemon and host.** The desktop app no longer has an image panel (its side panels were removed in favour of the conversation column), so these controls apply to other clients. This file retains its original name for existing links. It describes the shipped image feature, not a pending delivery plan.
 
 ## Supported images and producers
 

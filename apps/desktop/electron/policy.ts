@@ -24,6 +24,8 @@ export function openTarget(value: unknown): "url" | "file" {
   return "url";
 }
 export const ZOOM_LEVELS = [0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+/// Bumped when the app's own scale changes, so an older saved zoom no longer applies.
+export const ZOOM_VERSION = 2;
 export function nextZoom(current: number, step: number) {
   return step === 0 ? 1 : step > 0 ? ZOOM_LEVELS.find(level => level > current + 1e-9) ?? current : [...ZOOM_LEVELS].reverse().find(level => level < current - 1e-9) ?? current;
 }

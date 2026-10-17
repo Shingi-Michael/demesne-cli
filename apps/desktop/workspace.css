@@ -1,9 +1,11 @@
 /* Desktop workspace: navigation, conversation, and inspection are separate surfaces.
    Theme roles still come from the shared host; code retains its monospace face. */
-body.desktop { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-feature-settings: "cv11", "ss01"; font-size: 14px; line-height: 1.55; }
+body.desktop { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-feature-settings: "cv11", "ss01"; font-size: 13px; line-height: 1.5; }
 body.desktop input, body.desktop select { font: inherit; }
-body.desktop code, body.desktop pre, body.desktop kbd, body.desktop .diff-line, body.desktop .source-line { font-family: "JetBrains Mono", monospace; }
-#desktop-shell { display: grid; grid-template-columns: 272px minmax(0, 1fr); grid-template-rows: 56px minmax(0, 1fr); background: var(--ink); }
+body.desktop code,
+body.desktop pre,
+body.desktop kbd { font-family: "JetBrains Mono", monospace; }
+#desktop-shell { display: grid; grid-template-columns: 256px minmax(0, 1fr); grid-template-rows: 48px minmax(0, 1fr); background: var(--ink); }
 #desktop-shell:has(#desktop-sidebar[hidden]) { grid-template-columns: 0 minmax(0, 1fr); }
 #desktop-sidebar { grid-column: 1; grid-row: 1 / -1; position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--side); padding: 14px 12px 12px; }
 .ico { flex: none; display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
@@ -13,7 +15,7 @@ body.desktop code, body.desktop pre, body.desktop kbd, body.desktop .diff-line, 
 #desktop-project-button:hover, #desktop-project-button[aria-expanded="true"] { background: var(--surface2); }
 .project-mark { display: block; flex: none; width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(145deg, #3a5f94, #20344f); color: #dce9ff; font: 600 14px/30px "JetBrains Mono", monospace; text-align: center; letter-spacing: -0.02em; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset; }
 .project-text { display: flex; flex: 1; min-width: 0; flex-direction: column; }
-#desktop-project-name { font-size: 14px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#desktop-project-name { font-size: 13.5px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-pulse { display: block; margin-top: 2px; color: var(--t3); font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project-pulse::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 6px 1px 0; border-radius: 50%; background: var(--ok); }
 .project-pulse[data-tone="warn"]::before { background: var(--warn); }
@@ -49,9 +51,9 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 /* One inbox-style list: a session that needs you gets a second, coloured
    line; a settled one is a single quiet line with its time. */
 #sidebar-sessions { flex: 1; min-height: 70px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
-.sidebar-group { padding: 18px 12px 6px; color: var(--t4); font-size: 11.5px; font-weight: 500; letter-spacing: 0.02em; }
+.sidebar-group { padding: 16px 12px 5px; color: var(--t4); font-size: 11px; font-weight: 500; letter-spacing: 0.02em; }
 .sidebar-group:first-child { padding-top: 4px; }
-.sidebar-session { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 7px 12px; border-radius: 9px; color: var(--t2); text-align: left; font-size: 13.5px; line-height: 20px; }
+.sidebar-session { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 7px 12px; border-radius: 9px; color: var(--t2); text-align: left; font-size: 13px; line-height: 18px; }
 .sidebar-session:hover { background: var(--surface2); }
 .sidebar-session.selected { background: var(--surface2); color: var(--t1); }
 .sidebar-session.needs { padding: 8px 12px; }
@@ -65,7 +67,7 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-session-body { display: flex; flex: 1; min-width: 0; flex-direction: column; }
 .sidebar-session-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-session.needs .sidebar-session-name { color: var(--t1); }
-.sidebar-session-line { margin-top: 1px; color: var(--t3); font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-session-line { margin-top: 1px; color: var(--t3); font-size: 11.5px; line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-session-line .warn { color: var(--warn); }
 .sidebar-session-line .acc { color: var(--acc); }
 .sidebar-session-line .bad { color: var(--bad); }
@@ -89,7 +91,7 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-drive-steps i.done { background: var(--acc); }
 .sidebar-drive-steps i.current { background: var(--acc); opacity: 0.45; }
 .sidebar-drive-steps small { margin-left: auto; color: var(--t4); font-size: 11.5px; white-space: nowrap; }
-.sidebar-footer { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 4px 0; border-top: 1px solid var(--line); color: var(--t2); font-size: 13.5px; }
+.sidebar-footer { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 4px 0; border-top: 1px solid var(--line); color: var(--t2); font-size: 13px; }
 .sidebar-footer button { width: auto; height: 30px; display: flex; align-items: center; gap: 9px; padding: 0 8px; color: var(--t2); }
 .sidebar-footer button:hover { background: var(--surface2); color: var(--t1); }
 .sidebar-footer button .ico { color: var(--t3); }
@@ -112,10 +114,10 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .rail-ring i { display: block; width: 28px; height: 28px; border-radius: 50%; background: var(--side); }
 .rail-ring:hover i { background: var(--surface2); }
 /* The top bar: the sidebar toggle, the session title, its branch, and ⋯. */
-#desktop-toolbar { grid-column: 2; grid-row: 1; min-width: 0; height: 56px; padding: 0 20px 0 18px; gap: 10px; border: 0; background: var(--ink); z-index: 80; }
+#desktop-toolbar { grid-column: 2; grid-row: 1; min-width: 0; height: 48px; padding: 0 18px 0 16px; gap: 10px; border: 0; background: var(--ink); z-index: 80; }
 #desktop-toggle-sidebar { color: var(--t3); display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; }
 #desktop-toggle-sidebar:hover { background: var(--surface2); color: var(--t1); }
-.workspace-title { margin: 0 4px 0 2px; font-size: 14px; font-weight: 600; letter-spacing: -0.005em; color: var(--t1); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-title { margin: 0 4px 0 2px; font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em; color: var(--t1); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #desktop-toolbar header { flex: 1; min-width: 0; margin: 0; gap: 8px; justify-content: flex-start; }
 #desktop-toolbar .header-state { gap: 8px; font-size: 12px; margin: 0; }
 #desktop-toolbar .chip { display: inline-flex; align-items: center; gap: 6px; font: 12px "JetBrains Mono", monospace; color: var(--t2); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px; white-space: nowrap; }
@@ -127,25 +129,25 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .desktop .workspace > main { padding: 0; gap: 0; }
 .desktop .live-app:not(.start) .stage { padding: 28px 32px 16px; }
 .desktop #conversation, .desktop #drive-turn { max-width: 780px; margin-left: auto; margin-right: auto; }
-.desktop .live-app.start .stage { padding: 48px 36px 96px; }
-.desktop .hero { max-width: 720px; gap: 22px; }
+.desktop .live-app.start .stage { padding: 40px 32px 80px; }
+.desktop .hero { max-width: 680px; gap: 18px; }
 .desktop .live-app.start .intro { gap: 6px; }
-.hero-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--t3); font-size: 13px; line-height: 20px; }
+.hero-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--t3); font-size: 12.5px; line-height: 18px; }
 .hero-eyebrow .ico { color: var(--t3); }
-.desktop .live-app.start .intro h1 { font-size: 30px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; color: var(--t1); }
+.desktop .live-app.start .intro h1 { font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; color: var(--t1); }
 .desktop .live-app.start .intro p { font-size: 13.5px; line-height: 1.6; color: var(--t3); }
 .desktop .intro strong { color: var(--t2); font-weight: 500; }
-.hero-drive { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 2px; font-size: 13px; line-height: 20px; color: var(--t3); }
+.hero-drive { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 2px; font-size: 12.5px; line-height: 18px; color: var(--t3); }
 .hero-drive .ico { color: var(--t3); }
 .hero-drive b { color: var(--t2); font-weight: 500; }
-.hero-drive .link { color: var(--acc); font-size: 13px; }
+.hero-drive .link { color: var(--acc); font-size: 12.5px; }
 .desktop .live-app.start .composer textarea::placeholder { color: var(--t4); }
 .desktop .live-app.start .hints button { font-size: 12.5px; color: var(--t3); }
 .desktop #input-area { padding: 12px 32px 22px; }
 .desktop #input-area > * { max-width: 780px; margin-left: auto; margin-right: auto; }
-.desktop .composer { border-radius: 16px; padding: 16px 18px 10px; gap: 10px; background: var(--surface); border-color: var(--line2); box-shadow: 0 5px 24px #00000012; }
+.desktop .composer { border-radius: 14px; padding: 12px 14px 8px; gap: 8px; background: var(--surface); border-color: var(--line2); box-shadow: 0 5px 24px #00000012; }
 .desktop .composer:focus-within { border-color: color-mix(in srgb, var(--electric) 60%, var(--borderBright)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--electric) 7%, transparent); }
-.desktop .composer textarea { font-family: inherit; font-size: 15px; line-height: 24px; min-height: 48px; }
+.desktop .composer textarea { font-family: inherit; font-size: 14px; line-height: 22px; min-height: 44px; }
 .desktop .composer-bar { gap: 10px; }
 .desktop .composer .hints button { font-size: 11px; }
 .desktop .composer kbd { font-size: 10px; border-color: var(--rule); padding: 0 4px; }
@@ -168,8 +170,8 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .desktop .step-fold .diff .rm > span:nth-child(2) { color: var(--bad); }
 .desktop .step-fold .diff .ad { background: var(--ok-soft); }
 .desktop .step-fold .diff .ad > span:nth-child(2) { color: var(--ok); }
-.desktop .answer .markdown { font-size: 15.5px; line-height: 1.7; }
-.desktop .markdown code:not(pre code) { background: var(--surface2); border-radius: 5px; padding: 2px 6px; font-size: 13.5px; color: var(--t1); }
+.desktop .answer .markdown { font-size: 14px; line-height: 1.65; }
+.desktop .markdown code:not(pre code) { background: var(--surface2); border-radius: 5px; padding: 1px 5px; font-size: 12.5px; color: var(--t1); }
 .desktop .turn-receipt { color: var(--t4); }
 .desktop .turn-receipt .receipt-action, .desktop .turn-receipt .receipt-steps { color: var(--t3); }
 .desktop .turn-receipt .receipt-action:hover, .desktop .turn-receipt .receipt-steps:hover { color: var(--t1); }
@@ -179,7 +181,7 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .desktop .composer-bar .cb-box { border-color: var(--line); }
 .desktop .ring { background: conic-gradient(var(--acc) 0 var(--usage, 0%), var(--surface3) 0); }
 .desktop .ring::after { background: var(--surface); }
-.desktop .markdown { font-family: inherit; font-size: 15px; line-height: 1.75; }
+.desktop .markdown { font-family: inherit; font-size: 14px; line-height: 1.65; }
 .desktop .markdown h1, .desktop .markdown h2, .desktop .markdown h3 { letter-spacing: -.3px; }
 .desktop .markdown pre { border-radius: 9px; font-size: 12px; line-height: 1.7; }
 .desktop .turn-receipt { font-size: 11px; gap: 8px; }
@@ -188,7 +190,6 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .desktop .compaction-summary .markdown { font-size: 13px; }
 .desktop #panel { background: var(--surface); max-width: 48%; border-left: 1px solid var(--rule); font-size: 12px; }
 .desktop #panel .panel-head { padding: 18px; }
-.desktop .panel-actions button { border-radius: 6px; }
 .desktop .proposals h2 { font-size: 11px; letter-spacing: .4px; color: var(--secondary); margin-bottom: 8px; }
 .desktop .proposal-row { border-radius: 8px; padding: 11px 12px; margin-bottom: 5px; background: var(--surface); border: 1px solid var(--rule); }
 .desktop .proposal-row b { font-size: 13px; font-weight: 450; }
@@ -197,7 +198,7 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .desktop .modal { border-radius: 14px; box-shadow: 0 20px 70px #0006; }
 .desktop #notice { font-family: inherit; border-radius: 10px; }
 @media (max-width: 1150px) {
-  #desktop-shell:not(.sidebar-collapsed) { grid-template-columns: 236px minmax(0, 1fr); }
+  #desktop-shell:not(.sidebar-collapsed) { grid-template-columns: 228px minmax(0, 1fr); }
   #desktop-toolbar { padding: 0 14px; gap: 8px; }
   .desktop .live-app:not(.start) .stage { padding: 22px 20px 12px; }
   .desktop #input-area { padding: 10px 20px 18px; }
@@ -251,7 +252,12 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .desktop .model-picker-heading { display: flex; flex-direction: column; gap: 3px; padding: 16px 16px 14px; }
 .desktop .model-picker-heading strong { font-size: 14px; color: var(--strong); font-weight: 550; }
 .desktop .model-picker-heading span { font-size: 11px; color: var(--muted); }
-.desktop #overlay.anchored { border-radius: 12px; }
+.desktop #overlay.anchored, .desktop #overlay.dropped { border-radius: 12px; }
+.desktop #overlay.dropped .modal-title { display: none; }
+.desktop #overlay.dropped .menu-row { padding: 8px 12px; }
+.desktop #overlay.dropped .menu-row .name { width: auto; flex: none; }
+.desktop #overlay.dropped .menu-row .value { flex: 1; text-align: right; color: var(--t4); }
+.desktop #overlay.dropped .menu-footer { display: none; }
 .desktop .model-thinking { padding: 10px 16px; background: var(--ink); border-top: 1px solid var(--rule); }
 .desktop .model-thinking button { padding: 3px 7px; border-radius: 5px; }
 .desktop .model-thinking button.on { color: var(--strong); background: var(--raised); }
@@ -259,20 +265,7 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .desktop .panel-heading { min-height: 54px; padding: 12px 18px; border-bottom: 1px solid var(--rule); }
 .desktop .panel-heading .label { font-size: 14px; font-weight: 550; color: var(--strong); }
 .desktop .panel-heading .subject { font-size: 12px; }
-.desktop .panel-footer { padding: 12px 16px; font-size: 11px; border-top: 1px solid var(--rule); }
-.desktop .panel-section { font-size: 10px; letter-spacing: .7px; padding-top: 20px; padding-bottom: 8px; }
-.desktop .panel-row { padding: 11px 16px; font-size: 12px; }
-.desktop .panel-actions { padding: 12px 16px; gap: 7px; }
-.desktop .panel-actions button { padding: 6px 10px; border: 1px solid var(--rule); background: var(--ink); font-size: 11px; }
-.desktop .panel-actions button:hover { border-color: var(--borderBright); background: var(--raised); }
-.desktop .context-details { padding: 20px; }
-.desktop .context-top { font-size: 20px; line-height: 1.5; letter-spacing: -.5px; }
-.desktop .context-top span { font-size: 12px; letter-spacing: 0; }
-.desktop .kv { font-size: 12px; padding-top: 5px; padding-bottom: 5px; }
-.desktop .files-view .file-row { min-height: 34px; font-family: inherit; }
-.desktop .files-view .file-row .name { font-size: 12px; }
-.desktop .file-search { border-radius: 8px; padding: 5px 9px; }
-.desktop .files-view pre, .desktop .source-view, .desktop .output { font-family: "JetBrains Mono", monospace; }
+
 .desktop .drive-content { padding: 20px; font-family: inherit; line-height: 1.6; }
 .desktop .drive-content h2, .desktop .drive-heading { font-family: inherit; font-size: 14px; font-weight: 550; color: var(--strong); }
 .desktop .drive-status { padding: 12px 14px; border: 1px solid var(--rule); border-radius: 9px; background: var(--ink); }
@@ -325,6 +318,4 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
   .desktop .menu-footer .right { display: none; }
 }
 
-.desktop #panel.expanded { max-width: 100%; }
-
-.desktop .markdown pre, .desktop .output, .desktop .diff-code { background: var(--surface); }
+.desktop .markdown pre { background: var(--surface); }

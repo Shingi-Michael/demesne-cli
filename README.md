@@ -41,7 +41,7 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 <table>
 <tr>
 <td width="50%" valign="top"><img src="docs/assets/demesne-start.png" alt="Start screen with three Drive proposals"><br><sub><b>Start from a suggestion.</b> The start screen lists what Drive would do next, and the evidence for each item.</sub></td>
-<td width="50%" valign="top"><img src="docs/assets/demesne-review.png" alt="Review panel with a diff beside the conversation"><br><sub><b>Check the work.</b> Each edit, command and check stays with the turn that made it, and you can rerun a check before you commit.</sub></td>
+<td width="50%" valign="top"><img src="docs/assets/demesne-review.png" alt="A turn’s steps with the edit’s diff unfolded in place"><br><sub><b>Check the work.</b> Each edit, command and check stays with the turn that made it; a step unfolds its diff or output right there.</sub></td>
 </tr>
 </table>
 
@@ -126,8 +126,8 @@ Output can be text, JSON or a stream of events. Anything that would need your ap
 | Send / new line | Enter / Shift+Enter |
 | Take the suggested prompt | Tab on an empty composer |
 | Settings | Tab (no suggestion) or Ctrl+K |
-| Changes / files / checks | Alt+D / Alt+O / Alt+T |
-| Drive / history | Alt+J / Alt+H |
+| Drive | Alt+J |
+| This conversation’s menu | ⋯ in the top bar |
 | Back to live output | Ctrl+G |
 | Stop | Double Esc |
 | Zoom | ⌘= / ⌘- / ⌘0 |

@@ -1,10 +1,7 @@
 name: Desktop
+# Runs only when started by hand (Actions → Desktop → Run workflow); the
+# smoke test runs locally before a merge instead of on every push.
 on:
-  push:
-    branches: [main]
-    paths: ['apps/**', 'packages/**', 'scripts/**', 'package.json', 'bun.lock', '.github/workflows/desktop.yml']
-  pull_request:
-    paths: ['apps/**', 'packages/**', 'scripts/**', 'package.json', 'bun.lock', '.github/workflows/desktop.yml']
   workflow_dispatch:
 permissions:
   contents: read

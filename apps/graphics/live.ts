@@ -357,6 +357,9 @@ function renderSidebar() {
     const title = selected ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
     const working = selected ? Boolean(state.activeTurnId) && !waiting : item.status === "running" || item.status === "queued";
     const tone = selected && waiting ? "warn" : working ? "working" : item.status === "failed" ? "bad" : "";
+    // An empty chat is the composer itself, and the New chat row above
+    // already names it; it joins the list once it has a turn.
+    if (title === "New chat" && !working && !waiting) continue;
     // Each row carries its own delete, shown on hover: no menu, no dialog.
     const remove = working ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" `);
     rows.push(`<div class="sidebar-item">${row(tone, title, selected, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id)}${remove}</div>`);

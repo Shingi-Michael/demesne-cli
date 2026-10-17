@@ -119,6 +119,8 @@ if (readme) {
   await page.locator('#briefing button[data-action="ideas-show"]').click(); await page.waitForTimeout(400);
 } else {
   await shot("02-turn");
+  await page.locator("#sidebar-sessions .sidebar-item").first().hover(); await page.waitForTimeout(300);
+  await shot("02-sidebar-delete");
   // The briefing line above the composer, each part opened; then the
   // sidebar folded to its rail, and the project switcher.
   await toggle('#briefing button[data-action="review-open"]', "02-review-open");

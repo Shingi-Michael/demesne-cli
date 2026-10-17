@@ -1426,7 +1426,15 @@ export class GraphicsHost {
       return;
     }
     if (method === "archive") {
-      await this.client.archiveSession(this.current!.session.id);
+      // Another conversation (from the sidebar) is archived in place; the
+      // open one is archived and replaced by a new chat.
+      const id = typeof args.id === "string" ? args.id : this.current!.session.id;
+      if (id !== this.current?.session.id) {
+        await this.client.archiveSession(id);
+        await this.refreshSessions();
+        return;
+      }
+      await this.client.archiveSession(id);
       await this.newSession();
       return;
     }

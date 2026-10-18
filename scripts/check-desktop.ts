@@ -18,6 +18,11 @@ const aside = "Desktop smoke: a second conversation";
 const asideDone = "A second conversation is here.";
 const completed = "Verified the desktop change.";
 const afterClose = "Daemon work completed after the window closed.";
+const thinkingPrompt = "Desktop smoke: readable thinking";
+const thinkingText = "First reasoning paragraph.\nSecond line stays readable.\n\n" + "A detailed thought with enough words to wrap across several lines. ".repeat(12) + "\n" + "long_identifier_".repeat(90);
+let nextThought!: () => void, finishThought!: () => void;
+const thoughtGate = new Promise<void>(resolve => { nextThought = resolve; });
+const thoughtFinish = new Promise<void>(resolve => { finishThought = resolve; });
 let round = 0, release: (() => void) | undefined;
 const gate = new Promise<void>(done => { release = done; });
 const f = await fixture({
@@ -32,6 +37,17 @@ const f = await fixture({
     }
     if (typeof user === "string" && user.startsWith("Compaction fixture")) {
       yield { type: "text_delta", delta: "Historical evidence. ".repeat(1200) };
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
+    if (user === thinkingPrompt) {
+      yield { type: "reasoning_delta", delta: thinkingText };
+      await thoughtGate;
+      if (signal.aborted) throw signal.reason;
+      yield { type: "reasoning_delta", delta: "\n\nThe streamed update arrived." };
+      await thoughtFinish;
+      if (signal.aborted) throw signal.reason;
+      yield { type: "text_delta", delta: "Thinking check complete." };
       yield { type: "finish", reason: "stop" };
       return;
     }
@@ -153,6 +169,37 @@ let sessionId = "";
 try {
   await open(false, true);
   await capture("01-start");
+  await type(thinkingPrompt);
+  const trace = page.locator(".thinking-main .thinking-content").last();
+  const thinkingToggle = page.locator(".thinking-main .thinking-toggle").last();
+  await trace.waitFor({ state: "visible" });
+  assert.equal(await thinkingToggle.getAttribute("aria-expanded"), "true");
+  assert((await trace.innerText()).includes("First reasoning paragraph."));
+  const layout = await trace.evaluate(element => {
+    const paragraph = element.querySelector("p")!;
+    return { height: paragraph.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(paragraph).lineHeight), width: element.clientWidth, scrollWidth: element.scrollWidth };
+  });
+  assert(layout.height > layout.lineHeight, "Thinking preserves multiple lines");
+  assert(layout.scrollWidth <= layout.width + 1, "Long thinking text wraps without horizontal overflow");
+  await capture("01-thinking-expanded");
+  await thinkingToggle.click();
+  await trace.waitFor({ state: "hidden" });
+  nextThought();
+  await until(() => trace.textContent().then(text => text?.includes("The streamed update arrived.")), "reasoning delta arrived while collapsed");
+  assert.equal(await thinkingToggle.getAttribute("aria-expanded"), "false");
+  assert(!(await trace.isVisible()), "Streaming does not reopen a manually collapsed trace");
+  await thinkingToggle.click();
+  await trace.waitFor({ state: "visible" });
+  await textIncludes("The streamed update arrived.");
+  finishThought();
+  await textIncludes("Thinking check complete.");
+  await click("toggle-steps");
+  await trace.waitFor({ state: "visible" });
+  await thinkingToggle.click();
+  await trace.waitFor({ state: "hidden" });
+  await thinkingToggle.click();
+  await trace.waitFor({ state: "visible" });
+  await click("toggle-steps");
   await type(prompt);
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Edit"]), "file approval visible");
   await capture("02-file-approval");
@@ -285,7 +332,7 @@ try {
 
 
   // The receipt opens the turn's steps; the edit's row unfolds its diff in place.
-  await click("toggle-steps");
+  await click("toggle-steps", { id: completedSession.turns.find(turn => turn.content === prompt)!.id });
   await click("step");
   await until(() => evaluate<boolean>("return !!document.querySelector('.step-fold')?.innerText.includes('after');"), "inline diff visible");
   await capture("03-changes");
@@ -318,7 +365,7 @@ try {
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
   await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
   await until(() => page.locator(".compaction-card").count().then(count => count === 1), "conversation summary visible");
-  const firstTurnId = completedSession.turns.find(turn => turn.content === prompt)!.id;
+  const firstTurnId = completedSession.turns[0]!.id;
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Older conversation is unmounted by default");
   assert.equal(await page.locator(`#turn-${compacted.firstRetainedTurnId}`).count(), 1, "Retained turns stay visible");
   await page.getByRole("button", { name: "Expand full history", exact: true }).click();
@@ -351,7 +398,7 @@ try {
   await open();
   await textIncludes(afterClose);
   await capture("06-work-survived-close");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "daemon work survives app closure"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "daemon work survives app closure"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

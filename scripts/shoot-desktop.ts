@@ -136,6 +136,15 @@ if (readme) {
   await page.locator("textarea").click(); await page.keyboard.type("/"); await page.waitForTimeout(900);
   await shot("02-slash");
   await page.fill("textarea", ""); await page.keyboard.press("Escape"); await page.waitForTimeout(300);
+  // Settings: its own window, a page at a time, and its search.
+  await page.locator(".sidebar-settings").click(); await page.waitForTimeout(600);
+  for (const id of ["general", "appearance", "providers", "sessions", "computer"]) {
+    await page.locator(`#overlay button[data-action="settings-page"][data-args*='"${id}"']`).click(); await page.waitForTimeout(400);
+    await shot(`02-settings-${id}`);
+  }
+  await page.fill("#settings-search", "approve"); await page.waitForTimeout(400);
+  await shot("02-settings-search");
+  await page.keyboard.press("Escape"); await page.waitForTimeout(300);
 }
 // The turn's steps open and the edit's row unfolds its diff in place; the
 // top bar's ⋯ is the conversation's menu.

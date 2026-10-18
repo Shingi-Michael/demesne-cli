@@ -246,25 +246,25 @@ try {
   await page.locator(".sidebar-settings").click();
   await page.locator('#overlay[data-screen="settings"]').waitFor();
   await capture("02-settings");
-  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Theme", { exact: true }) }).click();
-  await page.locator('#overlay[data-screen="themes"]').waitFor();
-  await capture("02-themes");
-  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Demesne Light", { exact: true }) }).click();
-  await page.locator("#overlay").waitFor({ state: "hidden" });
+  // Settings is pages on the left; a theme changes from its picker and
+  // Settings stays open.
+  const settingsPage = (id: string) => page.locator(`#overlay button[data-action="settings-page"][data-args*='"${id}"']`).click();
+  await settingsPage("appearance");
+  await page.locator('#overlay select[data-setting="theme"]').selectOption({ label: "Demesne Light" });
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#F6F8FA");
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#f7f7f5", "The desktop wears its own light palette");
+  assert(await page.locator('#overlay[data-screen="settings"]').isVisible(), "Settings stays open after a theme change");
+  await capture("02-settings-light");
+  await page.keyboard.press("Escape");
+  await page.locator("#overlay").waitFor({ state: "hidden" });
   await capture("02-light-conversation");
   await page.locator(".sidebar-settings").click();
-  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Theme", { exact: true }) }).click();
-  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Demesne", { exact: true }) }).click();
-  await page.locator("#overlay").waitFor({ state: "hidden" });
+  await page.locator('#overlay select[data-setting="theme"]').selectOption({ label: "Demesne" });
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#0B1218");
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#121315", "The desktop wears its own dark palette");
-  await page.locator(".sidebar-settings").click();
-  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Providers", { exact: true }) }).click();
-  await page.locator('#overlay[data-screen="providers"]').waitFor();
+  await settingsPage("providers");
   await capture("02-providers");
-  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Provider setup", { exact: true }) }).click();
+  await page.locator("#overlay").getByRole("button", { name: "Open setup", exact: true }).click();
   await page.locator("#setup:not([hidden])").waitFor();
   await capture("02-setup");
   await page.keyboard.press("Escape");

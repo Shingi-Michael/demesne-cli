@@ -2995,3 +2995,298 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 .live-app.start .composer .send .send-stop {
   display: none;
 }
+
+/* Settings: a window of its own. Pages down the left under a search; on the
+   right each page's settings as rows (what it does, then its control). */
+.modal.sheet[data-screen="settings"] {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(1000px, calc(100vw - 48px));
+  height: min(720px, calc(100vh - 96px));
+  max-height: none;
+  flex-direction: row;
+  border-radius: 14px;
+  box-shadow: 0 0 0 100vmax #0007, 0 24px 80px #0008;
+}
+.settings-nav {
+  flex: none;
+  width: 232px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 12px;
+  overflow: auto;
+  border-right: 1px solid var(--rule);
+  background: var(--ink);
+}
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--borderBright);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+}
+.settings-search:focus-within {
+  border-color: var(--electric);
+}
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--strong);
+  font: inherit;
+  font-size: 13px;
+}
+.settings-group {
+  padding: 14px 8px 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.settings-nav > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--paper);
+  font-size: 13.5px;
+  text-align: left;
+}
+.settings-nav > button .ico {
+  width: 16px;
+  height: 16px;
+  color: var(--secondary);
+}
+.settings-nav > button:hover {
+  background: var(--surface);
+}
+.settings-nav > button.on {
+  background: var(--raised);
+  color: var(--strong);
+}
+.settings-nav > button.on .ico {
+  color: var(--strong);
+}
+.settings-body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 26px 32px 32px;
+  scrollbar-width: thin;
+}
+.settings-body h1 {
+  margin: 4px 0 6px;
+  font-size: 20px;
+  font-weight: 550;
+  letter-spacing: -0.3px;
+  color: var(--strong);
+}
+.settings-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  color: var(--secondary);
+}
+.settings-close:hover {
+  background: var(--raised);
+  color: var(--strong);
+}
+.settings-close .ico {
+  width: 16px;
+  height: 16px;
+}
+.settings-section {
+  margin-top: 22px;
+}
+.settings-section h2 {
+  margin: 0 0 4px;
+  padding-right: 40px;
+  font-size: 15px;
+  font-weight: 550;
+  color: var(--strong);
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.settings-section .settings-row:last-child {
+  border-bottom: 0;
+}
+.settings-text {
+  flex: 1;
+  min-width: 0;
+}
+.settings-label {
+  font-size: 14px;
+  color: var(--strong);
+}
+.settings-description {
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--secondary);
+}
+.settings-control {
+  flex: none;
+  max-width: 50%;
+  display: flex;
+  justify-content: flex-end;
+}
+.settings-button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--borderBright);
+  border-radius: 8px;
+  color: var(--strong);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.settings-button:hover {
+  background: var(--raised);
+}
+.settings-button.primary {
+  border-color: transparent;
+  background: var(--electric);
+  color: var(--ink);
+}
+.settings-button.primary:hover {
+  background: var(--electric);
+  filter: brightness(1.08);
+}
+.settings-switch {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--borderBright);
+}
+.settings-switch i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--strong);
+  transition: transform 140ms ease;
+}
+.settings-switch.on {
+  background: var(--electric);
+}
+.settings-switch.on i {
+  transform: translateX(16px);
+  background: #fff;
+}
+.settings-segments {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--borderBright);
+  border-radius: 9px;
+}
+.settings-segments button {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 6px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+.settings-segments button:hover {
+  color: var(--strong);
+}
+.settings-segments button.on {
+  background: var(--raised);
+  color: var(--strong);
+}
+.settings-select {
+  position: relative;
+  display: inline-flex;
+}
+.settings-select select {
+  appearance: none;
+  min-width: 220px;
+  height: 34px;
+  padding: 0 34px 0 12px;
+  border: 1px solid var(--borderBright);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--strong);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.settings-select select:focus {
+  border-color: var(--electric);
+}
+.settings-select::after {
+  content: "";
+  position: absolute;
+  right: 13px;
+  top: 12px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--secondary);
+  border-bottom: 1.5px solid var(--secondary);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.settings-swatches {
+  display: inline-flex;
+  gap: 6px;
+}
+.settings-swatches i {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid var(--borderBright);
+}
+.settings-value {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--secondary);
+  font-size: 13px;
+}
+.settings-value.mono {
+  font-family: JetBrains Mono, monospace;
+  font-size: 12px;
+}
+.settings-empty {
+  margin-top: 40px;
+  color: var(--secondary);
+}
+@media (max-width: 720px) {
+  .settings-nav {
+    width: 180px;
+  }
+  .settings-body {
+    padding: 22px 20px;
+  }
+  .settings-row {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .settings-control {
+    max-width: 100%;
+  }
+}

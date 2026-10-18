@@ -230,10 +230,9 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .menu-footer { border-top: 1px solid var(--rule); padding: 12px 16px; font-size: 10px; color: var(--muted); gap: 6px; }
 .desktop .menu-footer .right { font-size: 10px; }
 .desktop .section-label { font-family: inherit; font-size: 10px; letter-spacing: .7px; padding: 16px 12px 6px; color: var(--muted); }
-.desktop #overlay[data-screen="settings"] .menu-row { flex-wrap: wrap; padding: 12px; align-items: baseline; }
-.desktop #overlay[data-screen="settings"] .menu-row .name { flex: 1; font-weight: 500; }
-.desktop #overlay[data-screen="settings"] .menu-row .hint { display: none; }
-.desktop #overlay[data-screen="settings"] .menu-row .setting-description { flex-basis: 100%; text-align: left; color: var(--secondary); font-size: 11px; line-height: 1.6; }
+.desktop #overlay.sheet[data-screen="settings"] { width: min(1000px, calc(100vw - 48px)); max-width: none; border-radius: 14px; overflow: hidden; -webkit-app-region: no-drag; }
+.desktop .settings-nav { background: var(--side, var(--ink)); }
+.desktop .settings-search input { font-family: inherit; }
 .desktop .model-picker-heading { display: flex; flex-direction: column; gap: 3px; padding: 16px 16px 14px; }
 .desktop .model-picker-heading strong { font-size: 14px; color: var(--strong); font-weight: 550; }
 .desktop .model-picker-heading span { font-size: 11px; color: var(--muted); }

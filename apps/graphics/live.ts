@@ -190,6 +190,8 @@ let state: Snapshot | null = null,
 let inspectSurface: "diff" | "review" | "log" | null = null,
   inspectItem = "";
 let overlay: OverlayName | null = null,
+  /// The Settings page showing; its search lists matches from every page.
+  settingsPage = "general",
   overlayQuery = "",
   overlayIndex = 0,
   models: ModelDescriptor[] = [],
@@ -1769,6 +1771,8 @@ async function openOverlay(name: OverlayName, query = "") {
     void act(() => api("providers-refresh"));
     return;
   }
+  // Settings lists your provider accounts, so it checks them too.
+  if (name === "settings") void act(() => api("providers-refresh"));
   if (name === "cleanup") void act(() => api("cleanup-scan"));
   if (name === "models") {
     modelLevels.clear();
@@ -1851,6 +1855,193 @@ function renderModelPopover(hidden: number) {
     `<div class="model-picker-heading"><strong>Choose a model</strong><span>For this conversation</span></div><div class="filter-wrap"><input id="chooser-filter" placeholder="Search models…" aria-label="Filter models" value="${h(overlayQuery)}" autocomplete="off"></div><div class="menu-list">${rows || `<div class="empty">${modelsLoading && !models.length ? "Loading models…" : "No matches."}</div>`}${hidden ? `<div class="empty">${hidden} more · keep typing to narrow</div>` : ""}</div>${thinking}<div class="menu-footer">${k("↑↓")} select ${k("↵")} switch ${btn("close-overlay", `${k("Esc")} close`)}<span class="right">${overlayQuery ? `${overlayRows.length} of ` : ""}${models.length || ""}${models.length ? " models" : ""}</span></div>`;
   el("overlay").querySelector(".menu-row.selected")?.scrollIntoView({ block: "nearest" });
 }
+/// Settings is a window of its own: pages down the left, and on the right
+/// each page's settings as rows that say what they do, with their control
+/// at the end. Search lists matching settings from every page.
+const SETTINGS_ICONS: Record<string, string> = {
+  general: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>',
+  appearance: '<circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.83-.44-1.12-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.56-2.5 5.56-5.55C21.97 6.01 17.46 2 12 2Z"/>',
+  providers: '<path d="M2.6 18.4A2 2 0 0 0 2 19.8V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.2a2 2 0 0 0 1.4-.6l.8-.8a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5"/>',
+  sessions: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+  computer: '<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>',
+};
+type SettingRow = { label: string; description?: string; control: string; wide?: boolean };
+type SettingsPage = { id: string; label: string; group: string; sections: { title: string; rows: SettingRow[] }[] };
+const settingsButton = (action: string, label: string, data: Record<string, unknown> = {}, className = "") =>
+  btn(action, label, data, `settings-button ${className}`.trim());
+function settingsSwitch(on: boolean, action: string, data: Record<string, unknown>, label: string) {
+  return btn(action, "<i></i>", data, `settings-switch${on ? " on" : ""}`).replace("<button ", `<button role="switch" aria-checked="${on}" aria-label="${h(label)}" `);
+}
+function settingsSegments(options: { label: string; on: boolean; action: string; data: Record<string, unknown> }[]) {
+  return `<span class="settings-segments" role="radiogroup">${options.map((option) => btn(option.action, h(option.label), option.data, option.on ? "on" : "").replace("<button ", `<button role="radio" aria-checked="${option.on}" `)).join("")}</span>`;
+}
+function settingsPages(): SettingsPage[] {
+  const s = state!;
+  const group = (name: string) => (name.startsWith("custom-") ? "Your themes" : name.includes("light") || name.includes("latte") || name === "github-light" ? "Light" : "Dark");
+  const themeGroups = ["Your themes", "Dark", "Light"]
+    .map((title) => [title, s.themes.filter((name) => group(name) === title)] as const)
+    .filter(([, names]) => names.length);
+  const themeSelect = `<span class="settings-select"><select data-setting="theme" aria-label="Theme">${themeGroups
+    .map(([title, names]) => `<optgroup label="${h(title)}">${names.map((name) => `<option value="${h(name)}"${name === s.theme ? " selected" : ""}>${h(s.themeOptions.find((theme) => theme.name === name)?.label ?? name)}</option>`).join("")}</optgroup>`)
+    .join("")}</select></span>`;
+  const swatches = ["ink", "surface", "raised", "paper", "electric", "citron", "thinking", "signal"]
+    .filter((name) => s.palette[name as keyof typeof s.palette])
+    .map((name) => `<i style="background:${h(s.palette[name as keyof typeof s.palette])}" title="${name}"></i>`)
+    .join("");
+  const recent = s.sessions.filter((item) => item.turns > 0).length;
+  return [
+    {
+      id: "general",
+      label: "General",
+      group: "Settings",
+      sections: [
+        {
+          title: "Session behavior",
+          rows: [
+            {
+              label: "Mode",
+              description: "Plan reads your project and proposes changes without touching files. Build may edit files and run commands.",
+              control: settingsSegments([
+                { label: "Plan", on: s.planOnly, action: "setting", data: { action: "mode", data: { planOnly: true } } },
+                { label: "Build", on: !s.planOnly, action: "setting", data: { action: "mode", data: { planOnly: false } } },
+              ]),
+            },
+            {
+              label: "Auto-approve",
+              description: "Run edits, commands, deletions and publishing without asking first. Applies to this conversation; Plan stays read only.",
+              control: settingsSwitch(!!s.session?.autoApprove, "setting", { action: "auto-approve", data: { autoApprove: !s.session?.autoApprove } }, "Auto-approve"),
+            },
+          ],
+        },
+        {
+          title: "Model",
+          rows: [
+            {
+              label: "Model for this conversation",
+              description: `${s.model.displayName ?? s.model.id}${s.reasoning ? ` · ${s.reasoning} thinking` : ""} on ${s.model.provider}. You can also switch it from the composer.`,
+              control: settingsButton("overlay", "Change…", { name: "models" }),
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: "appearance",
+      label: "Appearance",
+      group: "Settings",
+      sections: [
+        {
+          title: "Theme",
+          rows: [
+            { label: "Theme", description: "Colors for the whole app, saved on this device.", control: themeSelect },
+            { label: "Palette", description: "The colors the current theme uses.", control: `<span class="settings-swatches">${swatches}</span>` },
+            ...(s.themeCanUndo ? [{ label: "Undo last theme change", description: "Go back to the theme you had before.", control: settingsButton("setting", "Undo", { action: "theme-undo", data: {} }) }] : []),
+          ],
+        },
+      ],
+    },
+    {
+      id: "providers",
+      label: "Providers",
+      group: "Settings",
+      sections: [
+        {
+          title: "Accounts",
+          rows: s.providers.items.length
+            ? s.providers.items.map((item) => {
+                const signing = s.providers.signingIn === item.key;
+                const control = signing
+                  ? settingsButton("provider-cancel", "Cancel", { key: item.key })
+                  : item.status === "signed-in"
+                    ? settingsButton("provider-signout", "Sign out", { key: item.key })
+                    : item.status === "signed-out"
+                      ? settingsButton("provider-signin", "Sign in ↗", { key: item.key }, "primary")
+                      : `<span class="settings-value">${item.kind === "local" ? "Local" : "API key"}</span>`;
+                return { label: `${item.label}${item.active ? " · in use" : ""}`, description: signing ? "Waiting for your browser…" : item.detail, control };
+              })
+            : [{ label: s.providers.loading ? "Checking providers…" : "No providers yet", description: "Run provider setup to add one.", control: "" }],
+        },
+        {
+          title: "Setup",
+          rows: [
+            { label: "Provider setup", description: "Pick where Demesne runs its model: your ChatGPT plan, OpenRouter, a local server or any OpenAI-compatible URL.", control: settingsButton("setting-leave", "Open setup", { action: "setup", data: {} }) },
+            ...(s.model.provider === "ChatGPT"
+              ? [{ label: "ChatGPT plan", description: s.chatgptAccount?.email ?? s.chatgptAccount?.label ?? "Signed in", control: settingsButton("open-link", "Manage usage ↗", { url: "https://chatgpt.com/settings/usage" }) }]
+              : []),
+          ],
+        },
+      ],
+    },
+    {
+      id: "sessions",
+      label: "Sessions",
+      group: "Settings",
+      sections: [
+        {
+          title: "History",
+          rows: [
+            { label: "Conversations", description: `${recent} with turns · ${s.sessions.length} in all, in this folder.`, control: settingsButton("overlay", "Browse…", { name: "sessions" }) },
+            { label: "Clean up", description: "Delete empty, quick and long-unused conversations. The open one and running ones are never listed.", control: settingsButton("overlay", "Clean up…", { name: "cleanup" }) },
+          ],
+        },
+      ],
+    },
+    {
+      id: "computer",
+      label: "Connection",
+      group: "This computer",
+      sections: [
+        {
+          title: "Connection",
+          rows: [
+            { label: "Folder", description: "The project this window works in.", control: `<span class="settings-value mono" title="${h(s.workspace)}">${h(s.workspace.replace(/^\/Users\/[^/]+/, "~"))}</span>` },
+            { label: "Daemon", description: `Demesne's background service · ${s.connection}.`, control: `<span class="settings-value mono">${h(s.server.replace(/^https?:\/\//, ""))}</span>` },
+          ],
+        },
+      ],
+    },
+  ];
+}
+function renderSettings() {
+  const box = el("overlay");
+  const focused = box.querySelector<HTMLInputElement>("input"),
+    hasFocus = !!focused && focused === document.activeElement,
+    caret = focused?.selectionStart,
+    scroll = box.querySelector(".settings-body")?.scrollTop ?? 0;
+  const pages = settingsPages();
+  if (!pages.some((page) => page.id === settingsPage)) settingsPage = "general";
+  const query = overlayQuery.trim().toLowerCase();
+  const row = (item: SettingRow) =>
+    `<div class="settings-row"><div class="settings-text"><div class="settings-label">${h(item.label)}</div>${item.description ? `<div class="settings-description">${h(item.description)}</div>` : ""}</div>${item.control ? `<div class="settings-control">${item.control}</div>` : ""}</div>`;
+  const section = (title: string, rows: SettingRow[]) => `<section class="settings-section"><h2>${h(title)}</h2>${rows.map(row).join("")}</section>`;
+  let body: string;
+  if (query) {
+    const found = pages.flatMap((page) =>
+      page.sections.map((part) => ({ title: `${page.label} · ${part.title}`, rows: part.rows.filter((item) => `${item.label} ${item.description ?? ""} ${part.title} ${page.label}`.toLowerCase().includes(query)) })),
+    ).filter((part) => part.rows.length);
+    body = found.length ? found.map((part) => section(part.title, part.rows)).join("") : `<p class="settings-empty">No settings match “${h(overlayQuery)}”.</p>`;
+  } else {
+    const page = pages.find((item) => item.id === settingsPage)!;
+    body = `<h1>${h(page.label)}</h1>${page.sections.map((part) => section(part.title, part.rows)).join("")}`;
+  }
+  let lastGroup = "";
+  const nav = pages
+    .map((page) => {
+      const heading = page.group !== lastGroup ? `<div class="settings-group">${h(page.group)}</div>` : "";
+      lastGroup = page.group;
+      return heading + btn("settings-page", `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${SETTINGS_ICONS[page.id]}</svg>${h(page.label)}`, { id: page.id }, !query && page.id === settingsPage ? "on" : "").replace("<button ", !query && page.id === settingsPage ? '<button aria-current="page" ' : "<button ");
+    })
+    .join("");
+  box.innerHTML =
+    `<nav class="settings-nav" aria-label="Settings pages"><label class="settings-search"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input id="settings-search" placeholder="Search" aria-label="Search settings" value="${h(overlayQuery)}" autocomplete="off" spellcheck="false"></label>${nav}</nav>` +
+    `<div class="settings-body">${btn("close-overlay", '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>', {}, "dialog-close settings-close").replace("<button ", '<button aria-label="Close settings" ')}${body}</div>`;
+  if (hasFocus) {
+    const input = box.querySelector<HTMLInputElement>("input")!;
+    input.focus({ preventScroll: true });
+    if (caret != null) input.setSelectionRange(caret, caret);
+  }
+  box.querySelector(".settings-body")!.scrollTop = scroll;
+}
 function renderOverlay() {
   if (!state) return;
   el("overlay").hidden = !overlay;
@@ -1874,6 +2065,10 @@ function renderOverlay() {
     models,
     state.providers,
     state.cleanup,
+    state.themeCanUndo,
+    state.workspace,
+    state.connection,
+    settingsPage,
   ]);
   if (signature === overlaySignature) return;
   overlaySignature = signature;
@@ -1884,70 +2079,10 @@ function renderOverlay() {
     filter = true,
     footerNote = "";
   if (overlay === "settings") {
-    // The model lives in the composer; the rest of the old list is one
-    // command away, so Settings keeps only what you change here.
-    title = "Settings";
-    subtitle = "Make this workspace yours";
-    filter = false;
-    footerNote = "model is in the composer · all commands /";
-    const signedIn = state.providers.items.filter((item) => item.status === "signed-in").map((item) => item.label);
-    overlayRows = [
-      {
-        label: "Mode",
-        group: "Session behavior",
-        value: state.planOnly ? "Plan · read only" : "Build · edits allowed",
-        action: "mode",
-        data: { planOnly: !state.planOnly },
-        hint: `to ${state.planOnly ? "Build" : "Plan"} ↵`,
-        description: "Plan reads and proposes without changing files; Build may edit.",
-      },
-      {
-        label: "Approvals",
-        group: "Session behavior",
-        value: state.session?.autoApprove ? "Auto-approve all" : "Ask first",
-        action: "auto-approve",
-        data: { autoApprove: !state.session?.autoApprove },
-        hint: state.session?.autoApprove ? "turn off ↵" : "turn on ↵",
-        description: "Auto-approve all skips prompts for edits, commands, deletions and publishing. Plan stays read only.",
-      },
-      {
-        label: "Theme",
-        group: "Appearance",
-        value: state.theme,
-        action: "overlay",
-        data: { name: "themes" },
-        hint: "/theme",
-      },
-      {
-        label: "Providers",
-        group: "Connections",
-        value: signedIn.length ? `${signedIn.join(", ")} · signed in` : state.providers.items.length ? "none signed in" : "sign in · sign out",
-        action: "overlay",
-        data: { name: "providers" },
-        hint: "/providers",
-      },
-      {
-        label: "Sessions",
-        group: "History",
-        value: `${state.sessions.filter((item) => item.turns > 0 && item.id !== state!.session?.id).slice(0, 3).length} recent · ${state.sessions.length} total`,
-        action: "overlay",
-        data: { name: "sessions" },
-        hint: "/sessions",
-      },
-      // The ChatGPT plan lives here, not in the status bar.
-      ...(state.model.provider === "ChatGPT"
-        ? [
-            {
-              label: "ChatGPT plan",
-              value: state.chatgptAccount?.email ?? state.chatgptAccount?.label ?? "signed in",
-              action: "open-link",
-              data: { url: "https://chatgpt.com/settings/usage" },
-              hint: "manage usage ↗",
-            },
-          ]
-        : []),
-    ];
-  } else if (overlay === "models") {
+    renderSettings();
+    return;
+  }
+  if (overlay === "models") {
     title = "Switch model";
     noun = "models";
     const scoreOf = (model: ModelDescriptor) => modelScores.get(`${model.provider}\u0000${model.id}`);
@@ -2112,14 +2247,14 @@ function renderOverlay() {
     .map((row, index) => {
       const group =
         row.group && row.group !== lastGroup
-          ? `<div class="section-label">${h(row.group)}${overlay !== "settings" ? `<span>${overlay === "models" ? models.filter((model) => model.provider.toUpperCase() === row.group).length : overlayRows.filter((item) => item.group === row.group).length}</span>` : ""}</div>`
+          ? `<div class="section-label">${h(row.group)}<span>${overlay === "models" ? models.filter((model) => model.provider.toUpperCase() === row.group).length : overlayRows.filter((item) => item.group === row.group).length}</span></div>`
           : "";
       lastGroup = row.group ?? "";
       return (
         group +
         btn(
           "choose-row",
-          `<span class="name">${h(row.label)}</span><span class="value">${h(row.value)}</span><span class="hint">${h(row.hint ?? "")}${index === overlayIndex && overlay !== "settings" ? ` ${k("↵")}` : ""}</span>${overlay === "settings" && row.description ? `<small class="setting-description">${h(row.description)}</small>` : ""}`,
+          `<span class="name">${h(row.label)}</span><span class="value">${h(row.value)}</span><span class="hint">${h(row.hint ?? "")}${index === overlayIndex ? ` ${k("↵")}` : ""}</span>`,
           { index },
           `menu-row ${index === overlayIndex ? "selected" : ""}`,
           overlay === "sessions",
@@ -2535,6 +2670,24 @@ async function dispatch(
   // The opener toggles: a second click on the model chip closes its picker.
   if (action === "overlay" && overlay === args.name && !args.query) return dispatch("close-overlay", {});
   if (action === "overlay") return openOverlay(args.name, args.query ?? "");
+  if (action === "settings-page") {
+    settingsPage = args.id;
+    overlayQuery = "";
+    renderOverlay();
+    el("overlay").querySelector(".settings-body")!.scrollTop = 0;
+    return;
+  }
+  // A Settings control changes the setting and leaves Settings open.
+  if (action === "setting") {
+    if (args.action === "auto-approve" && driveNavigating) throw new Error("Only you can change session approvals.");
+    return api(args.action, args.data);
+  }
+  // Some settings open another screen, which takes Settings' place.
+  if (action === "setting-leave") {
+    overlay = null;
+    renderOverlay();
+    return dispatch(args.action, args.data);
+  }
   if (action === "close-overlay") {
     overlay = null;
     renderOverlay();
@@ -2980,7 +3133,9 @@ document.addEventListener("input", (event) => {
     changedDraft();
     return;
   }
+  // Only a text field filters (Settings' theme picker is a select).
   if (
+    input instanceof HTMLInputElement &&
     input.closest("#overlay") &&
     overlay &&
     !["rename", "confirm-archive", "confirm-undo"].includes(overlay)
@@ -2990,6 +3145,11 @@ document.addEventListener("input", (event) => {
     renderOverlay();
   }
   if (input.closest("#setup")) setupInput(input);
+});
+// Settings' pickers (the theme) change on choice, not on click.
+document.addEventListener("change", (event) => {
+  const select = event.target as HTMLSelectElement;
+  if (select.dataset.setting === "theme") void act(() => api("theme", { name: select.value }));
 });
 document.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -3151,6 +3311,13 @@ document.addEventListener("keydown", (event) => {
         renderOverlay();
         return;
       }
+    }
+    // In Settings ↑↓ step through its pages.
+    if (overlay === "settings" && (key === "arrowdown" || key === "arrowup") && !overlayQuery) {
+      event.preventDefault();
+      const ids = settingsPages().map((page) => page.id);
+      run(() => dispatch("settings-page", { id: ids[(ids.indexOf(settingsPage) + (key === "arrowdown" ? 1 : -1) + ids.length) % ids.length] }));
+      return;
     }
     if (key === "arrowdown" || key === "arrowup") {
       run(() => {

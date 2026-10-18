@@ -765,14 +765,9 @@ function runHTML(run: GraphicsRun, index: number) {
             ],
         ),
     ).size;
-  // A finished turn reads as its answer: thinking and tool steps fold into
-  // the receipt line under it, and open from there. A running turn folds its
-  // steps into one trail line and its thinking into one streaming line.
-  // A finished turn folds its steps behind the receipt; a running one lists
-  // them as they happen, each a quiet line on the guide.
-  const live = active(run),
-    fold = run.status === "completed" && !stepsOpen.has(run.id);
-  const lastThought = run.entries.findLast((e) => e.type === "reasoning");
+  // Completed traces fold into the receipt. While streaming, show the full
+  // latest trace unless the reader explicitly collapses it.
+  const live = active(run), fold = run.status === "completed" && !stepsOpen.has(run.id);
   let body = "", steps = "";
   const flush = () => { if (steps) { body += `<div class="steps">${steps}</div>`; steps = ""; } };
   for (let i = 0; i < run.entries.length; i++) {
@@ -782,20 +777,12 @@ function runHTML(run: GraphicsRun, index: number) {
       flush();
       body += `<div class="answer"><span class="answer-mark" aria-hidden="true">d.</span><div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div></div>`;
     }
-    if (live && entry === lastThought && i === run.entries.length - 1) {
-      flush();
-      const open = detailsOpen.has(key), text = entry.raw.trim().split(/\n+/).at(-1) ?? "";
-      body += `<div class="thinking thinking-line"><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div><button type="button" class="thinking-line-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({ id: key }))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">◇ thinking <i>${h(text.slice(-240))}</i></button></div>`;
-      continue;
-    }
     if (fold && (entry.type === "reasoning" || entry.type === "tool")) continue;
     if (entry.type === "reasoning") {
       flush();
       const live = active(run) && i === run.entries.length - 1;
-      // Keep reasoning out of the conversation until the reader asks for it.
-      // Explicit expansion survives streaming updates and completion.
-      const open = detailsOpen.has(key);
-      body += `<div class="thinking thinking-main ${live ? "live" : ""}"><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${live ? spinner() : CHEVRON}${live ? "Thinking" : `Thought for ${duration(entry.durationMs)}`}</button><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div></div>`;
+      const open = detailsOpen.has(key) || (live && !detailsClosed.has(key));
+      body += `<div class="thinking thinking-main ${live ? "live" : ""}"><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${live ? spinner() : CHEVRON}${live ? "Thinking" : `Thought for ${duration(entry.durationMs)}`}<span class="thinking-disclosure">${open ? "Collapse" : "Show trace"}</span></button><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div></div>`;
     }
     if (entry.type === "tool") {
       const group: ToolEntry[] = [entry];
@@ -2599,12 +2586,15 @@ async function dispatch(
     reportObservation(); return;
   }
   if(action === "toggle-thinking") {
-    const content=document.getElementById(`thinking-body-${args.id}`), toggle=content?.nextElementSibling;
+    const content=document.getElementById(`thinking-body-${args.id}`), toggle=content?.previousElementSibling;
     if(!content || !(toggle instanceof HTMLButtonElement))return;
     const open=toggle.getAttribute("aria-expanded") === "true";
     if(open){detailsOpen.delete(args.id);detailsClosed.add(args.id);}
     else{detailsClosed.delete(args.id);detailsOpen.add(args.id);}
-    content.hidden=open;toggle.setAttribute("aria-expanded",String(!open));reportObservation();return;
+    content.hidden=open;toggle.setAttribute("aria-expanded",String(!open));
+    const label=toggle.querySelector(".thinking-disclosure");
+    if(label)label.textContent=open ? "Show trace" : "Collapse";
+    reportObservation();return;
   }
   if (action === "question-control") return questionAction(args.action);
   if (action === "auto-approve" && driveNavigating)

@@ -590,7 +590,7 @@ function renderStatus() {
   el("status").hidden = inSession();
   // The context used, as a small ring; the numbers wait in its tooltip.
   const c2 = c.percentage == null ? "" : `<span class="ring" style="--usage:${Math.min(100, c.percentage)}%"></span>`;
-  el("composer-model").innerHTML = `${h(state.model.displayName ?? state.model.id) || "Choose a model"}${CHEVRON}`;
+  el("composer-model").innerHTML = `${h(state.model.displayName ?? state.model.id) || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
   el("composer-context").innerHTML = c2;
   el("composer-context").title = c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`;
   el("composer-context").hidden = !inSession() || !c2;
@@ -1184,7 +1184,7 @@ function renderComposer() {
   // The approval chip says how edits and commands are gated; it opens Settings.
   const chip = el("composer-approval");
   chip.classList.toggle("auto", Boolean(state.session?.autoApprove));
-  chip.innerHTML = `${ICON_SHIELD}${state.session?.autoApprove ? (state.planOnly ? "Auto-approve · plan only" : "Auto-approve") : "Ask before edits"}${CHEVRON}`;
+  chip.innerHTML = `${ICON_SHIELD}${state.session?.autoApprove ? (state.planOnly ? "Auto-approve · plan only" : "Auto-approve") : "Ask before edits"}`;
   chip.title = state.session?.autoApprove ? "Edits and commands run without asking this session. Change in Settings." : "Each edit and command asks first. Change in Settings.";
   form.classList.toggle("queued", queued);
   form.classList.toggle("restored", state.restored && !question);
@@ -1219,9 +1219,12 @@ function renderComposer() {
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${k("Enter")} ${asking ? "send instead" : "queue"}</span>` : ""}<span class="stop-word">■ Stop</span>`
     : "send";
-  // In a session the send square is always there (it reads Stop while a
-  // turn runs); the start screen shows it once there is something to send.
-  form.querySelector<HTMLElement>(".send")!.hidden = question ? !draft : state.activeTurnId || session ? false : !draft;
+  // The send mark sits in the box's corner, faint until there is something
+  // to send; while a turn runs it is Stop.
+  const send = form.querySelector<HTMLButtonElement>(".send")!;
+  send.hidden = Boolean(question) && !draft;
+  send.setAttribute("aria-label", state.activeTurnId && !question ? "Stop" : "Send");
+  form.classList.toggle("has-draft", draft);
   form.querySelector<HTMLElement>(".hints")!.hidden = Boolean(state.activeTurnId) || (session && draft);
   (form.querySelector(".send") as HTMLButtonElement).disabled =
     state.connection !== "online" || state.busy || answeringQuestion;

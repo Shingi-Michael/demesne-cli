@@ -80,13 +80,20 @@ void app.whenReady().then(async () => {
       app.setBadgeCount(Number.isInteger(count) && count > 0 && count < 1000 ? count : 0);
       return null;
     }
+    // Settings' text size: an exact level, or none to read the current one.
+    if (method === "desktop-zoom") {
+      const level = Number((args as Record<string, unknown>).zoom);
+      if (ZOOM_LEVELS.includes(level)) setZoom(level);
+      return { zoom };
+    }
     if (method === "desktop-select-project") {
       const selected = await dialog.showOpenDialog(window!, { title: "Open a Demesne project", properties: ["openDirectory"] });
       return selected.canceled ? backend!.request("desktop-bootstrap") : backend!.request("desktop-open-project", { path: selected.filePaths[0] });
     }
     return backend!.request(method, args as Record<string, unknown>);
   });
-  const applyZoom = (step: number) => { zoom = nextZoom(zoom, step); contents.setZoomFactor(zoom); try { mkdirSync(app.getPath("userData"), { recursive: true }); writeFileSync(zoomPath, JSON.stringify({ zoom, version: ZOOM_VERSION })); } catch (error) { log(String(error)); } };
+  const applyZoom = (step: number) => setZoom(nextZoom(zoom, step));
+  function setZoom(level: number) { zoom = level; contents.setZoomFactor(zoom); try { mkdirSync(app.getPath("userData"), { recursive: true }); writeFileSync(zoomPath, JSON.stringify({ zoom, version: ZOOM_VERSION })); } catch (error) { log(String(error)); } };
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
     { label: "File", submenu: [{ label: "Open project…", accelerator: "CmdOrCtrl+O", click: () => emit("demesne:desktop-action", { action: "open-project" }) }, { label: "Settings…", accelerator: "CmdOrCtrl+,", click: () => emit("demesne:desktop-action", { action: "settings" }) }, { type: "separator" }, { role: process.platform === "darwin" ? "close" : "quit" }] },

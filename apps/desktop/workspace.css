@@ -340,3 +340,34 @@ html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[
 }
 
 .desktop .markdown pre { background: var(--surface); }
+
+/* Composer: one quiet box holding what you type, with a faint send mark in
+   its right corner; the mention, approval, model and context controls sit
+   under it as plain words, not chips. */
+.desktop #composer { position: static; display: flex; flex-direction: column; gap: 6px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.desktop #composer:focus-within { box-shadow: none; }
+.desktop #composer .composer-box { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 11px 50px 11px 16px; border: 1px solid var(--line2); border-radius: 14px; background: var(--surface); box-shadow: 0 5px 24px #00000012; }
+.desktop #composer .composer-box:focus-within { border-color: color-mix(in srgb, var(--acc) 50%, var(--line2)); }
+.desktop #composer.queued .composer-box { border-color: var(--composerQueuedBorder); }
+.desktop #composer.restored .composer-box { border-color: var(--composerRestoredBorder); }
+.desktop #composer.stop-armed .composer-box { border-color: var(--composerStoppedBorder); }
+.desktop #composer textarea { min-height: 22px; padding-right: 0; font-size: 14px; line-height: 22px; }
+.desktop .live-app.start #composer textarea { min-height: 44px; }
+.desktop #composer .send { position: absolute; right: 9px; bottom: 7px; display: grid; place-items: center; width: 30px; height: 30px; margin: 0; padding: 0; border-radius: 8px; background: transparent; color: var(--t4); box-shadow: none; }
+.desktop #composer .send:hover:not(:disabled) { background: var(--surface2); color: var(--t1); }
+.desktop #composer.has-draft .send { color: var(--t1); }
+.desktop #composer .send .ico { width: 17px; height: 17px; stroke-width: 2; }
+.desktop #composer .send > kbd, .desktop #composer .send #send-label, .desktop #composer .send #tokens, .desktop #composer .send .send-stop { display: none; }
+.desktop #composer .send .send-arrow { display: block; }
+.desktop #composer.stopping .send { color: var(--t2); }
+.desktop #composer.stopping .send .send-arrow { display: none; }
+.desktop #composer.stopping .send .send-stop { display: block; width: 14px; height: 14px; fill: currentColor; stroke: none; }
+.desktop #composer .composer-bar { position: static; display: flex; align-items: center; justify-content: flex-start; gap: 2px; padding: 0 6px; }
+.desktop #composer .composer-bar .sp { flex: 1; }
+.desktop #composer .composer-bar .cb, .desktop #composer .composer-bar .cb-box { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border: 0; border-radius: 7px; background: none; font-size: 12.5px; color: var(--t3); }
+.desktop #composer .composer-bar .cb:hover { background: var(--surface2); color: var(--t1); }
+.desktop #composer .composer-bar .cb .ico { width: 15px; height: 15px; }
+.desktop #composer .composer-bar #composer-context:hover { background: none; }
+.desktop #composer .composer-effort { margin-left: 4px; color: var(--t4); }
+.desktop #composer .composer-bar .hints { margin-left: 6px; }
+.desktop .live-app:not(.start) #composer .composer-bar .hints { display: none; }

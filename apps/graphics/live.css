@@ -2588,6 +2588,44 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
   font-size: 14px;
   line-height: 1.55;
 }
+/* Mail from another agent: the ask's place, the accent surface, and the
+   sender on its first line. */
+.live-app:not(.start) .request.mail {
+  background: var(--accentSurface);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.request.mail .text + .mail-from {
+  margin-top: 10px;
+}
+.mail-from {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--secondary);
+  white-space: nowrap;
+}
+.mail-from .mail-mark {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--secondary);
+}
+.mail-address {
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: var(--secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mail-kind {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .request-meta {
   position: absolute;
   right: 4px;

@@ -166,6 +166,8 @@ timeout_ms = 15000
 
 Each MCP server may also supply an `env` table. Tools are named `mcp__SERVER__TOOL` and pass through approval policy. External servers have their own OS access; the example path is illustrative, not a sandbox.
 
+When [Heartbeat](heartbeat.md) runs on the machine, demesne joins it at startup. `[heartbeat]` takes `enabled` (true joins even if the socket is absent at startup, false never joins) and `socket` (the daemon's control socket; default `HEARTBEAT_CONTROL_SOCKET`, else its data directory).
+
 ## Preferences and grants
 
 - `theme`: `auto`, `demesne`, `demesne-light`, `dracula`, `tokyo-night`, `tokyo-night-storm`, `nord`, `gruvbox-dark`, `catppuccin-mocha`, `catppuccin-latte`, `github-light`. This supplies the initial palette. `/theme` persists a live selection in the daemon's `themes.json`; that selection takes precedence on subsequent launches. [`/themefy`](themes.md) creates custom palettes through an interview and adds them to the picker.

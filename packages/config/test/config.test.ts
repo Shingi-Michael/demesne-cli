@@ -262,6 +262,20 @@ timeout_ms = 15000
     expect(loaded.sources["mcp.servers"]).toBe("user");
   });
 
+  test("reads the Heartbeat section", () => {
+    const directory = temporaryDirectory();
+    const path = writeConfig(directory, `
+[heartbeat]
+enabled = true
+socket = "/tmp/hb/control.sock"
+`);
+    const loaded = loadConfig({ env: {}, userConfigPath: path, projectConfigPath: null });
+    expect(loaded.config.heartbeat).toEqual({ enabled: true, socket: "/tmp/hb/control.sock" });
+    expect(loaded.sources["heartbeat.enabled"]).toBe("user");
+    expect(loadConfig({ env: {}, userConfigPath: null, projectConfigPath: null }).config.heartbeat).toBeUndefined();
+    expect(() => loadConfig({ env: {}, userConfigPath: writeConfig(directory, "[heartbeat]\nport = 1\n"), projectConfigPath: null })).toThrow(ConfigError);
+  });
+
   test("rejects malformed MCP servers", () => {
     expect(() => validateConfigDocument({ mcp: { servers: { files: { args: ["x"] } } } }))
       .toThrow(/command/);

@@ -68,6 +68,10 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 <td valign="top"><b>Next prompt</b><br>After each turn the composer suggests what to ask next. Press <b>Tab</b> to use it.</td>
 <td valign="top"><b>Start from the terminal</b><br>Run <code>demesne</code> in a project folder and the desktop window opens on it. <code>demesne prompt</code> runs without a window.</td>
 </tr>
+<tr>
+<td valign="top"><b>Heartbeat</b><br>With <a href="https://github.com/tkamucheka/heartbeat">Heartbeat</a> on the machine, every chat has an address other agents can message, on this machine or a paired one. Mail arrives as a turn, even while the chat is idle. <a href="docs/heartbeat.md">Heartbeat</a></td>
+<td valign="top"></td>
+</tr>
 </table>
 
 **A note on safety.** Commands run as your user, not in a sandbox. When you're the one asking, demesne checks with you before it writes a file or runs a command. Drive's coding turns don't ask, so a mission can run on its own (missions and proposals you Run work in a separate git worktree, never your checkout, unless you add `--here`), but pushing, opening pull requests, releases and package publishing still need your OK. Only use Drive on projects where that's fine. [Security details](SECURITY.md)

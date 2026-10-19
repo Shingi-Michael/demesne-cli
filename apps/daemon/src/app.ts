@@ -61,10 +61,11 @@ import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
+import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
 import { imageGenerationTool } from "./image-generation.ts";
 import { captureWindowTool } from "./window-capture.ts";
 import { workspaceFileChanges, workspaceFileInfo } from "./workspace-file-info.ts";
-import type { AgentConfig, ImageGenerationConfig } from "@demesne/config";
+import type { AgentConfig, HeartbeatConfig, ImageGenerationConfig } from "@demesne/config";
 import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, InferenceSchedulers, type InferenceBoundaryHook } from "./inference-scheduler.ts";
@@ -116,6 +117,8 @@ export function createDaemonApp(options: {
   providerInferenceSlots?: Record<string, number>;
   allowlistPath?: string;
   mcpServers?: Record<string, McpServerConfig>;
+  /// Join Heartbeat, the agent message bus, when its daemon runs here.
+  heartbeat?: HeartbeatConfig;
   images?: ImageGenerationConfig;
   inferenceBoundaryHook?: InferenceBoundaryHook;
   contextPlanner?: ContextPlanner;
@@ -239,6 +242,22 @@ export function createDaemonApp(options: {
       })
     : Promise.resolve();
   const commands=new CommandMonitor(store);
+  const heartbeatClient = new HeartbeatClient(options.heartbeat?.socket ?? heartbeatSocketPath());
+  const heartbeat = heartbeatEnabled(options.heartbeat, heartbeatClient) ? new HeartbeatBridge({
+    client: heartbeatClient,
+    startTurn: (sessionId, content) => {
+      // Mail runs like a prompt typed here: reads are free, the rest asks.
+      const { turn } = store.createTurn(sessionId, content, "ask");
+      queueTurn(turn, snapshotTurnInference(processor, undefined));
+    },
+    waitForIdle: (sessionId) => new Promise((resolve) => {
+      const active = () => store.getSession(sessionId)?.turns.some((turn) => turn.status === "queued" || turn.status === "running") ?? false;
+      if (!active()) return resolve();
+      const unsubscribe = hub.subscribe(sessionId, () => { if (!active()) { unsubscribe(); resolve(); } });
+    }),
+    log: (message) => console.warn(message),
+  }) : null;
+  if (heartbeat) tools.register(heartbeatTool(heartbeat));
   const engine = new AgentEngine(
     store,
     tools,
@@ -257,6 +276,7 @@ export function createDaemonApp(options: {
       inferenceFor: (model, thinkingEnabled) => snapshotTurnInference(processor, thinkingEnabled, { model }),
       subagentModels: () => subagentModels(),
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
+      ...(heartbeat ? { sessionContext: (sessionId: string) => heartbeat.context(sessionId) } : {}),
       ...options.agent,
     },
   );
@@ -284,6 +304,10 @@ export function createDaemonApp(options: {
 
   async function runTurn(turn: Turn, inference: TurnInference, signal: AbortSignal): Promise<void> {
     try {
+      // The chat's Heartbeat address, claimed before its first model request
+      // so the model is told it; a slow daemon never holds the turn.
+      const workspace = heartbeat && turn.kind !== "compaction" ? store.getSession(turn.sessionId)?.workspace?.root : undefined;
+      if (workspace) await Promise.race([heartbeat!.attach(turn.sessionId, workspace), new Promise((resolve) => setTimeout(resolve, 2_000))]);
       if (turn.kind === "compaction") await compactor.run(turn.id, inference, signal);
       else await engine.run(turn.id, inference, signal);
     } catch (error) {
@@ -692,6 +716,7 @@ export function createDaemonApp(options: {
           const session = store.getSession(id);
           if (!session) { response.skipped.push({ id, reason: "not found" }); continue; }
           if (session.turns.some((turn) => turn.status === "queued" || turn.status === "running")) { response.skipped.push({ id, reason: "a turn is running" }); continue; }
+          heartbeat?.detach(id);
           store.deleteSession(id);
           rmSync(join(dirname(options.databasePath), "session-tools", `${id}.json`), { force: true });
           response.deleted.push(id);
@@ -729,6 +754,7 @@ export function createDaemonApp(options: {
 
       if (request.method === "DELETE" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {
         const { session, event } = store.archiveSession(path[2]!);
+        heartbeat?.detach(session.id);
         const response: ArchiveSessionResponse = { session, eventId: event.eventId };
         return json(response);
       }
@@ -1089,6 +1115,7 @@ export function createDaemonApp(options: {
       await Promise.allSettled(activeDriveDecisions);
       await mcpReady.catch(() => undefined);
       mcp.stop();
+      heartbeat?.stop();
       await commands.close();
       backgroundProcesses.shutdownAll();
       store.close();

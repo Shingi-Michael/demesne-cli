@@ -883,6 +883,8 @@ function isQualitativeWorkspaceOverview(request: string): boolean {
 /// merging or editing pull requests and releases, or publishing a package.
 /// Even with every other tool allowed, these still ask.
 export function publishesOutside(toolName: string, input: unknown): boolean {
+  // Pairing another machine onto Heartbeat is the owner's call, never a turn's.
+  if (toolName === "heartbeat") return isRecord(input) && input.action === "approve";
   if (toolName !== "run_command" || !isRecord(input) || !Array.isArray(input.argv)) return false;
   const argv = input.argv.map(String);
   const program = argv[0]?.split("/").at(-1) ?? "";

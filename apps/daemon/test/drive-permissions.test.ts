@@ -27,6 +27,8 @@ test("publishesOutside: pushes, PR and release changes, and package publishes", 
   expect(run("gh", "api", "repos/o/r")).toBe(false);
   expect(run("bun", "test")).toBe(false);
   expect(publishesOutside("write_file", { path: "push.txt" })).toBe(false);
+  expect(publishesOutside("heartbeat", { action: "approve", node_id: "macbook-air" })).toBe(true);
+  expect(publishesOutside("heartbeat", { action: "send", to: "claude@m/x", text: "hi" })).toBe(false);
 });
 
 test("submit accepts allow alongside ask and deny", () => {

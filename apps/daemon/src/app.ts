@@ -246,10 +246,9 @@ export function createDaemonApp(options: {
   const heartbeat = heartbeatEnabled(options.heartbeat, heartbeatClient) ? new HeartbeatBridge({
     client: heartbeatClient,
     startTurn: (sessionId, content) => {
-      // Mail runs the way this chat last ran: a chat left on Auto answers on
-      // its own; a chat that asks shows the approval row and waits.
-      const last = store.getSession(sessionId)?.turns.filter((turn) => turn.kind !== "compaction").at(-1);
-      const { turn } = store.createTurn(sessionId, content, last?.permissionMode ?? "ask");
+      // Mail runs on Auto, like a Drive mission: nobody is at the window to
+      // approve, and a turn that waits never answers the sender.
+      const { turn } = store.createTurn(sessionId, content, "allow");
       queueTurn(turn, snapshotTurnInference(processor, undefined));
     },
     waitForIdle: (sessionId) => new Promise((resolve) => {

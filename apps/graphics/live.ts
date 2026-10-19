@@ -538,6 +538,44 @@ function undoDelete() {
   return true;
 }
 let statusSignature = "";
+/// What changed since the last commit, from the workspace file list.
+function workingChanges() {
+  const files = state?.files.filter((file) => file.status) ?? [];
+  return { files: files.length, added: files.reduce((sum, file) => sum + (file.additions ?? 0), 0), removed: files.reduce((sum, file) => sum + (file.deletions ?? 0), 0) };
+}
+/// The top bar's branch, with what changed since the last commit. With
+/// changes it is a button: one click asks for a commit and a PR, as a turn.
+function branchChip() {
+  const branch = state?.session?.workspace?.gitBranch;
+  if (!branch) return "";
+  const changes = workingChanges();
+  if (!changes.files) return `<span class="chip">⎇ ${h(branch)}</span>`;
+  const tip = `${changes.files === 1 ? "1 file" : `${changes.files} files`} changed · click to commit and open a PR`;
+  return `<button type="button" class="chip ship" data-action="ship" title="${h(tip)}">⎇ ${h(branch)}<span class="plus">+${changes.added}</span><span class="minus">−${changes.removed}</span></button>`;
+}
+const SHIP_PROMPT = "Commit these changes, push the branch, and open a pull request. If this is the default branch, make a new branch for them first.";
+/// The context ring's breakdown, unfolded above it until Esc or a click away.
+let contextCardOpen = false;
+function renderContextCard() {
+  const card = el("context-card"), ring = el("composer-context");
+  const c = context(), plan = state?.provider?.contextPlan;
+  const open = contextCardOpen && inSession() && c.percentage != null;
+  ring.setAttribute("aria-expanded", String(open));
+  ring.classList.toggle("on", open);
+  card.hidden = !open;
+  if (!open) return;
+  const capacity = c.capacity ?? 0;
+  const parts = plan
+    ? [
+        { name: "Conversation", tokens: plan.estimatedMessageTokens, tone: "a" },
+        { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" },
+        { name: "Kept free for replies", tokens: plan.reserves.totalTokens ?? 0, tone: "c" },
+      ]
+    : [{ name: "Conversation", tokens: c.used ?? 0, tone: "a" }];
+  const free = Math.max(0, capacity - parts.reduce((sum, part) => sum + part.tokens, 0));
+  const share = (tokens: number) => (capacity ? (tokens / capacity) * 100 : 0);
+  card.innerHTML = `<div class="context-head"><span>Context</span><span>${c.percentage}% · ${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span></div><div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div><div class="context-legend">${[...parts, { name: "Free", tokens: free, tone: "free" }].filter((part) => part.tokens > 0).map((part) => `<u class="tone-${part.tone}"></u><span>${part.name}</span><em>${tokensShort(part.tokens)}</em>`).join("")}</div>${btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact")}`;
+}
 function renderStatus() {
   if (!state) return;
   renderSidebar();
@@ -575,6 +613,7 @@ function renderStatus() {
     state.session?.title,
     state.session?.autoApprove,
     state.session?.workspace?.gitBranch,
+    workingChanges(),
     state.runs.length,
     inSession(),
     driveWord(),
@@ -594,13 +633,14 @@ function renderStatus() {
   el("composer-context").innerHTML = c2;
   el("composer-context").title = c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`;
   el("composer-context").hidden = !inSession() || !c2;
+  renderContextCard();
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   // The top bar carries the session's branch and ⋯, which opens the
   // session's own view (rename, compact, history). The sidebar shows what
   // needs you; Drive lives in its footer.
   el("header").innerHTML =
-    `<div class="header-state">${state.session?.workspace?.gitBranch ? `<span class="chip">⎇ ${h(state.session.workspace.gitBranch)}</span>` : ""}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "chip auto-approve") : ""}</div>${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`, true).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+    `<div class="header-state">${branchChip()}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "chip auto-approve") : ""}</div>${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`, true).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
 }
 function totals(run: GraphicsRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -2580,6 +2620,16 @@ async function dispatch(
   args: Record<string, any>,
   target?: HTMLElement,
 ) {
+  if (action === "context-card") {
+    contextCardOpen = !contextCardOpen;
+    renderContextCard();
+    return;
+  }
+  if (contextCardOpen) {
+    contextCardOpen = false;
+    renderContextCard();
+  }
+  if (action === "ship") return submitText(SHIP_PROMPT);
   if (action === "toggle-compacted-history" && state?.checkpoint) {
     const id = state.checkpoint.id;
     if (expandedCompactions.has(id)) expandedCompactions.delete(id); else expandedCompactions.add(id);
@@ -3055,6 +3105,10 @@ document.addEventListener("click", (event) => {
   const target = (event.target as Element).closest<HTMLElement>(
     "[data-action]",
   );
+  if (contextCardOpen && !target && !(event.target as Element).closest("#context-card")) {
+    contextCardOpen = false;
+    renderContextCard();
+  }
   if (target) {
     event.preventDefault();
     void act(() =>
@@ -3176,6 +3230,11 @@ document.addEventListener("keydown", (event) => {
   }
   if (key === "escape") {
     run(() => {
+      if (contextCardOpen) {
+        contextCardOpen = false;
+        renderContextCard();
+        return;
+      }
       if (overlay) {
         overlay = null;
         renderOverlay();

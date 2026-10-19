@@ -46,6 +46,15 @@ export interface ImageGenerationConfig {
   requestTimeoutMs?: number;
 }
 
+/// Heartbeat, the per-machine daemon that lets agents message each other.
+/// `enabled` unset means: join when its control socket exists at start.
+export interface HeartbeatConfig {
+  enabled?: boolean;
+  /// Path of the daemon's control socket; default: HEARTBEAT_CONTROL_SOCKET,
+  /// else <HEARTBEAT_DATA_DIR or ~/.local/state/heartbeat>/control.sock.
+  socket?: string;
+}
+
 export interface DaemonConfig {
   autoStart: AutoStartPolicy;
   host?: string;
@@ -100,6 +109,7 @@ export interface DemesneConfig {
   notifications: NotificationConfig;
   ui: UiConfig;
   mcp: { servers: Record<string, McpServerConfig> };
+  heartbeat?: HeartbeatConfig;
 }
 
 export interface LoadedConfig {
@@ -234,7 +244,7 @@ function applyDocument(
   const path = source === "user" ? "user config" : "project config";
   assertKnownKeys(document, [
     "server", "data_dir", "theme", "inference_slots",
-    "provider", "additional_providers", "images", "daemon", "agent", "drive", "permissions", "notifications", "ui", "mcp",
+    "provider", "additional_providers", "images", "daemon", "agent", "drive", "permissions", "notifications", "ui", "mcp", "heartbeat",
   ], path);
 
   assign(config, "server", document.server, source, sources, (value, key) => {
@@ -317,6 +327,14 @@ function applyDocument(
     assignInto(target, "model", images.model, source, sources, "images.model", optionalString);
     assignInto(target, "apiKey", images.api_key, source, sources, "images.apiKey", optionalString);
     assignInto(target, "requestTimeoutMs", images.request_timeout_ms, source, sources, "images.requestTimeoutMs", optionalPositiveInteger);
+  }
+
+  if (document.heartbeat !== undefined) {
+    const heartbeat = objectValue(document.heartbeat, "heartbeat");
+    assertKnownKeys(heartbeat, ["enabled", "socket"], `${path}.heartbeat`);
+    const target = config.heartbeat ??= {};
+    assignInto(target, "enabled", heartbeat.enabled, source, sources, "heartbeat.enabled", optionalBoolean);
+    assignInto(target, "socket", heartbeat.socket, source, sources, "heartbeat.socket", optionalString);
   }
 
   if (document.daemon !== undefined) {

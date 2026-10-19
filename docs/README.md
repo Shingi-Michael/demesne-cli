@@ -16,6 +16,7 @@ These guides describe the current implementation, including direct ChatGPT infer
 | [Questions and interviews](questions.md) | Typed composer answers, adaptive follow-ups, saved drafts, pause and recovery |
 | [Themefy and themes](themes.md) | LLM color interviews, instant palettes, saved themes, contrast validation and undo |
 | [Image preview](artifact-preview-plan.md) | Supported producers, formats, controls, current limitations |
+| [Heartbeat](heartbeat.md) | Messages between agents on this and paired machines: addresses, mail as turns, the tool |
 | [Troubleshooting](troubleshooting.md) | Startup, old builds, opening the desktop window, sign-in, stalled work |
 
 ## Build and maintain

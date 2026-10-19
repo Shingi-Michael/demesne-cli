@@ -376,6 +376,11 @@ export const heartbeatDefinition: ProviderToolDefinition = {
   },
 };
 
+/// The daemon's grammar spells the performatives like this; "REQUEST#_" is a
+/// grammar error, so the default send used to fail at the socket.
+const COMPACT_CODES: Record<Performative, string> = {
+  request: "REQ", offer: "OFFER", agree: "AGREE", refuse: "REFUSE", inform: "INFORM", done: "DONE", fail: "FAIL", cancel: "CANCEL", lease: "LEASE", release: "RELEASE",
+};
 function compactLine(input: Record<string, unknown>): { line: string; to: string; performative: Performative } {
   const to = typeof input.to === "string" ? input.to.trim() : "";
   if (!/^[a-zA-Z0-9_.-]+(@[a-zA-Z0-9_.-]+)?(\/[a-zA-Z0-9_.-]+)?$/.test(to)) throw new Error("send needs to: an address like provider@node/label");
@@ -384,7 +389,7 @@ function compactLine(input: Record<string, unknown>): { line: string; to: string
   const replyTo = typeof input.reply_to === "string" ? input.reply_to.trim() : "";
   if (replyTo && !/^[a-zA-Z0-9_-]+$/.test(replyTo)) throw new Error("reply_to must be a message id");
   const text = typeof input.text === "string" ? input.text.replace(/"/g, "").replace(/\s+/g, " ").trim() : "";
-  const line = `${performative.toUpperCase()}#_${replyTo ? ` ^${replyTo}` : ""} →${to}${text ? ` why:"${text}"` : ""}`;
+  const line = `${COMPACT_CODES[performative]}#_${replyTo ? ` ^${replyTo}` : ""} →${to}${text ? ` why:"${text}"` : ""}`;
   return { line, to, performative };
 }
 

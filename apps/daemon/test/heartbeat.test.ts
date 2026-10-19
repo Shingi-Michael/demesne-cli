@@ -264,6 +264,9 @@ describe("heartbeat tool", () => {
     expect(sent).toMatchObject({ id: "1", result: "sent" });
     const say = daemon.requests.find((request) => request.command === "say")!;
     expect(say.line).toBe("INFORM#_ ^41 →claude@testnode/heartbeat-k3x9a why:\"tests pass now\"");
+    // The default performative is a request, spelled REQ in the daemon's grammar.
+    await tool.execute({ action: "send", to: "claude@testnode/heartbeat-k3x9a", text: "status?" }, context);
+    expect(daemon.requests.findLast((request) => request.command === "say")!.line).toBe("REQ#_ →claude@testnode/heartbeat-k3x9a why:\"status?\"");
     expect(say.as).toMatch(/^demesne@testnode\/demesne-cli-[a-z2-7]{5}$/);
     expect(say.owner).toBe(false);
 

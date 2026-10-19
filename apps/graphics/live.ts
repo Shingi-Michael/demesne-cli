@@ -1,6 +1,7 @@
 import { compactedConversation } from "./compacted-conversation.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
 import { splitNextPrompt } from "../../packages/protocol/src/next-prompt.ts";
+import { parseMailTurn } from "../../packages/protocol/src/heartbeat-mail.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "../cli/src/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "../cli/src/workbench/drive-timeline.ts";
@@ -180,7 +181,9 @@ const verb = (tool: ToolEntry) =>
     git_history: "History",
     session_tools: "Tool",
     subagent: "Agent",
-  })[tool.name] ?? tool.name.replaceAll("_", " ");
+  })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
+/// The heartbeat tool's actions, as the step rows name them.
+const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
 const tools = (run: GraphicsRun) =>
   run.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
 let state: Snapshot | null = null,
@@ -710,6 +713,7 @@ const STEP_ICONS: Record<string, string> = {
   agent: '<path d="M12 3v2"/><path d="m5.6 5.6 1.4 1.4"/><path d="M3 12h2"/><path d="m18.4 5.6-1.4 1.4"/><path d="M21 12h-2"/><circle cx="12" cy="13" r="5"/><path d="M12 18v3"/>',
   ask: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
   other: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
 };
 const stepIcon = (tool: ToolEntry) => {
   const kind = tool.name === "run_command" ? "run"
@@ -718,6 +722,7 @@ const stepIcon = (tool: ToolEntry) => {
     : tool.name === "list_files" ? "list"
     : tool.name === "subagent" ? "agent"
     : tool.name === "ask_user" ? "ask"
+    : tool.name === "heartbeat" ? "mail"
     : ["read_file", "read_files", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
     : "other";
   return `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${STEP_ICONS[kind]}</svg>`;
@@ -898,6 +903,7 @@ function runHTML(run: GraphicsRun, index: number) {
         ? btn("toggle-steps", fold ? (steps ? `${steps} step${steps === 1 ? "" : "s"}` : "thinking") : "hide steps", { id: run.id }, "receipt-steps")
         : "",
       receipt?.mode === "Plan" || run.planOnly ? "plan" : "",
+      mailReply(run),
     ].filter(Boolean);
     const answered = run.entries.some((e) => e.type === "assistant");
     const actions = [
@@ -905,7 +911,7 @@ function runHTML(run: GraphicsRun, index: number) {
       files && !state!.activeTurnId ? btn("undo-turn", `${ICON_UNDO}Undo changes`, { id: run.id }, "receipt-action") : "",
     ].filter(Boolean).join("");
     // A turn that only answered needs no receipt: its time is on the ask.
-    const bare = run.status === "completed" && !files && !checks.length && !steps && !thought && !(receipt?.mode === "Plan" || run.planOnly) && !model;
+    const bare = run.status === "completed" && !files && !checks.length && !steps && !thought && !(receipt?.mode === "Plan" || run.planOnly) && !model && !mailReply(run);
     footer = bare ? "" : `<div class="turn-receipt">${parts.map((part) => `<span>${part}</span>`).join("")}${actions ? `<span class="receipt-actions">${actions}</span>` : ""}</div>`;
   }
   const latestTool = items.findLast(
@@ -931,7 +937,29 @@ function runHTML(run: GraphicsRun, index: number) {
   const answered = run.entries.some((e) => e.type === "assistant");
   const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}</span>`;
   const queued = live && state!.queue.trim() ? `<div class="next-line"><span class="next-label">NEXT</span><span class="next-text">${h(state!.queue.trim())}</span>${btn("queue-action", "edit", { action: "edit" })}${btn("queue-action", "send now", { action: "now" })}${btn("queue-action", "×", { action: "drop" }, "next-drop")}</div>` : "";
-  return `<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div><div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${activity}</div>${queued}`;
+  const request = mailRequest(run) ?? `<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+  return `${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${activity}</div>${queued}`;
+}
+const ICON_MAIL = '<svg class="ico mail-mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
+/// Mail from another agent sits where a typed ask sits, since it is one, but
+/// its bubble takes the accent surface and opens with who sent it and what
+/// kind of message it is, so a scroll never mistakes it for your words. It
+/// has no edit or retry: the words are the sender's.
+function mailRequest(run: GraphicsRun): string | null {
+  const mail = parseMailTurn(run.content);
+  if (!mail) return null;
+  const senders = mail.messages.map((message) => message.from.replace(/^[^@]*@/, "")).filter(Boolean);
+  const lines = mail.messages.map((message) =>
+    `<span class="mail-from">${ICON_MAIL}<code class="mail-address" title="${h(message.from || "unknown sender")}">${h(message.from || "unknown sender")}</code><span class="mail-kind" title="${message.authority === "owner" ? "relayed by your own agent" : "from another agent"}">${h(message.performative)}${message.authority === "owner" ? " · owner" : ""}</span></span><span class="text">${h(message.text)}</span>`);
+  for (const pair of mail.pairRequests) lines.push(`<span class="mail-from">${ICON_MAIL}<code class="mail-address">${h(pair.requester)}</code><span class="mail-kind">pairing</span></span><span class="text">${h(pair.node)} asks to pair with this machine.</span>`);
+  return `<div class="request mail" title="Heartbeat mail to ${h(mail.address)}">${lines.join("")}<span class="request-meta"><time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+}
+/// "replied to claude@macbook": where a mail turn's answer went, for its
+/// receipt. A send that answers nobody in particular still counts.
+function mailReply(run: GraphicsRun): string {
+  const sent = run.entries.filter((entry): entry is ToolEntry => entry.type === "tool" && entry.name === "heartbeat" && entry.input.action === "send" && entry.state === "done");
+  const to = [...new Set(sent.map((tool) => String(tool.input.to ?? "").replace(/\/[^/]*$/, "")).filter(Boolean))];
+  return to.length ? `replied to <span class="mail-address">${h(to.join(", "))}</span>` : "";
 }
 /** Whole seconds since a moment, for clocks that tick in place. */
 const elapsed = (since: string) => {

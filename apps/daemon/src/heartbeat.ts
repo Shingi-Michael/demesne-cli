@@ -1,6 +1,7 @@
 import type { ProviderToolDefinition } from "@demesne/providers";
 import type { HeartbeatConfig } from "@demesne/config";
 import { InvalidStateError } from "@demesne/storage";
+import { formatMail as formatMailTurn } from "@demesne/protocol";
 import type { AgentTool } from "./tools.ts";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -166,22 +167,11 @@ export function splitAddress(address: string): { provider: string; node: string;
   return match ? { provider: match[1]!, node: match[2]!, label: match[3]! } : null;
 }
 
-const MAIL_HEADER = "Heartbeat mail for ";
-
-/// Mail as the text of a turn: one line per message in the compact form the
-/// model already knows, with the daemon's English under it.
+/// Mail as the text of a turn, in the shared format the window reads back.
 export function formatMail(address: string, messages: Envelope[], pairRequests: PairRequest[]): string {
-  const lines = [`${MAIL_HEADER}${address}:`];
-  for (const message of messages) lines.push(`[${message.authority}] ${message.compact}\n  = ${message.english}`);
-  for (const request of pairRequests) {
-    lines.push(`[pair-request] ${request.requester} on ${request.node_id} asks to connect, with ${request.capabilities.join(", ")}${request.note ? ` (note: ${request.note})` : ""}. `
-      + `Ask your owner one yes-or-no question; on yes use the heartbeat tool's approve action for ${request.node_id}, on no its deny action.`);
-  }
-  return lines.join("\n");
+  return formatMailTurn(address, messages, pairRequests);
 }
-
-/// Whether a turn's text is mail delivered by this bridge.
-export function isMailTurn(content: string): boolean { return content.startsWith(MAIL_HEADER); }
+export { isMailTurn } from "@demesne/protocol";
 
 export interface HeartbeatBridgeOptions {
   client: HeartbeatClient;

@@ -296,7 +296,7 @@ describe("daemon with Heartbeat", () => {
     const server = Bun.serve({ port: 0, fetch: app.fetch });
     try {
       const created = await (await fetch(new URL("/v1/sessions", server.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "hb", workspacePath: workspace, trustWorkspace: true }) })).json() as CreateSessionResponse;
-      const submitted = await (await fetch(new URL(`/v1/sessions/${created.session.id}/turns`, server.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "hello", permissionMode: "allow" }) })).json() as SubmitTurnResponse;
+      const submitted = await (await fetch(new URL(`/v1/sessions/${created.session.id}/turns`, server.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "hello", permissionMode: "ask" }) })).json() as SubmitTurnResponse;
       await waitForTurn(server.url, created.session.id, submitted.eventId);
       const address = [...daemon.listeners.keys()][0];
       expect(address).toMatch(/^demesne@testnode\/demesne-cli-[a-z2-7]{5}$/);
@@ -304,7 +304,7 @@ describe("daemon with Heartbeat", () => {
       daemon.send(address!, "claude@testnode/heartbeat-k3x9a", "what changed today", "peer");
       const turns = await pollTurns(server.url, created.session.id, (list) => list.some((turn) => isMailTurn(turn.content) && turn.status === "completed"));
       const mail = turns.find((turn) => isMailTurn(turn.content))!;
-      expect(mail.permissionMode).toBe("allow"); // follows the chat's last turn
+      expect(mail.permissionMode).toBe("allow"); // mail runs on Auto whatever the chat's mode
       expect(mail.content).toContain("[peer] REQ#");
       expect(mail.content).toContain("what changed today");
       expect(mail.responseText).toContain("Request accepted: Heartbeat mail for");

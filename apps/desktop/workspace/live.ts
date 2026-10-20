@@ -7,6 +7,7 @@ import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
 import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
+import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun } from "./session-model.ts";
 import type {
@@ -236,6 +237,12 @@ let drivePageOpen = false, drivePageSignature = "";
 const stepsOpen = new Set<string>();
 /// Steps whose diff or output is unfolded in place, keyed run:tool.
 const stepOpen = new Set<string>();
+/// Review in the turn: the receipt's "N files changed" unfolds the turn's
+/// diffs under the answer. A note on a line rides with the next message.
+interface ReviewFile { path: string; rows: ReturnType<typeof codeDiff>["rows"]; added: number; removed: number; created: boolean }
+const reviewOpen = new Set<string>(), reviewFiles = new Map<string, ReviewFile[] | { error: string } | "loading">();
+const diffNotes = new Map<string, DiffNote>();
+let noteEditing: { runId: string; path: string; side: "old" | "new"; line: number } | null = null, noteDraft = "", reviewVersion = 0;
 /// The turn whose changes the undo confirmation reverts.
 let undoTurnId: string | null = null;
 const expandedCompactions = new Set<string>();
@@ -910,7 +917,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     const parts = [
       error ? `<span class="${run.status === "failed" ? "danger" : ""}">${h(error)}</span>` : "",
       [model ? h(model) : "", receipt?.durationMs != null ? duration(receipt.durationMs) : "", speed].filter(Boolean).join(" · "),
-      files ? `<span class="receipt-files" title="${h(paths.join(", "))}">${files === 1 ? "1 file changed" : `${files} files changed`} ${counts(total)}</span>` : "",
+      files ? btn("review-turn", `${files === 1 ? "1 file changed" : `${files} files changed`} ${counts(total)}${CHEVRON}`, { id: run.id }, `receipt-files${reviewOpen.has(run.id) ? " open" : ""}`).replace("<button ", `<button aria-expanded="${reviewOpen.has(run.id)}" title="${h(paths.join("\n"))}" `) : "",
       checks.length ? `<span class="receipt-checks ${passed ? "success" : failed ? "danger" : ""}" title="${h(checks.map((check) => check.detail ?? check.name).join("\n"))}">${passed ? "checks passed" : failed ? "checks failed" : stopped ? "checks stopped" : "checks unknown"}</span>` : "",
       run.status === "completed" && (steps || thought)
         ? btn("toggle-steps", fold ? (steps ? `${steps} step${steps === 1 ? "" : "s"}` : "thinking") : "hide steps", { id: run.id }, "receipt-steps")
@@ -951,7 +958,74 @@ function runHTML(run: WorkspaceRun, index: number) {
   const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}</span>`;
   const queued = live && state!.queue.trim() ? `<div class="next-line"><span class="next-label">NEXT</span><span class="next-text">${h(state!.queue.trim())}</span>${btn("queue-action", "edit", { action: "edit" })}${btn("queue-action", "send now", { action: "now" })}${btn("queue-action", "×", { action: "drop" }, "next-drop")}</div>` : "";
   const request = mailRequest(run) ?? `<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
-  return `${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${activity}</div>${queued}`;
+  const review = reviewOpen.has(run.id) && !live ? reviewHTML(run.id) : "";
+  return `${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}${activity}</div>${queued}`;
+}
+/// The turn's changed files under its receipt: a header line per file, its
+/// changes with a little context, and the notes left on its lines.
+function reviewHTML(runId: string) {
+  const files = reviewFiles.get(runId);
+  if (!files || files === "loading") return '<div class="turn-review"><p class="rv-status">Loading the changes…</p></div>';
+  if (!Array.isArray(files)) return `<div class="turn-review"><p class="rv-status danger">Couldn’t load the changes: ${h(files.error)}</p></div>`;
+  if (!files.length) return '<div class="turn-review"><p class="rv-status">These changes are no longer in the files.</p></div>';
+  const blocks = files.map((file) => {
+    const lines = reviewRows(file.rows).map((row) => {
+      if (row.kind === "gap") return `<div class="rv-gap">${h(row.text)}</div>`;
+      const side = row.kind === "removed" ? "old" : "new", line = (side === "old" ? row.old : row.next) ?? 0;
+      const key = noteKey(file.path, side, line), note = diffNotes.get(key);
+      const editing = noteEditing?.runId === runId && noteKey(noteEditing.path, noteEditing.side, noteEditing.line) === key;
+      const args = { id: runId, path: file.path, side, line };
+      const mark = row.kind === "added" ? "+" : row.kind === "removed" ? "−" : "";
+      const cell = btn("note-line", `<span class="no">${line}</span><span class="mk">${mark}</span><span class="code">${h(row.text) || " "}</span>`, args, `rv-l ${row.kind === "added" ? "ad" : row.kind === "removed" ? "rm" : ""}${note ? " noted" : ""}`).replace("<button ", `<button title="Leave a note on line ${line}" `);
+      const noteRow = editing
+        ? `<div class="rv-note editing"><input id="rv-note-input" value="${h(noteDraft)}" aria-label="Note on line ${line}" placeholder="Note on line ${line} · Enter to keep, Esc to drop" autocomplete="off" spellcheck="true"></div>`
+        : note ? btn("note-line", h(note.text), args, "rv-note").replace("<button ", '<button title="Edit this note" ') : "";
+      return cell + noteRow;
+    }).join("");
+    return `<div class="rv-file"><div class="rv-head"><code>${h(file.path)}</code>${file.added ? `<span class="add">+${file.added}</span>` : ""}${file.removed ? `<span class="del">−${file.removed}</span>` : ""}${file.created ? '<span class="rv-new">new</span>' : ""}</div><div class="rv-diff">${lines || '<div class="rv-gap">no change</div>'}</div></div>`;
+  });
+  return `<div class="turn-review">${blocks.join("")}</div>`;
+}
+async function toggleReview(runId: string) {
+  if (reviewOpen.delete(runId)) {
+    if (noteEditing?.runId === runId) noteEditing = null;
+    reviewVersion++;
+    return renderConversation();
+  }
+  reviewOpen.add(runId);
+  reviewFiles.set(runId, "loading");
+  reviewVersion++;
+  renderConversation();
+  try {
+    const review = await api("changes", { scope: "turn", turnId: runId }) as { files: { path: string; rows: ReviewFile["rows"]; added: number; removed: number; beforeExists?: boolean }[] };
+    reviewFiles.set(runId, review.files.map((file) => ({ path: file.path, rows: file.rows, added: file.added, removed: file.removed, created: file.beforeExists === false })));
+  } catch (error) {
+    reviewFiles.set(runId, { error: error instanceof Error ? error.message : String(error) });
+  }
+  reviewVersion++;
+  renderConversation();
+}
+function editNote(runId: string, path: string, side: "old" | "new", line: number) {
+  if (noteEditing) saveNote();
+  noteEditing = { runId, path, side, line };
+  noteDraft = diffNotes.get(noteKey(path, side, line))?.text ?? "";
+  reviewVersion++;
+  renderConversation();
+  const input = document.getElementById("rv-note-input") as HTMLInputElement | null;
+  input?.focus({ preventScroll: true });
+  input?.setSelectionRange(input.value.length, input.value.length);
+}
+/// Enter or leaving the field keeps the note; an empty note removes it.
+function saveNote(keep = true) {
+  if (!noteEditing) return;
+  const { path, side, line } = noteEditing, key = noteKey(path, side, line);
+  noteEditing = null;
+  if (keep && noteDraft.trim()) diffNotes.set(key, { path, side, line, text: noteDraft.trim() });
+  else if (keep) diffNotes.delete(key);
+  noteDraft = "";
+  reviewVersion++;
+  renderConversation();
+  renderComposer();
 }
 const ICON_MAIL = '<svg class="ico mail-mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
 /// Mail from another agent sits where a typed ask sits, since it is one, but
@@ -1085,6 +1159,7 @@ function renderConversation() {
       state.questions.length > 0,
       active(run) ? state.queue : "",
       state.activeTurnId,
+      reviewOpen.has(run.id) ? reviewVersion : 0,
     ]);
     let saved = runNodes.get(run.id);
     if (!saved) {
@@ -1248,6 +1323,7 @@ function renderComposer() {
     state.planOnly,
     answeringQuestion,
     driveSuggestion(),
+    diffNotes.size,
   ]);
   if (
     signature === composerSignature &&
@@ -1295,7 +1371,7 @@ function renderComposer() {
   // / and @, and a draft shows ↵ send instead. The start screen keeps / and
   // @ and adds ↵ once there is something to send.
   const armed = Date.now() < stopArmed;
-  const draft = Boolean(editor.value.trim()), session = inSession();
+  const draft = Boolean(editor.value.trim()) || diffNotes.size > 0, session = inSession();
   // While a turn runs the send button is Stop; Enter queues what you type.
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${k("Enter")} ${asking ? "send instead" : "queue"}</span>` : ""}<span class="stop-word">■ Stop</span>`
@@ -1319,7 +1395,8 @@ function renderComposer() {
   const mentions = [...editor.value.matchAll(/(?:^|\s)@([^\s]+)/g)]
     .map((match) => match[1]!)
     .filter((path) => state!.files.some((file) => file.path === path));
-  el("mention-chips").innerHTML = [...new Set(mentions)]
+  const notes = diffNotes.size && !question ? btn("notes-clear", `${diffNotes.size} note${diffNotes.size === 1 ? "" : "s"} on the changes ×`, {}, "chip notes-chip").replace("<button ", '<button title="Sent with your next message. Click to drop them." ') : "";
+  el("mention-chips").innerHTML = notes + [...new Set(mentions)]
     .map((path) => btn("remove-mention", `${h(path)} ×`, { path }, "chip"))
     .join("");
 }
@@ -2524,7 +2601,16 @@ async function chooseCompletion(index = completionIndex) {
   }
 }
 async function submitText(value = editor.value) {
-  if (!state || !value.trim()) return;
+  if (!state) return;
+  // Notes on the diff open the next message; a message may be only notes.
+  const notes = !pendingQuestion() && !value.startsWith("/") ? notesMessage([...diffNotes.values()]) : "";
+  if (!value.trim() && !notes) return;
+  if (notes) {
+    value = value.trim() ? `${notes}\n\n${value}` : notes;
+    diffNotes.clear();
+    reviewVersion++;
+    renderConversation();
+  }
   if (pendingQuestion()) return answerQuestion(value);
   if (state.activeTurnId) {
     // Enter while a turn runs queues the message as the next one.
@@ -2878,6 +2964,14 @@ async function dispatch(
     renderApproval();
     return;
   }
+  if (action === "review-turn") return toggleReview(String(args.id));
+  if (action === "note-line") return editNote(String(args.id), String(args.path), args.side === "old" ? "old" : "new", Number(args.line));
+  if (action === "notes-clear") {
+    diffNotes.clear();
+    reviewVersion++;
+    renderConversation();
+    return renderComposer();
+  }
   if (action === "toggle-steps") {
     stepsOpen.has(args.id) ? stepsOpen.delete(args.id) : stepsOpen.add(args.id);
     follow = false;
@@ -3099,6 +3193,7 @@ function renderState(next: Snapshot) {
   state = next;
   if (lastSession !== next.session?.id) {
     lastSession = next.session?.id ?? "";
+    reviewOpen.clear(); reviewFiles.clear(); diffNotes.clear(); noteEditing = null;
     follow = true;
     overlay = null;
     driveShown = ideasShown = false;
@@ -3222,8 +3317,20 @@ document.addEventListener("click", (event) => {
     void act(() => api("open-link", { url: link.href }));
   }
 });
+// Clicking another line while writing a note moves straight to it: the
+// field keeps focus until the click lands, so the redraw can't swallow it.
+document.addEventListener("mousedown", (event) => {
+  if (noteEditing && (event.target as Element).closest?.(".rv-l, .rv-note:not(.editing)")) event.preventDefault();
+});
+document.addEventListener("focusout", (event) => {
+  if ((event.target as HTMLElement).id === "rv-note-input" && noteEditing) saveNote();
+});
 document.addEventListener("input", (event) => {
   const input = event.target as HTMLInputElement;
+  if (input.id === "rv-note-input") {
+    noteDraft = input.value;
+    return;
+  }
   if (input.id === "drive-mission") {
     driveMissionDraft = input.value;
     // Start lights up as soon as there is a goal; the page itself doesn't redraw.
@@ -3330,6 +3437,12 @@ document.addEventListener("keydown", (event) => {
   };
   if (state.setup) {
     handleSetupKey(event);
+    return;
+  }
+  if ((event.target as HTMLElement).id === "rv-note-input" && (key === "enter" || key === "escape")) {
+    event.preventDefault();
+    saveNote(key === "enter");
+    editor.focus({ preventScroll: true });
     return;
   }
   if (key === "escape") {

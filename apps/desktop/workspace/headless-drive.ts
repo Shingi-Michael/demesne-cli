@@ -1,6 +1,6 @@
 import type { DriveFix } from "@demesne/protocol";
-import { missionReceipt, type DriveReceipt } from "../../cli/src/drive-receipt.ts";
-import type { CliSettings } from "../../cli/src/cli-config.ts";
+import { missionReceipt, type DriveReceipt } from "@demesne/drive/drive-receipt.ts";
+import type { CliSettings } from "@demesne/setup/cli-config.ts";
 import { WorkspaceHost, type WorkspaceHostOptions } from "./host.ts";
 
 /// `demesne drive "<mission>"`: a Drive mission with no window, for CI and

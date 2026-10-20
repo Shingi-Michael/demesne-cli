@@ -6,7 +6,7 @@ import type {
   DriveInspection,
   DriveObservation,
 } from "@demesne/protocol";
-import type { ToolEntry, WorkbenchEntry } from "../../cli/src/workbench/entries.ts";
+import type { ToolEntry, WorkbenchEntry } from "@demesne/workbench/entries.ts";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun } from "./session-model.ts";
 

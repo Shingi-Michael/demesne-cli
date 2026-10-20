@@ -302,7 +302,7 @@ test.each([false, true])(
 test.each(["keep_working", "redirect", "stale_redirect"] as const)(
   "controller checkpoint performs one fresh %s review through the real API",
   async (verdict) => {
-    const { AgentDrive } = await import("../../cli/src/agent-drive.ts");
+    const { AgentDrive } = await import("@demesne/drive/agent-drive.ts");
     let issued = false,
       drive: InstanceType<typeof AgentDrive> | undefined,
       eventsTask: Promise<void> | undefined;

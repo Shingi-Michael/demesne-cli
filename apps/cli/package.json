@@ -8,6 +8,8 @@
     "@demesne/config": "workspace:*",
     "@demesne/protocol": "workspace:*",
     "@demesne/providers": "workspace:*",
-    "@demesne/chatgpt-auth": "workspace:*"
+    "@demesne/chatgpt-auth": "workspace:*",
+    "@demesne/setup": "workspace:*",
+    "@demesne/workbench": "workspace:*"
   }
 }

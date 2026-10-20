@@ -1,6 +1,6 @@
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun } from "./session-model.ts";
-import type { WorkbenchEntry } from "../../cli/src/workbench/entries.ts";
+import type { WorkbenchEntry } from "@demesne/workbench/entries.ts";
 
 export type WorkspaceSnapshot = ReturnType<WorkspaceHost["snapshot"]>;
 type Fields = { set: Record<string, unknown>; unset: string[] };

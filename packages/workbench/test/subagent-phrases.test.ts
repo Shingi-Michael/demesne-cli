@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { SUBAGENT_PHRASE_MS, subagentPhrase, subagentStatus } from "../src/workbench/subagent-phrases.ts";
+import { SUBAGENT_PHRASE_MS, subagentPhrase, subagentStatus } from "../src/subagent-phrases.ts";
 
 test("phrases mix bad intentions and gremlin energy with pokes at the sub-agent's model", () => {
   const cycle = (model: string) => new Set(Array.from({ length: 40 }, (_, tick) => subagentPhrase(0, tick * SUBAGENT_PHRASE_MS, model)));

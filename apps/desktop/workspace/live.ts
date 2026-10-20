@@ -3,15 +3,15 @@ import { markdown, MarkdownView } from "./markdown.ts";
 import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
-import { codeDiff } from "../../cli/src/workbench/change-diff.ts";
-import { driveSince, driveStepLine, driveTaskList } from "../../cli/src/workbench/drive-timeline.ts";
-import { subagentPhrase } from "../../cli/src/workbench/subagent-phrases.ts";
+import { codeDiff } from "@demesne/workbench/change-diff.ts";
+import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
+import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun } from "./session-model.ts";
 import type {
   ToolEntry,
   WorkbenchEntry,
-} from "../../cli/src/workbench/entries.ts";
+} from "@demesne/workbench/entries.ts";
 import type {
   ModelDescriptor,
   ModelScore,

@@ -1,7 +1,7 @@
 import { ChatGPTAuth } from "@demesne/chatgpt-auth";
 import { loadConfig, updateUserConfig, type ProviderConfig } from "@demesne/config";
-import { configureChatGPT, connectChatGPT } from "../../cli/src/chatgpt-auth.ts";
-import { beginOpenRouterLogin, configureOpenRouter, DEFAULT_OPENROUTER_MODEL, OPENROUTER_URL } from "../../cli/src/openrouter-auth.ts";
+import { configureChatGPT, connectChatGPT } from "@demesne/setup/chatgpt-auth.ts";
+import { beginOpenRouterLogin, configureOpenRouter, DEFAULT_OPENROUTER_MODEL, OPENROUTER_URL } from "@demesne/setup/openrouter-auth.ts";
 
 /// Settings › Providers: each provider with its sign-in state, and signing in
 /// or out of the ones that have accounts (ChatGPT, OpenRouter). Signing out

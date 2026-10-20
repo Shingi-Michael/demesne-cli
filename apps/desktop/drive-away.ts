@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { loadCliSettings } from "../cli/src/cli-config.ts";
+import { loadCliSettings } from "@demesne/setup/cli-config.ts";
 import { WorkspaceHost, type WorkspaceHostOptions } from "./workspace/host.ts";
 
 /// Drive keeps working when you close the window. The window's host owns

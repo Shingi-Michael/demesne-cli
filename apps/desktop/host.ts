@@ -3,7 +3,7 @@ import { homedir, userInfo } from "node:os";
 import { execFileSync } from "node:child_process";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { loadCliSettings } from "../cli/src/cli-config.ts";
+import { loadCliSettings } from "@demesne/setup/cli-config.ts";
 import { daemonAddress, WorkspaceHost } from "./workspace/host.ts";
 import { StateEncoder, type WorkspaceSnapshot } from "./workspace/state-wire.ts";
 import { driveJournalPath } from "./workspace/drive-controller.ts";

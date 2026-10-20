@@ -1,4 +1,4 @@
-import { chatGPTAuthForConfig, connectChatGPT } from "../../cli/src/chatgpt-auth.ts";
+import { chatGPTAuthForConfig, connectChatGPT } from "@demesne/setup/chatgpt-auth.ts";
 import { assertProviderUrl } from "@demesne/config";
 import {
   initialWizard,
@@ -11,19 +11,19 @@ import {
   selectedModel,
   type WizardState,
   type WizardEffect,
-} from "../../cli/src/setup-wizard.ts";
+} from "@demesne/setup/setup-wizard.ts";
 import {
   probeTargets,
   probeProvider,
   targetForUrl,
   type ProbeResult,
-} from "../../cli/src/provider-probe.ts";
+} from "@demesne/setup/provider-probe.ts";
 import {
   beginOpenRouterLogin,
   discoverOpenRouter,
   OPENROUTER_URL,
-} from "../../cli/src/openrouter-auth.ts";
-import { writeSetupConfig } from "../../cli/src/setup.ts";
+} from "@demesne/setup/openrouter-auth.ts";
+import { writeSetupConfig } from "@demesne/setup/setup.ts";
 
 export type SetupSnapshot = WizardState & {
   customResult: ProbeResult | null;

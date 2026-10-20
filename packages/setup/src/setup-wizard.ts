@@ -1,7 +1,7 @@
 import type { ChatGPTAccount } from "@demesne/chatgpt-auth";
 import { assertProviderUrl } from "@demesne/config";
 import { formatFooterLine, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, wrapDisplayText, type Painter, type PaletteColor } from "@demesne/brand";
-import { keycap, keyHints } from "./workbench/session-chrome.ts";
+import { keycap, keyHints } from "@demesne/workbench/session-chrome.ts";
 import type { ProbeResult } from "./provider-probe.ts";
 
 /// `demesne setup` as the redesign's three-step wizard: Provider → Model →

@@ -8,8 +8,8 @@ import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs"
 import { join, resolve } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { CliContextRail } from "./context-rail.ts";
-import { TurnThroughputTracker } from "./turn-throughput.ts";
-import { TurnActivityLedger, type TurnPhase } from "./turn-activity.ts";
+import { TurnThroughputTracker } from "@demesne/workbench/turn-throughput.ts";
+import { TurnActivityLedger, type TurnPhase } from "@demesne/workbench/turn-activity.ts";
 import { TerminalTextPacer } from "./terminal-text-pacer.ts";
 import { reducedMotionEnabled } from "./motion.ts";
 import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted } from "@demesne/client";
@@ -19,9 +19,9 @@ import { formatProcessView } from "./process-view.ts";
 import { checkForUpdate } from "./update-check.ts";
 import { queueSummary } from "./input-queue.ts";
 import { notify, shouldNotifyApproval, shouldNotifyCompletion, type NotificationOptions } from "./notifications.ts";
-import { derivePersistedRule } from "./allow-rules.ts";
+import { derivePersistedRule } from "@demesne/workbench/allow-rules.ts";
 import { VERSION } from "./version.ts";
-import { loadAccountSettings, loadCliSettings, type CliSettings } from "./cli-config.ts";
+import { loadAccountSettings, loadCliSettings, type CliSettings } from "@demesne/setup/cli-config.ts";
 import {
   createDaemonControlDependencies,
   daemonStatus,
@@ -29,11 +29,11 @@ import {
   readDaemonLog,
   startDaemon,
   stopDaemon,
-} from "./daemon-control.ts";
+} from "@demesne/setup/daemon-control.ts";
 import { formatDoctorReport, runDoctor } from "./doctor.ts";
-import { runSetup } from "./setup.ts";
-import { runChatGPTAuthCommand } from "./chatgpt-auth.ts";
-import { beginOpenRouterLogin, configureOpenRouter } from "./openrouter-auth.ts";
+import { runSetup } from "@demesne/setup/setup.ts";
+import { runChatGPTAuthCommand } from "@demesne/setup/chatgpt-auth.ts";
+import { beginOpenRouterLogin, configureOpenRouter } from "@demesne/setup/openrouter-auth.ts";
 import { updateUserConfig } from "@demesne/config";
 import { createInterface } from "node:readline/promises";
 import { desktopArgs, runDesktop } from "./desktop-launcher.ts";

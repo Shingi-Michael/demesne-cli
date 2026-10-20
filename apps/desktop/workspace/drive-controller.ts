@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { DriveMemoryEntry } from "@demesne/protocol";
-import { AgentDrive } from "../../cli/src/agent-drive.ts";
-import { ProjectMemory } from "../../cli/src/drive-memory.ts";
-import { parseDriveStart } from "../../cli/src/drive-tasks.ts";
-import { loadWorkflows, runWorkflowCheck, workflowMission, workflowRun } from "../../cli/src/workflows.ts";
+import { AgentDrive } from "@demesne/drive/agent-drive.ts";
+import { ProjectMemory } from "@demesne/drive/drive-memory.ts";
+import { parseDriveStart } from "@demesne/drive/drive-tasks.ts";
+import { loadWorkflows, runWorkflowCheck, workflowMission, workflowRun } from "@demesne/drive/workflows.ts";
 import { DirectDriveControl } from "./drive-direct.ts";
 import type { WorkspaceHost } from "./host.ts";
 

@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import type { EventEnvelope, SessionReplayPage, SessionStateResponse } from "@demesne/protocol";
 import { ApiRequestError } from "@demesne/client";
-import { replaySession, toolTarget } from "../src/workbench/history.ts";
-import { toolCompletion } from "../src/workbench/tool-result.ts";
+import { replaySession, toolTarget } from "../src/history.ts";
+import { toolCompletion } from "../src/tool-result.ts";
 
 const at = "2026-09-21T12:00:00Z";
 const state: SessionStateResponse = {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isPlaceholderTitle, titleFromRequest } from "../src/session-title.ts";
+import { isPlaceholderTitle, titleFromRequest } from "../session-title.ts";
 
 describe("session titles from the first request", () => {
   test("recognizes the time placeholder only", () => {

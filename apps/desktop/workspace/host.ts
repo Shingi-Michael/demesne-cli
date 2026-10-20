@@ -1,6 +1,6 @@
 import { ChatGPTAuth, type ChatGPTAccount } from "@demesne/chatgpt-auth";
-import { configuredChatGPTAccount } from "../../cli/src/chatgpt-auth.ts";
-import { codeDiff } from "../../cli/src/workbench/change-diff.ts";
+import { configuredChatGPTAccount } from "@demesne/setup/chatgpt-auth.ts";
+import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import type {
   CommandsResponse,
   CommandRecord,
@@ -30,23 +30,23 @@ import {
   type ModelDescriptor,
   type WorkspaceFileInfo,
 } from "@demesne/protocol";
-import { loadCliSettings, type CliSettings } from "../../cli/src/cli-config.ts";
+import { loadCliSettings, type CliSettings } from "@demesne/setup/cli-config.ts";
 import {
   createDaemonControlDependencies,
   startDaemon,
-} from "../../cli/src/daemon-control.ts";
-import { replaySession } from "../../cli/src/workbench/history.ts";
-import { expandMentions } from "../../cli/src/prompt-editor.ts";
+} from "@demesne/setup/daemon-control.ts";
+import { replaySession } from "@demesne/workbench/history.ts";
+import { expandMentions } from "./prompt-editor.ts";
 import {
   isPlaceholderTitle,
   titleFromRequest,
-} from "../../cli/src/session-title.ts";
+} from "./session-title.ts";
 import { WorkspaceDrive } from "./drive-controller.ts";
 import { ProviderAccounts, type ProviderEntry } from "./providers.ts";
 import { BreakageWatch } from "./breakage.ts";
-import { missionReceipt } from "../../cli/src/drive-receipt.ts";
-import { expandCustomCommand, loadCustomCommands, mergeSlashCommands, type CustomCommand } from "../../cli/src/custom-commands.ts";
-import { loadWorkflows, workflowCommand } from "../../cli/src/workflows.ts";
+import { missionReceipt } from "@demesne/drive/drive-receipt.ts";
+import { expandCustomCommand, loadCustomCommands, mergeSlashCommands, type CustomCommand } from "./custom-commands.ts";
+import { loadWorkflows, workflowCommand } from "@demesne/drive/workflows.ts";
 import { WorkspaceSetup } from "./setup-controller.ts";
 import { WorkspaceSession } from "./session-model.ts";
 

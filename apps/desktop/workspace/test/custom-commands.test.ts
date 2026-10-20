@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SLASH_COMMANDS } from "@demesne/brand";
-import { expandCustomCommand, loadCustomCommands, mergeSlashCommands } from "../src/custom-commands.ts";
+import { expandCustomCommand, loadCustomCommands, mergeSlashCommands } from "../custom-commands.ts";
 
 const temporaryDirectories: string[] = [];
 

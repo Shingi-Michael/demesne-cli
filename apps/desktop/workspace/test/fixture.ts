@@ -11,7 +11,7 @@ import { DemesneClient } from "@demesne/client";
 import { createDaemonApp } from "../../../daemon/src/app.ts";
 import { serveDaemon } from "../../../daemon/src/http-server.ts";
 import type { TurnProcessor } from "../../../daemon/src/processor.ts";
-import { loadCliSettings } from "../../../cli/src/cli-config.ts";
+import { loadCliSettings } from "@demesne/setup/cli-config.ts";
 
 /// What a child process (the desktop sidecar, a UI check) inherits: the
 /// session it draws in, never provider credentials.

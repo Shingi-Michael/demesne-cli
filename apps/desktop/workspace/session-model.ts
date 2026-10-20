@@ -12,14 +12,14 @@ import {
 import {
   restoreSessionEntries,
   toolArguments,
-} from "../../cli/src/workbench/history.ts";
-import { derivePersistedRule } from "../../cli/src/allow-rules.ts";
-import { codeDiff } from "../../cli/src/workbench/change-diff.ts";
+} from "@demesne/workbench/history.ts";
+import { derivePersistedRule } from "@demesne/workbench/allow-rules.ts";
+import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import type {
   WorkbenchEntry,
   ToolEntry,
   ResponseReceipt,
-} from "../../cli/src/workbench/entries.ts";
+} from "@demesne/workbench/entries.ts";
 
 export interface WorkspaceApproval {
   id: string;

@@ -1,0 +1,16 @@
+{
+  "name": "@demesne/setup",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "@demesne/brand": "workspace:*",
+    "@demesne/chatgpt-auth": "workspace:*",
+    "@demesne/config": "workspace:*",
+    "@demesne/protocol": "workspace:*",
+    "@demesne/providers": "workspace:*",
+    "@demesne/workbench": "workspace:*"
+  }
+}

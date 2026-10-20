@@ -6,7 +6,7 @@ import { parseDriveRequest, validateDriveDecisionContext, type DriveAction, type
 import { AgentDrive, type DriveServices } from "../src/agent-drive.ts";
 import { currentDriveTask } from "../src/drive-tasks.ts";
 import { missionReceipt } from "../src/drive-receipt.ts";
-import { driveTaskList } from "../src/workbench/drive-timeline.ts";
+import { driveTaskList } from "../src/drive-timeline.ts";
 import { checkSatisfied, loadWorkflows, parseWorkflow, runWorkflowCheck, workflowCommand, workflowMission, workflowRun } from "../src/workflows.ts";
 
 const BUGFIX = `---

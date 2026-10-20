@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { partialToolArguments, applyToolDraft } from "../src/workbench/tool-preview.ts";
-import { codeDiff } from "../src/workbench/change-diff.ts";
-import type { WorkbenchEntry } from "../src/workbench/entries.ts";
+import { partialToolArguments, applyToolDraft } from "../src/tool-preview.ts";
+import { codeDiff } from "../src/change-diff.ts";
+import type { WorkbenchEntry } from "../src/entries.ts";
 const user = (id = 1): WorkbenchEntry => ({ id, type: "user", text: "Write code", at: "12:00" });
 
 test("partial JSON renders streamed escaped code and multi-hunk edits without interpreting unfinished escapes", () => {

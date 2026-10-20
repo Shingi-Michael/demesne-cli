@@ -13,7 +13,7 @@ import {
   type PromptEditorKey,
   type PromptEditorResult,
   type PromptEditorState,
-} from "../src/prompt-editor.ts";
+} from "../prompt-editor.ts";
 
 function state(value: string, cursor = value.length): PromptEditorState {
   return { ...createPromptEditorState(), value, cursor };

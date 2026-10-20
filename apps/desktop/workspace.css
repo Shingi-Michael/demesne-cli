@@ -502,6 +502,34 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop #composer .send { transition: color 140ms var(--ease), background-color 140ms var(--ease), transform 140ms var(--ease); }
   .desktop #composer.has-draft .send:hover:not(:disabled) { transform: translateX(1px); }
 }
+/* Review in the turn: "N files changed" unfolds the turn's diffs under the
+   answer. Click a line to leave a note; notes ride with the next message. */
+.desktop .turn-receipt .receipt-files { display: inline-flex; align-items: center; gap: 4px; margin: -2px -6px; padding: 2px 6px; border-radius: var(--r-sm); color: var(--t2); font-size: inherit; }
+.desktop .turn-receipt .receipt-files:hover, .desktop .turn-receipt .receipt-files.open { background: var(--tone2); color: var(--t1); }
+.desktop .turn-receipt .receipt-files .chev { width: 13px; height: 13px; }
+.desktop .turn-receipt .receipt-files.open .chev { transform: rotate(180deg); }
+.desktop .turn-review { margin: 14px 0 4px 34px; display: flex; flex-direction: column; gap: 16px; }
+.desktop .rv-status { color: var(--t4); font-size: 12.5px; }
+.desktop .rv-head { display: flex; align-items: baseline; gap: 8px; padding: 0 4px 6px; font-size: 12px; color: var(--t4); }
+.desktop .rv-head code { font: 12.5px "JetBrains Mono", monospace; color: var(--t1); }
+.desktop .rv-head .add { color: var(--ok); } .desktop .rv-head .del { color: var(--bad); }
+.desktop .rv-head .rv-new { margin-left: auto; }
+.desktop .rv-diff { border-radius: var(--r); background: var(--surface); box-shadow: 0 0 0 1px var(--hair); overflow: hidden; font: 12px/20px "JetBrains Mono", monospace; }
+.desktop .rv-l { display: grid; grid-template-columns: 44px 18px 1fr; width: 100%; text-align: left; color: var(--t2); cursor: text; border-radius: 0; }
+.desktop .rv-l .no { padding-right: 10px; text-align: right; color: var(--t4); }
+.desktop .rv-l .mk { color: var(--t4); }
+.desktop .rv-l .code { white-space: pre-wrap; overflow-wrap: anywhere; padding-right: 12px; }
+.desktop .rv-l.ad { background: var(--ok-soft); } .desktop .rv-l.ad .mk { color: var(--ok); }
+.desktop .rv-l.rm { background: var(--bad-soft); } .desktop .rv-l.rm .mk { color: var(--bad); }
+.desktop .rv-l:hover, .desktop .rv-l:focus-visible { box-shadow: inset 2px 0 0 var(--acc); outline: 0; }
+.desktop .rv-l.noted .no { color: var(--acc); }
+.desktop .rv-gap { padding: 0 0 0 62px; background: var(--tone); color: var(--t4); font: 11.5px/20px Inter, system-ui, sans-serif; }
+.desktop .rv-note { display: flex; gap: 10px; width: 100%; margin: 0; padding: 6px 14px 6px 62px; text-align: left; font: 13px/20px Inter, system-ui, sans-serif; color: var(--t1); background: var(--surface); }
+.desktop .rv-note::before { content: ""; flex: none; width: 2px; border-radius: 1px; background: var(--acc); }
+.desktop button.rv-note:hover { background: var(--tone2); }
+.desktop .rv-note input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--t1); font: inherit; padding: 0; }
+.desktop .rv-note input::placeholder { color: var(--t4); }
+.desktop #mention-chips .notes-chip { color: var(--acc); background: var(--acc-soft); border: 0; }
 /* Drive page: takes the main column in place of the conversation. The box,
    then one list; each row is one line and shows its actions when pointed at. */
 body.drive-page-open #stage, body.drive-page-open #input-area, body.drive-page-open #banner { display: none !important; }

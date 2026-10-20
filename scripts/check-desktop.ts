@@ -361,6 +361,21 @@ try {
   await click("step");
   await until(() => evaluate<boolean>("return !!document.querySelector('.step-fold')?.innerText.includes('after');"), "inline diff visible");
   await capture("03-changes");
+  // "N files changed" unfolds the turn's diffs under the answer; a note on a
+  // line waits in the composer for the next message.
+  const editTurn = completedSession.turns.find(turn => turn.content === prompt)!.id;
+  await page.locator(`#turn-${editTurn} .receipt-files`).click();
+  await until(() => evaluate<boolean>(`return !!document.querySelector('#turn-${editTurn} .turn-review')?.innerText.includes("greeting = 'after'");`), "the turn's diff unfolds under the receipt");
+  await page.locator(`#turn-${editTurn} .rv-l.ad`).first().click();
+  await page.locator("#rv-note-input").fill("Say hello instead");
+  await page.locator("#rv-note-input").press("Enter");
+  await page.locator(`#turn-${editTurn} .rv-note`).filter({ hasText: "Say hello instead" }).waitFor();
+  await page.locator("#mention-chips .notes-chip").filter({ hasText: "1 note on the changes" }).waitFor();
+  await capture("03-review");
+  await page.locator("#mention-chips .notes-chip").click();
+  await until(() => page.locator(`#turn-${editTurn} .rv-note`).count().then(count => count === 0), "dropping the notes clears them from the diff");
+  await page.locator(`#turn-${editTurn} .receipt-files`).click();
+  await until(() => page.locator(`#turn-${editTurn} .turn-review`).count().then(count => count === 0), "the review folds away again");
   await desktop!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(900, 680));
   await until(() => page.evaluate(() => window.innerWidth <= 900), "narrow desktop size");
   assert(await page.locator("textarea").isVisible(), "Composer remains available at minimum window size");

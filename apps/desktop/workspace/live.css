@@ -1782,46 +1782,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 .live-app:not(.start) .composer .hints:not([hidden]) + .send {
   margin-left: 6px;
 }
-/* The briefing line: branches to review, and what Drive is doing or would
-   do next. Each part unfolds above the composer. */
-#briefing {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.briefing-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--muted);
-  padding: 0 2px;
-}
-.briefing-line .link {
-  color: var(--electric);
-  font-size: 12px;
-}
-.briefing-line .link.amber {
-  color: var(--thinking);
-}
-.briefing-line .muted {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 420px;
-}
-.briefing-line .sep {
-  max-width: none;
-}
-.briefing-ideas .proposals-footer {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-}
 #briefing .drive-live {
   max-height: 42vh;
   overflow-y: auto;
@@ -2267,12 +2227,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 #drive-turn .drive-pinned {
   margin: 0;
 }
-.briefing-label {
-  color: var(--electric);
-}
-.briefing-label.amber {
-  color: var(--thinking);
-}
 /* A branch ready to review: what changed, how its checks went, what to do. */
 .breakage-card.ready.compact {
   border-left-width: 1px;
@@ -2684,26 +2638,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 }
 .live-app:not(.start) .response {
   gap: 14px;
-}
-/* What Drive is doing, as a pill above the composer. */
-.briefing-line {
-  gap: 8px;
-  padding: 0;
-}
-.briefing-line .pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 11px;
-  border-radius: 999px;
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  color: var(--secondary);
-  font-size: 12.5px;
-  line-height: 18px;
-}
-.briefing-line .pill .link {
-  font-size: 12.5px;
 }
 /* The composer bar: a + for files, the approval chip, then the model, the
    context ring and a square send that reads Stop while a turn runs. */

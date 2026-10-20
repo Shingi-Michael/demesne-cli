@@ -1683,8 +1683,9 @@ function driveWord() {
   const run = worktreeRun(), pinned = pinnedMission();
   return { needs: needsYou().length, live: Boolean(run.fix || run.away || (pinned && pinned.status !== "paused" && pinned.status !== "blocked")) };
 }
-/// One line above the composer in a session: branches waiting for review,
-/// and what Drive is doing or would do next. Each part unfolds in place.
+/// A strip along the top edge of the composer in a session: branches waiting
+/// for review, and what Drive is doing or would do next. Its chevron grows
+/// the box upward to show Drive's rows; closing folds them away again.
 let briefingSignature = "";
 function renderBriefing() {
   if (!state) return;
@@ -1695,45 +1696,80 @@ function renderBriefing() {
     inSession(), review.map((job) => [job.id, job.status, job.title, job.diff]), reviewShown, away?.status,
     pinned && (driveShown && !driveTurnMission() ? [pinned, detailsOpen.has("drive-details"), Math.floor(Date.now() / 10_000)] : [pinned.status, pinned.mission, driveTurnMission() ? driveProgress(pinned) : activeMinutes(pinned)]),
     run.fix && [run.fix.title, run.fix.status], run.away && run.away.items.map((item) => item.state),
-    driveShown, ideasShown, next.proposals, next.loading, next.generatedAt && age(next.generatedAt),
+    driveShown, ideasShown, next.proposals, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
   ]);
   if (signature === briefingSignature) return;
   briefingSignature = signature;
   const parts: string[] = [];
-  let unfolded = "";
+  const mark = (kind: "spin" | "idea" | "amber" | "ok") => kind === "spin" ? `<span class="bf-spin" aria-hidden="true"></span>` : `<span class="bf-dot ${kind}" aria-hidden="true"></span>`;
+  let fold = "", toggle: { action: string; open: boolean } | null = null, progress: number | null = null;
   if (review.length) {
     const only = review.length === 1 ? review[0]! : null;
     const about = only && reviewShown ? "" : only ? `${only.title}${only.diff ? ` · +${only.diff.additions} −${only.diff.deletions}` : ""}` : away && away.status !== "running" ? "Drive ran them while you were away" : "";
-    parts.push(`${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ${reviewShown ? "⌄" : "›"}`, {}, "link")}${about ? `<span class="muted">${h(about)}</span>` : ""}`);
+    parts.push(`${mark("ok")}${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review`, {}, "bf-word")}${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
   }
+  const label = (drive: NonNullable<Snapshot["drive"]>) => drive.status === "blocked" ? "Drive needs you" : drive.status === "paused" ? "Drive is paused" : "Drive is working";
+  const driveMark = (drive: NonNullable<Snapshot["drive"]>) => mark(drive.status === "blocked" ? "amber" : drive.status === "paused" ? "idea" : "spin");
   if (pinned && driveTurnMission()) {
-    // The mission is the conversation's newest turn; this line only says how far it has got.
-    const label = pinned.status === "blocked" ? "Drive needs you" : pinned.status === "paused" ? "Drive is paused" : "Drive is working";
-    const progress = driveProgress(pinned);
-    parts.push(`<span class="briefing-label${pinned.status === "blocked" ? " amber" : ""}">${label}</span>${progress ? `<span class="muted sep">·</span><span class="muted">${h(progress)}</span>` : ""}`);
+    // The mission is the conversation's newest turn; the strip only says how far it has got.
+    const tasks = driveTaskList(pinned), done = tasks.filter((task) => task.mark === "✓").length;
+    if (tasks.length > 1) progress = done / tasks.length;
+    const about = driveProgress(pinned);
+    parts.push(`${driveMark(pinned)}<b class="bf-word${pinned.status === "blocked" ? " amber" : ""}">${label(pinned)}</b>${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
   } else if (pinned) {
-    const label = pinned.status === "blocked" ? "Drive needs you" : pinned.status === "paused" ? "Drive is paused" : "Drive is working";
     const time = activeMinutes(pinned);
-    parts.push(`${btn("drive-show", `${label} ${driveShown ? "⌄" : "›"}`, {}, `link${pinned.status === "blocked" ? " amber" : ""}`)}<span class="muted">${h(missionTitle(pinned))}${time ? ` · ${time}` : ""}</span>`);
-    if (driveShown) unfolded = `<div class="drive-live">${pinnedCard(pinned)}</div>`;
+    parts.push(`${driveMark(pinned)}${btn("drive-show", label(pinned), {}, `bf-word${pinned.status === "blocked" ? " amber" : ""}`)}<span class="bf-about">${h(missionTitle(pinned))}${time ? ` · ${time}` : ""}</span>`);
+    toggle = { action: "drive-show", open: driveShown };
+    if (driveShown) fold = `<div class="drive-live">${pinnedCard(pinned)}</div>`;
   } else if (run.fix || run.away) {
     const about = run.fix ? run.fix.title : `Drive's list · ${run.away!.items.filter((item) => !["queued", "running"].includes(item.state)).length} of ${run.away!.items.length} done`;
-    parts.push(`${btn("drive-show", `Drive is working ${driveShown ? "⌄" : "›"}`, {}, "link")}<span class="muted">${h(about)}</span>`);
+    parts.push(`${mark("spin")}${btn("drive-show", "Drive is working", {}, "bf-word")}<span class="bf-about">${h(about)}</span>`);
   } else if (next.proposals.length) {
     const count = next.proposals.length;
-    parts.push(btn("ideas-show", `Drive has ${count} idea${count === 1 ? "" : "s"} ${ideasShown ? "⌄" : "›"}`, {}, "link"));
+    parts.push(`${mark("idea")}${btn("ideas-show", `Drive has ${count} idea${count === 1 ? "" : "s"}`, {}, "bf-word")}<span class="bf-about">for this project</span>`);
+    toggle = { action: "ideas-show", open: ideasShown };
     if (ideasShown) {
-      const top = next.proposals, words = ["", "it", "both", "all three"];
-      const away = Math.min(3, top.length);
-      unfolded = `<div class="briefing-ideas">${proposalRows(top)}<p class="proposals-footer">${[
-        btn("next-away", `Run ${words[away]} overnight ›`, { count: away }, "link"),
+      const words = ["", "it", "both", "all three"], overnight = Math.min(3, count);
+      fold = `${ideaRows(next.proposals)}<p class="bf-foot">${[
+        btn("next-away", `Run ${words[overnight]} overnight`, { count: overnight }, "link"),
         btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading),
-        next.generatedAt ? `<span class="muted">looked ${age(next.generatedAt)}</span>` : "",
-      ].filter(Boolean).join('<span class="muted"> · </span>')}</p></div>`;
+        next.generatedAt ? `<span>looked ${age(next.generatedAt)}</span>` : "",
+      ].filter(Boolean).join('<span class="bf-sep">·</span>')}</p>`;
     }
   }
-  node.innerHTML = parts.length ? `<p class="briefing-line">${parts.map((part) => `<span class="pill">${part}</span>`).join("")}</p>${unfolded}` : "";
   node.hidden = !inSession() || !parts.length;
+  if (node.hidden) { node.innerHTML = ""; return; }
+  const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
+  const strip = `<div class="bf-strip">${parts.map((part) => `<span class="bf-part">${part}</span>`).join('<span class="bf-sep">·</span>')}<span class="bf-sp"></span>${chevron}</div>${progress !== null ? `<div class="bf-progress"><i style="width:${Math.round(progress * 100)}%"></i></div>` : ""}`;
+  // The fold animates its height: opening renders it shut, then opens it on
+  // the next frame; closing keeps what was showing until it has folded away.
+  const open = Boolean(fold), previous = node.querySelector<HTMLElement>(".bf-fold"), wasOpen = Boolean(previous?.classList.contains("open"));
+  if (!open && wasOpen && previous) {
+    node.querySelector(".bf-head")!.innerHTML = strip;
+    node.classList.remove("open");
+    previous.classList.remove("open");
+    setTimeout(() => { if (!previous.classList.contains("open")) previous.firstElementChild!.innerHTML = ""; }, 320);
+    return;
+  }
+  node.innerHTML = `<div class="bf-head">${strip}</div><div class="bf-fold${open && wasOpen ? " open" : ""}"><div>${fold}</div></div>`;
+  node.classList.toggle("open", open);
+  if (open && !wasOpen) {
+    const created = node.querySelector<HTMLElement>(".bf-fold")!;
+    void created.offsetHeight;
+    requestAnimationFrame(() => created.classList.add("open"));
+  }
+}
+/// Drive's ideas as one line each: a hollow mark, the title, its time on the
+/// right, which gives way to Run, Plan and Not now when you point at it.
+function ideaRows(items: Snapshot["driveNext"]["proposals"]) {
+  const signal = new Map(state!.driveNext.signals.map((item) => [item.id, item]));
+  const minutes = (value: number) => (value < 60 ? `${value} min` : `${Math.round(value / 6) / 10} h`);
+  return `<div class="bf-rows">${items.map((item) => {
+    const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
+    const why = [item.why, evidence && `Evidence: ${evidence}`].filter(Boolean).join("\n");
+    const pending = Boolean(driveActionPending);
+    return `<div class="bf-row" title="${h(why)}"><span class="bf-dot hollow" aria-hidden="true"></span><span class="bf-title">${h(item.title)}</span><span class="bf-r">~${minutes(item.expectedMinutes ?? item.minutes)}</span><span class="bf-act">${btn("next-run", "Run", { id: item.id }, "primary", pending)}${btn("next-plan", "Plan", { id: item.id }, "", pending)}${btn("next-snooze", "Not now", { id: item.id }, "", pending)}</span></div>`;
+  }).join("")}</div>`;
 }
 /// One model's scoreboard line in the model picker: how it has done on your
 /// own recorded work over the last 30 days.

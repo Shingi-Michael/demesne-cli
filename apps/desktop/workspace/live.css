@@ -720,41 +720,6 @@
   display: flex;
   flex-direction: column;
 }
-.modal.sheet[data-screen="drive"] { width: min(720px, calc(100% - 32px)); overflow-y: auto; }
-.drive-panel { padding: 24px; }
-.drive-panel button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; }
-.drive-panel button:hover:not(:disabled) { background: var(--surface2); }
-.drive-panel button.primary { color: var(--ink); background: var(--electric); border-color: var(--electric); }
-.drive-panel button.primary:hover:not(:disabled) { filter: brightness(1.1); background: var(--electric); }
-.drive-panel button:disabled { opacity: 0.45; cursor: default; }
-.drive-panel button.quiet { border-color: transparent; }
-.drive-panel button.danger { color: var(--signal); }
-#main:has(> #overlay[data-screen="drive"]:not([hidden]))::after { content: ""; position: absolute; inset: 0; background: #0006; backdrop-filter: blur(1px); pointer-events: none; z-index: 29; }
-.drive-panel-head, .drive-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.drive-panel-head h2 { margin: 0 0 5px; font-size: 22px; color: var(--strong); }
-.drive-panel-head p { margin: 0; color: var(--muted); line-height: 1.5; }
-.drive-panel-head > button { flex: none; }
-.drive-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
-.drive-section h3 { margin: 0 0 12px; color: var(--strong); font-size: 14px; font-weight: 600; }
-.drive-panel p { line-height: 1.6; }
-.drive-panel-error { padding: 10px 12px; border: 1px solid var(--signal); border-radius: 8px; color: var(--signal); overflow-wrap: anywhere; }
-.drive-panel form { display: flex; flex-direction: column; gap: 10px; }
-.drive-panel form > label:first-child { font-size: 13px; }
-.drive-panel #drive-mission { width: 100%; min-height: 88px; max-height: 220px; resize: vertical; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--ink); color: var(--strong); font: inherit; line-height: 1.5; }
-.drive-panel #drive-mission:focus { outline: 2px solid var(--electric); outline-offset: 1px; }
-.drive-panel .drive-mode { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-.drive-panel .drive-mode input { width: 14px; height: 14px; margin: 0; }
-.drive-panel form > p { margin: 0; font-size: 12px; }
-.drive-panel form > button { align-self: flex-start; margin-top: 4px; }
-.drive-panel .drive-idea { padding: 12px 0; border-bottom: 1px solid var(--line); }
-.drive-panel .proposal-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; }
-.drive-panel .proposal-row > b { flex: 1 1 55%; }
-.drive-panel .proposal-row:not(:hover):not(:focus-within) .proposal-snooze { display: inline-block; }
-.drive-panel .proposal-explanation { margin: 8px 0 0; font-size: 13px; }
-.drive-panel .proposal-evidence { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
-.drive-panel .drive-empty { color: var(--muted); }
-.drive-panel .drive-activity { white-space: pre-wrap; }
-.drive-panel .next-actions { flex-wrap: wrap; }
 .modal-title {
   display: flex;
   align-items: center;

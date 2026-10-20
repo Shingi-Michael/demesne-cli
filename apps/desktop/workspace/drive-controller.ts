@@ -81,8 +81,7 @@ export class WorkspaceDrive {
       }
       const value = args.text.trim();
       if (["pause", "resume", "stop"].includes(value)) {
-        this.agent.control(value as "pause" | "resume" | "stop");
-        if (value === "stop") await this.host.interrupt();
+        await this.control(value as "pause" | "resume" | "stop");
       } else if (/^remember\s/.test(value)) {
         // /drive remember <text>: a standing preference or decision.
         this.memory.add({ kind: "preference", text: value.replace(/^remember\s+/, ""), source: "you" });
@@ -99,11 +98,27 @@ export class WorkspaceDrive {
     if (method === "drive-control") {
       if (!["pause", "resume", "stop"].includes(String(args.control)))
         throw new Error("Unknown Drive control");
-      this.agent.control(args.control as "pause" | "resume" | "stop");
-      if (args.control === "stop") await this.host.interrupt();
+      await this.control(args.control as "pause" | "resume" | "stop");
       return;
     }
     throw new Error(`Unsupported action: ${method}`);
+  }
+  private async control(control: "pause" | "resume" | "stop") {
+    const missionSession = this.agent.state?.homeSessionId;
+    if (control !== "stop" || !missionSession || ["completed", "stopped"].includes(this.agent.state!.status)) {
+      this.agent.control(control);
+      return;
+    }
+    // Halt planning first; settle the worktree only after its coder is cancelled.
+    this.agent.control("pause");
+    // Reading another chat must never redirect Stop to that chat's coder.
+    if (missionSession === this.host.current?.session.id) await this.host.interrupt();
+    else {
+      const session = await this.host.api.getSessionState(missionSession);
+      const turn = session.session.turns.findLast(turn => turn.status === "running" || turn.status === "queued");
+      if (turn) await this.host.api.cancelTurn(turn.id);
+    }
+    this.agent.control("stop");
   }
   /// A new mission works in its own git worktree and session, so your
   /// checkout stays as it is until you apply the result. `--here` (or no git

@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+
+test("project switching may reload only the exact main application document", () => {
+  expect(allowAppReload(APP_URL, true)).toBe(true);
+  expect(allowAppReload(APP_URL, false)).toBe(false);
+  for (const url of ["https://example.com", "file:///etc/passwd", "demesne://app/other.html", `${APP_URL}?redirect=1`, "demesne://elsewhere/index.html"])
+    expect(allowAppReload(url, true)).toBe(false);
+});
 
 test("only local application origins reach the bridge and asset resolver", () => {
   expect(localAppURL("demesne://app/index.html")).toBe(true);

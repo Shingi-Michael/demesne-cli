@@ -24,12 +24,28 @@ let nextThought!: () => void, finishThought!: () => void;
 const thoughtGate = new Promise<void>(resolve => { nextThought = resolve; });
 const thoughtFinish = new Promise<void>(resolve => { finishThought = resolve; });
 let round = 0, release: (() => void) | undefined;
+let failSuggestions = false;
 const gate = new Promise<void>(done => { release = done; });
 const f = await fixture({
   providerId: "test", modelId: "desktop-test", contextCapacity: 262144, maxOutputTokens: 1024,
   async listModels() { return [{ id: "desktop-test", provider: "test", contextWindow: 262144 }]; },
   async *stream(messages, _tools, signal) {
     const user = messages.findLast(message => message.role === "user")?.content;
+    if (_tools.some(tool => tool.name === "drive_ui")) {
+      // Keep planning pending so the actual UI can exercise Pause/Resume/Stop.
+      await new Promise<void>(resolve => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      signal.throwIfAborted();
+      return;
+    }
+    if (String(messages[0]?.content).includes("planner for one software workspace")) {
+      if (failSuggestions) throw new Error("Fixture suggestion service unavailable");
+      yield { type: "tool_call_delta", index: 0, idDelta: "suggestions", nameDelta: "propose_next", argumentsDelta: JSON.stringify({ proposals: [] }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
     if (messages[0]?.content?.includes("immutable coding-session checkpoints")) {
       yield { type: "text_delta", delta: JSON.stringify({ schemaVersion: 1, goal: "Continue desktop work", currentState: "Older turns summarized", constraints: [], decisions: [], files: [], validation: [], unresolved: [] }) };
       yield { type: "finish", reason: "stop" };
@@ -227,13 +243,21 @@ try {
   assert.equal(await page.getByRole("searchbox", { name: "Find a conversation or project" }).inputValue(), "", "Escape clears the search");
   await until(() => page.locator(".sidebar-session[aria-current='page']").isVisible(), "the list is back after search");
   assert(await page.locator("#sidebar-drive").isVisible(), "Drive is a fixed row in the sidebar");
-  // The project sits at the top as text; search switches projects, with no menu.
+  // Projects stay visible, and each project owns a collapsible list of chats.
   assert((await page.locator("#desktop-project-sub").innerText()).length > 0, "The project shows its folder under its name");
   await page.getByRole("searchbox", { name: "Find a conversation or project" }).focus();
-  await until(() => page.locator("#sidebar-projects").isVisible(), "focusing search lists projects");
+  await until(() => page.locator("#sidebar-projects").isVisible(), "projects are visible");
   assert(await page.locator("#sidebar-projects").getByText("Open a folder…").isVisible(), "search can open another folder");
   await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
-  await until(() => page.locator("#sidebar-projects").isHidden(), "leaving search hides projects");
+  assert(await page.locator("#sidebar-projects").isVisible(), "projects stay visible after search");
+  const projectToggle = page.locator(".sidebar-project.active .sidebar-project-toggle");
+  await projectToggle.click();
+  assert.equal(await projectToggle.getAttribute("aria-expanded"), "false");
+  assert(!await page.locator(".sidebar-session[aria-current='page']").isVisible(), "collapsing a project hides its chats");
+  await page.reload();
+  await until(() => page.locator(".sidebar-project.active .sidebar-project-toggle").getAttribute("aria-expanded").then(value => value === "false"), "project collapse persists across reload");
+  await projectToggle.click();
+  assert(await page.locator(".sidebar-session[aria-current='page']").isVisible(), "expanding restores its chats");
   // A settled chat carries no mark; double-clicking its title renames it in place.
   assert.equal(await page.locator(".sidebar-session:not([aria-current]) .sidebar-session-mark").evaluateAll(marks => marks.filter(mark => getComputedStyle(mark).visibility === "visible").length), 0, "Settled chats carry no mark");
   await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
@@ -407,7 +431,78 @@ try {
   await open();
   await textIncludes(afterClose);
   await capture("06-work-survived-close");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "daemon work survives app closure"] }, null, 2));
+  // Project groups expose their own chats and open the selected chat across
+  // workspace boundaries, rather than restoring a different conversation.
+  const secondProject = join(f.root, "sidebar-project");
+  mkdirSync(secondProject);
+  await f.client.createSession({ workspacePath: secondProject, trustWorkspace: true });
+  await desktop!.evaluate(({ dialog }, workspace) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
+  }, secondProject);
+  await page.locator("#sidebar-open-project").click();
+  await until(() => page.locator("#desktop-project-button").getAttribute("title").then(path => path === secondProject), "sidebar opens another project");
+  await type("A chat in the second project");
+  await until(() => page.locator(".sidebar-project.active .sidebar-session").count().then(count => count === 1), "new chat is nested under its project");
+  await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-session[data-args*="${sessionId}"]`).click();
+  await until(() => page.locator("#desktop-project-button").getAttribute("title").then(path => path === f.workspace), "chat selection switches to its project");
+  await until(() => page.locator(".sidebar-session[aria-current='page']").getAttribute("data-args").then(args => Boolean(args?.includes(sessionId))), "cross-project selection opens the exact chat");
+  const secondary = page.locator(`.sidebar-project[data-project="${secondProject}"]`);
+  await secondary.locator(".sidebar-project-toggle").click();
+  assert(await secondary.locator(".sidebar-session").isVisible(), "other projects expand without switching workspace");
+  await page.getByRole("searchbox", { name: "Find a conversation or project" }).fill("second project");
+  assert.equal(await page.locator(".sidebar-project").count(), 1, "search keeps only projects with matching chats");
+  assert(await secondary.locator(".sidebar-session").isVisible(), "search exposes matching chats in another project");
+  await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
+  const projectOrder = () => page.locator(".sidebar-project").evaluateAll(groups => groups.map(group => (group as HTMLElement).dataset.project));
+  const primary = page.locator(`.sidebar-project[data-project="${f.workspace}"]`);
+  await secondary.locator(".sidebar-project-name").dragTo(primary.locator(".sidebar-project-header"), { targetPosition: { x: 80, y: 2 } });
+  await until(async () => JSON.stringify(await projectOrder()) === JSON.stringify([secondProject, f.workspace]), "dragging reorders project groups");
+  assert.equal(await page.locator("#desktop-project-button").getAttribute("title"), f.workspace, "dragging does not open a project");
+  assert.equal(await page.locator(".dragging, .drop-before, .drop-after").count(), 0, "drop clears drag feedback");
+  await page.reload();
+  await until(async () => JSON.stringify(await projectOrder()) === JSON.stringify([secondProject, f.workspace]), "manual order survives reload with the active project second");
+  await secondary.locator(".sidebar-project-name").focus();
+  await page.keyboard.press("Alt+ArrowDown");
+  assert.deepEqual(await projectOrder(), [f.workspace, secondProject], "keyboard moves a project down");
+  await page.keyboard.press("Alt+ArrowUp");
+  assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "keyboard moves a project up");
+  await secondary.locator(".sidebar-project-name").click();
+  await until(() => page.locator(".sidebar-project.active").getAttribute("data-project").then(path => path === secondProject), "opening the reordered project");
+  await primary.locator(".sidebar-project-name").click();
+  await until(() => page.locator(".sidebar-project.active").getAttribute("data-project").then(path => path === f.workspace), "switching back to the second project in manual order");
+  assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "switching projects preserves manual ordering");
+  await page.locator("textarea").focus();
+  await capture("07-project-groups");
+  await page.locator("#sidebar-drive").click();
+  const drivePanel = page.getByRole("dialog", { name: "Drive", exact: true });
+  await drivePanel.getByRole("heading", { name: "Start a mission" }).waitFor();
+  await drivePanel.getByText("No suggestions yet.", { exact: false }).waitFor();
+  await drivePanel.getByLabel("What should Drive accomplish?").fill("Verify the Drive controls");
+  await page.keyboard.press("Escape");
+  await page.locator("#sidebar-drive").click();
+  assert.equal(await drivePanel.getByLabel("What should Drive accomplish?").inputValue(), "Verify the Drive controls", "closing Drive preserves the mission draft");
+  failSuggestions = true;
+  await drivePanel.getByRole("button", { name: "Refresh", exact: true }).click();
+  await until(() => drivePanel.innerText().then(text => text.includes("Couldn’t load suggestions:")), "suggestion failures are visible");
+  assert.equal(await drivePanel.getByLabel("What should Drive accomplish?").inputValue(), "Verify the Drive controls", "refresh preserves the mission draft");
+  failSuggestions = false;
+  await drivePanel.getByRole("button", { name: "Refresh", exact: true }).click();
+  await until(() => drivePanel.innerText().then(text => !text.includes("Couldn’t load suggestions:") && !text.includes("Refreshing…")), "Refresh recovers the suggestions view");
+  await capture("08-drive");
+  await drivePanel.getByRole("button", { name: "Start mission", exact: true }).click();
+  await drivePanel.getByRole("button", { name: "Pause", exact: true }).waitFor();
+  assert(await drivePanel.isVisible(), "Drive stays open when a mission switches to its worktree");
+  assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "Drive worktrees stay within their parent project");
+  assert.equal(await page.locator(".sidebar-project.active").getAttribute("data-project"), f.workspace);
+  await drivePanel.getByRole("button", { name: "Pause", exact: true }).click();
+  await drivePanel.getByRole("button", { name: "Resume", exact: true }).waitFor();
+  await until(() => drivePanel.locator(".drive-status").innerText().then(text => text === "Paused"), "Pause is reflected in mission status");
+  await drivePanel.getByRole("button", { name: "Resume", exact: true }).click();
+  await drivePanel.getByRole("button", { name: "Pause", exact: true }).waitFor();
+  await drivePanel.getByRole("button", { name: "Stop", exact: true }).click();
+  await until(() => drivePanel.locator(".drive-status").innerText().then(text => text === "Stopped"), "Stop is reflected in mission status");
+  await capture("09-drive-stopped");
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

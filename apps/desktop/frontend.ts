@@ -49,7 +49,7 @@ const errorMessage = (error: unknown): string => {
 function setBusy(value: boolean, message?: string) {
   busy = value;
   shell.setAttribute("aria-busy", String(value));
-  for (const id of ["desktop-choose-project", "desktop-error-choose", "desktop-retry"])
+  for (const id of ["desktop-choose-project", "desktop-error-choose", "desktop-retry", "sidebar-open-project"])
     el<HTMLButtonElement>(id).disabled = value;
   for (const button of projectsList.querySelectorAll<HTMLButtonElement>("button")) button.disabled = value;
   for (const button of el("desktop-recent-list").querySelectorAll<HTMLButtonElement>("button")) button.disabled = value;
@@ -86,20 +86,6 @@ function showActionError(error: unknown) {
     setTimeout(() => { notice.hidden = true; }, 6000);
   }
 }
-const icon = (paths: string, className = "ico") => {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("class", className);
-  svg.setAttribute("aria-hidden", "true");
-  svg.innerHTML = paths;
-  return svg;
-};
-const FOLDER_ICON = '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>';
-/// "dc" for demesne-cli, "bl" for blog: the mark a project wears in the switcher.
-const projectMark = (name: string) => {
-  const words = name.split(/[-_ .]+/).filter(Boolean);
-  return (words.length > 1 ? words[0]![0]! + words[1]![0]! : name.slice(0, 2)).toLowerCase();
-};
 /// A path at home reads as ~/code/blog.
 const shortPath = (path: string) => path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
 function recentButton(path: string) {
@@ -119,43 +105,6 @@ function recentButton(path: string) {
   button.addEventListener("click", () => { void openProject(path); });
   return button;
 }
-/// A project in the sidebar's search results: one line, its mark and name,
-/// like a chat row.
-function projectRow(path: string) {
-  const button = document.createElement("button"), mark = document.createElement("span"), name = document.createElement("span");
-  button.type = "button";
-  button.className = "sidebar-project-row";
-  button.title = path;
-  mark.className = "project-mark";
-  mark.dataset.hue = String(1 + [...projectName(path)].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 3);
-  mark.textContent = projectMark(projectName(path));
-  mark.setAttribute("aria-hidden", "true");
-  name.textContent = projectName(path);
-  button.append(mark, name);
-  // A click must not blur the search first, or the row would vanish under it.
-  button.addEventListener("mousedown", (event) => event.preventDefault());
-  button.addEventListener("click", () => { void openProject(path); });
-  return button;
-}
-/// Search switches projects: while it has focus, your other projects that
-/// match show under the chats, with Open a folder… last. No menu.
-function renderProjectResults() {
-  const query = searchField.value.trim().toLowerCase(), open = document.activeElement === searchField || Boolean(query);
-  projectsList.hidden = !open;
-  if (!open) { projectsList.replaceChildren(); return; }
-  const matches = recentProjects.filter((path) => path !== workspace && (!query || projectName(path).toLowerCase().includes(query) || path.toLowerCase().includes(query))).slice(0, 5);
-  const label = document.createElement("div"), folder = document.createElement("button"), word = document.createElement("span"), key = document.createElement("kbd");
-  label.className = "sidebar-group";
-  label.textContent = "Projects";
-  folder.type = "button";
-  folder.className = "sidebar-project-row";
-  word.textContent = "Open a folder…";
-  key.textContent = openShortcut;
-  folder.append(icon(FOLDER_ICON), word, key);
-  folder.addEventListener("mousedown", (event) => event.preventDefault());
-  folder.addEventListener("click", () => { void openProject(); });
-  projectsList.replaceChildren(label, ...matches.map(projectRow), folder);
-}
 function renderProjects() {
   const list = el("desktop-recent-list");
   list.replaceChildren(...recentProjects.slice(0, 6).map((path) => recentButton(path)));
@@ -166,7 +115,8 @@ function renderProjects() {
     projectHead.dataset.path = shortPath(workspace);
     document.title = `${projectName(workspace)} — Demesne`;
   }
-  renderProjectResults();
+  el("sidebar-sessions").dataset.projects = JSON.stringify(recentProjects);
+  el("sidebar-sessions").dataset.workspace = workspace ?? "";
 }
 async function applyBootstrap(result: DesktopBootstrap) {
   if (fatal) return;
@@ -200,11 +150,11 @@ async function applyBootstrap(result: DesktopBootstrap) {
   }
   setBusy(false, "");
 }
-async function openProject(path?: string) {
+async function openProject(path?: string, sessionId?: string) {
   if (busy) return;
   setBusy(true, "Opening project…");
   try {
-    const result = await request<DesktopBootstrap>(path ? "desktop-open-project" : "desktop-select-project", path ? { path } : {});
+    const result = await request<DesktopBootstrap>(path ? "desktop-open-project" : "desktop-select-project", path ? { path, ...(sessionId ? { sessionId } : {}) } : {});
     // A successful recovery gets a fresh webview, including UI listeners.
     if (fatal && result.workspace && result.snapshot) { window.location.reload(); return; }
     await applyBootstrap(result);
@@ -214,8 +164,12 @@ async function openProject(path?: string) {
     setBusy(false);
   }
 }
-for (const id of ["desktop-choose-project", "desktop-error-choose"])
+for (const id of ["desktop-choose-project", "desktop-error-choose", "sidebar-open-project", "sidebar-open-folder"])
   el(id).addEventListener("click", () => { void openProject(); });
+document.addEventListener("demesne:open-project", (event) => {
+  const { path, sessionId } = (event as CustomEvent<{ path: string; sessionId?: string }>).detail;
+  void openProject(path, sessionId);
+});
 el("desktop-retry").addEventListener("click", () => window.location.reload());
 document.addEventListener("keydown", (event) => {
   if (event.isComposing) return;
@@ -255,6 +209,7 @@ async function start() {
     await applyBootstrap(await request<DesktopBootstrap>("desktop-bootstrap"));
   } catch (error) { showError(error); }
 }
+setBusy(true);
 void start();
 
 const sidebarToggle = el<HTMLButtonElement>("desktop-toggle-sidebar");
@@ -268,9 +223,6 @@ try { setSidebarCollapsed(localStorage.getItem("demesne-sidebar-collapsed") === 
 sidebarToggle.addEventListener("click", () => setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")));
 for (const id of ["rail-expand", "rail-sessions"]) el(id).addEventListener("click", () => setSidebarCollapsed(false));
 // Search is always there; Escape clears it and gives the list back.
-searchField.addEventListener("input", renderProjectResults);
-searchField.addEventListener("focus", renderProjectResults);
-searchField.addEventListener("blur", renderProjectResults);
 searchField.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   event.preventDefault();
@@ -288,3 +240,4 @@ document.addEventListener("demesne:needs-you", (event) => {
 });
 el("sidebar-new-key").textContent = mac ? "⌘N" : "Ctrl+N";
 el("sidebar-settings-key").textContent = mac ? "⌘," : "Ctrl+,";
+el("sidebar-open-key").textContent = openShortcut;

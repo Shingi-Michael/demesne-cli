@@ -145,7 +145,7 @@ async function runSubagentInference(options: Parameters<typeof runSubagent>[0]):
     } finally {
       signal.removeEventListener("abort", forward);
       // The parent turn continues after this call either way.
-      lease.release({ turnContinues: true });
+      lease.release();
     }
 
     if (!calls.size) return report(text, used, inference.modelId);

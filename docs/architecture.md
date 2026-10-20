@@ -130,6 +130,5 @@ The default data directory is `~/.demesne`, overridden by `data_dir` or `DEMESNE
 | Drive journals, project memory and dismissals | `drive/` |
 | Daemon proposal cache | `drive-next/` |
 | Desktop project/session preferences | `desktop-ui.json` |
-| Open-original preview copies | `preview-cache/` |
 
 The desktop host exits cleanly on EOF or quit and disposes its client streams and Drive without stopping the daemon. See the [desktop implementation](../apps/desktop/README.md#process-boundary) and [troubleshooting](troubleshooting.md).

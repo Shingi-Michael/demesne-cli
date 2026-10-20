@@ -86,7 +86,7 @@ export class SessionCompactor {
         continue;
       }
       const chunk = prepare(size);
-      content = await this.summarize(turnId, inference, chunk.messages, chunk.plan, signal, size < pending.length);
+      content = await this.summarize(turnId, inference, chunk.messages, chunk.plan, signal);
       checkpointMessage = renderSummaryCheckpoint(content);
       pending.splice(0, size);
       rounds++;
@@ -108,7 +108,7 @@ export class SessionCompactor {
   }
 
   private async summarize(turnId: string, inference: TurnInference, messages: ProviderMessage[], contextPlan: ContextPlan,
-    signal: AbortSignal, turnContinues: boolean): Promise<SummaryCheckpointContentV1> {
+    signal: AbortSignal): Promise<SummaryCheckpointContentV1> {
     const lease = await this.scheduler.for(inference.providerId).acquire(turnId, signal);
     const controller = new AbortController();
     const abort = () => controller.abort(signal.reason);
@@ -117,7 +117,6 @@ export class SessionCompactor {
     const started = performance.now();
     let firstTokenAt: number | null = null;
     let finishReason: string | undefined;
-    let successful = false;
     const metrics = () => ({ queueDurationMs: Math.max(0, Math.round(lease.queueDurationMs)),
       durationMs: Math.max(0, Math.round(performance.now() - started)),
       timeToFirstTokenMs: firstTokenAt === null ? null : Math.max(0, Math.round(firstTokenAt - started)) });
@@ -153,7 +152,6 @@ export class SessionCompactor {
       const content = parseSummaryCheckpoint(text);
       this.store.recordProviderMetrics(providerCallId, metrics());
       this.store.settleProviderCall(providerCallId, "completed", undefined, finishReason);
-      successful = true;
       return content;
     } catch (error) {
       controller.abort(error);
@@ -164,7 +162,7 @@ export class SessionCompactor {
       throw error;
     } finally {
       signal.removeEventListener("abort", abort);
-      lease.release({ turnContinues: successful && turnContinues });
+      lease.release();
     }
   }
 }

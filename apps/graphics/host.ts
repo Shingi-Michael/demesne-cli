@@ -24,7 +24,6 @@ import {
   isRecord,
   parseAnswerQuestionsRequest,
   parseQuestionActionRequest,
-  type ImageArtifact,
   type Session,
   type EventEnvelope,
   type PermissionDecision,
@@ -179,7 +178,6 @@ export class GraphicsHost {
   current: GraphicsSession | null = null;
   sessions: Session[] = [];
   files: WorkspaceFileInfo[] = [];
-  artifacts: ImageArtifact[] = [];
   processes: CommandRecord[] = [];
   queuePosition: number | null = null;
   verificationFingerprint: WorkspaceFingerprint | null = null;
@@ -216,7 +214,6 @@ export class GraphicsHost {
   private disposed = false;
   private selectedSession?: string;
   private drafts = new Map<string, string>();
-  private images = new Map<string, string>();
   onAction?: (
     method: string,
     args: Record<string, unknown>,
@@ -301,7 +298,6 @@ export class GraphicsHost {
       activeTurnId: this.active?.id ?? null,
       busy: this.busy,
       files: this.files,
-      artifacts: this.artifacts,
       planOnly: this.planOnly,
       queue: this.queue,
       draft: this.draft,
@@ -512,15 +508,12 @@ export class GraphicsHost {
       this.draftVersion++;
       this.restored = false;
       this.files = [];
-      this.artifacts = [];
-      this.images.clear();
       this.busy = false;
       this.error = null;
       this.publish();
       const controller = (this.stream = new AbortController());
       void this.watch(id, generation, controller);
       void this.refreshFiles().catch(() => {});
-      void this.refreshArtifacts().catch(() => {});
       void this.refreshSessions();
     } finally {
       this.busy = false;
@@ -557,8 +550,6 @@ export class GraphicsHost {
           event.type === "tool.call_completed"
         )
           void this.refreshProcesses();
-        if (event.type === "artifact.created")
-          void this.refreshArtifacts().catch(() => {});
         if (/^tool\.call_(completed|failed)$/.test(event.type))
           void this.refreshFiles().catch(() => {});
         if (
@@ -695,22 +686,6 @@ export class GraphicsHost {
         this.loadingFiles = null;
       });
     return this.loadingFiles;
-  }
-  async refreshArtifacts() {
-    const id = this.current?.session.id;
-    if (!id) return;
-    let cursor = 0;
-    const artifacts: ImageArtifact[] = [];
-    do {
-      const page = await this.client.listArtifacts(id, cursor);
-      artifacts.push(...page.artifacts);
-      if (page.nextCursor === null) break;
-      cursor = page.nextCursor;
-    } while (true);
-    if (this.current?.session.id === id) {
-      this.artifacts = artifacts;
-      this.publish();
-    }
   }
   async submit(content: string, planOnly = this.planOnly, permissionMode: "ask" | "allow" = "ask") {
     if (!this.current || this.connection !== "online")
@@ -1380,50 +1355,6 @@ export class GraphicsHost {
       const path = join(directory, `${this.current!.session.id}.${format}`);
       writeFileSync(path, content, { mode: 0o600 });
       return { path };
-    }
-    if (method === "artifact") {
-      const id = string(args.id, "artifact id", 200),
-        artifact = this.artifacts.find((item) => item.id === id);
-      if (!artifact) throw new Error("Image is not in the current session.");
-      const key = `${id}:${args.original === true ? "original" : "preview"}`;
-      if (this.images.has(key)) return this.images.get(key);
-      const variant = args.original === true ? "original" : "preview";
-      const bytes = await this.client.artifactContent(artifact, variant);
-      const data = `data:${variant === "original" ? artifact.mimeType : "image/png"};base64,${Buffer.from(bytes).toString("base64")}`;
-      if (this.images.size >= 3)
-        this.images.delete(this.images.keys().next().value!);
-      this.images.set(key, data);
-      return data;
-    }
-    if (method === "import-reference") {
-      const artifact = await this.client.importImage(
-        this.current!.session.id,
-        string(args.path, "image path", 4096),
-        true,
-        args.viewport as ImageArtifact["viewport"],
-      );
-      await this.refreshArtifacts();
-      return artifact;
-    }
-    if (method === "open-artifact") {
-      const artifact = this.artifacts.find((item) => item.id === args.id);
-      if (!artifact) throw new Error("Image is not in this session");
-      const bytes = await this.client.artifactContent(artifact, "original");
-      const directory = join(this.settings.dataDirectory, "preview-cache");
-      mkdirSync(directory, { recursive: true, mode: 0o700 });
-      const extension =
-        artifact.mimeType === "image/jpeg"
-          ? "jpg"
-          : artifact.mimeType === "image/webp"
-            ? "webp"
-            : "png";
-      const path = join(
-        directory,
-        `${createHash("sha256").update(bytes).digest("hex")}.${extension}`,
-      );
-      writeFileSync(path, bytes, { mode: 0o600 });
-      await this.open(path);
-      return;
     }
     if (method === "open-link") {
       const url = new URL(string(args.url, "link", 8000));

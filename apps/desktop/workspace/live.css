@@ -124,11 +124,6 @@
   color: var(--thinking);
   border-color: var(--composerQueuedBorder);
 }
-.pill.auto-approve {
-  color: var(--thinking);
-  background: var(--thinkingSurface);
-  border-color: var(--composerQueuedBorder);
-}
 .pill.failed {
   background: var(--errorSurface);
   color: var(--signal);
@@ -2738,10 +2733,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
   width: 12px;
   height: 12px;
   color: var(--muted);
-}
-#composer-approval.auto {
-  color: var(--thinking);
-  border-color: color-mix(in srgb, var(--thinking) 40%, transparent);
 }
 .composer-bar .sp {
   flex: 1;

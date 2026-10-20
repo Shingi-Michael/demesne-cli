@@ -197,6 +197,8 @@ export class WorkspaceHost {
   untrustedWorkspace: string | null = null;
   private trustWorkspace = false;
   planOnly = false;
+  /** Plan is per chat: each chat keeps the mode it was left in. */
+  private plans = new Map<string, boolean>();
   queue = "";
   /** Send now: the queued follow-up goes out as soon as the stopped turn settles. */
   sendQueuedOnStop = false;
@@ -275,6 +277,7 @@ export class WorkspaceHost {
             workspace: this.current.session.workspace,
             createdAt: this.current.session.createdAt,
             autoApprove: this.current.session.autoApprove === true,
+            acceptEdits: this.current.session.acceptEdits === true,
           }
         : null,
       sessions: this.sessions.map((session) => ({
@@ -496,6 +499,7 @@ export class WorkspaceHost {
       this.generation = generation;
       this.stream?.abort();
       this.current = new WorkspaceSession(state, events);
+      this.planOnly = this.plans.get(id) ?? false;
       this.reviewRevision++;
       this.reviewCache.clear();
       this.processes = [];
@@ -1148,6 +1152,28 @@ export class WorkspaceHost {
     }
     if (method === "mode") {
       this.planOnly = args.planOnly === true;
+      if (this.current) this.plans.set(this.current.session.id, this.planOnly);
+      this.publish();
+      return;
+    }
+    // The composer's mode word: Ask, Accept edits, Plan or Auto, for this chat.
+    if (method === "permission-mode") {
+      const mode = args.mode;
+      if (mode !== "ask" && mode !== "edits" && mode !== "plan" && mode !== "auto") throw new Error("Invalid mode");
+      if (!this.current) throw new Error("Choose a session first.");
+      const selected = this.current, id = selected.session.id;
+      const patch: { autoApprove?: boolean; acceptEdits?: boolean } = {};
+      if ((selected.session.autoApprove === true) !== (mode === "auto")) patch.autoApprove = mode === "auto";
+      if ((selected.session.acceptEdits === true) !== (mode === "edits")) patch.acceptEdits = mode === "edits";
+      if (patch.autoApprove !== undefined || patch.acceptEdits !== undefined) {
+        const result = await this.client.updateSession(id, patch);
+        if ((result.session.autoApprove === true) !== (mode === "auto") || (result.session.acceptEdits === true) !== (mode === "edits"))
+          throw new Error("The daemon did not apply this mode. Restart Demesne to update the daemon.");
+        selected.session.autoApprove = result.session.autoApprove === true;
+        selected.session.acceptEdits = result.session.acceptEdits === true;
+      }
+      this.plans.set(id, mode === "plan");
+      if (this.current === selected) this.planOnly = mode === "plan";
       this.publish();
       return;
     }

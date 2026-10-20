@@ -376,6 +376,22 @@ try {
   await until(() => page.locator(`#turn-${editTurn} .rv-note`).count().then(count => count === 0), "dropping the notes clears them from the diff");
   await page.locator(`#turn-${editTurn} .receipt-files`).click();
   await until(() => page.locator(`#turn-${editTurn} .turn-review`).count().then(count => count === 0), "the review folds away again");
+  // The mode word under the composer: ⇧⇥ steps Ask → Accept edits → Plan → Auto → Ask.
+  await page.locator("textarea").focus();
+  for (const [word, policy] of [["Accept edits", { acceptEdits: true, autoApprove: false }], ["Plan", { acceptEdits: false, autoApprove: false }],
+    ["Auto", { acceptEdits: false, autoApprove: true }], ["Ask", { acceptEdits: false, autoApprove: false }]] as const) {
+    await page.keyboard.press("Shift+Tab");
+    await until(() => page.locator("#composer-mode").innerText().then(text => text.startsWith(word)), `mode word ${word}`);
+    await until(async () => {
+      const session = (await f.client.getSessionState(sessionId)).session;
+      return session.acceptEdits === policy.acceptEdits && session.autoApprove === policy.autoApprove;
+    }, `daemon policy for ${word}`);
+    if (word === "Plan") {
+      assert(await page.locator("#mode-hint").isVisible(), "the mode hint names the four modes");
+      await capture("03-mode-plan");
+    }
+  }
+  assert(await page.evaluate(() => document.activeElement?.tagName === "TEXTAREA"), "⇧⇥ keeps focus in the composer");
   await desktop!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(900, 680));
   await until(() => page.evaluate(() => window.innerWidth <= 900), "narrow desktop size");
   assert(await page.locator("textarea").isVisible(), "Composer remains available at minimum window size");

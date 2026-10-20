@@ -34,6 +34,11 @@ describe("DemesneStore", () => {
     expect(reopened.setSessionAutoApprove(session.id, false).event?.payload).toEqual({ autoApprove: false });
     expect(reopened.isSessionAutoApprove(session.id)).toBe(false);
     expect(reopened.listSessions().every(session => session.autoApprove === false)).toBe(true);
+    expect(reopened.getSession(session.id)?.acceptEdits).toBe(false);
+    expect(reopened.setSessionAcceptEdits(session.id, true).event?.payload).toEqual({ acceptEdits: true });
+    expect(reopened.isSessionAcceptEdits(session.id)).toBe(true);
+    expect(reopened.isSessionAcceptEdits(other.id)).toBe(false);
+    expect(reopened.setSessionAcceptEdits(session.id, true).event).toBeNull();
     reopened.close();
   });
 

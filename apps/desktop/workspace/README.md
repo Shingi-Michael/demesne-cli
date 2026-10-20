@@ -18,7 +18,7 @@ Drive uses direct daemon operations and recorded evidence. It cannot answer perm
 
 ## No side panels
 
-The desktop has no side panels. Drive lives in the conversation: a mission is a turn, and its ideas unfold above or under the composer. A turn's edits, commands and checks unfold in place under their steps, and the top bar's **⋯** is the conversation's menu. The host still answers `files`, `changes` and `processes` for Drive and tests.
+The desktop has no side panels. The sidebar’s Drive action opens a sheet with a mission form, progress and controls, suggestions, and links to review results. Missions also appear as conversation turns, and ideas can unfold above or under the composer. A turn's edits, commands and checks unfold in place under their steps, and the top bar's **⋯** is the conversation's menu. The host still answers `files`, `changes` and `processes` for Drive and tests.
 
 ## Drive completion
 

@@ -108,9 +108,21 @@ export class DesktopHost {
   bootstrap(): DesktopBootstrap {
     return { workspace: this.host?.workspace ?? null, recentProjects: [...this.prefs.recentProjects], snapshot: this.host?.snapshot() ?? null, userName: userFirstName() };
   }
-  private async select(path: unknown): Promise<DesktopBootstrap> {
+  private async select(path: unknown, sessionId?: unknown): Promise<DesktopBootstrap> {
     const workspace = desktopWorkspace(path);
-    if (this.host?.workspace === workspace) return this.bootstrap();
+    if (sessionId !== undefined && (typeof sessionId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(sessionId)))
+      throw new Error("Invalid session id");
+    const selectChat = async (host: WorkspaceHost) => {
+      if (typeof sessionId !== "string") return;
+      if (!host.sessions.some(session => session.id === sessionId && session.workspace?.root === workspace))
+        throw new Error("This conversation is not available in the selected project");
+      await host.select(sessionId);
+    };
+    if (this.host?.workspace === workspace) {
+      await selectChat(this.host);
+      this.rememberSession(this.host.snapshot());
+      return this.bootstrap();
+    }
     if (this.switching) throw new Error("A project is already opening");
     if (this.host?.hasUnsentDrafts) throw new Error("Send or clear your unsent drafts before changing projects");
     if (this.host?.busy) throw new Error("Wait for the current session action to finish before changing projects");
@@ -152,6 +164,7 @@ export class DesktopHost {
           candidate.error = null;
         } catch {}
       }
+      await selectChat(candidate);
       if (reclaimed && candidate.drive && candidate.driveState?.status === "paused" && candidate.connection === "online") {
         try {
           if (candidate.current?.session.id !== reclaimed.sessionId) await candidate.select(reclaimed.sessionId);
@@ -240,7 +253,7 @@ export class DesktopHost {
       return;
     }
     if (request.method === "desktop-bootstrap") return this.bootstrap();
-    if (request.method === "desktop-open-project") return this.select(request.args.path);
+    if (request.method === "desktop-open-project") return this.select(request.args.path, request.args.sessionId);
     if (this.switching) throw new Error("Wait for the project to open");
     if (!this.host) throw new Error("Choose a project first");
     const result = await this.host.handle(request.method, request.args);

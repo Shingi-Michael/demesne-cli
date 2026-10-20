@@ -28,7 +28,9 @@ Drive is a separate planning context that coordinates coding turns, inspects rec
 
 ## NEXT: proposed work
 
-Drive has no panel. A mission is the newest turn of the conversation it started from, with Pause/Resume, Stop and Details on it; from any other conversation the sidebar's **Drive** row or Alt+J jumps there, and a fix or away run unfolds on the line above the composer. Drive's ranked ideas unfold in place too: under the composer on the start screen, or from "Drive has N ideas ›" above the composer in a conversation. Each idea is one row with Run and Plan, Not now on hover, and its reason and evidence in the tooltip. Outcomes and blockers Drive records go to project memory. Missions start from `/drive` in the composer.
+Open **Drive** in the sidebar, or press Alt+J, for the mission form, current or last mission, controls, suggested work, and branches awaiting review. The form defaults to one bounded task; **Keep choosing improvements after this task** selects continuous mode. It retains your unfinished mission text when closed. Suggestions show their reason and supporting evidence, with visible loading and error states and a **Refresh** action. A failed Run or Plan leaves the suggestion available to retry. Plan preserves an unsent chat draft and waits until the current turn has finished.
+
+The mission also appears as a turn in its conversation, with Pause/Resume, Stop and Details. **Open conversation** goes there; **Review branches** opens the existing review cards. Stop targets the mission session even when you are reading another chat. Ranked ideas remain available from the start screen and the briefing above the composer. Outcomes and blockers Drive records go to project memory. You can also start missions with `/drive` in the composer.
 
 | Action | Result |
 | --- | --- |

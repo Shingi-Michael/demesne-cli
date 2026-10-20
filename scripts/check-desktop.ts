@@ -284,7 +284,8 @@ try {
   // The keyboard reaches the same delete: Delete on the focused row.
   const row = page.locator(`#sidebar-sessions .sidebar-session[data-args='${otherArgs}']`);
   await row.focus();
-  assert(await row.locator("xpath=..").locator(".sidebar-delete").evaluate(button => getComputedStyle(button).opacity === "1"), "The trash shows when the keyboard is on the row");
+  // The trash eases in, so give its transition a moment.
+  await until(() => row.locator("xpath=..").locator(".sidebar-delete").evaluate(button => getComputedStyle(button).opacity === "1").then(shown => shown || Promise.reject(new Error("trash hidden"))), "The trash shows when the keyboard is on the row");
   await page.keyboard.press("Delete");
   await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before - 1), "Delete on a row removes it");
   await until(async () => (await f.client.listSessions()).length === before - 1, "the daemon archived it");

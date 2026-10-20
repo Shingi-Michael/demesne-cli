@@ -392,3 +392,87 @@ html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[
 .desktop #context-card .tone-c { background: var(--t4); }
 .desktop #context-card .tone-free { background: var(--line2); }
 .desktop #context-card .context-compact { margin-top: 10px; padding: 0; font-size: 12px; color: var(--acc); }
+
+/* Polish: one surface system and motion. Surfaces are tones over the
+   background and hairlines, not solid outlines; three radii (6, 10, 14);
+   one shadow ramp; and everything that appears, folds or moves eases. */
+body.desktop { --hair: rgba(255, 255, 255, 0.08); --hair2: rgba(255, 255, 255, 0.13); --tone: rgba(255, 255, 255, 0.04); --tone2: rgba(255, 255, 255, 0.07); --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.25); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.3); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.5); --r-sm: 6px; --r: 10px; --r-lg: 14px; --ease: cubic-bezier(0.2, 0.7, 0.2, 1); }
+/* Sidebar: the tone difference is the edge; rows and search have no line. */
+#desktop-sidebar { border-right: 0; }
+.sidebar-nav button, .sidebar-settings, .sidebar-session, .sidebar-more, .sidebar-project-row { border-radius: var(--r); }
+.sidebar-search { border: 0; border-radius: var(--r); background: var(--tone); }
+.sidebar-search:focus-within { background: var(--tone2); box-shadow: 0 0 0 1px var(--hair2); }
+.sidebar-rename input { border: 0; border-radius: var(--r-sm); box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 55%, transparent); }
+.sidebar-delete { border-radius: var(--r-sm); }
+#rail-expand, .rail-button { border-radius: var(--r); }
+body.desktop kbd { border: 0; border-radius: var(--r-sm); background: var(--tone2); }
+#desktop-toggle-sidebar, #desktop-toolbar .header-more { border-radius: var(--r-sm); }
+#desktop-toolbar .chip { border: 0; border-radius: var(--r-sm); background: var(--tone2); padding: 5px 9px; }
+#desktop-toolbar .chip.ship:hover { background: var(--surface3); }
+#desktop-toolbar .chip.auto-approve { background: var(--warn-soft); }
+/* Conversation: the guide is a hairline; folds and code are tones. */
+.desktop .steps .tool-row { border-radius: var(--r-sm); }
+.desktop .step-fold, .desktop .approval-fold { border: 0; border-radius: var(--r-sm); background: var(--tone); }
+.desktop .markdown pre { border: 0; border-radius: var(--r); background: var(--tone); }
+.desktop .markdown code:not(pre code) { border-radius: var(--r-sm); background: var(--tone2); }
+.desktop .request { border-radius: var(--r-lg) var(--r-lg) 4px var(--r-lg); }
+.desktop .compaction-card, .desktop .proposal-row, .desktop #drive-turn, .desktop .question-card { border: 0; box-shadow: 0 0 0 1px var(--hair); }
+.desktop .compaction-card, .desktop #drive-turn, .desktop .question-card { border-radius: var(--r-lg); }
+.desktop .proposal-row { border-radius: var(--r); }
+.desktop .question-card fieldset, .desktop .question-card button { border: 0; border-radius: var(--r-sm); background: var(--tone); }
+.desktop .question-card input { border: 0; border-radius: var(--r-sm); box-shadow: 0 0 0 1px var(--hair2); }
+.desktop .briefing-line .pill { border: 0; border-radius: var(--r-sm); background: var(--tone2); }
+.desktop .approval-row { border-radius: var(--r); min-height: 38px; }
+.desktop .approval-row button { border-radius: var(--r-sm); }
+.desktop .approval-row button kbd { background: transparent; }
+/* Composer: a tone with a hairline ring, a soft ring when focused. */
+.desktop #composer .composer-box { border: 0; border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); }
+.desktop #composer .composer-box:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair)), var(--shadow-2); }
+.desktop #composer.queued .composer-box { box-shadow: 0 0 0 1px var(--composerQueuedBorder), var(--shadow-2); }
+.desktop #composer.restored .composer-box { box-shadow: 0 0 0 1px var(--composerRestoredBorder), var(--shadow-2); }
+.desktop #composer.stop-armed .composer-box { box-shadow: 0 0 0 1px var(--composerStoppedBorder), var(--shadow-2); }
+.desktop #composer .send, .desktop #composer .composer-bar .cb, .desktop #composer .composer-bar .cb-box { border-radius: var(--r-sm); }
+.desktop #composer .composer-bar .cb-box { border: 0; }
+.desktop #context-card { border: 0; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); }
+.desktop #context-card .context-bar { background: var(--tone2); }
+/* Sheets, popovers and menus: no outline, a hairline ring and one shadow. */
+.desktop .popover, .desktop .modal, .desktop #overlay.sheet, .desktop #overlay.anchored, .desktop #overlay.dropped { border: 0; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); }
+.desktop #overlay.sheet[data-screen="settings"] { box-shadow: 0 0 0 1px var(--hair), var(--shadow-3), 0 0 0 100vmax rgba(0, 0, 0, 0.3); }
+html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[data-theme*="latte"] .desktop #overlay.sheet[data-screen="settings"] { box-shadow: 0 0 0 1px var(--hair), var(--shadow-3), 0 0 0 100vmax rgba(0, 0, 0, 0.12); }
+.desktop .menu-row, .desktop .settings-nav-item { border-radius: var(--r-sm); }
+.desktop .filter-wrap input, .desktop .settings-search { border: 0; border-radius: var(--r); background: var(--tone); }
+.desktop .filter-wrap input:focus, .desktop .settings-search:focus-within { background: var(--tone2); box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair)); }
+.desktop .settings-nav { border-right: 0; }
+.desktop .settings-toggle { border: 0; }
+.desktop .settings-segments { border: 0; border-radius: var(--r-sm); background: var(--tone); }
+.desktop .settings-segments button { border-radius: 4px; }
+.desktop .settings-segments button.on { box-shadow: var(--shadow-1); }
+.desktop .settings-select select, .desktop .settings-button { border: 0; border-radius: var(--r-sm); background: var(--tone2); }
+.desktop .settings-select select:focus-visible { outline: 0; box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 55%, transparent); }
+.desktop .settings-button:hover { background: var(--surface3); }
+.desktop .dialog-close { border-radius: var(--r-sm); }
+.desktop #notice { border: 0; border-radius: var(--r); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); }
+.desktop .drive-status, .desktop .saved, .desktop #desktop-error-message, .desktop .setup-list, #desktop-recent-list { border: 0; border-radius: var(--r); box-shadow: 0 0 0 1px var(--hair); }
+.desktop #setup input { border: 0; border-radius: var(--r-sm); box-shadow: 0 0 0 1px var(--hair2); }
+.desktop #setup footer .right > button, .desktop-primary { border: 0; border-radius: var(--r); }
+.desktop .model-thinking button { border-radius: var(--r-sm); }
+body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline: 2px solid color-mix(in srgb, var(--acc) 55%, transparent); outline-offset: 2px; }
+/* Motion: what appears rises in, what folds eases, what you point at tints. */
+@keyframes desktop-rise { from { opacity: 0; transform: translateY(6px) scale(0.985); } }
+@keyframes desktop-appear { from { opacity: 0; transform: translateY(4px); } }
+@keyframes desktop-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop #overlay:not([hidden]), .desktop #context-card:not([hidden]), .desktop #completion:not([hidden]), #notice:not([hidden]) { animation: desktop-rise 160ms var(--ease); }
+  .desktop #approval:not([hidden]), .desktop #breakage:not([hidden]), .desktop #question:not(:empty), .desktop .hero-ideas, .desktop .step-fold { animation: desktop-appear 180ms var(--ease); }
+  .desktop #conversation > .turn, .desktop .compaction-card { animation: desktop-appear 220ms var(--ease); }
+  .desktop #hero { animation: desktop-fade 260ms var(--ease); }
+  #desktop-shell { transition: grid-template-columns 200ms var(--ease); }
+  .desktop button, .sidebar-session, .sidebar-nav button, .sidebar-settings, .menu-row, .tool-row, #desktop-toolbar .chip, .desktop .composer-bar .cb, .desktop .settings-nav-item, .desktop .settings-segments button, .desktop .settings-toggle { transition: background-color 140ms var(--ease), color 140ms var(--ease), box-shadow 140ms var(--ease), opacity 140ms var(--ease); }
+  .desktop #composer .composer-box, .sidebar-search, .desktop .settings-search, .desktop .filter-wrap input { transition: box-shadow 160ms var(--ease), background-color 160ms var(--ease); }
+  .sidebar-delete { transition: opacity 140ms var(--ease), transform 140ms var(--ease); transform: scale(0.9); }
+  .sidebar-item:hover .sidebar-delete, .sidebar-delete:focus-visible, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-delete { transform: none; }
+  .desktop .settings-toggle i { transition: left 160ms var(--ease), background-color 160ms var(--ease); }
+  .desktop .ring { transition: --usage 300ms var(--ease); }
+  .desktop #composer .send { transition: color 140ms var(--ease), background-color 140ms var(--ease), transform 140ms var(--ease); }
+  .desktop #composer.has-draft .send:hover:not(:disabled) { transform: translateX(1px); }
+}

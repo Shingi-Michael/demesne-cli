@@ -64,7 +64,7 @@ All routes require production daemon authentication. Content responses include M
 
 The interface host fetches authenticated images and supplies safe data to the webview page. Loading an artifact does not expose the daemon token. Request identities prevent stale asynchronous loads from replacing a newer selection.
 
-Selection, pin/follow, zoom, pan, comparison opacity and reference choice are frontend state. Daemon metadata/content survive restart; not every viewing preference is persisted. Pane navigation is remembered within a session, and panel width is saved in `graphics-ui.json`.
+Selection, pin/follow, zoom, pan, comparison opacity and reference choice are frontend state. Daemon metadata/content survive restart; not every viewing preference is persisted..
 
 Vision hydration selects the last two retained image IDs in tool messages, resolves their previews, and adds data URLs only at the provider boundary. The engine reserves additional context for those image inputs. A missing file does not prevent text-only replay. Chat Completions and Responses serialize image inputs differently through their respective adapters.
 

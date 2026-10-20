@@ -31,7 +31,7 @@ Drive uses direct daemon operations and recorded evidence by default. `DEMESNE_D
 
 ## No side panels
 
-The desktop has no side panels. Drive lives in the conversation: a mission is a turn, and its ideas unfold above or under the composer. A turn's edits, commands and checks unfold in place under their steps in the conversation, and the top bar's **⋯** is the conversation's menu. The host still answers `files`, `changes`, `processes` and `rerun-checks` for other clients and tests; the desktop renderer no longer draws Files, Changes, Verification, Log, Context, History or Preview views.
+The desktop has no side panels. Drive lives in the conversation: a mission is a turn, and its ideas unfold above or under the composer. A turn's edits, commands and checks unfold in place under their steps in the conversation, and the top bar's **⋯** is the conversation's menu. The host still answers `files`, `changes` and `processes` for Drive and tests; the desktop renderer no longer draws Files, Changes, Verification, Log, Context, History or Preview views.
 
 ## Drive completion
 

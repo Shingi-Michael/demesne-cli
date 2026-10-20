@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import { formatMail } from "../../../packages/protocol/src/heartbeat-mail.ts";
+import { formatMail } from "../../../../packages/protocol/src/heartbeat-mail.ts";
 
 // Exercise the mail bubble and reply receipt renderers without booting the desktop host.
 const source = await Bun.file(new URL("../live.ts", import.meta.url)).text();
 const slice = (from: string, to: string) => source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from)));
-const { parseMailTurn } = await import("../../../packages/protocol/src/heartbeat-mail.ts");
+const { parseMailTurn } = await import("../../../../packages/protocol/src/heartbeat-mail.ts");
 const js = new Bun.Transpiler({ loader: "ts" }).transformSync(`${slice("const ICON_MAIL =", "/// \"replied to")}\n${slice("function mailReply(", "\n}\n")}}`);
 const render = new Function("parseMailTurn", "h", "clock", `${js}\n  return { mailRequest, mailReply };`)(parseMailTurn, (text: string) => String(text).replace(/</g, "&lt;"), () => "04:52") as {
   mailRequest: (run: unknown) => string | null;

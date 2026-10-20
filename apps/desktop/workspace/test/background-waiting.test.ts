@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { GraphicsHost } from "../host.ts";
+import { WorkspaceHost } from "../host.ts";
 import { fixture, eventually } from "./fixture.ts";
 
 test("a chat that asks for approval in the background is marked waiting until it is answered", async () => {
@@ -22,7 +22,7 @@ test("a chat that asks for approval in the background is marked waiting until it
       }
     },
   });
-  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
+  const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
   try {
     await host.connect();
     const asking = host.current!.session.id;

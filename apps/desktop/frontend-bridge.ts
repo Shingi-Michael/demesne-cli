@@ -1,4 +1,4 @@
-import type { StateUpdate } from "../graphics/state-wire.ts";
+import type { StateUpdate } from "./workspace/state-wire.ts";
 
 export type DesktopInvoke = <T = unknown>(
   command: string,

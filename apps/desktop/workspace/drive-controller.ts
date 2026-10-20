@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { DriveMemoryEntry } from "@demesne/protocol";
-import { AgentDrive } from "../cli/src/agent-drive.ts";
-import { ProjectMemory } from "../cli/src/drive-memory.ts";
-import { parseDriveStart } from "../cli/src/drive-tasks.ts";
-import { loadWorkflows, runWorkflowCheck, workflowMission, workflowRun } from "../cli/src/workflows.ts";
+import { AgentDrive } from "../../cli/src/agent-drive.ts";
+import { ProjectMemory } from "../../cli/src/drive-memory.ts";
+import { parseDriveStart } from "../../cli/src/drive-tasks.ts";
+import { loadWorkflows, runWorkflowCheck, workflowMission, workflowRun } from "../../cli/src/workflows.ts";
 import { DirectDriveControl } from "./drive-direct.ts";
-import type { GraphicsHost } from "./host.ts";
+import type { WorkspaceHost } from "./host.ts";
 
 /// Where a workspace's mission journal lives (one per daemon and project).
 export function driveJournalPath(dataDirectory: string, server: string, workspace: string) {
@@ -16,14 +16,14 @@ export function driveJournalPath(dataDirectory: string, server: string, workspac
 
 /** Drive works the daemon directly (recorded session state in, API
  * submissions out); the UI only shows it. It cannot approve permissions. */
-export class GraphicsDrive {
+export class WorkspaceDrive {
   readonly agent: AgentDrive;
   /// This workspace's project memory, and its entries for the UI.
   readonly memory: ProjectMemory;
   memoryEntries: DriveMemoryEntry[] = [];
   readonly journalPath: string;
   constructor(
-    private host: GraphicsHost,
+    private host: WorkspaceHost,
   ) {
     const key = createHash("sha256").update(`${host.api.server}\n${host.workspace}`).digest("hex");
     this.memory = new ProjectMemory(join(host.settings.dataDirectory, "drive", `${key}.memory.jsonl`));

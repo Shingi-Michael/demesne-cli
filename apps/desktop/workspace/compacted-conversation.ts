@@ -1,8 +1,8 @@
 import type { SessionCheckpoint } from "@demesne/protocol";
-import type { GraphicsRun } from "./session-model.ts";
+import type { WorkspaceRun } from "./session-model.ts";
 
 /** Collapse only the proven prefix, never guess from turn counts or timestamps. */
-export function compactedConversation(runs: readonly GraphicsRun[], checkpoint: SessionCheckpoint | null | undefined) {
+export function compactedConversation(runs: readonly WorkspaceRun[], checkpoint: SessionCheckpoint | null | undefined) {
   if (!checkpoint?.firstRetainedTurnId) return null;
   const boundary = runs.findIndex(run => run.id === checkpoint.firstRetainedTurnId);
   const compaction = runs.findIndex(run => run.id === checkpoint.turnId);

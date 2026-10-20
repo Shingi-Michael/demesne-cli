@@ -1,5 +1,5 @@
 import { expect,test } from "bun:test";
-import { GraphicsHost } from "../host.ts";
+import { WorkspaceHost } from "../host.ts";
 import { fixture,eventually } from "./fixture.ts";
 
 test("question replies keep the coding draft out of the queue and survive a new UI host",async()=>{
@@ -9,7 +9,7 @@ test("question replies keep the coding draft out of the queue and survive a new 
     else {yield{type:"text_delta",delta:"Recorded the typed preference."};yield{type:"finish",reason:"stop"};}
   }});
   const options={workspace:f.workspace,settings:f.settings,client:f.client,changed:()=>{}};
-  let host=new GraphicsHost(options);
+  let host=new WorkspaceHost(options);
   try {
     await host.connect();await host.submit("Interview me");
     await eventually(()=>host.current!.questions.size===1);
@@ -18,7 +18,7 @@ test("question replies keep the coding draft out of the queue and survive a new 
     const action={action:"draft" as const,index:0,revision:q.revision!,text:"warm olive",draftVersion:1};
     await host.handle("question-action",{sessionId,id:q.id,action});
     expect(host.draft).toBe("A separate coding request");expect(host.queue).toBe("");expect(calls).toBe(1);
-    host.dispose();host=new GraphicsHost({...options,sessionId});await host.connect();
+    host.dispose();host=new WorkspaceHost({...options,sessionId});await host.connect();
     expect(host.snapshot().questions[0]!.draft).toBe("warm olive");
     const restored=host.snapshot().questions[0]!;
     await host.handle("question-action",{sessionId,id:restored.id,action:{action:"answer",index:0,revision:restored.revision,answer:{answer:"warm olive",source:"typed"}}});
@@ -37,7 +37,7 @@ test.each([1,2])("late draft replies cannot revive a closed question or roll bac
   const gate=Promise.withResolvers<void>(),saved=Promise.withResolvers<void>();
   const original=f.client.questionAction.bind(f.client);
   f.client.questionAction=async(id,action)=>{const result=await original(id,action);if(action.action==="draft"){saved.resolve();await gate.promise;}return result;};
-  const host=new GraphicsHost({workspace:f.workspace,settings:f.settings,client:f.client,changed:()=>{}});
+  const host=new WorkspaceHost({workspace:f.workspace,settings:f.settings,client:f.client,changed:()=>{}});
   try{
     await host.connect();await host.submit("Ask for preferences");await eventually(()=>host.current!.questions.size===1);
     const sessionId=host.current!.session.id,q=host.snapshot().questions[0]!;

@@ -228,7 +228,7 @@ export class ChatGPTAuth {
       renameSync(temporary, this.path);
     } finally { rmSync(temporary, { force: true }); }
   }
-  /** A file lock serializes rotating refresh tokens across CLI, graphics host and daemon. */
+  /** A file lock serializes rotating refresh tokens across CLI, desktop host and daemon. */
   private async locked<T>(work: () => T | Promise<T>, signal?: AbortSignal): Promise<T> {
     this.secureDirectory();
     const started = Date.now();

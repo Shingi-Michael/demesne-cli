@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { awayMarkerPath, awayPlan, handOffDrive, readAwayMarker, reclaimDrive, type ProcessControl } from "../drive-away.ts";
-import type { GraphicsHost } from "../../graphics/host.ts";
+import type { WorkspaceHost } from "../workspace/host.ts";
 
 const journal = () => join(mkdtempSync(join(tmpdir(), "demesne-away-")), "drive.json");
 function processes(running: Set<number>) {
@@ -35,7 +35,7 @@ test("only a running mission on its own session is handed off", () => {
   const host = (drive: Record<string, unknown> | undefined, status = "running", current = "s1") => ({
     drive: drive && { journalPath: "/j", agent: { active: ["running", "waiting"].includes(status) }, ...drive },
     driveState: { status, homeSessionId: "s1" }, current: { session: { id: current } }, workspace: "/work", api: { server: "http://x/" },
-  }) as unknown as GraphicsHost;
+  }) as unknown as WorkspaceHost;
   expect(awayPlan(host({}))).toEqual({ workspace: "/work", server: "http://x/", sessionId: "s1", journal: "/j" });
   expect(awayPlan(host({}, "waiting"))).not.toBeNull();
   expect(awayPlan(host({}, "paused"))).toBeNull();
@@ -77,14 +77,14 @@ test("a finished, vanished or unrelated process is never signalled", async () =>
 });
 
 test("the background process carries a worktree mission to the end and commits it for review", async () => {
-  const { fixture, eventually } = await import("../../graphics/test/fixture.ts");
-  const { GraphicsHost } = await import("../../graphics/host.ts");
+  const { fixture, eventually } = await import("../workspace/test/fixture.ts");
+  const { WorkspaceHost } = await import("../workspace/host.ts");
   const { runDriveAway } = await import("../drive-away.ts");
   const f = await fixture({ providerId: "test", modelId: "test", contextCapacity: 262144, async listModels() { return []; },
     async *stream() { yield { type: "text_delta", delta: "Thinking it over." }; yield { type: "finish", reason: "stop" }; } });
   for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=a@b", "commit", "-qm", "init"]])
     Bun.spawnSync(["git", ...args], { cwd: f.workspace });
-  const window = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, drive: true });
+  const window = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, drive: true });
   try {
     await window.connect();
     await eventually(() => Boolean(window.current), 5000);
@@ -92,7 +92,7 @@ test("the background process carries a worktree mission to the end and commits i
     const fix = window.breakage.state.fix!, plan = awayPlan(window)!;
     expect(plan.sessionId).toBe(fix.sessionId!);
     window.dispose();
-    let away: GraphicsHost | undefined;
+    let away: WorkspaceHost | undefined;
     const code = await runDriveAway({ workspace: plan.workspace, server: plan.server, sessionId: plan.sessionId }, {
       settings: f.settings, client: f.client, pollMs: 20,
       resumed: (host) => { away = host; expect(host.driveState?.status).toBe("running"); host.drive!.agent.control("stop"); },

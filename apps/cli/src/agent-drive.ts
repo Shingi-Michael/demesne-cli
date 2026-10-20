@@ -629,7 +629,7 @@ export class AgentDrive {
     }
     if (observation.draft.trim()) {
       // Drive's own just-sent message can linger in an observation taken
-      // before the composer cleared (the graphics app reports asynchronously).
+      // before the composer cleared (the desktop reports asynchronously).
       // That is not your draft: look again shortly instead of blocking.
       const own = this.lastSubmission !== "" && this.lastSubmission.startsWith(observation.draft.trim());
       if (own && this.staleDraftChecks++ < 20) {

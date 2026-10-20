@@ -1,17 +1,17 @@
 import { compactedConversation } from "./compacted-conversation.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
-import { splitNextPrompt } from "../../packages/protocol/src/next-prompt.ts";
-import { parseMailTurn } from "../../packages/protocol/src/heartbeat-mail.ts";
+import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
+import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
-import { codeDiff } from "../cli/src/workbench/change-diff.ts";
-import { driveSince, driveStepLine, driveTaskList } from "../cli/src/workbench/drive-timeline.ts";
-import { subagentPhrase } from "../cli/src/workbench/subagent-phrases.ts";
-import type { GraphicsHost } from "./host.ts";
-import type { GraphicsRun } from "./session-model.ts";
+import { codeDiff } from "../../cli/src/workbench/change-diff.ts";
+import { driveSince, driveStepLine, driveTaskList } from "../../cli/src/workbench/drive-timeline.ts";
+import { subagentPhrase } from "../../cli/src/workbench/subagent-phrases.ts";
+import type { WorkspaceHost } from "./host.ts";
+import type { WorkspaceRun } from "./session-model.ts";
 import type {
   ToolEntry,
   WorkbenchEntry,
-} from "../cli/src/workbench/entries.ts";
+} from "../../cli/src/workbench/entries.ts";
 import type {
   ModelDescriptor,
   ModelScore,
@@ -19,7 +19,7 @@ import type {
   DriveState,
 } from "@demesne/protocol";
 
-type Snapshot = ReturnType<GraphicsHost["snapshot"]>;
+type Snapshot = ReturnType<WorkspaceHost["snapshot"]>;
 type OverlayName =
   | "settings"
   | "models"
@@ -133,7 +133,7 @@ const pathHTML = (path: string) => {
   const slash = path.lastIndexOf("/");
   return `<span class="folder">${h(path.slice(0, slash + 1))}</span>${h(path.slice(slash + 1))}`;
 };
-const active = (run: GraphicsRun) =>
+const active = (run: WorkspaceRun) =>
   run.status === "running" || run.status === "queued";
 const mark = (status: string) =>
   status === "done" || status === "completed"
@@ -176,7 +176,7 @@ const verb = (tool: ToolEntry) =>
   })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
 /// The heartbeat tool's actions, as the step rows name them.
 const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
-const tools = (run: GraphicsRun) =>
+const tools = (run: WorkspaceRun) =>
   run.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
 let state: Snapshot | null = null;
 let overlay: OverlayName | null = null,
@@ -221,7 +221,7 @@ const expanded = new Set<string>(),
     {
       signature: string;
       node: HTMLElement;
-      run?: GraphicsRun;
+      run?: WorkspaceRun;
       views: Map<number, MarkdownView>;
     }
   >();
@@ -627,7 +627,7 @@ function renderStatus() {
   el("header").innerHTML =
     `<div class="header-state">${branchChip()}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "chip auto-approve") : ""}</div>${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
 }
-function totals(run: GraphicsRun, tool: ToolEntry) {
+function totals(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
   let total = diffCache.get(key);
   if (!total) {
@@ -667,7 +667,7 @@ const spinnerFrame = () => SPINNER[Math.floor(Date.now() / 90) % SPINNER.length]
 const spinner = () => `<span class="spin" aria-hidden="true">${spinnerFrame()}</span>`;
 /// A running sub-agent's target: its task and a phrase that cycles the whole
 /// time it runs (updated in place by a timer); its steps count on the right.
-function toolTarget(run: GraphicsRun, tool: ToolEntry) {
+function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === "run_command" && tool.waiting) return "command";
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   if (tool.name !== "subagent" || tool.state !== "running") return h(base);
@@ -718,7 +718,7 @@ const CHEVRON = '<svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><p
 const foldable = (tool: ToolEntry) =>
   (tool.phase === "change" && tool.state !== "running" && !tool.drafting && (Boolean(tool.changes?.length) || Boolean(tool.diff))) ||
   (tool.name === "run_command" && !tool.waiting && !tool.drafting && Boolean(tool.toolCallId));
-function toolRow(run: GraphicsRun, tool: ToolEntry) {
+function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}`, open = stepOpen.has(key), canFold = foldable(tool);
   const now = tool.state === "running" || tool.drafting;
   const meta = tool.waiting
@@ -744,7 +744,7 @@ function toolRow(run: GraphicsRun, tool: ToolEntry) {
 }
 /// What unfolds under a step: the edit's diff with a little context, or
 /// the command's recorded output (its tail), loaded when first opened.
-function stepFold(run: GraphicsRun, tool: ToolEntry) {
+function stepFold(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.phase === "change") {
     const files = tool.changes?.length ? tool.changes.map((change) => ({ path: change.path, before: change.before ?? "", after: change.after ?? "" })) : tool.diff ? [{ path: String(tool.input.path ?? tool.detail ?? ""), before: tool.diff.oldText, after: tool.diff.newText }] : [];
     const blocks = files.map((file) => {
@@ -770,7 +770,7 @@ function stepFold(run: GraphicsRun, tool: ToolEntry) {
 }
 /// A sub-agent's thinking and steps under its row: open while it works,
 /// collapsible like a thinking block afterwards.
-function subagentTrace(run: GraphicsRun, tool: ToolEntry, key: string) {
+function subagentTrace(run: WorkspaceRun, tool: ToolEntry, key: string) {
   if (tool.name !== "subagent" || !tool.trace?.length) return "";
   const live = tool.state === "running";
   const steps = tool.trace.filter((segment) => segment.kind === "step").length;
@@ -779,7 +779,7 @@ function subagentTrace(run: GraphicsRun, tool: ToolEntry, key: string) {
     : `<p>${h(segment.text.trim())}</p>`).join("");
   return `<details class="thinking ${live ? "live" : ""}" data-detail="${key}:trace"${(live && !detailsClosed.has(`${key}:trace`)) || detailsOpen.has(`${key}:trace`) ? " open" : ""}><summary>◇ Sub-agent trace · ${steps} step${steps === 1 ? "" : "s"}</summary><div>${body}</div></details>`;
 }
-function runHTML(run: GraphicsRun, index: number) {
+function runHTML(run: WorkspaceRun, index: number) {
   const items = tools(run),
     files = new Set(
       items
@@ -926,7 +926,7 @@ const ICON_MAIL = '<svg class="ico mail-mark" viewBox="0 0 24 24" aria-hidden="t
 /// its bubble takes the accent surface and opens with who sent it and what
 /// kind of message it is, so a scroll never mistakes it for your words. It
 /// has no edit or retry: the words are the sender's.
-function mailRequest(run: GraphicsRun): string | null {
+function mailRequest(run: WorkspaceRun): string | null {
   const mail = parseMailTurn(run.content);
   if (!mail) return null;
   const senders = mail.messages.map((message) => message.from.replace(/^[^@]*@/, "")).filter(Boolean);
@@ -937,7 +937,7 @@ function mailRequest(run: GraphicsRun): string | null {
 }
 /// "replied to claude@macbook": where a mail turn's answer went, for its
 /// receipt. A send that answers nobody in particular still counts.
-function mailReply(run: GraphicsRun): string {
+function mailReply(run: WorkspaceRun): string {
   const sent = run.entries.filter((entry): entry is ToolEntry => entry.type === "tool" && entry.name === "heartbeat" && entry.input.action === "send" && entry.state === "done");
   const to = [...new Set(sent.map((tool) => String(tool.input.to ?? "").replace(/\/[^/]*$/, "")).filter(Boolean))];
   return to.length ? `replied to <span class="mail-address">${h(to.join(", "))}</span>` : "";
@@ -949,7 +949,7 @@ const elapsed = (since: string) => {
 };
 /// A running turn's steps as one line: the last few, what runs now, and how
 /// long the turn has run; the step count opens the full rows.
-function stepTrail(run: GraphicsRun, items: ToolEntry[]) {
+function stepTrail(run: WorkspaceRun, items: ToolEntry[]) {
   if (!items.length) return "";
   const shown = items.slice(-4), earlier = items.length - shown.length;
   const name = (tool: ToolEntry) => {
@@ -970,7 +970,7 @@ function stepTrail(run: GraphicsRun, items: ToolEntry[]) {
  * and move the existing Markdown nodes into it. */
 function patchStream(
   saved: NonNullable<ReturnType<typeof runNodes.get>>,
-  run: GraphicsRun,
+  run: WorkspaceRun,
 ): boolean {
   const before = saved.run;
   if (
@@ -2890,13 +2890,13 @@ async function dispatch(
 }
 
 /// The paths a turn's completed edits touched.
-function changedPaths(run: GraphicsRun) {
+function changedPaths(run: WorkspaceRun) {
   return [...new Set(tools(run).filter((t) => t.phase === "change" && t.state === "done").flatMap((t) => t.changes?.map((c) => c.path) ?? [String(t.input.path ?? t.detail ?? "")]))];
 }
 /// Opens a turn's steps and unfolds the ones asked for (its edits, its
 /// checks, or every step), loading a command's recorded output as a click
 /// on its row would; then scrolls the turn into view.
-async function unfoldTurn(run: GraphicsRun, phase: "change" | "verify" | "all", only?: ToolEntry, path?: string) {
+async function unfoldTurn(run: WorkspaceRun, phase: "change" | "verify" | "all", only?: ToolEntry, path?: string) {
   revealCompactedTurn(run.id);
   expanded.add(run.id);
   stepsOpen.add(run.id);

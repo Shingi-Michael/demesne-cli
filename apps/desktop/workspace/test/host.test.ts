@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { GraphicsHost, daemonAddress, daemonCredential } from "../host.ts";
+import { WorkspaceHost, daemonAddress, daemonCredential } from "../host.ts";
 import { fixture, eventually } from "./fixture.ts";
 
 function hostFor(f: Awaited<ReturnType<typeof fixture>>) {
-  return new GraphicsHost({
+  return new WorkspaceHost({
     workspace: f.workspace,
     settings: f.settings,
     client: f.client,
@@ -222,7 +222,7 @@ test("remote addresses do not receive local daemon credentials", () => {
     daemonCredential("https://remote.example", "/missing", {}),
   ).toBeUndefined();
 });
-test("clicking around the graphics UI never pauses Drive; writing or sending does", async () => {
+test("clicking around the desktop never pauses Drive; writing or sending does", async () => {
   const f = await fixture();
   const host = hostFor(f);
   let takeovers = 0;
@@ -246,7 +246,7 @@ test("clicking around the graphics UI never pauses Drive; writing or sending doe
 test("the displayed context follows the active daemon model, not the primary provider's config", async () => {
   const f = await fixture({ providerId: "cloud", modelId: "cloud-model", contextCapacity: 272000,
     async listModels() { return []; }, async *stream() { yield { type: "text_delta", delta: "Ready" }; yield { type: "finish", reason: "stop" }; } });
-  const h = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
+  const h = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
   try { await h.connect(); expect(h.snapshot().model.contextWindow).toBe(272000); }
   finally { h.dispose(); await f.close(); }
 });
@@ -274,7 +274,7 @@ test("/drive moves the mission into its own worktree session, and returns you af
     async *stream() { yield { type: "text_delta", delta: "Thinking it over." }; yield { type: "finish", reason: "stop" }; } });
   for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=a@b", "commit", "-qm", "init"]])
     Bun.spawnSync(["git", ...args], { cwd: f.workspace });
-  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, drive: true });
+  const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, drive: true });
   try {
     await host.connect();
     await eventually(() => Boolean(host.current), 5000);
@@ -313,7 +313,7 @@ test("away mode works through the top proposals and leaves each one to review", 
       yield { type: "text_delta", delta: "Done." }; yield { type: "finish", reason: "stop" };
     } });
   for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-qm", "init"]]) Bun.spawnSync(["git", ...args], { cwd: f.workspace, env: process.env });
-  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, drive: true });
+  const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, drive: true });
   try {
     await host.connect();
     await eventually(() => Boolean(host.current), 5000);

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProviderAccounts } from "../providers.ts";
 import { loadConfig, updateUserConfig } from "@demesne/config";
-import { fakeChatGPT } from "../../../packages/chatgpt-auth/test/fixture.ts";
+import { fakeChatGPT } from "../../../../packages/chatgpt-auth/test/fixture.ts";
 import { eventually } from "./fixture.ts";
 
 const roots: string[] = [];

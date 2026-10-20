@@ -3,8 +3,8 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fixture, eventually } from "./fixture.ts";
-import { GraphicsHost } from "../host.ts";
-import { workspaceFingerprint } from "../../daemon/src/workspace-review.ts";
+import { WorkspaceHost } from "../host.ts";
+import { workspaceFingerprint } from "../../../daemon/src/workspace-review.ts";
 import sharp from "sharp";
 
 const settings = (f: Awaited<ReturnType<typeof fixture>>) => ({
@@ -47,7 +47,7 @@ test("live commands expose output before exit, persist results, detect external 
     join(f.workspace, "check.ts"),
     "console.log('FIRST');await Bun.sleep(700);console.log('LAST');\n",
   );
-  const host = new GraphicsHost(settings(f));
+  const host = new WorkspaceHost(settings(f));
   try {
     await host.connect();
     const id = host.current!.session.id;
@@ -152,7 +152,7 @@ test("review scopes preserve recorded edits, include workspace changes and refus
     "-qm",
     "Initial",
   );
-  const host = new GraphicsHost(settings(f));
+  const host = new WorkspaceHost(settings(f));
   try {
     await host.connect();
     const id = host.current!.session.id;
@@ -208,7 +208,7 @@ test("review scopes preserve recorded edits, include workspace changes and refus
 
 test("reference import stays inside the workspace and keeps original resolution", async () => {
   const f = await fixture();
-  const host = new GraphicsHost(settings(f));
+  const host = new WorkspaceHost(settings(f));
   try {
     await host.connect();
     await host.submit("Start session");
@@ -288,8 +288,8 @@ test("command panels report the actual model queue position", async () => {
 });
 
 test("background launch errors settle command telemetry rather than leaving a phantom process", async () => {
-  const { ToolRegistry } = await import("../../daemon/src/tools.ts"),
-    { backgroundProcesses } = await import("../../daemon/src/background.ts");
+  const { ToolRegistry } = await import("../../../daemon/src/tools.ts"),
+    { backgroundProcesses } = await import("../../../daemon/src/background.ts");
   const original = backgroundProcesses.spawn;
   let finished = false;
   backgroundProcesses.spawn = () => {

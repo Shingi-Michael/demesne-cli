@@ -1,4 +1,4 @@
-import { splitNextPrompt } from "../../packages/protocol/src/next-prompt.ts";
+import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { createHash } from "node:crypto";
 import type {
   DriveAction,
@@ -6,9 +6,9 @@ import type {
   DriveInspection,
   DriveObservation,
 } from "@demesne/protocol";
-import type { ToolEntry, WorkbenchEntry } from "../cli/src/workbench/entries.ts";
-import type { GraphicsHost } from "./host.ts";
-import type { GraphicsRun } from "./session-model.ts";
+import type { ToolEntry, WorkbenchEntry } from "../../cli/src/workbench/entries.ts";
+import type { WorkspaceHost } from "./host.ts";
+import type { WorkspaceRun } from "./session-model.ts";
 
 /// Drive's direct control. Observations are built from the daemon's recorded
 /// session (requests, tool results, answers, checks), work is submitted
@@ -30,9 +30,9 @@ const MAX_CHARS = 24_000;
 
 const clip = (text: string) => (text.length > MAX_ROW ? `${text.slice(0, MAX_ROW - 1)}…` : text);
 const lines = (text: string) => text.split("\n").map((line) => line.trimEnd()).filter((line) => line.trim()).map(clip);
-const answers = (run: GraphicsRun) =>
+const answers = (run: WorkspaceRun) =>
   run.entries.filter((entry): entry is Extract<WorkbenchEntry, { type: "assistant" }> => entry.type === "assistant").flatMap((entry) => lines(splitNextPrompt(entry.raw).text));
-const tools = (run: GraphicsRun) => run.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
+const tools = (run: WorkspaceRun) => run.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
 const FILE_TOOLS = new Set(["edit_file", "write_file", "move_path", "delete_path"]);
 
 /// One line per tool call: `✓ run_command $ bun test · exit 0`.
@@ -43,9 +43,9 @@ function toolLine(tool: ToolEntry): string {
 }
 
 export class DirectDriveControl {
-  constructor(private host: GraphicsHost) {}
+  constructor(private host: WorkspaceHost) {}
 
-  private runs(): GraphicsRun[] {
+  private runs(): WorkspaceRun[] {
     return this.host.current?.runs() ?? [];
   }
 
@@ -76,7 +76,7 @@ export class DirectDriveControl {
       total += block.rows.length;
     }
     const rows = kept.flatMap((block) => block.rows);
-    const settled = (run: GraphicsRun) => run.status === "completed";
+    const settled = (run: WorkspaceRun) => run.status === "completed";
     const answerRows = kept.filter((block) => settled(block.run)).flatMap((block) => block.answer);
     const latestBlock = kept.at(-1);
     const latestAnswerRows = latestBlock && settled(latestBlock.run) ? latestBlock.answer : [];

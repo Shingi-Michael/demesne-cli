@@ -40,15 +40,6 @@
       "name": "@demesne/desktop",
       "dependencies": {
         "@demesne/brand": "workspace:*",
-        "@demesne/client": "workspace:*",
-        "@demesne/config": "workspace:*",
-        "@demesne/protocol": "workspace:*",
-      },
-    },
-    "apps/graphics": {
-      "name": "@demesne/graphics",
-      "dependencies": {
-        "@demesne/brand": "workspace:*",
         "@demesne/chatgpt-auth": "workspace:*",
         "@demesne/client": "workspace:*",
         "@demesne/config": "workspace:*",
@@ -113,8 +104,6 @@
     "@demesne/daemon": ["@demesne/daemon@workspace:apps/daemon"],
 
     "@demesne/desktop": ["@demesne/desktop@workspace:apps/desktop"],
-
-    "@demesne/graphics": ["@demesne/graphics@workspace:apps/graphics"],
 
     "@demesne/protocol": ["@demesne/protocol@workspace:packages/protocol"],
 

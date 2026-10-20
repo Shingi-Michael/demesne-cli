@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { fixture, eventually } from "./fixture.ts";
-import { GraphicsHost } from "../host.ts";
+import { WorkspaceHost } from "../host.ts";
 import {
   validateDriveDecisionContext,
   type DriveDecision,
@@ -83,7 +83,7 @@ test("real command facts distinguish failed, passing and outdated checks", async
       }
     },
   });
-  const host = new GraphicsHost({
+  const host = new WorkspaceHost({
     workspace: f.workspace,
     settings: f.settings,
     client: f.client,

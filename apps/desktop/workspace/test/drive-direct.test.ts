@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { validateDriveDecisionContext, type DriveRequest } from "@demesne/protocol";
 import { DirectDriveControl, SENT } from "../drive-direct.ts";
-import type { GraphicsHost } from "../host.ts";
+import type { WorkspaceHost } from "../host.ts";
 
 /// A stand-in host: one completed turn that edited a file, ran a check and
 /// answered. Direct control reads only recorded state, never the screen.
@@ -27,7 +27,7 @@ function host(overrides: Partial<Record<string, unknown>> = {}) {
     api: { async commands() { return { commands: [{ id: "c1", argv: ["bun", "test"], status: "completed", exitCode: 0, freshness: "current", stdout: "12 pass\n0 fail", stderr: "" }] }; } },
     ...overrides,
   };
-  return { control: new DirectDriveControl(fake as unknown as GraphicsHost), submitted };
+  return { control: new DirectDriveControl(fake as unknown as WorkspaceHost), submitted };
 }
 
 test("direct observation is a recorded transcript: requests, tool lines, answers, files and checks", () => {

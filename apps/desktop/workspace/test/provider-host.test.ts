@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { GraphicsHost } from "../host.ts";
+import { WorkspaceHost } from "../host.ts";
 import type { ProviderAccounts } from "../providers.ts";
 import { fixture } from "./fixture.ts";
 
@@ -18,7 +18,7 @@ test("a cancelled browser flow cannot erase a newer sign-in or its cancel state"
     signOut: async () => ({ label: "unused" }),
     cancel() { pending?.reject(new Error("Previous sign-in cancelled.")); this.signingIn = null; },
   };
-  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, providerAccounts: accounts, changed: () => {} });
+  const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, providerAccounts: accounts, changed: () => {} });
   try {
     const old = host.handle("provider-signin", { key: "new:chatgpt" });
     expect(host.providers.signingIn).toBe("new:chatgpt");
@@ -35,7 +35,7 @@ test("closing the host cancels its browser sign-in without publishing a stale er
   const f = await fixture();
   const login = Promise.withResolvers<{ label: string }>();
   let cancelled = 0, publications = 0;
-  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => { publications++; }, providerAccounts: {
+  const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => { publications++; }, providerAccounts: {
     signingIn: "new:chatgpt", list: async () => [], signIn: () => login.promise, signOut: async () => ({ label: "unused" }),
     cancel() { cancelled++; login.reject(new Error("Cancelled on close.")); },
   } });

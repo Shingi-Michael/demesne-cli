@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import { GraphicsHost } from "../host.ts";
+import { WorkspaceHost } from "../host.ts";
 import { fixture, eventually } from "./fixture.ts";
 
 test("desktop compact action preserves a draft and shows the compaction turn", async () => {
   const f = await fixture();
-  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
+  const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
   try {
     await host.connect();
     host.draft = "Keep my unfinished request";
@@ -23,7 +23,7 @@ test("desktop refuses compaction while a conversation turn is active", async () 
       await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
     },
   });
-  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
+  const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
   try {
     await host.connect();
     await host.submit("Work");
@@ -43,7 +43,7 @@ test("completed compaction updates the live context meter to the saved plan with
       yield { type: "usage", usage: { inputTokens: 18000, outputTokens: 100, totalTokens: 18100 } };
     },
   });
-  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
+  const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
   try {
     await host.connect();
     for (let i = 0; i < 5; i++) {

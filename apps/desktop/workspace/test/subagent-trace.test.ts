@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { EventEnvelope, SessionStateResponse } from "@demesne/protocol";
-import { GraphicsSession } from "../session-model.ts";
+import { WorkspaceSession } from "../session-model.ts";
 
 const at = "2026-10-01T12:00:00Z";
 const state: SessionStateResponse = {
@@ -12,8 +12,8 @@ let id = 0;
 const event = (type: EventEnvelope["type"], payload: Record<string, unknown>): EventEnvelope =>
   ({ schemaVersion: 1, eventId: ++id, type, payload, sessionId: "s", turnId: "t", workspaceId: null, agentRunId: null, occurredAt: at });
 
-test("the graphics session builds a live sub-agent trace from progress events", () => {
-  const session = new GraphicsSession(state);
+test("the workspace session builds a live sub-agent trace from progress events", () => {
+  const session = new WorkspaceSession(state);
   session.apply(event("tool.call_requested", { toolCallId: "a", name: "subagent", arguments: JSON.stringify({ description: "Find restore", prompt: "Where?" }) }));
   session.apply(event("tool.call_progress", { toolCallId: "a", thinking: "Read the history module." }));
   session.apply(event("tool.call_progress", { toolCallId: "a", text: "read history.ts" }));

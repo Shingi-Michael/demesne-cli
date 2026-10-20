@@ -1,11 +1,11 @@
 import { createDesktopBridge, type DesktopInvoke } from "./frontend-bridge.ts";
-import type { GraphicsSnapshot, StateUpdate } from "../graphics/state-wire.ts";
+import type { WorkspaceSnapshot, StateUpdate } from "./workspace/state-wire.ts";
 
 interface DesktopBootstrap {
   workspace: string | null;
   recentProjects: string[];
   userName?: string;
-  snapshot: GraphicsSnapshot | null;
+  snapshot: WorkspaceSnapshot | null;
 }
 interface DesktopNative {
   core: { invoke: DesktopInvoke };
@@ -185,7 +185,7 @@ async function applyBootstrap(result: DesktopBootstrap) {
     return;
   }
   if (!result.snapshot) throw new Error("The project opened without a workspace connection. Try again to restart the desktop backend.");
-  // Each GraphicsHost has its own revision sequence and UI listeners. Reloading
+  // Each WorkspaceHost has its own revision sequence and UI listeners. Reloading
   // makes project changes atomic, resets StateReceiver, and avoids double mounts.
   if (mounted && previous !== workspace) {
     window.location.reload();
@@ -196,7 +196,7 @@ async function applyBootstrap(result: DesktopBootstrap) {
   el("desktop-sidebar").hidden = false;
   if (!mounted) {
     mounted = true;
-    await import("../graphics/live.ts");
+    await import("./workspace/live.ts");
   }
   setBusy(false, "");
 }

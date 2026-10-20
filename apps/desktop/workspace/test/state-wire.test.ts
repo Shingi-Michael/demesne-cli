@@ -2,14 +2,14 @@ import { expect, test } from "bun:test";
 import {
   StateEncoder,
   StateReceiver,
-  type GraphicsSnapshot,
+  type WorkspaceSnapshot,
   type StateUpdate,
 } from "../state-wire.ts";
-import { GraphicsHost } from "../host.ts";
+import { WorkspaceHost } from "../host.ts";
 import { fixture } from "./fixture.ts";
-import type { GraphicsRun } from "../session-model.ts";
+import type { WorkspaceRun } from "../session-model.ts";
 const wire = <T>(value: T): T => JSON.parse(JSON.stringify(value));
-const run = (id: string, text: string): GraphicsRun => ({
+const run = (id: string, text: string): WorkspaceRun => ({
   id,
   number: 1,
   content: "Check the parser",
@@ -22,10 +22,10 @@ const run = (id: string, text: string): GraphicsRun => ({
   ],
 });
 async function withState(
-  body: (state: GraphicsSnapshot) => Promise<void> | void,
+  body: (state: WorkspaceSnapshot) => Promise<void> | void,
 ) {
   const f = await fixture(),
-    host = new GraphicsHost({
+    host = new WorkspaceHost({
       client: f.client,
       settings: f.settings,
       workspace: f.workspace,
@@ -86,7 +86,7 @@ test("snapshot fields, removed optional fields, reordered entries, and turn tran
     const encoder = new StateEncoder(),
       receiver = new StateReceiver();
     let revision = 0;
-    const apply = (state: GraphicsSnapshot) => {
+    const apply = (state: WorkspaceSnapshot) => {
       state = { ...state, revision: ++revision };
       receiver.apply(wire(encoder.encode(state)));
       expect(receiver.needsReset).toBe(false);

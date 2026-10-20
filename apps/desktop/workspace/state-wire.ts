@@ -1,17 +1,17 @@
-import type { GraphicsHost } from "./host.ts";
-import type { GraphicsRun } from "./session-model.ts";
-import type { WorkbenchEntry } from "../cli/src/workbench/entries.ts";
+import type { WorkspaceHost } from "./host.ts";
+import type { WorkspaceRun } from "./session-model.ts";
+import type { WorkbenchEntry } from "../../cli/src/workbench/entries.ts";
 
-export type GraphicsSnapshot = ReturnType<GraphicsHost["snapshot"]>;
+export type WorkspaceSnapshot = ReturnType<WorkspaceHost["snapshot"]>;
 type Fields = { set: Record<string, unknown>; unset: string[] };
 type EntryUpdate =
   | { id: number; value: WorkbenchEntry }
   | { id: number; fields: Fields; append?: { offset: number; text: string } };
 type RunUpdate =
-  | { id: string; value: GraphicsRun }
+  | { id: string; value: WorkspaceRun }
   | { id: string; fields: Fields; entries: EntryUpdate[]; order?: number[] };
 export type StateUpdate =
-  | { kind: "snapshot"; state: GraphicsSnapshot }
+  | { kind: "snapshot"; state: WorkspaceSnapshot }
   | {
       kind: "patch";
       base: number;
@@ -76,8 +76,8 @@ function entryUpdate(
     : { id: next.id, value: next };
 }
 function runUpdate(
-  previous: GraphicsRun | undefined,
-  next: GraphicsRun,
+  previous: WorkspaceRun | undefined,
+  next: WorkspaceRun,
 ): RunUpdate | null {
   if (!previous) return { id: next.id, value: next };
   if (previous === next) return null;
@@ -108,10 +108,10 @@ export class StateEncoder {
     revision: number;
     sessionId: string | null;
     fields: Record<string, unknown>;
-    runs: Map<string, GraphicsRun>;
+    runs: Map<string, WorkspaceRun>;
     order: string[];
   } | null = null;
-  reset(state: GraphicsSnapshot) {
+  reset(state: WorkspaceSnapshot) {
     this.previous = {
       revision: state.revision,
       sessionId: state.session?.id ?? null,
@@ -120,7 +120,7 @@ export class StateEncoder {
       order: state.runs.map((run) => run.id),
     };
   }
-  encode(state: GraphicsSnapshot): StateUpdate {
+  encode(state: WorkspaceSnapshot): StateUpdate {
     const before = this.previous;
     if (!before || before.sessionId !== (state.session?.id ?? null)) {
       this.reset(state);
@@ -149,7 +149,7 @@ export class StateEncoder {
 /** Apply atomically and preserve identities of unchanged runs/entries. Missing or
  * out-of-order deltas trigger a fresh snapshot instead of displaying stale data. */
 export class StateReceiver {
-  state: GraphicsSnapshot | null = null;
+  state: WorkspaceSnapshot | null = null;
   needsReset = false;
   private pending: Extract<StateUpdate, { kind: "patch" }>[] = [];
   private remember(update: Extract<StateUpdate, { kind: "patch" }>) {
@@ -158,7 +158,7 @@ export class StateReceiver {
     if (this.pending.length > 128) this.pending.shift();
     this.needsReset = true;
   }
-  seed(state: GraphicsSnapshot): GraphicsSnapshot | null {
+  seed(state: WorkspaceSnapshot): WorkspaceSnapshot | null {
     const previous = this.state;
     if (!this.state || state.revision >= this.state.revision)
       this.state = state;
@@ -168,7 +168,7 @@ export class StateReceiver {
     this.needsReset = this.pending.length > 0;
     return this.state === previous ? null : this.state;
   }
-  apply(update: StateUpdate): GraphicsSnapshot | null {
+  apply(update: StateUpdate): WorkspaceSnapshot | null {
     this.needsReset = this.pending.length > 0;
     if (update.kind === "snapshot") return this.seed(update.state);
     if (this.state && update.revision <= this.state.revision) return null;

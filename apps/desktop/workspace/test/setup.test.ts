@@ -8,13 +8,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GraphicsSetup } from "../setup-controller.ts";
+import { WorkspaceSetup } from "../setup-controller.ts";
 import { eventually } from "./fixture.ts";
 
 test("setup checks URLs, edits review values, and writes only on explicit Review confirmation", async () => {
   const root = mkdtempSync(join(tmpdir(), "graphics-setup-")),
     path = join(root, "config.toml");
-  const setup = new GraphicsSetup({
+  const setup = new WorkspaceSetup({
     configPath: path,
     changed: () => {},
     copy: async () => {},
@@ -56,7 +56,7 @@ test("OpenRouter credential stays in the host until Review and never enters UI s
     path = join(root, "config.toml"),
     secret = "test-secret-key";
   let opened = 0;
-  const setup = new GraphicsSetup({
+  const setup = new WorkspaceSetup({
     configPath: path,
     changed: () => {},
     copy: async () => {},
@@ -90,11 +90,11 @@ test("OpenRouter credential stays in the host until Review and never enters UI s
 });
 
 test("ChatGPT setup signs in, acknowledges plan usage, and writes a token-free provider profile", async () => {
-  const { fakeChatGPT } = await import("../../../packages/chatgpt-auth/test/fixture.ts");
+  const { fakeChatGPT } = await import("../../../../packages/chatgpt-auth/test/fixture.ts");
   const { loadConfig } = await import("@demesne/config");
   const fake = await fakeChatGPT(), root = mkdtempSync(join(tmpdir(), "graphics-chatgpt-")), path = join(root, "config.toml");
   const snapshots: string[] = [];
-  const setup = new GraphicsSetup({ configPath: path, dataDirectory: root, env: {}, changed: () => snapshots.push(JSON.stringify(setup.snapshot())), copy: async () => {}, finish: async () => {},
+  const setup = new WorkspaceSetup({ configPath: path, dataDirectory: root, env: {}, changed: () => snapshots.push(JSON.stringify(setup.snapshot())), copy: async () => {}, finish: async () => {},
     open: async url => { await fake.callback(url); }, fetch: (async (url, init) => String(url).startsWith("http:") ? Response.json({ data: [] }) : fake.fetch(url, init)) as typeof fetch });
   try {
     await setup.start(); await setup.action({ index: 4, key: "return" });

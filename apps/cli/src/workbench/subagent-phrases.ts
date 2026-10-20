@@ -1,7 +1,7 @@
 /// What a sub-agent's card says while it thinks: a cycling, irreverent label
 /// instead of "thinking · 3 tool calls". Real steps (read, search) still show
 /// as they happen; the trace under the card stays the real thinking.
-/// Dependency-free so both the terminal and the graphics renderer use it.
+/// Dependency-free so the renderer can bundle it.
 
 const BAD_INTENTIONS = [
   "Dreaming about rm -rf",

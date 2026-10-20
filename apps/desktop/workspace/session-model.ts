@@ -12,16 +12,16 @@ import {
 import {
   restoreSessionEntries,
   toolArguments,
-} from "../cli/src/workbench/history.ts";
-import { derivePersistedRule } from "../cli/src/allow-rules.ts";
-import { codeDiff } from "../cli/src/workbench/change-diff.ts";
+} from "../../cli/src/workbench/history.ts";
+import { derivePersistedRule } from "../../cli/src/allow-rules.ts";
+import { codeDiff } from "../../cli/src/workbench/change-diff.ts";
 import type {
   WorkbenchEntry,
   ToolEntry,
   ResponseReceipt,
-} from "../cli/src/workbench/entries.ts";
+} from "../../cli/src/workbench/entries.ts";
 
-export interface GraphicsApproval {
+export interface WorkspaceApproval {
   id: string;
   turnId: string;
   toolCallId: string;
@@ -30,13 +30,13 @@ export interface GraphicsApproval {
   input: Record<string, unknown>;
   rule: string | null;
 }
-export interface GraphicsQuestion extends Partial<Omit<QuestionState,"id" | "turnId" | "toolCallId" | "questions">> {
+export interface WorkspaceQuestion extends Partial<Omit<QuestionState,"id" | "turnId" | "toolCallId" | "questions">> {
   id: string;
   turnId: string;
   toolCallId: string;
   questions: UserQuestion[];
 }
-export interface GraphicsRun {
+export interface WorkspaceRun {
   id: string;
   number: number;
   content: string;
@@ -48,7 +48,7 @@ export interface GraphicsRun {
   entries: WorkbenchEntry[];
   receipt?: ResponseReceipt;
 }
-export interface GraphicsChange {
+export interface WorkspaceChange {
   path: string;
   state: string;
   added: number;
@@ -63,14 +63,14 @@ export interface GraphicsChange {
 
 /** The event journal is authoritative. Streaming deltas coalesce without losing
  * their first timestamp or replay cursor; settled run projections are cached. */
-export class GraphicsSession {
+export class WorkspaceSession {
   state: SessionStateResponse;
   cursor: number;
   provider: ProviderCallSnapshot | null;
-  approvals = new Map<string, GraphicsApproval>();
-  questions = new Map<string, GraphicsQuestion>();
+  approvals = new Map<string, WorkspaceApproval>();
+  questions = new Map<string, WorkspaceQuestion>();
   private journals = new Map<string, ReplayEvent[]>();
-  private cache = new Map<string, GraphicsRun>();
+  private cache = new Map<string, WorkspaceRun>();
   constructor(
     state: SessionStateResponse,
     events: readonly ReplayEvent[] = [],
@@ -266,12 +266,12 @@ export class GraphicsSession {
       });
     if (event.type === "question.updated" && isRecord(p.state)) {
       const current=this.questions.get(String(p.questionId));
-      if (current) this.questions.set(current.id,{...current,...p.state} as GraphicsQuestion);
+      if (current) this.questions.set(current.id,{...current,...p.state} as WorkspaceQuestion);
     }
     if (event.type === "question.resolved" || event.type === "question.cancelled")
       this.questions.delete(String(p.questionId));
   }
-  runs(): GraphicsRun[] {
+  runs(): WorkspaceRun[] {
     return this.session.turns.map((turn, index) => {
       let run = this.cache.get(turn.id);
       if (!run) {
@@ -299,7 +299,7 @@ export class GraphicsSession {
       return run;
     });
   }
-  changes(id: string): GraphicsChange[] {
+  changes(id: string): WorkspaceChange[] {
     const run = this.runs().find((run) => run.id === id);
     if (!run) return [];
     const files = new Map<

@@ -1,6 +1,6 @@
 import { ChatGPTAuth, type ChatGPTAccount } from "@demesne/chatgpt-auth";
-import { configuredChatGPTAccount } from "../cli/src/chatgpt-auth.ts";
-import { codeDiff } from "../cli/src/workbench/change-diff.ts";
+import { configuredChatGPTAccount } from "../../cli/src/chatgpt-auth.ts";
+import { codeDiff } from "../../cli/src/workbench/change-diff.ts";
 import type {
   CommandsResponse,
   CommandRecord,
@@ -30,30 +30,30 @@ import {
   type ModelDescriptor,
   type WorkspaceFileInfo,
 } from "@demesne/protocol";
-import { loadCliSettings, type CliSettings } from "../cli/src/cli-config.ts";
+import { loadCliSettings, type CliSettings } from "../../cli/src/cli-config.ts";
 import {
   createDaemonControlDependencies,
   startDaemon,
-} from "../cli/src/daemon-control.ts";
-import { replaySession } from "../cli/src/workbench/history.ts";
-import { expandMentions } from "../cli/src/prompt-editor.ts";
+} from "../../cli/src/daemon-control.ts";
+import { replaySession } from "../../cli/src/workbench/history.ts";
+import { expandMentions } from "../../cli/src/prompt-editor.ts";
 import {
   isPlaceholderTitle,
   titleFromRequest,
-} from "../cli/src/session-title.ts";
-import { GraphicsDrive } from "./drive-controller.ts";
+} from "../../cli/src/session-title.ts";
+import { WorkspaceDrive } from "./drive-controller.ts";
 import { ProviderAccounts, type ProviderEntry } from "./providers.ts";
 import { BreakageWatch } from "./breakage.ts";
-import { missionReceipt } from "../cli/src/drive-receipt.ts";
-import { expandCustomCommand, loadCustomCommands, mergeSlashCommands, type CustomCommand } from "../cli/src/custom-commands.ts";
-import { loadWorkflows, workflowCommand } from "../cli/src/workflows.ts";
-import { GraphicsSetup } from "./setup-controller.ts";
-import { GraphicsSession } from "./session-model.ts";
+import { missionReceipt } from "../../cli/src/drive-receipt.ts";
+import { expandCustomCommand, loadCustomCommands, mergeSlashCommands, type CustomCommand } from "../../cli/src/custom-commands.ts";
+import { loadWorkflows, workflowCommand } from "../../cli/src/workflows.ts";
+import { WorkspaceSetup } from "./setup-controller.ts";
+import { WorkspaceSession } from "./session-model.ts";
 
 /// How many of the top Next proposals away mode works through.
 export const AWAY_RUNS = 3;
 
-export interface GraphicsHostOptions {
+export interface WorkspaceHostOptions {
   workspace?: string;
   server?: string;
   sessionId?: string;
@@ -65,7 +65,7 @@ export interface GraphicsHostOptions {
   /// Desktop hosts use trusted native IPC instead of command-line OS utilities.
   copy?: (text: string) => Promise<void>;
   open?: (path: string) => Promise<void>;
-  changed: (snapshot: ReturnType<GraphicsHost["snapshot"]>) => void;
+  changed: (snapshot: ReturnType<WorkspaceHost["snapshot"]>) => void;
   /// Applied once, the first time the daemon is online: `demesne --model <id>`
   /// and `demesne "<message>"`.
   startup?: { model?: string; prompt?: string };
@@ -121,10 +121,10 @@ const BACKGROUND_POLL_MS = 4_000;
 
 /** All privileged operations stay here. The web renderer gets snapshots and a
  * fixed set of actions, never a daemon token, shell, arbitrary URL, or filesystem API. */
-export class GraphicsHost {
+export class WorkspaceHost {
   settings: CliSettings;
-  setup: GraphicsSetup | null = null;
-  drive: GraphicsDrive | undefined;
+  setup: WorkspaceSetup | null = null;
+  drive: WorkspaceDrive | undefined;
   driveState: import("@demesne/protocol").DriveState | null = null;
   /// Drive's Next queue for this workspace.
   nextQueue: {
@@ -140,7 +140,7 @@ export class GraphicsHost {
   /// Settings › Providers: each provider's sign-in state, and the one being
   /// signed in while its browser flow is open.
   providers: { items: ProviderEntry[]; signingIn: string | null; message: string | null; loading: boolean } = { items: [], signingIn: null, message: null, loading: false };
-  private providerAccounts: NonNullable<GraphicsHostOptions["providerAccounts"]> | null = null;
+  private providerAccounts: NonNullable<WorkspaceHostOptions["providerAccounts"]> | null = null;
   private providerSignInGeneration = 0;
   /// Settings › Clean up sessions: what's worth deleting, what you ticked,
   /// and whether Delete was pressed once (it asks twice).
@@ -175,7 +175,7 @@ export class GraphicsHost {
   model: ModelDescriptor = { id: "", provider: "" };
   /// The model's chosen thinking level (none: the model's default).
   reasoning: string | undefined;
-  current: GraphicsSession | null = null;
+  current: WorkspaceSession | null = null;
   sessions: Session[] = [];
   files: WorkspaceFileInfo[] = [];
   processes: CommandRecord[] = [];
@@ -220,7 +220,7 @@ export class GraphicsHost {
   ) => Promise<unknown>;
   onEvent?: (event: EventEnvelope) => void;
   onManual?: () => void;
-  constructor(private options: GraphicsHostOptions) {
+  constructor(private options: WorkspaceHostOptions) {
     this.workspace = resolve(options.workspace ?? process.cwd());
     this.settings =
       options.settings ??
@@ -240,7 +240,7 @@ export class GraphicsHost {
       process.env.COLORFGBG,
     ).name;
     this.selectedSession = options.sessionId;
-    if (options.drive) this.drive = new GraphicsDrive(this);
+    if (options.drive) this.drive = new WorkspaceDrive(this);
   }
   get api() {
     return this.client;
@@ -495,7 +495,7 @@ export class GraphicsHost {
       if (this.disposed) return;
       this.generation = generation;
       this.stream?.abort();
-      this.current = new GraphicsSession(state, events);
+      this.current = new WorkspaceSession(state, events);
       this.reviewRevision++;
       this.reviewCache.clear();
       this.processes = [];
@@ -1061,7 +1061,7 @@ export class GraphicsHost {
     }
     if (method === "setup") {
       this.setup?.dispose();
-      this.setup = new GraphicsSetup({
+      this.setup = new WorkspaceSetup({
         dataDirectory: this.settings.accountDataDirectory ?? this.settings.dataDirectory,
         configPath: this.settings.configPath,
         changed: () => this.publish(),

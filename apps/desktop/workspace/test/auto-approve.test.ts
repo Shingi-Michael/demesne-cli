@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { EventEnvelope, SessionStateResponse } from "@demesne/protocol";
-import { GraphicsHost } from "../host.ts";
-import { GraphicsSession } from "../session-model.ts";
+import { WorkspaceHost } from "../host.ts";
+import { WorkspaceSession } from "../session-model.ts";
 import { fixture, eventually } from "./fixture.ts";
 
-const hostFor = (f: Awaited<ReturnType<typeof fixture>>) => new GraphicsHost({
+const hostFor = (f: Awaited<ReturnType<typeof fixture>>) => new WorkspaceHost({
   workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {},
 });
 
@@ -104,7 +104,7 @@ test("the session projection accepts only current permission changes in event or
     session: { id: "selected", title: "Selected", createdAt: at, updatedAt: at, workspace: null, turns: [] },
     lastEventId: 0, pendingPermissions: [], latestProviderCall: null,
   };
-  const session = new GraphicsSession(state);
+  const session = new WorkspaceSession(state);
   const event = (eventId: number, sessionId: string, autoApprove: unknown): EventEnvelope => ({
     schemaVersion: 1, eventId, type: "session.permissions_changed", payload: { autoApprove }, sessionId,
     turnId: null, workspaceId: null, agentRunId: null, occurredAt: at,

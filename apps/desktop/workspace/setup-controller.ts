@@ -1,4 +1,4 @@
-import { chatGPTAuthForConfig, connectChatGPT } from "../cli/src/chatgpt-auth.ts";
+import { chatGPTAuthForConfig, connectChatGPT } from "../../cli/src/chatgpt-auth.ts";
 import { assertProviderUrl } from "@demesne/config";
 import {
   initialWizard,
@@ -11,26 +11,26 @@ import {
   selectedModel,
   type WizardState,
   type WizardEffect,
-} from "../cli/src/setup-wizard.ts";
+} from "../../cli/src/setup-wizard.ts";
 import {
   probeTargets,
   probeProvider,
   targetForUrl,
   type ProbeResult,
-} from "../cli/src/provider-probe.ts";
+} from "../../cli/src/provider-probe.ts";
 import {
   beginOpenRouterLogin,
   discoverOpenRouter,
   OPENROUTER_URL,
-} from "../cli/src/openrouter-auth.ts";
-import { writeSetupConfig } from "../cli/src/setup.ts";
+} from "../../cli/src/openrouter-auth.ts";
+import { writeSetupConfig } from "../../cli/src/setup.ts";
 
 export type SetupSnapshot = WizardState & {
   customResult: ProbeResult | null;
   checkedAt: number | null;
   saving: boolean;
 };
-export class GraphicsSetup {
+export class WorkspaceSetup {
   private state: WizardState;
   private chatgpt: ReturnType<typeof chatGPTAuthForConfig>;
   private apiKey: string | undefined;

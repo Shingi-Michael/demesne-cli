@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fixture, eventually } from "../../graphics/test/fixture.ts";
+import { fixture, eventually } from "../../desktop/workspace/test/fixture.ts";
 import type {
   DriveRequest,
   DriveReview,

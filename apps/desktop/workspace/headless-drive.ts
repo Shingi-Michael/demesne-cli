@@ -1,7 +1,7 @@
 import type { DriveFix } from "@demesne/protocol";
-import { missionReceipt, type DriveReceipt } from "../cli/src/drive-receipt.ts";
-import type { CliSettings } from "../cli/src/cli-config.ts";
-import { GraphicsHost, type GraphicsHostOptions } from "./host.ts";
+import { missionReceipt, type DriveReceipt } from "../../cli/src/drive-receipt.ts";
+import type { CliSettings } from "../../cli/src/cli-config.ts";
+import { WorkspaceHost, type WorkspaceHostOptions } from "./host.ts";
 
 /// `demesne drive "<mission>"`: a Drive mission with no window, for CI and
 /// scripts. It runs the same planner the window does (in its own worktree
@@ -19,9 +19,9 @@ export interface HeadlessDriveResult {
 }
 
 export async function runHeadlessDrive(options: { workspace: string; sessionId: string; mission: string; workflow?: string; server?: string; settings: CliSettings; log?: (line: string) => void },
-  test: { client?: GraphicsHostOptions["client"]; pollMs?: number; started?: (host: GraphicsHost) => void } = {}): Promise<HeadlessDriveResult> {
+  test: { client?: WorkspaceHostOptions["client"]; pollMs?: number; started?: (host: WorkspaceHost) => void } = {}): Promise<HeadlessDriveResult> {
   const log = options.log ?? (() => {});
-  const host = new GraphicsHost({
+  const host = new WorkspaceHost({
     workspace: options.workspace, server: options.server, sessionId: options.sessionId, settings: options.settings, headless: true,
     ...(test.client ? { client: test.client } : {}),
     changed: () => {},

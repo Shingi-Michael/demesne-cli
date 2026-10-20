@@ -198,8 +198,10 @@ async function start() {
     listeners.push(...await Promise.all([
       native.event.listen<StateUpdate>("demesne:update", (event) => bridge.update(event.payload)),
       native.event.listen<unknown>("demesne:desktop-error", (event) => showError(event.payload)),
-      native.event.listen<{ action: "open-project" | "settings" }>("demesne:desktop-action", (event) => {
+      native.event.listen<{ action: "open-project" | "settings" | "open-chat"; sessionId?: string; path?: string }>("demesne:desktop-action", (event) => {
         if (event.payload.action === "open-project") void openProject();
+        else if (event.payload.action === "open-chat" && mounted && !fatal)
+          document.dispatchEvent(new CustomEvent("demesne:open-chat", { detail: { sessionId: event.payload.sessionId, path: event.payload.path } }));
         else if (event.payload.action === "settings" && mounted && !fatal && !busy)
           document.dispatchEvent(new Event("demesne:open-settings"));
       }),

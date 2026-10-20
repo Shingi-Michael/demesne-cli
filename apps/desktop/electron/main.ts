@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, protocol, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, protocol, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -78,6 +78,19 @@ void app.whenReady().then(async () => {
     if (method === "desktop-badge") {
       const count = Number((args as Record<string, unknown>).count);
       app.setBadgeCount(Number.isInteger(count) && count > 0 && count < 1000 ? count : 0);
+      return null;
+    }
+    // A Mac banner for a chat that needs you; clicking it opens that chat.
+    if (method === "desktop-notify") {
+      const { title, body, sessionId, path } = args as Record<string, unknown>;
+      if (!Notification.isSupported() || typeof title !== "string" || typeof body !== "string") return null;
+      const banner = new Notification({ title: title.slice(0, 120), body: body.slice(0, 240) });
+      banner.on("click", () => {
+        window?.show();
+        window?.focus();
+        emit("demesne:desktop-action", { action: "open-chat", sessionId: typeof sessionId === "string" ? sessionId : undefined, path: typeof path === "string" ? path : undefined });
+      });
+      banner.show();
       return null;
     }
     // Settings' text size: an exact level, or none to read the current one.

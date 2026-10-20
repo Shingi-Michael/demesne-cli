@@ -220,8 +220,13 @@ try {
   await thinkingToggle.click();
   await trace.waitFor({ state: "visible" });
   await click("toggle-steps");
+  // Mac banners: record them in the main process, and look away from the window.
+  await desktop.evaluate(({ Notification }) => { (globalThis as any).banners = []; Notification.isSupported = () => true; Notification.prototype.show = function () { (globalThis as any).banners.push({ title: this.title, body: this.body }); }; });
+  await page.evaluate(() => { document.hasFocus = () => false; });
   await type(prompt);
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Edit"]), "file approval visible");
+  await until(() => desktop.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body.startsWith("Wants to edit"))), "a waiting approval sends a Mac banner");
+  await page.evaluate(() => { delete (document as any).hasFocus; });
   await capture("02-file-approval");
   await click("permission", { decision: "allow_once" });
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Run"]), "command approval visible");
@@ -323,6 +328,10 @@ try {
   await page.locator(".sidebar-settings").click();
   await page.locator('#overlay[data-screen="settings"] .settings-nav-item.on').filter({ hasText: "General" }).waitFor();
   await capture("02-settings");
+  await page.locator("#overlay .settings-segments button").filter({ hasText: "Always" }).click();
+  await until(() => page.evaluate("localStorage.getItem('demesne-notify')").then(value => value === "always"), "Notify me remembers Always");
+  await page.locator("#overlay .settings-segments button").filter({ hasText: "When it needs you" }).click();
+  await until(() => page.evaluate("localStorage.getItem('demesne-notify')").then(value => value === "needs"), "Notify me goes back to When it needs you");
   await page.getByRole("textbox", { name: "Search settings" }).fill("palette");
   await until(() => page.locator("#overlay .settings-row b").allInnerTexts().then(titles => titles.includes("Theme") && !titles.includes("Mode")), "Settings search finds the theme row");
   await page.getByRole("textbox", { name: "Search settings" }).fill("");

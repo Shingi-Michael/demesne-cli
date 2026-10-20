@@ -25,6 +25,9 @@ export interface SessionRule {
 
 const MAX_SESSION_RULES = 16;
 
+/// What "Accept edits" lets through without asking. Deletes and commands still ask.
+export const EDIT_TOOLS = new Set(["edit_file", "write_file", "move_path"]);
+
 /// In-memory per-session approval grants ("always this session") plus the
 /// persisted user allowlist, which is consulted first. Session grants never
 /// outlive the daemon process and expire implicitly when a session ends.
@@ -35,7 +38,14 @@ export class PermissionBroker {
   constructor(
     private readonly allowlist?: ConfigAllowlist,
     private readonly sessionAutoApprove: (sessionId: string) => boolean = () => false,
+    private readonly sessionAcceptEdits: (sessionId: string) => boolean = () => false,
   ) {}
+
+  /// The session's own policy covers this tool: Auto covers everything,
+  /// Accept edits covers file edits.
+  private sessionAllows(sessionId: string, toolName: string | undefined): boolean {
+    return this.sessionAutoApprove(sessionId) || (toolName !== undefined && EDIT_TOOLS.has(toolName) && this.sessionAcceptEdits(sessionId));
+  }
 
   wait(
     permissionId: string,
@@ -48,7 +58,7 @@ export class PermissionBroker {
     if (signal.aborted) return Promise.reject(signal.reason);
     // The UI can enable the policy synchronously while the permission event
     // is being delivered, before this waiter has been registered.
-    if (this.sessionAutoApprove(sessionId)) return Promise.resolve("allow_once");
+    if (this.sessionAllows(sessionId, toolName)) return Promise.resolve("allow_once");
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(permissionId);
@@ -70,7 +80,7 @@ export class PermissionBroker {
   }
 
   preapproved(sessionId: string, toolName: string, input: unknown): boolean {
-    if (this.sessionAutoApprove(sessionId)) return true;
+    if (this.sessionAllows(sessionId, toolName)) return true;
     const rules = this.grants.get(sessionId);
     if (rules && sessionRulesCover(rules, toolName, input)) return true;
     const allowRules = this.allowlist?.rulesFor();
@@ -84,10 +94,9 @@ export class PermissionBroker {
   /// Enabling the persisted policy releases this session's existing waiters.
   /// One-shot decisions never create grants that would survive disabling it.
   approvePendingSession(sessionId: string): number {
-    if (!this.sessionAutoApprove(sessionId)) return 0;
     let resolved = 0;
     for (const [permissionId, pending] of this.pending) {
-      if (pending.sessionId === sessionId && this.resolve(permissionId, "allow_once")) resolved++;
+      if (pending.sessionId === sessionId && this.sessionAllows(sessionId, pending.toolName) && this.resolve(permissionId, "allow_once")) resolved++;
     }
     return resolved;
   }

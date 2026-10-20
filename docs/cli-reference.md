@@ -52,7 +52,7 @@ A new session in a folder you haven't trusted yet asks "Do you trust the files i
 
 `--permission ask|deny` chooses the turn's permission mode. Without an interactive approval channel, requested approvals are denied rather than left waiting. Saved grants and workspace permissions remain subject to daemon policy; `ask` is not unattended blanket authorization.
 
-**Settings › Approvals › Auto-approve all** enables automatic approval for the current session. The approval card offers the same option. Edits, commands, deletions and publishing run without asking, including any action already waiting for approval. The setting persists for that session across reopening and daemon restarts; new sessions start with **Ask first**. Turn it off to resume approval prompts for later actions. Plan mode still exposes inspection tools only.
+**Settings › Approvals › Auto-approve all** enables automatic approval for the current session. The approval card offers the same option. Edits, commands, deletions and publishing run without asking, including any action already waiting for approval. The setting persists for that session across reopening and daemon restarts; new sessions start with **Ask first**. Turn it off to resume approval prompts for later actions. Plan mode still exposes inspection tools only. The desktop composer's mode word sets the same policy, and adds **Accept edits**, which lets file edits, new files and moves through while deletes and commands still ask.
 
 ## Slash commands
 

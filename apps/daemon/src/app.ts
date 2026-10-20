@@ -194,7 +194,7 @@ export function createDaemonApp(options: {
   if (invalidRules.length > 0) {
     console.warn(`Ignoring ${invalidRules.length} invalid permissions.allow entr${invalidRules.length === 1 ? "y" : "ies"}: ${invalidRules.join(", ")}`);
   }
-  const permissions = new PermissionBroker(allowlist, (sessionId) => store.isSessionAutoApprove(sessionId));
+  const permissions = new PermissionBroker(allowlist, (sessionId) => store.isSessionAutoApprove(sessionId), (sessionId) => store.isSessionAcceptEdits(sessionId));
   const questions = new QuestionBroker(options.questionTimeoutMs);
   const inferenceSlots = options.inferenceSlots ?? 1;
   const primarySlots = options.providerInferenceSlots?.[processor.providerId] ?? inferenceSlots;
@@ -746,6 +746,12 @@ export function createDaemonApp(options: {
           session = updated.session;
           eventId = updated.event?.eventId ?? eventId;
           if (body.autoApprove) permissions.approvePendingSession(path[2]!);
+        }
+        if (body.acceptEdits !== undefined) {
+          const updated = store.setSessionAcceptEdits(path[2]!, body.acceptEdits);
+          session = updated.session;
+          eventId = updated.event?.eventId ?? eventId;
+          if (body.acceptEdits) permissions.approvePendingSession(path[2]!);
         }
         const response: UpdateSessionResponse = { session, eventId };
         return json(response);

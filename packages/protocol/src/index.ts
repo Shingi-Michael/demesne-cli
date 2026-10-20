@@ -373,10 +373,13 @@ export interface Session {
   /// Session-wide approval policy; older clients and fixtures may omit it.
   /// Stored sessions always return a boolean and default to false.
   autoApprove?: boolean;
+  /// File edits run without asking; commands and deletes still ask.
+  acceptEdits?: boolean;
 }
 
 export interface UpdateSessionRequest {
   autoApprove?: boolean;
+  acceptEdits?: boolean;
   title?: string;
   preferredModel?: string | null;
 }
@@ -586,8 +589,12 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
     if (typeof value.autoApprove !== "boolean") throw new ProtocolValidationError("autoApprove must be a boolean");
     update.autoApprove = value.autoApprove;
   }
-  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined) {
-    throw new ProtocolValidationError("title, preferredModel or autoApprove is required");
+  if (value.acceptEdits !== undefined) {
+    if (typeof value.acceptEdits !== "boolean") throw new ProtocolValidationError("acceptEdits must be a boolean");
+    update.acceptEdits = value.acceptEdits;
+  }
+  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined) {
+    throw new ProtocolValidationError("title, preferredModel, autoApprove or acceptEdits is required");
   }
   return update;
 }

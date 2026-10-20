@@ -664,7 +664,7 @@ function renderStatus() {
   // session's own view (rename, compact, history). The sidebar shows what
   // needs you; Drive lives in its footer.
   el("header").innerHTML =
-    `<div class="header-state">${branchChip()}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "chip auto-approve") : ""}</div>${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+    `<div class="header-state">${branchChip()}</div>${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
 }
 function totals(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -749,7 +749,6 @@ const stepIcon = (tool: ToolEntry) => {
   return `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${STEP_ICONS[kind]}</svg>`;
 };
 const ICON_SPARK = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>';
-const ICON_SHIELD = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>';
 const ICON_COPY = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
 const ICON_UNDO = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>';
 const CHEVRON = '<svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
@@ -1305,6 +1304,30 @@ async function answerQuestion(value: string) {
     if (composerSlot===key) editor.value="";
   } finally { answeringQuestion=false;renderComposer(); }
 }
+type Mode = "ask" | "edits" | "plan" | "auto";
+const MODES: Record<Mode, string> = { ask: "Ask", edits: "Accept edits", plan: "Plan", auto: "Auto" };
+const MODE_HELP: Record<Mode, string> = {
+  ask: "Every edit and command asks first",
+  edits: "File edits run without asking; commands and deletes still ask",
+  plan: "Reads and proposes a plan; changes nothing",
+  auto: "Edits and commands run without asking",
+};
+function currentMode(): Mode {
+  return state?.planOnly ? "plan" : state?.session?.autoApprove ? "auto" : state?.session?.acceptEdits ? "edits" : "ask";
+}
+let modeHintTimer: ReturnType<typeof setTimeout> | undefined;
+/** Steps to the next mode and names all four for a moment above the composer. */
+async function cycleMode(step = 1) {
+  const order = Object.keys(MODES) as Mode[];
+  const next = order[(order.indexOf(currentMode()) + step + order.length) % order.length]!;
+  const hint = el("mode-hint");
+  hint.innerHTML = order.map((mode) => mode === next ? `<b class="mode-${mode}">${MODES[mode]}</b>` : MODES[mode]).join(" · ");
+  hint.hidden = false;
+  clearTimeout(modeHintTimer);
+  modeHintTimer = setTimeout(() => { hint.hidden = true; }, 1600);
+  if (state?.session) await api("permission-mode", { mode: next });
+  else await api("mode", { planOnly: next === "plan" });
+}
 function renderComposer() {
   if (!state) return;
   const width = editor.clientWidth;
@@ -1320,6 +1343,7 @@ function renderComposer() {
     state.approvals.length,
     state.questions.length,
     state.session?.autoApprove,
+    state.session?.acceptEdits,
     state.planOnly,
     answeringQuestion,
     driveSuggestion(),
@@ -1338,11 +1362,13 @@ function renderComposer() {
     question = pendingQuestion(),
     answered = question && (question.answers?.length ?? 0) >= question.questions.length,
     queued = false;
-  // The approval chip says how edits and commands are gated; it opens Settings.
-  const chip = el("composer-approval");
-  chip.classList.toggle("auto", Boolean(state.session?.autoApprove));
-  chip.innerHTML = `${ICON_SHIELD}${state.session?.autoApprove ? (state.planOnly ? "Auto-approve · plan only" : "Auto-approve") : "Ask before edits"}`;
-  chip.title = state.session?.autoApprove ? "Edits and commands run without asking this session. Change in Settings." : "Each edit and command asks first. Change in Settings.";
+  // The mode word says how this chat's edits and commands are gated; a
+  // click or ⇧⇥ steps to the next mode.
+  const mode = currentMode(), chip = el("composer-mode");
+  chip.className = `cb mode-${mode}`;
+  chip.innerHTML = `${MODES[mode]}<kbd>⇧⇥</kbd>`;
+  chip.title = `${MODE_HELP[mode]}. Click or ⇧⇥ for the next mode.`;
+  form.classList.toggle("mode-plan", mode === "plan");
   form.classList.toggle("queued", queued);
   form.classList.toggle("restored", state.restored && !question);
   form.classList.toggle("stop-armed", Date.now() < stopArmed);
@@ -2818,6 +2844,7 @@ async function dispatch(
     document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path: args.path, ...(action === "project-session" ? { sessionId: args.id } : {}) } }));
     return;
   }
+  if (action === "cycle-mode") return cycleMode();
   if (action === "context-card") {
     contextCardOpen = !contextCardOpen;
     renderContextCard();
@@ -3586,6 +3613,10 @@ document.addEventListener("keydown", (event) => {
       return;
     }
   }
+  if (key === "tab" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && event.target === editor) {
+    run(() => cycleMode());
+    return;
+  }
   if (event.target === editor && key === "enter" && !event.shiftKey) {
     // During an approval Enter allows; with text it denies and says why.
     const approval = !pendingQuestion() ? state.approvals[0] : undefined;
@@ -3691,6 +3722,7 @@ window.demesneInspect = () => ({
   })),
   approvals: state?.approvals.length,
   autoApprove: state?.session?.autoApprove === true,
+  mode: currentMode(),
   approvalText: el("approval").innerText,
   approvalDetailsOpen: !(el("approval").querySelector<HTMLElement>(".approval-fold")?.hidden ?? true),
   questions: state?.questions.length,

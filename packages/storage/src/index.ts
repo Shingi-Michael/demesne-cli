@@ -62,6 +62,7 @@ interface SessionRow {
   archived_at: string | null;
   preferred_model: string | null;
   auto_approve: number;
+  accept_edits: number;
 }
 
 interface TurnRow {
@@ -260,7 +261,7 @@ export class DemesneStore {
     const row = this.database
       .query(`
         SELECT sessions.id, sessions.title, sessions.created_at, sessions.updated_at,
-               sessions.workspace_id, sessions.archived_at, sessions.preferred_model, sessions.auto_approve,
+               sessions.workspace_id, sessions.archived_at, sessions.preferred_model, sessions.auto_approve, sessions.accept_edits,
                workspaces.root AS workspace_root
         FROM sessions
         LEFT JOIN workspaces ON workspaces.id = sessions.workspace_id
@@ -275,6 +276,7 @@ export class DemesneStore {
       id: row.id,
       title: row.title,
       autoApprove: row.auto_approve === 1,
+      acceptEdits: row.accept_edits === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       workspace: row.workspace_id && row.workspace_root
@@ -340,6 +342,26 @@ export class DemesneStore {
       const now = new Date().toISOString();
       this.database.query("UPDATE sessions SET auto_approve = ?, updated_at = ? WHERE id = ?").run(autoApprove ? 1 : 0, now, id);
       const event = this.insertEvent("session.permissions_changed", id, null, { autoApprove }, now);
+      return { session: this.getSessionOrThrow(id), event };
+    })();
+    if (result.event) this.eventSink?.(result.event);
+    return result;
+  }
+
+  /// Accept edits: file edits run without asking; commands and deletes still ask.
+  isSessionAcceptEdits(id: string): boolean {
+    const row = this.database.query("SELECT accept_edits FROM sessions WHERE id = ?").get(id) as { accept_edits: number } | null;
+    return row?.accept_edits === 1;
+  }
+
+  setSessionAcceptEdits(id: string, acceptEdits: boolean): { session: Session; event: EventEnvelope | null } {
+    if (typeof acceptEdits !== "boolean") throw new InvalidStateError("acceptEdits must be a boolean");
+    const result = this.database.transaction(() => {
+      const session = this.getSessionOrThrow(id);
+      if (session.acceptEdits === acceptEdits) return { session, event: null };
+      const now = new Date().toISOString();
+      this.database.query("UPDATE sessions SET accept_edits = ?, updated_at = ? WHERE id = ?").run(acceptEdits ? 1 : 0, now, id);
+      const event = this.insertEvent("session.permissions_changed", id, null, { acceptEdits }, now);
       return { session: this.getSessionOrThrow(id), event };
     })();
     if (result.event) this.eventSink?.(result.event);
@@ -1618,6 +1640,9 @@ export class DemesneStore {
     }
     if (!this.hasColumn("sessions", "auto_approve")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN auto_approve INTEGER NOT NULL DEFAULT 0 CHECK (auto_approve IN (0, 1))");
+    }
+    if (!this.hasColumn("sessions", "accept_edits")) {
+      this.database.run("ALTER TABLE sessions ADD COLUMN accept_edits INTEGER NOT NULL DEFAULT 0 CHECK (accept_edits IN (0, 1))");
     }
     this.backfillModelMessages();
     this.migrateSearchIndex();

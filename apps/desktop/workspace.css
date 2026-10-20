@@ -132,7 +132,6 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 #desktop-toolbar header { flex: 1; min-width: 0; margin: 0; gap: 8px; justify-content: flex-start; }
 #desktop-toolbar .header-state { gap: 8px; font-size: 12px; margin: 0; }
 #desktop-toolbar .chip { display: inline-flex; align-items: center; gap: 6px; font: 12px "JetBrains Mono", monospace; color: var(--t2); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px; white-space: nowrap; }
-#desktop-toolbar .chip.auto-approve { font-family: inherit; color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
 #desktop-toolbar .header-more { margin-left: auto; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--t3); font-size: 18px; line-height: 1; }
 #desktop-toolbar .header-more:hover, #desktop-toolbar .header-more.active { background: var(--surface2); color: var(--t1); }
 #desktop-shell > .live-app { grid-column: 2; grid-row: 2; min-width: 0; width: 100%; height: 100%; }
@@ -435,7 +434,6 @@ body.desktop kbd { border: 0; border-radius: var(--r-sm); background: var(--tone
 #desktop-toggle-sidebar, #desktop-toolbar .header-more { border-radius: var(--r-sm); }
 #desktop-toolbar .chip { border: 0; border-radius: var(--r-sm); background: var(--tone2); padding: 5px 9px; }
 #desktop-toolbar .chip.ship:hover { background: var(--surface3); }
-#desktop-toolbar .chip.auto-approve { background: var(--warn-soft); }
 /* Conversation: the guide is a hairline; folds and code are tones. */
 .desktop .steps .tool-row { border-radius: var(--r-sm); }
 .desktop .step-fold, .desktop .approval-fold { border: 0; border-radius: var(--r-sm); background: var(--tone); }
@@ -584,4 +582,20 @@ body.drive-page-open #stage, body.drive-page-open #input-area, body.drive-page-o
   #drive-page .drive-spin { animation: drive-spin 900ms linear infinite; }
   #drive-page .drive-row, #drive-page .drive-go, #drive-page .drive-box, #drive-page .drive-mode { transition: background-color 140ms var(--ease), color 140ms var(--ease), box-shadow 160ms var(--ease); }
   #drive-page .drive-act, #drive-page .drive-r { transition: opacity 140ms var(--ease); }
+}
+
+/* Composer mode: one word under the box, coloured by mode; ⇧⇥ steps it. */
+.desktop #composer .composer-bar #composer-mode kbd { font: 11px Inter, system-ui, sans-serif; color: var(--t4); background: none; border: 0; padding: 0; margin-left: 2px; }
+.desktop #composer .composer-bar #composer-mode.mode-edits { color: var(--ok); }
+.desktop #composer .composer-bar #composer-mode.mode-plan { color: var(--acc); }
+.desktop #composer .composer-bar #composer-mode.mode-auto { color: var(--warn); }
+.desktop #composer.mode-plan .composer-box { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 38%, transparent), var(--shadow-2); }
+.desktop #mode-hint { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); z-index: 5; padding: 5px 12px; border-radius: var(--r-sm); background: var(--surface2); box-shadow: 0 0 0 1px var(--hair), var(--shadow-1); color: var(--t3); font-size: 12px; white-space: nowrap; pointer-events: none; }
+.desktop #mode-hint b { font-weight: 500; color: var(--t1); }
+.desktop #mode-hint b.mode-edits { color: var(--ok); }
+.desktop #mode-hint b.mode-plan { color: var(--acc); }
+.desktop #mode-hint b.mode-auto { color: var(--warn); }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop #mode-hint:not([hidden]) { animation: desktop-appear 160ms var(--ease); }
+  .desktop #composer .composer-box { transition: box-shadow 180ms var(--ease); }
 }

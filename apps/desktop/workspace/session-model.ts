@@ -138,6 +138,8 @@ export class WorkspaceSession {
       this.session.title = p.title;
     if (event.type === "session.permissions_changed" && typeof p.autoApprove === "boolean")
       this.session.autoApprove = p.autoApprove;
+    if (event.type === "session.permissions_changed" && typeof p.acceptEdits === "boolean")
+      this.session.acceptEdits = p.acceptEdits;
     if (event.type === "turn.created" && event.turnId)
       this.ensureTurn({
         id: event.turnId,

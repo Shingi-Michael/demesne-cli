@@ -26,7 +26,7 @@ test("ambiguous, absent and mismatched windows never fall back to a desktop or a
   const tool = captureWindowTool({ list: async () => windows, capture: async (id) => { captured.push(id); return new Uint8Array(); } });
   expect(await tool.executeWithArtifacts!({ application: "Ghostty" }, context)).toContain("Specify a windowId");
   expect(await tool.executeWithArtifacts!({ application: "Ghostty", windowId: 13 }, context)).toContain("No unique matching window");
-  expect(await tool.executeWithArtifacts!({ application: "Ghostty", title: "missing" }, context)).toContain("make its terminal window visible");
+  expect(await tool.executeWithArtifacts!({ application: "Ghostty", title: "missing" }, context)).toContain("make its window visible");
   expect(captured).toEqual([]);
   await tool.executeWithArtifacts!({ application: "ghostty", windowId: 12 }, context);
   expect(captured).toEqual([12]);

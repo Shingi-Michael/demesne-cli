@@ -155,7 +155,7 @@ request_timeout_ms = 300000
 # api_key = "..."  # private configuration only
 ```
 
-Set `vision = true` under `[provider]` to enable the configured daemon vision path. Generation uses `/images/generations` or `/images/edits`; viewing an image is not generation. ChatGPT sign-in does not supply credentials for this separate image backend. See [preview](artifact-preview-plan.md).
+Set `vision = true` under `[provider]` to enable the configured daemon vision path. Generation uses `/images/generations` or `/images/edits`; viewing an image is not generation. ChatGPT sign-in does not supply credentials for this separate image backend. See [images](images.md).
 
 ```toml
 [mcp.servers.files]

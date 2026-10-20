@@ -35,7 +35,7 @@ Keep the daemon’s native image dependencies in `dist/node_modules` with the CL
 
 ## Desktop development
 
-The desktop window shows the shared UI from `apps/graphics` directly in a sandboxed Electron renderer.
+The desktop window shows the interface in `apps/desktop/workspace` in a sandboxed Electron renderer.
 
 Keep the authenticated daemon client and credentials in the backend. Native dialogs, clipboard operations, and external opening must pass through validated desktop commands. See the [desktop implementation guide](apps/desktop/README.md) for the process boundary and test commands.
 
@@ -44,10 +44,13 @@ Keep the authenticated daemon client and credentials in the backend. Native dial
 | Location | Responsibility |
 | --- | --- |
 | `apps/daemon/` | HTTP API, coding turns, tools, approvals, scheduling, reviews, proposals and artifact ingestion |
-| `apps/cli/` | Commands, headless client, setup and reusable Drive controller |
+| `apps/cli/` | Commands, headless client and desktop launcher |
 | `apps/desktop/` | Electron window, restricted native bridge, Bun host sidecar, desktop integration checks |
-| `apps/graphics/` | Shared interface code shown by the desktop window: browser UI, authenticated host, state wire and Markdown |
-| `packages/protocol/` | API/event types, validation and Drive/panel contracts |
+| `apps/desktop/workspace/` | The interface the window shows: renderer, authenticated host, state wire, Markdown, Drive control |
+| `packages/drive/` | Drive controller, memory, task ledger, checkpoints, protection, receipts, workflows |
+| `packages/workbench/` | Conversation entries, history, diffs, tool previews and allow rules |
+| `packages/setup/` | CLI config, ChatGPT/OpenRouter sign-in, setup wizard, provider probe, daemon control |
+| `packages/protocol/` | API/event types, validation and Drive contracts |
 | `packages/client/` | Typed authenticated HTTP/SSE client |
 | `packages/config/` | TOML/environment loading, defaults and private config writes |
 | `packages/providers/` | Chat Completions and ChatGPT Responses adapters |
@@ -68,13 +71,13 @@ Keep the authenticated daemon client and credentials in the backend. Native dial
 
 ## Verification
 
-All code PRs run `bun run typecheck` and `bun test`. [CI](.github/workflows/ci.yml) installs with the frozen lockfile and runs tests under a temporary home on Linux. The [desktop workflow](.github/workflows/desktop.yml) builds the app and runs the Linux WebDriver check under Xvfb. That is not a GPU or Wayland test. Native macOS checks remain separate.
+Run `bun run typecheck` and `bun test` before every code PR. [CI](.github/workflows/ci.yml) and the [desktop workflow](.github/workflows/desktop.yml) only run when started by hand, so these local checks are what a PR is merged on. On headless Linux run the desktop check with `bun scripts/prepare-desktop.ts && dbus-run-session -- xvfb-run -a bun run desktop:check`; that is not a GPU or Wayland test, and native macOS checks remain separate.
 
 | Change | Additional relevant checks |
 | --- | --- |
 | Desktop UI/bridge/lifecycle | `bun run desktop:check`; Electron boundary tests and desktop bundle build |
-| Shared UI behavior/layout | `bun test apps/graphics/test`; `bun run desktop:check` |
-| Drive | Controller/unit tests; `bun run desktop:check` when the panel changes |
+| Interface behavior/layout | `bun test apps/desktop/workspace/test`; `bun run desktop:check` |
+| Drive | `bun test packages/drive/test` and the daemon Drive tests; `bun run desktop:check` when its turn or ideas change |
 | Packaging | Both builds and relevant checks against packaged assets |
 | Provider/auth/tool execution | Adapter, auth, engine and approval fixtures; never real credentials in test fixtures |
 | Documentation only | Validate relative links/anchors, source names, script commands and config examples; preview diagrams |

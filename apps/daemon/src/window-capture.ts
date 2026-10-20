@@ -79,7 +79,7 @@ export function captureWindowTool(deps: WindowCaptureDependencies = nativeWindow
       && (title === undefined || window.title.toLowerCase() === title));
     signal.throwIfAborted();
     if (matches.length !== 1) {
-      return `No unique matching window was captured. ${matches.length ? "Specify a windowId to select the intended window." : "Open the requested application/window or correct the title filter."}\nVisible windows for ${input.application}: ${JSON.stringify(windows)}\nDo not substitute a browser or another application's window. For Demesne, ask the user to make its terminal window visible if it is not identifiable.`;
+      return `No unique matching window was captured. ${matches.length ? "Specify a windowId to select the intended window." : "Open the requested application/window or correct the title filter."}\nVisible windows for ${input.application}: ${JSON.stringify(windows)}\nDo not substitute a browser or another application's window. For Demesne, ask the user to make its window visible if it is not identifiable.`;
     }
     const window = matches[0]!;
     const data = await deps.capture(window.id, signal);

@@ -31,4 +31,4 @@ The state changes are journaled as `question.requested`, `question.updated`, `qu
 
 [`/themefy`](themes.md) uses this infrastructure for adaptive color interviews. Its restricted palette workflow validates, saves and applies the theme after your answers; `ask_user` handles the questions and their durable lifecycle.
 
-Implementation: [tool definition](../apps/daemon/src/tools.ts), [live waiter](../apps/daemon/src/questions.ts), [durable state](../packages/storage/src/questions.ts), and [composer](../apps/graphics/live.ts).
+Implementation: [tool definition](../apps/daemon/src/tools.ts), [live waiter](../apps/daemon/src/questions.ts), [durable state](../packages/storage/src/questions.ts), and [composer](../apps/desktop/workspace/live.ts).

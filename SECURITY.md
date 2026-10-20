@@ -40,7 +40,7 @@ The [Electron desktop client](apps/desktop/README.md#process-boundary) loads loc
 
 Native project selection validates the canonical directory and existing workspace ownership/write-permission rules. Choosing a project does not authorize commands or relax daemon tool approval. Quitting ends the UI host without killing daemon-owned work; closing on macOS hides the window. A running Drive mission carries on in a detached host process with the same permissions until it settles; pause or stop it first if it should not keep working unattended. Electron/Playwright integration tests use private fixture data and ordinary browser automation; no production test endpoint or renderer-side privileged testing API is added.
 
-System webviews receive platform security updates separately from Demesne. The desktop bundle does not yet provide signing/notarization or automatic updates. See [desktop prerequisites and limits](docs/desktop.md).
+The bundled Chromium is updated only when Demesne's Electron version is. The desktop bundle does not yet provide signing/notarization or automatic updates. See [desktop prerequisites and limits](docs/desktop.md).
 
 These are defense boundaries, not a promise that untrusted generated code is safe to execute. Review requested actions and keep grants specific to the intended work.
 

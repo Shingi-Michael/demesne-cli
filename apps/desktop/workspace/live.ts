@@ -3128,7 +3128,7 @@ document.addEventListener("keydown", (event) => {
     event.target instanceof HTMLTextAreaElement;
   const key = event.key.toLowerCase(),
     ctrl = event.ctrlKey || event.metaKey;
-  // Native details and buttons must keep Enter/Space when a side panel is open.
+  // Native details and buttons keep Enter and Space.
   if (!ctrl && !event.altKey && (key === "enter" || key === " ") && event.target instanceof Element) {
     const control = event.target.closest<HTMLElement>(".approval-row button, .thinking-toggle");
     if (control) { event.preventDefault(); control.click(); return; }

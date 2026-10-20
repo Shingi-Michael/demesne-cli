@@ -2035,76 +2035,64 @@ function renderDrivePage() {
   const focusId = active?.id, focusAction = active?.dataset.action, focusArgs = active?.dataset.args;
   const selection = active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] : null;
   const scroll = page.scrollTop;
-  const quiet = !pinned && !run.fix && !run.away && !review.length && !next.proposals.length;
-  const row = (mark: string, body: string, actions: string, className = "") => `<div class="drive-row${className ? ` ${className}` : ""}"><span class="drive-mk">${mark}</span>${body}<span class="sp"></span>${actions}</div>`;
+  // One list, no labels: what is working, what is ready for you, then ideas.
+  // Each row is one line; its actions replace the word on the right when
+  // you point at it or tab into it.
+  const row = (mark: string, title: string, right: string, actions = "", className = "") =>
+    `<div class="drive-row${className ? ` ${className}` : ""}"><span class="drive-mk">${mark}</span>${title}<span class="drive-r">${right}</span>${actions ? `<span class="drive-act">${actions}</span>` : ""}</div>`;
+  const plain = (text: string, tip = "") => `<span class="drive-title"${tip ? ` title="${h(tip)}"` : ""}>${h(text)}</span>`;
   const spin = '<span class="drive-spin" aria-hidden="true"></span>';
-  const section = (label: string, count: number | null, body: string, extra = "") => `<section class="drive-sec"><div class="drive-sh">${label}${count ? ` <span class="n">${count}</span>` : ""}<span class="sp"></span>${extra}</div>${body}</section>`;
-  // Working: the mission with its trail, and any worktree run.
-  const working: string[] = [];
+  const dot = (kind: string) => `<span class="drive-dot ${kind}" aria-hidden="true"></span>`;
+  const rows: string[] = [];
   if (pinned) {
-    const live = pinned.status === "running" || pinned.status === "waiting";
-    const tasks = driveTaskList(pinned), done = tasks.filter((task) => task.mark === "✓").length;
-    const trail = tasks.slice(Math.max(0, done - 2), done + 1).filter((task) => task.text.split(" · ")[0] !== missionTitle(pinned)).map((task) => `<span class="${task.mark === "✓" ? "done" : "now"}">${task.mark === "✓" ? "✓ " : ""}${h(task.text.split(" · ")[0]!)}</span>`).join("");
-    const mark = live ? spin : pinned.status === "blocked" ? '<span class="drive-ring" aria-hidden="true"></span>' : "‖";
+    const live = pinned.status === "running" || pinned.status === "waiting", blocked = pinned.status === "blocked";
+    const reason = blocked ? (pinned.activity?.trim() || pinned.steps.at(-1)?.note || "Drive stopped without recording a reason.").split("\n")[0]! : "";
     const controls = [
-      live ? btn("drive-control", "Pause", { control: "pause" }, "quiet", pending) : btn("drive-control", "Resume", { control: "resume" }, "primary", pending || !online),
+      live ? btn("drive-control", "Pause", { control: "pause" }, "", pending) : btn("drive-control", "Resume", { control: "resume" }, "primary", pending || !online),
       btn("drive-control", "Stop", { control: "stop" }, "quiet", pending),
     ].join("");
-    working.push(row(mark, `${btn("drive-conversation", h(missionTitle(pinned)), {}, "drive-title").replace("<button ", '<button title="Open its conversation" ')}<span class="drive-trail">${trail}</span>`, `<span class="drive-status${pinned.status === "blocked" ? " warn" : ""}">${DRIVE_STATUS[pinned.status] ?? pinned.status}</span><span class="drive-m">${h(activeMinutes(pinned))}</span>${controls}`, "hl"));
-    if (tasks.length) working.push(`<div class="drive-prog"><i style="width:${Math.round((100 * done) / tasks.length)}%"></i></div>`);
-    if (pinned.status === "blocked") working.push(`<p class="drive-note">${h((pinned.activity?.trim() || pinned.steps.at(-1)?.note || "Drive stopped without recording a reason.").split("\n")[0]!)}</p>`);
+    const title = btn("drive-conversation", h(missionTitle(pinned)), {}, "drive-title").replace("<button ", `<button title="${h(reason || "Open its conversation")}" `);
+    rows.push(row(live ? spin : blocked ? dot("warn") : dot("paused"), title, `<span class="drive-status${blocked ? " warn" : ""}">${DRIVE_STATUS[pinned.status] ?? pinned.status}</span> · ${h(activeMinutes(pinned))}`, controls));
   }
   if (run.fix) {
-    const activity = run.fix.activity ? `${run.fix.activity.steps} step${run.fix.activity.steps === 1 ? "" : "s"}${run.fix.activity.last ? ` · ${run.fix.activity.last}` : ""}` : "Creating the worktree…";
-    working.push(row(spin, `<span class="drive-title">${h(run.fix.title)}</span><span class="drive-m">${h(activity)}</span>`, btn("breakage-discard", busyWith === "discard" ? "Stopping…" : "Stop", { id: run.fix.id }, "quiet", Boolean(busyWith))));
+    const activity = run.fix.activity ? `${run.fix.activity.steps} step${run.fix.activity.steps === 1 ? "" : "s"}` : "Starting";
+    rows.push(row(spin, plain(run.fix.title, run.fix.activity?.last ?? ""), h(activity), btn("breakage-discard", busyWith === "discard" ? "Stopping…" : "Stop", { id: run.fix.id }, "quiet", Boolean(busyWith))));
   }
   if (run.away) {
     const finished = run.away.items.filter((item) => !["queued", "running"].includes(item.state)).length;
-    working.push(row(spin, `<span class="drive-title">Working through Drive's ideas</span><span class="drive-m">${finished} of ${run.away.items.length} done</span>`, btn("breakage-away-stop", "Stop after this one", {}, "quiet", Boolean(busyWith))));
+    rows.push(row(spin, plain("Working through Drive's ideas"), `${finished} of ${run.away.items.length}`, btn("breakage-away-stop", "Stop after this one", {}, "quiet", Boolean(busyWith))));
   }
-  // Ready for you: each finished branch with what it changed and its checks.
-  const ready = review.map((job) => {
-    if (job.status === "failed")
-      return row('<span class="drive-bad" aria-hidden="true">!</span>', `<span class="drive-title" title="${h(job.error ?? "")}">${h(job.title)}</span><span class="drive-m">${job.unchanged ? "finished without changes" : "couldn't finish"}</span>`, btn("breakage-discard", busyWith === "discard" ? "Discarding…" : "Discard", { id: job.id }, "quiet", Boolean(busyWith)));
+  for (const job of review) {
+    if (job.status === "failed") {
+      rows.push(row(dot("bad"), plain(job.title, job.error ?? ""), job.unchanged ? "No changes" : "Couldn’t finish", btn("breakage-discard", busyWith === "discard" ? "Discarding…" : "Discard", { id: job.id }, "quiet", Boolean(busyWith))));
+      continue;
+    }
     const checks = job.checks ?? [], passed = checks.filter((check) => check.passed).length;
     const verdict = !checks.length ? "no checks ran" : passed === checks.length ? "checks passed" : `${checks.length - passed} of ${checks.length} checks failed`;
-    const diff = job.diff ? `<span class="add">+${job.diff.additions}</span> <span class="del">−${job.diff.deletions}</span> · ${job.diff.files} file${job.diff.files === 1 ? "" : "s"} · ` : "";
-    return row('<span class="drive-ok" aria-hidden="true">✓</span>', `<span class="drive-title" title="${h([job.summary, `on ${job.branch}`].filter(Boolean).join("\n"))}">${h(job.title)}</span><span class="drive-m">${diff}${verdict}</span>`,
-      `${btn("breakage-apply", busyWith === "apply" ? "Applying…" : "Apply", { id: job.id }, "primary", Boolean(busyWith)).replace("<button ", '<button title="Apply to my branch" ')}${btn("breakage-pr", busyWith === "pr" ? "Opening…" : "Open PR", { id: job.id }, "", Boolean(busyWith))}${btn("breakage-discard", busyWith === "discard" ? "Discarding…" : "Discard", { id: job.id }, "quiet", Boolean(busyWith))}`);
-  });
-  // Ideas: Run and Plan show on the row you point at.
+    const diff = job.diff ? `+${job.diff.additions} −${job.diff.deletions} in ${job.diff.files} file${job.diff.files === 1 ? "" : "s"}, ` : "";
+    rows.push(row(dot("ok"), plain(job.title, [job.summary, `${diff}${verdict}`, `on ${job.branch}`].filter(Boolean).join("\n")), "Ready to review",
+      `${btn("breakage-apply", busyWith === "apply" ? "Applying…" : "Apply", { id: job.id }, "primary", Boolean(busyWith)).replace("<button ", '<button title="Apply to my branch" ')}${btn("breakage-pr", busyWith === "pr" ? "Opening…" : "Open PR", { id: job.id }, "", Boolean(busyWith))}${btn("breakage-discard", busyWith === "discard" ? "Discarding…" : "Discard", { id: job.id }, "quiet", Boolean(busyWith))}`));
+  }
+  const look = (label: string) => btn("next-refresh", next.loading ? "Looking…" : label, {}, "link", next.loading || pending || !online);
+  if (next.error) rows.push(row(dot("bad"), plain(`Couldn’t load ideas: ${next.error}`), "", look("Look again")));
   const signal = new Map(next.signals.map((item) => [item.id, item]));
   const minutes = (value: number) => (value < 60 ? `~${value}m` : `~${Math.round(value / 6) / 10}h`);
-  const ideas = next.proposals.map((item) => {
+  for (const item of next.proposals) {
     const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
-    return row(`<span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span>`, `<span class="drive-title">${h(item.title)}</span><span class="drive-m" title="${h([item.why, evidence && `Evidence: ${evidence}`].filter(Boolean).join("\n"))}">${h(item.why)}</span>`,
-      `<span class="drive-m">${minutes(item.expectedMinutes ?? item.minutes)}</span><span class="drive-hover">${btn("next-run", "Run", { id: item.id }, "primary", pending || !online)}${btn("next-plan", "Plan", { id: item.id }, "", pending || !online)}${btn("next-snooze", "Not now", { id: item.id }, "quiet", pending)}</span>`, "idea");
-  });
-  const look = btn("next-refresh", next.loading ? "Looking…" : "Look again", {}, "link", next.loading || pending || !online);
-  const ideasBody = `${next.error ? `<p class="drive-error" role="alert">Couldn’t load ideas: ${h(next.error)}</p>` : ""}${ideas.join("")}${next.proposals.length > 1 ? `<p class="drive-more">${btn("next-away", `Run the top ${Math.min(3, next.proposals.length) === 2 ? "two" : "three"} while you're away ›`, { count: Math.min(3, next.proposals.length) }, "link", driveBusy() || pending || !online)}</p>` : ""}`;
-  const last = drive && !pinned
-    ? `<p class="drive-last">Last mission · ${btn("drive-conversation", h(missionTitle(drive)), {}, "link")} · <span class="drive-status">${DRIVE_STATUS[drive.status] ?? drive.status}</span></p>`
-    : "";
+    rows.push(row(dot("idea"), plain(item.title, [item.why, evidence && `Evidence: ${evidence}`].filter(Boolean).join("\n")), minutes(item.expectedMinutes ?? item.minutes),
+      `${btn("next-run", "Run", { id: item.id }, "primary", pending || !online)}${btn("next-plan", "Plan", { id: item.id }, "", pending || !online)}${btn("next-snooze", "Not now", { id: item.id }, "quiet", pending)}`));
+  }
+  if (drive && !pinned)
+    rows.push(row(dot("done"), btn("drive-conversation", h(missionTitle(drive)), {}, "drive-title muted").replace("<button ", '<button title="Open its conversation" '), `<span class="drive-status">${DRIVE_STATUS[drive.status] ?? drive.status}</span>`, "", "past"));
   const model = (state.model.id ?? "").split("/").at(-1);
-  const seg = (label: string, continuous: boolean) => btn("drive-mode", label, { continuous }, driveContinuous === continuous ? "on" : "").replace("<button ", `<button aria-pressed="${driveContinuous === continuous}" `);
-  const looked = next.generatedAt ? ` · looked ${age(next.generatedAt)}` : "";
-  const status = pinned ? `${DRIVE_STATUS[pinned.status] ?? pinned.status}` : run.fix || run.away ? "Working" : "Idle";
-  page.innerHTML = `<div class="drive-col${quiet ? " quiet" : ""}">
-    <p class="drive-state"><span class="drive-dot${status === "Working" ? " live" : status === "Needs you" ? " warn" : ""}"></span>${h(status)}${h(looked)}</p>
-    <h1>${quiet ? "What should Drive take on?" : "Drive"}</h1>
-    <p class="drive-lede">${quiet ? "It works on its own branch and brings back something to review." : "Give it a goal. It works on its own branch and brings back something to review."}</p>
+  const blocked = driveBusy() ? "Drive works on one thing at a time" : !online ? "Connect to the daemon to start work" : "Start (Ctrl+↵)";
+  page.innerHTML = `<div class="drive-col${rows.length ? "" : " quiet"}">
     <form id="drive-mission-form" class="drive-compose">
-      <div class="drive-box"><textarea id="drive-mission" rows="3" maxlength="8000" aria-label="What should Drive take on?" placeholder="Describe the outcome, and how Drive can tell it's done…">${h(driveMissionDraft)}</textarea></div>
-      <div class="drive-cbar"><span class="drive-seg" role="group" aria-label="How long Drive works">${seg("One task", false)}${seg("Ongoing", true)}</span><span class="sp"></span>${model ? `<span class="drive-model">${h(model)}</span>` : ""}<button type="submit" class="drive-go"${driveCanStart() ? "" : " disabled"}>${driveActionPending === "drive" ? "Starting…" : "Start"} ${k("Ctrl+↵")}</button></div>
-      ${driveBusy() ? '<p class="drive-hint">Drive works on one thing at a time. Stop or finish the work below to start another.</p>' : quiet ? '<p class="drive-hint">One task stops after a checked result. Ongoing keeps looking for work in this project.</p>' : ""}
+      <div class="drive-box"><textarea id="drive-mission" rows="2" maxlength="8000" aria-label="What should Drive take on?" placeholder="Give Drive a goal…">${h(driveMissionDraft)}</textarea>
+      <div class="drive-cbar">${btn("drive-mode", driveContinuous ? "Ongoing" : "One task", { continuous: !driveContinuous }, "drive-mode").replace("<button ", `<button title="${driveContinuous ? "Ongoing: keeps finding work in this project" : "One task: stops after a checked result"}" `)}<span class="sp"></span>${model ? `<span class="drive-model">${h(model)}</span>` : ""}<button type="submit" class="drive-go" aria-label="Start" title="${blocked}"${driveCanStart() ? "" : " disabled"}>${driveActionPending === "drive" ? spin : "↵"}</button></div></div>
       ${driveActionError ? `<p class="drive-error" role="alert">${h(driveActionError)}</p>` : ""}
-      ${!online ? '<p class="drive-error">Connect to the daemon to start or resume work.</p>' : ""}
     </form>
-    ${working.length ? section("Working", null, working.join("")) : ""}
-    ${ready.length ? section("Ready for you", ready.length, ready.join("")) : ""}
-    ${next.proposals.length || next.error ? section("Ideas", next.proposals.length, ideasBody, look) : ""}
-    ${quiet && !next.error ? `<div class="drive-empty"><b>Nothing waiting.</b>${next.loading ? "Drive is looking for work…" : `Drive finds work while you're away, or ${btn("next-refresh", "look now", {}, "link", next.loading || pending || !online)}.`}</div>` : ""}
-    ${last}
+    ${rows.length ? `<div class="drive-list">${rows.join("")}</div>` : `<p class="drive-empty">${next.loading ? "Looking for work…" : `Nothing waiting · ${look("look now")}`}</p>`}
   </div>`;
   page.scrollTop = scroll;
   const replacement = focusId ? document.getElementById(focusId) : [...page.querySelectorAll<HTMLElement>("[data-action]")].find((node) => node.dataset.action === focusAction && node.dataset.args === focusArgs);

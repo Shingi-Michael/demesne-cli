@@ -1074,30 +1074,41 @@ export class GraphicsHost {
       return;
     }
     if (["next-run", "next-plan", "next-snooze", "next-never"].includes(method)) {
-      const item = this.nextQueue.proposals.find((proposal) => proposal.id === args.id);
+      const item = this.snapshot().driveNext.proposals.find((proposal) => proposal.id === args.id);
       if (!item) throw new Error("That proposal is no longer in the queue.");
       if (method === "next-snooze") return this.hideNext(item.id, Date.now() + 24 * 3_600_000);
       if (method === "next-never") {
         this.drive?.addMemory({ kind: "veto", text: `${item.title}: ${item.why}`, source: "you" });
         return this.hideNext(item.id, "never");
       }
-      this.hideNext(item.id, Date.now() + 6 * 3_600_000);
-      if (method === "next-plan") return this.submit(`${item.title}. ${item.why}`, true);
+      if (method === "next-plan") {
+        if (this.active) throw new Error("Wait for the current turn to finish before planning a suggestion.");
+        if (this.draft.trim()) throw new Error("Send or clear your draft before planning a suggestion.");
+        this.drive?.agent.intervene();
+        const result = await this.submit(`${item.title}. ${item.why}`, true);
+        this.hideNext(item.id, Date.now() + 6 * 3_600_000);
+        return result;
+      }
       // Run works in its own git worktree, so your checkout and this
       // conversation stay as they are until you apply the result. Outside a
       // git repository (or on an older daemon) it's a bounded mission here.
       if (this.breakage.supported) {
         const cited = this.nextQueue.signals.filter((signal) => item.evidence.includes(signal.id));
-        try { return await this.breakage.runProposal({ id: item.id, kind: item.kind, title: item.title, why: item.why, minutes: item.minutes, confidence: item.confidence }, cited); }
+        try {
+          const result = await this.breakage.runProposal({ id: item.id, kind: item.kind, title: item.title, why: item.why, minutes: item.minutes, confidence: item.confidence }, cited);
+          this.hideNext(item.id, Date.now() + 6 * 3_600_000);
+          return result;
+        }
         catch (error) {
           if (!/needs a git repository|no commits yet/.test(error instanceof Error ? error.message : "")) {
-            this.hideNext(item.id, 0);
             throw error;
           }
         }
       }
       if (!this.drive) throw new Error("Drive is unavailable here.");
-      return this.drive.handle("drive", { text: `--bounded ${item.title}. ${item.why}` });
+      const result = await this.drive.handle("drive", { text: `--bounded ${item.title}. ${item.why}` });
+      this.hideNext(item.id, Date.now() + 6 * 3_600_000);
+      return result;
     }
     if (method === "cleanup-scan") return this.scanCleanup();
     if (method === "cleanup-delete") return this.deleteCleanup();

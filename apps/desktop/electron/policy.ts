@@ -1,5 +1,7 @@
 import { isAbsolute, resolve, sep } from "node:path";
 export const APP_URL = "demesne://app/index.html";
+/** Project changes reload the shell; other destinations and frames stay blocked. */
+export const allowAppReload = (url: string, isMainFrame: boolean) => isMainFrame && url === APP_URL;
 export const EVENTS = ["demesne:update", "demesne:command", "demesne:desktop-error", "demesne:desktop-action"] as const;
 export function localAppURL(value: string) {
   try { const url = new URL(value); return url.protocol === "demesne:" && url.hostname === "app" && !url.port && !url.username && !url.password; } catch { return false; }

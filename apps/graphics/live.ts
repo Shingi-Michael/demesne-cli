@@ -1,4 +1,5 @@
 import { compactedConversation } from "./compacted-conversation.ts";
+import { SidebarProjectOrder } from "./sidebar-project-order.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
 import { splitNextPrompt } from "../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../packages/protocol/src/heartbeat-mail.ts";
@@ -23,6 +24,7 @@ import type {
 
 type Snapshot = ReturnType<GraphicsHost["snapshot"]>;
 type OverlayName =
+  | "drive"
   | "settings"
   | "models"
   | "themes"
@@ -244,6 +246,7 @@ const expanded = new Set<string>(),
 /// screen, Drive's ideas under it); turns whose steps are open.
 let driveShown = false,
   ideasShown = false;
+let driveMissionDraft = "", driveContinuous = false, driveActionPending = "", driveActionError = "";
 const stepsOpen = new Set<string>();
 /// Steps whose diff or output is unfolded in place, keyed run:tool.
 const stepOpen = new Set<string>();
@@ -342,37 +345,52 @@ const UNDO_MS = 5_000;
 const pendingDeletes = new Map<string, ReturnType<typeof setTimeout>>();
 /// The chat whose title is being renamed in place, in the sidebar.
 let renaming: string | null = null;
-/// How many conversations the sidebar lists. Deleting one moves the next up;
-/// search finds the older ones.
+/// Initially show six chats per project; Show more and search reveal the rest.
 const SIDEBAR_ROWS = 6;
+const expandedProjectChats = new Set<string>();
+const projectOrder = new SidebarProjectOrder(
+  document.getElementById("sidebar-sessions"),
+  () => state ? [document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace, ...JSON.parse(document.getElementById("sidebar-sessions")?.dataset.projects ?? "[]")] : [],
+  renderSidebar,
+);
+const projectDisclosure: Record<string, boolean> = (() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem("demesne-project-disclosure") ?? "{}");
+    return Object.fromEntries(Object.entries(saved).filter(([, value]) => typeof value === "boolean")) as Record<string, boolean>;
+  } catch { return {}; }
+})();
 /// Conversations deleted from the sidebar, hidden at once while the daemon
 /// archives them.
 const deletedSessions = new Set<string>();
 const ICON_BRANCH = '<svg class="ico sidebar-branch" viewBox="0 0 24 24" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>';
 const ICON_TRASH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg>';
-/// The sidebar: the project's pulse, one inbox-style list of sessions (a
-/// session that needs you gets a second, coloured line; a settled one is a
-/// single quiet line with its time), Drive as a short footer, and the rail's
-/// dots when the sidebar is folded.
+/// Project groups hold their chats; worktree chats remain with their parent.
 function renderSidebar() {
   const list = document.getElementById("sidebar-sessions");
-  if (!state || !list) return;
+  if (!state || !list || projectOrder.dragging) return;
   // While a title is being renamed, the list holds still under the cursor.
   if (renaming && list.querySelector(".sidebar-rename")) return;
   const query = (document.getElementById("sidebar-search") as HTMLInputElement | null)?.value.trim().toLowerCase() ?? "";
   // A chat Drive runs on its own branch (a worktree) joins the list with a
   // branch mark; its branch is in the tooltip.
   const branches = new Map([state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId)).map((job) => [job.sessionId!, job.branch] as const));
-  const sessions = state.sessions.filter(item => (item.workspace === state!.workspace || item.id === state!.session?.id || branches.has(item.id)) && !deletedSessions.has(item.id));
+  const sessions = state.sessions.filter(item => !deletedSessions.has(item.id));
+  const projectWorkspace = list.dataset.workspace || state.workspace;
+  const projectPaths = projectOrder.paths();
+  // Worktree chats stay with their parent project, alongside its review actions.
+  const projectFor = (item: typeof sessions[number]) => branches.has(item.id) || item.id === state!.session?.id ? projectWorkspace : item.workspace;
   const review = reviewJobs(), pinned = pinnedMission(), run = worktreeRun(), word = driveWord();
   const ideas = state.driveNext.proposals.length;
   const waiting = state.approvals.length ? "approval" : state.questions.length ? "answer" : "";
-  const signature = JSON.stringify([sessions, [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([sessions, projectPaths, projectDisclosure, [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
   const dot = (tone: string) => `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`;
-  const focused = (document.activeElement as HTMLElement | null)?.closest?.("#sidebar-sessions") ? [...list.querySelectorAll(".sidebar-session")].indexOf(document.activeElement as Element) : -1;
+  const focusedControl = document.activeElement instanceof HTMLButtonElement && list.contains(document.activeElement)
+    ? { action: document.activeElement.dataset.action, args: document.activeElement.dataset.args } : null;
+  const focusedRow = document.activeElement?.closest(".sidebar-item")?.querySelector(".sidebar-session");
+  const focused = focusedRow ? [...list.querySelectorAll(".sidebar-session")].indexOf(focusedRow) : -1;
   // One line per chat: a dot for its state, its title, its time. The dot is
   // amber when the chat needs you, a spinner while it works, blue for a
   // branch of Drive's that waits for review (those sit on the Branches row).
@@ -381,49 +399,65 @@ function renderSidebar() {
     const about = STATE_WORDS[tone] ?? "", branch = branches.get(id);
     const tip = [title, about || fullTime(updatedAt), branch && `on ${branch}`].filter(Boolean).join(" · ");
     const mark = branch ? ICON_BRANCH : "";
-    return btn("select-session", `${dot(tone)}<span class="sidebar-session-name">${h(title)}</span>${mark}${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, { id }, `sidebar-session${selected ? " selected" : ""}`)
-      .replace("<button ", `<button title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
+    const project = projectFor(sessions.find(item => item.id === id)!);
+    return btn(project === projectWorkspace ? "select-session" : "project-session", `${dot(tone)}<span class="sidebar-session-name">${h(title)}</span>${mark}${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, { id, path: project }, `sidebar-session${selected ? " selected" : ""}`)
+      .replace("<button ", `<button title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${project === projectWorkspace ? ' aria-keyshortcuts="Delete"' : ""}${selected ? ' aria-current="page"' : ""} `);
   };
-  const matching = sessions.filter(item => item.title.toLowerCase().includes(query));
-  const rows: string[] = [];
-  let shown = 0, more = 0;
-  // Searching shows more of what matches; the list itself stays at six.
-  const limit = query ? SIDEBAR_ROWS * 2 : SIDEBAR_ROWS;
-  for (const item of matching) {
-    if (shown >= limit) { if (item.turns) more++; continue; }
-    const selected = item.id === current?.id;
-    const title = selected ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
-    const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
-    const working = selected ? Boolean(state.activeTurnId) && !waiting : !asks && (item.status === "running" || item.status === "queued");
-    // Looking at a chat marks it seen; one that has moved on since, while
-    // you were elsewhere, carries the blue dot until you open it.
-    if (selected || !(item.id in seenChats)) markSeen(item.id, item.updatedAt);
-    const fresh = !selected && item.status === "completed" && seenChats[item.id] !== item.updatedAt;
-    const tone = asks ? "warn" : working ? "working" : item.status === "failed" ? "bad" : fresh ? "acc" : "";
-    // An empty chat is the composer itself, and the New chat row above
-    // already names it; it joins the list once it has a turn.
-    if (title === "New chat" && !working && !waiting) continue;
-    // Each row carries its own delete, shown on hover: no menu, no dialog.
-    // The keyboard deletes with Delete on the row itself, so the trash
-    // stays out of the tab order.
-    const remove = working ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" tabindex="-1" `);
-    if (renaming === item.id) {
-      rows.push(`<div class="sidebar-item"><form class="sidebar-rename" data-id="${h(item.id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`);
+  const groups: string[] = [];
+  for (const [index, path] of projectPaths.entries()) {
+    const name = path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path;
+    const projectMatches = Boolean(query) && path.toLowerCase().includes(query);
+    const projectSessions = sessions.filter(item => projectFor(item) === path);
+    const matching = projectSessions.filter(item => projectMatches || item.title.toLowerCase().includes(query));
+    if (query && !projectMatches && !matching.length) continue;
+    const expanded = Boolean(query) || (projectDisclosure[path] ?? path === projectWorkspace);
+    const rows: string[] = [];
+    let shown = 0, more = 0;
+    // Search reveals every match; each project can also expand its full history.
+    const limit = query || expandedProjectChats.has(path) ? Infinity : SIDEBAR_ROWS;
+    for (const item of matching) {
+      if (shown >= limit) { if (item.turns) more++; continue; }
+      const selected = item.id === current?.id;
+      const title = selected ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
+      const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
+      const working = selected ? Boolean(state.activeTurnId) && !waiting : !asks && (item.status === "running" || item.status === "queued");
+      // Looking at a chat marks it seen; one that has moved on since, while
+      // you were elsewhere, carries the blue dot until you open it.
+      if (selected || !(item.id in seenChats)) markSeen(item.id, item.updatedAt);
+      const fresh = !selected && item.status === "completed" && seenChats[item.id] !== item.updatedAt;
+      const tone = asks ? "warn" : working ? "working" : item.status === "failed" ? "bad" : fresh ? "acc" : "";
+      // An empty chat is the composer itself, and the New chat row above
+      // already names it; it joins the list once it has a turn.
+      if (title === "New chat" && !working && !waiting) continue;
+      // Each row carries its own delete, shown on hover: no menu, no dialog.
+      // The keyboard deletes with Delete on the row itself, so the trash
+      // stays out of the tab order.
+      const remove = working || path !== projectWorkspace ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" tabindex="-1" `);
+      if (renaming === item.id) {
+        rows.push(`<div class="sidebar-item"><form class="sidebar-rename" data-id="${h(item.id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`);
+        shown++;
+        continue;
+      }
+      rows.push(`<div class="sidebar-item">${row(tone, title, selected, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id, item.updatedAt)}${remove}</div>`);
       shown++;
-      continue;
     }
-    rows.push(`<div class="sidebar-item">${row(tone, title, selected, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id, item.updatedAt)}${remove}</div>`);
-    shown++;
+    if (more && !query) rows.push(btn("project-more", `Show ${more} more`, { path }, "sidebar-more"));
+    else if (!query && expandedProjectChats.has(path) && shown > SIDEBAR_ROWS) rows.push(btn("project-more", "Show fewer", { path }, "sidebar-more"));
+    const toggle = btn("project-toggle", '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>', { path }, "sidebar-project-toggle")
+      .replace("<button ", `<button aria-label="${h(`${expanded ? "Collapse" : "Expand"} ${name}`)}" aria-expanded="${expanded}" aria-controls="project-chats-${index}"${query ? " disabled" : ""} `);
+    const label = btn("project-open", `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v11H3zM3 7V4h7l2 3"/></svg><span>${h(name)}</span>`, { path }, "sidebar-project-name")
+      .replace("<button ", `<button draggable="true" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="${h(path)} · Drag to reorder (Alt+↑/↓)"${path === projectWorkspace ? ' aria-current="location"' : ""} `);
+    groups.push(`<section class="sidebar-project${path === projectWorkspace ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${toggle}${label}</div><div class="sidebar-project-chats" id="project-chats-${index}"${expanded ? "" : " hidden"}>${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
   }
-  // Past six, one quiet row says how many more there are and opens search.
-  if (more && !query) rows.push(`<button type="button" class="sidebar-more" id="sidebar-more">${more} more</button>`);
-  list.innerHTML = rows.length ? rows.join("") : `<p class="sidebar-empty">${query ? "No matching conversations" : "Your conversations will appear here."}</p>`;
+  list.innerHTML = groups.length ? groups.join("") : '<p class="sidebar-empty">No matching conversations or projects</p>';
   const editing = list.querySelector<HTMLInputElement>(".sidebar-rename input");
   if (editing && document.activeElement !== editing) { editing.focus(); editing.select(); }
   // A redraw keeps keyboard focus where it was, or on the row that moved up.
-  if (focused >= 0 && !editing) {
-    const buttons = list.querySelectorAll<HTMLElement>(".sidebar-session");
-    (buttons[Math.min(focused, buttons.length - 1)] ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
+  if (focusedControl && !editing) {
+    const sameControl = [...list.querySelectorAll<HTMLButtonElement>("button")].find(button =>
+      button.dataset.action === focusedControl.action && button.dataset.args === focusedControl.args && !button.closest("[hidden]"));
+    const buttons = [...list.querySelectorAll<HTMLElement>(".sidebar-session")].filter(button => !button.closest("[hidden]"));
+    (sameControl ?? (focused >= 0 ? buttons[Math.min(focused, buttons.length - 1)] : null) ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
   }
   const title = document.getElementById("workspace-title");
   if (title) { title.textContent = inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
@@ -467,7 +501,7 @@ document.getElementById("sidebar-search")?.addEventListener("input", renderSideb
 // The list moves with the arrow keys, Home and End; Delete or Backspace
 // deletes the focused chat, and ⌘Z brings the last one back.
 document.getElementById("sidebar-sessions")?.addEventListener("keydown", (event) => {
-  const rows = [...document.querySelectorAll<HTMLElement>("#sidebar-sessions .sidebar-session")];
+  const rows = [...document.querySelectorAll<HTMLElement>("#sidebar-sessions .sidebar-session")].filter(row => !row.closest("[hidden]"));
   const index = rows.indexOf(event.target as HTMLElement);
   if (index < 0 || event.metaKey || event.ctrlKey || event.altKey) return;
   const key = event.key;
@@ -486,7 +520,7 @@ document.getElementById("sidebar-sessions")?.addEventListener("keydown", (event)
 });
 /// The chat above or below the open one in the list, for Ctrl+Tab.
 function neighbourChat(step: number) {
-  const ids = [...document.querySelectorAll<HTMLElement>("#sidebar-sessions .sidebar-session")].map((row) => JSON.parse(row.dataset.args ?? "{}").id as string).filter(Boolean);
+  const ids = [...document.querySelectorAll<HTMLElement>('#sidebar-sessions .sidebar-session[data-action="select-session"]')].filter(row => !row.closest("[hidden]")).map((row) => JSON.parse(row.dataset.args ?? "{}").id as string).filter(Boolean);
   if (!ids.length) return undefined;
   const at = ids.indexOf(state?.session?.id ?? "");
   return ids[at < 0 ? (step > 0 ? 0 : ids.length - 1) : (at + step + ids.length) % ids.length];
@@ -497,14 +531,11 @@ function neighbourChat(step: number) {
 // may not complete on the same element: the second press starts the rename.
 document.getElementById("sidebar-sessions")?.addEventListener("mousedown", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLElement>(".sidebar-session");
-  if (!button || event.detail < 2 || event.button !== 0) return;
+  if (!button || button.dataset.action !== "select-session" || event.detail < 2 || event.button !== 0) return;
   event.preventDefault();
   renaming = JSON.parse(button.dataset.args ?? "{}").id ?? null;
   renderSidebar();
 }, true);
-document.getElementById("sidebar-sessions")?.addEventListener("click", (event) => {
-  if ((event.target as HTMLElement).closest("#sidebar-more")) document.getElementById("sidebar-search")?.focus();
-});
 function endRename(save: boolean) {
   const form = document.querySelector<HTMLFormElement>(".sidebar-rename");
   const id = renaming, title = form?.querySelector("input")?.value.trim() ?? "";
@@ -1170,14 +1201,15 @@ function renderHero() {
 /// Drive's proposals as rows: kind, title and estimate, with Run and Plan. The
 /// reason and the evidence it rests on show on hover. The start screen shows three; a session's briefing
 /// line unfolds them in place.
-function proposalRows(items: Snapshot["driveNext"]["proposals"]) {
+function proposalRows(items: Snapshot["driveNext"]["proposals"], detailed = false) {
   const signal = new Map(state!.driveNext.signals.map((item) => [item.id, item]));
   const minutes = (value: number) => (value < 60 ? `${value} min` : `${Math.round(value / 6) / 10} h`);
   return `<div class="proposal-list">${items
     .map((item) => {
       const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
       const why = [item.why, evidence && `Evidence: ${evidence}`].filter(Boolean).join("\n");
-      return `<div class="proposal-row" title="${h(why)}"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b>${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}</small>${btn("next-run", "Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id }, "quiet proposal-snooze")}</div>`;
+      const row = `<div class="proposal-row" title="${h(why)}"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b>${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}</small>${btn("next-run", "Run", { id: item.id }, "primary", true, Boolean(driveActionPending))}${btn("next-plan", "Plan", { id: item.id }, "", false, Boolean(driveActionPending))}${btn("next-snooze", "Not now", { id: item.id }, "quiet proposal-snooze", false, Boolean(driveActionPending))}</div>`;
+      return detailed ? `<div class="drive-idea">${row}<p class="proposal-explanation">${h(item.why)}</p>${evidence ? `<p class="proposal-evidence">Based on: ${h(evidence)}</p>` : ""}</div>` : row;
     })
     .join("")}</div>`;
 }
@@ -1849,7 +1881,7 @@ async function openOverlay(name: OverlayName, query = "") {
     overlaySignature = "";
     if (overlay === "models") renderOverlay();
   }
-  const input = el("overlay").querySelector<HTMLInputElement>("input");
+  const input = el("overlay").querySelector<HTMLInputElement | HTMLTextAreaElement>("textarea, input");
   if (input) input.focus();
   else {
     el("overlay").tabIndex = 0;
@@ -2052,14 +2084,93 @@ function renderSettings() {
   el("overlay").innerHTML =
     `<nav class="settings-nav" aria-label="Settings sections"><div class="settings-search"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="chooser-filter" placeholder="Search" aria-label="Search settings" value="${h(overlayQuery)}" autocomplete="off"></div><div class="settings-group">Settings</div>${nav}</nav><div class="settings-body">${btn("close-overlay", "×", {}, "dialog-close").replace("<button ", '<button aria-label="Close dialog" ')}${body}</div>`;
 }
+async function driveAction(method: string, args: Record<string, unknown> = {}) {
+  if (driveActionPending) return;
+  driveActionPending = method;
+  driveActionError = "";
+  overlaySignature = "";
+  renderOverlay();
+  try {
+    const result = await api(method, args);
+    if (method === "next-plan") { overlay = null; renderOverlay(); }
+    return result;
+  } catch (error) {
+    driveActionError = error instanceof Error ? error.message : String(error);
+    throw error;
+  } finally {
+    driveActionPending = "";
+    overlaySignature = "";
+    renderOverlay();
+  }
+}
+
+function renderDrivePanel() {
+  if (!state) return;
+  const drive = state.drive, next = state.driveNext, pinned = pinnedMission(), run = worktreeRun(), review = reviewJobs();
+  const signature = JSON.stringify(["drive", drive, next, state.breakage, state.connection, state.busy, driveMissionDraft, driveContinuous, driveActionPending, driveActionError, [...detailsOpen]]);
+  if (signature === overlaySignature) return;
+  overlaySignature = signature;
+  overlayRows = [];
+  const box = el("overlay"), active = box.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+  const focusId = active?.id, focusAction = active?.dataset.action, focusArgs = active?.dataset.args;
+  const selection = active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] : null;
+  const scroll = box.scrollTop, pending = Boolean(driveActionPending), online = state.connection === "online";
+  const resumable = drive && !drive.protection?.trip && ["paused", "blocked", "idle", "stopped"].includes(drive.status);
+  const busy = Boolean(pinned || run.fix || run.away);
+  let mission = "";
+  if (drive) {
+    const parts = missionParts(drive);
+    const controls = [
+      ["running", "waiting"].includes(drive.status) ? btn("drive-control", "Pause", { control: "pause" }, "", false, pending) : "",
+      resumable ? btn("drive-control", "Resume", { control: "resume" }, "primary", false, pending || !online) : "",
+      !["completed", "stopped", "idle"].includes(drive.status) ? btn("drive-control", "Stop", { control: "stop" }, "danger", false, pending) : "",
+      btn("drive-conversation", "Open conversation", {}, "quiet", false, pending),
+    ].join("");
+    mission = `<section class="drive-section"><h3>${pinned ? "Current mission" : "Last mission"}</h3><div class="drive-pinned-title">${h(parts.title)}</div><p class="drive-status"><strong>${h(drive.status[0]!.toUpperCase() + drive.status.slice(1))}</strong></p><p class="drive-activity">${h(drive.activity || parts.summary)}</p>${drive.protection?.trip ? `<p class="drive-panel-error">Mission limit reached: ${h(drive.protection.trip.reason)}. Start a new mission after reviewing this result.</p>` : ""}${parts.tasks}<p class="drive-meta">${h(parts.stats)}</p><div class="next-actions">${controls}</div>${parts.details}</section>`;
+  }
+  const work = run.fix || run.away || review.length ? `<section class="drive-section"><h3>Project work</h3>${run.fix ? `<p>${h(run.fix.title)} · ${h(run.fix.status)}</p>` : ""}${run.away ? `<p>Working through ${run.away.items.length} suggestions</p>${btn("breakage-away-stop", "Stop after this one", {}, "quiet", false, pending)}` : ""}${review.length ? btn("drive-review", `Review ${review.length} ${review.length === 1 ? "branch" : "branches"}`, {}, "primary") : ""}</section>` : "";
+  box.innerHTML = `<div class="drive-panel">
+    <div class="drive-panel-head"><div><h2>Drive</h2><p>Give Drive a goal, follow its progress, and review the result.</p></div>${btn("close-overlay", "Close", {}, "quiet")}</div>
+    ${driveActionError ? `<p class="drive-panel-error" role="alert">${h(driveActionError)}</p>` : ""}
+    ${!online ? '<p class="drive-panel-error">Connect to the daemon to start or resume work.</p>' : ""}
+    ${mission}${work}
+    <section class="drive-section"><h3>Start a mission</h3>
+      ${busy ? '<p class="muted">Finish or stop the current work before starting another mission.</p>' : ""}
+      <form id="drive-mission-form">
+        <label for="drive-mission">What should Drive accomplish?</label>
+        <textarea id="drive-mission" name="mission" rows="3" maxlength="8000" required placeholder="Describe a concrete outcome and how to verify it…">${h(driveMissionDraft)}</textarea>
+        <label class="drive-mode"><input id="drive-continuous" type="checkbox"${driveContinuous ? " checked" : ""}> Keep choosing improvements after this task</label>
+        <p class="muted">By default, Drive finishes after one verified task. Work runs in a separate branch when available; otherwise it uses this conversation. Drive runs edits and commands automatically; publishing still asks.</p>
+        <button type="submit" class="primary"${busy || pending || !online ? " disabled" : ""}>${driveActionPending === "drive" ? "Starting…" : "Start mission"}</button>
+      </form>
+    </section>
+    <section class="drive-section"><div class="drive-section-head"><h3>Suggested work</h3>${btn("next-refresh", next.loading ? "Refreshing…" : "Refresh", {}, "quiet", false, next.loading || pending || !online)}</div>
+      ${next.error ? `<p class="drive-panel-error" role="alert">Couldn’t load suggestions: ${h(next.error)}</p>` : ""}
+      ${next.proposals.length ? proposalRows(next.proposals, true) : `<p class="drive-empty">${next.loading ? "Looking for useful work in this project…" : "No suggestions yet. Refresh to look for work, or start a mission above."}</p>`}
+      ${next.proposals.length > 1 ? btn("next-away", `Run top ${Math.min(3, next.proposals.length)} while away`, { count: Math.min(3, next.proposals.length) }, "quiet", false, busy || pending || !online) : ""}
+    </section></div>`;
+  box.scrollTop = scroll;
+  const replacement = focusId ? document.getElementById(focusId) : [...box.querySelectorAll<HTMLElement>("[data-action]")].find(node => node.dataset.action === focusAction && node.dataset.args === focusArgs);
+  if (active && replacement && !replacement.hasAttribute("disabled")) {
+    replacement.focus({ preventScroll: true });
+    if (selection && replacement instanceof HTMLTextAreaElement) replacement.setSelectionRange(selection[0]!, selection[1]!);
+  }
+}
+
 function renderOverlay() {
   if (!state) return;
   el("overlay").hidden = !overlay;
   el("overlay").dataset.screen = overlay ?? "";
   el("overlay").setAttribute("role", "dialog");
-  el("overlay").setAttribute("aria-label", overlay === "models" ? "Choose a model" : overlay ?? "Dialog");
+  el("overlay").setAttribute("aria-label", overlay === "drive" ? "Drive" : overlay === "models" ? "Choose a model" : overlay ?? "Dialog");
+  for (const id of ["sidebar-drive", "rail-drive"]) {
+    const button = document.getElementById(id);
+    button?.setAttribute("aria-expanded", String(overlay === "drive"));
+    button?.classList.toggle("on", overlay === "drive");
+  }
   placeOverlay();
   if (!overlay) return;
+  if (overlay === "drive") return renderDrivePanel();
   const focused = el("overlay").querySelector<HTMLInputElement>("input"),
     hasFocus = focused === document.activeElement,
     selection = focused?.selectionStart;
@@ -2648,6 +2759,24 @@ async function dispatch(
   args: Record<string, any>,
   target?: HTMLElement,
 ) {
+  if (action === "project-toggle" || action === "project-more") {
+    const path = String(args.path);
+    if (action === "project-toggle") {
+      projectDisclosure[path] = !(projectDisclosure[path] ?? path === (document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace));
+      try { localStorage.setItem("demesne-project-disclosure", JSON.stringify(projectDisclosure)); } catch {}
+    } else if (expandedProjectChats.has(path)) expandedProjectChats.delete(path);
+    else expandedProjectChats.add(path);
+    renderSidebar();
+    // Rendering replaces the control: keep keyboard focus on its replacement.
+    document.querySelectorAll<HTMLButtonElement>(`#sidebar-sessions [data-action="${action}"]`).forEach(button => {
+      if (JSON.parse(button.dataset.args ?? "{}").path === path) button.focus({ preventScroll: true });
+    });
+    return;
+  }
+  if (action === "project-open" || action === "project-session") {
+    document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path: args.path, ...(action === "project-session" ? { sessionId: args.id } : {}) } }));
+    return;
+  }
   if (action === "context-card") {
     contextCardOpen = !contextCardOpen;
     renderContextCard();
@@ -2681,8 +2810,7 @@ async function dispatch(
   if (action === "auto-approve" && driveNavigating)
     throw new Error("Only you can change session approvals.");
   if (action === "new-session") return api("new-session", {});
-  if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never"].includes(action)) return api(action, args);
-  if (action === "next-away") return act(() => api(action, args));
+  if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "next-away", "drive-control"].includes(action)) return driveAction(action, args);
   if (action.startsWith("breakage-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
   if (["cleanup-toggle", "cleanup-delete"].includes(action)) return act(() => api(action, args));
@@ -2736,25 +2864,16 @@ async function dispatch(
     return;
   }
   if (action === "drive-open") {
-    // Drive in place: its mission's conversation, the mission unfolded on
-    // the briefing line, or its ideas under the composer. A toggle (Alt+J)
-    // folds it again.
-    const pinned = pinnedMission(), run = worktreeRun(), home = pinned?.homeSessionId;
-    if (home && home !== state!.session?.id) return dispatch("select-session", { id: home });
-    if (pinned && driveTurnMission()) {
-      follow = false;
-      document.getElementById("drive-turn")?.scrollIntoView({ block: "start" });
-      return;
-    }
-    const drive = inSession() && Boolean(pinned || run.fix || run.away);
-    if (drive) driveShown = args.toggle ? !driveShown : true;
-    else ideasShown = args.toggle ? !ideasShown : true;
-    if (inSession()) renderBriefing();
-    else {
-      heroSignature = "";
-      renderHero();
-    }
-    renderBreakage();
+    if (args.toggle && overlay === "drive") return dispatch("close-overlay", {});
+    return openOverlay("drive");
+  }
+  if (action === "drive-conversation" || action === "drive-review") {
+    overlay = null;
+    renderOverlay();
+    if (action === "drive-review") return dispatch("review-open", { show: true });
+    const home = state?.drive?.homeSessionId;
+    if (home && home !== state?.session?.id) await dispatch("select-session", { id: home });
+    else document.getElementById("drive-turn")?.scrollIntoView({ block: "start" });
     return;
   }
   if (action === "step") {
@@ -3031,7 +3150,7 @@ function renderState(next: Snapshot) {
     lastSession = next.session?.id ?? "";
     follow = true;
     readingHeld = false;
-    overlay = null;
+    if (overlay !== "drive") overlay = null;
     inspectSurface = null;
     inspectItem = "";
     driveShown = ideasShown = false;
@@ -3156,6 +3275,8 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("input", (event) => {
   const input = event.target as HTMLInputElement;
+  if (input.id === "drive-mission") { driveMissionDraft = input.value; return; }
+  if (input.id === "drive-continuous") { driveContinuous = input.checked; return; }
   if (input === (editor as unknown as HTMLInputElement)) {
     changedDraft();
     return;
@@ -3180,6 +3301,15 @@ document.addEventListener("submit", (event) => {
   event.preventDefault();
   const form = event.target as HTMLFormElement;
   void act(async () => {
+    if (form.id === "drive-mission-form") {
+      if (driveActionPending) return;
+      const mission = driveMissionDraft.trim();
+      if (!mission) return;
+      await driveAction("drive", { text: `${driveContinuous ? "--continuous" : "--bounded"} ${mission}` });
+      driveMissionDraft = "";
+      overlaySignature = "";
+      renderOverlay();
+    }
     if (form.id === "composer") {
       if (pendingQuestion()) await submitText();
       else if (state?.activeTurnId) {
@@ -3327,6 +3457,13 @@ document.addEventListener("keydown", (event) => {
     }
   }
   if (overlay) {
+    if (overlay === "drive") {
+      if (ctrl && key === "enter" && (event.target as HTMLElement).id === "drive-mission") {
+        event.preventDefault();
+        document.querySelector<HTMLFormElement>("#drive-mission-form")?.requestSubmit();
+      }
+      return;
+    }
     // ←→ choose the highlighted model's thinking level (while the filter is
     // empty; with text they move the caret).
     if (overlay === "models" && (key === "arrowleft" || key === "arrowright") && !overlayQuery) {
@@ -3981,12 +4118,13 @@ function observeUI(): DriveObservation {
     if (!element) continue;
     const box = geometry(element);
     if (box) {
+      const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
       panes.push({ surface: name, ...box });
       scrollRegions.push({
         surface: scrollName,
         ...box,
-        offset: Math.round(element.scrollTop),
-        maximum: Math.max(0, element.scrollHeight - element.clientHeight),
+        offset: Math.min(maximum, Math.max(0, Math.round(element.scrollTop))),
+        maximum,
       });
     }
   }

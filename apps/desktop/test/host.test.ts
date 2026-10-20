@@ -177,6 +177,12 @@ test("desktop switching preserves drafts, canonicalizes projects, and restores p
     expect(statSync(prefsPath).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(prefsPath, "utf8"))).toMatchObject({ lastWorkspace: other, recentProjects: [other, f.workspace] });
     const selectedOtherSession = bootstrap(await sidecar.value("desktop-bootstrap")).snapshot!.session!.id;
+    const another = await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true });
+    const openedChat = bootstrap(await sidecar.value("desktop-open-project", { path: f.workspace, sessionId: another.session.id }));
+    expect(openedChat.snapshot!.session!.id).toBe(another.session.id);
+    expect(await sidecar.request("desktop-open-project", { path: other, sessionId: another.session.id })).toMatchObject({ ok: false, error: "This conversation is not available in the selected project" });
+    expect(bootstrap(await sidecar.value("desktop-bootstrap")).workspace).toBe(f.workspace);
+    expect(bootstrap(await sidecar.value("desktop-open-project", { path: other, sessionId: selectedOtherSession })).snapshot!.session!.id).toBe(selectedOtherSession);
     expect(await sidecar.request("desktop-open-project", { path: join(f.root, "missing") })).toMatchObject({ ok: false });
     chmodSync(f.workspace, 0o775);
     const groupWritable = await sidecar.request("desktop-open-project", { path: f.workspace });

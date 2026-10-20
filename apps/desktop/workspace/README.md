@@ -18,7 +18,7 @@ Drive uses direct daemon operations and recorded evidence. It cannot answer perm
 
 ## No side panels
 
-The desktop has no side panels. The sidebar’s Drive row turns the main column into Drive’s page (`#drive-page`, `renderDrivePage` in `live.ts`): the mission box, what Drive is working on with its controls, branches ready for review, and ideas. Missions also appear as conversation turns, and ideas can unfold above or under the composer. A turn's edits, commands and checks unfold in place under their steps, and the top bar's **⋯** is the conversation's menu. The host still answers `files`, `changes` and `processes` for Drive and tests.
+The desktop has no side panels. The sidebar’s Drive row turns the main column into Drive’s page (`#drive-page`, `renderDrivePage` in `live.ts`): a goal box, then one list of what Drive is working on, branches ready for review and ideas, each row showing its actions on hover. Missions also appear as conversation turns, and ideas can unfold above or under the composer. A turn's edits, commands and checks unfold in place under their steps, and the top bar's **⋯** is the conversation's menu. The host still answers `files`, `changes` and `processes` for Drive and tests.
 
 ## Drive completion
 

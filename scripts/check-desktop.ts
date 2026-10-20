@@ -476,8 +476,8 @@ try {
   await page.locator("#sidebar-drive").click();
   const drivePage = page.locator("#drive-page");
   const mission = drivePage.getByLabel("What should Drive take on?");
-  await drivePage.getByRole("heading", { name: "What should Drive take on?" }).waitFor();
-  await drivePage.getByText("Nothing waiting.", { exact: false }).waitFor();
+  await mission.waitFor();
+  await drivePage.getByText("Nothing waiting", { exact: false }).waitFor();
   assert(!(await page.locator("#stage").isVisible()), "Drive takes the main column in place of the conversation");
   await mission.fill("Verify the Drive controls");
   await page.keyboard.press("Escape");
@@ -491,9 +491,9 @@ try {
   assert.equal(await mission.inputValue(), "Verify the Drive controls", "looking again preserves the mission draft");
   failSuggestions = false;
   await drivePage.getByRole("button", { name: "Look again", exact: true }).click();
-  await until(() => drivePage.innerText().then(text => !text.includes("Couldn’t load ideas:") && !text.includes("Looking…") && !text.includes("Drive is looking for work")), "Look again recovers the ideas view");
+  await until(() => drivePage.innerText().then(text => !text.includes("Couldn’t load ideas:") && !text.includes("Looking")), "Look again recovers the ideas view");
   await capture("08-drive");
-  await drivePage.getByRole("button", { name: /^Start/ }).click();
+  await drivePage.getByRole("button", { name: "Start", exact: true }).click();
   await drivePage.getByRole("button", { name: "Pause", exact: true }).waitFor();
   assert(await drivePage.isVisible(), "Drive stays open when a mission switches to its worktree");
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "Drive worktrees stay within their parent project");

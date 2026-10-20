@@ -616,22 +616,24 @@ body.drive-page-open #stage, body.drive-page-open #input-area, body.drive-page-o
   .desktop #drop-zone:not([hidden]) { animation: desktop-appear 140ms var(--ease); }
 }
 
-/* Drive's strip along the composer's top edge: one line with a mark, a word
-   and what it is about; the chevron grows the box upward to show the rows. */
-.desktop #composer #briefing { margin: -11px -50px 0 -16px; border-radius: var(--r-lg) var(--r-lg) 0 0; }
-.desktop #composer #briefing[hidden] { display: none; }
-.desktop #briefing .bf-head { position: relative; }
-.desktop #briefing .bf-strip { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px 0 16px; font-size: 12.5px; color: var(--t3); white-space: nowrap; box-shadow: inset 0 -1px 0 var(--hair); }
+/* Drive's chip: a small rounded chip centred above the composer. Its card
+   grows out of it over the conversation and never moves the page. */
+.desktop #briefing { position: relative; display: flex; justify-content: center; margin: 0 0 10px; pointer-events: none; }
+.desktop #briefing[hidden] { display: none; }
+.desktop #briefing .bf-chip, .desktop #briefing .bf-card.open { pointer-events: auto; }
+.desktop #briefing .bf-chip { position: relative; display: inline-flex; align-items: center; gap: 8px; max-width: min(560px, 100%); height: 30px; padding: 0 6px 0 13px; overflow: hidden; border-radius: 15px; background: var(--surface2); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); font-size: 12.5px; color: var(--t3); white-space: nowrap; }
+.desktop #briefing .bf-chip:not(:has(.bf-chev)) { padding-right: 13px; }
+.desktop #briefing .bf-chip:hover { background: color-mix(in srgb, var(--surface2) 88%, var(--t1)); }
+.desktop #briefing.open .bf-chip { box-shadow: 0 0 0 1px var(--hair), var(--shadow-1); }
 .desktop #briefing .bf-part { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .desktop #briefing .bf-word { padding: 0; border: 0; background: none; font: inherit; font-weight: 500; color: var(--t2); cursor: pointer; }
 .desktop #briefing button.bf-word:hover { color: var(--t1); }
 .desktop #briefing .bf-word.amber { color: var(--warn); }
-.desktop #briefing .bf-about { overflow: hidden; text-overflow: ellipsis; max-width: 380px; color: var(--t3); }
+.desktop #briefing .bf-about { overflow: hidden; text-overflow: ellipsis; max-width: 300px; color: var(--t3); }
 .desktop #briefing .bf-sep { color: var(--t4); }
-.desktop #briefing .bf-sp { flex: 1; }
-.desktop #briefing .bf-chev { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--t4); cursor: pointer; }
+.desktop #briefing .bf-chev { display: grid; place-items: center; width: 22px; height: 22px; margin-left: -2px; padding: 0; border: 0; border-radius: 11px; background: none; color: var(--t4); cursor: pointer; }
 .desktop #briefing .bf-chev:hover { background: var(--tone2); color: var(--t1); }
-.desktop #briefing .bf-chev .ico { width: 15px; height: 15px; transform: rotate(180deg); }
+.desktop #briefing .bf-chev .ico { width: 14px; height: 14px; transform: rotate(180deg); }
 .desktop #briefing.open .bf-chev .ico { transform: none; }
 .desktop #briefing .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .desktop #briefing .bf-dot.idea { background: var(--acc); }
@@ -639,14 +641,13 @@ body.drive-page-open #stage, body.drive-page-open #input-area, body.drive-page-o
 .desktop #briefing .bf-dot.amber { background: var(--warn); }
 .desktop #briefing .bf-dot.hollow { box-shadow: inset 0 0 0 1.5px var(--t4); }
 .desktop #briefing .bf-spin { width: 11px; height: 11px; flex: none; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--acc) 25%, transparent); border-top-color: var(--acc); }
-.desktop #briefing .bf-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; overflow: hidden; }
+.desktop #briefing .bf-progress { position: absolute; left: 14px; right: 14px; bottom: 0; height: 1.5px; overflow: hidden; border-radius: 1px; }
 .desktop #briefing .bf-progress i { display: block; height: 100%; background: linear-gradient(90deg, transparent, var(--acc)); }
-.desktop #briefing .bf-fold { display: grid; grid-template-rows: 0fr; }
-.desktop #briefing .bf-fold.open { grid-template-rows: 1fr; }
-.desktop #briefing .bf-fold > div { min-height: 0; overflow: hidden; }
-.desktop #briefing .bf-fold.open > div { padding: 6px 10px 4px; box-shadow: inset 0 -1px 0 var(--hair); }
+.desktop #briefing .bf-card { position: absolute; bottom: calc(100% + 8px); left: 50%; z-index: 5; width: min(460px, 100%); margin-left: max(-230px, -50%); padding: 6px; border-radius: var(--r-lg); background: var(--surface2); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); opacity: 0; transform: translateY(6px) scale(.96); transform-origin: 50% 100%; visibility: hidden; }
+.desktop #briefing .bf-card:empty { display: none; }
+.desktop #briefing .bf-card.open { opacity: 1; transform: none; visibility: visible; }
 .desktop #briefing .bf-rows { display: flex; flex-direction: column; }
-.desktop #briefing .bf-row { position: relative; display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 8px; border-radius: var(--r-sm); color: var(--t1); font-size: 13px; }
+.desktop #briefing .bf-row { position: relative; display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: var(--r-sm); color: var(--t1); font-size: 13px; }
 .desktop #briefing .bf-row:hover, .desktop #briefing .bf-row:focus-within { background: var(--tone); }
 .desktop #briefing .bf-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desktop #briefing .bf-r { margin-left: auto; color: var(--t4); font-size: 12px; }
@@ -655,23 +656,25 @@ body.drive-page-open #stage, body.drive-page-open #input-area, body.drive-page-o
 .desktop #briefing .bf-row:hover .bf-r, .desktop #briefing .bf-row:focus-within .bf-r { opacity: 0; }
 .desktop #briefing .bf-act button { height: 24px; padding: 0 9px; border: 0; border-radius: var(--r-sm); background: var(--tone2); color: var(--t2); font-size: 12px; cursor: pointer; }
 .desktop #briefing .bf-act button.primary { color: var(--acc); }
-.desktop #briefing .bf-act button:hover:not(:disabled) { background: var(--surface2); color: var(--t1); }
-.desktop #briefing .bf-foot { display: flex; align-items: center; gap: 8px; margin: 2px 0 4px; padding: 0 8px; font-size: 12px; color: var(--t4); }
+.desktop #briefing .bf-act button:hover:not(:disabled) { background: var(--surface); color: var(--t1); }
+.desktop #briefing .bf-foot { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; padding: 6px 10px 2px; box-shadow: inset 0 1px 0 var(--hair); font-size: 12px; color: var(--t4); }
 .desktop #briefing .bf-foot .link { font-size: 12px; }
-.desktop #briefing .drive-live { margin: 2px 0 6px; }
+.desktop #briefing .drive-live { margin: 2px; }
 @keyframes bf-spin { to { transform: rotate(360deg); } }
 @keyframes bf-breathe { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: no-preference) {
   .desktop #briefing .bf-spin { animation: bf-spin 900ms linear infinite; }
   .desktop #briefing .bf-dot.idea { animation: bf-breathe 2.4s ease-in-out infinite; }
-  .desktop #briefing .bf-fold { transition: grid-template-rows 260ms var(--ease); }
+  .desktop #briefing .bf-chip { transition: background-color 160ms var(--ease), box-shadow 200ms var(--ease); }
+  .desktop #briefing .bf-card { transition: opacity 180ms var(--ease), transform 240ms var(--ease), visibility 0s linear 240ms; }
+  .desktop #briefing .bf-card.open { transition: opacity 180ms var(--ease), transform 240ms var(--ease), visibility 0s; }
   .desktop #briefing .bf-chev .ico { transition: transform 220ms var(--ease); }
   .desktop #briefing .bf-progress i { transition: width 600ms var(--ease); }
   .desktop #briefing .bf-row { transition: background-color 140ms var(--ease); }
   .desktop #briefing .bf-act, .desktop #briefing .bf-r { transition: opacity 140ms var(--ease); }
-  .desktop #briefing .bf-fold .bf-row, .desktop #briefing .bf-fold .drive-live, .desktop #briefing .bf-fold .bf-foot { opacity: 0; transform: translateY(4px); transition: opacity 200ms var(--ease), transform 240ms var(--ease), background-color 140ms var(--ease); }
-  .desktop #briefing .bf-fold.open .bf-row, .desktop #briefing .bf-fold.open .drive-live, .desktop #briefing .bf-fold.open .bf-foot { opacity: 1; transform: none; }
-  .desktop #briefing .bf-fold.open .bf-row:nth-child(2) { transition-delay: 40ms, 40ms, 0ms; }
-  .desktop #briefing .bf-fold.open .bf-row:nth-child(3) { transition-delay: 80ms, 80ms, 0ms; }
-  .desktop #briefing .bf-fold.open .bf-row:nth-child(n+4), .desktop #briefing .bf-fold.open .bf-foot { transition-delay: 120ms, 120ms, 0ms; }
+  .desktop #briefing .bf-card .bf-row, .desktop #briefing .bf-card .drive-live, .desktop #briefing .bf-card .bf-foot { opacity: 0; transform: translateY(4px); transition: opacity 200ms var(--ease), transform 240ms var(--ease), background-color 140ms var(--ease); }
+  .desktop #briefing .bf-card.open .bf-row, .desktop #briefing .bf-card.open .drive-live, .desktop #briefing .bf-card.open .bf-foot { opacity: 1; transform: none; }
+  .desktop #briefing .bf-card.open .bf-row:nth-child(1) { transition-delay: 40ms, 40ms, 0ms; }
+  .desktop #briefing .bf-card.open .bf-row:nth-child(2) { transition-delay: 80ms, 80ms, 0ms; }
+  .desktop #briefing .bf-card.open .bf-row:nth-child(n+3), .desktop #briefing .bf-card.open .bf-foot { transition-delay: 120ms, 120ms, 0ms; }
 }

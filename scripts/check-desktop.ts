@@ -563,14 +563,18 @@ try {
   await evaluate(`const b = document.createElement("button"); b.dataset.action = "next-refresh"; b.id = "fixture-refresh"; document.getElementById("drive-page").append(b); b.click(); b.remove();`);
   await until(() => drivePage.innerText().then(text => text.includes("Add tests for fuzzy search ranking")), "Drive offers the fixture ideas");
   await page.keyboard.press("Escape");
-  await until(() => page.locator("#briefing .bf-strip").innerText().then(text => text.includes("Drive has 3 ideas")), "the composer strip names Drive's ideas");
+  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
   await page.locator("#briefing .bf-chev").click();
-  await until(() => page.locator("#briefing .bf-fold.open .bf-row").count().then(count => count === 3), "the strip unfolds three idea rows");
+  await until(() => page.locator("#briefing .bf-card.open .bf-row").count().then(count => count === 3), "the chip's card shows three idea rows");
   await page.waitForTimeout(400);
   await page.locator("#briefing .bf-row").first().hover();
-  await capture("10-drive-strip");
-  await page.locator("#briefing .bf-chev").click();
-  await until(() => page.locator("#briefing .bf-fold.open").count().then(count => count === 0), "the strip folds the ideas away");
+  await capture("10-drive-chip");
+  await page.keyboard.press("Escape");
+  await until(() => page.locator("#briefing .bf-card.open").count().then(count => count === 0), "Escape puts the card away");
+  await page.locator("#briefing .bf-word").click();
+  await until(() => page.locator("#briefing .bf-card.open").count().then(count => count === 1), "the chip's word opens the card again");
+  await page.locator("#stage").click({ position: { x: 20, y: 20 } });
+  await until(() => page.locator("#briefing .bf-card.open").count().then(count => count === 0), "a click elsewhere puts the card away");
   console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {

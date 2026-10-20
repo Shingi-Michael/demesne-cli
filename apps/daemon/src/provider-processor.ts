@@ -113,6 +113,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
       profile,
       thinkingEnabled,
       preservesPromptCache: this.preservesPromptCache,
+      vision: this.provider.vision === true,
       contextCapacity,
       maxOutputTokens: requestDefaults.maxOutputTokens,
       temperature: requestDefaults.temperature,

@@ -7,6 +7,8 @@ export interface TurnInference {
   readonly profile: string | null;
   readonly thinkingEnabled: boolean | undefined;
   readonly preservesPromptCache: boolean;
+  /// The provider takes images (attachments and tool screenshots).
+  readonly vision?: boolean;
   readonly contextCapacity?: number;
   readonly maxOutputTokens?: number;
   readonly temperature?: number;
@@ -32,6 +34,7 @@ export interface TurnProcessor {
   readonly temperature?: number;
   readonly seed?: number;
   readonly preservesPromptCache?: boolean;
+  readonly vision?: boolean;
   createTurnInference?(thinkingEnabled: boolean | undefined, overrides?: InferenceOverrides): TurnInference;
   /// The model's thinking level, chosen with the model (none: its default).
   readonly reasoning?: string;
@@ -79,6 +82,7 @@ export function snapshotTurnInference(
     profile,
     thinkingEnabled,
     preservesPromptCache,
+    vision: processor.vision === true,
     contextCapacity,
     maxOutputTokens,
     temperature,

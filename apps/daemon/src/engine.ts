@@ -95,7 +95,13 @@ export class AgentEngine {
 
     const themefy = turn.kind === "themefy";
     const history = themefy ? [] : groupHistory(this.store.getModelContextTranscript(session.id));
-    const userMessage = { role: "user" as const, content: turn.content };
+    // Attached images travel with the message as artifact ids; the text names
+    // them so a model that can't see pixels still knows they are there.
+    const attached = turn.attachments ?? [];
+    const userMessage = attached.length
+      ? { role: "user" as const, content: `${turn.content}\n\n${attached.map((image) => `[Attached image ${image.filename}, ${image.width}×${image.height}]`).join("\n")}`,
+        imageArtifactIds: attached.map((image) => image.id) }
+      : { role: "user" as const, content: turn.content };
     const currentUser = this.store.appendModelMessage(turnId, userMessage);
     const currentMessages: ProviderMessage[] = [userMessage];
     // `ask_user` needs someone to answer: not in non-interactive turns.
@@ -153,7 +159,8 @@ export class AgentEngine {
         tools: requestDefinitions,
         historicalTurns,
         capacityTokens: inference.contextCapacity,
-        outputReserveTokens: this.options.providerVision && unplannedMessages.some((message) => message.role === "tool" && message.imageArtifactIds?.length)
+        outputReserveTokens: (this.options.providerVision && unplannedMessages.some((message) => message.role === "tool" && message.imageArtifactIds?.length))
+          || (inference.vision && attached.length)
           ? (inference.maxOutputTokens ?? 1536) + 4096 : inference.maxOutputTokens,
       });
       const assembled = new Map<number, AssembledToolCall>();
@@ -182,8 +189,9 @@ export class AgentEngine {
         try {
           let providerEventCount = 0;
           let usageEventCount = 0;
-          const visualMessages = this.options.providerVision
-            ? await hydrateImageInputs(this.store, session.id, messages, providerController.signal) : messages;
+          const visualMessages = this.options.providerVision || inference.vision
+            ? await hydrateImageInputs(this.store, session.id, messages, providerController.signal,
+              { tools: this.options.providerVision === true, attachments: true }) : messages;
           const stream = inference.stream(visualMessages, requestDefinitions, providerController.signal, { cacheKey: session.id });
           for await (const event of withProviderDeadlines(
             stream,

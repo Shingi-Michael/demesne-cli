@@ -392,6 +392,17 @@ try {
     }
   }
   assert(await page.evaluate(() => document.activeElement?.tagName === "TEXTAREA"), "⇧⇥ keeps focus in the composer");
+  // + attaches images: a thumbnail sits in the box above the text, × drops it.
+  const shot = join(f.workspace, "..", "shot.png");
+  writeFileSync(shot, await sharp({ create: { width: 320, height: 200, channels: 3, background: "#3d5a80" } }).png().toBuffer());
+  await page.locator("#attach-input").setInputFiles(shot);
+  await page.locator("#attach-row .att img").waitFor();
+  await page.locator("textarea").fill("Make the header match this");
+  await capture("03-attach");
+  await page.locator("#attach-row .att").hover();
+  await page.locator("#attach-row .att-x").click();
+  await until(() => page.locator("#attach-row .att").count().then(count => count === 0), "removing the image empties the row");
+  await page.locator("textarea").fill("");
   await desktop!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(900, 680));
   await until(() => page.evaluate(() => window.innerWidth <= 900), "narrow desktop size");
   assert(await page.locator("textarea").isVisible(), "Composer remains available at minimum window size");

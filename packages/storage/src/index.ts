@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   type ImageArtifact,
+  type TurnAttachment,
   type ArtifactPage,
   PROTOCOL_VERSION,
   type ContextPlan,
@@ -77,6 +78,7 @@ interface TurnRow {
   thinking_enabled: number | null;
   plan_only: number | null;
   kind: string;
+  attachments_json: string | null;
 }
 
 interface EventRow {
@@ -620,7 +622,7 @@ export class DemesneStore {
       toolCallId,
       toolCallsJson,
       new Date().toISOString(),
-      message.role === "tool" && message.imageArtifactIds?.length ? JSON.stringify(message.imageArtifactIds) : null,
+      (message.role === "tool" || message.role === "user") && message.imageArtifactIds?.length ? JSON.stringify(message.imageArtifactIds) : null,
       message.role === "assistant" && message.responses ? JSON.stringify(message.responses) : null,
     );
     return { id: Number(result.lastInsertRowid), turnId, message };
@@ -863,6 +865,7 @@ export class DemesneStore {
     thinkingEnabled?: boolean,
     planOnly = false,
     kind: "chat" | "compaction" | "themefy" = "chat",
+    attachments: TurnAttachment[] = [],
   ): { turn: Turn; event: EventEnvelope } {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -874,7 +877,7 @@ export class DemesneStore {
       if (active.count > 0) throw new InvalidStateError("Session already has an active turn");
       this.database
         .query(
-          "INSERT INTO turns (id, session_id, content, response_text, status, created_at, permission_mode, thinking_enabled, plan_only, kind) VALUES (?, ?, ?, '', 'queued', ?, ?, ?, ?, ?)",
+          "INSERT INTO turns (id, session_id, content, response_text, status, created_at, permission_mode, thinking_enabled, plan_only, kind, attachments_json) VALUES (?, ?, ?, '', 'queued', ?, ?, ?, ?, ?, ?)",
         )
         .run(
           id,
@@ -885,6 +888,7 @@ export class DemesneStore {
           thinkingEnabled === undefined ? null : thinkingEnabled ? 1 : 0,
           planOnly ? 1 : 0,
           kind,
+          attachments.length ? JSON.stringify(attachments) : null,
         );
       this.database.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now, sessionId);
       const event = this.insertEvent("turn.created", sessionId, id, {
@@ -892,6 +896,7 @@ export class DemesneStore {
         ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),
         ...(planOnly ? { planOnly: true } : {}),
         ...(kind !== "chat" ? { kind } : {}),
+        ...(attachments.length ? { attachments } : {}),
       }, now);
       return { turn: this.getTurnOrThrow(id), event };
     })();
@@ -1526,6 +1531,9 @@ export class DemesneStore {
     if (!this.hasColumn("turns", "reverted_at")) {
       this.database.run("ALTER TABLE turns ADD COLUMN reverted_at TEXT");
     }
+    if (!this.hasColumn("turns", "attachments_json")) {
+      this.database.run("ALTER TABLE turns ADD COLUMN attachments_json TEXT");
+    }
     if (!this.hasColumn("turns", "plan_only")) {
       this.database.run("ALTER TABLE turns ADD COLUMN plan_only INTEGER NOT NULL DEFAULT 0");
     }
@@ -1899,6 +1907,7 @@ function mapTurn(row: TurnRow): Turn {
     thinkingEnabled: row.thinking_enabled === null ? null : row.thinking_enabled !== 0,
     ...(row.plan_only ? { planOnly: true } : {}),
     ...(row.kind === "compaction" || row.kind === "themefy" ? { kind: row.kind } : {}),
+    ...(row.attachments_json ? { attachments: JSON.parse(row.attachments_json) as TurnAttachment[] } : {}),
   };
 }
 
@@ -1929,7 +1938,8 @@ function mapProviderCallSnapshot(row: ProviderCallRow): ProviderCallSnapshot {
 function mapModelMessage(row: ModelMessageRow): StoredModelMessage {
   if (row.role === "user") {
     if (row.content === null) throw new InvalidStateError(`User model message ${row.id} has no content`);
-    return { id: row.id, turnId: row.turn_id, message: { role: "user", content: row.content } };
+    return { id: row.id, turnId: row.turn_id, message: { role: "user", content: row.content,
+      ...(row.image_artifact_ids_json ? { imageArtifactIds: JSON.parse(row.image_artifact_ids_json) as string[] } : {}) } };
   }
   if (row.role === "tool") {
     if (row.content === null || !row.tool_call_id) {

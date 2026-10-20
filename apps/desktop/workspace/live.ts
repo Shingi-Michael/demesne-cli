@@ -956,7 +956,11 @@ function runHTML(run: WorkspaceRun, index: number) {
   const answered = run.entries.some((e) => e.type === "assistant");
   const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}</span>`;
   const queued = live && state!.queue.trim() ? `<div class="next-line"><span class="next-label">NEXT</span><span class="next-text">${h(state!.queue.trim())}</span>${btn("queue-action", "edit", { action: "edit" })}${btn("queue-action", "send now", { action: "now" })}${btn("queue-action", "×", { action: "drop" }, "next-drop")}</div>` : "";
-  const request = mailRequest(run) ?? `<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+  const attached = run.attachments?.length
+    ? `<div class="request-att">${run.attachments.map((image) => attachmentPreviews.has(image.id)
+      ? `<img src="${attachmentPreviews.get(image.id)}" alt="${h(image.filename)}" title="${h(image.filename)}">`
+      : `<span class="att-name" title="${h(`${image.width}×${image.height}`)}">${h(image.filename)}</span>`).join("")}</div>` : "";
+  const request = mailRequest(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
   const review = reviewOpen.has(run.id) && !live ? reviewHTML(run.id) : "";
   return `${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}${activity}</div>${queued}`;
 }
@@ -1304,6 +1308,25 @@ async function answerQuestion(value: string) {
     if (composerSlot===key) editor.value="";
   } finally { answeringQuestion=false;renderComposer(); }
 }
+/// Images for the next message: previews stay here, the host holds the
+/// uploaded artifacts.
+const attachmentPreviews = new Map<string, string>();
+const ATTACHABLE = ["image/png", "image/jpeg", "image/webp"];
+async function attachFiles(files: File[]) {
+  const images = files.filter((file) => ATTACHABLE.includes(file.type));
+  if (images.length < files.length) notice("Only PNG, JPEG and WebP images can be attached.");
+  for (const file of images) {
+    if (file.size > 20 * 1024 * 1024) { notice(`${file.name} is over 20 MB.`); continue; }
+    const url = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    const image = await api("attach", { name: file.name || "pasted-image.png", mimeType: file.type, data: url.slice(url.indexOf(",") + 1) }) as { id: string } | undefined;
+    if (image?.id) { attachmentPreviews.set(image.id, url); composerSignature = ""; renderComposer(); renderConversation(); }
+  }
+}
 type Mode = "ask" | "edits" | "plan" | "auto";
 const MODES: Record<Mode, string> = { ask: "Ask", edits: "Accept edits", plan: "Plan", auto: "Auto" };
 const MODE_HELP: Record<Mode, string> = {
@@ -1348,6 +1371,7 @@ function renderComposer() {
     answeringQuestion,
     driveSuggestion(),
     diffNotes.size,
+    state.attachments.map((image) => image.id).join(),
   ]);
   if (
     signature === composerSignature &&
@@ -1397,7 +1421,13 @@ function renderComposer() {
   // / and @, and a draft shows ↵ send instead. The start screen keeps / and
   // @ and adds ↵ once there is something to send.
   const armed = Date.now() < stopArmed;
-  const draft = Boolean(editor.value.trim()) || diffNotes.size > 0, session = inSession();
+  const draft = Boolean(editor.value.trim()) || diffNotes.size > 0 || state.attachments.length > 0, session = inSession();
+  const attachRow = el("attach-row");
+  attachRow.hidden = !state.attachments.length || Boolean(question);
+  attachRow.innerHTML = state.attachments.map((image) => {
+    const preview = attachmentPreviews.get(image.id);
+    return `<span class="att" title="${h(`${image.filename} · ${image.width}×${image.height}`)}">${preview ? `<img src="${preview}" alt="${h(image.filename)}">` : `<span class="att-name">${h(image.filename)}</span>`}${btn("detach", "×", { id: image.id }, "att-x").replace("<button ", `<button aria-label="Remove ${h(image.filename)}" `)}</span>`;
+  }).join("");
   // While a turn runs the send button is Stop; Enter queues what you type.
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${k("Enter")} ${asking ? "send instead" : "queue"}</span>` : ""}<span class="stop-word">■ Stop</span>`
@@ -2630,7 +2660,7 @@ async function submitText(value = editor.value) {
   if (!state) return;
   // Notes on the diff open the next message; a message may be only notes.
   const notes = !pendingQuestion() && !value.startsWith("/") ? notesMessage([...diffNotes.values()]) : "";
-  if (!value.trim() && !notes) return;
+  if (!value.trim() && !notes && !state.attachments.length) return;
   if (notes) {
     value = value.trim() ? `${notes}\n\n${value}` : notes;
     diffNotes.clear();
@@ -2845,6 +2875,8 @@ async function dispatch(
     return;
   }
   if (action === "cycle-mode") return cycleMode();
+  if (action === "attach-pick") { el<HTMLInputElement>("attach-input").click(); return; }
+  if (action === "detach") return api("detach", { id: args.id });
   if (action === "context-card") {
     contextCardOpen = !contextCardOpen;
     renderContextCard();
@@ -3445,6 +3477,39 @@ el("stage").addEventListener("scroll", () => {
 });
 document.addEventListener("demesne:open-settings", () => {
   if (state && !state.setup) void act(() => openOverlay("settings"));
+});
+// Images reach the composer by +, paste or a drop anywhere in the window.
+el<HTMLInputElement>("attach-input").addEventListener("change", (event) => {
+  const input = event.target as HTMLInputElement, files = [...input.files ?? []];
+  input.value = "";
+  if (files.length) void act(() => attachFiles(files));
+});
+editor.addEventListener("paste", (event) => {
+  const files = [...event.clipboardData?.files ?? []].filter((file) => file.type.startsWith("image/"));
+  if (!files.length || !state?.session) return;
+  event.preventDefault();
+  void act(() => attachFiles(files));
+});
+let dragDepth = 0;
+const carriesFiles = (event: DragEvent) => event.dataTransfer?.types.includes("Files") === true;
+document.addEventListener("dragenter", (event) => {
+  if (!carriesFiles(event) || !state?.session) return;
+  dragDepth++;
+  el("drop-zone").hidden = false;
+});
+document.addEventListener("dragleave", (event) => {
+  if (!carriesFiles(event)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) el("drop-zone").hidden = true;
+});
+document.addEventListener("dragover", (event) => { if (carriesFiles(event)) event.preventDefault(); });
+document.addEventListener("drop", (event) => {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0;
+  el("drop-zone").hidden = true;
+  const files = [...event.dataTransfer?.files ?? []];
+  if (files.length && state?.session) void act(() => attachFiles(files));
 });
 document.addEventListener("keydown", (event) => {
   if (!state || event.isComposing) return;

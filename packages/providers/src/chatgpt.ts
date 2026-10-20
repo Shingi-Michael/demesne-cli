@@ -19,6 +19,7 @@ function wireName(name: string): string { return /^[A-Za-z0-9_-]{1,64}$/.test(na
 /** ChatGPT plan OAuth uses public Responses, with a fixed credential destination. */
 export class ChatGPTProvider implements ProviderAdapter {
   readonly id = "ChatGPT";
+  readonly vision = true;
   private readonly fetcher: typeof fetch;
   /// Models whose catalog entry says they can stream reasoning summaries.
   private readonly summaries = new Set<string>();

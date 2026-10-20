@@ -2,6 +2,7 @@ import type {ReviewScope, ReviewResponse, CommandsResponse} from "@demesne/proto
 import type { ThemeLibrary } from "@demesne/brand";
 import {
   type ImageArtifact,
+  type TurnAttachment,
   type ArtifactPage,
   EventStreamHttpError,
   isRecord,
@@ -248,6 +249,18 @@ export class DemesneClient {
 
   async getArtifact(sessionId: string, id: string): Promise<ImageArtifact> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(id)}`);
+  }
+
+  /** Uploads an image for the next message; send its id in attachmentIds. */
+  async uploadAttachment(sessionId: string, data: Uint8Array, mimeType: string, filename: string): Promise<TurnAttachment> {
+    const response = await this.fetchImpl(new URL(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments`, this.server), {
+      method: "POST",
+      headers: { ...this.authHeaders(), "Content-Type": mimeType, "X-Demesne-Filename": encodeURIComponent(filename) },
+      body: data as Uint8Array<ArrayBuffer>,
+    });
+    const body = await response.json().catch(() => null) as unknown;
+    if (!response.ok) throw new ApiRequestError(parseApiError(body) ?? "The image could not be attached", response.status, null);
+    return body as TurnAttachment;
   }
 
   async artifactContent(artifact: ImageArtifact, variant: "preview" | "original" = "preview", signal?: AbortSignal): Promise<Uint8Array> {

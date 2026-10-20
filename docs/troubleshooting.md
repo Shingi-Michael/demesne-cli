@@ -77,4 +77,4 @@ Historical changes are immutable evidence; Files shows the current workspace. Us
 
 ## Images missing from Preview or model context
 
-Supported inputs are static PNG, JPEG and WebP within ingestion limits. Check whether the image was ingested into this session, whether Preview is pinned, and whether its content files still exist. Merely writing a path in prose does not create an artifact. A visible preview also does not prove the selected model can see it: vision hydration must be enabled. See [image preview](artifact-preview-plan.md) and [pipeline limits](artifact-preview-implementation.md).
+Supported inputs are static PNG, JPEG and WebP within ingestion limits. Check whether the image was ingested into this session and whether its content files still exist. Merely writing a path in prose does not create an artifact. A stored image does not mean the selected model can see it: vision hydration must be enabled. The desktop window does not display images yet. See [images](images.md).

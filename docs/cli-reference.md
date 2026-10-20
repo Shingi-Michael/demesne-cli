@@ -33,11 +33,9 @@ Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src
 | `demesne events SESSION_ID [--after EVENT_ID]` | Stream journal events |
 | `demesne --version` | Show version; interactive use also checks for updates (`--no-check` disables it) |
 
-`--server URL` selects the daemon. The window opens on the current folder unless `--workspace` names another. To find the app, `demesne` checks `DEMESNE_DESKTOP_BIN`, then `Demesne.app` in `/Applications` or `~/Applications` on macOS, then `demesne-desktop` on PATH, then a build in this checkout under `apps/desktop/release`. From a checkout with Electron installed it falls back to `bun run desktop`. If none of these is found, it says to build with `bun run build:desktop` or use `demesne prompt`. See the [desktop guide](desktop.md). The old `demesne graphics` command still works and opens the window too.
+`--server URL` selects the daemon. The window opens on the current folder unless `--workspace` names another. To find the app, `demesne` checks `DEMESNE_DESKTOP_BIN`, then `Demesne.app` in `/Applications` or `~/Applications` on macOS, then `demesne-desktop` on PATH, then a build in this checkout under `apps/desktop/release`. From a checkout with Electron installed it falls back to `bun run desktop`. If none of these is found, it says to build with `bun run build:desktop` or use `demesne prompt`. See the [desktop guide](desktop.md).
 
 ChatGPT uses the public Responses API directly. [Authentication](authentication.md#continue-with-chatgpt) explains account selection, Sol verification and plan usage.
-
-The former `--no-tui` full-screen/text-workbench switch is not an interactive mode in the current entry point. Use `prompt` for text output.
 
 ## Headless output
 
@@ -58,7 +56,7 @@ A new session in a folder you haven't trusted yet asks "Do you trust the files i
 
 ## Slash commands
 
-These commands are handled by the interface host. The canonical grammar is in [the brand package](../packages/brand/src/index.ts), with dispatch in [host.ts](../apps/graphics/host.ts).
+These commands are handled by the interface host. The canonical grammar is in [the brand package](../packages/brand/src/index.ts), with dispatch in [host.ts](../apps/desktop/workspace/host.ts).
 
 | Command | Action |
 | --- | --- |
@@ -67,7 +65,7 @@ These commands are handled by the interface host. The canonical grammar is in [t
 | `/resume ID` (`/switch`) | Select a session |
 | `/rename TITLE` | Rename the current session |
 | `/delete` (`/archive`) | Archive, not erase, the session |
-| `/cleanup` | Delete sessions for good: lists empty ones, quick questions that changed nothing, ones that never finished, archived ones, ones whose folder is gone, and ones unused for 30+ days, each with its reason. Sessions with no real work come ticked; Delete asks twice. The open session and running ones are never listed. Also in Settings and the Session panel. |
+| `/cleanup` | Delete sessions for good: lists empty ones, quick questions that changed nothing, ones that never finished, archived ones, ones whose folder is gone, and ones unused for 30+ days, each with its reason. Sessions with no real work come ticked; Delete asks twice. The open session and running ones are never listed. Also in Settings › Conversations. |
 | `/model [ID]` | Select a model or open the picker |
 | `/subagent [MODEL]` | Choose the subagent default; `same` uses the main model |
 | `/theme [NAME]` | Change the interface theme |
@@ -93,17 +91,22 @@ There is no separate `/thinking` command. Settings and the model picker expose s
 | Input | Current behavior |
 | --- | --- |
 | Enter / Shift+Enter | Send / newline; Enter does not resubmit a running turn |
-| Tab with an empty composer / Ctrl+K | Settings |
-| Esc | Close the current popup first; otherwise arm turn cancellation |
+| ⌘, (Ctrl+, elsewhere), Ctrl+K, or Tab on an empty composer | Settings |
+| ⌘N | New chat |
+| Esc | Close the current popup first; deny a waiting approval; otherwise arm turn cancellation |
 | Esc twice within 1.5 seconds | Cancel an active turn when no popup consumes Escape |
 | Ctrl+Q (⌘Q on macOS) | Close the window; daemon work continues |
 | Ctrl+O (⌘O on macOS) | Open another project |
 | Ctrl+G | Follow live output |
+| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous chat in the sidebar |
+| ↑ ↓ Home End, Delete | Move through the sidebar's chats, delete the focused one |
+| ⌘Z outside a text field | Bring back the chat you just deleted |
+| ⌘= / ⌘- / ⌘0 | Zoom in, out, actual size |
 | Alt+J | Show or fold what Drive is doing, or its ideas |
-| ⋯ in the top bar | This conversation: rename, compact, archive, all conversations |
+| ⋯ in the top bar | This conversation: rename, compact, new chat, settings |
 | `y`, `n`, `a`, `s` outside a text field | Allow once, deny, session grant, saved grant for an approval |
 
-In text fields, ordinary browser editing applies. The old ANSI workbench's readline shortcuts and Session/Activity/Transcript view cycling no longer apply. See [input dispatch](../apps/graphics/live.ts).
+In text fields, ordinary editing applies. On Linux and Windows, ⌘ is Ctrl. See [input dispatch](../apps/desktop/workspace/live.ts).
 
 ## Custom commands and mentions
 

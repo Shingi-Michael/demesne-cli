@@ -23,12 +23,12 @@ Drive is a separate planning context that coordinates coding turns, inspects rec
 - **Pause** stops planning; an already submitted coding turn can finish.
 - **Stop** also attempts to interrupt coding work in the mission session.
 - **Resume** re-observes current state and retains the ledger. It cannot silently restart completed work or clear a protection stop.
-- Human typing, pasting and actionable input take over from Drive. Viewing its own progress panel and passive scrolling do not by themselves request new coding work.
+- Human typing, pasting and actionable input take over from Drive. Opening its details and passive scrolling do not by themselves request new coding work.
 - Drive's coding turns are submitted with permission mode `allow`: every edit and command runs without asking, because Drive is meant to work unattended. Commands that publish beyond the machine still ask: `git push`, `gh pr`/`release`/`repo`/`gist` create, merge, edit, delete and similar, `gh api` writes, and `npm`/`pnpm`/`yarn`/`bun publish` (including inside `sh -c` scripts). Your own turns still ask. Drive cannot answer a human question; it waits for you.
 
 ## NEXT: proposed work
 
-Drive has no panel. A mission is the newest turn of the conversation it started from, with Pause/Resume, Stop and Details on it; from any other conversation the sidebar's Drive footer (Open ›) or Alt+J jumps there, and a fix or away run unfolds on the line above the composer. Drive's ranked ideas unfold in place too: under the composer on the start screen, or from "Drive has N ideas ›" above the composer in a conversation. Each idea is one row with Run and Plan, Not now on hover, and its reason and evidence in the tooltip. Outcomes and blockers Drive records go to project memory. Missions start from `/drive` in the composer.
+Drive has no panel. A mission is the newest turn of the conversation it started from, with Pause/Resume, Stop and Details on it; from any other conversation the sidebar's **Drive** row or Alt+J jumps there, and a fix or away run unfolds on the line above the composer. Drive's ranked ideas unfold in place too: under the composer on the start screen, or from "Drive has N ideas ›" above the composer in a conversation. Each idea is one row with Run and Plan, Not now on hover, and its reason and evidence in the tooltip. Outcomes and blockers Drive records go to project memory. Missions start from `/drive` in the composer.
 
 | Action | Result |
 | --- | --- |
@@ -155,7 +155,7 @@ jobs:
           MISSION: ${{ github.event.comment.body }}
 ```
 
-Pass the mission through an environment variable, as above, never by pasting `${{ github.event.comment.body }}` into the script. Limit who can start it: a mission runs commands with the job's token and secrets. [Implementation](../apps/graphics/headless-drive.ts)
+Pass the mission through an environment variable, as above, never by pasting `${{ github.event.comment.body }}` into the script. Limit who can start it: a mission runs commands with the job's token and secrets. [Implementation](../apps/desktop/workspace/headless-drive.ts)
 
 ## Breakage alerts: fix it in a worktree
 
@@ -170,7 +170,7 @@ When the fix finishes, demesne commits it on the branch and the card shows the d
 - **Open PR** pushes the branch and opens a pull request with the evidence. Since you clicked it, it doesn't ask again.
 - **Discard** (or **Stop and discard** while running) removes the worktree and branch.
 
-## Direct control is the default
+## Direct control
 
 ```mermaid
 flowchart TD
@@ -189,7 +189,7 @@ flowchart TD
     Next -->|no| Idle[Idle]
 ```
 
-[DirectDriveControl](../apps/graphics/drive-direct.ts) builds observations from daemon-recorded session data and submits work through the host/API. It inspects answers, diffs, checks, and logs without typing into or navigating the screen. The UI displays the activity. Planner actions do not include clicks, keys or scrolling.
+[DirectDriveControl](../apps/desktop/workspace/drive-direct.ts) builds observations from daemon-recorded session data and submits work through the host/API. It inspects answers, diffs, checks, and logs; it never reads or drives the screen. The UI only displays the activity.
 
 The planner has a separate context. Drive sees bounded observations, project memory, recorded facts, and inspected evidence—not the coder's full private context. Tool output and repository text are untrusted evidence. A summary saying that tests passed is not equivalent to recorded passing checks.
 
@@ -200,17 +200,17 @@ The planner has a separate context. Drive sees bounded observations, project mem
 /drive forget MEMORY_ID
 ```
 
-[Project memory](../apps/cli/src/drive-memory.ts) is an append-only private JSONL journal of preferences, decisions, outcomes, blockers and vetoes. The planner receives a bounded selection: standing entries first, then recent learned entries, within 60 entries/8,000 characters. Session UI shows the saved entries; nothing in this memory grants tool permission.
+[Project memory](../packages/drive/src/drive-memory.ts) is an append-only private JSONL journal of preferences, decisions, outcomes, blockers and vetoes. The planner receives a bounded selection: standing entries first, then recent learned entries, within 60 entries/8,000 characters. Session UI shows the saved entries; nothing in this memory grants tool permission.
 
 The mission journal and memory are stored under `<data_dir>/drive/`, keyed by daemon and workspace. Unfinished missions reopen paused; the controller does not replay old actions automatically. A journal lock prevents concurrent writers.
 
-The [task ledger](../apps/cli/src/drive-tasks.ts) records stable IDs, goals, acceptance criteria, worker turn IDs, completion revisions and evidence. Criteria cannot be redefined after work starts. Completed work stays completed until an explicit reopen, or a validated automatic reopen citing a relevant changed file/newly failing check. Rephrasing a goal or asking for another summary does not establish new work. Earlier completion evidence remains attached after reopening.
+The [task ledger](../packages/drive/src/drive-tasks.ts) records stable IDs, goals, acceptance criteria, worker turn IDs, completion revisions and evidence. Criteria cannot be redefined after work starts. Completed work stays completed until an explicit reopen, or a validated automatic reopen citing a relevant changed file/newly failing check. Rephrasing a goal or asking for another summary does not establish new work. Earlier completion evidence remains attached after reopening.
 
 Continuous discovery gets a coder consultation and a bounded clarification opportunity. A next task must be grounded in the current consultation, within the mission, and distinct from finished work. When evidence offers no useful next task, Drive idles.
 
 ## Live coder check-ins
 
-[Checkpoint reviews](../apps/cli/src/drive-checkpoints.ts) react to completed checks, batches of at least two edits, or repeated tool calls. The controller coalesces these signals with a 15-second cooldown. The configured interval (default 120 seconds) remains a periodic fallback.
+[Checkpoint reviews](../packages/drive/src/drive-checkpoints.ts) react to completed checks, batches of at least two edits, or repeated tool calls. The controller coalesces these signals with a 15-second cooldown. The configured interval (default 120 seconds) remains a periodic fallback.
 
 A review acquires the relevant model slot; it does not interrupt an active inference request simply to look. The daemon assembles a **fresh** packet after queueing, using event cursors, tool results, file revisions, and check state. One-slot servers interleave reviews at inference boundaries; provider-specific concurrency can allow overlap.
 
@@ -246,15 +246,15 @@ max_redirects = 3
 
 These client-loaded limits apply to **new** missions. Task/submission histories are bounded at 64 tasks/256 worker requests. Active time excludes explicit pauses, but counts time a mission works in the background with the window closed. Tokens use receipts where available and estimates until then; the budget is not a billing quote or a zero-overshoot guarantee.
 
-[Loop protection](../apps/cli/src/drive-protection.ts) detects unchanged repeated submissions, recurring navigation cycles, and overlap with completed goals. It uses recorded file/check outcomes, not clocks or newly generated prose, as progress. A protection stop persists across restarts and ordinary Resume. Review the reason and start a deliberate new mission if the scope should change.
+[Loop protection](../packages/drive/src/drive-protection.ts) detects unchanged repeated submissions, recurring inspect/wait cycles, and overlap with completed goals. It uses recorded file/check outcomes, not clocks or newly generated prose, as progress. A protection stop persists across restarts and ordinary Resume. Review the reason and start a deliberate new mission if the scope should change.
 
 ## Verification and boundaries
 
 The UI exposes planning attempts, reasoning summaries when provided, decisions, results, receipts and saved evidence. These traces are not evidence of the coder's success by themselves. Resume refreshes current facts; rebuilding without restarting leaves old daemon routes active.
 
 ```sh
-bun test apps/daemon/test/agent-drive.test.ts apps/daemon/test/drive-review.test.ts apps/daemon/test/drive-next.test.ts
-bun test apps/graphics/test/drive-direct.test.ts apps/graphics/test/drive-facts.test.ts
+bun test packages/drive/test apps/daemon/test/agent-drive.test.ts apps/daemon/test/drive-review.test.ts apps/daemon/test/drive-next.test.ts
+bun test apps/desktop/workspace/test/drive-direct.test.ts apps/desktop/workspace/test/drive-facts.test.ts
 ```
 
 These tests use deterministic model fixtures. They do not demonstrate that an arbitrary model will make good autonomous decisions. Drive still depends on model judgment and the operator's approval policy.

@@ -1,8 +1,23 @@
-# Image artifact pipeline
+# Images
 
-[Documentation index](README.md) · [Preview user guide](artifact-preview-plan.md) · [Architecture](architecture.md)
+[Documentation index](README.md) · [Architecture](architecture.md) · [Configuration](configuration.md#images-and-mcp)
 
-This document maps the delivered implementation. The original A–E roadmap is superseded by the code and verification surfaces below; unchecked historical milestones are not a current task list.
+The daemon stores images that tools produce and can hand the latest two to a vision-capable model. The desktop window does not show them yet: its image panel went with the side panels. The data and routes below remain for the model, for history, and for a future inline view.
+
+## Producers
+
+The daemon ingests static PNG, JPEG and WebP images. Files are limited to 20 MiB and 40 million decoded pixels; multi-frame images and MIME/format mismatches are rejected. Original bytes are retained, and a normalized PNG preview fits within 1600 × 1600 without upscaling.
+
+| Producer | What is available |
+| --- | --- |
+| MCP tools returning image content blocks | Structured ingestion with source/tool attribution |
+| `view_image` | Import an image from the permitted workspace |
+| `capture_window` | macOS window capture when the tool is registered and OS permission is available |
+| `generate_image` | Generate or edit using a separately configured Images-compatible backend |
+
+Enabling `vision`, image generation, or MCP servers registers the image path; `capture_window` is macOS-specific and needs OS screenshot permission. Generation credentials are separate from ChatGPT sign-in.
+
+Storing an image does not give its pixels to the language model. With vision enabled, the latest two retained tool-image IDs in model context are resolved into image inputs at the provider boundary. Older images keep metadata; missing cached bytes fall back to text. The chat model, the image-generation model and the tool that captured a screenshot can all differ; keep those labels distinct when describing a result.
 
 ## Data flow
 
@@ -13,11 +28,8 @@ flowchart LR
     Validate --> Preview[Normalized PNG preview]
     Validate --> Descriptor[(SQLite artifact descriptor)]
     Descriptor --> Event[Artifact-created journal event]
-    Event --> Host[Interface host reconciles artifact metadata]
     Original --> API[Authenticated content API]
     Preview --> API
-    Host --> API
-    API --> Browser[Preview image in the desktop webview]
     Descriptor --> Vision[Opt-in image hydration for model context]
     Preview --> Vision
 ```
@@ -36,7 +48,6 @@ flowchart LR
 | Last-two-image model inputs | [image-inputs.ts](../apps/daemon/src/image-inputs.ts) |
 | Authenticated routes | [app.ts](../apps/daemon/src/app.ts) |
 | Metadata/content client | [client](../packages/client/src/index.ts) |
-| Preview controls and pixel geometry | [live.ts](../apps/graphics/live.ts), [host.ts](../apps/graphics/host.ts) |
 
 ## Ingestion and storage
 
@@ -60,17 +71,9 @@ Artifacts are session-scoped. The descriptor links to a recorded turn/tool and s
 
 All routes require production daemon authentication. Content responses include MIME type, length and ETag. Missing files return an unavailable/not-found response. Reference import requires a session with a workspace and existing turn. The [typed client](../packages/client/src/index.ts) is the source for request/response shapes.
 
-## UI state and model input
-
-The interface host fetches authenticated images and supplies safe data to the webview page. Loading an artifact does not expose the daemon token. Request identities prevent stale asynchronous loads from replacing a newer selection.
-
-Selection, pin/follow, zoom, pan, comparison opacity and reference choice are frontend state. Daemon metadata/content survive restart; not every viewing preference is persisted..
+## Model input and packaging
 
 Vision hydration selects the last two retained image IDs in tool messages, resolves their previews, and adds data URLs only at the provider boundary. The engine reserves additional context for those image inputs. A missing file does not prevent text-only replay. Chat Completions and Responses serialize image inputs differently through their respective adapters.
-
-## Rendering and packaging
-
-Images are rendered as part of the HTML interface in the [desktop window](desktop.md).
 
 Compiled daemons load native image dependencies beside the real executable, outside Bun's embedded filesystem. Keep `dist/node_modules` with `demesned`; building only the executable and omitting those codecs is incomplete packaging.
 
@@ -78,7 +81,7 @@ Compiled daemons load native image dependencies beside the real executable, outs
 
 ```sh
 bun test apps/daemon/test/artifacts.test.ts apps/daemon/test/image-inputs.test.ts apps/daemon/test/image-generation.test.ts
-bun test packages/storage/test apps/graphics/test/panel-api.test.ts
+bun test packages/storage/test
 ```
 
-Coverage includes immutable originals, MIME/size rejection, authenticated/session-scoped access, duplicate delivery, model hydration, replay, reference import, and the panel API. Tests with fake producers do not establish a live provider's model availability or image-generation entitlement.
+Coverage includes immutable originals, MIME/size rejection, authenticated/session-scoped access, duplicate delivery, model hydration, replay and reference import. Tests with fake producers do not establish a live provider's model availability or image-generation entitlement.

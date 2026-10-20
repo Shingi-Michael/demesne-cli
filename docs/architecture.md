@@ -19,13 +19,13 @@ flowchart LR
     Daemon --> MCP[Configured MCP processes]
 ```
 
-The [CLI entry point](../apps/cli/src/main.ts) opens the desktop window from an interactive terminal through the [desktop launcher](../apps/cli/src/desktop-launcher.ts) and exposes headless commands. The [shared host](../apps/graphics/host.ts) owns the authenticated client, local UI state, config writes, and browser opening; the [desktop host](../apps/desktop/host.ts) runs it beside the window. The web page has no Node API, daemon token, or unrestricted network access.
+The [CLI entry point](../apps/cli/src/main.ts) opens the desktop window from an interactive terminal through the [desktop launcher](../apps/cli/src/desktop-launcher.ts) and exposes headless commands. The [workspace host](../apps/desktop/workspace/host.ts) owns the authenticated client, local UI state, config writes, and browser opening; the [desktop host](../apps/desktop/host.ts) runs it beside the window. The web page has no Node API, daemon token, or unrestricted network access.
 
 The [daemon](../apps/daemon/src/app.ts) owns turns and background commands. Closing the UI does not stop daemon-owned coding work. Drive's orchestration loop is client-owned; its journal is saved, and a running mission carries on in a background host when the window closes ([below](#desktop-process-boundary)). The [store](../packages/storage/src/index.ts) marks interrupted daemon work on restart instead of replaying side effects.
 
 ## Desktop process boundary
 
-The [Electron desktop app](desktop.md) displays the shared UI in bundled Chromium. Its main process supplies native project selection, clipboard and external opening. The existing compiled Bun host owns the authenticated daemon client and Drive controller. Public state and named actions cross private process pipes and a context-isolated preload bridge. IPC validates the main frame and local `demesne://app` origin. The sandboxed renderer has no Node integration or credentials; remote navigation, new windows and embedded webviews are denied.
+The [Electron desktop app](desktop.md) displays the [workspace UI](../apps/desktop/workspace/README.md) in bundled Chromium. Its main process supplies native project selection, clipboard and external opening. The existing compiled Bun host owns the authenticated daemon client and Drive controller. Public state and named actions cross private process pipes and a context-isolated preload bridge. IPC validates the main frame and local `demesne://app` origin. The sandboxed renderer has no Node integration or credentials; remote navigation, new windows and embedded webviews are denied.
 
 Quitting ends its UI host; closing the window on macOS hides it. A running Drive mission is handed to a detached host process with no window, which resumes it and exits once it settles; reopening the project stops that process and resumes the mission in the window ([Drive keeps working](agent-drive.md#drive-keeps-working-when-you-close-the-window)). Daemon-owned turns continue, and the project/session can be reopened. See the [desktop implementation](../apps/desktop/README.md#process-boundary).
 
@@ -115,7 +115,7 @@ All production routes except `/healthz` require the daemon bearer token. This is
 | Drive | `POST /v1/drive/next`, `POST /v1/drive/decide`, worktree fixes and `GET/POST /v1/drive/away` (away mode), session Drive facts, guarded check-in cancellation |
 | Images | Session artifact list, metadata, content and import routes |
 
-SSE clients resume from event cursors and use bounded replay to recover gaps. Filesystem operations resolve against the session's canonical workspace. Image bytes use [authenticated binary routes](artifact-preview-implementation.md), not event JSON.
+SSE clients resume from event cursors and use bounded replay to recover gaps. Filesystem operations resolve against the session's canonical workspace. Image bytes use [authenticated binary routes](images.md#http-contract), not event JSON.
 
 ## Storage and lifecycle
 

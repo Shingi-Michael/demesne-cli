@@ -2,13 +2,13 @@
 
 [Documentation index](README.md) · [Implementation](../apps/desktop/README.md) · [Configuration](configuration.md) · [Security](../SECURITY.md)
 
-Demesne uses Electron and bundled Chromium on macOS, Linux and Windows. Its existing HTML/CSS/TypeScript interface retains conversations, file inspection, diffs, verification, previews, authentication, subagents and Drive. The existing Bun daemon owns coding turns and session data; `demesne prompt` remains available for headless use.
+Demesne uses Electron and bundled Chromium on macOS, Linux and Windows. Its HTML/CSS/TypeScript interface covers conversations, diffs, checks, authentication, subagents and Drive. The existing Bun daemon owns coding turns and session data; `demesne prompt` remains available for headless use.
 
 ## Prerequisites
 
 For development, install [Bun 1.4.0](https://bun.sh) and Node.js 22 or newer for packaging tools. No Rust or system webview development libraries are needed. Build on the target operating system and architecture so the compiled Bun backends and native image codecs match the package.
 
-On macOS, install Xcode command-line tools for packaging. Linux needs a graphical session and Chromium runtime libraries (GTK 3, NSS, ALSA, GBM); CI checks Ubuntu 22.04 and 24.04. Windows packaging uses NSIS. Native window capture remains macOS-only; Windows end-to-end behavior is not yet verified.
+On macOS, install Xcode command-line tools for packaging. Linux needs a graphical session and Chromium runtime libraries (GTK 3, NSS, ALSA, GBM). Windows packaging uses NSIS. Native window capture remains macOS-only; Windows end-to-end behavior is not yet verified.
 
 ## Run from source
 
@@ -17,7 +17,7 @@ bun install --frozen-lockfile
 bun run desktop
 ```
 
-Use **Open project** to select a folder. Existing workspace trust, provider setup, authentication and configuration behavior is retained. Your sessions and private `desktop-ui.json` preferences remain in the same daemon data directory.
+Use **Open project** to select a folder. Workspace trust, provider setup, authentication and configuration work as on the command line. Your sessions and private `desktop-ui.json` preferences remain in the same daemon data directory.
 
 ## Open from the terminal
 
@@ -33,11 +33,11 @@ bun run build:desktop
 
 Outputs under `apps/desktop/release` are a macOS `.app`, Linux `.deb`, or Windows NSIS `.exe`. Use `bun run build:desktop -- --dir` for an unpacked package. The package includes Chromium, the Bun host and daemon, frontend assets and native image dependencies. End users do not need Bun, Node.js or Rust. Configured external tools and model servers remain separate dependencies.
 
-The release workflow produces platform artifacts and checksums. These source changes do not replace artifacts already published on GitHub. Release signing, notarization and automatic updates still need configuration. Keep the complete application together; copying a single executable loses required resources.
+The release workflow (run on a version tag) produces platform artifacts and checksums. Release signing, notarization and automatic updates still need configuration. Keep the complete application together; copying a single executable loses required resources.
 
 ## Closing the app and stopping work
 
-On macOS the window's close button hides it; click the Dock icon to return. Quit exits the app and its UI host. On Linux and Windows, closing the window quits. Daemon-owned turns continue after app exit. A running Drive mission is handed to a detached Bun host; reopening the project reclaims it. Use the session cancel and Drive pause/stop controls to stop work. Stopping the daemon is a separate operation.
+On macOS the window's close button hides it; click the Dock icon to return. Quit exits the app and its UI host. On Linux and Windows, closing the window quits. Daemon-owned turns continue after app exit. A running Drive mission is handed to a detached Bun host; reopening the project reclaims it. Use Esc twice or the stop square to cancel a turn, and Pause or Stop on a Drive mission's turn. Stopping the daemon is a separate operation.
 
 The last project and session are restored on launch. Missing or archived sessions open a new session instead. Avoid opening two clients that orchestrate the same Drive mission.
 
@@ -53,7 +53,7 @@ After successful compaction, the conversation shows the saved summary in place o
 
 The left sidebar is a list of one-line rows at the same height. The project comes first, as text: its mark and name, with its folder and branch under it. Then search, which finds conversations and switches projects: while it has focus, your other projects that match show under the chats with **Open a folder…** (⌘O) last, and Escape clears it. Then three fixed rows: **New chat** (⌘N), **Drive** (a dot when it has something for you, amber when it needs you; the row takes you to the mission or unfolds its ideas) and **Branches** (shown with a count when Drive has work waiting for review). Under a **Chats** label come the conversations, titles only. Each state has its own mark: an amber ring when one waits for your approval or answer (in the background too), a spinner while one works, a blue dot when one has a new reply you haven't opened, and a red cross when its last turn failed; a settled one has no mark, only its time. A chat Drive runs on its own branch shows a branch mark, with the branch in its tooltip; every tooltip has the full time and the state in words. The list shows six, and a quiet **N more** row under them opens search. Pointing at a row, or moving the keyboard onto it, swaps its time for a delete icon, and deleting it (no menu, no dialog) moves the next one up. Another conversation is archived a few seconds later, so ⌘Z brings back the one you just deleted. Double-click a title to rename it in place: Enter or clicking away keeps it, Escape puts it back. The arrow keys, Home and End move through the list, Delete or Backspace deletes the focused row, and Ctrl+Tab and Ctrl+Shift+Tab step through the chats. Settings (⌘,) sits at the foot.
 
-The toolbar toggle folds the sidebar into a 60px rail (the mark, **+**, conversations with an amber ring when one needs you, a branch icon when Drive has a branch to review, Drive's progress ring and Settings) and remembers the preference. The Dock icon counts the chats that need you, so it shows from any app. The top bar shows the conversation's title, its branch, and **⋯**. When the branch has changes since the last commit, its chip shows the lines added and removed, and clicking it asks for a commit, a push and a pull request as the next turn. **⋯** is a small menu for this conversation (rename, compact with the context used, new chat, all conversations, archive, settings). There are no side panels, Drive included: a turn's edits, commands and checks unfold in place under their steps, and `/diff` unfolds the latest turn's edits.
+The toolbar toggle folds the sidebar into a 60px rail (the mark, **+**, conversations with an amber ring when one needs you, a branch icon when Drive has a branch to review, Drive's progress ring and Settings) and remembers the preference. The Dock icon counts the chats that need you, so it shows from any app. The top bar shows the conversation's title, its branch, and **⋯**. When the branch has changes since the last commit, its chip shows the lines added and removed, and clicking it asks for a commit, a push and a pull request as the next turn. **⋯** is a small menu for this conversation (rename, compact with the context used, new chat, settings). There are no side panels, Drive included: a turn's edits, commands and checks unfold in place under their steps, and `/diff` unfolds the latest turn's edits.
 
 A new chat opens with a greeting ("Thursday evening · project on branch", then "What are we building, Mike?", the name from git's `user.name`) and the composer. Drive's best idea is the composer's ghost text; Tab takes it. One line under the composer says how many ideas Drive has; **show ›** unfolds them there as rows (Run, Plan, Not now on hover), and **Run all overnight ›** runs the top three.
 

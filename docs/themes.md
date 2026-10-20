@@ -32,4 +32,4 @@ Cancellation, model failure before application, and rejected colors leave the cu
 - `POST /v1/themes` accepts `{ "action": "select", "name": "…" }` or `{ "action": "undo" }`.
 - Answers use the [question protocol](questions.md#protocol). Restart continuations retain the Themefy scope and exact chain of recorded answers.
 
-Source: [palette validation](../packages/brand/src/custom-theme.ts), [theme storage](../apps/daemon/src/themes.ts), [interview prompt and tool schema](../apps/daemon/src/themefy.ts), [restricted engine](../apps/daemon/src/engine.ts), and [interface host](../apps/graphics/host.ts).
+Source: [palette validation](../packages/brand/src/custom-theme.ts), [theme storage](../apps/daemon/src/themes.ts), [interview prompt and tool schema](../apps/daemon/src/themefy.ts), [restricted engine](../apps/daemon/src/engine.ts), and [interface host](../apps/desktop/workspace/host.ts).

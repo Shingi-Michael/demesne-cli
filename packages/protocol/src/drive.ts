@@ -2,13 +2,9 @@ import { DRIVE_CHECKPOINTS, parseDriveReview, type DriveReview, type DriveCheckp
 import { parseDriveFacts, parseDriveLedger, driveReopenReason, type DriveFacts, type DriveLedger, type DriveMode } from "./drive-tasks.ts";
 import { isRecord, ProtocolValidationError, type TokenUsage } from "./index.ts";
 
-export const DRIVE_KEYS = ["up", "down", "left", "right", "pageup", "pagedown", "home", "end", "return", "escape", "tab", "shift+tab",
-  "ctrl+b", "ctrl+g", "ctrl+x", "ctrl+t", "alt+h", "alt+r", "alt+d", "alt+v", "alt+enter", "alt+up", "alt+down"] as const;
-export type DriveKey = typeof DRIVE_KEYS[number];
 export const DRIVE_INSPECTIONS = ["answer", "diff", "checks", "log"] as const;
 export type DriveInspectAction = { kind: "inspect"; target: typeof DRIVE_INSPECTIONS[number]; item?: string; position?: "start" | "continue" | "end" };
-export type DriveAction = { kind: "click"; target: string } | { kind: "key"; key: DriveKey }
-  | { kind: "compose"; text: string } | { kind: "scroll"; row: number; column: number; amount: number }
+export type DriveAction = { kind: "compose"; text: string }
   | { kind: "set_criteria"; criteria: string[] } | { kind: "reopen_task"; taskId: string; reason: string }
   | DriveInspectAction | { kind: "complete"; basis?: "answer" | "verified-work" } | { kind: "next_task"; task: string } | { kind: "redirect"; text: string } | { kind: "blocked" | "wait" | "idle" | "keep_working" };
 export interface DriveNavigation {
@@ -37,17 +33,12 @@ export interface DriveObservation {
   mode: "input" | "streaming" | "approval" | "dialog";
   ready: boolean; draft: string; surface: string; width: number; height: number;
   rows: string[];
-  /** Rendered pane geometry and keyboard focus, not inferred from screen text. */
-  focus?: "composer" | "content" | "dialog";
-  panes?: { surface: string; row: number; column: number; width: number; height: number }[];
   /** Visible result rows with the Drive notes panel excluded. */
   evidenceRows?: string[];
   /** Visible text from completed assistant answers, excluding requests/thinking/Drive. */
   answerRows?: string[];
   /** Visible completed answer from the latest turn, for next-work consultation. */
   latestAnswerRows?: string[];
-  /** Actual scroll offsets; positive scrolling moves toward larger offsets. */
-  scrollRegions?: { surface: string; row: number; column: number; width: number; height: number; offset: number; maximum: number }[];
   controls: { id: string; label: string; row: number; column: number; width: number }[];
   artifactId?: string;
   navigation?: DriveNavigation;
@@ -311,8 +302,7 @@ export function parseDriveDecision(value: unknown): DriveDecision {
   if (!isRecord(value) || !isRecord(value.action)) invalid("action", "expected an object with a kind");
   const raw = value.action;
   let action: DriveAction;
-  if (raw.kind === "click") action = { kind: "click", target: text(raw.target, 100, "action.target") };
-  else if (raw.kind === "compose") {
+  if (raw.kind === "compose") {
     const content = text(raw.text, 16_000, "action.text");
     if (!driveComposerAllowed(content)) throw new ProtocolValidationError("Drive can compose work and inspection commands only");
     action = { kind: "compose", text: content };
@@ -322,14 +312,7 @@ export function parseDriveDecision(value: unknown): DriveDecision {
     action = { kind: "inspect", target: raw.target as DriveInspectAction["target"],
       ...(raw.item !== undefined ? { item: text(raw.item, 4096, "action.item", true) || undefined } : {}),
       ...(raw.position !== undefined ? { position: raw.position as DriveInspectAction["position"] } : {}) };
-  } else if (raw.kind === "key") {
-    if (!DRIVE_KEYS.includes(raw.key as DriveKey)) invalid("action.key", `expected one of: ${DRIVE_KEYS.join(", ")}`);
-    action = { kind: "key", key: raw.key as DriveKey };
-  } else if (raw.kind === "scroll") {
-    if (!Number.isSafeInteger(raw.amount) || raw.amount === 0 || Math.abs(raw.amount as number) > 12) invalid("action.amount", "expected a non-zero integer from -12 to 12");
-    action = { kind: "scroll", row: coordinate(raw.row, 250, "action.row"), column: coordinate(raw.column, 500, "action.column"), amount: raw.amount as number };
-  }
-  else if (raw.kind === "set_criteria") {
+  } else if (raw.kind === "set_criteria") {
     const criteria = list(raw.criteria, "action.criteria");
     if (!criteria.length) invalid("action.criteria", "specify at least one acceptance criterion");
     action = { kind: "set_criteria", criteria };
@@ -344,7 +327,7 @@ export function parseDriveDecision(value: unknown): DriveDecision {
     if (/[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/.test(content)) invalid("action.text", "redirect cannot contain terminal control characters");
     action = { kind: "redirect", text: content };
   } else if (raw.kind === "blocked" || raw.kind === "wait" || raw.kind === "idle" || raw.kind === "keep_working") action = { kind: raw.kind };
-  else invalid("action.kind", "expected click, key, compose, scroll, inspect, complete, next_task, idle, blocked, wait, keep_working, or redirect");
+  else invalid("action.kind", "expected compose, inspect, set_criteria, reopen_task, complete, next_task, idle, blocked, wait, keep_working, or redirect");
   return { ...(typeof value.answer === "string" && value.answer.trim() ? { answer: text(value.answer, 16_000, "answer") } : {}),
     action, note: text(value.note, 2000, "note"), notes: text(value.notes, 8000, "notes", true), completed: list(value.completed, "completed"), remaining: list(value.remaining, "remaining"), evidence: evidence(value.evidence, "evidence") };
 }
@@ -388,12 +371,6 @@ export function validateDriveDecisionContext(decision: DriveDecision, request: D
     if (action.target === "diff" && (!screen.navigation.files.length || action.item && !screen.navigation.files.includes(action.item))) invalid("action.item", "choose a path from navigation.files");
     if (action.target === "checks" && (!screen.navigation.checks.length || action.item && !screen.navigation.checks.includes(action.item))) invalid("action.item", "choose a check id from navigation.checks");
   }
-  // Alt+Enter expands an open Diff; anywhere else it types a newline into the
-  // composer, which leaves a draft that stops Drive.
-  if (action.kind === "key" && action.key === "alt+enter" && !screen.surface?.startsWith("diff") && !screen.panes?.some((pane) => pane.surface.startsWith("diff")))
-    invalid("action.key", "alt+enter only expands an open Diff (open one with alt+d or inspect target=diff); elsewhere it types a newline into the composer. Alt+V opens Preview, which shows images and pages the agent produced, not the workbench itself");
-  if (action.kind === "click" && !screen.controls.some((control) => control.id === action.target)) invalid("action.target", "choose an id from observation.controls");
-  if (action.kind === "scroll" && (action.row >= screen.height || action.column >= screen.width)) invalid("action.scroll", "coordinates must be inside the observed screen");
   if (action.kind === "compose" && (!action.text.trimStart().startsWith("/") || /^\/plan(?:\s|$)/.test(action.text.trimStart())) && screen.sessionId !== request.homeSessionId)
     invalid("action.compose", `return to the mission session with /resume ${request.homeSessionId} before submitting work`);
   for (const [index, item] of decision.evidence.entries()) {
@@ -485,21 +462,6 @@ export function parseDriveRequest(value: unknown): DriveRequest {
       return { id: text(item.id, 100, `${path}.id`), label: text(item.label, 1000, `${path}.label`, true), row: coordinate(item.row, height, `${path}.row`), column: coordinate(item.column, width, `${path}.column`), width: coordinate(item.width, width + 1, `${path}.width`) };
     }), ...(raw.artifactId !== undefined ? { artifactId: text(raw.artifactId, 100, "observation.artifactId") } : {}),
   };
-  if (raw.focus !== undefined) {
-    if (!["composer", "content", "dialog"].includes(String(raw.focus))) invalid("observation.focus", "expected composer, content, or dialog");
-    observation.focus = raw.focus as DriveObservation["focus"];
-  }
-  if (raw.panes !== undefined) {
-    if (!Array.isArray(raw.panes) || raw.panes.length > 8) invalid("observation.panes", "expected at most 8 visible panes");
-    observation.panes = raw.panes.map((pane, index) => {
-      const path = `observation.panes[${index}]`;
-      if (!isRecord(pane)) invalid(path, "expected an object");
-      const row = coordinate(pane.row, height, `${path}.row`), column = coordinate(pane.column, width, `${path}.column`);
-      const paneWidth = coordinate(pane.width, width - column + 1, `${path}.width`), paneHeight = coordinate(pane.height, height - row + 1, `${path}.height`);
-      if (!paneWidth || !paneHeight) invalid(path, "expected positive pane dimensions");
-      return { surface: text(pane.surface, 100, `${path}.surface`), row, column, width: paneWidth, height: paneHeight };
-    });
-  }
   if (raw.evidenceRows !== undefined) {
     if (!Array.isArray(raw.evidenceRows) || raw.evidenceRows.length > height) invalid("observation.evidenceRows", "expected rows within the screen height");
     observation.evidenceRows = raw.evidenceRows.map((line, index) => text(line, 2000, `observation.evidenceRows[${index}]`, true));
@@ -511,18 +473,6 @@ export function parseDriveRequest(value: unknown): DriveRequest {
   if (raw.latestAnswerRows !== undefined) {
     if (!Array.isArray(raw.latestAnswerRows) || raw.latestAnswerRows.length > height) invalid("observation.latestAnswerRows", "expected rows within the screen height");
     observation.latestAnswerRows = raw.latestAnswerRows.map((line, index) => text(line, 2000, `observation.latestAnswerRows[${index}]`, true));
-  }
-  if (raw.scrollRegions !== undefined) {
-    if (!Array.isArray(raw.scrollRegions) || raw.scrollRegions.length > 16) invalid("observation.scrollRegions", "expected at most 16 visible scroll regions");
-    observation.scrollRegions = raw.scrollRegions.map((item, index) => {
-      const path = `observation.scrollRegions[${index}]`;
-      if (!isRecord(item)) invalid(path, "expected a scroll region");
-      const row = coordinate(item.row, height, `${path}.row`), column = coordinate(item.column, width, `${path}.column`);
-      const maximum = coordinate(item.maximum, Number.MAX_SAFE_INTEGER, `${path}.maximum`);
-      return { surface: text(item.surface, 100, `${path}.surface`), row, column,
-        width: coordinate(item.width, width - column + 1, `${path}.width`), height: coordinate(item.height, height - row + 1, `${path}.height`),
-        offset: coordinate(item.offset, maximum + 1, `${path}.offset`), maximum };
-    });
   }
   if (raw.navigation !== undefined) {
     const nav = raw.navigation;

@@ -9,7 +9,7 @@ import { beginDriveTrace, updateDriveTrace } from "../src/drive-trace.ts";
 const state = (): DriveState => ({ id: "mission", mission: "Inspect the saved result", homeSessionId: "home", workspace: "/project", status: "running", activity: "Planning", step: 0,
   model: "test / model", updatedAt: new Date().toISOString(), notes: "", completed: [], remaining: ["Review"], evidence: [], steps: [] });
 const response = (): DriveResponse => ({ provider: "test", model: "model", imageInspected: false,
-  decision: { action: { kind: "key", key: "ctrl+b" }, note: "Inspect saved checks", notes: "Reviewing", completed: [], remaining: ["Review"], evidence: [] } });
+  decision: { action: { kind: "wait" }, note: "Inspect saved checks", notes: "Reviewing", completed: [], remaining: ["Review"], evidence: [] } });
 
 test("pause freezes the partial trace, ignores late deltas, and restores it as stopped", async () => {
   const root = mkdtempSync(join(tmpdir(), "drive-trace-")), path = join(root, "mission.json");

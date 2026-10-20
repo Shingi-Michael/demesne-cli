@@ -31,17 +31,16 @@ test("a hand-off starts the host again with the mission's session and records it
   expect(existsSync(awayMarkerPath(failed))).toBe(false);
 });
 
-test("only a running, directly controlled mission on its own session is handed off", () => {
+test("only a running mission on its own session is handed off", () => {
   const host = (drive: Record<string, unknown> | undefined, status = "running", current = "s1") => ({
     drive: drive && { journalPath: "/j", agent: { active: ["running", "waiting"].includes(status) }, ...drive },
     driveState: { status, homeSessionId: "s1" }, current: { session: { id: current } }, workspace: "/work", api: { server: "http://x/" },
   }) as unknown as GraphicsHost;
-  expect(awayPlan(host({ direct: true }))).toEqual({ workspace: "/work", server: "http://x/", sessionId: "s1", journal: "/j" });
-  expect(awayPlan(host({ direct: true }, "waiting"))).not.toBeNull();
-  expect(awayPlan(host({ direct: true }, "paused"))).toBeNull();
-  expect(awayPlan(host({ direct: true }, "completed"))).toBeNull();
-  expect(awayPlan(host({ direct: false }))).toBeNull();
-  expect(awayPlan(host({ direct: true }, "running", "s2"))).toBeNull();
+  expect(awayPlan(host({}))).toEqual({ workspace: "/work", server: "http://x/", sessionId: "s1", journal: "/j" });
+  expect(awayPlan(host({}, "waiting"))).not.toBeNull();
+  expect(awayPlan(host({}, "paused"))).toBeNull();
+  expect(awayPlan(host({}, "completed"))).toBeNull();
+  expect(awayPlan(host({}, "running", "s2"))).toBeNull();
   expect(awayPlan(host(undefined))).toBeNull();
 });
 
@@ -85,7 +84,7 @@ test("the background process carries a worktree mission to the end and commits i
     async *stream() { yield { type: "text_delta", delta: "Thinking it over." }; yield { type: "finish", reason: "stop" }; } });
   for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=a@b", "commit", "-qm", "init"]])
     Bun.spawnSync(["git", ...args], { cwd: f.workspace });
-  const window = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, command: () => {} });
+  const window = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, drive: true });
   try {
     await window.connect();
     await eventually(() => Boolean(window.current), 5000);

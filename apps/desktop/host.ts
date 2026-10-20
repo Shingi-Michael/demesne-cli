@@ -132,7 +132,7 @@ export class DesktopHost {
           this.rememberSession(state);
           this.send({ kind: "update", update: encoder.encode(state) });
         } },
-        command: command => { if (this.generation === generation && !this.closed) this.send({ kind: "command", command }); },
+        drive: true,
         copy: text => this.native("copy", { text }),
         open: path => this.native("open", { path }),
         ...(this.options.startup?.model || this.options.startup?.prompt ? { startup: this.options.startup } : {}),

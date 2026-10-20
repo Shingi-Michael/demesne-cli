@@ -1,5 +1,4 @@
 import type { StateUpdate } from "../graphics/state-wire.ts";
-import type { GraphicsUICommand } from "../graphics/drive-controller.ts";
 
 export type DesktopInvoke = <T = unknown>(
   command: string,
@@ -13,9 +12,7 @@ export function createDesktopBridge(
   onError: (error: unknown) => void,
 ) {
   const updates = new Set<(update: StateUpdate) => void>();
-  const commands = new Set<(command: GraphicsUICommand) => void>();
   const pendingUpdates: StateUpdate[] = [];
-  const pendingCommands: GraphicsUICommand[] = [];
   let ready = false, drainingUpdates = false, disposed = false;
   const request = <T = unknown>(method: string, args: Record<string, unknown> = {}) =>
     invoke<T>("desktop_request", { method, args });
@@ -49,16 +46,10 @@ export function createDesktopBridge(
         drainUpdates();
         return () => { updates.delete(callback); };
       },
-      commands(callback: (command: GraphicsUICommand) => void) {
-        if (disposed) return () => {};
-        commands.add(callback);
-        return () => { commands.delete(callback); };
-      },
       ready() {
         if (ready || disposed) return;
         ready = true;
         void request("desktop-ready").catch(onError);
-        for (const command of pendingCommands.splice(0)) send(commands, command);
       },
     },
     update(update: StateUpdate) {
@@ -68,17 +59,10 @@ export function createDesktopBridge(
       if (pendingUpdates.length > 128) pendingUpdates.shift();
       drainUpdates();
     },
-    command(command: GraphicsUICommand) {
-      if (disposed) return;
-      if (ready && commands.size) send(commands, command);
-      else if (pendingCommands.length < 16) pendingCommands.push(command);
-      else void request("ui-result", { id: command.id, error: "Desktop view is still opening. Observe again." }).catch(onError);
-    },
     dispose() {
       disposed = true;
       updates.clear();
-      commands.clear();
-      pendingUpdates.length = pendingCommands.length = 0;
+      pendingUpdates.length = 0;
     },
   };
 }

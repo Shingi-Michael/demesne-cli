@@ -58,7 +58,6 @@ export class Backend {
         break;
       }
       case "update": this.options.emit("demesne:update", value.update); break;
-      case "command": this.options.emit("demesne:command", value.command); break;
       case "protocol-error": this.options.log(value.error); break;
       case "native": {
         // Correlate against the originating host, even if it fails during a dialog.

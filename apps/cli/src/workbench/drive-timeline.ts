@@ -1,7 +1,7 @@
 import type { DriveStep } from "@demesne/protocol";
 
-/// Shared by the terminal and graphics Drive panels, so both describe a step
-/// the same way. Dependency-free so the graphics renderer can bundle it.
+/// How the conversation describes Drive's steps. Dependency-free so the
+/// renderer can bundle it.
 export type DriveStepTone = "electric" | "secondary" | "muted" | "citron" | "thinking" | "signal" | "paper";
 
 const words = (value: unknown) => String(value ?? "").replace(/[\x00-\x1f\x7f-\x9f]/g, " ").replace(/\s+/g, " ").trim();
@@ -9,14 +9,11 @@ const read: Record<string, string> = { answer: "answer", diff: "changes", checks
 
 /// One timeline entry for a recorded step: what Drive did, in a few words.
 export function driveStepLine(step: DriveStep): { mark: string; text: string; tone: DriveStepTone } {
-  let action: { kind?: string; text?: string; task?: string; target?: string; key?: string; basis?: string } = {};
+  let action: { kind?: string; text?: string; task?: string; target?: string; basis?: string } = {};
   try { action = JSON.parse(step.action) as typeof action; } catch { /* a step from an older journal */ }
   const line = (mark: string, text: string, tone: DriveStepTone) => ({ mark, text, tone });
   const entry = action.kind === "compose" ? line("→", `Sent: ${words(action.text)}`, "electric")
     : action.kind === "inspect" ? line("◇", `Read the coder's ${read[action.target ?? ""] ?? "output"}`, "secondary")
-    : action.kind === "key" ? line("·", `Pressed ${words(action.key)}`, "muted")
-    : action.kind === "click" ? line("·", "Clicked a control", "muted")
-    : action.kind === "scroll" ? line("·", "Scrolled", "muted")
     : action.kind === "wait" ? line("◌", "Waited", "muted")
     : action.kind === "keep_working" ? line("✓", "Checked in: on track", "citron")
     : action.kind === "redirect" ? line("↻", `Redirected: ${words(action.text)}`, "thinking")
@@ -27,9 +24,9 @@ export function driveStepLine(step: DriveStep): { mark: string; text: string; to
     : action.kind === "blocked" ? line("×", "Stopped: needs you", "signal")
     : action.kind === "idle" ? line("·", "Nothing worthwhile left", "secondary")
     : line("·", words(step.note) || "Step", "muted");
-  // A step that found the screen changed did nothing; it is tried again.
-  return /^(UI changed|Control moved|Input changed|Scroll did not move)/.test(step.result)
-    ? line("·", `${entry.text} (screen changed)`, "muted") : entry;
+  // A step that found the session changed did nothing; it is tried again.
+  return /^UI changed/.test(step.result)
+    ? line("·", `${entry.text} (session changed)`, "muted") : entry;
 }
 
 /// `now`, `40s`, `3m`, `2h`: how long ago a timeline step happened.

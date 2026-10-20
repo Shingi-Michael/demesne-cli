@@ -35,7 +35,7 @@ test("Resume explains missing or completed missions instead of silently returnin
 
 test("pause aborts a pending decision and ignores a late action; resume observes afresh", async () => {
   const gate = Promise.withResolvers<DriveResponse>(); let calls = 0, actions = 0, signal: AbortSignal | undefined;
-  const drive = new AgentDrive({ observe: observation, perform: async () => { actions++; return "sent"; }, decide: async (_, input) => { signal = input; return ++calls === 1 ? gate.promise : response(decision({ kind: "key", key: "alt+d" })); }, changed() {}, delayMs: 60_000 });
+  const drive = new AgentDrive({ observe: observation, perform: async () => { actions++; return "sent"; }, decide: async (_, input) => { signal = input; return ++calls === 1 ? gate.promise : response(decision({ kind: "compose", text: "Inspect the parser" })); }, changed() {}, delayMs: 60_000 });
   try {
     drive.start("Finish"); const pending = drive.step(); drive.intervene();
     expect(signal?.aborted).toBe(true);
@@ -75,7 +75,7 @@ test("a rejected completion is available to the planner on resume and after jour
       if (++calls > 1) {
         expect(request.memory.feedback).toContain("verified-work completion requires");
         expect(request.memory.feedback).toContain('"kind":"complete"');
-        return response(decision({ kind: "key", key: "ctrl+b" }));
+        return response(decision({ kind: "wait" }));
       }
       return response(decision({ kind: "complete" }, { remaining: [], evidence: [{ observationId: screen.id, quote: "Done" }] }));
     } };
@@ -98,7 +98,7 @@ test("completed subtask memory reaches the next decision and survives journal re
   const services = { path, observe: observation, changed() {}, perform: async () => "Opened log", delayMs: 60_000,
     decide: async (request: DriveRequest) => {
       requests.push(structuredClone(request));
-      return response(decision({ kind: "key", key: "ctrl+b" }, {
+      return response(decision({ kind: "wait" }, {
         notes: "Implementation finished; inspect recorded checks next.",
         completed: ["Parser implementation finished"], remaining: ["Inspect recorded checks"],
       }));
@@ -113,7 +113,7 @@ test("completed subtask memory reaches the next decision and survives journal re
     await drive.step();
     expect(requests[1]?.memory.completed).toEqual(["Parser implementation finished"]);
     expect(requests[1]?.memory.remaining).toEqual(["Inspect recorded checks"]);
-    expect(requests[1]?.memory.steps.at(-1)?.result).toBe("Opened log");
+    expect(requests[1]?.memory.steps.at(-1)?.result).toBe("Waiting for the next observation.");
     drive.control("pause");
     restored = new AgentDrive(services);
     restored.control("resume");
@@ -125,7 +125,7 @@ test("completed subtask memory reaches the next decision and survives journal re
 
 test("planner progress cannot erase or replace verified ledger completions", async () => {
   const drive = new AgentDrive({ observe: observation, changed() {}, perform: async () => "Opened log", delayMs: 60_000,
-    decide: async () => response(decision({ kind: "key", key: "ctrl+b" }, {
+    decide: async () => response(decision({ kind: "wait" }, {
       completed: Array.from({ length: 32 }, (_, index) => `Subtask ${index}`),
     })) });
   try {
@@ -162,7 +162,7 @@ test("journal restores paused, holds a single writer, and does not replay prepar
 test.each([true, false])("docked Drive accepts conversation evidence while excluding its own notes: %s", async (visibleResult) => {
   const screen = { ...observation(), surface: "drive", rows: ["test suite: 12 passed | Drive notes: all done"], evidenceRows: ["test suite: 12 passed"] };
   let actions = 0;
-  const drive = new AgentDrive({ observe: () => screen, perform: async () => { actions++; return "opened Diff"; }, decide: async () => response(decision({ kind: "key", key: "alt+d" }, {
+  const drive = new AgentDrive({ observe: () => screen, perform: async () => { actions++; return "sent"; }, decide: async () => response(decision({ kind: "compose", text: "Review the diff" }, {
     evidence: [{ observationId: screen.id, quote: visibleResult ? "test suite: 12 passed" : "Drive notes: all done" }],
   })), changed() {}, delayMs: 60_000 });
   try { drive.start("Review"); await drive.step(); expect(actions).toBe(visibleResult ? 1 : 0); }
@@ -175,23 +175,22 @@ test("Drive cannot submit work or /plan into a history session, and detects no-p
   try {
     drive.start("Finish"); current = { ...current, sessionId: "old" }; await drive.step();
     expect(drive.state?.status).toBe("blocked"); expect(performed).toBe(0);
-    drive.control("resume"); next = decision({ kind: "key", key: "down" });
+    drive.control("resume"); next = decision({ kind: "wait" });
     for (let i = 0; i < 4; i++) await drive.step();
     expect(drive.state?.status).toBe("blocked"); expect(drive.state?.activity).toContain("repeated an action");
   } finally { drive.dispose(); }
 });
 
 test("Drive validation names the failing decision or request field", () => {
-  expect(() => parseDriveDecision(decision({ kind: "key" } as DriveAction))).toThrow("action.key");
+  expect(() => parseDriveDecision(decision({ kind: "key" } as unknown as DriveAction))).toThrow("action.kind");
   expect(() => parseDriveDecision(decision({ kind: "wait" }, { notes: "x".repeat(8001) }))).toThrow("notes");
   expect(() => parseDriveRequest({ mission: "Review", homeSessionId: "home", observation: observation(),
     memory: { notes: "", completed: [], remaining: ["x".repeat(1001)], evidence: [], steps: [] } })).toThrow("memory.remaining[0]");
 });
 
-test("protocol rejects arbitrary commands, keys, invalid payload sizes and coordinates", () => {
+test("protocol rejects arbitrary commands, screen actions and invalid payload sizes", () => {
   for (const text of ["/exit", "/undo", "/model other", "/custom-task"]) expect(() => parseDriveDecision(decision({ kind: "compose", text }))).toThrow();
-  expect(() => parseDriveDecision(decision({ kind: "key", key: "ctrl+c" as never }))).toThrow();
-  expect(() => parseDriveDecision(decision({ kind: "scroll", row: -1, column: 0, amount: 1 }))).toThrow();
+  for (const kind of ["key", "click", "scroll"]) expect(() => parseDriveDecision(decision({ kind } as unknown as DriveAction))).toThrow("action.kind");
   expect(() => parseDriveRequest({ mission: "a".repeat(8001), homeSessionId: "home", observation: observation(), memory: { notes: "", completed: [], remaining: [], evidence: [], steps: [] } })).toThrow();
 });
 
@@ -199,15 +198,16 @@ test("Drive thinks only on judgment steps: the first decision and each newly fin
   const nav = (turn: string, answer: boolean) => ({ document: `doc-${turn}`, turn, latest: true, answer, readingHeld: false, files: [], checks: [] });
   let current: DriveObservation = { ...observation(), navigation: nav("t1", false) };
   const thinking: (boolean | undefined)[] = [];
-  const keys = ["ctrl+b", "alt+d", "escape", "ctrl+g", "alt+h", "alt+r"] as const;
   const drive = new AgentDrive({ observe: () => current, perform: async () => "", changed() {}, delayMs: 60_000, retryDelaysMs: [],
-    decide: async (body) => { thinking.push(body.thinking); return response(decision({ kind: "key", key: keys[thinking.length % keys.length]! })); } });
+    decide: async (body) => { thinking.push(body.thinking); return response(decision({ kind: "wait" })); } });
   try {
     drive.start("Explain the lexer");
     await drive.step();                                                     // first decision: think
+    current = { ...current, rows: [...current.rows, "still working"] };
     await drive.step();                                                     // coder's turn not finished: quick
     current = { ...observation(), navigation: nav("t1", true), latestAnswerRows: ["The lexer scans identifiers."] };
     await drive.step();                                                     // turn t1 finished: think
+    current = { ...current, rows: [...current.rows, "reading on"] };
     await drive.step();                                                     // following steps on t1: quick
     current = { ...observation(), navigation: nav("t2", true), latestAnswerRows: ["Fixed the guard."] };
     await drive.step();                                                     // new finished turn t2: think
@@ -239,8 +239,6 @@ test("Drive is told why alt+enter outside a Diff, and inspecting before any turn
   const navigation = { document: "doc:1", turn: "0", latest: true, answer: false, readingHeld: false, files: [], checks: [] };
   const request = (screen: Partial<DriveObservation>): DriveRequest => ({ mission: "Describe this UI", homeSessionId: "home",
     observation: { ...observation(), navigation, ...screen }, memory: { notes: "", completed: [], remaining: [], evidence: [], steps: [] } });
-  expect(() => validateDriveDecisionContext(decision({ kind: "key", key: "alt+enter" }), request({}))).toThrow("types a newline into the composer");
-  expect(() => validateDriveDecisionContext(decision({ kind: "key", key: "alt+enter" }), request({ panes: [{ surface: "diff", row: 0, column: 60, width: 40, height: 30 }] }))).not.toThrow();
   expect(() => validateDriveDecisionContext(decision({ kind: "inspect", target: "log" }), request({}))).toThrow("no turn to inspect yet");
   expect(() => validateDriveDecisionContext(decision({ kind: "inspect", target: "log" }), request({ navigation: { ...navigation, turn: "3" } }))).not.toThrow();
 });

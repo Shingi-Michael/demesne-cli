@@ -1,5 +1,4 @@
 import { isRecord } from "@demesne/protocol";
-import type { GraphicsUICommand } from "../graphics/drive-controller.ts";
 import type { GraphicsSnapshot, StateUpdate } from "../graphics/state-wire.ts";
 
 /** The webview receives this public projection, never daemon/provider credentials. */
@@ -28,7 +27,6 @@ export type DesktopOutput =
   | { kind: "response"; id: number; ok: true; value?: unknown }
   | { kind: "response"; id: number; ok: false; error: string }
   | { kind: "update"; update: StateUpdate }
-  | { kind: "command"; command: GraphicsUICommand }
   | { kind: "native"; id: number; method: "copy" | "open"; args: { text?: string; path?: string } }
   | { kind: "protocol-error"; error: string };
 

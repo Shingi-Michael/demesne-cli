@@ -65,12 +65,11 @@ test("session auto-approve releases the current approval and follows selection, 
   } finally { host.dispose(); await f.close(); }
 });
 
-test("Drive cannot change approvals, malformed toggles fail, and an in-flight toggle cannot alter another selected session", async () => {
+test("malformed toggles fail, and an in-flight toggle cannot alter another selected session", async () => {
   const f = await fixture(), host = hostFor(f);
   try {
     await host.connect();
     const first = host.current!.session.id;
-    await expect(host.handle("auto-approve", { sessionId: first, autoApprove: true, driveCommand: "fake" })).rejects.toThrow("Only you");
     await expect(host.handle("auto-approve", { sessionId: first, autoApprove: "true" })).rejects.toThrow("Invalid");
     expect((await f.client.getSessionState(first)).session.autoApprove).toBe(false);
     const currentUpdate = f.client.updateSession.bind(f.client);

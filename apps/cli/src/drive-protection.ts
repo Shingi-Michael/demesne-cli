@@ -100,10 +100,9 @@ export function protectDriveDecision(guard: DriveProtection, decision: DriveDeci
     const intent = driveIntent(workerText(action.text)!);
     if (!discovering && guard.submissions.filter(prior => (!scope || prior.scope === scope) && similarIntent(prior, intent)).length >= 2) return `Repeated worker goal despite rewording or intervening tasks: “${intent.text}”. Two similar requests were already reserved.`;
   }
-  // Match repeated navigation paths, not observation IDs, clocks or model notes.
-  if (["key", "click", "scroll", "inspect", "wait"].includes(action.kind)) {
-    const signature = fingerprint(JSON.stringify({ action: action.kind === "click" ? { kind: "click", label: screen.controls.find(item => item.id === action.target)?.label } : action,
-      session: screen.sessionId, surface: screen.surface, scroll: screen.scrollRegions?.map(({ surface, offset }) => ({ surface, offset })) }));
+  // Match repeated inspections and waits, not observation IDs, clocks or model notes.
+  if (action.kind === "inspect" || action.kind === "wait") {
+    const signature = fingerprint(JSON.stringify({ action, session: screen.sessionId, surface: screen.surface }));
     const trail = [...guard.navigation, signature].slice(-24); guard.navigation = trail;
     for (let period = 2; period <= 6; period++) {
       if (trail.length >= period * 3 && trail.slice(-period * 3).every((item, index, all) => index < period || item === all[index % period])) return `Navigation cycle repeated three times (${period} actions per cycle) without fresh evidence.`;

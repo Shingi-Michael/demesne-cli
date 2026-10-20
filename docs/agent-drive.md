@@ -104,7 +104,7 @@ Each task lists its acceptance criteria, result, checks (failed and stale ones a
 
 While a mission's worktree is open, no other worktree job (a breakage fix or a proposal Run) starts in that project: apply or discard it first. A daemon restart keeps the worktree open; the mission reopens paused as usual.
 
-`/drive --here MISSION` runs in the current session instead. So does any mission outside a git repository, in one with no commits, or under `DEMESNE_DRIVE_CONTROL=ui`. The worktree links your `node_modules` rather than reinstalling, so a coder that installs packages there changes your checkout's dependencies too.
+`/drive --here MISSION` runs in the current session instead. So does any mission outside a git repository or in one with no commits. The worktree links your `node_modules` rather than reinstalling, so a coder that installs packages there changes your checkout's dependencies too.
 
 ## Workflows
 
@@ -118,7 +118,7 @@ The live block lists the steps with each step's check and its last result, and t
 
 Closing the window doesn't stop a running mission. The window's host hands it to a small background process with no window (the same desktop host, started with `--drive-away`). That process resumes the mission on the same session and keeps going until the mission settles. A worktree mission is then committed for review, just as it would be with the window open, and the process exits. When you open the project again, the window stops the background process and resumes the mission itself, so you're back in the same session with Drive still working. A mission that settled while you were away shows its review card.
 
-Only a running mission is handed off. Pause or Stop it before closing if you want it to wait. Its limits still apply, and its active time keeps counting while it works in the background. Approvals still ask: a mission waiting on one waits until you reopen the window. The process writes to `drive/away.log` in the data directory, and `<journal>.away.json` next to the mission journal records which process has it. The screen-driven route (`DEMESNE_DRIVE_CONTROL=ui`) needs the window, so it still pauses on close. [Implementation](../apps/desktop/drive-away.ts)
+Only a running mission is handed off. Pause or Stop it before closing if you want it to wait. Its limits still apply, and its active time keeps counting while it works in the background. Approvals still ask: a mission waiting on one waits until you reopen the window. The process writes to `drive/away.log` in the data directory, and `<journal>.away.json` next to the mission journal records which process has it. [Implementation](../apps/desktop/drive-away.ts)
 
 ## Drive in CI
 
@@ -189,11 +189,9 @@ flowchart TD
     Next -->|no| Idle[Idle]
 ```
 
-[DirectDriveControl](../apps/graphics/drive-direct.ts) builds observations from daemon-recorded session data and submits work through the host/API. It inspects answers, diffs, checks, and logs without typing into or navigating the screen. The UI displays the activity. Direct-mode planner actions do not include arbitrary clicks, keys or scrolling.
+[DirectDriveControl](../apps/graphics/drive-direct.ts) builds observations from daemon-recorded session data and submits work through the host/API. It inspects answers, diffs, checks, and logs without typing into or navigating the screen. The UI displays the activity. Planner actions do not include clicks, keys or scrolling.
 
-`DEMESNE_DRIVE_CONTROL=ui` retains the compatibility route: clipped visible DOM observations, authored controls, stale-observation checks, and short-lived capabilities for the exact submitted text. Those UI capabilities do not authorize arbitrary execution or approvals. Screen-control descriptions in older notes refer to this compatibility mode, not the current default.
-
-Both paths use a separate planner context. Drive sees bounded observations, project memory, recorded facts, and inspected evidence—not the coder's full private context. Tool output and repository text are untrusted evidence. A summary saying that tests passed is not equivalent to recorded passing checks.
+The planner has a separate context. Drive sees bounded observations, project memory, recorded facts, and inspected evidence—not the coder's full private context. Tool output and repository text are untrusted evidence. A summary saying that tests passed is not equivalent to recorded passing checks.
 
 ## Project memory and task ledger
 

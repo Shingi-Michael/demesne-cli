@@ -33,12 +33,12 @@ function removeAwayMarker(journal: string, pid?: number) {
   } catch {}
 }
 
-/// What to hand off when this host closes: a running mission under direct
-/// control, on the session it works in. Null when there is nothing to carry on
-/// (no mission, paused, finished, or the screen-driven UI route).
+/// What to hand off when this host closes: a running mission, on the session
+/// it works in. Null when there is nothing to carry on (no mission, paused or
+/// finished).
 export function awayPlan(host: GraphicsHost): { workspace: string; server: string; sessionId: string; journal: string } | null {
   const drive = host.drive, state = host.driveState;
-  if (!drive?.direct || !drive.agent.active || !state?.homeSessionId) return null;
+  if (!drive?.agent.active || !state?.homeSessionId) return null;
   if (host.current?.session.id !== state.homeSessionId) return null;
   return { workspace: host.workspace, server: host.api.server, sessionId: state.homeSessionId, journal: drive.journalPath };
 }
@@ -111,8 +111,7 @@ export async function runDriveAway(options: { workspace: string; server?: string
     workspace: options.workspace, server: options.server, sessionId: options.sessionId, settings, headless: true,
     ...(test.client ? { client: test.client } : {}),
     changed: () => {},
-    // Direct control never sends screen commands.
-    command: () => {},
+    drive: true,
   });
   const drive = host.drive!;
   const log = (text: string) => process.stderr.write(`${new Date().toISOString()} ${text}\n`);

@@ -274,7 +274,7 @@ export class AgentDrive {
     const attempt = ++this.recoveryAttempts;
     this.nextAttemptAt = Date.now() + (delays[attempt - 1] ?? 1000);
     this.state.recovery = { kind, attempt, limit, retryAt: this.nextAttemptAt, message: message.slice(0, 2000) };
-    this.state.feedback = `No new UI action was executed. ${kind === "transient" ? "Planning connection interrupted" : "Decision rejected"}: ${message}. Re-observe and choose the next valid action; do not assume the rejected action happened.`.slice(0, 8000);
+    this.state.feedback = `No new action was executed. ${kind === "transient" ? "Planning connection interrupted" : "Decision rejected"}: ${message}. Re-observe and choose the next valid action; do not assume the rejected action happened.`.slice(0, 8000);
     this.state.status = "waiting";
     this.state.activity = `${kind === "transient" ? "Planning connection interrupted" : "Correcting the next action"}. Retrying from a fresh observation (${attempt}/${limit})…`;
     this.publish(); return true;
@@ -745,10 +745,10 @@ export class AgentDrive {
       const completed = [...new Set([...completedTasks, ...decision.completed])].slice(0, 32);
       Object.assign(state, { notes: decision.notes, completed, remaining: decision.remaining, model: `${response.provider} / ${response.model}`, activity: decision.note });
       state.evidence = [...new Map([...state.evidence, ...confirmed].map((item) => [JSON.stringify(item), item])).values()].slice(-32);
-      const signature = JSON.stringify({ action: decision.action, surface: observation.surface, scrollRegions: observation.scrollRegions,
+      const signature = JSON.stringify({ action: decision.action, surface: observation.surface,
         screen: (observation.evidenceRows ?? observation.rows).join("\n").replace(/\b\d{2}:\d{2}:\d{2}\b|\+\d{2}:\d{2}/g, "clock") });
       this.repeated = { signature, count: signature === this.repeated.signature ? this.repeated.count + 1 : 1 };
-      if (this.repeated.count >= 4) throw new DrivePlanningError("Drive repeated an action without changing the visible UI. Use another route: keyboard navigation, an expanded pane, or a different visible control; inspect actual scroll offsets before retrying.", "decision");
+      if (this.repeated.count >= 4) throw new DrivePlanningError("Drive repeated an action without changing the session. Use another route: inspect a different result or send a targeted follow-up.", "decision");
       if (decision.action.kind === "compose") {
         const content = decision.action.text.trim();
         if (!content.startsWith("/")) {
@@ -828,11 +828,11 @@ export class AgentDrive {
       record.result = decision.action.kind === "wait" ? "Waiting for the next observation." : await this.services.perform(decision.action, observation, controller.signal);
       if (epoch !== this.epoch || controller.signal.aborted) return;
       this.recoveryAttempts = 0; this.nextAttemptAt = 0;
-      const skipped = /^(UI changed|Control moved|Input changed|Scroll did not move)/.test(record.result);
+      const skipped = /^UI changed/.test(record.result);
       if (skipped && decision.action.kind === "compose") state.protection!.pendingWorker = undefined;
       if (skipped) {
         this.skipped++;
-        state.feedback = `${record.result} No completed action should be inferred. ${this.skipped >= 3 ? "Several actions have been skipped; use fresh controls, keyboard navigation, or expand the pane rather than repeatedly reopening it." : "Observe the current screen and adapt the next action."}`;
+        state.feedback = `${record.result} No completed action should be inferred. ${this.skipped >= 3 ? "Several actions have been skipped; wait for the session to settle before acting again." : "Observe the session again and adapt the next action."}`;
         if (this.skipped >= 3) this.nextAttemptAt = Date.now() + 1000;
       } else this.skipped = 0;
       if (decision.action.kind === "compose" && SENT.test(record.result)) {

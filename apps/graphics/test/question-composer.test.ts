@@ -18,7 +18,6 @@ test("question replies keep the coding draft out of the queue and survive a new 
     const action={action:"draft" as const,index:0,revision:q.revision!,text:"warm olive",draftVersion:1};
     await host.handle("question-action",{sessionId,id:q.id,action});
     expect(host.draft).toBe("A separate coding request");expect(host.queue).toBe("");expect(calls).toBe(1);
-    await expect(host.handle("question-action",{sessionId,id:q.id,action,driveCommand:"fake-drive"})).rejects.toThrow("Only the user");
     host.dispose();host=new GraphicsHost({...options,sessionId});await host.connect();
     expect(host.snapshot().questions[0]!.draft).toBe("warm olive");
     const restored=host.snapshot().questions[0]!;

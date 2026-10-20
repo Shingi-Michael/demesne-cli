@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDriveDecision, parseDriveRequest, validateDriveDecisionContext, type DriveAction, type DriveDecision, type DriveLimits, type DriveObservation, type DriveRequest, type DriveResponse, type EventEnvelope } from "@demesne/protocol";
 import { AgentDrive, type DriveServices } from "../src/agent-drive.ts";
-import { driveIntent, similarIntent } from "../src/drive-protection.ts";
+import { driveIntent, newDriveProtection, protectDriveDecision, similarIntent } from "../src/drive-protection.ts";
 
 const screen = (): DriveObservation => ({ id: crypto.randomUUID(), sessionId: "home", workspace: "/project", title: "Mission", mode: "input", ready: true,
   draft: "", surface: "response", rows: ["The worker is reviewing the parser behavior."], width: 120, height: 30, controls: [] });
@@ -14,17 +14,19 @@ const services = (extra: Partial<DriveServices> = {}): DriveServices => ({ obser
   decide: async () => choice({ kind: "wait" }), ...extra });
 const event = (eventId: number, type: EventEnvelope["type"], payload: Record<string, unknown> = {}): EventEnvelope => ({ schemaVersion: 1, workspaceId: null, agentRunId: null, eventId, type, sessionId: "home", turnId: "worker", payload, occurredAt: new Date().toISOString() });
 
-test("three A/B navigation cycles stop despite new observation IDs and changing notes", async () => {
-  let calls = 0, actions = 0;
-  const drive = new AgentDrive(services({ decide: async () => choice({ kind: "key", key: ++calls % 2 ? "alt+d" : "escape" }), perform: async () => { actions++; return "Opened pane"; } }));
-  try { drive.start("Review"); for (let i = 0; i < 10; i++) await drive.step();
-    expect(drive.state?.protection?.trip?.kind).toBe("loop"); expect(drive.state?.activity).toContain("Navigation cycle"); expect(actions).toBe(5);
-  } finally { drive.dispose(); }
+test("three A/B inspection cycles stop despite new observation IDs and changing notes", () => {
+  const guard = newDriveProtection(); let reason: string | undefined, calls = 0;
+  for (let i = 0; i < 6 && !reason; i++) {
+    calls++;
+    const decision = { ...choice({ kind: "inspect", target: i % 2 ? "log" : "answer" }).decision, notes: `Note ${i}` };
+    reason = protectDriveDecision(guard, decision, screen(), false);
+  }
+  expect(reason).toContain("Navigation cycle"); expect(calls).toBe(6);
 });
 
 test("different unproductive actions still exhaust the no-progress allowance", async () => {
   let calls = 0;
-  const drive = new AgentDrive(services({ limits: { maxStalledCycles: 3 }, decide: async () => choice({ kind: "scroll", row: ++calls, column: 1, amount: 1 }) }));
+  const drive = new AgentDrive(services({ limits: { maxStalledCycles: 3 }, decide: async () => (++calls, choice({ kind: "wait" })) }));
   try { drive.start("Review"); for (let i = 0; i < 5; i++) await drive.step();
     expect(calls).toBe(3); expect(drive.state?.activity).toContain("No new result evidence");
   } finally { drive.dispose(); }

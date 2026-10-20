@@ -274,7 +274,7 @@ test("/drive moves the mission into its own worktree session, and returns you af
     async *stream() { yield { type: "text_delta", delta: "Thinking it over." }; yield { type: "finish", reason: "stop" }; } });
   for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=a@b", "commit", "-qm", "init"]])
     Bun.spawnSync(["git", ...args], { cwd: f.workspace });
-  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, command: () => {} });
+  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, drive: true });
   try {
     await host.connect();
     await eventually(() => Boolean(host.current), 5000);
@@ -313,7 +313,7 @@ test("away mode works through the top proposals and leaves each one to review", 
       yield { type: "text_delta", delta: "Done." }; yield { type: "finish", reason: "stop" };
     } });
   for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-qm", "init"]]) Bun.spawnSync(["git", ...args], { cwd: f.workspace, env: process.env });
-  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, command: () => {} });
+  const host = new GraphicsHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, drive: true });
   try {
     await host.connect();
     await eventually(() => Boolean(host.current), 5000);

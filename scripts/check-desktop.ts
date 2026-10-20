@@ -24,7 +24,7 @@ let nextThought!: () => void, finishThought!: () => void;
 const thoughtGate = new Promise<void>(resolve => { nextThought = resolve; });
 const thoughtFinish = new Promise<void>(resolve => { finishThought = resolve; });
 let round = 0, release: (() => void) | undefined;
-let failSuggestions = false;
+let failSuggestions = false, offerIdeas = false;
 const gate = new Promise<void>(done => { release = done; });
 const f = await fixture({
   providerId: "test", modelId: "desktop-test", contextCapacity: 262144, maxOutputTokens: 1024,
@@ -42,7 +42,11 @@ const f = await fixture({
     }
     if (String(messages[0]?.content).includes("planner for one software workspace")) {
       if (failSuggestions) throw new Error("Fixture suggestion service unavailable");
-      yield { type: "tool_call_delta", index: 0, idDelta: "suggestions", nameDelta: "propose_next", argumentsDelta: JSON.stringify({ proposals: [] }) };
+      // Late in the run Drive offers ideas, citing whatever signal it was given.
+      const cited = offerIdeas ? (JSON.parse(String(messages.findLast(message => message.role === "user")?.content ?? "{}")).signals ?? [])[0]?.id : undefined;
+      const proposals = cited ? ["Add tests for fuzzy search ranking", "Drop the unused sidebar sort helper", "Cache the file list between turns"].map((title, index) => ({
+        kind: "tidy", title, why: "Fixture idea for the composer strip.", evidence: [cited], minutes: 5 + index * 3, coders: 1, confidence: "high", value: 4 - index })) : [];
+      yield { type: "tool_call_delta", index: 0, idDelta: "suggestions", nameDelta: "propose_next", argumentsDelta: JSON.stringify({ proposals }) };
       yield { type: "finish", reason: "tool_calls" };
       return;
     }
@@ -549,6 +553,24 @@ try {
   await drivePage.getByRole("button", { name: "Stop", exact: true }).click();
   await until(() => drivePage.locator(".drive-status").innerText().then(text => text === "Stopped"), "Stop is reflected in mission status");
   await capture("09-drive-stopped");
+  // Back in a chat, Drive's ideas sit on the composer's top edge; the
+  // chevron grows the box upward to show them, one line each.
+  offerIdeas = true;
+  await drivePage.locator(".drive-row").filter({ hasText: "No changes" }).hover();
+  await drivePage.getByRole("button", { name: "Discard", exact: true }).click();
+  // Nothing on the page asks for fresh ideas while a past mission is listed,
+  // so press the same action the strip's "look again" sends.
+  await evaluate(`const b = document.createElement("button"); b.dataset.action = "next-refresh"; b.id = "fixture-refresh"; document.getElementById("drive-page").append(b); b.click(); b.remove();`);
+  await until(() => drivePage.innerText().then(text => text.includes("Add tests for fuzzy search ranking")), "Drive offers the fixture ideas");
+  await page.keyboard.press("Escape");
+  await until(() => page.locator("#briefing .bf-strip").innerText().then(text => text.includes("Drive has 3 ideas")), "the composer strip names Drive's ideas");
+  await page.locator("#briefing .bf-chev").click();
+  await until(() => page.locator("#briefing .bf-fold.open .bf-row").count().then(count => count === 3), "the strip unfolds three idea rows");
+  await page.waitForTimeout(400);
+  await page.locator("#briefing .bf-row").first().hover();
+  await capture("10-drive-strip");
+  await page.locator("#briefing .bf-chev").click();
+  await until(() => page.locator("#briefing .bf-fold.open").count().then(count => count === 0), "the strip folds the ideas away");
   console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {

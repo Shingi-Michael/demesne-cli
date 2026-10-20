@@ -1,0 +1,13 @@
+{
+  "name": "@demesne/workbench",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "@demesne/brand": "workspace:*",
+    "@demesne/client": "workspace:*",
+    "@demesne/protocol": "workspace:*"
+  }
+}

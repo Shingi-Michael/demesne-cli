@@ -7,7 +7,7 @@ import { DemesneStore } from "@demesne/storage";
 import type { EventEnvelope, SessionStateResponse } from "@demesne/protocol";
 import { coalesceReplayEvents, SessionReplay } from "../src/session-replay.ts";
 import { createDaemonApp } from "../src/app.ts";
-import { replaySession, restoreSessionEntries } from "../../cli/src/workbench/history.ts";
+import { replaySession, restoreSessionEntries } from "@demesne/workbench/history.ts";
 
 const at = "2026-09-21T12:00:00.000Z";
 const event = (eventId: number, type: EventEnvelope["type"], payload: EventEnvelope["payload"] = {}): EventEnvelope => ({

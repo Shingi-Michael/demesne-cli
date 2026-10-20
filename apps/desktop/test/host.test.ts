@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { fixture, eventually } from "../../graphics/test/fixture.ts";
+import { fixture, eventually } from "../workspace/test/fixture.ts";
 import { parseDesktopInput, type DesktopOutput, type DesktopBootstrap } from "../host-protocol.ts";
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };

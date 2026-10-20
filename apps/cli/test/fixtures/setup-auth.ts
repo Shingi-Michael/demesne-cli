@@ -1,4 +1,4 @@
-import { runSetup } from "../../src/setup.ts";
+import { runSetup } from "@demesne/setup/setup.ts";
 
 // Real PTY, reducer and PKCE callback; only the browser/provider network is fake.
 let attempt = 0;

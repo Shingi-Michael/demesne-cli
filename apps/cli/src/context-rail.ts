@@ -18,7 +18,7 @@ import {
   wrapDisplayText,
   type Painter,
 } from "@demesne/brand";
-import { classifyTurnPhase, isValidationCommand } from "./turn-activity.ts";
+import { classifyTurnPhase, isValidationCommand } from "@demesne/workbench/turn-activity.ts";
 import { contextUsageStack } from "./context-usage.ts";
 
 interface TrackedTool {

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createDesktopBridge, type DesktopInvoke } from "../frontend-bridge.ts";
-import type { GraphicsSnapshot, StateUpdate } from "../../graphics/state-wire.ts";
+import type { WorkspaceSnapshot, StateUpdate } from "../workspace/state-wire.ts";
 
 const snapshot = (revision: number): StateUpdate => ({
-  kind: "snapshot", state: { revision } as GraphicsSnapshot,
+  kind: "snapshot", state: { revision } as WorkspaceSnapshot,
 });
 function fixture(reject = false) {
   const calls: { command: string; args?: Record<string, unknown> }[] = [], errors: unknown[] = [];

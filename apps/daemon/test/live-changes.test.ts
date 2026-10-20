@@ -6,8 +6,8 @@ import type { EventEnvelope } from "@demesne/protocol";
 import { DemesneClient } from "../../../packages/client/src/index.ts";
 import { createDaemonApp } from "../src/app.ts";
 import type { TurnProcessor } from "../src/processor.ts";
-import { restoreSessionEntries, replaySession } from "../../cli/src/workbench/history.ts";
-import type { WorkbenchEntry, ToolEntry } from "../../cli/src/workbench/entries.ts";
+import { restoreSessionEntries, replaySession } from "@demesne/workbench/history.ts";
+import type { WorkbenchEntry, ToolEntry } from "@demesne/workbench/entries.ts";
 
 // The turn's tool entries, in order (one turn per session here).
 const toolsOf = (entries: WorkbenchEntry[]) => entries.filter((entry): entry is ToolEntry => entry.type === "tool");

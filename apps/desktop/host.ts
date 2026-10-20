@@ -3,10 +3,10 @@ import { homedir, userInfo } from "node:os";
 import { execFileSync } from "node:child_process";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { loadCliSettings } from "../cli/src/cli-config.ts";
-import { daemonAddress, GraphicsHost } from "../graphics/host.ts";
-import { StateEncoder, type GraphicsSnapshot } from "../graphics/state-wire.ts";
-import { driveJournalPath } from "../graphics/drive-controller.ts";
+import { loadCliSettings } from "@demesne/setup/cli-config.ts";
+import { daemonAddress, WorkspaceHost } from "./workspace/host.ts";
+import { StateEncoder, type WorkspaceSnapshot } from "./workspace/state-wire.ts";
+import { driveJournalPath } from "./workspace/drive-controller.ts";
 import { awayPlan, handOffDrive, reclaimDrive, runDriveAway } from "./drive-away.ts";
 import { MAX_INPUT_BYTES, parseDesktopInput, type DesktopBootstrap, type DesktopInput, type DesktopOutput, type DesktopRequest } from "./host-protocol.ts";
 
@@ -82,7 +82,7 @@ function userFirstName(): string {
   return firstName;
 }
 export class DesktopHost {
-  host: GraphicsHost | null = null;
+  host: WorkspaceHost | null = null;
   private encoder = new StateEncoder();
   private prefs: DesktopPreferences;
   private preferencePath: string;
@@ -117,7 +117,7 @@ export class DesktopHost {
     if (this.host?.drive?.agent.active) throw new Error("Pause Drive before changing projects");
     this.switching = true;
     const generation = this.generation + 1, encoder = new StateEncoder();
-    let candidate: GraphicsHost | null = null;
+    let candidate: WorkspaceHost | null = null;
     try {
       const settings = loadCliSettings({ workspaceRoot: workspace, serverOverride: this.options.server });
       const savedSession = this.prefs.lastSessions[sessionKey(settings.server, workspace)];
@@ -126,7 +126,7 @@ export class DesktopHost {
       // back to the window before it loads the journal.
       const reclaimed = await reclaimDrive(
         driveJournalPath(settings.dataDirectory, daemonAddress(this.options.server ?? settings.server), workspace));
-      candidate = new GraphicsHost({
+      candidate = new WorkspaceHost({
         workspace, server: this.options.server, sessionId: selectedSession, settings,
         changed: state => { if (this.generation === generation && !this.closed) {
           this.rememberSession(state);
@@ -176,7 +176,7 @@ export class DesktopHost {
     } catch (error) { candidate?.dispose(); throw error; }
     finally { this.switching = false; }
   }
-  private rememberSession(state: GraphicsSnapshot) {
+  private rememberSession(state: WorkspaceSnapshot) {
     if (!this.host || state.session?.workspace?.root !== this.host.workspace) return;
     const key = sessionKey(this.host.api.server, this.host.workspace), id = state.session.id;
     if (this.prefs.lastSessions[key] === id) return;

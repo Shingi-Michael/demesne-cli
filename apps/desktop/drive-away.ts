@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { loadCliSettings } from "../cli/src/cli-config.ts";
-import { GraphicsHost, type GraphicsHostOptions } from "../graphics/host.ts";
+import { loadCliSettings } from "@demesne/setup/cli-config.ts";
+import { WorkspaceHost, type WorkspaceHostOptions } from "./workspace/host.ts";
 
 /// Drive keeps working when you close the window. The window's host owns
 /// Drive's planning loop, so closing it used to pause a running mission. Now
@@ -36,7 +36,7 @@ function removeAwayMarker(journal: string, pid?: number) {
 /// What to hand off when this host closes: a running mission, on the session
 /// it works in. Null when there is nothing to carry on (no mission, paused or
 /// finished).
-export function awayPlan(host: GraphicsHost): { workspace: string; server: string; sessionId: string; journal: string } | null {
+export function awayPlan(host: WorkspaceHost): { workspace: string; server: string; sessionId: string; journal: string } | null {
   const drive = host.drive, state = host.driveState;
   if (!drive?.agent.active || !state?.homeSessionId) return null;
   if (host.current?.session.id !== state.homeSessionId) return null;
@@ -105,9 +105,9 @@ export async function reclaimDrive(journal: string, control: ProcessControl = pr
 
 /// The background process: `demesne-desktop-host --drive-away`.
 export async function runDriveAway(options: { workspace: string; server?: string; sessionId: string },
-  test: { settings?: GraphicsHostOptions["settings"]; client?: GraphicsHostOptions["client"]; resumed?: (host: GraphicsHost) => void; pollMs?: number } = {}): Promise<number> {
+  test: { settings?: WorkspaceHostOptions["settings"]; client?: WorkspaceHostOptions["client"]; resumed?: (host: WorkspaceHost) => void; pollMs?: number } = {}): Promise<number> {
   const settings = test.settings ?? loadCliSettings({ workspaceRoot: options.workspace, serverOverride: options.server });
-  const host = new GraphicsHost({
+  const host = new WorkspaceHost({
     workspace: options.workspace, server: options.server, sessionId: options.sessionId, settings, headless: true,
     ...(test.client ? { client: test.client } : {}),
     changed: () => {},

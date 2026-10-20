@@ -1,11 +1,11 @@
 import { isRecord } from "@demesne/protocol";
-import type { GraphicsSnapshot, StateUpdate } from "../graphics/state-wire.ts";
+import type { WorkspaceSnapshot, StateUpdate } from "./workspace/state-wire.ts";
 
 /** The webview receives this public projection, never daemon/provider credentials. */
 export interface DesktopBootstrap {
   workspace: string | null;
   recentProjects: string[];
-  snapshot: GraphicsSnapshot | null;
+  snapshot: WorkspaceSnapshot | null;
   /// Your first name for the greeting: git's user.name, else the account.
   userName?: string;
 }

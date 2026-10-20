@@ -1,0 +1,12 @@
+{
+  "name": "@demesne/drive",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "@demesne/brand": "workspace:*",
+    "@demesne/protocol": "workspace:*"
+  }
+}

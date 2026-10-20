@@ -6,9 +6,9 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
-import { fixture } from "../apps/graphics/test/fixture.ts";
+import { fixture } from "../apps/desktop/workspace/test/fixture.ts";
 
-const root = resolve(import.meta.dir, ".."), desktop = join(root, "apps/desktop"), graphics = join(root, "apps/graphics");
+const root = resolve(import.meta.dir, ".."), desktop = join(root, "apps/desktop");
 const readme = process.argv.includes("--readme");
 const output = readme ? join(root, "docs/assets") : resolve(process.argv.slice(2).find(arg => !arg.startsWith("--")) ?? "test-results/shots");
 const { _electron: electron } = await import("playwright");

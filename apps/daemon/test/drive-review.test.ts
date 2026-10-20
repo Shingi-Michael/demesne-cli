@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fixture, eventually } from "../../graphics/test/fixture.ts";
+import { fixture, eventually } from "../../desktop/workspace/test/fixture.ts";
 import type {
   DriveRequest,
   DriveReview,
@@ -302,7 +302,7 @@ test.each([false, true])(
 test.each(["keep_working", "redirect", "stale_redirect"] as const)(
   "controller checkpoint performs one fresh %s review through the real API",
   async (verdict) => {
-    const { AgentDrive } = await import("../../cli/src/agent-drive.ts");
+    const { AgentDrive } = await import("@demesne/drive/agent-drive.ts");
     let issued = false,
       drive: InstanceType<typeof AgentDrive> | undefined,
       eventsTask: Promise<void> | undefined;

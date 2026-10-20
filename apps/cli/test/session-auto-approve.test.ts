@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { fixture } from "../../graphics/test/fixture.ts";
+import { fixture } from "../../desktop/workspace/test/fixture.ts";
 
 test("CLI can enable, inspect and disable automatic approval for one session", async () => {
   const f = await fixture();

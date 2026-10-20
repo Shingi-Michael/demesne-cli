@@ -1726,7 +1726,7 @@ function renderBriefing() {
     parts.push(`${mark("spin")}${btn("drive-show", "Drive is working", {}, "bf-word")}<span class="bf-about">${h(about)}</span>`);
   } else if (next.proposals.length) {
     const count = next.proposals.length;
-    parts.push(`${mark("idea")}${btn("ideas-show", `Drive has ${count} idea${count === 1 ? "" : "s"}`, {}, "bf-word")}<span class="bf-about">for this project</span>`);
+    parts.push(`${mark("idea")}${btn("ideas-show", `Drive has ${count} idea${count === 1 ? "" : "s"}`, {}, "bf-word")}`);
     toggle = { action: "ideas-show", open: ideasShown };
     if (ideasShown) {
       const words = ["", "it", "both", "all three"], overnight = Math.min(3, count);
@@ -1740,24 +1740,32 @@ function renderBriefing() {
   node.hidden = !inSession() || !parts.length;
   if (node.hidden) { node.innerHTML = ""; return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
-  const strip = `<div class="bf-strip">${parts.map((part) => `<span class="bf-part">${part}</span>`).join('<span class="bf-sep">·</span>')}<span class="bf-sp"></span>${chevron}</div>${progress !== null ? `<div class="bf-progress"><i style="width:${Math.round(progress * 100)}%"></i></div>` : ""}`;
-  // The fold animates its height: opening renders it shut, then opens it on
-  // the next frame; closing keeps what was showing until it has folded away.
-  const open = Boolean(fold), previous = node.querySelector<HTMLElement>(".bf-fold"), wasOpen = Boolean(previous?.classList.contains("open"));
+  const chip = `${parts.map((part) => `<span class="bf-part">${part}</span>`).join('<span class="bf-sep">·</span>')}${chevron}${progress !== null ? `<span class="bf-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : ""}`;
+  // The card grows out of the chip: opening renders it shut, then opens it on
+  // the next frame; closing keeps what was showing until it has faded away.
+  const open = Boolean(fold), previous = node.querySelector<HTMLElement>(".bf-card"), wasOpen = Boolean(previous?.classList.contains("open"));
   if (!open && wasOpen && previous) {
-    node.querySelector(".bf-head")!.innerHTML = strip;
+    node.querySelector(".bf-chip")!.innerHTML = chip;
     node.classList.remove("open");
     previous.classList.remove("open");
-    setTimeout(() => { if (!previous.classList.contains("open")) previous.firstElementChild!.innerHTML = ""; }, 320);
+    setTimeout(() => { if (!previous.classList.contains("open")) previous.innerHTML = ""; }, 280);
     return;
   }
-  node.innerHTML = `<div class="bf-head">${strip}</div><div class="bf-fold${open && wasOpen ? " open" : ""}"><div>${fold}</div></div>`;
+  node.innerHTML = `<div class="bf-card${open && wasOpen ? " open" : ""}">${fold}</div><div class="bf-chip">${chip}</div>`;
   node.classList.toggle("open", open);
   if (open && !wasOpen) {
-    const created = node.querySelector<HTMLElement>(".bf-fold")!;
+    const created = node.querySelector<HTMLElement>(".bf-card")!;
     void created.offsetHeight;
     requestAnimationFrame(() => created.classList.add("open"));
   }
+}
+/// Closes Drive's card if it is open; true when it was.
+function closeBriefingCard() {
+  if (!el("briefing").classList.contains("open")) return false;
+  driveShown = false;
+  ideasShown = false;
+  renderBriefing();
+  return true;
 }
 /// Drive's ideas as one line each: a hollow mark, the title, its time on the
 /// right, which gives way to Run, Plan and Not now when you point at it.
@@ -3417,6 +3425,10 @@ document.addEventListener("click", (event) => {
 document.addEventListener("mousedown", (event) => {
   if (noteEditing && (event.target as Element).closest?.(".rv-l, .rv-note:not(.editing)")) event.preventDefault();
 });
+// Drive's card sits over the conversation, so a click anywhere else puts it away.
+document.addEventListener("pointerdown", (event) => {
+  if (!(event.target as Element).closest?.("#briefing")) closeBriefingCard();
+});
 document.addEventListener("focusout", (event) => {
   if ((event.target as HTMLElement).id === "rv-note-input" && noteEditing) saveNote();
 });
@@ -3580,6 +3592,7 @@ document.addEventListener("keydown", (event) => {
         renderContextCard();
         return;
       }
+      if (closeBriefingCard()) return;
       if (overlay) {
         overlay = null;
         renderOverlay();

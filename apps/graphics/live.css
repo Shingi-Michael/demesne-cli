@@ -129,14 +129,6 @@
   background: var(--thinkingSurface);
   border-color: var(--composerQueuedBorder);
 }
-.approval-mode {
-  margin-bottom: 6px;
-}
-.approval-mode button {
-  color: var(--thinking);
-  font-size: 12px;
-  line-height: 18px;
-}
 .pill.failed {
   background: var(--errorSurface);
   color: var(--signal);
@@ -215,11 +207,6 @@
   right: 0;
   top: 4px;
 }
-#rail .rail-state {
-  font-size: 12px;
-  color: var(--citron);
-  height: 20px;
-}
 #rail hr {
   width: 24px;
   border: 0;
@@ -263,35 +250,6 @@
 }
 .response.failed {
   border-color: var(--signal);
-}
-.speaker {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--electric);
-}
-.speaker time {
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--muted);
-}
-.response.failed .speaker {
-  color: var(--signal);
-}
-.folded-turn {
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--secondary);
-  display: block;
-  text-align: left;
-  width: 100%;
-  padding: 6px 0;
-  margin: 4px 0;
-}
-.folded-turn .muted {
-  color: var(--muted);
 }
 .system-band {
   display: flex;
@@ -438,42 +396,12 @@
 .live-activity img {
   flex: none;
 }
-.turn-footer {
-  border-top: 1px solid var(--rule);
-  padding-top: 6px;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--muted);
-  flex-wrap: wrap;
-}
-.turn-footer .links {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-}
-.turn-footer button {
-  font-size: 12px;
-  color: var(--secondary);
-}
 .copy-answer {
   opacity: 0;
 }
 .response:hover .copy-answer,
 .copy-answer:focus-visible {
   opacity: 1;
-}
-.turn-error {
-  color: var(--signal);
-  font-size: 13px;
-  line-height: 20px;
-}
-.turn-stopped {
-  color: var(--secondary);
-  font-size: 13px;
-  line-height: 20px;
 }
 .markdown {
   color: var(--strong);
@@ -719,22 +647,6 @@
   color: var(--muted);
   margin-left: auto;
 }
-.approval-details > summary {
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
-  width: fit-content;
-}
-.approval-details > summary:focus-visible {
-  outline: 1px solid var(--electric);
-  outline-offset: 4px;
-}
-.approval-details[open] > summary {
-  margin-bottom: 8px;
-}
-.approval-details .command-inset {
-  max-height: 240px;
-}
 
 .approval-actions {
   display: flex;
@@ -784,12 +696,6 @@
   font: inherit;
   border-radius: 4px;
   width: 100%;
-}
-.question-card .suggestions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 8px 0;
 }
 .question-card button {
   font-size: 13px;
@@ -937,14 +843,6 @@
 }
 .match {
   color: var(--electric);
-}
-
-.summary-line {
-  display: flex;
-  justify-content: space-between;
-  padding: 0 16px 8px;
-  font-size: 13px;
-  line-height: 20px;
 }
 
 .counts {
@@ -1099,9 +997,6 @@ button:disabled {
   .modal {
     left: 12px;
     right: 12px;
-  }
-  .turn-footer {
-    font-size: 11px;
   }
   .tool-row .verb {
     width: 46px;
@@ -1467,16 +1362,6 @@ button:disabled {
   background: var(--menuSelection);
   color: var(--electric);
 }
-#rail .rail-state {
-  width: 8px;
-  height: 8px;
-  flex: none;
-  background: var(--citron);
-  border-radius: 2px;
-}
-#rail .rail-state.running {
-  background: var(--thinking);
-}
 #rail hr {
   width: 16px;
   margin: 0;
@@ -1493,54 +1378,6 @@ button:disabled {
 #rail button.active .dot {
   left: 21px;
   top: 3px;
-}
-
-/* Review and inspection controls extend the existing Figma panel chrome. */
-
-.compare-controls {
-  padding: 8px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--secondary);
-}
-.compare-controls label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.compare-controls input {
-  flex: 1;
-  accent-color: var(--electric);
-}
-
-.viewport-inputs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-/* Files use the existing inspector palette and 12/20 source typography. */
-
-.files-list {
-  min-height: 0;
-  overflow: auto;
-  flex: 1;
-  scrollbar-width: thin;
-}
-.file-toolbar {
-  flex: none;
-  padding: 0 16px 8px;
-  border-bottom: 1px solid var(--rule);
-}
-
-.file-status {
-  color: var(--muted);
-  padding-top: 4px;
-}
-.file-status.amber {
-  color: var(--thinking);
 }
 
 /* The braille spinner shown wherever work is running (tool rows, thinking,
@@ -1813,10 +1650,6 @@ button:disabled {
 .breakage-receipt { margin: 0; color: var(--strong); font-size: 12.5px; line-height: 19px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .breakage-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .breakage-branch { color: var(--electric); font-size: 12px; overflow-wrap: anywhere; }
-.breakage-checks { list-style: none; margin: 0; padding: 0; font-size: 12px; line-height: 18px; }
-.breakage-checks .pass { color: var(--citron); }
-.breakage-checks .fail { color: var(--signal); }
-.breakage-checks code { color: var(--secondary); }
 .breakage-card.away:not(.running) { border-left-color: var(--citron); }
 .breakage-card.away:not(.running) .breakage-mark { color: var(--citron); }
 .away-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; line-height: 18px; }
@@ -1844,13 +1677,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 .breakage-actions button:disabled { opacity: 0.6; }
 .breakage-pulse { animation: breakage-pulse 1.4s ease-in-out infinite; }
 @keyframes breakage-pulse { 50% { opacity: 0.35; } }
-
-.files-section { padding: 12px 16px 4px; text-transform: none; }
-
-.file-status .add { color: var(--citron); }
-.file-status .del { color: var(--signal); }
-
-.files-keys { flex: none; padding: 8px 16px; border-top: 1px solid var(--rule); color: var(--muted); }
 
 /* A session reads as one column, like the start screen: your ask, the
    answer, a receipt line under it, then one briefing line and the composer.
@@ -1904,8 +1730,7 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
   font-size: 12px;
   color: var(--muted);
 }
-.turn-receipt button:hover,
-.turn-receipt .receipt-review {
+.turn-receipt button:hover {
   color: var(--electric);
 }
 .turn-receipt .success {
@@ -2017,39 +1842,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 }
 .live-app:not(.start) #breakage .breakage-card {
   box-shadow: none;
-}
-/* The top bar's places, as words; Drive opens its popover. */
-.header-nav {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding-left: 14px;
-  margin-left: 4px;
-  border-left: 1px solid var(--borderBright);
-  font-size: 12px;
-  line-height: 18px;
-}
-.header-nav button {
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-.header-nav button:hover,
-.header-nav button.active {
-  color: var(--electric);
-}
-.header-nav .count {
-  font-weight: 500;
-  font-size: 11px;
-  color: var(--thinking);
-}
-.header-nav .live {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--citron);
 }
 
 /* Every turn stays readable: a hairline between turns, the ask's actions
@@ -2535,15 +2327,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 }
 #hero .proposal-row small {
   flex: 1 1 0;
-}
-#header .sessions-word {
-  color: var(--muted);
-  padding-left: 10px;
-  margin-left: 10px;
-  border-left: 1px solid var(--rule);
-}
-#header .sessions-word:hover {
-  color: var(--paper);
 }
 
 /* Saved context replaces the older conversation, which remains expandable. */

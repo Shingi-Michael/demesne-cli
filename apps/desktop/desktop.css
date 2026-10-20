@@ -31,8 +31,7 @@ body.desktop { overflow: hidden; }
   position: relative;
   z-index: 90;
 }
-.desktop-wordmark, .desktop-home-wordmark { color: var(--electric); font-weight: 500; }
-.desktop-toolbar-rule { height: 16px; border-left: 1px solid var(--borderBright); }
+.desktop-home-wordmark { color: var(--electric); font-weight: 500; }
 #desktop-toolbar header { flex: none; border: 0; padding: 0; gap: 0; }
 #desktop-toolbar .header-state { font-size: 12px; margin-right: 8px; }
 .desktop-home, .desktop-error { display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center; overflow: auto; padding: 40px; }

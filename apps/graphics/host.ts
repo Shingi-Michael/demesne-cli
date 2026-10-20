@@ -183,8 +183,6 @@ export class GraphicsHost {
   queuePosition: number | null = null;
   verificationFingerprint: WorkspaceFingerprint | null = null;
   processesError: string | null = null;
-  checkQueue: string[] = [];
-  panelWidth: number | null = null;
   reviewRevision = 0;
   private reviewCache = new Map<
     string,
@@ -194,8 +192,6 @@ export class GraphicsHost {
   private watching: string | null = null;
   private watchedCommand = "none";
   private polling: Promise<void> | null = null;
-  private batchGeneration = 0;
-  private checkBatchActive = false;
   connection: "connecting" | "online" | "offline" = "connecting";
   error: string | null = null;
   /// The workspace waiting for the user's "Do you trust this folder?" answer.
@@ -246,16 +242,6 @@ export class GraphicsHost {
       process.env.COLORFGBG,
     ).name;
     this.selectedSession = options.sessionId;
-    try {
-      const prefs = JSON.parse(
-        readFileSync(
-          join(this.settings.dataDirectory, "graphics-ui.json"),
-          "utf8",
-        ),
-      );
-      if (Number.isFinite(prefs.panelWidth))
-        this.panelWidth = Math.max(300, Math.min(1000, prefs.panelWidth));
-    } catch {}
     if (options.command) this.drive = new GraphicsDrive(this, options.command);
   }
   get api() {
@@ -345,8 +331,6 @@ export class GraphicsHost {
       queuePosition: this.queuePosition,
       verificationFingerprint: this.verificationFingerprint,
       processesError: this.processesError,
-      checkQueue: this.checkQueue,
-      panelWidth: this.panelWidth,
       reviewRevision: this.reviewRevision,
     };
   }
@@ -517,9 +501,6 @@ export class GraphicsHost {
       this.current = new GraphicsSession(state, events);
       this.reviewRevision++;
       this.reviewCache.clear();
-      this.batchGeneration++;
-      this.checkBatchActive = false;
-      this.checkQueue = [];
       this.processes = [];
       this.verificationFingerprint = null;
       this.processesError = null;
@@ -792,9 +773,6 @@ export class GraphicsHost {
           command.check && ["running", "stopping"].includes(command.status),
       );
       if (!commands.length) return false;
-      this.batchGeneration++;
-      this.checkBatchActive = false;
-      this.checkQueue = [];
       await Promise.all(
         commands.map((command) =>
           this.client.stopCommand(this.current!.session.id, command.id),
@@ -958,61 +936,6 @@ export class GraphicsHost {
       this.panelWatchTimer.unref();
     }
   }
-  private async runChecks(ids: string[]) {
-    if (this.checkBatchActive) throw new Error("Checks are already queued");
-    const sessionId = this.current!.session.id;
-    const selected = ids.map((id) =>
-      this.processes.find((command) => command.id === id && command.check),
-    );
-    if (selected.some((command) => !command))
-      throw new Error("A selected check is no longer available");
-    const generation = ++this.batchGeneration;
-    this.checkBatchActive = true;
-    this.checkQueue = [...ids];
-    this.publish();
-    void (async () => {
-      try {
-        for (const id of ids) {
-          if (
-            generation !== this.batchGeneration ||
-            this.current?.session.id !== sessionId
-          )
-            break;
-          const started = await this.client.rerunCommand(sessionId, id);
-          this.checkQueue = this.checkQueue.filter((value) => value !== id);
-          await this.refreshProcesses();
-          this.publish();
-          while (generation === this.batchGeneration) {
-            await new Promise((resolve) => setTimeout(resolve, 300));
-            const result = await this.client.commands(
-              sessionId,
-              this.watchedCommand,
-            );
-            const command = result.commands.find(
-              (command) => command.id === started.id,
-            );
-            if (this.current?.session.id === sessionId) {
-              this.processes = result.commands;
-              this.queuePosition = result.queuePosition ?? null;
-              this.verificationFingerprint = result.fingerprint;
-              this.publish();
-            }
-            if (!command || !["running", "stopping"].includes(command.status))
-              break;
-          }
-        }
-      } catch (error) {
-        this.fail(error);
-      } finally {
-        if (generation === this.batchGeneration) {
-          this.checkBatchActive = false;
-          this.checkQueue = [];
-          this.publish();
-        }
-      }
-    })();
-  }
-
   async handle(method: string, raw: unknown): Promise<unknown> {
     const args = argsRecord(raw ?? {});
     const globals = new Set([
@@ -1117,19 +1040,6 @@ export class GraphicsHost {
     if (method === "processes") {
       await this.refreshProcesses();
       return this.processes;
-    }
-    if (method === "panel-width") {
-      const width = Number(args.width);
-      if (!Number.isFinite(width)) throw new Error("Invalid panel width");
-      this.panelWidth = Math.max(300, Math.min(1000, width));
-      mkdirSync(this.settings.dataDirectory, { recursive: true, mode: 0o700 });
-      writeFileSync(
-        join(this.settings.dataDirectory, "graphics-ui.json"),
-        JSON.stringify({ panelWidth: this.panelWidth }),
-        { mode: 0o600 },
-      );
-      this.publish();
-      return;
     }
     const driven = this.drive?.authorize(method, args);
     // Only the person sending a message takes over from Drive ("manual" is
@@ -1301,16 +1211,6 @@ export class GraphicsHost {
       await this.refreshFiles();
       return this.files;
     }
-    if (method === "read-file")
-      return this.client.readWorkspaceFile(
-        this.current!.session.id,
-        string(args.path, "file path", 4096),
-      );
-    if (method === "file-status")
-      return this.client.workspaceFileStatus(
-        this.current!.session.id,
-        string(args.path, "file path", 4096),
-      );
     if (method === "changes") {
       const scope = (args.scope ?? "turn") as ReviewScope;
       if (!["turn", "session", "workspace"].includes(scope))
@@ -1352,27 +1252,6 @@ export class GraphicsHost {
           else files.push(item);
         }
       return { ...review, files };
-    }
-    if (method === "stop-command") {
-      this.batchGeneration++;
-      this.checkBatchActive = false;
-      this.checkQueue = [];
-      const result = await this.client.stopCommand(
-        this.current!.session.id,
-        string(args.id, "command id", 200),
-      );
-      await this.refreshProcesses();
-      return result;
-    }
-    if (method === "rerun-checks") {
-      if (
-        !Array.isArray(args.ids) ||
-        args.ids.length < 1 ||
-        args.ids.length > 50 ||
-        args.ids.some((id) => typeof id !== "string")
-      )
-        throw new Error("Select recorded checks");
-      return this.runChecks(args.ids as string[]);
     }
     if (method === "permission") {
       const id = string(args.id, "permission id", 200),
@@ -1596,7 +1475,6 @@ export class GraphicsHost {
       [...this.drafts].some(([id, text]) => id !== this.current?.session.id && text.trim() && this.sessions.some(session => session.id === id));
   }
   dispose() {
-    this.batchGeneration++;
     this.providerSignInGeneration++;
     this.providerAccounts?.cancel();
     if (this.panelWatchTimer) clearInterval(this.panelWatchTimer);

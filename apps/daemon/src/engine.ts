@@ -165,7 +165,6 @@ export class AgentEngine {
       let receivedModelOutput = false;
       let firstTokenAt: number | null = null;
       const lease = await this.scheduler.for(inference.providerId).acquire(turnId, signal);
-      let turnContinues = false;
       let providerCallId: string;
       let requestStartedAt: number;
       const providerController = new AbortController();
@@ -274,15 +273,13 @@ export class AgentEngine {
               [...pendingContextDrops, ...dropped].map((entry) => entry.id),
             );
             pendingContextDrops.length = 0;
-            turnContinues = true;
             continue;
           }
           throw error;
         }
-        turnContinues = assembled.size > 0;
       } finally {
         signal.removeEventListener("abort", forwardAbort);
-        lease.release({ turnContinues });
+        lease.release();
       }
 
       pendingContextDrops.push(...takePlannedHistoryTurns(history, droppedHistoricalTurnIds));

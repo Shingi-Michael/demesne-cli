@@ -68,7 +68,7 @@ import { workspaceFileChanges, workspaceFileInfo } from "./workspace-file-info.t
 import type { AgentConfig, HeartbeatConfig, ImageGenerationConfig } from "@demesne/config";
 import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
-import { InferenceScheduler, InferenceSchedulers, type InferenceBoundaryHook } from "./inference-scheduler.ts";
+import { InferenceScheduler, InferenceSchedulers } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
@@ -120,7 +120,6 @@ export function createDaemonApp(options: {
   /// Join Heartbeat, the agent message bus, when its daemon runs here.
   heartbeat?: HeartbeatConfig;
   images?: ImageGenerationConfig;
-  inferenceBoundaryHook?: InferenceBoundaryHook;
   contextPlanner?: ContextPlanner;
   providerFirstEventTimeoutMs?: number;
   providerRequestTimeoutMs?: number;
@@ -205,7 +204,7 @@ export function createDaemonApp(options: {
     throw new Error(`The ${runtimeProfile} runtime profile requires one inference slot`);
   }
   const subagentModels = () => processor.availableModels?.() ?? [{ id: processor.modelId, provider: processor.providerId }];
-  const scheduler = new InferenceSchedulers(new InferenceScheduler(primarySlots, undefined, options.inferenceBoundaryHook), processor.providerId, options.providerInferenceSlots, inferenceSlots);
+  const scheduler = new InferenceSchedulers(new InferenceScheduler(primarySlots), processor.providerId, options.providerInferenceSlots, inferenceSlots);
   const tools = new ToolRegistry();
   const pendingCompactions = new Map<string, { instructions: string; inference: TurnInference }>();
   tools.register({
@@ -321,7 +320,6 @@ export function createDaemonApp(options: {
         console.error(`Could not persist failure for turn ${turn.id}`, persistenceError);
       }
     } finally {
-      scheduler.finishTurn(turn.id);
       const pending = pendingCompactions.get(turn.id);
       pendingCompactions.delete(turn.id);
       if (pending && !signal.aborted && !closing && store.getTurn(turn.id)?.status === "completed") {
@@ -496,7 +494,7 @@ export function createDaemonApp(options: {
             const value = { fingerprint, generatedAt: new Date().toISOString(), model: `${inference.providerId} / ${inference.modelId}`, proposals, signals };
             driveNextCache.write(body.workspace, value);
             return { workspace: body.workspace, ...value, proposals: applyCalibration(proposals, calibration), cached: false, calibration };
-          } finally { lease.release({ turnContinues: false }); slots.finishTurn(leaseId); }
+          } finally { lease.release(); }
         })();
         driveNextRuns.set(pendingKey, run);
         try { return json(await run); }
@@ -591,7 +589,7 @@ export function createDaemonApp(options: {
               const result=await planDrive(body, inferenceFor, signal, options, image, progress);
               if(body.review)body.review.modelMs=Math.round(performance.now()-reviewStarted);
               return {...result,...(body.review?{review:body.review}:{})};
-            } finally { lease.release({ turnContinues: false }); slots.finishTurn(leaseId); }
+            } finally { lease.release(); }
           })();
           activeDriveDecisions.add(planned);
           void planned.then(() => activeDriveDecisions.delete(planned), () => activeDriveDecisions.delete(planned));

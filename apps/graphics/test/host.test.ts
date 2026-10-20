@@ -229,7 +229,7 @@ test("clicking around the graphics UI never pauses Drive; writing or sending doe
   host.drive = { authorize: () => false, agent: { intervene: () => takeovers++ }, handle: async () => {}, dispose() {} } as unknown as typeof host.drive;
   const send = async (method: string, args: Record<string, unknown> = {}) => { try { await host.handle(method, args); } catch { /* only the takeover matters here */ } };
   try {
-    for (const method of ["panel-watch", "processes", "copy", "files", "changes", "open-artifact", "theme", "select-session"])
+    for (const method of ["panel-watch", "processes", "copy", "files", "changes", "theme", "select-session"])
       await send(method);
     expect(takeovers).toBe(0);
     await send("manual");

@@ -1,13 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createDesktopBridge, type DesktopInvoke } from "../frontend-bridge.ts";
 import type { GraphicsSnapshot, StateUpdate } from "../../graphics/state-wire.ts";
-import type { GraphicsUICommand } from "../../graphics/drive-controller.ts";
 
 const snapshot = (revision: number): StateUpdate => ({
   kind: "snapshot", state: { revision } as GraphicsSnapshot,
-});
-const command = (id: string): GraphicsUICommand => ({
-  id, observationId: "current", action: { kind: "compose", text: "Inspect the project." },
 });
 function fixture(reject = false) {
   const calls: { command: string; args?: Record<string, unknown> }[] = [], errors: unknown[] = [];
@@ -41,24 +37,11 @@ describe("desktop bridge", () => {
     expect(received).toHaveLength(128);
     expect(received.at(-1)).toEqual(snapshot(299));
   });
-  test("delays UI commands until bootstrap rendered and ready is sent once", () => {
-    const transport = fixture(), received: string[] = [];
-    transport.command(command("first"));
-    transport.bridge.commands((command) => received.push(command.id));
-    expect(received).toEqual([]);
-    transport.bridge.ready();
-    transport.bridge.ready();
-    transport.command(command("second"));
-    expect(received).toEqual(["first", "second"]);
-    expect(transport.calls).toEqual([{ command: "desktop_request", args: { method: "desktop-ready", args: {} } }]);
-  });
-  test("reports an unready command overflow instead of leaving Drive waiting", () => {
+  test("sends ready once", () => {
     const transport = fixture();
-    for (let index = 0; index < 17; index++) transport.command(command(String(index)));
-    expect(transport.calls).toHaveLength(1);
-    expect(transport.calls[0]!.args).toEqual({
-      method: "ui-result", args: { id: "16", error: "Desktop view is still opening. Observe again." },
-    });
+    transport.bridge.ready();
+    transport.bridge.ready();
+    expect(transport.calls).toEqual([{ command: "desktop_request", args: { method: "desktop-ready", args: {} } }]);
   });
   test("passes requests only through the restricted native proxy", async () => {
     const transport = fixture();

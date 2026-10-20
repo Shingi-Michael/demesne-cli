@@ -17,8 +17,6 @@ import type {
   ModelScore,
   ModelScoreboardResponse,
   DriveState,
-  DriveObservation,
-  CommandRecord,
 } from "@demesne/protocol";
 
 type Snapshot = ReturnType<GraphicsHost["snapshot"]>;
@@ -43,11 +41,6 @@ declare global {
         args?: Record<string, unknown>,
       ): Promise<T>;
       subscribe(callback: (update: StateUpdate) => void): () => void;
-      commands(
-        callback: (
-          command: import("./drive-controller.ts").GraphicsUICommand,
-        ) => void,
-      ): () => void;
       ready(): void;
     };
     demesneInspect?: () => unknown;
@@ -93,10 +86,9 @@ const btn = (
   label: string,
   data: Record<string, unknown> = {},
   className = "",
-  drive = false,
   disabled = false,
 ) =>
-  `<button type="button"${disabled ? " disabled" : ""} class="${className}" data-action="${action}" data-args="${h(JSON.stringify(data))}"${drive ? ` data-drive="${h(action + JSON.stringify(data))}"` : ""}>${label}</button>`;
+  `<button type="button"${disabled ? " disabled" : ""} class="${className}" data-action="${action}" data-args="${h(JSON.stringify(data))}">${label}</button>`;
 const num = (value: number | null | undefined) =>
   value == null || !Number.isFinite(value)
     ? "—"
@@ -186,12 +178,7 @@ const verb = (tool: ToolEntry) =>
 const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
 const tools = (run: GraphicsRun) =>
   run.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
-let state: Snapshot | null = null,
-  paneTurn = "";
-/// What Drive is inspecting in the conversation (its diff, checks or log),
-/// and which check; the observation names that surface.
-let inspectSurface: "diff" | "review" | "log" | null = null,
-  inspectItem = "";
+let state: Snapshot | null = null;
 let overlay: OverlayName | null = null,
   overlayQuery = "",
   overlayIndex = 0,
@@ -221,8 +208,6 @@ let completionItems: {
   completionIndex = 0,
   completionDismissed = false;
 let follow = true,
-  readingHeld = false,
-  driveNavigating = false,
   stopArmed = 0,
   draftTimer: ReturnType<typeof setTimeout> | undefined,
   noticeTimer: ReturnType<typeof setTimeout> | undefined,
@@ -268,9 +253,6 @@ async function api<T = unknown>(
   try {
     const result = await window.demesne.request<T>(method, {
       ...args,
-      ...(["drive", "drive-control"].includes(method)
-        ? { observation: observeUI() }
-        : {}),
       sessionId: state?.session?.id,
     });
     entry.outcome = "ok";
@@ -643,7 +625,7 @@ function renderStatus() {
   // session's own view (rename, compact, history). The sidebar shows what
   // needs you; Drive lives in its footer.
   el("header").innerHTML =
-    `<div class="header-state">${branchChip()}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "chip auto-approve") : ""}</div>${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`, true).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+    `<div class="header-state">${branchChip()}${state.session?.autoApprove ? btn("overlay", "Auto-approve", { name: "settings" }, "chip auto-approve") : ""}</div>${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
 }
 function totals(run: GraphicsRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -757,7 +739,6 @@ function toolRow(run: GraphicsRun, tool: ToolEntry) {
     `${now ? spinner() : stepIcon(tool)}<span class="verb">${h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
-    true,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
   return row + (open && canFold ? stepFold(run, tool) : "");
 }
@@ -1150,7 +1131,7 @@ function renderHero() {
   composer.remove();
   const name = state.workspace.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || state.workspace;
   const waiting = review.length
-    ? `<p>${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ›`, {}, "link", true)}<span class="muted"> · ${away && away.status !== "running" ? "Drive ran them while you were away" : "each in its own worktree"}</span></p>`
+    ? `<p>${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ›`, {}, "link")}<span class="muted"> · ${away && away.status !== "running" ? "Drive ran them while you were away" : "each in its own worktree"}</span></p>`
     : "";
   // A greeting and the composer, nothing else: Drive's best idea is the
   // composer's ghost text (Tab takes it); the rest of its ideas unfold from
@@ -1160,7 +1141,7 @@ function renderHero() {
     where = branch ? `${h(name)} on ${h(branch)}` : h(name);
   const ideas = next.proposals.length;
   const drive = ideas || driveBusy
-    ? `<p class="hero-drive">${ICON_SPARK}<b>Drive</b>${driveBusy ? " is working" : ` has ${ideas} idea${ideas === 1 ? "" : "s"}`}${ideas ? ` <span class="muted">·</span> ${btn("ideas-show", ideasShown ? "hide" : "show ›", {}, "link", true)}` : ""}${ideas > 1 && !driveBusy ? ` <span class="muted">·</span> ${btn("next-away", `Run ${ideas === 2 ? "both" : `all ${Math.min(3, ideas)}`} overnight ›`, { count: Math.min(3, ideas) }, "link", true)}` : ""}</p>${ideas && ideasShown ? `<div class="hero-ideas">${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", false, next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p></div>` : ""}`
+    ? `<p class="hero-drive">${ICON_SPARK}<b>Drive</b>${driveBusy ? " is working" : ` has ${ideas} idea${ideas === 1 ? "" : "s"}`}${ideas ? ` <span class="muted">·</span> ${btn("ideas-show", ideasShown ? "hide" : "show ›", {}, "link")}` : ""}${ideas > 1 && !driveBusy ? ` <span class="muted">·</span> ${btn("next-away", `Run ${ideas === 2 ? "both" : `all ${Math.min(3, ideas)}`} overnight ›`, { count: Math.min(3, ideas) }, "link")}` : ""}</p>${ideas && ideasShown ? `<div class="hero-ideas">${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p></div>` : ""}`
     : "";
   el("hero").innerHTML =
     `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${waiting}</div><div id="hero-composer"></div>${drive}`;
@@ -1177,7 +1158,7 @@ function proposalRows(items: Snapshot["driveNext"]["proposals"]) {
     .map((item) => {
       const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
       const why = [item.why, evidence && `Evidence: ${evidence}`].filter(Boolean).join("\n");
-      return `<div class="proposal-row" title="${h(why)}"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b>${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}</small>${btn("next-run", "Run", { id: item.id }, "primary", true)}${btn("next-plan", "Plan", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id }, "quiet proposal-snooze")}</div>`;
+      return `<div class="proposal-row" title="${h(why)}"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b>${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}</small>${btn("next-run", "Run", { id: item.id }, "primary")}${btn("next-plan", "Plan", { id: item.id })}${btn("next-snooze", "Not now", { id: item.id }, "quiet proposal-snooze")}</div>`;
     })
     .join("")}</div>`;
 }
@@ -1406,14 +1387,14 @@ function renderBreakage() {
   const node = document.getElementById("breakage");
   if (!node) return;
   const cards: string[] = [];
-  const close = (action: string, label: string) => btn(action, "×", {}, "breakage-close", true).replace("<button ", `<button aria-label="${label}" `);
+  const close = (action: string, label: string) => btn(action, "×", {}, "breakage-close").replace("<button ", `<button aria-label="${label}" `);
   const doing = (action: string, label: string, idle: string) => (busy === action ? label : idle);
   if (message) {
-    cards.push(`<div class="breakage-card toast ${message.tone}"><div class="breakage-head"><span class="breakage-mark">${message.tone === "ok" ? "✓" : "!"}</span><span class="breakage-text">${h(message.text)}</span>${message.url ? btn("breakage-open", "Open ›", {}, "link", true) : ""}${close("breakage-close", "Dismiss")}</div></div>`);
+    cards.push(`<div class="breakage-card toast ${message.tone}"><div class="breakage-head"><span class="breakage-mark">${message.tone === "ok" ? "✓" : "!"}</span><span class="breakage-text">${h(message.text)}</span>${message.url ? btn("breakage-open", "Open ›", {}, "link") : ""}${close("breakage-close", "Dismiss")}</div></div>`);
   }
   if (signals.length) {
     const running = fix && ["starting", "running"].includes(fix.status);
-    cards.push(`<div class="breakage-card alert"><div class="breakage-head"><span class="breakage-mark">✕</span><span class="breakage-text">${signals.length === 1 ? "Something just broke" : `${signals.length} things just broke`}</span>${close("breakage-dismiss", "Not now")}</div><ul class="breakage-list">${signals.map((signal) => `<li><b>${h(signal.title)}</b><span>${h(signal.detail.replace(/^Latest run exit (\S+) at \S+\.\s*/, "exit $1 · "))}</span></li>`).join("")}</ul><p class="breakage-note">${running ? `${fix.mission ? "A Drive mission is working in a worktree" : "A fix is already running"}; this one waits until it finishes.` : "Drive can fix it in a separate git worktree. Your files and this conversation stay as they are until you choose to apply it."}</p><div class="breakage-actions">${running ? "" : btn("breakage-fix", doing("fix", "Starting…", "▶ Fix in a worktree"), {}, "primary", true, Boolean(busy))}${btn("breakage-dismiss", "Not now", {}, "quiet", true)}${btn("breakage-never", "Never for this", {}, "quiet", true)}</div></div>`);
+    cards.push(`<div class="breakage-card alert"><div class="breakage-head"><span class="breakage-mark">✕</span><span class="breakage-text">${signals.length === 1 ? "Something just broke" : `${signals.length} things just broke`}</span>${close("breakage-dismiss", "Not now")}</div><ul class="breakage-list">${signals.map((signal) => `<li><b>${h(signal.title)}</b><span>${h(signal.detail.replace(/^Latest run exit (\S+) at \S+\.\s*/, "exit $1 · "))}</span></li>`).join("")}</ul><p class="breakage-note">${running ? `${fix.mission ? "A Drive mission is working in a worktree" : "A fix is already running"}; this one waits until it finishes.` : "Drive can fix it in a separate git worktree. Your files and this conversation stay as they are until you choose to apply it."}</p><div class="breakage-actions">${running ? "" : btn("breakage-fix", doing("fix", "Starting…", "▶ Fix in a worktree"), {}, "primary", Boolean(busy))}${btn("breakage-dismiss", "Not now", {}, "quiet")}${btn("breakage-never", "Never for this", {}, "quiet")}</div></div>`);
   }
   // A running mission shows on the briefing line; its card comes when it settles.
   const fixCard = (fix: NonNullable<Snapshot["breakage"]["fix"]>) => {
@@ -1422,7 +1403,7 @@ function renderBreakage() {
     if (fix.status === "starting" || fix.status === "running") {
       if (!running || (fix.mission && driveTurnMission())) return;
       const activity = fix.activity ? `${fix.activity.steps} step${fix.activity.steps === 1 ? "" : "s"}${fix.activity.last ? ` · ${h(fix.activity.last)}` : ""}` : "Creating the worktree…";
-      cards.push(`<div class="breakage-card running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">${fix.proposal ? "Working in a worktree" : "Fixing in a worktree"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><div class="breakage-meta">${branch}<span>${activity}</span></div><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Stopping…", "Stop and discard"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
+      cards.push(`<div class="breakage-card running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">${fix.proposal ? "Working in a worktree" : "Fixing in a worktree"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><div class="breakage-meta">${branch}<span>${activity}</span></div><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Stopping…", "Stop and discard"), { id: fix.id }, "quiet", Boolean(busy))}</div></div>`);
     } else if (fix.status === "ready") {
       // Three lines: what changed, what it says it did and how its checks
       // went, and what to do. The branch and file list are on hover.
@@ -1439,9 +1420,9 @@ function renderBreakage() {
         : passed === rows.length ? `${rows.length === 1 ? "Its check" : `All ${rows.length} checks`} passed.` : `${rows.length - passed} of ${rows.length} checks failed.`;
       const proof = rows.length ? `<span class="${passed === rows.length ? "pass" : "fail"}" title="${h(rows.map((row) => `${row.ok ? "✓" : "✕"} ${row.text}`).join("\n"))}">${h(verdict)}</span>` : `<span class="muted">${verdict}</span>`;
       const kind = fix.mission ? "Mission" : fix.proposal ? "Proposal" : "Fix";
-      cards.push(`<div class="breakage-card ready compact"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text" title="${h(`${kind} on ${fix.branch}`)}">${h(fix.title)}</span><small${paths.length > 1 ? ` title="${h(paths.join("\n"))}"` : ""}>${where}</small></div><p class="breakage-summary">${fix.summary ? `${h(fix.summary)} ` : ""}${proof}</p><div class="breakage-actions">${btn("breakage-apply", doing("apply", "Applying…", "Apply"), { id: fix.id }, "primary", true, Boolean(busy)).replace("<button ", '<button title="Apply to my branch" ')}${btn("breakage-pr", doing("pr", "Opening…", "Open PR"), { id: fix.id }, "", true, Boolean(busy))}${btn("breakage-discard", doing("discard", "Discarding…", "discard"), { id: fix.id }, "quiet", true, Boolean(busy))}${fix.receipt ? btn("breakage-receipt", "copy receipt", { id: fix.id }, "quiet", true) : ""}${fix.sessionId ? btn("review-diff", "diff ›", { id: fix.sessionId }, "quiet breakage-diff") : ""}</div></div>`);
+      cards.push(`<div class="breakage-card ready compact"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text" title="${h(`${kind} on ${fix.branch}`)}">${h(fix.title)}</span><small${paths.length > 1 ? ` title="${h(paths.join("\n"))}"` : ""}>${where}</small></div><p class="breakage-summary">${fix.summary ? `${h(fix.summary)} ` : ""}${proof}</p><div class="breakage-actions">${btn("breakage-apply", doing("apply", "Applying…", "Apply"), { id: fix.id }, "primary", Boolean(busy)).replace("<button ", '<button title="Apply to my branch" ')}${btn("breakage-pr", doing("pr", "Opening…", "Open PR"), { id: fix.id }, "", Boolean(busy))}${btn("breakage-discard", doing("discard", "Discarding…", "discard"), { id: fix.id }, "quiet", Boolean(busy))}${fix.receipt ? btn("breakage-receipt", "copy receipt", { id: fix.id }, "quiet") : ""}${fix.sessionId ? btn("review-diff", "diff ›", { id: fix.sessionId }, "quiet breakage-diff") : ""}</div></div>`);
     } else if (fix.status === "failed") {
-      cards.push(`<div class="breakage-card failed"><div class="breakage-head"><span class="breakage-mark">${(fix.proposal || fix.mission) && fix.unchanged ? "○" : "!"}</span><span class="breakage-text">${fix.proposal || fix.mission ? (fix.unchanged ? "Finished without changes" : "Couldn't finish it") : "Couldn't fix it"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><p class="breakage-summary">${h(fix.error ?? (fix.proposal || fix.mission ? "It failed." : "The fix failed."))}${fix.summary ? ` ${h(fix.summary)}` : ""}</p><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Discarding…", "Discard the worktree"), { id: fix.id }, "quiet", true, Boolean(busy))}</div></div>`);
+      cards.push(`<div class="breakage-card failed"><div class="breakage-head"><span class="breakage-mark">${(fix.proposal || fix.mission) && fix.unchanged ? "○" : "!"}</span><span class="breakage-text">${fix.proposal || fix.mission ? (fix.unchanged ? "Finished without changes" : "Couldn't finish it") : "Couldn't fix it"}</span><small>${elapsed}</small></div><p class="breakage-title">${h(fix.title)}</p><p class="breakage-summary">${h(fix.error ?? (fix.proposal || fix.mission ? "It failed." : "The fix failed."))}${fix.summary ? ` ${h(fix.summary)}` : ""}</p><div class="breakage-actions">${btn("breakage-discard", doing("discard", "Discarding…", "Discard the worktree"), { id: fix.id }, "quiet", Boolean(busy))}</div></div>`);
     }
   };
   // An away run is one card: a line per proposal, and a finished branch opens
@@ -1465,7 +1446,7 @@ function renderBreakage() {
       return `<li class="away-${item.state}"><span class="away-mark">${mark}</span>${title}${detail ? `<small>${detail}</small>` : ""}</li>`;
     }).join("");
     cards.push(away.status === "running"
-      ? `<div class="breakage-card away running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">Working through Drive's list</span><small>${done} of ${away.items.length} done</small></div><ul class="away-list">${rows}</ul><div class="breakage-actions">${btn("breakage-away-stop", "Stop after this one", {}, "quiet", true, Boolean(busy))}</div></div>`
+      ? `<div class="breakage-card away running"><div class="breakage-head"><span class="breakage-mark breakage-pulse">◌</span><span class="breakage-text">Working through Drive's list</span><small>${done} of ${away.items.length} done</small></div><ul class="away-list">${rows}</ul><div class="breakage-actions">${btn("breakage-away-stop", "Stop after this one", {}, "quiet", Boolean(busy))}</div></div>`
       : `<div class="breakage-card away"><div class="breakage-head"><span class="breakage-mark">✓</span><span class="breakage-text">While you were away</span><small>${waiting ? `${waiting} to review` : ""}</small>${close("breakage-away-close", "Dismiss")}</div><ul class="away-list">${rows}</ul>${away.reason ? `<p class="breakage-note">${h(away.reason)}</p>` : ""}</div>`);
   }
   for (const item of [fix, ...state.breakage.inbox]) {
@@ -1488,9 +1469,6 @@ function renderQuestion() {
   el("question").innerHTML = question && item
     ? `<section class="question-card"><div class="approval-title"><span class="amber">?</span> ${question.mode === "interview" ? "Interview" : "A question before continuing"}<small>${question.questions.length > 1 ? `${Math.min(index+1,question.questions.length)} of ${question.questions.length}` : ""}</small></div><p class="user-question">${h(item.question)}</p>${item.reason ? `<p class="muted">${h(item.reason)}</p>` : ""}${answered ? `<p>${h(question.answers?.at(-1)?.answer ?? "Explicitly skipped")}</p>` : ""}<p class="muted">${answered ? "Your answers are saved. Resume to continue from them." : question.interrupted ? "Saved after interruption. Your answer continues the interview." : question.status === "paused" ? "Paused. Your draft is saved; answering resumes the interview." : "Type your answer in the composer below."}</p><div class="approval-actions">${btn("question-control",question.status === "paused" || answered ? "Resume" : "Pause",{action:question.status === "paused" || answered ? "resume" : "pause"})}${btn("question-control","Cancel interview",{action:"cancel"},"quiet")}</div></section>`
     : "";
-}
-function selectedRun() {
-  return state?.runs.find((run) => run.id === paneTurn) ?? state?.runs.at(-1);
 }
 /// Stops the host polling command output that an unfolded check started.
 const unwatchOutput = () => void api("panel-watch", { panel: null }).catch(() => {});
@@ -1561,7 +1539,7 @@ function renderBriefing() {
   if (review.length) {
     const only = review.length === 1 ? review[0]! : null;
     const about = only && reviewShown ? "" : only ? `${only.title}${only.diff ? ` · +${only.diff.additions} −${only.diff.deletions}` : ""}` : away && away.status !== "running" ? "Drive ran them while you were away" : "";
-    parts.push(`${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ${reviewShown ? "⌄" : "›"}`, {}, "link", true)}${about ? `<span class="muted">${h(about)}</span>` : ""}`);
+    parts.push(`${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ${reviewShown ? "⌄" : "›"}`, {}, "link")}${about ? `<span class="muted">${h(about)}</span>` : ""}`);
   }
   if (pinned && driveTurnMission()) {
     // The mission is the conversation's newest turn; this line only says how far it has got.
@@ -1583,8 +1561,8 @@ function renderBriefing() {
       const top = next.proposals, words = ["", "it", "both", "all three"];
       const away = Math.min(3, top.length);
       unfolded = `<div class="briefing-ideas">${proposalRows(top)}<p class="proposals-footer">${[
-        btn("next-away", `Run ${words[away]} overnight ›`, { count: away }, "link", true),
-        btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", false, next.loading),
+        btn("next-away", `Run ${words[away]} overnight ›`, { count: away }, "link"),
+        btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading),
         next.generatedAt ? `<span class="muted">looked ${age(next.generatedAt)}</span>` : "",
       ].filter(Boolean).join('<span class="muted"> · </span>')}</p></div>`;
     }
@@ -1748,73 +1726,6 @@ function renderDriveTurn() {
   node.innerHTML = `${ask}<div class="response${live ? " running" : ""}"><ol class="drive-trail">${rows}</ol><div class="drive-turn-foot"><span class="drive-turn-meta">${meta}</span><span class="drive-turn-actions">${actions}</span></div>${open ? `<div class="drive-details">${parts.detailsBody}</div>` : ""}</div>`;
   if (bottom) stage.scrollTop = stage.scrollHeight;
 }
-function verificationChecks(turnId = "") {
-  if (!state) return [];
-  const records = state.processes.filter(
-    (command) => command.check && (!turnId || command.turnId === turnId),
-  );
-  const keys = new Set<string>();
-  const checks: CommandRecord[] = [];
-  for (const command of records) {
-    const key = JSON.stringify([command.argv, command.cwd]);
-    if (keys.has(key)) continue;
-    keys.add(key);
-    checks.push(command);
-  }
-  for (const run of state.runs.filter(
-    (run) => !turnId || run.id === turnId,
-  ))
-    for (const tool of tools(run).filter(
-      (tool) =>
-        tool.phase === "verify" &&
-        tool.name === "run_command" &&
-        tool.input.background !== true,
-    )) {
-      const argv = Array.isArray(tool.input.argv)
-        ? tool.input.argv.map(String)
-        : [tool.detail ?? tool.name];
-      if (
-        records.some((command) => command.toolCallId === tool.toolCallId) ||
-        checks.some(
-          (command) => JSON.stringify(command.argv) === JSON.stringify(argv),
-        )
-      )
-        continue;
-      checks.push({
-        id: `legacy:${run.id}:${tool.id}`,
-        sessionId: state.session!.id,
-        turnId: run.id,
-        toolCallId: tool.toolCallId,
-        rerunOf: null,
-        argv,
-        cwd: String(tool.input.cwd ?? state.workspace),
-        background: false,
-        check: true,
-        pid: null,
-        status:
-          tool.state === "running"
-            ? "running"
-            : tool.state === "done"
-              ? "completed"
-              : tool.state === "stopped"
-                ? "stopped"
-                : "failed",
-        startedAt: new Date(tool.startedAt).toISOString(),
-        completedAt: run.completedAt,
-        lastOutputAt: null,
-        exitCode: tool.exitCode ?? null,
-        timedOut: false,
-        stdout: tool.message ?? "",
-        stderr: "",
-        truncated: false,
-        fingerprint: null,
-        freshness: "unknown",
-        freshnessReason:
-          "This older result has no source fingerprint. Run the check again with the updated daemon.",
-      });
-    }
-  return checks;
-}
 async function openOverlay(name: OverlayName, query = "") {
   overlay = name;
   overlayQuery = query;
@@ -1855,7 +1766,6 @@ async function openOverlay(name: OverlayName, query = "") {
     el("overlay").tabIndex = 0;
     el("overlay").focus();
   }
-  reportObservation();
 }
 /// "262k": context sizes in the picker, rounded the way people say them.
 function tokensShort(value: number) {
@@ -1902,8 +1812,7 @@ function renderModelPopover(hidden: number) {
           "choose-row",
           `<span class="name">${h(row.label)}</span><span class="hint">${h(row.hint ?? "")}</span>${selected && row.description ? `<small class="model-stats">${row.description.split(" · ").map((part) => h(part).replaceAll(" ", "&nbsp;")).join(" · ")}</small>` : ""}`,
           { index },
-          `menu-row model-row ${selected ? "selected" : ""}`,
-        ).replace("<button ", row.value ? `<button title="${h(row.value)}" ` : "<button ")
+          `menu-row model-row ${selected ? "selected" : ""}`).replace("<button ", row.value ? `<button title="${h(row.value)}" ` : "<button ")
       );
     })
     .join("");
@@ -2264,7 +2173,6 @@ function renderOverlay() {
           `<span class="name">${h(row.label)}</span><span class="value">${h(row.value)}</span><span class="hint">${h(row.hint ?? "")}${index === overlayIndex ? ` ${k("↵")}` : ""}</span>`,
           { index },
           `menu-row ${index === overlayIndex ? "selected" : ""}`,
-          overlay === "sessions",
         ).replace("<button ", row.description ? `<button title="${h(row.description)}" ` : "<button ")
       );
     })
@@ -2388,8 +2296,7 @@ function renderCompletion() {
           "completion",
           `<span class="name">${highlight(item.label)}${argument}</span><span class="value">${h(item.description)}</span><span class="hint">${h(item.hint)} ${index === completionIndex ? k(mention ? "Tab" : "↵") : ""}</span>`,
           { index },
-          `menu-row ${index === completionIndex ? "selected" : ""}`,
-        )
+          `menu-row ${index === completionIndex ? "selected" : ""}`)
       );
     })
     .join("");
@@ -2408,7 +2315,7 @@ function changedDraft() {
     try { localStorage.setItem(replyCacheKey(question.id,index),JSON.stringify({text,version})); } catch {}
     draftTimer=setTimeout(()=>void api("question-action",{id:question.id,action:{action:"draft",text,index,revision,draftVersion:version}})
       .catch(()=>{}),60);
-    reportObservation();return;
+    return;
   }
   // Typing leaves Drive running (a "/" to look at commands is not a
   // takeover); sending the message is what takes over, in the host.
@@ -2422,7 +2329,6 @@ function changedDraft() {
     () => void act(() => api("draft", { text: editor.value })),
     60,
   );
-  reportObservation();
 }
 function setDraft(text: string) {
   editor.value = text;
@@ -2639,7 +2545,6 @@ async function submitText(value = editor.value) {
 /// reader scrolled up earlier in the session.
 function followLatest() {
   follow = true;
-  readingHeld = false;
   const stage = el("stage");
   stage.scrollTop = stage.scrollHeight;
 }
@@ -2661,10 +2566,10 @@ async function dispatch(
   if (action === "toggle-compacted-history" && state?.checkpoint) {
     const id = state.checkpoint.id;
     if (expandedCompactions.has(id)) expandedCompactions.delete(id); else expandedCompactions.add(id);
-    follow = false; readingHeld = true;
+    follow = false;
     renderConversation();
     compactionCard?.querySelector<HTMLButtonElement>(".compaction-toggle")?.focus({ preventScroll: true });
-    reportObservation(); return;
+    return;
   }
   if(action === "toggle-thinking") {
     const content=document.getElementById(`thinking-body-${args.id}`), toggle=content?.previousElementSibling;
@@ -2675,11 +2580,9 @@ async function dispatch(
     content.hidden=open;toggle.setAttribute("aria-expanded",String(!open));
     const label=toggle.querySelector(".thinking-disclosure");
     if(label)label.textContent=open ? "Show trace" : "Collapse";
-    reportObservation();return;
+    return;
   }
   if (action === "question-control") return questionAction(args.action);
-  if (action === "auto-approve" && driveNavigating)
-    throw new Error("Only you can change session approvals.");
   if (action === "new-session") return api("new-session", {});
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never"].includes(action)) return api(action, args);
   if (action === "next-away") return act(() => api(action, args));
@@ -2698,10 +2601,6 @@ async function dispatch(
   }
   if (action === "follow") {
     follow = true;
-    readingHeld = false;
-    paneTurn = "";
-    inspectSurface = null;
-    inspectItem = "";
     unwatchOutput();
     overlay = null;
     renderOverlay();
@@ -2828,8 +2727,6 @@ async function dispatch(
   if (action === "jump-turn") {
     revealCompactedTurn(args.id);
     expanded.add(args.id);
-    paneTurn = args.id;
-    if (!driveNavigating) readingHeld = true;
     follow = false;
     renderConversation();
     document
@@ -3030,10 +2927,7 @@ function renderState(next: Snapshot) {
   if (lastSession !== next.session?.id) {
     lastSession = next.session?.id ?? "";
     follow = true;
-    readingHeld = false;
     overlay = null;
-    inspectSurface = null;
-    inspectItem = "";
     driveShown = ideasShown = false;
     unwatchOutput();
     expanded.clear();
@@ -3114,7 +3008,6 @@ function renderState(next: Snapshot) {
         : "";
     el("banner").innerHTML = `${h(message)}${actions}`;
   }
-  reportObservation();
 }
 new ResizeObserver(() => renderComposer()).observe(editor);
 document.addEventListener("click", (event) => {
@@ -3202,7 +3095,6 @@ document.addEventListener(
   (event) => {
     const detail = event.target as HTMLDetailsElement;
     if (detail.dataset.detail) {
-      reportObservation();
     }
   },
   true,
@@ -3216,23 +3108,16 @@ el("stage").addEventListener(
   "wheel",
   (event) => {
     if (event.deltaY >= 0) return;
-    readingHeld = true;
     follow = false;
   },
   { passive: true },
 );
 el("stage").addEventListener("scroll", () => {
   const stage = el("stage");
-  if (!driveNavigating) {
-    if (stage.scrollHeight - stage.clientHeight - stage.scrollTop < 48) {
-      follow = true;
-      readingHeld = false;
-    } else if (stage.scrollTop < lastStageTop - 2) follow = false;
-  }
+  if (stage.scrollHeight - stage.clientHeight - stage.scrollTop < 48) follow = true;
+  else if (stage.scrollTop < lastStageTop - 2) follow = false;
   lastStageTop = stage.scrollTop;
-  reportObservation();
 });
-document.addEventListener("scroll", () => reportObservation(), true);
 document.addEventListener("demesne:open-settings", () => {
   if (state && !state.setup) void act(() => openOverlay("settings"));
 });
@@ -3484,7 +3369,6 @@ window.demesneInspect = () => ({
     stdout: c.stdout.slice(-2000),
     stderr: c.stderr.slice(-1000),
   })),
-  inspectSurface,
   openSteps: [...stepOpen],
   connection: state?.connection,
   theme: state?.theme,
@@ -3802,433 +3686,6 @@ function renderSetup() {
   }
   updateSetupTimer();
 }
-
-const driveControls = new Map<string, HTMLElement>();
-const driveAllowed = new Set([
-  "expand-turn",
-  "jump-turn",
-  "toggle-steps",
-  "step",
-  "follow",
-]);
-const fingerprint = (text: string) => {
-  let value = 2166136261;
-  for (let i = 0; i < text.length; i++)
-    value = Math.imul(value ^ text.charCodeAt(i), 16777619);
-  return (value >>> 0).toString(36);
-};
-function clipRect(element: Element) {
-  let rect = element.getBoundingClientRect(),
-    left = Math.max(0, rect.left),
-    top = Math.max(0, rect.top),
-    right = Math.min(innerWidth, rect.right),
-    bottom = Math.min(innerHeight, rect.bottom);
-  if (!rect.width || !rect.height) return null;
-  for (
-    let parent = element.parentElement;
-    parent;
-    parent = parent.parentElement
-  ) {
-    const style = getComputedStyle(parent);
-    if (style.display === "none" || style.visibility === "hidden") return null;
-    if (/auto|scroll|hidden|clip/.test(style.overflowX + style.overflowY)) {
-      const r = parent.getBoundingClientRect();
-      left = Math.max(left, r.left);
-      top = Math.max(top, r.top);
-      right = Math.min(right, r.right);
-      bottom = Math.min(bottom, r.bottom);
-    }
-  }
-  return right > left && bottom > top ? { left, top, right, bottom } : null;
-}
-/** Read visible text ranges after layout. Offscreen paragraphs, hidden details,
- * and the controller's own notes cannot become evidence for its next decision. */
-function observeUI(): DriveObservation {
-  const cw = Math.max(8, innerWidth / 500),
-    ch = Math.max(18, innerHeight / 250),
-    width = Math.min(500, Math.ceil(innerWidth / cw)),
-    height = Math.min(250, Math.ceil(innerHeight / ch));
-  const rows = Array.from({ length: height }, () =>
-      Array<string>(width).fill(" "),
-    ),
-    answer = rows.map((row) => row.map(() => " ")),
-    latest = rows.map((row) => row.map(() => " "));
-  let characters = 0;
-  const walker = document.createTreeWalker(
-      el("workspace"),
-      NodeFilter.SHOW_TEXT,
-    ),
-    range = document.createRange();
-  let node: Node | null;
-  while ((node = walker.nextNode()) && characters < 24000) {
-    const parent = node.parentElement;
-    if (
-      !parent ||
-      !node.textContent?.trim() ||
-      parent.closest(
-        "#status,header,.drive-live,#drive-turn,#overlay[hidden],#completion[hidden],time,script,style,textarea",
-      )
-    )
-      continue;
-    const clip = clipRect(parent);
-    if (!clip) continue;
-    const answerId =
-        parent.closest<HTMLElement>("[data-answer]")?.dataset.answer,
-      run = state?.runs.find((item) => item.id === answerId),
-      completed = run?.status === "completed",
-      isLatest = run?.id === state?.runs.at(-1)?.id;
-    for (const match of node.textContent.matchAll(/\S+/g)) {
-      range.setStart(node, match.index!);
-      range.setEnd(node, match.index! + match[0].length);
-      const rects = range.getClientRects();
-      // Words wrapping at the viewport edge are split into their visible glyphs.
-      const pieces =
-        rects.length <= 1
-          ? [{ text: match[0], rect: rects[0] }]
-          : [...match[0]].map((text, i) => {
-              range.setStart(node!, match.index! + i);
-              range.setEnd(node!, match.index! + i + 1);
-              return { text, rect: range.getBoundingClientRect() };
-            });
-      for (const { text, rect } of pieces) {
-        if (
-          !rect ||
-          rect.bottom <= clip.top ||
-          rect.top >= clip.bottom ||
-          rect.left >= clip.right ||
-          rect.right <= clip.left
-        )
-          continue;
-        const row = Math.max(
-            0,
-            Math.min(height - 1, Math.floor((rect.top + rect.height / 2) / ch)),
-          ),
-          column = Math.max(0, Math.floor(rect.left / cw));
-        for (let i = 0; i < text.length && column + i < width; i++) {
-          if (
-            rect.left + (i * rect.width) / text.length < clip.left ||
-            rect.left + (i * rect.width) / text.length >= clip.right
-          )
-            continue;
-          rows[row]![column + i] = text[i]!;
-          if (completed) {
-            answer[row]![column + i] = text[i]!;
-            if (isLatest) latest[row]![column + i] = text[i]!;
-          }
-        }
-        characters += text.length;
-      }
-    }
-  }
-  const geometry = (element: Element) => {
-    const rect = clipRect(element);
-    if (!rect) return null;
-    const row = Math.min(height - 1, Math.floor(rect.top / ch)),
-      column = Math.min(width - 1, Math.floor(rect.left / cw));
-    return {
-      row,
-      column,
-      width: Math.max(
-        1,
-        Math.min(width - column, Math.ceil((rect.right - rect.left) / cw)),
-      ),
-      height: Math.max(
-        1,
-        Math.min(height - row, Math.ceil((rect.bottom - rect.top) / ch)),
-      ),
-    };
-  };
-  const controls: DriveObservation["controls"] = [];
-  driveControls.clear();
-  for (const element of document.querySelectorAll<HTMLElement>(
-    "[data-drive][data-action]",
-  )) {
-    if (
-      !driveAllowed.has(element.dataset.action!) ||
-      element.closest(".drive-live, #drive-turn")
-    )
-      continue;
-    const box = geometry(element);
-    if (!box) continue;
-    const id = `c-${fingerprint(element.dataset.drive! + element.dataset.args)}`;
-    driveControls.set(id, element);
-    controls.push({
-      id,
-      label: (
-        element.innerText ||
-        element.getAttribute("aria-label") ||
-        ""
-      ).slice(0, 1000),
-      row: box.row,
-      column: box.column,
-      width: box.width,
-    });
-    if (controls.length >= 160) break;
-  }
-  const run = selectedRun(),
-    checks = run ? verificationChecks(run.id) : [],
-    surface = inspectSurface ?? "response";
-  // Diffs, checks and logs unfold inside the conversation, so an inspection
-  // reads the stage under that surface's name.
-  const panes: NonNullable<DriveObservation["panes"]> = [],
-    scrollRegions: NonNullable<DriveObservation["scrollRegions"]> = [];
-  for (const [element, name, scrollName] of [
-    [el("stage"), "response", "response"],
-    ...(inspectSurface
-      ? [[el("stage"), inspectSurface, inspectSurface === "diff" ? "diff-code" : inspectSurface]]
-      : []),
-  ] as [HTMLElement, string, string][]) {
-    if (!element) continue;
-    const box = geometry(element);
-    if (box) {
-      panes.push({ surface: name, ...box });
-      scrollRegions.push({
-        surface: scrollName,
-        ...box,
-        offset: Math.round(element.scrollTop),
-        maximum: Math.max(0, element.scrollHeight - element.clientHeight),
-      });
-    }
-  }
-  const mode =
-    state?.approvals.length || state?.questions.length
-      ? "approval"
-      : overlay || state?.setup
-        ? "dialog"
-        : state?.activeTurnId
-          ? "streaming"
-          : "input";
-  const textRows = rows.map((row) => row.join("").trimEnd()),
-    answerRows = answer.map((row) => row.join("").trimEnd()).filter(Boolean),
-    latestAnswerRows = latest
-      .map((row) => row.join("").trimEnd())
-      .filter(Boolean);
-  const observation: DriveObservation = {
-    id: "",
-    sessionId: state?.session?.id ?? "none",
-    workspace: state?.workspace ?? "",
-    title: state?.session?.title ?? "",
-    mode,
-    ready: mode === "input" && state?.connection === "online" && !state.busy,
-    draft: editor.value,
-    surface,
-    width,
-    height,
-    rows: textRows,
-    evidenceRows: textRows,
-    answerRows,
-    latestAnswerRows,
-    controls,
-    panes,
-    scrollRegions,
-    focus: overlay
-      ? "dialog"
-      : document.activeElement === editor
-        ? "composer"
-        : "content",
-    navigation: {
-      document: `${state?.session?.id ?? "none"}:${run?.id ?? "start"}`,
-      turn: run?.id ?? "start",
-      latest: run?.id === state?.runs.at(-1)?.id,
-      answer: Boolean(
-        run?.status === "completed" &&
-          run.entries.some((e) => e.type === "assistant"),
-      ),
-      readingHeld,
-      files: (run ? changedPaths(run) : []).slice(0, 128),
-      checks: checks.map((c) => String(c.id)).slice(0, 128),
-      ...(inspectItem ? { item: inspectItem } : {}),
-    },
-  };
-  observation.id = fingerprint(JSON.stringify(observation));
-  return observation;
-}
-let observationTimer: ReturnType<typeof setTimeout> | undefined,
-  lastObservation = "";
-function reportObservation() {
-  const needed = () =>
-    Boolean(
-      state?.session &&
-        state.drive &&
-        ["running", "waiting"].includes(state.drive.status),
-    );
-  if (!needed()) {
-    clearTimeout(observationTimer);
-    observationTimer = undefined;
-    lastObservation = "";
-    return;
-  }
-  if (observationTimer) return;
-  observationTimer = setTimeout(() => {
-    observationTimer = undefined;
-    if (!needed()) return;
-    const observed = observeUI();
-    if (observed.id === lastObservation) return;
-    lastObservation = observed.id;
-    void api("observe", { observation: observed }).catch(() => {});
-  }, 180);
-}
-window.demesne.commands(async (command) => {
-  driveNavigating = true;
-  try {
-    const observation = observeUI(),
-      action = command.action;
-    if (
-      observation.id !== command.observationId ||
-      observation.mode !== "input" ||
-      !observation.ready
-    )
-      throw new Error("UI changed; observe again.");
-    let result = "UI action finished.";
-    if (action.kind === "compose") {
-      if (editor.value)
-        throw new Error("Input changed; existing draft left untouched.");
-      editor.value = action.text;
-      editor.focus({ preventScroll: true });
-      renderComposer();
-      const plan = /^\/plan\s+/.test(action.text);
-      if (action.text.startsWith("/") && !plan)
-        throw new Error(
-          "Only requests or /plan prompts can be composed by Drive.",
-        );
-      followLatest();
-      await api(plan ? "plan-submit" : "submit", {
-        text: action.text,
-        driveCommand: command.id,
-      });
-      result = `Sent through the visible composer: ${action.text.slice(0, 500)}`;
-    } else if (action.kind === "click") {
-      const target = driveControls.get(action.target);
-      if (!target) throw new Error("Control moved; observe again.");
-      await dispatch(
-        target.dataset.action!,
-        JSON.parse(target.dataset.args ?? "{}"),
-        target,
-      );
-    } else if (action.kind === "inspect") {
-      const current = selectedRun();
-      if (!current) throw new Error("No turn to inspect");
-      if (action.target === "answer") {
-        revealCompactedTurn(current.id);
-        expanded.add(current.id);
-        follow = false;
-        readingHeld = false;
-        renderConversation();
-        const response = document
-          .getElementById(`turn-${current.id}`)
-          ?.querySelector<HTMLElement>("[data-answer]");
-        if (response) {
-          const stage = el("stage");
-          stage.scrollTop +=
-            response.getBoundingClientRect().top -
-            stage.getBoundingClientRect().top;
-        }
-        el("stage").focus();
-      } else {
-        // The diff, checks or log unfold under the turn's steps; the
-        // observation then reads the stage as that surface.
-        inspectSurface = action.target === "checks" ? "review" : action.target;
-        inspectItem = "";
-        let only: ToolEntry | undefined;
-        if (action.target === "checks") {
-          const checks = verificationChecks(current.id),
-            check = (action.item && checks.find((check) => check.id === action.item)) || checks[0];
-          if (check) {
-            inspectItem = check.id;
-            only = tools(current).find((tool) => tool.toolCallId === check.toolCallId);
-            if (!check.id.startsWith("legacy:")) {
-              await api("panel-watch", { panel: "log", command: check.id });
-              await api("processes");
-              const deadline = performance.now() + 3000;
-              while (
-                state?.session?.id === observation.sessionId &&
-                state.processes.find((record) => record.id === check.id)?.outputLoaded === false &&
-                performance.now() < deadline
-              )
-                await new Promise((resolve) => setTimeout(resolve, 16));
-              const loaded = state?.processes.find((record) => record.id === check.id);
-              if (!loaded || loaded.outputLoaded === false || state?.processesError)
-                throw new Error(state?.processesError ?? "Check output has not loaded. Inspect this check again.");
-            }
-          }
-        } else if (action.target === "diff" && action.item) inspectItem = action.item;
-        await unfoldTurn(current, action.target === "diff" ? "change" : action.target === "checks" ? "verify" : "all", only, action.target === "diff" ? action.item : undefined);
-      }
-      const scroll = el("stage");
-      if (action.position === "end") scroll.scrollTop = scroll.scrollHeight;
-      else if (action.position !== "continue") scroll.scrollTop = 0;
-    } else if (action.kind === "scroll") {
-      const region = observation.scrollRegions?.findLast(
-        (r) =>
-          action.row >= r.row &&
-          action.row < r.row + r.height &&
-          action.column >= r.column &&
-          action.column < r.column + r.width,
-      );
-      if (!region)
-        throw new Error("Scroll did not move; no scroll region here");
-      const scroll = el("stage");
-      const before = scroll.scrollTop;
-      scroll.scrollTop += action.amount * 18;
-      result =
-        before === scroll.scrollTop
-          ? "Scroll did not move; boundary reached."
-          : "Scrolled the visible view.";
-    } else if (action.kind === "key") {
-      const scroll = el("stage");
-      if (
-        ["up", "down", "pageup", "pagedown", "home", "end"].includes(action.key)
-      ) {
-        const before = scroll.scrollTop;
-        scroll.scrollTop =
-          action.key === "home"
-            ? 0
-            : action.key === "end"
-              ? scroll.scrollHeight
-              : scroll.scrollTop +
-                (action.key === "up"
-                  ? -22
-                  : action.key === "down"
-                    ? 22
-                    : action.key === "pageup"
-                      ? -scroll.clientHeight + 22
-                      : scroll.clientHeight - 22);
-        result =
-          before === scroll.scrollTop
-            ? "Scroll did not move; boundary reached."
-            : "Scrolled the visible view.";
-      } else if (action.key === "escape") {
-        inspectSurface = null;
-        inspectItem = "";
-      }
-      else if (action.key === "ctrl+g") await dispatch("follow", {});
-      else if (["ctrl+b", "alt+d", "alt+v", "alt+h", "alt+enter"].includes(action.key))
-        throw new Error(
-          "There are no side panels; inspect with target diff, checks or log to unfold the turn's result in the conversation.",
-        );
-      else
-        throw new Error(
-          `Key ${action.key} is unavailable here; use a visible control.`,
-        );
-    } else throw new Error("This action is handled by the Drive controller.");
-    // Force layout before acknowledging so the next decision sees the result.
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve()),
-    );
-    await api("ui-result", {
-      id: command.id,
-      result,
-      observation: observeUI(),
-    });
-  } catch (error) {
-    await api("ui-result", {
-      id: command.id,
-      error: error instanceof Error ? error.message : String(error),
-    }).catch(() => {});
-  } finally {
-    driveNavigating = false;
-  }
-});
 
 window.addEventListener("resize", () => {
   if (overlay) placeOverlay();

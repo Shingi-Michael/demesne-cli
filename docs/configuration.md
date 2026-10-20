@@ -191,7 +191,6 @@ The exported [environment map](../packages/config/src/index.ts) is authoritative
 | Images | `DEMESNE_IMAGE_URL`, `DEMESNE_IMAGE_MODEL`, `DEMESNE_IMAGE_API_KEY`, `DEMESNE_IMAGE_REQUEST_TIMEOUT_MS` |
 | OpenRouter login | `OPENROUTER_API_KEY` |
 | Desktop launch | `DEMESNE_DESKTOP_BIN` (the desktop app `demesne` opens; see [troubleshooting](troubleshooting.md#the-desktop-window-doesnt-open)) |
-| Drive transport | `DEMESNE_DRIVE_CONTROL=ui` selects the compatibility UI-control path |
 
 `DEMESNE_NO_INTRO` and `DEMESNE_NO_HYPERLINKS` are also read by the config loader. `NO_COLOR` and `DEMESNE_REDUCED_MOTION` affect the plain terminal output utilities; they are not general CSS feature switches.
 

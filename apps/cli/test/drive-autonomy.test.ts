@@ -26,9 +26,9 @@ test.each(["socket", "validation"])("Drive recovers %s planning failures from a 
       requests.push(request);
       if (requests.length === 1) {
         progress({ type: "reasoning.delta", delta: "Partial thought before failure" });
-        throw kind === "socket" ? new Error("The socket connection was closed unexpectedly.") : new DrivePlanningError("action.key missing", "decision");
+        throw kind === "socket" ? new Error("The socket connection was closed unexpectedly.") : new DrivePlanningError("action.text missing", "decision");
       }
-      return choose({ kind: "key", key: "ctrl+b" });
+      return choose({ kind: "compose", text: "Run the parser tests" });
     } });
   try {
     drive.start("Review"); await drive.step();
@@ -36,7 +36,7 @@ test.each(["socket", "validation"])("Drive recovers %s planning failures from a 
     expect(drive.state?.traces?.[0]?.reasoning).toContain("Partial thought"); expect(drive.state?.traces?.[0]?.status).toBe("failed");
     await drive.step(); expect(actions).toBe(1); expect(drive.state?.status).toBe("running");
     expect(requests[1]?.observation.id).not.toBe(requests[0]?.observation.id);
-    expect(requests[1]?.memory.feedback).toContain("No new UI action was executed"); expect(drive.state?.feedback).toBeUndefined();
+    expect(requests[1]?.memory.feedback).toContain("No new action was executed"); expect(drive.state?.feedback).toBeUndefined();
   } finally { drive.dispose(); }
 });
 

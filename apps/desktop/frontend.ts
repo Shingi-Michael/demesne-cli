@@ -1,6 +1,5 @@
 import { createDesktopBridge, type DesktopInvoke } from "./frontend-bridge.ts";
 import type { GraphicsSnapshot, StateUpdate } from "../graphics/state-wire.ts";
-import type { GraphicsUICommand } from "../graphics/drive-controller.ts";
 
 interface DesktopBootstrap {
   workspace: string | null;
@@ -69,7 +68,7 @@ function showError(error: unknown) {
   setBusy(false);
   el<HTMLButtonElement>("desktop-retry").focus({ preventScroll: true });
   // Shell readiness shows the initially hidden native window even when the
-  // workspace UI cannot mount. Drive commands still wait for bridge.ready().
+  // workspace UI cannot mount.
   void request("desktop-ready").catch(() => {});
 }
 function showActionError(error: unknown) {
@@ -244,7 +243,6 @@ async function start() {
     if (!native) throw new Error("Open Demesne with its desktop launcher. This page requires the native application bridge.");
     listeners.push(...await Promise.all([
       native.event.listen<StateUpdate>("demesne:update", (event) => bridge.update(event.payload)),
-      native.event.listen<GraphicsUICommand>("demesne:command", (event) => bridge.command(event.payload)),
       native.event.listen<unknown>("demesne:desktop-error", (event) => showError(event.payload)),
       native.event.listen<{ action: "open-project" | "settings" }>("demesne:desktop-action", (event) => {
         if (event.payload.action === "open-project") void openProject();

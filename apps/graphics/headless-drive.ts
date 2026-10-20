@@ -25,8 +25,7 @@ export async function runHeadlessDrive(options: { workspace: string; sessionId: 
     workspace: options.workspace, server: options.server, sessionId: options.sessionId, settings: options.settings, headless: true,
     ...(test.client ? { client: test.client } : {}),
     changed: () => {},
-    // Direct control never sends screen commands.
-    command: () => {},
+    drive: true,
   });
   // A cancelled CI job pauses the mission and saves it, as closing the window would.
   const interrupt = () => { host.dispose(); process.exit(130); };

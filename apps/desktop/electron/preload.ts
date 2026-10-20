@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-const events = new Set(["demesne:update", "demesne:command", "demesne:desktop-error", "demesne:desktop-action"]);
+const events = new Set(["demesne:update", "demesne:desktop-error", "demesne:desktop-action"]);
 contextBridge.exposeInMainWorld("demesneDesktop", {
   core: {
     invoke(command: string, args: Record<string, unknown> = {}) {

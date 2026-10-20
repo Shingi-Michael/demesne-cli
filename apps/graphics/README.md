@@ -21,13 +21,13 @@ The interface uses your existing config, daemon, models, workspace tools, sessio
 | ↑↓, Enter, Esc | Select, open, close menus |
 | y / n | Allow once / deny a pending approval |
 
-Drive uses direct daemon operations and recorded evidence by default. `DEMESNE_DRIVE_CONTROL=ui` selects its compatibility DOM-control path. Drive cannot answer permissions or questions; user intervention pauses it. See [Agent Drive](../../docs/agent-drive.md).
+Drive uses direct daemon operations and recorded evidence. It cannot answer permissions or questions; user intervention pauses it. See [Agent Drive](../../docs/agent-drive.md).
 
 ## Host and state
 
-`host.ts` owns authenticated daemon requests, config, filesystem operations, and credentials. The page receives public snapshots and sends named actions; it has no daemon token, Node access, network connection, or arbitrary shell API. Markdown is sanitized before rendering. The compatibility UI-control path uses short-lived capabilities for exact composer text. Direct Drive operations validate the session and recorded evidence; live corrections also reject stale worker state. The desktop's [process boundary](../desktop/README.md#process-boundary) describes how the window, Electron main process and host connect.
+`host.ts` owns authenticated daemon requests, config, filesystem operations, and credentials. The page receives public snapshots and sends named actions; it has no daemon token, Node access, network connection, or arbitrary shell API. Markdown is sanitized before rendering. Drive operations validate the session and recorded evidence; live corrections also reject stale worker state. The desktop's [process boundary](../desktop/README.md#process-boundary) describes how the window, Electron main process and host connect.
 
-`state-wire.ts` sends changed fields, changed turns, and appended text. The browser retains unchanged history locally. Revision and text-offset checks reject incomplete updates, buffer updates that overtake a bootstrap response, and request an authoritative snapshot before continuing. `markdown.ts` re-lexes the complete reply for Markdown correctness but only sanitizes, highlights, and replaces changed blocks; unchanged blocks retain their DOM nodes. Folded turns release those nodes, and static Markdown caching has a 2 MiB byte budget. The compatibility Drive path observes the page only on demand or at a bounded active cadence; the default direct path reads recorded daemon state.
+`state-wire.ts` sends changed fields, changed turns, and appended text. The browser retains unchanged history locally. Revision and text-offset checks reject incomplete updates, buffer updates that overtake a bootstrap response, and request an authoritative snapshot before continuing. `markdown.ts` re-lexes the complete reply for Markdown correctness but only sanitizes, highlights, and replaces changed blocks; unchanged blocks retain their DOM nodes. Folded turns release those nodes, and static Markdown caching has a 2 MiB byte budget. Drive reads recorded daemon state, never the page.
 
 ## No side panels
 

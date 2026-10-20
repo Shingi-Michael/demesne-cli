@@ -206,7 +206,7 @@ test("repeated summaries do not reset the no-progress counter", async () => {
   try {
     h.drive.start("Review parser");
     for (let i = 0; i < 7; i++) {
-      h.action = { kind: "scroll", row: i, column: 1, amount: 1 };
+      h.action = { kind: "wait" };
       h.screen = {
         id: "x",
         sessionId: "home",

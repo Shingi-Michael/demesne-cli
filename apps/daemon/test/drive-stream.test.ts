@@ -18,7 +18,7 @@ async function fixture(processor: TurnProcessor) {
     observation: { id: "screen", sessionId: session.id, workspace: session.workspace!.root, title: "Review", mode: "input", ready: true, draft: "", surface: "response", width: 100, height: 30, rows: ["Saved result"], controls: [] } };
   return { app, client, request, async close() { await app.close(); rmSync(root, { recursive: true, force: true }); } };
 }
-const action = JSON.stringify({ action: { kind: "key", key: "ctrl+b" }, note: "Read the execution log", notes: "Inspect recorded checks", completed: [], remaining: ["Review"], evidence: [] });
+const action = JSON.stringify({ action: { kind: "wait" }, note: "Read the execution log", notes: "Inspect recorded checks", completed: [], remaining: ["Review"], evidence: [] });
 
 test("production HTTP survives cold prefill, queued JSON planning, and idle events beyond Bun's default timeout", async () => {
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>(); let calls = 0;
@@ -51,8 +51,8 @@ test("production HTTP survives cold prefill, queued JSON planning, and idle even
     const streamed = await streamResult, json = await jsonResult, idle = await eventResult;
     expect("error" in streamed ? String(streamed.error) : null).toBeNull();
     expect("error" in json ? String(json.error) : null).toBeNull();
-    expect("value" in streamed && streamed.value.decision.action.kind).toBe("key");
-    expect("value" in json && json.value.decision.action.kind).toBe("key");
+    expect("value" in streamed && streamed.value.decision.action.kind).toBe("wait");
+    expect("value" in json && json.value.decision.action.kind).toBe("wait");
     expect("value" in idle && idle.value.includes(": heartbeat")).toBe(true);
     expect(calls).toBe(2); expect((await client.status()).activeInferences).toBe(0);
   } finally {
@@ -96,7 +96,7 @@ test("real Drive HTTP/client stream exposes thinking and drafts before a validat
     expect(progress.map((event) => event.type)).toEqual(["queued", "attempt", "reasoning.delta"]);
     expect(settled).toBe(false); expect((await f.client.status()).activeInferences).toBe(1);
     gate.resolve(); const result = await pending;
-    expect(result.decision.action).toEqual({ kind: "key", key: "ctrl+b" });
+    expect(result.decision.action).toEqual({ kind: "wait" });
     expect(progress.flatMap((event) => event.type === "action.delta" ? [event.delta] : []).join("")).toBe(action);
     expect(progress.some((event) => event.type === "usage" && event.usage.outputTokens === 50)).toBe(true);
     expect((await f.client.status()).activeInferences).toBe(0);
@@ -131,7 +131,7 @@ test("streamed corrections expose both attempts and never return an invalid draf
   } };
   const f = await fixture(processor), progress: DriveProgress[] = [];
   try {
-    expect((await f.client.decideDrive(f.request, undefined, (event) => progress.push(event))).decision.action.kind).toBe("key");
+    expect((await f.client.decideDrive(f.request, undefined, (event) => progress.push(event))).decision.action.kind).toBe("wait");
     expect(progress.filter((event) => event.type === "attempt").map((event) => event.attempt)).toEqual([1, 2]);
     expect(progress.find((event) => event.type === "correction")?.message).toContain("valid JSON");
   } finally { await f.close(); }

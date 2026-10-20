@@ -50,13 +50,12 @@ test("direct observation is a recorded transcript: requests, tool lines, answers
   expect(control.observe().id).toBe(observation.id);
 });
 
-test("compose submits through the API; screen actions are refused without effect", async () => {
+test("compose submits through the API", async () => {
   const { control, submitted } = host();
   const observation = control.observe(), signal = new AbortController().signal;
   expect(await control.perform({ kind: "compose", text: "Add a test for emoji identifiers" }, observation, signal)).toStartWith(SENT);
   expect(await control.perform({ kind: "compose", text: "/plan Review the lexer" }, observation, signal)).toStartWith(SENT);
   expect(submitted).toEqual([{ text: "Add a test for emoji identifiers", plan: false }, { text: "Review the lexer", plan: true }]);
-  expect(await control.perform({ kind: "key", key: "ctrl+b" }, observation, signal)).toStartWith("UI changed");
   await expect(control.perform({ kind: "compose", text: "/new" }, observation, signal)).rejects.toThrow("requests or /plan");
   expect(submitted).toHaveLength(2);
 });

@@ -42,7 +42,7 @@ import {
   isPlaceholderTitle,
   titleFromRequest,
 } from "../cli/src/session-title.ts";
-import { GraphicsDrive, type GraphicsUICommand } from "./drive-controller.ts";
+import { GraphicsDrive } from "./drive-controller.ts";
 import { ProviderAccounts, type ProviderEntry } from "./providers.ts";
 import { BreakageWatch } from "./breakage.ts";
 import { missionReceipt } from "../cli/src/drive-receipt.ts";
@@ -61,7 +61,8 @@ export interface GraphicsHostOptions {
   settings?: CliSettings;
   client?: DemesneClient;
   providerAccounts?: Pick<ProviderAccounts, "signingIn" | "list" | "signIn" | "signOut" | "cancel">;
-  command?: (command: GraphicsUICommand) => void;
+  /// Runs Drive in this host (the desktop window and headless missions).
+  drive?: boolean;
   /// Desktop hosts use trusted native IPC instead of command-line OS utilities.
   copy?: (text: string) => Promise<void>;
   open?: (path: string) => Promise<void>;
@@ -242,7 +243,7 @@ export class GraphicsHost {
       process.env.COLORFGBG,
     ).name;
     this.selectedSession = options.sessionId;
-    if (options.command) this.drive = new GraphicsDrive(this, options.command);
+    if (options.drive) this.drive = new GraphicsDrive(this);
   }
   get api() {
     return this.client;
@@ -955,8 +956,6 @@ export class GraphicsHost {
     if (!globals.has(method) && args.sessionId !== this.current?.session.id)
       throw new Error("The session changed. Try the action again.");
     if (method === "auto-approve") {
-      if (args.driveCommand !== undefined)
-        throw new Error("Only you can change session approvals.");
       if (typeof args.autoApprove !== "boolean")
         throw new Error("Invalid auto-approve setting");
       if (!this.current) throw new Error("Choose a session first.");
@@ -1041,11 +1040,10 @@ export class GraphicsHost {
       await this.refreshProcesses();
       return this.processes;
     }
-    const driven = this.drive?.authorize(method, args);
     // Only the person sending a message takes over from Drive ("manual" is
     // kept for callers that take over explicitly; typing no longer sends it).
     // Clicking, navigating, opening panels and reading leave it running.
-    if (!driven && ["manual", "submit", "plan-submit", "themefy"].includes(method)) {
+    if (["manual", "submit", "plan-submit", "themefy"].includes(method)) {
       this.onManual?.();
       this.drive?.agent.intervene();
     }
@@ -1189,7 +1187,6 @@ export class GraphicsHost {
       return;
     }
     if (method === "themefy") {
-      if(args.driveCommand)throw new Error("Only the user can start a theme interview");
       if(!this.current)await this.newSession();
       if(this.current!.active)throw new Error("Wait for the current turn to finish before starting Themefy");
       if(this.themeLibrary && !this.themeLibrary.persisted)this.setThemes(await this.client.selectTheme(this.theme));
@@ -1292,7 +1289,6 @@ export class GraphicsHost {
       return;
     }
     if (method === "question-action") {
-      if (args.driveCommand !== undefined) throw new Error("Only the user can answer or control an interview");
       if (!this.current) throw new Error("Choose a session first");
       const id=string(args.id,"question id",200), selected=this.current!;
       const pending=selected.questions.get(id);
@@ -1438,7 +1434,7 @@ export class GraphicsHost {
     }
     if (
       this.drive &&
-      ["drive", "drive-control", "observe", "ui-result", "manual"].includes(
+      ["drive", "drive-control", "manual"].includes(
         method,
       )
     )

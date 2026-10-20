@@ -20,11 +20,11 @@ test.each(["length", "missing", "multiple", "invalid", "valid"])("planner reject
       expect(messages.slice(0, 2).map((message) => message.role)).toEqual(["system", "user"]);
       yield { type: "reasoning_delta", delta: "Inspect visible evidence." };
       if (kind !== "missing") yield { type: "tool_call_delta", index: kind === "multiple" ? 1 : 0, idDelta: "ui", nameDelta: "drive_ui",
-        argumentsDelta: kind === "invalid" ? '{"action":' : JSON.stringify(choose({ kind: "key", key: "alt+h" })) };
+        argumentsDelta: kind === "invalid" ? '{"action":' : JSON.stringify(choose({ kind: "wait" })) };
       yield { type: "finish", reason: kind === "length" ? "length" : "tool_calls" };
     } };
   const planned = planDrive(request(), (thinking) => snapshotTurnInference(processor, thinking), new AbortController().signal);
-  if (kind === "valid") expect((await planned).decision.action).toEqual({ kind: "key", key: "alt+h" });
+  if (kind === "valid") expect((await planned).decision.action).toEqual({ kind: "wait" });
   else await expect(planned).rejects.toThrow();
 });
 
@@ -88,19 +88,19 @@ test.each(["missing-field", "bad-json", "unknown-target"])("planner corrects a m
     expect(thinking).toBeUndefined(); expect(signal.aborted).toBe(false);
     if (++calls === 2) {
       expect(messages.at(-1)?.role).toBe("tool");
-      expect(messages.at(-1)?.content).toContain("No UI action was performed");
-      expect(messages.at(-1)?.content).toContain(kind === "missing-field" ? "action.key" : kind === "bad-json" ? "valid JSON" : "action.target");
+      expect(messages.at(-1)?.content).toContain("No action was performed");
+      expect(messages.at(-1)?.content).toContain(kind === "missing-field" ? "action.text" : kind === "bad-json" ? "valid JSON" : "action.target");
       const prior = messages.at(-2);
       expect(prior?.role === "assistant" ? prior.toolCalls?.[0]?.id : undefined).toBe("invalid-decision");
     }
-    const invalid = kind === "bad-json" ? '{"action":' : JSON.stringify(choose(kind === "unknown-target" ? { kind: "click", target: "absent" } : { kind: "key" } as DriveAction));
+    const invalid = kind === "bad-json" ? '{"action":' : JSON.stringify(choose(kind === "unknown-target" ? { kind: "inspect", target: "screen" } as unknown as DriveAction : { kind: "compose" } as unknown as DriveAction));
     yield { type: "tool_call_delta", index: 0, idDelta: calls === 1 ? "invalid-decision" : "corrected", nameDelta: "drive_ui",
-      argumentsDelta: calls === 1 ? invalid : JSON.stringify(choose({ kind: "key", key: "ctrl+b" })) };
+      argumentsDelta: calls === 1 ? invalid : JSON.stringify(choose({ kind: "wait" })) };
     yield { type: "finish", reason: "tool_calls" };
   } };
   const inference = snapshotTurnInference(processor, undefined);
   expect(inference.maxOutputTokens).toBe(131072);
-  expect((await planDrive(request(), () => inference, new AbortController().signal)).decision.action).toEqual({ kind: "key", key: "ctrl+b" });
+  expect((await planDrive(request(), () => inference, new AbortController().signal)).decision.action).toEqual({ kind: "wait" });
   expect(calls).toBe(2);
 });
 
@@ -110,12 +110,12 @@ test("invalid corrections stop with the exact field; a decision that thinks past
     const thinkingByCall: (boolean | undefined)[] = [];
     const processor: TurnProcessor = { providerId: "test", modelId: "test", async listModels() { return []; }, async *stream(_messages, _tools, _signal, thinking) {
       calls++; thinkingByCall.push(thinking);
-      yield { type: "tool_call_delta", index: 0, idDelta: "bad", nameDelta: "drive_ui", argumentsDelta: JSON.stringify(choose({ kind: "scroll", row: 0, column: 0, amount: 0 })) };
+      yield { type: "tool_call_delta", index: 0, idDelta: "bad", nameDelta: "drive_ui", argumentsDelta: JSON.stringify(choose({ kind: "compose" } as unknown as DriveAction)) };
       yield { type: "finish", reason: truncated ? "length" : "tool_calls" };
     } };
     const pending = planDrive(request(), (thinking) => snapshotTurnInference(processor, thinking), new AbortController().signal);
     if (truncated) await expect(pending).rejects.toThrow("output token limit");
-    else await expect(pending).rejects.toThrow("Drive decision invalid after one correction: Agent Drive action.amount");
+    else await expect(pending).rejects.toThrow("Drive decision invalid after one correction: Agent Drive action.text");
     // Two calls either way: a correction that thinks, or one quick retry after
     // the cap — never a third, so a decision cannot loop.
     expect(calls).toBe(2);
@@ -142,7 +142,7 @@ test("planner corrects self-cited evidence before navigation without weakening t
   body.observation.evidenceRows = ["Recorded output: 999 pass"];
   const processor: TurnProcessor = { providerId: "test", modelId: "test", async listModels() { return []; }, async *stream(messages) {
     if (++calls === 2) expect(messages.at(-1)?.content).toContain("evidence[0]");
-    yield { type: "tool_call_delta", index: 0, idDelta: "evidence", nameDelta: "drive_ui", argumentsDelta: JSON.stringify(choose({ kind: "key", key: "ctrl+b" }, {
+    yield { type: "tool_call_delta", index: 0, idDelta: "evidence", nameDelta: "drive_ui", argumentsDelta: JSON.stringify(choose({ kind: "wait" }, {
       evidence: [{ observationId: body.observation.id, quote: calls === 1 ? "Resuming from the current UI" : "Recorded output: 999 pass" }],
     })) };
     yield { type: "finish", reason: "tool_calls" };
@@ -174,7 +174,7 @@ test("Drive caps each decision's output: quick steps lower than thinking ones, n
     createTurnInference(thinking: boolean | undefined, overrides?: { maxOutputTokens?: number }) {
       seen.push(overrides?.maxOutputTokens);
       return snapshotTurnInference({ providerId: "test", modelId: "test", maxOutputTokens: Math.min(131072, overrides?.maxOutputTokens ?? 131072), async listModels() { return []; },
-        async *stream() { yield { type: "tool_call_delta" as const, index: 0, idDelta: "ok", nameDelta: "drive_ui", argumentsDelta: JSON.stringify(choose({ kind: "key", key: "ctrl+b" })) }; yield { type: "finish" as const, reason: "tool_calls" }; } } as TurnProcessor, thinking);
+        async *stream() { yield { type: "tool_call_delta" as const, index: 0, idDelta: "ok", nameDelta: "drive_ui", argumentsDelta: JSON.stringify(choose({ kind: "wait" })) }; yield { type: "finish" as const, reason: "tool_calls" }; } } as TurnProcessor, thinking);
     } } as unknown as TurnProcessor;
   const { DRIVE_QUICK_TOKENS, DRIVE_THOUGHT_TOKENS } = await import("../src/drive-planner.ts");
   const inferenceFor = (thinking: boolean | undefined) => snapshotTurnInference(processor, thinking, { maxOutputTokens: thinking === false ? DRIVE_QUICK_TOKENS : DRIVE_THOUGHT_TOKENS });

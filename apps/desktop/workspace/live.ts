@@ -2075,6 +2075,14 @@ function settingsRows(section: string): SettingsRow[] {
             keywords: "approvals permissions ask before edits",
           }]
         : []),
+      ...(window.demesne.mode === "desktop"
+        ? [{
+            title: "Notify me",
+            description: "Mac banners when a chat waits on you, stops with an error, or Drive has a branch ready. Always also tells you when a chat finishes.",
+            control: settingsSegments(NOTIFY_MODES.map(([mode, label]) => [label, notifyMode === mode, "notify-mode", { mode }] as [string, boolean, string, Record<string, unknown>]), "Notify me"),
+            keywords: "notifications banners alerts dock",
+          }]
+        : []),
     ];
   if (section === "appearance") {
     const groups: [string, typeof s.themeOptions][] = [["Your themes", []], ["Dark", []], ["Light", []]];
@@ -2170,6 +2178,56 @@ function renderSettings() {
   el("overlay").innerHTML =
     `<nav class="settings-nav" aria-label="Settings sections"><div class="settings-search"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="chooser-filter" placeholder="Search" aria-label="Search settings" value="${h(overlayQuery)}" autocomplete="off"></div><div class="settings-group">Settings</div>${nav}</nav><div class="settings-body">${btn("close-overlay", "×", {}, "dialog-close").replace("<button ", '<button aria-label="Close dialog" ')}${body}</div>`;
 }
+/// Mac banners. "needs" (the default) speaks only when a chat waits on you,
+/// stops with an error, or Drive has a branch ready; "always" also says when
+/// a chat finishes; "never" stays quiet. Nothing shows for the chat you are
+/// looking at, and the first look after opening only takes stock.
+type NotifyMode = "needs" | "always" | "never";
+const NOTIFY_MODES: [NotifyMode, string][] = [["needs", "When it needs you"], ["always", "Always"], ["never", "Never"]];
+let notifyMode: NotifyMode = "needs";
+try { const saved = localStorage.getItem("demesne-notify"); if (saved === "always" || saved === "never") notifyMode = saved; } catch {}
+let notified: Set<string> | null = null;
+const notifyFrom = Date.now() - 5_000;
+function setNotifyMode(mode: NotifyMode) {
+  notifyMode = mode;
+  try { localStorage.setItem("demesne-notify", mode); } catch {}
+}
+function renderNotifications() {
+  if (!state || window.demesne.mode !== "desktop" || state.connection !== "online") return;
+  const current = state.session, looking = document.hasFocus() && !drivePageOpen;
+  const alerts = new Map<string, { title: string; body: string; sessionId?: string; path?: string }>();
+  for (const item of state.sessions) {
+    // Whatever happened before the app opened is old news.
+    if (Date.parse(item.updatedAt) < notifyFrom) continue;
+    const mine = item.id === current?.id, title = mine && inSession() ? current!.title : item.title;
+    const waits = mine ? Boolean(state.approvals.length || state.questions.length) : item.waiting;
+    const where = { sessionId: item.id, path: item.workspace };
+    if (waits) {
+      const approval = mine ? state.approvals[0] : undefined, input = (approval?.input ?? {}) as Record<string, unknown>;
+      const asked = approval?.name === "run_command" ? `Wants to run: ${Array.isArray(input.argv) ? input.argv.join(" ") : String(input.command ?? "")}` : approval ? `Wants to ${approval.name.replace(/_/g, " ")}${input.path ? ` ${String(input.path).split("/").pop()}` : ""}` : "";
+      const body = asked || (mine && state.questions.length ? "Has a question for you" : "Is waiting for you");
+      alerts.set(`${item.id}:wait:${item.updatedAt}`, { title, body, ...where });
+    } else if (item.status === "failed") alerts.set(`${item.id}:failed:${item.updatedAt}`, { title, body: "Stopped with an error", ...where });
+    else if (item.status === "completed" && notifyMode === "always") alerts.set(`${item.id}:done:${item.updatedAt}`, { title, body: "Finished", ...where });
+  }
+  for (const job of reviewJobs()) if (job.status === "ready") alerts.set(`drive:${job.id}`, { title: "Drive", body: `${job.title} is ready to review${job.diff ? ` · +${job.diff.additions} −${job.diff.deletions}` : ""}`, ...(job.sessionId ? { sessionId: job.sessionId } : {}) });
+  const fresh = notified ? [...alerts].filter(([key]) => !notified!.has(key)) : [];
+  notified = new Set([...(notified ?? []), ...alerts.keys()]);
+  if (notifyMode === "never") return;
+  for (const [, alert] of fresh) {
+    if (looking && alert.sessionId === current?.id) continue;
+    void api("desktop-notify", alert).catch(() => {});
+  }
+}
+// A banner's click comes back here and opens its chat.
+document.addEventListener("demesne:open-chat", (event) => {
+  const { sessionId, path } = (event as CustomEvent<{ sessionId?: string; path?: string }>).detail ?? {};
+  if (!sessionId || !state) return;
+  if (drivePageOpen) setDrivePage(false);
+  if (sessionId === state.session?.id) return;
+  const here = !path || path === (document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace);
+  void act(() => dispatch(here ? "select-session" : "project-session", here ? { id: sessionId } : { id: sessionId, path }));
+});
 /// Drive's page: the sidebar's Drive row (or Alt+J) turns the main column
 /// into Drive, and choosing a chat turns it back. No panel, no popup: each
 /// control sits on the row it acts on.
@@ -3145,6 +3203,11 @@ async function dispatch(
     return renderOverlay();
   }
   // A setting changes in place; the sheet stays open to show it took.
+  if (action === "notify-mode") {
+    setNotifyMode(args.mode as NotifyMode);
+    overlaySignature = "";
+    return renderOverlay();
+  }
   if (action === "settings-set") {
     const result = await api<{ zoom?: number } | null>(String(args.method), args.args ?? {});
     if (args.method === "desktop-zoom" && typeof result?.zoom === "number") zoomLevel = result.zoom;
@@ -3357,6 +3420,7 @@ function renderState(next: Snapshot) {
   renderDrivePage();
   renderCompletion();
   renderSetup();
+  renderNotifications();
   if (
     !editor.disabled &&
     !overlay &&

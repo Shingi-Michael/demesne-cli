@@ -3,7 +3,7 @@ import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
 import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
 import type { ReviewScope } from "@demesne/protocol";
-import { readArtifact, ingestImage } from "./artifacts.ts";
+import { readArtifact, ingestImage, imageSize } from "./artifacts.ts";
 import {
   encodeServerSentEvent,
   isRecord,
@@ -30,6 +30,7 @@ import {
   type EventEnvelope,
   type SubmitTurnResponse,
   type Turn,
+  type TurnAttachment,
   type TurnChangesResponse,
   type UndoSessionRequest,
   type UndoTurnResponse,
@@ -194,6 +195,7 @@ export function createDaemonApp(options: {
   if (invalidRules.length > 0) {
     console.warn(`Ignoring ${invalidRules.length} invalid permissions.allow entr${invalidRules.length === 1 ? "y" : "ies"}: ${invalidRules.join(", ")}`);
   }
+  const uploads = new Map<string, { sessionId: string; data: Buffer; mimeType: string; attachment: TurnAttachment }>();
   const permissions = new PermissionBroker(allowlist, (sessionId) => store.isSessionAutoApprove(sessionId), (sessionId) => store.isSessionAcceptEdits(sessionId));
   const questions = new QuestionBroker(options.questionTimeoutMs);
   const inferenceSlots = options.inferenceSlots ?? 1;
@@ -787,6 +789,30 @@ export function createDaemonApp(options: {
         }catch(error){return apiError("invalid_request",error instanceof Error?error.message:String(error),400);}
       }
 
+      // An image the person attaches to their next message: checked and held
+      // here until the message names it in attachmentIds, then saved as an
+      // image artifact of that turn.
+      if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "attachments") {
+        const session = store.getSession(path[2]!);
+        if (!session) return apiError("not_found", "Session not found", 404);
+        const mimeType = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+        if (!["image/png", "image/jpeg", "image/webp"].includes(mimeType)) return apiError("invalid_request", "Attach a PNG, JPEG or WebP image", 400);
+        if (Number(request.headers.get("content-length") ?? 0) > 20 * 1024 * 1024) return apiError("invalid_request", "Images can be at most 20 MB", 400);
+        const data = Buffer.from(await request.arrayBuffer());
+        if (!data.byteLength || data.byteLength > 20 * 1024 * 1024) return apiError("invalid_request", "Images can be at most 20 MB", 400);
+        let filename = "image";
+        try { filename = decodeURIComponent(request.headers.get("x-demesne-filename") ?? "image"); } catch { /* keep the default */ }
+        filename = filename.replace(/[\u0000-\u001f/\\]/g, "").slice(0, 200) || "image";
+        try {
+          const size = await imageSize(data, mimeType);
+          const attachment: TurnAttachment = { id: randomUUID(), filename, ...size };
+          uploads.set(attachment.id, { sessionId: session.id, data, mimeType, attachment });
+          // Uploads nobody sent are dropped oldest first.
+          for (const id of uploads.keys()) { if (uploads.size <= 24) break; uploads.delete(id); }
+          return json(attachment, 201);
+        } catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : String(error), 400); }
+      }
+
       if (request.method === "GET" && path[0] === "v1" && path[1] === "sessions" && path[3] === "artifacts") {
         const sessionId = path[2]!;
         if (!store.getSession(sessionId)) return apiError("not_found", "Session not found", 404);
@@ -867,13 +893,28 @@ export function createDaemonApp(options: {
           const message = error instanceof Error ? error.message : "Turn processor cannot snapshot inference configuration";
           return apiError("not_supported", message, 400);
         }
+        const held = (body.attachmentIds ?? []).map((id) => {
+          const upload = uploads.get(id);
+          if (!upload || upload.sessionId !== path[2]) throw new ProtocolValidationError("An attached image is missing; attach it again");
+          return upload;
+        });
+        const attachments = held.map((upload) => upload.attachment);
         const { turn, event } = store.createTurn(
           path[2]!,
           body.content,
           body.permissionMode ?? "deny",
           body.thinkingEnabled,
           body.planOnly ?? false,
+          "chat",
+          attachments,
         );
+        for (const upload of held) {
+          uploads.delete(upload.attachment.id);
+          // A failed save leaves the message's text naming the image; the
+          // model just doesn't receive its pixels.
+          await ingestImage(store, { data: upload.data, mimeType: upload.mimeType, filename: upload.attachment.filename },
+            { sessionId: turn.sessionId, turnId: turn.id, toolCallId: randomUUID(), name: "upload", id: upload.attachment.id }, 0).catch(() => undefined);
+        }
         queueTurn(turn, inference);
         const response: SubmitTurnResponse = { turn, eventId: event.eventId };
         return json(response, 202);

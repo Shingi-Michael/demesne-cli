@@ -8,6 +8,7 @@ import {
   type ProviderCallSnapshot,
   type UserQuestion,
   type QuestionState,
+  type TurnAttachment,
 } from "@demesne/protocol";
 import {
   restoreSessionEntries,
@@ -45,6 +46,7 @@ export interface WorkspaceRun {
   completedAt: string | null;
   planOnly: boolean;
   kind?: string;
+  attachments?: TurnAttachment[];
   entries: WorkbenchEntry[];
   receipt?: ResponseReceipt;
 }
@@ -154,6 +156,7 @@ export class WorkspaceSession {
           typeof p.thinkingEnabled === "boolean" ? p.thinkingEnabled : null,
         planOnly: p.planOnly === true,
         ...(p.kind === "compaction" || p.kind === "themefy" ? { kind: p.kind } : {}),
+        ...(Array.isArray(p.attachments) ? { attachments: p.attachments as TurnAttachment[] } : {}),
       });
     const turn = this.session.turns.find((turn) => turn.id === event.turnId);
     if (turn) {
@@ -293,6 +296,7 @@ export class WorkspaceSession {
           completedAt: turn.completedAt,
           planOnly: turn.planOnly ?? false,
           kind: turn.kind,
+          ...(turn.attachments?.length ? { attachments: turn.attachments } : {}),
           entries,
           receipt: close?.type === "notice" ? close.receipt : undefined,
         };

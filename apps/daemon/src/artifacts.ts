@@ -23,7 +23,7 @@ export function artifactRoot(store: DemesneStore): string {
 }
 
 export async function ingestImage(store: DemesneStore, image: ImageOutput,
-  origin: { sessionId: string; turnId: string; toolCallId: string; name: string }, index: number): Promise<ImageArtifact> {
+  origin: { sessionId: string; turnId: string; toolCallId: string; name: string; id?: string }, index: number): Promise<ImageArtifact> {
   if (image.data.byteLength > 20 * 1024 * 1024) throw new Error("Image exceeds 20 MiB");
   const decoder = sharp(image.data, { limitInputPixels: 40_000_000, animated: false });
   const info = await decoder.metadata();
@@ -40,12 +40,20 @@ export async function ingestImage(store: DemesneStore, image: ImageOutput,
     await rename(temporary, target);
   }
   const revision = image.revisionOf ? store.getImageArtifact(origin.sessionId, image.revisionOf) : null;
-  return store.recordImageArtifact({ id: crypto.randomUUID(), kind: "image", sessionId: origin.sessionId,
+  return store.recordImageArtifact({ id: origin.id ?? crypto.randomUUID(), kind: "image", sessionId: origin.sessionId,
     turnId: origin.turnId, toolCallId: origin.toolCallId, createdAt: new Date().toISOString(),
     filename: image.filename ?? `image-${index + 1}.${info.format === "jpeg" ? "jpg" : info.format}`,
     mimeType: mime, width: info.autoOrient.width, height: info.autoOrient.height, byteLength: image.data.byteLength, sha256: hash,
-    source: { kind: origin.name.startsWith("mcp__") ? "mcp" : "tool", name: origin.name, modelId: image.modelId ?? null },
+    source: { kind: origin.name === "upload" ? "upload" : origin.name.startsWith("mcp__") ? "mcp" : "tool", name: origin.name, modelId: image.modelId ?? null },
     revisionOf: revision?.id ?? null, ...(image.viewport?{viewport:image.viewport}:{}) }, `${origin.toolCallId}:${index}`);
+}
+
+/** Checks an uploaded image the way ingestImage will, and returns its size. */
+export async function imageSize(data: Uint8Array, mimeType: string): Promise<{ width: number; height: number }> {
+  const info = await sharp(data, { limitInputPixels: 40_000_000, animated: false }).metadata();
+  const mime = { png: "image/png", jpeg: "image/jpeg", webp: "image/webp" }[info.format as "png" | "jpeg" | "webp"];
+  if (!mime || mime !== mimeType || !info.width || !info.height || (info.pages ?? 1) > 1) throw new Error("Unsupported or mismatched image format");
+  return { width: info.autoOrient.width, height: info.autoOrient.height };
 }
 
 export function readArtifact(store: DemesneStore, artifact: ImageArtifact, preview: boolean): Promise<Buffer> {

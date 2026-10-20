@@ -70,7 +70,7 @@ export interface ImageArtifact {
   height: number;
   byteLength: number;
   sha256: string;
-  source: { kind: "mcp" | "tool"; name: string; modelId: string | null };
+  source: { kind: "mcp" | "tool" | "upload"; name: string; modelId: string | null };
   revisionOf: string | null;
   viewport?: {width:number;height:number;deviceScaleFactor?:number};
 }
@@ -162,7 +162,8 @@ export interface WorkspaceFileText extends WorkspaceFileStatus { content: string
 export interface ResponsesState { accountId: string; model: string; output: Record<string, unknown>[] }
 
 export type ModelMessage =
-  | { role: "system" | "user"; content: string }
+  | { role: "system"; content: string }
+  | { role: "user"; content: string; imageArtifactIds?: string[] }
   | { role: "assistant"; content: string | null; toolCalls?: ModelToolCall[]; responses?: ResponsesState }
   | { role: "tool"; toolCallId: string; content: string; imageArtifactIds?: string[] };
 
@@ -313,7 +314,11 @@ export interface Turn {
   /// Read-only planning turn: write and execution tools are not offered.
   planOnly?: boolean;
   kind?: "compaction" | "themefy";
+  /// Images the person attached to this message.
+  attachments?: TurnAttachment[];
 }
+
+export interface TurnAttachment { id: string; filename: string; width: number; height: number }
 
 export interface SessionCheckpoint {
   id: string;
@@ -457,6 +462,8 @@ export interface CreateSessionResponse {
 
 export interface SubmitTurnRequest {
   content: string;
+  /// Images uploaded to this session's artifacts first (at most 6).
+  attachmentIds?: string[];
   permissionMode?: PermissionMode;
   thinkingEnabled?: boolean;
   planOnly?: boolean;
@@ -625,11 +632,16 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
   if (value.planOnly !== undefined && typeof value.planOnly !== "boolean") {
     throw new ProtocolValidationError("planOnly must be a boolean");
   }
+  const attachmentIds = value.attachmentIds === undefined ? [] : value.attachmentIds;
+  if (!Array.isArray(attachmentIds) || attachmentIds.length > 6 || attachmentIds.some((id) => typeof id !== "string" || !id || id.length > 64)) {
+    throw new ProtocolValidationError("attachmentIds must be at most 6 artifact ids");
+  }
   return {
     content,
     ...(value.permissionMode ? { permissionMode: value.permissionMode } : {}),
     ...(value.thinkingEnabled !== undefined ? { thinkingEnabled: value.thinkingEnabled } : {}),
     ...(value.planOnly !== undefined ? { planOnly: value.planOnly } : {}),
+    ...(attachmentIds.length ? { attachmentIds } : {}),
   };
 }
 

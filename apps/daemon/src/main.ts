@@ -221,6 +221,7 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
     reasoningEffort: settings.reasoningEffort,
     openRouterIgnore: settings.openRouterIgnore,
     contextWindow: configuredContextCapacity,
+    vision: settings.vision,
   });
   const verifier = auth ? undefined : createRuntimeProfileVerifier({
     profile: runtimeProfile,

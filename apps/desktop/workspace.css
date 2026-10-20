@@ -599,3 +599,21 @@ body.drive-page-open #stage, body.drive-page-open #input-area, body.drive-page-o
   .desktop #mode-hint:not([hidden]) { animation: desktop-appear 160ms var(--ease); }
   .desktop #composer .composer-box { transition: box-shadow 180ms var(--ease); }
 }
+
+/* Attachments: thumbnails inside the composer box above the text, a drop
+   veil over the main column, and the sent images above the message. */
+.desktop #attach-row:not([hidden]) { display: flex; flex-wrap: wrap; gap: 8px; }
+.desktop #attach-row .att { position: relative; display: inline-flex; align-items: center; height: 44px; min-width: 44px; max-width: 200px; border-radius: var(--r-sm); background: var(--tone2); box-shadow: 0 0 0 1px var(--hair); overflow: hidden; }
+.desktop #attach-row .att img { height: 44px; width: auto; max-width: 120px; object-fit: cover; display: block; }
+.desktop .att-name { padding: 0 10px; color: var(--t2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desktop #attach-row .att-x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--ink) 80%, transparent); color: var(--t1); font-size: 12px; line-height: 18px; opacity: 0; cursor: pointer; }
+.desktop #attach-row .att:hover .att-x, .desktop #attach-row .att-x:focus-visible { opacity: 1; }
+.desktop #drop-zone { position: absolute; inset: 56px 8px 8px; z-index: 20; display: grid; place-items: center; border-radius: var(--r-lg); background: color-mix(in srgb, var(--acc) 6%, transparent); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--acc) 35%, transparent); color: var(--acc); font-size: 14px; pointer-events: none; }
+.desktop #drop-zone[hidden] { display: none; }
+.desktop .request-att { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; margin: 8px 0 -10px; }
+.desktop .request-att img { height: 72px; max-width: 160px; object-fit: cover; border-radius: var(--r); box-shadow: 0 0 0 1px var(--hair); }
+.desktop .request-att .att-name { display: inline-flex; align-items: center; height: 28px; border-radius: var(--r-sm); background: var(--tone2); }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop #attach-row .att-x { transition: opacity 140ms var(--ease); }
+  .desktop #drop-zone:not([hidden]) { animation: desktop-appear 140ms var(--ease); }
+}

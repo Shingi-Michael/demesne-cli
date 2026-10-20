@@ -5,6 +5,7 @@ import type {
   CommandsResponse,
   CommandRecord,
   ReviewScope,
+  TurnAttachment,
   WorkspaceFingerprint,
 } from "@demesne/protocol";
 import { createHash } from "node:crypto";
@@ -197,6 +198,8 @@ export class WorkspaceHost {
   untrustedWorkspace: string | null = null;
   private trustWorkspace = false;
   planOnly = false;
+  /** Images waiting to go with the next message, already uploaded. */
+  attachments: TurnAttachment[] = [];
   /** Plan is per chat: each chat keeps the mode it was left in. */
   private plans = new Map<string, boolean>();
   queue = "";
@@ -302,6 +305,7 @@ export class WorkspaceHost {
       busy: this.busy,
       files: this.files,
       planOnly: this.planOnly,
+      attachments: this.attachments,
       queue: this.queue,
       draft: this.draft,
       draftVersion: this.draftVersion,
@@ -500,6 +504,7 @@ export class WorkspaceHost {
       this.stream?.abort();
       this.current = new WorkspaceSession(state, events);
       this.planOnly = this.plans.get(id) ?? false;
+      this.attachments = [];
       this.reviewRevision++;
       this.reviewCache.clear();
       this.processes = [];
@@ -694,6 +699,7 @@ export class WorkspaceHost {
   async submit(content: string, planOnly = this.planOnly, permissionMode: "ask" | "allow" = "ask") {
     if (!this.current || this.connection !== "online")
       throw new Error("Connect to the daemon first.");
+    if (!content.trim() && this.attachments.length) content = "Take a look at the attached image.";
     if (!content.trim()) return;
     if (this.active) {
       // Enter while a turn runs queues the text as the next message.
@@ -714,11 +720,14 @@ export class WorkspaceHost {
         content,
         this.files.map((file) => file.path),
       );
+      const attached = this.attachments;
       const result = await this.client.submitTurn(id, {
         content: expanded,
         permissionMode,
         planOnly,
+        ...(attached.length ? { attachmentIds: attached.map((image) => image.id) } : {}),
       });
+      if (this.current?.session.id === id) this.attachments = this.attachments.filter((image) => !attached.includes(image));
       if (this.current?.session.id === id) {
         session.ensureTurn(result.turn);
         this.drive?.agent.workerStarted(id, content, result.turn.id);
@@ -1153,6 +1162,25 @@ export class WorkspaceHost {
     if (method === "mode") {
       this.planOnly = args.planOnly === true;
       if (this.current) this.plans.set(this.current.session.id, this.planOnly);
+      this.publish();
+      return;
+    }
+    // An image pasted, dropped or picked in the composer: uploaded now, sent
+    // with the next message.
+    if (method === "attach") {
+      if (!this.current) throw new Error("Choose a session first.");
+      if (typeof args.data !== "string" || typeof args.mimeType !== "string" || typeof args.name !== "string") throw new Error("Invalid image");
+      if (this.attachments.length >= 6) throw new Error("A message can carry at most 6 images.");
+      const selected = this.current;
+      const artifact = await this.client.uploadAttachment(selected.session.id, Buffer.from(args.data, "base64"), args.mimeType, args.name);
+      if (this.current !== selected) return;
+      const image = { id: artifact.id, filename: artifact.filename, width: artifact.width, height: artifact.height };
+      this.attachments = [...this.attachments, image];
+      this.publish();
+      return image;
+    }
+    if (method === "detach") {
+      this.attachments = this.attachments.filter((image) => image.id !== args.id);
       this.publish();
       return;
     }

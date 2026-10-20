@@ -108,7 +108,9 @@ body.desktop {
    terminal keeps the brand palette; the desktop maps the same roles here. */
 html[data-theme="demesne"] body.desktop {
   --ink: #121315; --side: #161719; --surface: #1b1c1f; --surface2: #212226; --surface3: #27292d;
-  --line: #26282c; --line2: #303337; --rule: #26282c; --borderBright: #303337; --raised: #212226;
+  --hair: rgba(255, 255, 255, 0.08); --hair2: rgba(255, 255, 255, 0.13); --tone: rgba(255, 255, 255, 0.04); --tone2: rgba(255, 255, 255, 0.07);
+  --line: var(--hair); --line2: var(--hair2); --rule: var(--hair); --borderBright: var(--hair2); --raised: #212226;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.25); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.3); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.5);
   --t1: #ededef; --t2: #b3b7bd; --t3: #80858c; --t4: #595e65;
   --strong: #ededef; --paper: #dcdee2; --secondary: #b3b7bd; --muted: #80858c;
   --acc: #7eaef0; --ok: #71c994; --bad: #ef8b8b; --warn: #e7b96a;
@@ -123,7 +125,9 @@ html[data-theme="demesne"] body.desktop {
 }
 html[data-theme="demesne-light"] body.desktop {
   --ink: #f7f7f5; --side: #efeeeb; --surface: #ffffff; --surface2: #f3f2ef; --surface3: #e9e8e4;
-  --line: #e4e3df; --line2: #d6d5d0; --rule: #e4e3df; --borderBright: #d6d5d0; --raised: #f3f2ef;
+  --hair: rgba(0, 0, 0, 0.09); --hair2: rgba(0, 0, 0, 0.15); --tone: rgba(0, 0, 0, 0.03); --tone2: rgba(0, 0, 0, 0.055);
+  --line: var(--hair); --line2: var(--hair2); --rule: var(--hair); --borderBright: var(--hair2); --raised: #f3f2ef;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.1); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.18);
   --t1: #1b1c1f; --t2: #4a4e55; --t3: #7a7f86; --t4: #a3a7ad;
   --strong: #1b1c1f; --paper: #2a2d33; --secondary: #4a4e55; --muted: #7a7f86;
   --acc: #2f6fd0; --ok: #2f9e5e; --bad: #d64e4e; --warn: #b87a12;

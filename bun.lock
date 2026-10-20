@@ -51,6 +51,7 @@
         "@demesne/protocol": "workspace:*",
         "@demesne/setup": "workspace:*",
         "@demesne/workbench": "workspace:*",
+        "@fontsource/inter": "5.1.1",
         "@fontsource/jetbrains-mono": "5.3.0",
         "dompurify": "3.4.16",
         "highlight.js": "11.12.0",
@@ -169,6 +170,8 @@
     "@electron/windows-sign": ["@electron/windows-sign@1.2.2", "", { "dependencies": { "cross-dirname": "^0.1.0", "debug": "^4.3.4", "fs-extra": "^11.1.1", "minimist": "^1.2.8", "postject": "^1.0.0-alpha.6" }, "bin": { "electron-windows-sign": "bin/electron-windows-sign.js" } }, "sha512-dfZeox66AvdPtb2lD8OsIIQh12Tp0GNCRUDfBHIKGpbmopZto2/A8nSpYYLoedPIHpqkeblZ/k8OV0Gy7PYuyQ=="],
 
     "@emnapi/runtime": ["@emnapi/runtime@1.11.3", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA=="],
+
+    "@fontsource/inter": ["@fontsource/inter@5.1.1", "", {}, "sha512-weN3E+rq0Xb3Z93VHJ+Rc7WOQX9ETJPTAJ+gDcaMHtjft67L58sfS65rAjC5tZUXQ2FdZ/V1/sSzCwZ6v05kJw=="],
 
     "@fontsource/jetbrains-mono": ["@fontsource/jetbrains-mono@5.3.0", "", {}, "sha512-fqDfB5I9f1p1TV486aUgB9t8zP84P0O1FtQR5Ol9vjwPy+S+EIGlVYm1cvj2W5shcZMTg2nZFdVMoH5wFu8a1A=="],
 

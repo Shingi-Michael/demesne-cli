@@ -18,7 +18,7 @@ for (const [entry, destination, target, format] of [
 }
 const metadata = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 writeFileSync(join(application, "package.json"), JSON.stringify({ name: "demesne-desktop", productName: "Demesne", version: process.env.DEMESNE_BUILD_VERSION ?? metadata.version, description: "A coding workspace with durable sessions and Agent Drive", author: "Demesne contributors", main: "main.cjs" }, null, 2));
-writeFileSync(join(out, "ui.css"), readFileSync(join(workspace, "ui.css"), "utf8").replaceAll("node_modules/@fontsource/jetbrains-mono/files/", "vendor/fonts/"));
+writeFileSync(join(out, "ui.css"), readFileSync(join(workspace, "ui.css"), "utf8").replaceAll(/node_modules\/@fontsource\/[a-z-]+\/files\//g, "vendor/fonts/"));
 cpSync(join(workspace, "live.css"), join(out, "live.css"));
 writeFileSync(join(out, "index.html"), readFileSync(join(desktop, "index.html"), "utf8").replaceAll("node_modules/katex/dist/katex.min.css", "vendor/katex/katex.min.css"));
 cpSync(join(desktop, "desktop.css"), join(out, "desktop.css"));
@@ -26,6 +26,7 @@ cpSync(join(desktop, "workspace.css"), join(out, "workspace.css"));
 cpSync(join(workspace, "assets"), join(out, "assets"), { recursive: true });
 mkdirSync(join(out, "vendor/fonts"), { recursive: true });
 for (const weight of [400, 500]) cpSync(join(desktop, "node_modules/@fontsource/jetbrains-mono/files", `jetbrains-mono-latin-${weight}-normal.woff2`), join(out, "vendor/fonts", `jetbrains-mono-latin-${weight}-normal.woff2`));
+for (const weight of [400, 500, 600]) cpSync(join(desktop, "node_modules/@fontsource/inter/files", `inter-latin-${weight}-normal.woff2`), join(out, "vendor/fonts", `inter-latin-${weight}-normal.woff2`));
 mkdirSync(join(out, "vendor/katex"), { recursive: true });
 cpSync(join(desktop, "node_modules/katex/dist/katex.min.css"), join(out, "vendor/katex/katex.min.css"));
 cpSync(join(desktop, "node_modules/katex/dist/fonts"), join(out, "vendor/katex/fonts"), { recursive: true });

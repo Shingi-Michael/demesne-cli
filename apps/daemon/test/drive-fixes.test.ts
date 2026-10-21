@@ -186,10 +186,10 @@ test("a /drive mission gets its own worktree session, survives a daemon restart,
   const list = async () => (await call(`/v1/drive/fixes?workspace=${encodeURIComponent(workspace)}`)).body.fixes as DriveFix[];
   try {
     await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) });
-    const opened = await call("/v1/drive/fixes", { method: "POST", body: JSON.stringify({ workspace, signals: [], mission: "Make the parser strict\nand keep its tests green" }) });
+    const opened = await call("/v1/drive/fixes", { method: "POST", body: JSON.stringify({ workspace, signals: [], mission: "Make the parser strict\nand keep its tests green", from: "chat-home" }) });
     expect(opened.status).toBe(201);
     const mission = opened.body.fix as DriveFix;
-    expect(mission).toMatchObject({ status: "running", title: "Make the parser strict", turnId: null, mission: "Make the parser strict\nand keep its tests green" });
+    expect(mission).toMatchObject({ status: "running", title: "Make the parser strict", turnId: null, mission: "Make the parser strict\nand keep its tests green", from: "chat-home" });
     expect(mission.branch).toMatch(/^drive\/mission-make-the-parser-strict-/);
     expect(mission.sessionId).toBeTruthy();
     // While its worktree is open, nothing else starts one.
@@ -200,6 +200,7 @@ test("a /drive mission gets its own worktree session, survives a daemon restart,
     app = createDaemonApp({ databasePath, processor });
     server = Bun.serve({ port: 0, fetch: app.fetch });
     expect((await list()).find((fix) => fix.id === mission.id)?.status).toBe("running");
+    expect((await list()).find((fix) => fix.id === mission.id)?.from).toBe("chat-home");
 
     // Drive's planner submits a turn to the mission session; it edits the worktree only.
     const submitted = await call(`/v1/sessions/${mission.sessionId}/turns`, { method: "POST", body: JSON.stringify({ content: "Make parser.ts strict", permissionMode: "allow" }) });

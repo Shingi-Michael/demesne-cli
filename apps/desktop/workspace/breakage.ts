@@ -169,9 +169,9 @@ export class BreakageWatch {
   /// Opens a worktree and session for a /drive mission. Drive's planner works
   /// there; finishMission commits the result for the card. Throws when it
   /// can't (not a git repository, or worktree work already running).
-  async openMission(mission: string): Promise<DriveFix> {
+  async openMission(mission: string, from?: string): Promise<DriveFix> {
     if (this.state.busy) throw new Error("Wait for the current worktree action to finish.");
-    const { fix } = await this.options.client().startDriveFix({ workspace: this.options.workspace(), signals: [], mission });
+    const { fix } = await this.options.client().startDriveFix({ workspace: this.options.workspace(), signals: [], mission, ...(from ? { from } : {}) });
     if (fix.status === "failed" || !fix.sessionId) throw new Error(fix.error ?? "Couldn't open a worktree for the mission.");
     // A branch still waiting for review keeps its place in the inbox.
     const waiting = this.state.fix;

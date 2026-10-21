@@ -51,7 +51,11 @@ export interface DriveDecision {
   answer?: string;
 }
 export interface DriveStep { step: number; action: string; note: string; result: string; at: string }
-export interface DriveMemory { notes: string; completed: string[]; remaining: string[]; evidence: DriveEvidence[]; steps: DriveStep[]; feedback?: string }
+/// A note you sent a running mission from the chat that started it.
+export interface DriveTold { text: string; at: string }
+export interface DriveMemory { notes: string; completed: string[]; remaining: string[]; evidence: DriveEvidence[]; steps: DriveStep[]; feedback?: string;
+  /// Your notes from the chat that started the mission, newest last.
+  told?: DriveTold[] }
 export interface DriveAutonomy {
   consultationTurnId?: string; consultations?: number;
   phase: "working" | "discovering"; task: string; cycle: number; consulted: boolean;
@@ -106,6 +110,8 @@ export interface DriveFix {
   /// Set for a /drive mission: the mission text. Drive's planner submits its
   /// turns to the worktree session, and finishing it commits the result.
   mission?: string;
+  /// A mission's: the chat you started it from.
+  from?: string;
   /// Ignored paths linked into the worktree (shared node_modules), never committed.
   linked?: string[];
   branch: string; path: string; base: string;
@@ -129,7 +135,7 @@ export interface DriveFix {
 export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "why"> & Partial<Pick<DriveProposal, "minutes" | "confidence">>;
 /// A breakage fix sends 1-5 signals; a proposal sends the signals it cites
 /// (0-5); a mission sends none.
-export interface DriveFixRequest { workspace: string; signals: DriveSignal[]; proposal?: DriveFixProposal; mission?: string }
+export interface DriveFixRequest { workspace: string; signals: DriveSignal[]; proposal?: DriveFixProposal; mission?: string; from?: string }
 export interface DriveFixFinishRequest { summary?: string; receipt?: string; headline?: string }
 export interface DriveFixesResponse { fixes: DriveFix[] }
 export type DriveFixAction = "apply" | "pr" | "discard";
@@ -494,6 +500,7 @@ export function parseDriveRequest(value: unknown): DriveRequest {
     ...(typeof value.thinking === "boolean" ? { thinking: value.thinking } : {}),
     memory: { notes: text(memory.notes, 8000, "memory.notes", true), completed: list(memory.completed, "memory.completed"), remaining: list(memory.remaining, "memory.remaining"), evidence: evidence(memory.evidence, "memory.evidence"),
       ...(memory.feedback !== undefined ? { feedback: text(memory.feedback, 8000, "memory.feedback") } : {}),
+      ...(memory.told !== undefined ? { told: told(memory.told) } : {}),
       steps: memory.steps.map((step, index) => {
         const path = `memory.steps[${index}]`;
         if (!isRecord(step)) invalid(path, "expected an object");
@@ -507,6 +514,13 @@ export function parseDriveNextRequest(value: unknown): DriveNextRequest {
 export function parseDriveAlertsRequest(value: unknown): DriveAlertsRequest {
   if (!isRecord(value)) invalid("request", "expected an object");
   return { workspace: text(value.workspace, 4096, "workspace"), ...(value.gh === true ? { gh: true } : {}) };
+}
+function told(value: unknown): DriveTold[] {
+  if (!Array.isArray(value) || value.length > 8) invalid("memory.told", "expected at most 8 notes");
+  return value.map((item, index) => {
+    if (!isRecord(item)) invalid(`memory.told[${index}]`, "expected a note");
+    return { text: text(item.text, 2000, `memory.told[${index}].text`), at: text(item.at, 100, `memory.told[${index}].at`) };
+  });
 }
 export function parseDriveFixRequest(value: unknown): DriveFixRequest {
   if (!isRecord(value)) invalid("request", "expected an object");
@@ -527,7 +541,8 @@ export function parseDriveFixRequest(value: unknown): DriveFixRequest {
     if (!isRecord(item) || !sources.includes(String(item.source))) invalid(path, "expected a signal");
     return { id: text(item.id, 200, `${path}.id`), source: item.source as DriveSignal["source"], title: text(item.title, 300, `${path}.title`), detail: text(item.detail, 1000, `${path}.detail`, true), urgent: item.urgent === true };
   });
-  return { workspace: text(value.workspace, 4096, "workspace"), signals, ...(proposal ? { proposal } : {}), ...(mission !== undefined ? { mission } : {}) };
+  const from = mission !== undefined && value.from !== undefined ? text(value.from, 100, "from") : undefined;
+  return { workspace: text(value.workspace, 4096, "workspace"), signals, ...(proposal ? { proposal } : {}), ...(mission !== undefined ? { mission } : {}), ...(from ? { from } : {}) };
 }
 export const DRIVE_AWAY_MAX_ITEMS = 6;
 export function parseDriveAwayRequest(value: unknown): DriveAwayRequest {

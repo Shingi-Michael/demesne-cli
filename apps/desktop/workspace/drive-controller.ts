@@ -99,6 +99,13 @@ export class WorkspaceDrive {
       } else if (value !== "status") await this.startMission(value);
       return;
     }
+    // A note from your chat. A blocked mission takes it as the answer and
+    // goes again.
+    if (method === "drive-tell") {
+      this.agent.tell(String(args.text ?? ""));
+      if (this.agent.state?.status === "blocked") this.agent.control("resume");
+      return;
+    }
     if (method === "drive-control") {
       if (!["pause", "resume", "stop"].includes(String(args.control)))
         throw new Error("Unknown Drive control");

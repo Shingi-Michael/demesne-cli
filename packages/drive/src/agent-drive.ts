@@ -188,6 +188,15 @@ export class AgentDrive {
     this.state.status="running"; this.state.activity=`Reopened by you: ${reason}`;
     this.startGuardClock(); this.publish(); this.schedule();
   }
+  /// A note from the chat that started the mission. Drive reads every note
+  /// before its next decision; the last eight are kept.
+  tell(text: string): void {
+    if (!this.state) throw new Error("No Drive mission to tell. Start one with /drive <mission>.");
+    const note = text.trim().slice(0, 2000);
+    if (!note) return;
+    this.state.told = [...(this.state.told ?? []), { text: note, at: new Date().toISOString() }].slice(-8);
+    this.publish();
+  }
   control(control: DriveControl): void {
     if (!this.state) throw new Error("No saved Drive mission. Start one with /drive <mission>.");
     if (this.state.status === "completed") throw new Error("This Drive mission is complete. Start another with /drive <mission>.");
@@ -447,7 +456,7 @@ export class AgentDrive {
       }
       const request: DriveRequest = { mode:state.mode, ledger:structuredClone(state.ledger), facts:state.facts, ...this.projectMemory(), mission: state.mission, homeSessionId: state.homeSessionId, observation, checkIn: { turnId: worker.turnId, cursor: worker.cursor, ...(this.services.checkpointReviews ? {freshEvidence:true,reason} : {}) }, thinking: false,
         ...(state.autonomy ? { autonomy: structuredClone(state.autonomy) } : {}), memory: { notes: state.notes, completed: state.completed, remaining: state.remaining,
-          evidence: [], steps: state.steps.slice(-6), ...(state.feedback ? { feedback: state.feedback } : {}) } };
+          evidence: [], steps: state.steps.slice(-6), ...(state.feedback ? { feedback: state.feedback } : {}), ...(state.told?.length ? { told: state.told } : {}) } };
       guard.planning = newTokenMeter(Math.ceil(JSON.stringify(request).length / 4)); chargeDriveTokens(guard, guard.planning, "planningTokens");
       if (!this.checkProtection(false)) return;
       this.publish();
@@ -684,7 +693,7 @@ export class AgentDrive {
         ...(state.autonomy ? { autonomy: structuredClone(state.autonomy) } : {}),
         ...(this.inspection ? { inspection: this.inspection } : {}),
         ...(state.workflow?.steps[state.workflow.current] ? { workflowStep: (({ title, check }) => ({ title, ...(check ? { check } : {}) }))(state.workflow.steps[state.workflow.current]!) } : {}),
-        memory: { notes: state.notes, completed: state.completed, remaining: state.remaining, evidence: state.evidence, steps: state.steps.slice(-12), ...(state.feedback ? { feedback: state.feedback } : {}) }, observation,
+        memory: { notes: state.notes, completed: state.completed, remaining: state.remaining, evidence: state.evidence, steps: state.steps.slice(-12), ...(state.feedback ? { feedback: state.feedback } : {}), ...(state.told?.length ? { told: state.told } : {}) }, observation,
         thinking: this.thinkingFor(observation, state, recovering) };
       state.protection!.planning = newTokenMeter(Math.ceil(JSON.stringify(request).length / 4));
       chargeDriveTokens(state.protection!, state.protection!.planning, "planningTokens");

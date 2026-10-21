@@ -494,6 +494,20 @@ try {
   const compacted = (await f.client.getSessionState(sessionId)).checkpoint!;
   assert(compacted && compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
+  // The cards on the right carry where the chat works, its context and what
+  // changed; the composer's ring and the branch chip stand aside meanwhile.
+  await until(() => page.locator("#cards [data-card=context]").innerText().then(text => text.includes(`${percentage}%`) && text.includes("Chat") && text.includes("Tools")), "the Context card shows the reduced context");
+  await until(() => page.locator("#cards [data-card=changes]").innerText().then(text => text.includes("+1") && text.includes("−1") && text.includes("Commit & PR")), "the Changes card lists what changed");
+  await until(() => page.locator("#cards [data-card=environment]").innerText().then(text => text.includes("This computer") && text.includes("Heartbeat")), "the Environment card names where the chat works");
+  assert(!(await page.locator("#composer-context").isVisible()), "the composer ring stands aside while the cards show");
+  await capture("04-cards");
+  await page.locator("#cards [data-card=environment] .card-head").click();
+  await until(() => page.locator("#cards [data-card=environment].folded").count().then(count => count === 1), "a card folds to one line");
+  await page.locator("#cards [data-card=environment] .card-head").click();
+  await page.locator("#cards [data-card=environment] .card-body").waitFor();
+  // The panel icon hides the cards; the ring and the branch chip come back.
+  await page.locator(".header-cards").click();
+  await page.locator("#cards").waitFor({ state: "hidden" });
   await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
   // The branch chip carries what changed since the last commit; the ring
   // unfolds the context breakdown above it until Esc.
@@ -503,6 +517,8 @@ try {
   await capture("04-context");
   await page.keyboard.press("Escape");
   await page.locator("#context-card").waitFor({ state: "hidden" });
+  await page.locator(".header-cards").click();
+  await page.locator("#cards [data-card=context]").waitFor();
   await until(() => page.locator(".compaction-card").count().then(count => count === 1), "conversation summary visible");
   const firstTurnId = completedSession.turns[0]!.id;
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Older conversation is unmounted by default");

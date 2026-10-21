@@ -238,6 +238,7 @@ export class DemesneClient {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/review?${query}`);
   }
   /// Other agents Heartbeat sees (empty when Heartbeat is off).
+  async connectors(): Promise<{ servers: { name: string; state: "starting" | "ready" | "failed"; tools: number }[]; heartbeat: boolean }> { return this.request("/v1/connectors"); }
   async heartbeatAgents(): Promise<{ node: string | null; agents: NearbyAgent[] }> { return this.request("/v1/heartbeat/agents"); }
   async commands(sessionId:string,output="all"):Promise<CommandsResponse>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands?output=${encodeURIComponent(output)}`);}
   async stopCommand(sessionId:string,id:string):Promise<{stopping:boolean}>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(id)}/stop`,{method:"POST",body:"{}"});}

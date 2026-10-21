@@ -36,7 +36,9 @@ describe("McpManager", () => {
   test("discovers and calls tools from a stdio server", async () => {
     const registry = new ToolRegistry();
     const manager = new McpManager({ servers: { stub: stubConfig } });
+    expect(manager.status()).toEqual([{ name: "stub", state: "starting", tools: 0 }]);
     await manager.start(registry);
+    expect(manager.status()).toEqual([{ name: "stub", state: "ready", tools: 1 }]);
 
     const tool = registry.get(mcpToolName("stub", "echo"));
     expect(tool).toBeDefined();
@@ -57,6 +59,7 @@ describe("McpManager", () => {
     await manager.start(registry);
     expect(registry.definitions().some((definition) => definition.name.startsWith("mcp__"))).toBe(false);
     expect(messages.some((message) => message.includes("broken"))).toBe(true);
+    expect(manager.status()).toEqual([{ name: "broken", state: "failed", tools: 0 }]);
     manager.stop();
   });
 

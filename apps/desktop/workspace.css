@@ -663,3 +663,55 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop #drive-reply.open .bf-row:nth-child(2) { transition-delay: 100ms, 100ms, 0ms; }
   .desktop #drive-reply.open .bf-row:nth-child(n+3), .desktop #drive-reply.open .bf-foot, .desktop #drive-reply.open .drive-live { transition-delay: 140ms, 140ms, 0ms; }
 }
+/* The cards on the right (top bar's panel icon): one column of quiet cards,
+   each a tone with a hairline ring; headers fold a card to one line. Shown
+   only where there is room. */
+#cards { display: none; }
+@media (min-width: 1100px) {
+  .desktop .live-app.cards-on #cards:not([hidden]) { display: flex; flex-direction: column; gap: 8px; flex: none; width: 288px; padding: 4px 14px 14px 0; overflow-y: auto; scrollbar-width: none; }
+  .desktop .live-app.cards-on #composer-context, #desktop-shell:has(.live-app.cards-on) #desktop-toolbar .chip { display: none; }
+}
+#desktop-toolbar .header-cards { margin-left: auto; display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--r-sm); color: var(--t3); }
+#desktop-toolbar .header-cards:hover { background: var(--surface2); color: var(--t1); }
+#desktop-toolbar .header-cards.on { background: var(--tone2); color: var(--t1); }
+#desktop-toolbar .header-cards + .header-more { margin-left: 2px; }
+@media (max-width: 1099px) { #desktop-toolbar .header-cards { display: none; } #desktop-toolbar .header-cards + .header-more { margin-left: auto; } }
+.desktop #cards .card { background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair); border-radius: var(--r); font-size: 12.5px; color: var(--t2); }
+.desktop #cards .card-head { display: flex; align-items: center; gap: 4px; width: 100%; padding: 10px 12px; text-align: left; color: var(--t1); font-weight: 600; font-size: 12.5px; border-radius: var(--r); }
+.desktop #cards .card-head:hover .card-chev { opacity: 1; }
+.desktop #cards .card-chev { width: 13px; height: 13px; color: var(--t3); opacity: 0.6; }
+.desktop #cards .folded .card-chev { transform: rotate(-90deg); }
+.desktop #cards .card-sum { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--t3); }
+.desktop #cards .card:not(.folded) .card-sum:not(:has(.counts, .card-meter, .agent-mark)) { visibility: hidden; }
+.desktop #cards .card-body { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 2px; }
+.desktop #cards .card-row { position: relative; display: flex; align-items: center; gap: 8px; min-height: 26px; min-width: 0; }
+.desktop #cards .card-row .ico { width: 14px; height: 14px; flex: none; color: var(--t3); }
+.desktop #cards .card-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); }
+.desktop #cards .card-label em { font-style: normal; color: var(--t3); }
+.desktop #cards .card-right { flex: none; color: var(--t3); }
+.desktop #cards .card-on { color: var(--ok); }
+.desktop #cards .card-meter { display: inline-block; width: 28px; height: 4px; border-radius: 2px; background: var(--tone2); overflow: hidden; }
+.desktop #cards .card-meter i { display: block; height: 100%; background: var(--t2); }
+.desktop #cards .context-bar { display: flex; height: 6px; margin: 4px 0 8px; border-radius: 3px; overflow: hidden; background: var(--tone2); }
+.desktop #cards .context-bar i { display: block; height: 100%; min-width: 2px; }
+.desktop #cards .tone-a { background: var(--acc, #7eaef0); }
+.desktop #cards .tone-b { background: #a58cf0; }
+.desktop #cards .tone-c { background: var(--t4); }
+.desktop #cards .card-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--t3); font-size: 11.5px; }
+.desktop #cards .card-legend u { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 2px; }
+.desktop #cards .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; color: var(--t3); font-size: 11.5px; }
+.desktop #cards .card-foot .link { color: var(--t2); text-decoration: underline; text-decoration-color: var(--hair2); text-underline-offset: 3px; }
+.desktop #cards .card-btn { flex: none; padding: 4px 10px; border-radius: var(--r-sm); background: var(--tone2); color: var(--t1); font-size: 12px; }
+.desktop #cards .card-btn:hover { background: var(--surface3, var(--hair2)); }
+.desktop #cards .card-act { position: absolute; right: 0; padding: 3px 9px; border-radius: var(--r-sm); background: var(--surface2); color: var(--t1); font-size: 12px; opacity: 0; pointer-events: none; }
+.desktop #cards .card-hover:hover .card-act, .desktop #cards .card-act:focus-visible { opacity: 1; pointer-events: auto; }
+.desktop #cards .card-dot { width: 7px; height: 7px; margin: 0 3.5px; border-radius: 50%; flex: none; background: var(--t4); }
+.desktop #cards .card-dot.ready { background: var(--ok); }
+.desktop #cards .card-dot.failed { background: var(--danger, #e5484d); }
+.desktop #cards .counts { display: inline-flex; gap: 6px; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop #cards .card-chev { transition: transform 160ms var(--ease), opacity 140ms var(--ease); }
+  .desktop #cards .card-act { transition: opacity 140ms var(--ease); }
+  .desktop #cards .card-body { animation: card-unfold 200ms var(--ease); }
+}
+@keyframes card-unfold { from { opacity: 0; transform: translateY(-3px); } }

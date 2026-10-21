@@ -240,8 +240,16 @@ export interface McpManagerOptions {
   log?: (message: string) => void;
 }
 
+export interface McpServerStatus {
+  name: string;
+  state: "starting" | "ready" | "failed";
+  tools: number;
+}
+
 export class McpManager {
   private readonly clients = new Map<string, McpStdioClient>();
+  /// Each server's tool count once started, or null when it failed.
+  private readonly started = new Map<string, number | null>();
   private readonly log: (message: string) => void;
 
   constructor(options: McpManagerOptions) {
@@ -261,13 +269,24 @@ export class McpManager {
     await Promise.all([...this.clients.values()].map(async (client) => {
       const started = await client.start();
       if (!started) {
+        this.started.set(client.name, null);
         this.log(`MCP server ${client.name} is unavailable`);
         return;
       }
-      for (const definition of client.listTools()) {
+      const tools = client.listTools();
+      for (const definition of tools) {
         registry.register(buildAgentTool(client, definition));
       }
+      this.started.set(client.name, tools.length);
     }));
+  }
+
+  /// The configured servers, for the desktop's Connectors card.
+  status(): McpServerStatus[] {
+    return [...this.clients.keys()].map((name) => {
+      const tools = this.started.get(name);
+      return { name, state: tools === undefined ? "starting" : tools === null ? "failed" : "ready", tools: tools ?? 0 };
+    });
   }
 
   stop(): void {

@@ -4,6 +4,7 @@ import { markdown, MarkdownView } from "./markdown.ts";
 import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
+import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
@@ -823,11 +824,9 @@ function nextSuggestion(): string | null {
 /// part, the whole turns a quarter on a random axis, and they close. One
 /// timer turns every mark together, and a mark drawn mid-beat starts where
 /// the others are, so repaints never restart it.
-const cubeTurn = { x: -24, y: 36, z: 0 };
-let cubeParted = false;
-const cubeTransform = () => `rotateX(${cubeTurn.x}deg) rotateY(${cubeTurn.y}deg) rotateZ(${cubeTurn.z}deg)`;
-const CUBELETS = [-1, 1].flatMap((x) => [-1, 1].flatMap((y) => [-1, 1].map((z) => `<b style="--x:${x};--y:${y};--z:${z}"><i></i><i></i><i></i><i></i><i></i><i></i></b>`))).join("");
-const spinner = () => `<span class="cube-mark${cubeParted ? " parted" : ""}" aria-hidden="true"><span class="cube" style="transform:${cubeTransform()}">${CUBELETS}</span></span>`;
+let cube = restingCube(performance.now());
+const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+const spinner = () => `<span class="cube-mark" aria-hidden="true">${cubeSvg(cube, performance.now(), reducedMotion())}</span>`;
 /// Words for work in progress, with a silver shine sweeping across them.
 /// The delay keeps a repainted line in step with the sweep instead of
 /// restarting it (3s each way).
@@ -4051,19 +4050,18 @@ void window.demesne
   });
 // Spinners and thinking sub-agents' phrases advance in place; the DOM (and
 // so the terminal's tiles) only changes when a glyph or phrase does.
-setInterval(() => {
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches || !document.querySelector(".cube-mark")) return;
-  const marks = () => document.querySelectorAll<HTMLElement>(".cube-mark");
-  const part = (on: boolean) => { cubeParted = on; for (const mark of marks()) mark.classList.toggle("parted", on); };
-  part(true);
-  setTimeout(() => {
-    const axis = (["x", "y", "z"] as const)[Math.floor(Math.random() * 3)]!;
-    cubeTurn[axis] += Math.random() < 0.5 ? 90 : -90;
-    const turn = cubeTransform();
-    for (const mark of marks()) (mark.firstElementChild as HTMLElement).style.transform = turn;
-  }, 220);
-  setTimeout(() => part(false), 760);
-}, 1400);
+// One frame loop draws every cube mark, and only while a cube moves.
+const drawCubes = (now: number) => {
+  requestAnimationFrame(drawCubes);
+  if (reducedMotion()) return;
+  const marks = document.querySelectorAll<HTMLElement>(".cube-mark");
+  if (!marks.length) return;
+  cube = advance(cube, now);
+  if (!moving(cube, now) && marks[0]!.dataset.at === String(cube.beatAt)) return;
+  const frame = cubeSvg(cube, now);
+  for (const mark of marks) { mark.innerHTML = frame; mark.dataset.at = String(cube.beatAt); }
+};
+requestAnimationFrame(drawCubes);
 setInterval(() => {
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   for (const span of document.querySelectorAll<HTMLElement>("[data-subagent-phrase]")) {

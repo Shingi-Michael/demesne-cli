@@ -252,7 +252,7 @@ try {
   assert(layout.scrollWidth <= layout.width + 1, "Long thinking text wraps without horizontal overflow");
   await capture("01-thinking-expanded");
   // While it thinks, the toggle carries the cube and the shining word.
-  assert.equal(await thinkingToggle.locator(".cube-mark b").count(), 8, "the working cube is eight cubelets");
+  assert((await thinkingToggle.locator(".cube-mark svg polygon").count()) >= 8, "the working cube draws its cubelets");
   assert.equal(await thinkingToggle.locator(".shine").innerText(), "Thinking");
   await capture("01-thinking-cube");
   await thinkingToggle.click();

@@ -135,9 +135,11 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
       at: turn.completedAt ?? recorded.findLast((event) => event.type === "message.completed" || /^turn\.(completed|failed|cancelled|interrupted)$/.test(event.type))?.occurredAt });
     if (turn.status !== "running" && turn.status !== "queued") {
       for (const tool of entries.filter((entry): entry is ToolEntry => entry.id > request.id && entry.type === "tool")) {
-        if (tool.state === "running") {
+        // A call still running, or still being drafted, when the turn ended
+        // did not finish: it shows as stopped, never as working.
+        if (tool.state === "running" || tool.drafting) {
           const stopped = turn.status === "cancelled" || turn.status === "interrupted";
-          tool.state = stopped ? "stopped" : "failed"; tool.waiting = false;
+          tool.state = stopped ? "stopped" : "failed"; tool.waiting = false; tool.drafting = false;
           tool.message = stopped ? "Stopped before a result was recorded." : "The run ended before a result was recorded.";
         }
       }

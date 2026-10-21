@@ -1,5 +1,5 @@
 import type { DemesneClient } from "@demesne/client";
-import type { DriveAway, DriveAwayRequest, DriveFix, DriveFixAction, DriveFixProposal, DriveSignal } from "@demesne/protocol";
+import type { DriveAuto, DriveAway, DriveFix, DriveFixAction, DriveFixProposal, DriveSignal } from "@demesne/protocol";
 
 /// Breakage alerts: notices when something newly breaks (a check starts
 /// failing, CI on the default branch turns red, an open PR's CI fails) and
@@ -17,6 +17,8 @@ export interface BreakageState {
   inbox: DriveFix[];
   /// The latest away run: proposals worked one after another while you're away.
   away: DriveAway | null;
+  /// Drive on by default: whether it starts on its own here, and today's runs.
+  auto: DriveAuto | null;
   /// The action in flight (fix, apply, pr, discard).
   busy: string | null;
   /// The outcome of the last action, or why it failed.
@@ -28,7 +30,7 @@ const OPEN = new Set(["starting", "running", "ready", "failed"]);
 export const neverAlert = (signal: Pick<DriveSignal, "title">) => `Never alert: ${signal.title}`;
 
 export class BreakageWatch {
-  state: BreakageState = { signals: [], fix: null, inbox: [], away: null, busy: null, message: null };
+  state: BreakageState = { signals: [], fix: null, inbox: [], away: null, auto: null, busy: null, message: null };
   /// Urgent signals at the last check; null until the first (the baseline).
   private seen: Map<string, DriveSignal> | null = null;
   private lastGitHub = 0;
@@ -64,6 +66,7 @@ export class BreakageWatch {
       if (this.state.fix && ["starting", "running"].includes(this.state.fix.status) && !this.state.fix.mission) this.watchFix();
     } catch { this.unsupported = true; return; }
     if (this.state.away?.status === "running") this.watchAway();
+    await this.refreshAuto();
     this.options.publish();
     await this.check();
     this.timer = setInterval(() => void this.check(), LOCAL_EVERY);
@@ -103,13 +106,24 @@ export class BreakageWatch {
     }, FIX_EVERY);
   }
 
-  /// Away mode: Drive runs these proposals one after another, each in its own
-  /// worktree, and they wait here for review.
-  async startAway(items: DriveAwayRequest["items"], minutes?: number) {
-    const { away } = await this.options.client().startDriveAway({ workspace: this.options.workspace(), items, ...(minutes ? { minutes } : {}) });
-    this.state.away = away; this.state.message = null;
+  /// Drive on by default: its switch here, and whether it started a run on
+  /// its own since the last look (the daemon starts those).
+  async refreshAuto() {
+    const client = this.options.client(), workspace = this.options.workspace();
+    try { this.state.auto = (await client.driveAuto(workspace)).auto; } catch { this.state.auto = null; return; }
+    if (this.awayTimer) return;
+    const away = (await client.driveAway(workspace).catch(() => ({ away: null }))).away;
+    if (away?.status !== "running") return;
     await this.refreshOpen().catch(() => {});
     this.watchAway();
+  }
+
+  async setAuto(on: boolean) {
+    const { auto } = await this.options.client().setDriveAuto(this.options.workspace(), on);
+    this.state.auto = auto;
+    // Turning it off stops a run it started on its own, after the current one.
+    if (!on && this.state.away?.auto) await this.refreshOpen().catch(() => {});
+    this.options.publish();
   }
 
   async stopAway() {
@@ -123,6 +137,7 @@ export class BreakageWatch {
     if (this.unsupported || this.checking || this.options.busy()) return;
     this.checking = true;
     try {
+      await this.refreshAuto();
       const gh = Date.now() - this.lastGitHub >= GITHUB_EVERY;
       const { signals } = await this.options.client().driveAlerts({ workspace: this.options.workspace(), ...(gh ? { gh: true } : {}) });
       if (gh) this.lastGitHub = Date.now();

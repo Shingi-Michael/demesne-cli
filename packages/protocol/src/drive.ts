@@ -154,9 +154,16 @@ export interface DriveAway {
   items: DriveAwayItem[];
   /// Why it ended early, when it did.
   reason?: string;
+  /// Drive started it on its own after you went quiet (see DriveAuto).
+  auto?: boolean;
 }
 export interface DriveAwayRequest { workspace: string; items: Pick<DriveAwayItem, "proposal" | "signals">[]; minutes?: number }
 export interface DriveAwayResponse { away: DriveAway | null }
+/// Drive on by default: once a project has been quiet for `quietMinutes`,
+/// Drive runs its top Next idea in a worktree on its own, at most `perDay`
+/// times a day. One switch per project turns it off.
+export interface DriveAuto { workspace: string; on: boolean; quietMinutes: number; perDay: number; usedToday: number }
+export interface DriveAutoResponse { auto: DriveAuto }
 export interface DriveRequest {
   mode?: DriveMode; ledger?: DriveLedger; facts?: DriveFacts;
   /// The workspace's project memory, bounded: standing preferences and

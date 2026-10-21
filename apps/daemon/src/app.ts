@@ -21,7 +21,7 @@ import {
   type SessionCleanupResponse,
   type DriveAlertsResponse,
   type DriveFixAction,
-  type DriveFixesResponse, type DriveAwayResponse,
+  type DriveFixesResponse, type DriveAwayResponse, type DriveAutoResponse,
   type ApiErrorBody,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
@@ -57,6 +57,7 @@ import { SessionToolStore } from "./session-tools.ts";
 import { DriveNextCache, proposeNext } from "./drive-next.ts";
 import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { DriveFixes } from "./drive-fixes.ts";
+import { DriveAutoRuns } from "./drive-auto.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
@@ -307,6 +308,24 @@ export function createDaemonApp(options: {
   const activeControllers = new Map<string, AbortController>();
   const activeStreamClosers = new Set<() => void>();
   const driveLifecycle = new AbortController();
+  // Drive on by default: a quiet project's top idea runs in a worktree on its own.
+  const driveAuto = new DriveAutoRuns(join(dirname(options.databasePath), "drive-auto.json"), {
+    workspaces: () => (store.database.query("SELECT root FROM workspaces").all() as { root: string }[]).map((row) => row.root),
+    trusted: (workspace) => workspaceTrust.isTrusted(workspace),
+    lastActivity: (workspace) => {
+      const row = store.database.query(`SELECT SUM(t.status IN ('queued', 'running')) AS active, MAX(COALESCE(t.completed_at, t.created_at)) AS last
+        FROM turns t JOIN sessions s ON s.id = t.session_id JOIN workspaces w ON w.id = s.workspace_id WHERE w.root = ?`).get(workspace) as { active: number | null; last: string | null } | null;
+      return !row?.last || row.active ? null : Date.parse(row.last);
+    },
+    busy: (workspace) => driveFixes.working(workspace),
+    ideas: (workspace) => {
+      const cached = driveNextCache.read(workspace);
+      return cached && { ...cached, proposals: applyCalibration(cached.proposals, calibrationLog.calibration(workspace)) };
+    },
+    start: (request) => { driveFixes.startAway(request); },
+  });
+  const driveAutoTimer = setInterval(() => { try { driveAuto.tick(); } catch { /* the next minute tries again */ } }, 60_000);
+  driveAutoTimer.unref?.();
   const activeDriveDecisions = new Set<Promise<unknown>>();
   const requestDrainWaiters = new Set<() => void>();
   let activeRequests = 0;
@@ -556,6 +575,17 @@ export function createDaemonApp(options: {
         if (!workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
         try { return json({ away: driveFixes.startAway(body) } satisfies DriveAwayResponse, 201); }
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start", 409); }
+      }
+      // Drive on by default, and the one switch per project that turns it off.
+      if (request.method === "GET" && url.pathname === "/v1/drive/auto") {
+        return json({ auto: driveAuto.state(url.searchParams.get("workspace") ?? "") } satisfies DriveAutoResponse);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/drive/auto") {
+        const body = await readJson(request) as { workspace?: unknown; on?: unknown };
+        if (typeof body?.workspace !== "string" || typeof body.on !== "boolean") return apiError("invalid_request", "Expected a workspace and on", 400);
+        // Turning it off also stops a run it started on its own, after the current one.
+        if (!body.on && driveFixes.away(body.workspace)?.auto) driveFixes.stopAway(body.workspace);
+        return json({ auto: driveAuto.set(body.workspace, body.on) } satisfies DriveAutoResponse);
       }
       if (request.method === "POST" && url.pathname === "/v1/drive/away/stop") {
         const body = await readJson(request) as { workspace?: unknown };
@@ -1171,6 +1201,7 @@ export function createDaemonApp(options: {
   async function closeApplication(): Promise<void> {
       closing = true;
       driveLifecycle.abort(new DOMException("Daemon shutting down", "AbortError"));
+      clearInterval(driveAutoTimer);
       for (const close of [...activeStreamClosers]) close();
       if (activeRequests > 0) {
         await new Promise<void>((resolve) => requestDrainWaiters.add(resolve));

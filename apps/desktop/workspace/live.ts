@@ -231,9 +231,8 @@ const expanded = new Set<string>(),
 /// screen, Drive's ideas under it); turns whose steps are open.
 let driveShown = false,
   ideasShown = false;
-let driveMissionDraft = "", driveContinuous = false, driveActionPending = "", driveActionError = "";
+let driveActionPending = "";
 /// Drive's page fills the main column in place of the conversation.
-let drivePageOpen = false, drivePageSignature = "";
 const stepsOpen = new Set<string>();
 /// Steps whose diff or output is unfolded in place, keyed run:tool.
 const stepOpen = new Set<string>();
@@ -450,7 +449,7 @@ function renderSidebar() {
     (sameControl ?? (focused >= 0 ? buttons[Math.min(focused, buttons.length - 1)] : null) ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
   }
   const title = document.getElementById("workspace-title");
-  if (title) { title.textContent = drivePageOpen ? "Drive" : inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
+  if (title) { title.textContent = inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
   // Under the project's name: its folder and branch, and the connection
   // only when it is not there.
   const sub = document.getElementById("desktop-project-sub");
@@ -459,15 +458,7 @@ function renderSidebar() {
     const link = state.connection === "online" ? "" : state.connection === "connecting" ? "connecting…" : "offline";
     sub.textContent = [state.workspace.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~"), branch, link].filter(Boolean).join(" · ");
   }
-  // Drive and Branches are two fixed rows: a dot on Drive when it has
-  // something for you, a count on Branches when its work waits for review.
-  const driveRow = document.getElementById("sidebar-drive"), pip = document.getElementById("sidebar-drive-pip");
-  if (driveRow && pip) {
-    const blocked = pinned?.status === "blocked";
-    pip.hidden = !(pinned || run.fix || run.away || ideas);
-    pip.className = `sidebar-pip${blocked ? " warn" : ""}`;
-    driveRow.title = blocked ? "Drive needs you" : pinned ? `Drive: ${missionTitle(pinned)}` : run.fix ? `Drive: ${run.fix.title}` : run.away ? "Drive is running the away list" : ideas ? `Drive has ${ideas} idea${ideas === 1 ? "" : "s"}` : "Drive";
-  }
+  // Branches is a fixed row with a count while Drive's work waits for review.
   const branchesRow = document.getElementById("sidebar-branches"), count = document.getElementById("sidebar-branches-count");
   if (branchesRow && count) {
     branchesRow.hidden = !review.length;
@@ -1706,7 +1697,7 @@ function renderBriefing() {
     inSession(), review.map((job) => [job.id, job.status, job.title, job.diff]), reviewShown, away?.status,
     pinned && (driveShown && !driveTurnMission() ? [pinned, detailsOpen.has("drive-details"), Math.floor(Date.now() / 10_000)] : [pinned.status, pinned.mission, driveTurnMission() ? driveProgress(pinned) : activeMinutes(pinned)]),
     run.fix && [run.fix.title, run.fix.status], run.away && run.away.items.map((item) => item.state),
-    driveShown, ideasShown, next.proposals, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
+    driveShown, ideasShown, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
   ]);
   if (signature === briefingSignature) return;
   briefingSignature = signature;
@@ -1734,6 +1725,8 @@ function renderBriefing() {
   } else if (run.fix || run.away) {
     const about = run.fix ? run.fix.title : `Drive's list · ${run.away!.items.filter((item) => !["queued", "running"].includes(item.state)).length} of ${run.away!.items.length} done`;
     parts.push(`${mark("spin")}${btn("drive-show", "Drive is working", {}, "bf-word")}<span class="bf-about">${h(about)}</span>`);
+  } else if (next.error && !next.proposals.length) {
+    parts.push(`${mark("amber")}<span class="bf-word">Drive couldn't look for ideas</span>${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}`);
   } else if (next.proposals.length) {
     const count = next.proposals.length;
     const title = `${count === 1 ? "One thing" : `${["", "", "Two", "Three", "Four", "Five"][count] ?? count} things`} I could do next`;
@@ -2210,7 +2203,7 @@ function setNotifyMode(mode: NotifyMode) {
 }
 function renderNotifications() {
   if (!state || window.demesne.mode !== "desktop" || state.connection !== "online") return;
-  const current = state.session, looking = document.hasFocus() && !drivePageOpen;
+  const current = state.session, looking = document.hasFocus();
   const alerts = new Map<string, { title: string; body: string; sessionId?: string; path?: string }>();
   for (const item of state.sessions) {
     // Whatever happened before the app opened is old news.
@@ -2239,137 +2232,22 @@ function renderNotifications() {
 document.addEventListener("demesne:open-chat", (event) => {
   const { sessionId, path } = (event as CustomEvent<{ sessionId?: string; path?: string }>).detail ?? {};
   if (!sessionId || !state) return;
-  if (drivePageOpen) setDrivePage(false);
   if (sessionId === state.session?.id) return;
   const here = !path || path === (document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace);
   void act(() => dispatch(here ? "select-session" : "project-session", here ? { id: sessionId } : { id: sessionId, path }));
 });
-/// Drive's page: the sidebar's Drive row (or Alt+J) turns the main column
-/// into Drive, and choosing a chat turns it back. No panel, no popup: each
-/// control sits on the row it acts on.
-function setDrivePage(open: boolean) {
-  if (open === drivePageOpen) return;
-  drivePageOpen = open;
-  drivePageSignature = sidebarSignature = "";
-  renderDrivePage();
-  renderSidebar();
-  if (open) document.getElementById("drive-mission")?.focus({ preventScroll: true });
-  else editor.focus({ preventScroll: true });
-}
-/// Drive takes one piece of work at a time.
-const driveBusy = () => Boolean(pinnedMission() || worktreeRun().fix || worktreeRun().away);
-const driveCanStart = () => Boolean(driveMissionDraft.trim()) && !driveBusy() && !driveActionPending && state?.connection === "online";
-const DRIVE_STATUS: Record<string, string> = { running: "Working", waiting: "Working", paused: "Paused", blocked: "Needs you", completed: "Done", stopped: "Stopped", idle: "Idle" };
-function renderDrivePage() {
-  if (!state) return;
-  const page = el("drive-page");
-  document.body.classList.toggle("drive-page-open", drivePageOpen);
-  page.hidden = !drivePageOpen;
-  for (const id of ["sidebar-drive", "rail-drive"]) {
-    const button = document.getElementById(id);
-    button?.classList.toggle("on", drivePageOpen);
-    if (drivePageOpen) button?.setAttribute("aria-current", "page");
-    else button?.removeAttribute("aria-current");
-  }
-  const title = document.getElementById("workspace-title");
-  if (title && drivePageOpen) title.textContent = title.title = "Drive";
-  if (!drivePageOpen) {
-    page.innerHTML = "";
-    return;
-  }
-  const drive = state.drive, next = state.driveNext, pinned = pinnedMission(), run = worktreeRun(), review = reviewJobs();
-  const busyWith = state.breakage.busy, pending = Boolean(driveActionPending), online = state.connection === "online";
-  const signature = JSON.stringify([drive, next, state.breakage, online, driveContinuous, driveActionPending, driveActionError, state.model.id, Math.floor(Date.now() / 30_000)]);
-  if (signature === drivePageSignature) return;
-  drivePageSignature = signature;
-  const active = page.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
-  const focusId = active?.id, focusAction = active?.dataset.action, focusArgs = active?.dataset.args;
-  const selection = active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] : null;
-  const scroll = page.scrollTop;
-  // One list, no labels: what is working, what is ready for you, then ideas.
-  // Each row is one line; its actions replace the word on the right when
-  // you point at it or tab into it.
-  const row = (mark: string, title: string, right: string, actions = "", className = "") =>
-    `<div class="drive-row${className ? ` ${className}` : ""}"><span class="drive-mk">${mark}</span>${title}<span class="drive-r">${right}</span>${actions ? `<span class="drive-act">${actions}</span>` : ""}</div>`;
-  const plain = (text: string, tip = "") => `<span class="drive-title"${tip ? ` title="${h(tip)}"` : ""}>${h(text)}</span>`;
-  const spin = '<span class="drive-spin" aria-hidden="true"></span>';
-  const dot = (kind: string) => `<span class="drive-dot ${kind}" aria-hidden="true"></span>`;
-  const rows: string[] = [];
-  if (pinned) {
-    const live = pinned.status === "running" || pinned.status === "waiting", blocked = pinned.status === "blocked";
-    const reason = blocked ? (pinned.activity?.trim() || pinned.steps.at(-1)?.note || "Drive stopped without recording a reason.").split("\n")[0]! : "";
-    const controls = [
-      live ? btn("drive-control", "Pause", { control: "pause" }, "", pending) : btn("drive-control", "Resume", { control: "resume" }, "primary", pending || !online),
-      btn("drive-control", "Stop", { control: "stop" }, "quiet", pending),
-    ].join("");
-    const title = btn("drive-conversation", h(missionTitle(pinned)), {}, "drive-title").replace("<button ", `<button title="${h(reason || "Open its conversation")}" `);
-    rows.push(row(live ? spin : blocked ? dot("warn") : dot("paused"), title, `<span class="drive-status${blocked ? " warn" : ""}">${DRIVE_STATUS[pinned.status] ?? pinned.status}</span> · ${h(activeMinutes(pinned))}`, controls));
-  }
-  if (run.fix) {
-    const activity = run.fix.activity ? `${run.fix.activity.steps} step${run.fix.activity.steps === 1 ? "" : "s"}` : "Starting";
-    rows.push(row(spin, plain(run.fix.title, run.fix.activity?.last ?? ""), h(activity), btn("breakage-discard", busyWith === "discard" ? "Stopping…" : "Stop", { id: run.fix.id }, "quiet", Boolean(busyWith))));
-  }
-  if (run.away) {
-    const finished = run.away.items.filter((item) => !["queued", "running"].includes(item.state)).length;
-    rows.push(row(spin, plain("Working through Drive's ideas"), `${finished} of ${run.away.items.length}`, btn("breakage-away-stop", "Stop after this one", {}, "quiet", Boolean(busyWith))));
-  }
-  for (const job of review) {
-    if (job.status === "failed") {
-      rows.push(row(dot("bad"), plain(job.title, job.error ?? ""), job.unchanged ? "No changes" : "Couldn’t finish", btn("breakage-discard", busyWith === "discard" ? "Discarding…" : "Discard", { id: job.id }, "quiet", Boolean(busyWith))));
-      continue;
-    }
-    const checks = job.checks ?? [], passed = checks.filter((check) => check.passed).length;
-    const verdict = !checks.length ? "no checks ran" : passed === checks.length ? "checks passed" : `${checks.length - passed} of ${checks.length} checks failed`;
-    const diff = job.diff ? `+${job.diff.additions} −${job.diff.deletions} in ${job.diff.files} file${job.diff.files === 1 ? "" : "s"}, ` : "";
-    rows.push(row(dot("ok"), plain(job.title, [job.summary, `${diff}${verdict}`, `on ${job.branch}`].filter(Boolean).join("\n")), "Ready to review",
-      `${btn("breakage-apply", busyWith === "apply" ? "Applying…" : "Apply", { id: job.id }, "primary", Boolean(busyWith)).replace("<button ", '<button title="Apply to my branch" ')}${btn("breakage-pr", busyWith === "pr" ? "Opening…" : "Open PR", { id: job.id }, "", Boolean(busyWith))}${btn("breakage-discard", busyWith === "discard" ? "Discarding…" : "Discard", { id: job.id }, "quiet", Boolean(busyWith))}`));
-  }
-  const look = (label: string) => btn("next-refresh", next.loading ? "Looking…" : label, {}, "link", next.loading || pending || !online);
-  if (next.error) rows.push(row(dot("bad"), plain(`Couldn’t load ideas: ${next.error}`), "", look("Look again")));
-  const signal = new Map(next.signals.map((item) => [item.id, item]));
-  const minutes = (value: number) => (value < 60 ? `~${value}m` : `~${Math.round(value / 6) / 10}h`);
-  for (const item of next.proposals) {
-    const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
-    rows.push(row(dot("idea"), plain(item.title, [item.why, evidence && `Evidence: ${evidence}`].filter(Boolean).join("\n")), minutes(item.expectedMinutes ?? item.minutes),
-      `${btn("next-run", "Run", { id: item.id }, "primary", pending || !online)}${btn("next-plan", "Plan", { id: item.id }, "", pending || !online)}${btn("next-snooze", "Not now", { id: item.id }, "quiet", pending)}`));
-  }
-  if (drive && !pinned)
-    rows.push(row(dot("done"), btn("drive-conversation", h(missionTitle(drive)), {}, "drive-title muted").replace("<button ", '<button title="Open its conversation" '), `<span class="drive-status">${DRIVE_STATUS[drive.status] ?? drive.status}</span>`, "", "past"));
-  const model = (state.model.id ?? "").split("/").at(-1);
-  const blocked = driveBusy() ? "Drive works on one thing at a time" : !online ? "Connect to the daemon to start work" : "Start (Ctrl+↵)";
-  page.innerHTML = `<div class="drive-col${rows.length ? "" : " quiet"}">
-    <form id="drive-mission-form" class="drive-compose">
-      <div class="drive-box"><textarea id="drive-mission" rows="2" maxlength="8000" aria-label="What should Drive take on?" placeholder="Give Drive a goal…">${h(driveMissionDraft)}</textarea>
-      <div class="drive-cbar">${btn("drive-mode", driveContinuous ? "Ongoing" : "One task", { continuous: !driveContinuous }, "drive-mode").replace("<button ", `<button title="${driveContinuous ? "Ongoing: keeps finding work in this project" : "One task: stops after a checked result"}" `)}<span class="sp"></span>${model ? `<span class="drive-model">${h(model)}</span>` : ""}<button type="submit" class="drive-go" aria-label="Start" title="${blocked}"${driveCanStart() ? "" : " disabled"}>${driveActionPending === "drive" ? spin : "↵"}</button></div></div>
-      ${driveActionError ? `<p class="drive-error" role="alert">${h(driveActionError)}</p>` : ""}
-    </form>
-    ${rows.length ? `<div class="drive-list">${rows.join("")}</div>` : `<p class="drive-empty">${next.loading ? "Looking for work…" : `Nothing waiting · ${look("look now")}`}</p>`}
-  </div>`;
-  page.scrollTop = scroll;
-  const replacement = focusId ? document.getElementById(focusId) : [...page.querySelectorAll<HTMLElement>("[data-action]")].find((node) => node.dataset.action === focusAction && node.dataset.args === focusArgs);
-  if (active && replacement && !replacement.hasAttribute("disabled")) {
-    replacement.focus({ preventScroll: true });
-    if (selection && replacement instanceof HTMLTextAreaElement) replacement.setSelectionRange(selection[0]!, selection[1]!);
-  }
-}
 async function driveAction(method: string, args: Record<string, unknown> = {}) {
   if (driveActionPending) return;
   driveActionPending = method;
-  driveActionError = "";
-  drivePageSignature = "";
-  renderDrivePage();
+  renderBriefing();
   try {
-    const result = await api(method, args);
-    // Plan opens its conversation, where the plan is written.
-    if (method === "next-plan") setDrivePage(false);
-    return result;
+    return await api(method, args);
   } catch (error) {
-    driveActionError = error instanceof Error ? error.message : String(error);
+    notice(error instanceof Error ? error.message : String(error));
     throw error;
   } finally {
     driveActionPending = "";
-    drivePageSignature = "";
-    renderDrivePage();
+    renderBriefing();
   }
 }
 
@@ -3025,10 +2903,7 @@ async function dispatch(
     return;
   }
   if (action === "question-control") return questionAction(args.action);
-  if (action === "new-session") {
-    setDrivePage(false);
-    return api("new-session", {});
-  }
+  if (action === "new-session") return api("new-session", {});
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "next-away", "drive-control"].includes(action)) return driveAction(action, args);
   if (action.startsWith("breakage-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
@@ -3078,17 +2953,18 @@ async function dispatch(
     renderBreakage();
     return;
   }
-  if (action === "drive-open") return setDrivePage(args.toggle ? !drivePageOpen : true);
-  if (action === "drive-mode") {
-    driveContinuous = Boolean(args.continuous);
-    drivePageSignature = "";
-    return renderDrivePage();
-  }
-  if (action === "drive-conversation") {
-    setDrivePage(false);
-    const home = state?.drive?.homeSessionId;
-    if (home && home !== state?.session?.id) await dispatch("select-session", { id: home });
-    else document.getElementById("drive-turn")?.scrollIntoView({ block: "start" });
+  // /drive and Alt+J open what Drive has (its mission or its ideas) where it
+  // lives: the line at the conversation's end, or under the start composer.
+  if (action === "drive-open") {
+    const run = worktreeRun(), busy = Boolean(pinnedMission() || run.fix || run.away);
+    if (busy) driveShown = args.toggle ? !driveShown : true;
+    else if (state?.driveNext.proposals.length) ideasShown = args.toggle ? !ideasShown : true;
+    else return driveAction("next-refresh");
+    if (inSession()) renderBriefing();
+    else {
+      heroSignature = "";
+      renderHero();
+    }
     return;
   }
   if (action === "step") {
@@ -3304,7 +3180,6 @@ async function dispatch(
     action === "archive" ||
     action === "undo"
   ) {
-    if (action === "select-session") setDrivePage(false);
     overlay = null;
     renderOverlay();
     return api(action, args);
@@ -3433,14 +3308,12 @@ function renderState(next: Snapshot) {
   renderBriefing();
   renderBreakage();
   renderOverlay();
-  renderDrivePage();
   renderCompletion();
   renderSetup();
   renderNotifications();
   if (
     !editor.disabled &&
     !overlay &&
-    !drivePageOpen &&
     !next.setup &&
     (editorFocused || document.activeElement === document.body)
   )
@@ -3514,13 +3387,6 @@ document.addEventListener("input", (event) => {
     noteDraft = input.value;
     return;
   }
-  if (input.id === "drive-mission") {
-    driveMissionDraft = input.value;
-    // Start lights up as soon as there is a goal; the page itself doesn't redraw.
-    const start = document.querySelector<HTMLButtonElement>("#drive-mission-form .drive-go");
-    if (start) start.disabled = !driveCanStart();
-    return;
-  }
   if (input === (editor as unknown as HTMLInputElement)) {
     changedDraft();
     return;
@@ -3545,15 +3411,6 @@ document.addEventListener("submit", (event) => {
   event.preventDefault();
   const form = event.target as HTMLFormElement;
   void act(async () => {
-    if (form.id === "drive-mission-form") {
-      if (driveActionPending) return;
-      const mission = driveMissionDraft.trim();
-      if (!mission) return;
-      await driveAction("drive", { text: `${driveContinuous ? "--continuous" : "--bounded"} ${mission}` });
-      driveMissionDraft = "";
-      drivePageSignature = "";
-      renderDrivePage();
-    }
     if (form.id === "composer") {
       if (pendingQuestion()) await submitText();
       else if (state?.activeTurnId) {
@@ -3675,7 +3532,6 @@ document.addEventListener("keydown", (event) => {
         editor.focus();
         return;
       }
-      if (drivePageOpen) return setDrivePage(false);
       if (!el("completion").hidden) {
         completionDismissed = true;
         renderCompletion();
@@ -3693,11 +3549,6 @@ document.addEventListener("keydown", (event) => {
         setTimeout(renderComposer, 1510);
       }
     });
-    return;
-  }
-  if (drivePageOpen && !overlay && ctrl && key === "enter" && (event.target as HTMLElement).id === "drive-mission") {
-    event.preventDefault();
-    document.querySelector<HTMLFormElement>("#drive-mission-form")?.requestSubmit();
     return;
   }
   if (ctrl && key === "k") {

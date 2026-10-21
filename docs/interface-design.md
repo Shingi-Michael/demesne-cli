@@ -16,7 +16,7 @@ Check layout changes in the real desktop window, not only in unit tests.
 
 ## Layout rules
 
-- **No side panels.** Everything lives in the sidebar, the conversation column and the composer. A turn's edits, commands and checks unfold in place under their steps; Drive's missions are turns and its ideas unfold by the composer.
+- **No side panels.** Everything lives in the sidebar, the conversation column and the composer. A turn's edits, commands and checks unfold in place under their steps; Drive's missions are turns and its ideas unfold from a line at the end of the conversation; Drive has no page.
 - **No menus where a direct action fits.** Act on the row itself (the sidebar's delete icon, double-click to rename). The top bar's **⋯** is the one small menu.
 - **One line per row.** Sidebar rows have the same height and carry an icon and a word, not sentences. State is a single mark (amber ring, spinner, blue dot, red cross), with words in the tooltip.
 - **Add as little surface as possible.** Fold new facts into existing rows, chips and tooltips before adding anything new.

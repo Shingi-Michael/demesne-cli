@@ -260,6 +260,11 @@ describe("Demesne daemon", () => {
       { method: "POST", body: JSON.stringify({ content: "non-interactive follow-up", permissionMode: "deny" }) });
     await collectPersistedEvents(running.url, created.session.id, quiet.eventId);
     expect(offered.at(-1)).not.toContain("ask_user");
+    // Nor is an Auto turn (Drive, mail): nobody is there to answer.
+    const auto = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "non-interactive Drive step", permissionMode: "allow" }) });
+    await collectPersistedEvents(running.url, created.session.id, auto.eventId);
+    expect(offered.at(-1)).not.toContain("ask_user");
   });
 
   test("persists a completed turn and replays its events after restart", async () => {

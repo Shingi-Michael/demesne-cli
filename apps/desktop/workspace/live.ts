@@ -1747,25 +1747,15 @@ function renderApproval() {
     ? `Always allow ${command && rule.startsWith(command) ? short + rule.slice(command.length) : rule}`
     : hunks ? `Always allow edits to ${rule && rule !== "." ? relative(rule) : "this project"}` : "Always allow";
   slot.innerHTML =
-    `<div class="approval-row${approval.drive ? " from-drive" : ""}" role="group" aria-label="${approval.drive ? "Drive asks" : "Approval"}">${driveAsks(approval.drive)}${icon}<span class="approval-verb">${h(verb)}</span>${target ? `<code>${h(target)}</code>` : ""}<span class="approval-note">· ${note}</span><span class="approval-space"></span>` +
+    `<div class="approval-row" role="group" aria-label="Approval">${icon}<span class="approval-verb">${h(verb)}</span>${target ? `<code>${h(target)}</code>` : ""}<span class="approval-note">· ${note}</span><span class="approval-space"></span>` +
     btn("approval-show", approvalOpen ? "hide" : isCommand ? "command" : hunks ? "diff" : "details", {}, `approval-show${approvalOpen ? " open" : ""}`) +
     btn("permission", `Allow ${k("↵")}`, { id: approval.id, decision: "allow_once" }, "allow") +
     (approval.rule ? btn("permission", "Always", { id: approval.id, decision: "allow_always" }, "always").replace("<button ", `<button title="${h(scope)} · saved to your config (${h(approval.rule)})" `) : "") +
     btn("permission", `Deny ${k("Esc")}`, { id: approval.id, decision: "deny" }, "deny") +
     `</div><div class="approval-fold command-inset"${approvalOpen ? "" : " hidden"}>${preview}</div>`;
 }
-/// Whose ask it is, when Drive's mission asks in the chat it started from:
-/// its chat is one click away.
-function driveAsks(chat: string | undefined) {
-  if (chat === undefined) return "";
-  const mission = state?.breakage.fix?.mission ? state.breakage.fix : null;
-  return mission?.sessionId
-    ? btn("select-session", `${ICON_SPARK}Drive asks`, { id: mission.sessionId }, "drive-asks").replace("<button ", `<button title="${h(`From its chat: ${chat}`)}" `)
-    : `<span class="drive-asks">${ICON_SPARK}Drive asks</span>`;
-}
 /// Enter with text during an approval: deny, then stop the turn and send what
-/// you typed as the next message. Drive's ask is told instead: the words go
-/// to its mission, and your chat stays as it is.
+/// you typed as the next message.
 async function denyInstead(text: string) {
   const approval = state?.approvals[0];
   if (!approval) return;
@@ -1773,7 +1763,6 @@ async function denyInstead(text: string) {
   editor.value = "";
   renderComposer();
   await api("permission", { id: approval.id, decision: "deny" });
-  if (approval.drive !== undefined) { await api("drive-tell", { text }); return; }
   await api("submit", { text });
   await api("queue-action", { action: "now" });
 }
@@ -1878,7 +1867,7 @@ function renderQuestion() {
     ? `<span>${answered ? "Answered" : "Paused"}</span>${btn("question-control", "Resume", { action: "resume" }, "ask-link")}`
     : btn("question-skip", "Skip this question", {}, "ask-link");
   el("question").innerHTML = question && item
-    ? `<div class="ask-q${question.drive !== undefined ? " from-drive" : ""}"><span class="ask-mark" aria-hidden="true"></span><div class="ask-body">${driveAsks(question.drive)}<p class="ask-text">${h(item.question)}${question.questions.length > 1 ? `<small>${Math.min(index + 1, question.questions.length)} of ${question.questions.length}</small>` : ""}</p>${item.reason ? `<p class="ask-why">${h(item.reason)}</p>` : ""}${answered ? `<p class="ask-why">${h(question.answers?.at(-1)?.answer ?? "Skipped")}</p>` : ""}${choices.length ? `<div class="ask-choices">${choices.map((choice, n) => btn("question-pick", `<kbd>${n + 1}</kbd>${h(choice)}`, { text: choice }, "ask-choice")).join("")}</div>` : ""}<div class="ask-foot">${foot}</div></div></div>`
+    ? `<div class="ask-q"><span class="ask-mark" aria-hidden="true"></span><div class="ask-body"><p class="ask-text">${h(item.question)}${question.questions.length > 1 ? `<small>${Math.min(index + 1, question.questions.length)} of ${question.questions.length}</small>` : ""}</p>${item.reason ? `<p class="ask-why">${h(item.reason)}</p>` : ""}${answered ? `<p class="ask-why">${h(question.answers?.at(-1)?.answer ?? "Skipped")}</p>` : ""}${choices.length ? `<div class="ask-choices">${choices.map((choice, n) => btn("question-pick", `<kbd>${n + 1}</kbd>${h(choice)}`, { text: choice }, "ask-choice")).join("")}</div>` : ""}<div class="ask-foot">${foot}</div></div></div>`
     : "";
   // A new question scrolls into view, as a new answer would.
   if (question && question.id !== questionShown) el("stage").scrollTop = el("stage").scrollHeight;

@@ -152,8 +152,9 @@ export class AgentEngine {
       : { role: "user" as const, content: turn.content };
     const currentUser = this.store.appendModelMessage(turnId, userMessage);
     const currentMessages: ProviderMessage[] = [userMessage];
-    // `ask_user` needs someone to answer: not in non-interactive turns.
-    const canAsk = Boolean(this.options.questions) && turn.permissionMode !== "deny";
+    // `ask_user` needs someone to answer: only in a chat you're in (ask).
+    // Drive, mail and other Auto turns decide for themselves.
+    const canAsk = Boolean(this.options.questions) && turn.permissionMode === "ask";
     const definitions = themefy
       ? [...this.tools.definitions().filter(definition=>definition.name === "ask_user"),themefyDefinition]
       : session.workspace
@@ -730,7 +731,7 @@ export class AgentEngine {
     this.store.startToolCall(toolCallId);
     const snapshotTargets = this.captureSnapshot(turnId, sessionId, workspaceRoot, call.name, input);
     try {
-      const questions = permissionMode === "deny" ? undefined : this.options.questions;
+      const questions = permissionMode === "ask" ? this.options.questions : undefined;
       const output = await (tool.executeWithArtifacts ?? tool.execute)(input, { workspaceRoot, signal, sessionId, turnId,
         commands:this.options.commands?.reporter(sessionId,turnId,toolCallId,workspaceRoot),
         ...(questions ? { ask: async (asked: UserQuestion[], mode?: import("@demesne/protocol").QuestionMode) => {

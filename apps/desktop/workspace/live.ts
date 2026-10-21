@@ -1748,28 +1748,31 @@ function renderBriefing() {
     }
   }
   node.hidden = !inSession() || !parts.length;
-  if (node.hidden) { node.innerHTML = ""; return; }
+  if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").classList.remove("open"); return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
   const chip = `${parts.map((part) => `<span class="bf-part">${part}</span>`).join('<span class="bf-sep">·</span>')}${chevron}${progress !== null ? `<span class="bf-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : ""}`;
-  // The card grows out of the chip: opening renders it shut, then opens it on
-  // the next frame; closing keeps what was showing until it has faded away.
-  const open = Boolean(fold), previous = node.querySelector<HTMLElement>(".bf-card"), wasOpen = Boolean(previous?.classList.contains("open"));
-  if (!open && wasOpen && previous) {
-    node.querySelector(".bf-chip")!.innerHTML = chip;
-    node.classList.remove("open");
-    previous.classList.remove("open");
-    setTimeout(() => { if (!previous.classList.contains("open")) previous.innerHTML = ""; }, 280);
+  node.innerHTML = `<div class="bf-chip">${chip}</div>`;
+  node.classList.toggle("open", Boolean(fold));
+  // What the chip opens is Drive speaking in the conversation: a short reply
+  // at its end that scrolls with everything else, so nothing is covered.
+  const reply = el("drive-reply"), open = Boolean(fold), shown = reply.classList.contains("open");
+  if (!open && shown) {
+    reply.classList.remove("open");
+    setTimeout(() => { if (!reply.classList.contains("open")) { reply.hidden = true; reply.innerHTML = ""; } }, 320);
     return;
   }
-  node.innerHTML = `<div class="bf-card${open && wasOpen ? " open" : ""}">${fold}</div><div class="bf-chip">${chip}</div>`;
-  node.classList.toggle("open", open);
-  if (open && !wasOpen) {
-    const created = node.querySelector<HTMLElement>(".bf-card")!;
-    void created.offsetHeight;
-    requestAnimationFrame(() => created.classList.add("open"));
-  }
+  if (!open) return;
+  const title = toggle?.action === "ideas-show" ? `${next.proposals.length === 1 ? "One thing" : `${["", "", "Two", "Three", "Four", "Five"][next.proposals.length] ?? next.proposals.length} things`} I could do next` : "What I'm working on";
+  reply.innerHTML = `<div class="dr-fold"><div><div class="answer dr-answer"><span class="answer-mark dr-mark" aria-hidden="true">${ICON_SPARK}</span><div class="dr-body"><p class="dr-title">${h(title)}</p>${fold}</div></div></div></div>`;
+  reply.hidden = false;
+  if (shown) { reply.classList.add("open"); return; }
+  void reply.offsetHeight;
+  const stage = el("stage"), end = performance.now() + 340;
+  requestAnimationFrame(() => reply.classList.add("open"));
+  const follow = () => { stage.scrollTop = stage.scrollHeight; if (performance.now() < end) requestAnimationFrame(follow); };
+  follow();
 }
-/// Closes Drive's card if it is open; true when it was.
+/// Folds Drive's reply away if it is open; true when it was.
 function closeBriefingCard() {
   if (!el("briefing").classList.contains("open")) return false;
   driveShown = false;
@@ -3498,10 +3501,6 @@ document.addEventListener("click", (event) => {
 // field keeps focus until the click lands, so the redraw can't swallow it.
 document.addEventListener("mousedown", (event) => {
   if (noteEditing && (event.target as Element).closest?.(".rv-l, .rv-note:not(.editing)")) event.preventDefault();
-});
-// Drive's card sits over the conversation, so a click anywhere else puts it away.
-document.addEventListener("pointerdown", (event) => {
-  if (!(event.target as Element).closest?.("#briefing")) closeBriefingCard();
 });
 document.addEventListener("focusout", (event) => {
   if ((event.target as HTMLElement).id === "rv-note-input" && noteEditing) saveNote();

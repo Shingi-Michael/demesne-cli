@@ -1782,11 +1782,11 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 .live-app:not(.start) .composer .hints:not([hidden]) + .send {
   margin-left: 6px;
 }
-#briefing .drive-live {
+#drive-reply .drive-live {
   max-height: 42vh;
   overflow-y: auto;
 }
-#briefing .drive-pinned {
+#drive-reply .drive-pinned {
   margin: 0;
 }
 .live-app:not(.start) #breakage {

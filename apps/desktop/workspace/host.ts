@@ -895,6 +895,10 @@ export class WorkspaceHost {
         this.verificationFingerprint = result.fingerprint;
         this.processesError = null;
         if (changed) this.publish();
+        // A background command that just started may not have printed the
+        // address it serves yet; look again briefly so its preview appears.
+        if (!this.panelWatchTimer && result.commands.some((command) => command.background && command.status === "running" && !command.serves && Date.now() - Date.parse(command.startedAt) < 60_000))
+          setTimeout(() => void this.refreshProcesses(), 1000).unref?.();
       })
       .catch((error) => {
         if (this.current?.session.id !== id) return;

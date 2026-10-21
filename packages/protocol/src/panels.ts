@@ -56,6 +56,22 @@ export interface CommandRecord {
   fingerprint: WorkspaceFingerprint | null;
   freshness: "current" | "outdated" | "unknown";
   freshnessReason?: string;
+  /// The local address a running background command serves, read from its
+  /// output ("Local: http://localhost:5173/"), for the desktop's live preview.
+  serves?: string | null;
+}
+/// The first loopback http(s) address in a command's output, with colour
+/// codes stripped and 0.0.0.0 shown as localhost.
+export function servedURL(output: string): string | null {
+  const plain = output.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
+  const match = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d{2,5})?(?=[/\s"'<>()\]]|$)(?:\/[^\s"'<>()\]]*)?/.exec(plain);
+  if (!match) return null;
+  try {
+    const url = new URL(match[0].replace("//0.0.0.0", "//localhost"));
+    return url.href;
+  } catch {
+    return null;
+  }
 }
 export interface CommandsResponse {
   queuePosition?: number | null;

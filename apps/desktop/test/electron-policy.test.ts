@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
 
 test("project switching may reload only the exact main application document", () => {
   expect(allowAppReload(APP_URL, true)).toBe(true);
@@ -33,4 +33,9 @@ test("zoom preserves the desktop's fixed levels", () => {
   expect(nextZoom(1.25, 0)).toBe(1);
   expect(nextZoom(3, 1)).toBe(3);
   expect(nextZoom(0.67, -1)).toBe(0.67);
+});
+
+test("the live preview frame loads only pages served on this machine", () => {
+  for (const url of ["http://localhost:5173/", "http://127.0.0.1:8000/docs", "http://[::1]:4321/", "https://localhost:3000/"]) expect(previewURL(url)).toBe(true);
+  for (const url of ["https://example.com/", "http://localhost.evil.com/", "http://user:pw@localhost:3000/", "file:///etc/passwd", "javascript:alert(1)", "demesne://app/index.html"]) expect(previewURL(url)).toBe(false);
 });

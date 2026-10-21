@@ -19,6 +19,8 @@ const asideDone = "A second conversation is here.";
 const completed = "Verified the desktop change.";
 const afterClose = "Daemon work completed after the window closed.";
 const thinkingPrompt = "Desktop smoke: readable thinking";
+const previewPrompt = "Desktop smoke: run the site";
+let previewRound = 0;
 const thinkingText = "First reasoning paragraph.\nSecond line stays readable.\n\n" + "A detailed thought with enough words to wrap across several lines. ".repeat(12) + "\n" + "long_identifier_".repeat(90);
 let nextThought!: () => void, finishThought!: () => void;
 const thoughtGate = new Promise<void>(resolve => { nextThought = resolve; });
@@ -79,6 +81,16 @@ const f = await fixture({
       yield { type: "finish", reason: "stop" };
       return;
     }
+    if (user === previewPrompt) {
+      if (previewRound++ === 0) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "desktop-preview", nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: [process.execPath, "serve.ts"], background: true }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", delta: "The site is running." };
+        yield { type: "finish", reason: "stop" };
+      }
+      return;
+    }
     if (user === aside) {
       yield { type: "text_delta", delta: asideDone };
       yield { type: "finish", reason: "stop" };
@@ -105,6 +117,7 @@ const f = await fixture({
 });
 writeFileSync(join(f.workspace, "hello.ts"), "export const greeting = 'before';\n");
 writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ scripts: { check: "bun check.ts" } }));
+writeFileSync(join(f.workspace, "serve.ts"), "const server = Bun.serve({ port: 0, fetch: () => new Response('<h1>Fieldnote preview</h1>', { headers: { 'content-type': 'text/html' } }) });\nconsole.log(`  \\u001b[32mLocal:\\u001b[39m http://localhost:${server.port}/`);\n");
 writeFileSync(join(f.workspace, "check.ts"), "import {readFileSync} from 'node:fs';if(!readFileSync('hello.ts','utf8').includes(\"'after'\"))throw new Error('Wrong file');console.log('DESKTOP_CHECK_PASSED');\n");
 const git = (...values: string[]) => execFileSync("git", ["-C", f.workspace, ...values], { stdio: "pipe" });
 git("init", "-q"); git("add", ".");
@@ -575,6 +588,24 @@ try {
   await until(() => page.locator("#drive-reply.open").count().then(count => count === 1), "the chip's word opens it again");
   await page.locator("#briefing .bf-chev").click();
   await until(() => page.locator("#drive-reply").isHidden(), "the chevron folds it away");
+  // A dev server started in the chat unfolds its live page under its step.
+  await type(previewPrompt);
+  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Run"]), "the server's command asks first");
+  await click("permission", { decision: "allow_once" });
+  await textIncludes("The site is running.");
+  const preview = page.locator("[data-preview]").last();
+  await until(() => preview.isVisible(), "the running server's page unfolds under its step", 20_000);
+  await until(() => page.frameLocator("[data-preview] iframe").last().locator("h1").innerText().then(text => text === "Fieldnote preview"), "the preview shows the live page");
+  assert(await page.locator(".tool-row .verb", { hasText: "Serving" }).count() > 0, "the step says it is serving");
+  await preview.getByRole("button", { name: "Phone", exact: true }).click();
+  assert(await preview.locator(".pv-view.phone").count() === 1, "Phone narrows the page in place");
+  await preview.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  await capture("11-preview");
+  await preview.getByRole("button", { name: "Output", exact: true }).click();
+  await until(() => page.locator(".step-fold .fold-cmd .pv-back").last().isVisible(), "Output swaps the page for the command's output");
+  await page.locator(".step-fold .fold-cmd .pv-back").last().click();
+  await until(() => page.locator("[data-preview] iframe").last().isVisible(), "Preview brings the page back");
   console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {

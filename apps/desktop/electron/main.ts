@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
-import { APP_URL, allowAppReload, assetPath, localAppURL, nextZoom, openTarget, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
@@ -65,7 +65,7 @@ void app.whenReady().then(async () => {
   });
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
   contents.on("will-navigate", event => { if (!allowAppReload(event.url, true)) event.preventDefault(); });
-  contents.on("will-frame-navigate", event => { if (!allowAppReload(event.url, event.isMainFrame)) event.preventDefault(); });
+  contents.on("will-frame-navigate", event => { if (!allowAppReload(event.url, event.isMainFrame) && (event.isMainFrame || !previewURL(event.url))) event.preventDefault(); });
   contents.on("will-attach-webview", event => event.preventDefault());
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {

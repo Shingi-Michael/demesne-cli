@@ -2,6 +2,13 @@ import { isAbsolute, resolve, sep } from "node:path";
 export const APP_URL = "demesne://app/index.html";
 /** Project changes reload the shell; other destinations and frames stay blocked. */
 export const allowAppReload = (url: string, isMainFrame: boolean) => isMainFrame && url === APP_URL;
+/** A chat's live preview may load only pages served on this machine. */
+export function previewURL(value: string) {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) && !url.username && !url.password;
+  } catch { return false; }
+}
 export const EVENTS = ["demesne:update", "demesne:desktop-error", "demesne:desktop-action"] as const;
 export function localAppURL(value: string) {
   try { const url = new URL(value); return url.protocol === "demesne:" && url.hostname === "app" && !url.port && !url.username && !url.password; } catch { return false; }

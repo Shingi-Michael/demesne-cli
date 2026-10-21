@@ -236,6 +236,10 @@ let driveActionPending = "";
 const stepsOpen = new Set<string>();
 /// Steps whose diff or output is unfolded in place, keyed run:tool.
 const stepOpen = new Set<string>();
+/// Live previews: the page a running dev server serves unfolds under the
+/// step that started it. Phone width and "show output" are per step.
+const previewPhone = new Set<string>(), previewOutput = new Set<string>(), previewSeen = new Set<string>();
+const serving = (tool: ToolEntry) => tool.name === "run_command" ? state?.processes.find((command) => command.toolCallId === tool.toolCallId && command.serves) ?? null : null;
 /// Review in the turn: the receipt's "N files changed" unfolds the turn's
 /// diffs under the answer. A note on a line rides with the next message.
 interface ReviewFile { path: string; rows: ReturnType<typeof codeDiff>["rows"]; added: number; removed: number; created: boolean }
@@ -749,8 +753,8 @@ const foldable = (tool: ToolEntry) =>
   (tool.name === "run_command" && !tool.waiting && !tool.drafting && Boolean(tool.toolCallId));
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}`, open = stepOpen.has(key), canFold = foldable(tool);
-  const now = tool.state === "running" || tool.drafting;
-  const meta = tool.waiting
+  const now = tool.state === "running" || tool.drafting, served = serving(tool)?.serves;
+  const meta = served ? `<span class="pv-live" aria-hidden="true"></span>${h(new URL(served).host)}` : tool.waiting
     ? `<span class="amber">${tool.name === "ask_user" || state?.questions.some((q) => q.toolCallId === tool.toolCallId) ? "waiting for your answer" : "waiting for you"}</span>`
     : tool.phase === "change"
       ? tool.drafting ? "writing…" : tool.state === "done" ? counts(totals(run, tool)) : `<span class="${tone(tool.state)}">${h(tool.state)}</span>`
@@ -765,7 +769,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
               : `<span class="muted">${h(mark(tool.state))}</span> ${h(tool.state)}`;
   const row = btn(
     canFold ? "step" : "tool",
-    `${now ? spinner() : stepIcon(tool)}<span class="verb">${h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    `${now ? spinner() : stepIcon(tool)}<span class="verb">${served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -793,9 +797,16 @@ function stepFold(run: WorkspaceRun, tool: ToolEntry) {
     return `<div class="step-fold">${blocks.join("")}</div>`;
   }
   const record = state!.processes.find((command) => command.toolCallId === tool.toolCallId);
+  const key = `${run.id}:${tool.id}`;
+  if (record?.serves && !previewOutput.has(key)) {
+    const url = record.serves, host = new URL(url).host, phone = previewPhone.has(key);
+    const tab = (label: string, on: boolean, action: string, args: Record<string, unknown>) => btn(action, label, args, `pv-btn${on ? " on" : ""}`);
+    return `<div class="step-fold pv" data-preview="${h(key)}"><div class="pv-bar"><span class="pv-live" aria-hidden="true"></span><span class="pv-url" title="${h(url)}">${h(host)}</span><span class="sp"></span>${tab("Desktop", !phone, "preview-width", { key, phone: false })}${tab("Phone", phone, "preview-width", { key, phone: true })}${tab("Reload", false, "preview-reload", { key })}${tab("Output", false, "preview-output", { key })}${tab("Open ↗", false, "open-link", { url })}</div><div class="pv-view${phone ? " phone" : ""}"><iframe src="${h(url)}" title="Preview of ${h(host)}" sandbox="allow-scripts allow-same-origin allow-forms allow-modals" referrerpolicy="no-referrer"></iframe></div></div>`;
+  }
   const text = record ? `${record.stdout}${record.stderr ? `\n${record.stderr}` : ""}`.trim().split("\n").slice(-40).join("\n") : "";
   const body = text ? `<pre class="out">${h(text)}</pre>` : `<div class="out muted">${record?.outputLoaded === false ? "Loading output…" : record ? "No output." : "Output not recorded."}</div>`;
-  return `<div class="step-fold"><div class="fold-cmd">$ ${h(String(tool.detail ?? "").replace(/^\$\s*/, ""))}</div>${body}</div>`;
+  const back = record?.serves ? btn("preview-output", "Preview", { key }, "pv-btn pv-back") : "";
+  return `<div class="step-fold"><div class="fold-cmd">$ ${h(String(tool.detail ?? "").replace(/^\$\s*/, ""))}${back}</div>${body}</div>`;
 }
 /// A sub-agent's thinking and steps under its row: open while it works,
 /// collapsible like a thinking block afterwards.
@@ -822,7 +833,8 @@ function runHTML(run: WorkspaceRun, index: number) {
     ).size;
   // Completed traces fold into the receipt. While streaming, show the full
   // latest trace unless the reader explicitly collapses it.
-  const live = active(run), fold = run.status === "completed" && !stepsOpen.has(run.id);
+  // A step serving a live page keeps the trace open so its preview shows.
+  const live = active(run), fold = run.status === "completed" && !stepsOpen.has(run.id) && !items.some((tool) => serving(tool));
   let body = "", steps = "";
   const flush = () => { if (steps) { body += `<div class="steps">${steps}</div>`; steps = ""; } };
   for (let i = 0; i < run.entries.length; i++) {
@@ -1111,6 +1123,13 @@ function revealCompactedTurn(id: string) {
 }
 function renderConversation() {
   if (!state) return;
+  // A server that starts during the newest turn unfolds its page once.
+  const newest = state.runs.at(-1);
+  for (const entry of newest?.entries ?? []) {
+    if (entry.type !== "tool" || !serving(entry)) continue;
+    const key = `${newest!.id}:${entry.id}`;
+    if (!previewSeen.has(key)) { previewSeen.add(key); stepOpen.add(key); }
+  }
   const root = el("conversation"),
     stage = el("stage"),
     top = stage.scrollTop,
@@ -1148,7 +1167,7 @@ function renderConversation() {
       [...stepOpen].filter((key) => key.startsWith(`${run.id}:`)).map((key) => {
         const tool = run.entries.find((entry) => entry.type === "tool" && String(entry.id) === key.slice(run.id.length + 1));
         const record = tool?.type === "tool" && tool.name === "run_command" ? state!.processes.find((command) => command.toolCallId === tool.toolCallId) : null;
-        return record ? `${key}:${record.outputLoaded}:${record.stdout.length}:${record.stderr.length}` : key;
+        return record ? `${key}:${record.outputLoaded}:${record.stdout.length}:${record.stderr.length}:${record.serves}:${previewOutput.has(key)}` : key;
       }),
       state.questions.length > 0,
       active(run) ? state.queue : "",
@@ -3196,6 +3215,31 @@ async function dispatch(
   }
   if (action === "setup" || action === "setup-action") return api(action, args);
   if (action === "open-link") return api("open-link", { url: args.url });
+  // Width and reload act on the frame in place, so the page keeps its state.
+  if (action === "preview-width") {
+    const view = document.querySelector<HTMLElement>(`[data-preview="${CSS.escape(String(args.key))}"]`);
+    args.phone ? previewPhone.add(args.key) : previewPhone.delete(args.key);
+    view?.querySelector(".pv-view")?.classList.toggle("phone", Boolean(args.phone));
+    view?.querySelectorAll<HTMLElement>(".pv-btn").forEach((button) => { if (button.dataset.action === "preview-width") button.classList.toggle("on", JSON.parse(button.dataset.args ?? "{}").phone === Boolean(args.phone)); });
+    return;
+  }
+  if (action === "preview-reload") {
+    const frame = document.querySelector<HTMLIFrameElement>(`[data-preview="${CSS.escape(String(args.key))}"] iframe`);
+    if (frame) frame.src = frame.src;
+    return;
+  }
+  if (action === "preview-output") {
+    previewOutput.has(args.key) ? previewOutput.delete(args.key) : previewOutput.add(args.key);
+    renderConversation();
+    const [runId, id] = [String(args.key).slice(0, String(args.key).lastIndexOf(":")), Number(String(args.key).split(":").at(-1))];
+    const tool = state?.runs.find((run) => run.id === runId)?.entries.find((entry) => entry.id === id);
+    const record = tool?.type === "tool" ? state!.processes.find((command) => command.toolCallId === tool.toolCallId) : undefined;
+    if (previewOutput.has(args.key) && record?.outputLoaded === false) {
+      await api("panel-watch", { panel: "log", command: record.id });
+      await api("processes");
+    }
+    return;
+  }
   if (
     [
       "permission",

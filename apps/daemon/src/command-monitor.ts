@@ -5,6 +5,7 @@ import type {
   CommandsResponse,
   WorkspaceFingerprint,
 } from "@demesne/protocol";
+import { servedURL } from "@demesne/protocol";
 import type { DemesneStore } from "@demesne/storage";
 import type { AgentTool } from "./tools.ts";
 import { workspaceFingerprint } from "./workspace-review.ts";
@@ -182,6 +183,7 @@ export class CommandMonitor {
                   "No source fingerprint was recorded")
                 : undefined;
         }
+        record.serves = record.background && record.status === "running" ? servedURL(`${record.stdout}\n${record.stderr}`) : null;
         if (output !== "all" && record.id !== output) {
           record.stdout = record.stderr = "";
           record.outputLoaded = false;

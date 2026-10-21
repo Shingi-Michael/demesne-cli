@@ -2,7 +2,9 @@
 /// axis, and close, once per beat. It is drawn as one small SVG of flat faces
 /// lit from a fixed light, so a mark costs a few polygons instead of dozens of
 /// 3D layers, and a mark drawn mid-beat (the conversation repaints while the
-/// model streams) starts on the same frame as every other.
+/// model streams) starts on the same frame as every other. One unit is one
+/// pixel, the size of the CSS cube it replaced: it is a little larger than its
+/// 12px box and spills past it while parted.
 
 type Matrix = [number, number, number, number, number, number, number, number, number];
 type Vector = [number, number, number];
@@ -78,5 +80,5 @@ export function cubeSvg(state: CubeState, now: number, still = false): string {
     const points = face.corners.map((corner) => `${(center[0] + corner[0]).toFixed(2)},${(center[1] + corner[1]).toFixed(2)}`).join(" ");
     return `<polygon points="${points}" style="fill:color-mix(in srgb,var(--t1) ${share}%,var(--t4))"/>`;
   }));
-  return `<svg viewBox="-9 -9 18 18" width="12" height="12">${polygons.join("")}</svg>`;
+  return `<svg viewBox="-6 -6 12 12" width="12" height="12">${polygons.join("")}</svg>`;
 }

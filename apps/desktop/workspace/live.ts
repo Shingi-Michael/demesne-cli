@@ -293,6 +293,9 @@ async function act(task: () => Promise<unknown>) {
     return null;
   }
 }
+/// The same model, whether or not either id carries its provider prefix.
+const sameModel = (a: string | undefined, b: string | undefined) =>
+  Boolean(a && b) && (a === b || a!.split("/").at(-1) === b!.split("/").at(-1));
 function context() {
   const plan = state?.provider?.contextPlan,
     usage = state?.provider?.usage;
@@ -300,10 +303,14 @@ function context() {
     plan?.estimatedInputTokens ??
     usage?.totalTokens ??
     (state?.runs.length === 0 ? 0 : null);
-  const capacity = plan?.capacityTokens ?? state?.model.contextWindow ?? null;
+  // The last request's plan was sized for the model it ran on. After you
+  // switch models, the size is the chosen model's until its first request.
+  const fresh = Boolean(plan) && sameModel(state?.provider?.model, state?.model.id);
+  const capacity = (fresh ? plan!.capacityTokens : null) ?? state?.model.contextWindow ?? null;
   return {
     used,
     capacity,
+    fresh,
     estimated: plan?.estimatedInputTokens != null,
     percentage:
       used != null && capacity ? Math.round((used / capacity) * 100) : null,
@@ -621,7 +628,8 @@ function renderContextCard() {
     ? [
         { name: "Conversation", tokens: plan.estimatedMessageTokens, tone: "a" },
         { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" },
-        { name: "Kept free for replies", tokens: plan.reserves.totalTokens ?? 0, tone: "c" },
+        // What is kept free depends on the model; a new one's comes with its first request.
+        ...(c.fresh ? [{ name: "Kept free for replies", tokens: plan.reserves.totalTokens ?? 0, tone: "c" }] : []),
       ]
     : [{ name: "Conversation", tokens: c.used ?? 0, tone: "a" }];
   const free = Math.max(0, capacity - parts.reduce((sum, part) => sum + part.tokens, 0));
@@ -674,7 +682,7 @@ function renderCards() {
   if (c.percentage != null) {
     const capacity = c.capacity ?? 0;
     const parts = plan
-      ? [{ name: "Chat", tokens: plan.estimatedMessageTokens, tone: "a" }, { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" }, { name: "Kept free", tokens: plan.reserves.totalTokens ?? 0, tone: "c" }]
+      ? [{ name: "Chat", tokens: plan.estimatedMessageTokens, tone: "a" }, { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" }, ...(c.fresh ? [{ name: "Kept free", tokens: plan.reserves.totalTokens ?? 0, tone: "c" }] : [])]
       : [{ name: "Chat", tokens: c.used ?? 0, tone: "a" }];
     const share = (tokens: number) => (capacity ? Math.min(100, (tokens / capacity) * 100) : 0);
     out.push(card("context", "Context", `${c.percentage}%<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>`,

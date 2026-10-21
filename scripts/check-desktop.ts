@@ -43,6 +43,9 @@ const heartbeatDaemon = Bun.listen({ unix: heartbeatSocket, socket: { data(socke
 let previewRound = 0;
 let askRound = 0;
 let brokeRound = 0;
+// The processor itself, so the last check can let it switch models (turns
+// before it run on one fixed model).
+let smokeProcessor: { modelId: string; contextCapacity?: number; setModel?: (id: string) => void } | undefined;
 const thinkingText = "First reasoning paragraph.\nSecond line stays readable.\n\n" + "A detailed thought with enough words to wrap across several lines. ".repeat(12) + "\n" + "long_identifier_".repeat(90);
 let nextThought!: () => void, finishThought!: () => void;
 const thoughtGate = new Promise<void>(resolve => { nextThought = resolve; });
@@ -52,7 +55,7 @@ let failSuggestions = false, offerIdeas = false;
 const gate = new Promise<void>(done => { release = done; });
 const f = await fixture({
   providerId: "test", modelId: "desktop-test", contextCapacity: 262144, maxOutputTokens: 1024,
-  async listModels() { return [{ id: "desktop-test", provider: "test", contextWindow: 262144 }]; },
+  async listModels() { smokeProcessor = this; return [{ id: "desktop-test", provider: "test", contextWindow: 262144 }, { id: "desktop-small", provider: "test", contextWindow: 32768 }]; },
   async *stream(messages, _tools, signal) {
     const user = messages.findLast(message => message.role === "user")?.content;
     if (_tools.some(tool => tool.name === "drive_ui")) {
@@ -745,7 +748,16 @@ try {
   await capture("14-broke");
   await page.locator("#drive-reply.open button", { hasText: "Not now" }).click();
   await until(() => broke.count().then(count => count === 0), "Not now puts it away");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line"] }, null, 2));
+  // Switching models resizes the context at once, before the new model's
+  // first request.
+  const sizeBefore = await page.locator("#composer-context").getAttribute("title");
+  assert(sizeBefore?.includes("of 262.1k"), `the context starts at the first model's size: ${sizeBefore}`);
+  smokeProcessor!.setModel = (id: string) => { smokeProcessor!.modelId = id; smokeProcessor!.contextCapacity = id === "desktop-small" ? 32768 : 262144; };
+  await page.locator("#composer-model").click();
+  await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
+  await page.keyboard.press("Enter");
+  await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

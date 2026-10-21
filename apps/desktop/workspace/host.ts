@@ -1320,6 +1320,13 @@ export class WorkspaceHost {
         id,
         provider: this.model.provider,
       };
+      // The context size has to follow the switch: when the list doesn't
+      // say, the daemon knows the active model's.
+      if (!this.model.contextWindow) {
+        const health = await this.client.health().catch(() => null);
+        if (health?.contextCapacity && health.model.split("/").at(-1) === id.split("/").at(-1))
+          this.model = { ...this.model, contextWindow: health.contextCapacity };
+      }
       if (this.current)
         await this.client.updateSession(this.current.session.id, {
           preferredModel: id,

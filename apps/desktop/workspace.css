@@ -36,6 +36,9 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-session-mark { flex: none; position: relative; width: 10px; height: 10px; margin: 0 3px; border-radius: 50%; visibility: hidden; }
 .sidebar-session-mark.warn { visibility: visible; border: 2px solid var(--warn); }
 .sidebar-session-mark.acc { visibility: visible; width: 7px; height: 7px; margin: 0 4.5px; background: var(--acc); }
+/* Working: the same small dot, breathing. The cube turns only in the conversation. */
+.sidebar-session-mark.working { visibility: visible; width: 6px; height: 6px; margin: 0 5px; background: var(--acc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 18%, transparent); }
+@media (prefers-reduced-motion: no-preference) { .sidebar-session-mark.working { animation: bf-breathe 2.4s ease-in-out infinite; } }
 .sidebar-session-mark.bad { visibility: visible; border-radius: 0; }
 .sidebar-session-mark.bad::before, .sidebar-session-mark.bad::after { content: ""; position: absolute; left: 50%; top: 50%; width: 11px; height: 2px; border-radius: 1px; background: var(--bad); transform: translate(-50%, -50%) rotate(45deg); }
 .sidebar-session-mark.bad::after { transform: translate(-50%, -50%) rotate(-45deg); }
@@ -117,7 +120,6 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .sidebar-item:hover .sidebar-delete, .sidebar-delete:focus-visible, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-delete { opacity: 1; pointer-events: auto; }
 .sidebar-item:has(.sidebar-delete):hover .sidebar-session-age, .sidebar-item:has(.sidebar-delete):has(.sidebar-session:focus-visible) .sidebar-session-age { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-session-mark.working { animation-duration: 2.4s; }
   .sidebar-delete { transition: none; }
 }
 .sidebar-delete:hover { color: var(--bad); background: var(--bad-soft); }

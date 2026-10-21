@@ -179,7 +179,7 @@ async function open(workspace = false, welcome = false) {
     await page.getByRole("button", { name: "Open a project", exact: false }).click();
   }
   await until(() => evaluate<boolean>("const editor=document.querySelector('textarea');return !!editor && editor.getBoundingClientRect().width>0 && document.body.innerText.includes('desktop-test');"), "connected desktop project", 30_000);
-  assert.equal(await evaluate("return document.getElementById('desktop-project-button')?.title;"), f.workspace);
+  assert.equal(await evaluate("return document.getElementById('sidebar-sessions')?.dataset.workspace;"), f.workspace);
   assert.equal(await page.evaluate(() => typeof (window as any).require), "undefined", "No Node in the renderer");
   assert.equal(await page.evaluate(() => typeof (window as any).process), "undefined", "No process or environment in the renderer");
   const isolation = await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.getLastWebPreferences());
@@ -266,10 +266,11 @@ try {
   await until(() => page.locator(".sidebar-session[aria-current='page']").isVisible(), "the list is back after search");
   assert(await page.locator("#sidebar-drive, #drive-page").count() === 0, "Drive has no sidebar row and no page");
   // Projects stay visible, and each project owns a collapsible list of chats.
-  assert((await page.locator("#desktop-project-sub").innerText()).length > 0, "The project shows its folder under its name");
+  assert.equal(await page.locator("#desktop-project-button, #sidebar-open-folder, #sidebar-branches").count(), 0, "The sidebar names the project once, in its group");
+  assert((await page.locator(".sidebar-project.active .sidebar-project-name").getAttribute("title"))?.startsWith(f.workspace), "The project's line carries its folder");
   await page.getByRole("searchbox", { name: "Find a conversation or project" }).focus();
   await until(() => page.locator("#sidebar-projects").isVisible(), "projects are visible");
-  assert(await page.locator("#sidebar-projects").getByText("Open a folder…").isVisible(), "search can open another folder");
+  assert((await page.locator("#sidebar-open-project").getAttribute("title"))?.startsWith("Open a folder"), "Projects' + opens another folder");
   await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
   assert(await page.locator("#sidebar-projects").isVisible(), "projects stay visible after search");
   const projectToggle = page.locator(".sidebar-project.active .sidebar-project-toggle");
@@ -509,15 +510,17 @@ try {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
   }, secondProject);
   await page.locator("#sidebar-open-project").click();
-  await until(() => page.locator("#desktop-project-button").getAttribute("title").then(path => path === secondProject), "sidebar opens another project");
+  await until(() => page.locator("#sidebar-sessions").getAttribute("data-workspace").then(path => path === secondProject), "sidebar opens another project");
   await type("A chat in the second project");
   await until(() => page.locator(".sidebar-project.active .sidebar-session").count().then(count => count === 1), "new chat is nested under its project");
   await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-session[data-args*="${sessionId}"]`).click();
-  await until(() => page.locator("#desktop-project-button").getAttribute("title").then(path => path === f.workspace), "chat selection switches to its project");
+  await until(() => page.locator("#sidebar-sessions").getAttribute("data-workspace").then(path => path === f.workspace), "chat selection switches to its project");
   await until(() => page.locator(".sidebar-session[aria-current='page']").getAttribute("data-args").then(args => Boolean(args?.includes(sessionId))), "cross-project selection opens the exact chat");
   const secondary = page.locator(`.sidebar-project[data-project="${secondProject}"]`);
   await secondary.locator(".sidebar-project-toggle").click();
   assert(await secondary.locator(".sidebar-session").isVisible(), "other projects expand without switching workspace");
+  assert.equal(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).getAttribute("aria-expanded"), "false", "opening one project closes the other");
+  assert(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-state`).isVisible(), "a closed project shows its state on its line");
   await page.getByRole("searchbox", { name: "Find a conversation or project" }).fill("second project");
   assert.equal(await page.locator(".sidebar-project").count(), 1, "search keeps only projects with matching chats");
   assert(await secondary.locator(".sidebar-session").isVisible(), "search exposes matching chats in another project");
@@ -526,7 +529,7 @@ try {
   const primary = page.locator(`.sidebar-project[data-project="${f.workspace}"]`);
   await secondary.locator(".sidebar-project-name").dragTo(primary.locator(".sidebar-project-header"), { targetPosition: { x: 80, y: 2 } });
   await until(async () => JSON.stringify(await projectOrder()) === JSON.stringify([secondProject, f.workspace]), "dragging reorders project groups");
-  assert.equal(await page.locator("#desktop-project-button").getAttribute("title"), f.workspace, "dragging does not open a project");
+  assert.equal(await page.locator("#sidebar-sessions").getAttribute("data-workspace"), f.workspace, "dragging does not open a project");
   assert.equal(await page.locator(".dragging, .drop-before, .drop-after").count(), 0, "drop clears drag feedback");
   await page.reload();
   await until(async () => JSON.stringify(await projectOrder()) === JSON.stringify([secondProject, f.workspace]), "manual order survives reload with the active project second");

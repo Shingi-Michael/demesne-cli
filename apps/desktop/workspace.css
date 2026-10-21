@@ -17,11 +17,6 @@ body.desktop kbd { font-family: "JetBrains Mono", monospace; }
 .sidebar-nav button .ico, .sidebar-settings .ico { color: var(--t3); }
 #desktop-sidebar .sidebar-nav kbd, #desktop-sidebar .sidebar-settings kbd { margin-left: auto; border: 0; background: none; padding: 0; color: var(--t4); }
 .sidebar-foot { display: flex; flex-direction: column; gap: 1px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); }
-/* The active project's name, folder and branch anchor the workspace. */
-.sidebar-head { display: flex; align-items: center; gap: 10px; padding: 2px 8px 12px; min-width: 0; }
-.sidebar-head-copy { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
-#desktop-project-name { font-size: 13.5px; font-weight: 500; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#desktop-project-sub { font-size: 11.5px; color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-mark { display: block; flex: none; width: 24px; height: 24px; border-radius: 7px; background: linear-gradient(145deg, #3a5f94, #20344f); color: #dce9ff; font: 600 11px/24px "JetBrains Mono", monospace; text-align: center; letter-spacing: -0.02em; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset; }
 .sidebar-settings { margin-top: 6px; }
 body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); border: 1px solid var(--line2); border-radius: 5px; padding: 3px 5px; background: var(--surface); }
@@ -72,20 +67,24 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-project-name .ico { width: 15px; height: 15px; color: var(--t3); }
 .sidebar-project.active .sidebar-project-name { color: var(--t1); }
 .sidebar-project.active .sidebar-project-name .ico { color: var(--acc); }
+/* A project's line ends in its state: branches to review in green, the
+   amber ring when a chat needs you, a spinner, or when it last moved. */
+.sidebar-project-state { flex: none; display: inline-flex; align-items: center; padding-right: 8px; color: var(--t4); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sidebar-project-state .sidebar-session-mark { margin: 0; }
+.sidebar-project-review { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; margin-right: 6px; padding: 0 7px; border-radius: 10px; background: var(--ok-soft); color: var(--ok); font-size: 11px; font-variant-numeric: tabular-nums; transition: background-color 140ms var(--ease); }
+.sidebar-project-review:hover { background: color-mix(in srgb, var(--ok) 20%, transparent); }
+.sidebar-project-review .sidebar-branch { width: 11px; height: 11px; color: currentColor; }
+.sidebar-project-chats .sidebar-review { color: var(--ok); }
+.sidebar-project-chats .sidebar-review:hover { color: var(--ok); background: var(--ok-soft); }
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar-project-chats.unfolding { animation: sidebar-unfold 200ms var(--ease); }
+  .sidebar-project-toggle .ico { transition: transform 160ms var(--ease); }
+}
+@keyframes sidebar-unfold { from { opacity: 0; transform: translateY(-4px); } }
 .sidebar-project-chats { margin: 2px 0 4px 12px; padding-left: 3px; border-left: 1px solid var(--line); }
 .sidebar-project-chats .sidebar-session { gap: 7px; padding-left: 6px; font-size: 13px; }
 .sidebar-project-chats .sidebar-empty { padding: 5px 12px; font-size: 12px; }
 .sidebar-project-chats .sidebar-more { padding-left: 30px; }
-#sidebar-open-folder { margin-top: 6px; color: var(--t3); font-size: 12.5px; }
-.sidebar-project-row { display: flex; align-items: center; gap: 11px; width: 100%; height: 32px; padding: 0 10px; border-radius: 9px; color: var(--t2); font-size: 13.5px; text-align: left; white-space: nowrap; }
-.sidebar-project-row:hover, .sidebar-project-row:focus-visible { background: var(--surface2); color: var(--t1); }
-.sidebar-project-row > span:not(.project-mark) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.sidebar-project-row .project-mark { width: 18px; height: 18px; border-radius: 5px; font-size: 9px; line-height: 18px; }
-.sidebar-project-row .project-mark[data-hue="1"] { background: linear-gradient(145deg, #4f7a5a, #2a4532); color: #dff5e4; }
-.sidebar-project-row .project-mark[data-hue="2"] { background: linear-gradient(145deg, #8a6b3a, #4e3a1b); color: #fbe9cc; }
-.sidebar-project-row .project-mark[data-hue="3"] { background: linear-gradient(145deg, #7a4f8a, #432a4e); color: #f0dff5; }
-.sidebar-project-row .ico { width: 16px; height: 16px; color: var(--t3); }
-#desktop-sidebar .sidebar-project-row kbd { margin-left: auto; border: 0; background: none; padding: 0; color: var(--t4); }
 .sidebar-session-mark.working { width: 10px; height: 10px; margin: 0 3px; border: 1.6px solid var(--line2); border-top-color: var(--acc); background: transparent; animation: sidebar-spin 900ms linear infinite; }
 @keyframes sidebar-spin { to { transform: rotate(360deg); } }
 .sidebar-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -436,7 +435,7 @@ html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[
 body.desktop { --hair: rgba(255, 255, 255, 0.08); --hair2: rgba(255, 255, 255, 0.13); --tone: rgba(255, 255, 255, 0.04); --tone2: rgba(255, 255, 255, 0.07); --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.25); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.3); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.5); --r-sm: 6px; --r: 10px; --r-lg: 14px; --ease: cubic-bezier(0.2, 0.7, 0.2, 1); }
 /* Sidebar: the tone difference is the edge; rows and search have no line. */
 #desktop-sidebar { border-right: 0; }
-.sidebar-nav button, .sidebar-settings, .sidebar-session, .sidebar-more, .sidebar-project-row { border-radius: var(--r); }
+.sidebar-nav button, .sidebar-settings, .sidebar-session, .sidebar-more { border-radius: var(--r); }
 .sidebar-search { border: 0; border-radius: var(--r); background: var(--tone); }
 .sidebar-search:focus-within { background: var(--tone2); box-shadow: 0 0 0 1px var(--hair2); }
 .sidebar-rename input { border: 0; border-radius: var(--r-sm); box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 55%, transparent); }

@@ -14,17 +14,13 @@
 <body class="desktop">
   <div id="desktop-shell">
     <aside id="desktop-sidebar" aria-label="Workspace navigation" hidden>
-      <div class="sidebar-head" id="desktop-project-button"><span class="project-mark" aria-hidden="true">d.</span><span class="sidebar-head-copy"><b id="desktop-project-name"></b><small id="desktop-project-sub"></small></span></div>
       <label class="sidebar-search"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input id="sidebar-search" type="search" placeholder="Search projects and chats" aria-label="Find a conversation or project" autocomplete="off"></label>
       <nav class="sidebar-nav" aria-label="Workspace">
         <button type="button" data-action="new-session" aria-label="New chat"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>New chat<kbd id="sidebar-new-key">⌘N</kbd></button>
-        
-        <button type="button" id="sidebar-branches" data-action="review-open" data-args='{"show":true}' aria-label="Branches to review" hidden><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>Branches<kbd id="sidebar-branches-count"></kbd></button>
       </nav>
-      <div class="sidebar-group-heading"><span class="sidebar-group">Projects</span><button id="sidebar-open-project" type="button" aria-label="Open a project" title="Open a project"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg></button></div>
+      <div class="sidebar-group-heading"><span class="sidebar-group">Projects</span><button id="sidebar-open-project" type="button" aria-label="Open a folder" title="Open a folder"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg></button></div>
       <nav id="sidebar-projects" aria-label="Projects">
         <div id="sidebar-sessions" role="navigation" aria-label="Conversations"></div>
-        <button id="sidebar-open-folder" class="sidebar-project-row" type="button"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M3 7h7l2 2h9v11H3zM3 7V4h7l2 3"/></svg><span>Open a folder…</span><kbd id="sidebar-open-key">⌘O</kbd></button>
       </nav>
       <div id="sidebar-order-status" role="status" class="sidebar-order-status"></div>
       <div class="sidebar-foot">

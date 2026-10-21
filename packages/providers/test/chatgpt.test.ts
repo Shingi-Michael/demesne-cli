@@ -24,7 +24,7 @@ test("only explicitly configured Sol is retained when omitted, with no inference
     const models = await p.listModels();
     expect(models.map(model => model.id)).toEqual(configuredModel === "gpt-6.1-sol" ? ["first", "second", "gpt-6.1-sol"] : ["first", "second"]);
     if (configuredModel === "gpt-6.1-sol") expect(models[2]).toEqual({ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", provider: "ChatGPT", contextWindow: 1_050_000, maxOutputTokens: 128_000,
-      reasoningLevels: ["low", "medium", "high", "xhigh", "max"], defaultReasoningLevel: "medium" });
+      reasoningLevels: ["low", "medium", "high", "xhigh", "max"], defaultReasoningLevel: "low" });
   }
   expect(calls).toHaveLength(4);
 });
@@ -39,7 +39,7 @@ test("a listed Sol keeps the account's display name, metadata and position", asy
   const models = await p.listModels();
   expect(models.map(model => model.id)).toEqual(["first", "gpt-6.1-sol", "last"]);
   expect(models[1]).toEqual({ id: "gpt-6.1-sol", displayName: "Sol for this account", provider: "ChatGPT", contextWindow: 272_000, maxOutputTokens: 32_768,
-    reasoningLevels: ["low", "high"], defaultReasoningLevel: "high" });
+    reasoningLevels: ["low", "high"], defaultReasoningLevel: "low" });
 });
 
 test("explicit Sol verification requires completed inference and caches only this provider instance", async () => {
@@ -132,12 +132,13 @@ test("the catalog's thinking levels are listed, and a chosen level is sent with 
     bodies.push(JSON.parse(String(init?.body))); return responseStream();
   }) as unknown as typeof fetch });
   const models = await p.listModels();
-  expect(models[0]).toMatchObject({ id: "astra", reasoningLevels: ["low", "medium", "high", "xhigh"], defaultReasoningLevel: "medium" });
+  // Thinking starts at the model's lowest level, whatever the catalog suggests.
+  expect(models[0]).toMatchObject({ id: "astra", reasoningLevels: ["low", "medium", "high", "xhigh"], defaultReasoningLevel: "low" });
   expect(models[1]).not.toHaveProperty("reasoningLevels");
   await collect(p, { ...request, model: "astra", reasoningLevel: "xhigh" });
   expect(bodies[0].reasoning).toEqual({ effort: "xhigh", summary: "auto" });
   await collect(p, { ...request, model: "astra" });
-  expect(bodies[1].reasoning).toEqual({ summary: "auto" });
+  expect(bodies[1].reasoning).toEqual({ effort: "low", summary: "auto" });
   await collect(p, { ...request, model: "plain" });
   expect(bodies[2]).not.toHaveProperty("reasoning");
 });

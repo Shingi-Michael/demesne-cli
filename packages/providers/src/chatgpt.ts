@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isRecord, type ModelDescriptor } from "@demesne/protocol";
-import { ProviderError, readEventData, readLimitedText, type ProviderAdapter, type ProviderMessage, type ProviderRequest, type ProviderStreamEvent } from "./index.ts";
+import { ProviderError, readEventData, readLimitedText, thinkingOffLevel, type ProviderAdapter, type ProviderMessage, type ProviderRequest, type ProviderStreamEvent } from "./index.ts";
 
 const API = "https://api.openai.com/v1";
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";
@@ -10,7 +10,7 @@ const SOL = "gpt-6.1-sol";
 const SOL_REASONING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 function solDescriptor(): ModelDescriptor {
   return { id: SOL, displayName: "GPT-6.1 Sol", provider: "ChatGPT", contextWindow: 1_050_000, maxOutputTokens: 128_000,
-    reasoningLevels: [...SOL_REASONING_LEVELS], defaultReasoningLevel: "medium" };
+    reasoningLevels: [...SOL_REASONING_LEVELS], defaultReasoningLevel: thinkingOffLevel(SOL_REASONING_LEVELS) };
 }
 const integer = (n: unknown): number | undefined => typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : undefined;
 const count = (n: unknown): number | null => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : null;
@@ -24,6 +24,8 @@ export class ChatGPTProvider implements ProviderAdapter {
   /// Models whose catalog entry says they can stream reasoning summaries.
   private readonly summaries = new Set<string>();
   private listedSol?: ModelDescriptor;
+  /// Each listed model's thinking levels, for its default when none is chosen.
+  private readonly levels = new Map<string, string[]>();
   private verifiedSol = false;
   constructor(private readonly options: {
     accountId: string;
@@ -41,6 +43,7 @@ export class ChatGPTProvider implements ProviderAdapter {
     try { body = JSON.parse(await readLimitedText(response, 1024 * 1024)); } catch { throw new ProviderError("ChatGPT returned an invalid model catalog."); }
     if (!isRecord(body) || !Array.isArray(body.models) || body.models.length > 1000) throw new ProviderError("ChatGPT returned an invalid model catalog.");
     this.summaries.clear();
+    this.levels.clear();
     const seen = new Set<string>();
     const models = body.models.flatMap((m): ModelDescriptor[] => {
       if (!isRecord(m) || m.visibility !== "list" || typeof m.slug !== "string" || !m.slug || seen.has(m.slug)) return [];
@@ -49,11 +52,11 @@ export class ChatGPTProvider implements ProviderAdapter {
       const levels = Array.isArray(m.supported_reasoning_levels)
         ? m.supported_reasoning_levels.flatMap((level: unknown) => isRecord(level) && typeof level.effort === "string" && /^[a-z]{1,16}$/.test(level.effort) ? [level.effort] : [])
         : [];
+      if (levels.length) this.levels.set(m.slug, levels);
       return [{ id: m.slug, displayName: typeof m.display_name === "string" ? m.display_name : m.slug, provider: this.id,
         contextWindow: integer(m.context_window) ?? this.options.contextWindow,
         maxOutputTokens: integer(m.max_output_tokens),
-        ...(levels.length ? { reasoningLevels: levels } : {}),
-        ...(typeof m.default_reasoning_level === "string" && levels.includes(m.default_reasoning_level) ? { defaultReasoningLevel: m.default_reasoning_level } : {}) }];
+        ...(levels.length ? { reasoningLevels: levels, defaultReasoningLevel: thinkingOffLevel(levels) } : {}) }];
     });
     this.listedSol = models.find(model => model.id === SOL);
     // Do not probe from discovery or inject every documented model. A selected
@@ -74,6 +77,11 @@ export class ChatGPTProvider implements ProviderAdapter {
     return this.listedSol ? { ...this.listedSol, ...(this.listedSol.reasoningLevels ? { reasoningLevels: [...this.listedSol.reasoningLevels] } : {}) } : solDescriptor();
   }
   async *stream(request: ProviderRequest, signal: AbortSignal): AsyncGenerator<ProviderStreamEvent> {
+    // Thinking starts off (or at its lowest) unless a level was chosen.
+    if (!request.reasoningLevel && request.thinkingEnabled !== false) {
+      const levels = request.model === SOL ? this.listedSol?.reasoningLevels ?? SOL_REASONING_LEVELS : this.levels.get(request.model);
+      if (levels?.length) request = { ...request, reasoningLevel: thinkingOffLevel(levels) };
+    }
     if (request.model === SOL && request.reasoningLevel) {
       const levels = this.listedSol?.reasoningLevels ?? SOL_REASONING_LEVELS;
       if (!levels.includes(request.reasoningLevel)) throw new ProviderError(`GPT-6.1 Sol through ChatGPT does not support the ${request.reasoningLevel} reasoning effort. Choose ${levels.join(", ")}.`, undefined, "unsupported_reasoning_effort");

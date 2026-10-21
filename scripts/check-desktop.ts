@@ -251,7 +251,7 @@ try {
   await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
   assert.equal(await page.getByRole("searchbox", { name: "Find a conversation or project" }).inputValue(), "", "Escape clears the search");
   await until(() => page.locator(".sidebar-session[aria-current='page']").isVisible(), "the list is back after search");
-  assert(await page.locator("#sidebar-drive").isVisible(), "Drive is a fixed row in the sidebar");
+  assert(await page.locator("#sidebar-drive, #drive-page").count() === 0, "Drive has no sidebar row and no page");
   // Projects stay visible, and each project owns a collapsible list of chats.
   assert((await page.locator("#desktop-project-sub").innerText()).length > 0, "The project shows its folder under its name");
   await page.getByRole("searchbox", { name: "Find a conversation or project" }).focus();
@@ -529,50 +529,35 @@ try {
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "switching projects preserves manual ordering");
   await page.locator("textarea").focus();
   await capture("07-project-groups");
-  await page.locator("#sidebar-drive").click();
-  const drivePage = page.locator("#drive-page");
-  const mission = drivePage.getByLabel("What should Drive take on?");
-  await mission.waitFor();
-  await drivePage.getByText("Nothing waiting", { exact: false }).waitFor();
-  assert(!(await page.locator("#stage").isVisible()), "Drive takes the main column in place of the conversation");
-  await mission.fill("Verify the Drive controls");
-  await page.keyboard.press("Escape");
-  await page.locator("#stage").waitFor();
-  assert(await drivePage.isHidden(), "Escape leaves the Drive page");
-  await page.locator("#sidebar-drive").click();
-  assert.equal(await mission.inputValue(), "Verify the Drive controls", "leaving Drive preserves the mission draft");
+  // Drive has no page: it speaks from a line at the end of the conversation.
+  const line = page.locator("#briefing");
+  const pressAction = (action: string) => evaluate(`const b = document.createElement("button"); b.dataset.action = ${JSON.stringify(action)}; document.body.append(b); b.click(); b.remove();`);
   failSuggestions = true;
-  await drivePage.getByRole("button", { name: "look now", exact: true }).click();
-  await until(() => drivePage.innerText().then(text => text.includes("Couldn’t load ideas:")), "idea failures are visible");
-  assert.equal(await mission.inputValue(), "Verify the Drive controls", "looking again preserves the mission draft");
+  await pressAction("next-refresh");
+  await until(() => line.innerText().then(text => text.includes("Drive couldn't look for ideas")), "idea failures show on Drive's line");
   failSuggestions = false;
-  await drivePage.getByRole("button", { name: "Look again", exact: true }).click();
-  await until(() => drivePage.innerText().then(text => !text.includes("Couldn’t load ideas:") && !text.includes("Looking")), "Look again recovers the ideas view");
-  await capture("08-drive");
-  await drivePage.getByRole("button", { name: "Start", exact: true }).click();
-  await drivePage.getByRole("button", { name: "Pause", exact: true }).waitFor();
-  assert(await drivePage.isVisible(), "Drive stays open when a mission switches to its worktree");
+  await line.getByRole("button", { name: "look again", exact: true }).click();
+  await until(() => line.isHidden(), "look again recovers, and the line goes quiet with nothing to offer");
+  await page.locator("textarea").fill("/drive --bounded Verify the Drive controls");
+  await page.locator("textarea").press("Enter");
+  const control = (name: string) => page.locator('[data-action="drive-control"]').filter({ hasText: new RegExp(`^${name}$`, "i") }).first();
+  await control("pause").waitFor();
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "Drive worktrees stay within their parent project");
   assert.equal(await page.locator(".sidebar-project.active").getAttribute("data-project"), f.workspace);
   await capture("08-drive-working");
-  await drivePage.getByRole("button", { name: "Pause", exact: true }).click();
-  await drivePage.getByRole("button", { name: "Resume", exact: true }).waitFor();
-  await until(() => drivePage.locator(".drive-status").innerText().then(text => text === "Paused"), "Pause is reflected in mission status");
-  await drivePage.getByRole("button", { name: "Resume", exact: true }).click();
-  await drivePage.getByRole("button", { name: "Pause", exact: true }).waitFor();
-  await drivePage.getByRole("button", { name: "Stop", exact: true }).click();
-  await until(() => drivePage.locator(".drive-status").innerText().then(text => text === "Stopped"), "Stop is reflected in mission status");
+  await control("pause").click();
+  await control("resume").waitFor();
+  await control("resume").click();
+  await control("pause").waitFor();
+  await control("stop").click();
+  await until(() => page.locator('[data-action="drive-control"]').filter({ hasText: /^pause$/i }).count().then(count => count === 0), "Stop ends the mission");
   await capture("09-drive-stopped");
-  // Back in a chat, Drive's ideas sit on the composer's top edge; the
-  // chevron grows the box upward to show them, one line each.
+  // The finished mission left a worktree without changes; its review card
+  // opens from Drive's line and discards it.
   offerIdeas = true;
-  await drivePage.locator(".drive-row").filter({ hasText: "No changes" }).hover();
-  await drivePage.getByRole("button", { name: "Discard", exact: true }).click();
-  // Nothing on the page asks for fresh ideas while a past mission is listed,
-  // so press the same action the strip's "look again" sends.
-  await evaluate(`const b = document.createElement("button"); b.dataset.action = "next-refresh"; b.id = "fixture-refresh"; document.getElementById("drive-page").append(b); b.click(); b.remove();`);
-  await until(() => drivePage.innerText().then(text => text.includes("Add tests for fuzzy search ranking")), "Drive offers the fixture ideas");
-  await page.keyboard.press("Escape");
+  await line.getByRole("button", { name: /to review/ }).click();
+  await page.getByRole("button", { name: "Discard the worktree", exact: true }).click();
+  await pressAction("next-refresh");
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
   assert(await page.evaluate(() => Boolean(document.querySelector("#stage > #briefing")) && !document.querySelector("#composer-slot #briefing")), "Drive's line sits where the conversation ends, not on the composer");
   await page.locator("#briefing .bf-chev").click();

@@ -16,8 +16,6 @@ body.desktop kbd { font-family: "JetBrains Mono", monospace; }
 .sidebar-nav button.on { background: var(--surface2); color: var(--t1); }
 .sidebar-nav button .ico, .sidebar-settings .ico { color: var(--t3); }
 #desktop-sidebar .sidebar-nav kbd, #desktop-sidebar .sidebar-settings kbd { margin-left: auto; border: 0; background: none; padding: 0; color: var(--t4); }
-.sidebar-pip { display: block; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--acc); }
-.sidebar-pip.warn { background: var(--warn); }
 .sidebar-foot { display: flex; flex-direction: column; gap: 1px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); }
 /* The active project's name, folder and branch anchor the workspace. */
 .sidebar-head { display: flex; align-items: center; gap: 10px; padding: 2px 8px 12px; min-width: 0; }
@@ -526,62 +524,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .rv-note input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--t1); font: inherit; padding: 0; }
 .desktop .rv-note input::placeholder { color: var(--t4); }
 .desktop #mention-chips .notes-chip { color: var(--acc); background: var(--acc-soft); border: 0; }
-/* Drive page: takes the main column in place of the conversation. The box,
-   then one list; each row is one line and shows its actions when pointed at. */
-body.drive-page-open #stage, body.drive-page-open #input-area, body.drive-page-open #banner { display: none !important; }
-#drive-page:not([hidden]) { flex: 1; min-height: 0; overflow: auto; padding: 48px 32px 48px; scrollbar-width: thin; scrollbar-color: var(--hair2) transparent; }
-#drive-page .drive-col { width: min(640px, 100%); margin: 0 auto; font-family: Inter, system-ui, sans-serif; font-size: 13.5px; line-height: 20px; color: var(--t2); }
-#drive-page .drive-col.quiet { padding-top: 12vh; }
-#drive-page .drive-box { border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); padding: 12px 14px 8px; }
-#drive-page .drive-box:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair)), var(--shadow-2); }
-#drive-page .drive-box textarea { height: auto; min-height: 44px; max-height: 240px; line-height: 21px; font-size: 13.5px; color: var(--t1); font-family: inherit; resize: none; field-sizing: content; }
-#drive-page .drive-box textarea::placeholder { color: var(--t4); }
-#drive-page .drive-cbar { display: flex; align-items: center; gap: 12px; margin-top: 4px; font-size: 12px; color: var(--t3); }
-#drive-page .sp { flex: 1; }
-#drive-page .drive-mode { height: 24px; padding: 0 6px; margin-left: -6px; border-radius: var(--r-sm); color: var(--t3); }
-#drive-page .drive-mode:hover { background: var(--tone2); color: var(--t1); }
-#drive-page .drive-model { color: var(--t4); }
-#drive-page .drive-go { display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-sm); color: var(--t1); font-size: 14px; }
-#drive-page .drive-go:hover:not(:disabled) { background: var(--tone2); }
-#drive-page .drive-go:disabled { color: var(--t4); cursor: default; }
-#drive-page .drive-error { margin: 8px 14px 0; color: var(--bad); font-size: 12px; }
-#drive-page .drive-list { margin-top: 20px; }
-#drive-page .drive-row { position: relative; display: flex; align-items: center; gap: 12px; height: 38px; padding: 0 12px; border-radius: 9px; }
-#drive-page .drive-row:hover, #drive-page .drive-row:focus-within { background: var(--tone); }
-#drive-page .drive-mk { display: grid; place-items: center; flex: none; width: 14px; }
-#drive-page .drive-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); text-align: left; }
-#drive-page .drive-title.muted, #drive-page .drive-row.past .drive-r { color: var(--t3); }
-#drive-page .drive-r { margin-left: auto; padding-left: 12px; flex: none; color: var(--t4); font-size: 12px; white-space: nowrap; }
-#drive-page .drive-act { position: absolute; right: 8px; top: 0; bottom: 0; display: flex; align-items: center; gap: 4px; opacity: 0; }
-#drive-page .drive-row:hover .drive-act, #drive-page .drive-row:focus-within .drive-act { opacity: 1; }
-#drive-page .drive-row:has(.drive-act):hover .drive-r, #drive-page .drive-row:has(.drive-act):focus-within .drive-r { opacity: 0; }
-#drive-page .drive-act button { height: 24px; padding: 0 9px; border-radius: var(--r-sm); background: var(--tone2); color: var(--t1); font-size: 12px; }
-#drive-page .drive-act button.primary { background: var(--acc-soft); color: var(--acc); }
-#drive-page .drive-act button.quiet, #drive-page .drive-act button.link { background: none; color: var(--t3); }
-#drive-page .drive-act button:hover:not(:disabled) { background: var(--surface3); color: var(--t1); }
-#drive-page .drive-act button:disabled { opacity: 0.5; cursor: default; }
-#drive-page .drive-status { display: inline; border: 0; border-radius: 0; box-shadow: none; padding: 0; background: none; color: inherit; }
-#drive-page .drive-status.warn { color: var(--warn); }
-#drive-page .drive-spin { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--hair2); border-top-color: var(--acc); }
-#drive-page .drive-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--t4); }
-#drive-page .drive-dot.ok { background: var(--ok); }
-#drive-page .drive-dot.bad { background: var(--bad); }
-#drive-page .drive-dot.warn { background: transparent; box-shadow: 0 0 0 1.5px var(--warn); width: 8px; height: 8px; }
-#drive-page .drive-dot.idea, #drive-page .drive-dot.paused { background: transparent; box-shadow: 0 0 0 1px var(--t4); }
-#drive-page .drive-dot.done { background: var(--hair2); }
-#drive-page .drive-empty { margin-top: 20px; padding: 0 12px; color: var(--t4); font-size: 12.5px; }
-#drive-page button.link { color: var(--acc); background: none; padding: 0; }
-#drive-page button.link:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
-#drive-page button.link:disabled { color: var(--t4); }
-#sidebar-drive.on { background: var(--tone2); color: var(--t1); }
-@keyframes drive-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: no-preference) {
-  #drive-page:not([hidden]) .drive-col { animation: desktop-appear 180ms var(--ease); }
-  #drive-page .drive-spin { animation: drive-spin 900ms linear infinite; }
-  #drive-page .drive-row, #drive-page .drive-go, #drive-page .drive-box, #drive-page .drive-mode { transition: background-color 140ms var(--ease), color 140ms var(--ease), box-shadow 160ms var(--ease); }
-  #drive-page .drive-act, #drive-page .drive-r { transition: opacity 140ms var(--ease); }
-}
-
 /* Composer mode: one word under the box, coloured by mode; ⇧⇥ steps it. */
 .desktop #composer .composer-bar #composer-mode kbd { font: 11px Inter, system-ui, sans-serif; color: var(--t4); background: none; border: 0; padding: 0; margin-left: 2px; }
 .desktop #composer .composer-bar #composer-mode.mode-edits { color: var(--ok); }

@@ -574,7 +574,9 @@ try {
   await until(() => drivePage.innerText().then(text => text.includes("Add tests for fuzzy search ranking")), "Drive offers the fixture ideas");
   await page.keyboard.press("Escape");
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
+  assert(await page.evaluate(() => Boolean(document.querySelector("#stage > #briefing")) && !document.querySelector("#composer-slot #briefing")), "Drive's line sits where the conversation ends, not on the composer");
   await page.locator("#briefing .bf-chev").click();
+  await until(() => page.locator("#briefing .bf-word").innerText().then(text => text.includes("Three things I could do next")), "the line becomes Drive's reply");
   await until(() => page.locator("#drive-reply.open .bf-row").count().then(count => count === 3), "Drive's ideas open as a reply in the conversation");
   await page.waitForTimeout(400);
   assert(await page.evaluate(() => { const stage = document.getElementById("stage")!, reply = document.getElementById("drive-reply")!; return reply.getBoundingClientRect().bottom <= stage.getBoundingClientRect().bottom + 2; }), "the reply is scrolled into view, not covering anything");
@@ -582,6 +584,8 @@ try {
   await capture("10-drive-reply");
   await page.keyboard.press("Escape");
   await until(() => page.locator("#drive-reply.open").count().then(count => count === 0), "Escape folds the reply away");
+  await page.waitForTimeout(400);
+  await capture("10-drive-line");
   await page.locator("#briefing .bf-word").click();
   await until(() => page.locator("#drive-reply.open").count().then(count => count === 1), "the chip's word opens it again");
   await page.locator("#briefing .bf-chev").click();

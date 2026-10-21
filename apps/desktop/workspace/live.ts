@@ -1693,9 +1693,9 @@ function driveWord() {
   const run = worktreeRun(), pinned = pinnedMission();
   return { needs: needsYou().length, live: Boolean(run.fix || run.away || (pinned && pinned.status !== "paused" && pinned.status !== "blocked")) };
 }
-/// A strip along the top edge of the composer in a session: branches waiting
-/// for review, and what Drive is doing or would do next. Its chevron grows
-/// the box upward to show Drive's rows; closing folds them away again.
+/// A quiet line where the conversation ends: branches waiting for review,
+/// and what Drive is doing or would do next. Its chevron turns the line into
+/// Drive's reply, unfolding the rows under it; closing folds them away again.
 let briefingSignature = "";
 function renderBriefing() {
   if (!state) return;
@@ -1736,7 +1736,8 @@ function renderBriefing() {
     parts.push(`${mark("spin")}${btn("drive-show", "Drive is working", {}, "bf-word")}<span class="bf-about">${h(about)}</span>`);
   } else if (next.proposals.length) {
     const count = next.proposals.length;
-    parts.push(`${mark("idea")}${btn("ideas-show", `Drive has ${count} idea${count === 1 ? "" : "s"}`, {}, "bf-word")}`);
+    const title = `${count === 1 ? "One thing" : `${["", "", "Two", "Three", "Four", "Five"][count] ?? count} things`} I could do next`;
+    parts.push(`${mark("idea")}${btn("ideas-show", ideasShown ? title : `Drive has ${count} idea${count === 1 ? "" : "s"} for what's next`, {}, "bf-word")}`);
     toggle = { action: "ideas-show", open: ideasShown };
     if (ideasShown) {
       const words = ["", "it", "both", "all three"], overnight = Math.min(3, count);
@@ -1750,11 +1751,14 @@ function renderBriefing() {
   node.hidden = !inSession() || !parts.length;
   if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").classList.remove("open"); return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
-  const chip = `${parts.map((part) => `<span class="bf-part">${part}</span>`).join('<span class="bf-sep">·</span>')}${chevron}${progress !== null ? `<span class="bf-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : ""}`;
-  node.innerHTML = `<div class="bf-chip">${chip}</div>`;
+  // The first part's mark sits in the conversation's mark column, like an answer's d.
+  const lead = /^<span class="bf-(?:spin|dot)[^>]*><\/span>/.exec(parts[0]!)?.[0] ?? "";
+  parts[0] = parts[0]!.slice(lead.length);
+  const chip = `${parts.map((part) => `<span class="bf-part">${part}</span>`).join('<span class="bf-sep">·</span>')}${chevron}`;
+  node.innerHTML = `<span class="bf-lead${fold ? " open" : ""}">${fold ? ICON_SPARK : lead}</span><div class="bf-chip">${chip}</div>${progress !== null ? `<span class="bf-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : ""}`;
   node.classList.toggle("open", Boolean(fold));
-  // What the chip opens is Drive speaking in the conversation: a short reply
-  // at its end that scrolls with everything else, so nothing is covered.
+  // Opening turns the line into Drive speaking in the conversation: its rows
+  // unfold under it and scroll with everything else, so nothing is covered.
   const reply = el("drive-reply"), open = Boolean(fold), shown = reply.classList.contains("open");
   if (!open && shown) {
     reply.classList.remove("open");
@@ -1762,8 +1766,7 @@ function renderBriefing() {
     return;
   }
   if (!open) return;
-  const title = toggle?.action === "ideas-show" ? `${next.proposals.length === 1 ? "One thing" : `${["", "", "Two", "Three", "Four", "Five"][next.proposals.length] ?? next.proposals.length} things`} I could do next` : "What I'm working on";
-  reply.innerHTML = `<div class="dr-fold"><div><div class="answer dr-answer"><span class="answer-mark dr-mark" aria-hidden="true">${ICON_SPARK}</span><div class="dr-body"><p class="dr-title">${h(title)}</p>${fold}</div></div></div></div>`;
+  reply.innerHTML = `<div class="dr-fold"><div><div class="dr-body">${fold}</div></div></div>`;
   reply.hidden = false;
   if (shown) { reply.classList.add("open"); return; }
   void reply.offsetHeight;

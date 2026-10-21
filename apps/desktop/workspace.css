@@ -620,30 +620,32 @@ body.drive-page-open #stage, body.drive-page-open #input-area, body.drive-page-o
 
 /* Drive's chip: a small rounded chip centred above the composer. What it
    opens is a short reply from Drive at the end of the conversation. */
-.desktop #briefing { position: relative; display: flex; justify-content: center; margin: 0 0 10px; pointer-events: none; }
+.desktop #briefing { position: relative; display: flex; align-items: center; gap: 12px; max-width: 780px; min-height: 28px; margin: 0 auto 14px; }
 .desktop #briefing[hidden] { display: none; }
-.desktop #briefing .bf-chip { pointer-events: auto; }
-.desktop #briefing .bf-chip { position: relative; display: inline-flex; align-items: center; gap: 8px; max-width: min(560px, 100%); height: 30px; padding: 0 6px 0 13px; overflow: hidden; border-radius: 15px; background: var(--surface2); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); font-size: 12.5px; color: var(--t3); white-space: nowrap; }
-.desktop #briefing .bf-chip:not(:has(.bf-chev)) { padding-right: 13px; }
-.desktop #briefing .bf-chip:hover { background: color-mix(in srgb, var(--surface2) 88%, var(--t1)); }
-.desktop #briefing.open .bf-chip { box-shadow: 0 0 0 1px var(--hair), var(--shadow-1); }
+.desktop #briefing .bf-lead { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 7px; box-shadow: inset 0 0 0 1px var(--tone2); }
+.desktop #briefing .bf-lead.open { box-shadow: none; background: color-mix(in srgb, var(--acc) 22%, var(--surface2)); color: var(--acc); }
+.desktop #briefing .bf-lead .ico { width: 12px; height: 12px; }
+.desktop #briefing .bf-lead .bf-dot { width: 6px; height: 6px; }
+.desktop #briefing .bf-chip { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; color: var(--t3); white-space: nowrap; }
 .desktop #briefing .bf-part { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
-.desktop #briefing .bf-word { padding: 0; border: 0; background: none; font: inherit; font-weight: 500; color: var(--t2); cursor: pointer; }
+.desktop #briefing .bf-word { padding: 0; border: 0; background: none; font: inherit; color: var(--t3); cursor: pointer; }
 .desktop #briefing button.bf-word:hover { color: var(--t1); }
+.desktop #briefing.open .bf-word { color: var(--t1); font-size: 14px; }
 .desktop #briefing .bf-word.amber { color: var(--warn); }
-.desktop #briefing .bf-about { overflow: hidden; text-overflow: ellipsis; max-width: 300px; color: var(--t3); }
+.desktop #briefing .bf-about { overflow: hidden; text-overflow: ellipsis; max-width: 360px; color: var(--t4); }
 .desktop #briefing .bf-sep { color: var(--t4); }
-.desktop #briefing .bf-chev { display: grid; place-items: center; width: 22px; height: 22px; margin-left: -2px; padding: 0; border: 0; border-radius: 11px; background: none; color: var(--t4); cursor: pointer; }
+.desktop #briefing .bf-chev { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--t4); cursor: pointer; opacity: 0; }
+.desktop #briefing:hover .bf-chev, .desktop #briefing.open .bf-chev, .desktop #briefing .bf-chev:focus-visible { opacity: 1; }
 .desktop #briefing .bf-chev:hover { background: var(--tone2); color: var(--t1); }
-.desktop #briefing .bf-chev .ico { width: 14px; height: 14px; transform: rotate(180deg); }
-.desktop #briefing.open .bf-chev .ico { transform: none; }
+.desktop #briefing .bf-chev .ico { width: 14px; height: 14px; }
+.desktop #briefing.open .bf-chev .ico { transform: rotate(180deg); }
 .desktop :is(#briefing, #drive-reply) .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .desktop :is(#briefing, #drive-reply) .bf-dot.idea { background: var(--acc); }
 .desktop :is(#briefing, #drive-reply) .bf-dot.ok { background: var(--ok); }
 .desktop :is(#briefing, #drive-reply) .bf-dot.amber { background: var(--warn); }
 .desktop :is(#briefing, #drive-reply) .bf-dot.hollow { box-shadow: inset 0 0 0 1.5px var(--t4); }
 .desktop #briefing .bf-spin { width: 11px; height: 11px; flex: none; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--acc) 25%, transparent); border-top-color: var(--acc); }
-.desktop #briefing .bf-progress { position: absolute; left: 14px; right: 14px; bottom: 0; height: 1.5px; overflow: hidden; border-radius: 1px; }
+.desktop #briefing .bf-progress { position: absolute; left: 32px; width: 160px; bottom: -3px; height: 1.5px; overflow: hidden; border-radius: 1px; background: var(--tone); }
 .desktop #briefing .bf-progress i { display: block; height: 100%; background: linear-gradient(90deg, transparent, var(--acc)); }
 .desktop :is(#briefing, #drive-reply) .bf-rows { display: flex; flex-direction: column; }
 .desktop :is(#briefing, #drive-reply) .bf-row { position: relative; display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: var(--r-sm); color: var(--t1); font-size: 13px; }
@@ -664,26 +666,23 @@ body.drive-page-open #stage, body.drive-page-open #input-area, body.drive-page-o
 .desktop #drive-reply .dr-fold { display: grid; grid-template-rows: 0fr; }
 .desktop #drive-reply.open .dr-fold { grid-template-rows: 1fr; }
 .desktop #drive-reply .dr-fold > div { min-height: 0; overflow: hidden; }
-.desktop #drive-reply .dr-answer { padding: 4px 0 18px; }
-.desktop #drive-reply .dr-mark { display: grid; place-items: center; background: color-mix(in srgb, var(--acc) 22%, var(--surface2)); color: var(--acc); }
-.desktop #drive-reply .dr-mark .ico { width: 12px; height: 12px; }
-.desktop #drive-reply .dr-body { flex: 1; min-width: 0; }
-.desktop #drive-reply .dr-title { margin: 1px 0 4px; color: var(--t1); font-size: 14px; }
-.desktop #drive-reply .bf-row { margin-left: -10px; }
-.desktop #drive-reply .bf-foot { padding-left: 0; box-shadow: none; }
+.desktop #drive-reply .dr-body { padding: 0 0 18px 22px; }
+.desktop #drive-reply .bf-foot { box-shadow: none; }
 @keyframes bf-spin { to { transform: rotate(360deg); } }
 @keyframes bf-breathe { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: no-preference) {
   .desktop #briefing .bf-spin { animation: bf-spin 900ms linear infinite; }
   .desktop :is(#briefing, #drive-reply) .bf-dot.idea { animation: bf-breathe 2.4s ease-in-out infinite; }
-  .desktop #briefing .bf-chip { transition: background-color 160ms var(--ease), box-shadow 200ms var(--ease); }
+  .desktop #briefing .bf-lead { transition: background-color 200ms var(--ease), box-shadow 200ms var(--ease), color 200ms var(--ease); }
+  .desktop #briefing .bf-word { transition: color 140ms var(--ease); }
+  .desktop #briefing .bf-chev { transition: opacity 140ms var(--ease); }
   .desktop #briefing .bf-chev .ico { transition: transform 220ms var(--ease); }
   .desktop #briefing .bf-progress i { transition: width 600ms var(--ease); }
   .desktop :is(#briefing, #drive-reply) .bf-row { transition: background-color 140ms var(--ease); }
   .desktop :is(#briefing, #drive-reply) .bf-act, .desktop :is(#briefing, #drive-reply) .bf-r { transition: opacity 140ms var(--ease); }
   .desktop #drive-reply .dr-fold { transition: grid-template-rows 280ms var(--ease); }
-  .desktop #drive-reply .dr-title, .desktop #drive-reply .bf-row, .desktop #drive-reply .drive-live, .desktop #drive-reply .bf-foot { opacity: 0; transform: translateY(4px); transition: opacity 200ms var(--ease), transform 240ms var(--ease), background-color 140ms var(--ease); }
-  .desktop #drive-reply.open .dr-title, .desktop #drive-reply.open .bf-row, .desktop #drive-reply.open .drive-live, .desktop #drive-reply.open .bf-foot { opacity: 1; transform: none; }
+  .desktop #drive-reply .bf-row, .desktop #drive-reply .drive-live, .desktop #drive-reply .bf-foot { opacity: 0; transform: translateY(4px); transition: opacity 200ms var(--ease), transform 240ms var(--ease), background-color 140ms var(--ease); }
+  .desktop #drive-reply.open .bf-row, .desktop #drive-reply.open .drive-live, .desktop #drive-reply.open .bf-foot { opacity: 1; transform: none; }
   .desktop #drive-reply.open .bf-row:nth-child(1) { transition-delay: 60ms, 60ms, 0ms; }
   .desktop #drive-reply.open .bf-row:nth-child(2) { transition-delay: 100ms, 100ms, 0ms; }
   .desktop #drive-reply.open .bf-row:nth-child(n+3), .desktop #drive-reply.open .bf-foot, .desktop #drive-reply.open .drive-live { transition-delay: 140ms, 140ms, 0ms; }

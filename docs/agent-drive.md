@@ -35,7 +35,7 @@ The mission also appears as a turn in its conversation, with Pause/Resume, Stop 
 | Action | Result |
 | --- | --- |
 | Run | Do it in its own git worktree and branch, then show the result to Apply, Open PR or Discard ([below](#run-works-in-a-worktree)) |
-| Plan first | Submit a read-only planning turn |
+| Plan first | Write a read-only plan in a new chat of its own; you stay in yours |
 | Not now | Hide that proposal for 24 hours |
 | Never | Hide its stable proposal ID and record a project-memory veto |
 | Refresh | Recollect signals and regenerate proposals explicitly |

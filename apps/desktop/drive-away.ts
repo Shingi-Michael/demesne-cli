@@ -39,7 +39,8 @@ function removeAwayMarker(journal: string, pid?: number) {
 export function awayPlan(host: WorkspaceHost): { workspace: string; server: string; sessionId: string; journal: string } | null {
   const drive = host.drive, state = host.driveState;
   if (!drive?.agent.active || !state?.homeSessionId) return null;
-  if (host.current?.session.id !== state.homeSessionId) return null;
+  // The mission works in the chat you're in, or in its own chat behind it.
+  if (host.current?.session.id !== state.homeSessionId && host.driveSession?.session.id !== state.homeSessionId) return null;
   return { workspace: host.workspace, server: host.api.server, sessionId: state.homeSessionId, journal: drive.journalPath };
 }
 

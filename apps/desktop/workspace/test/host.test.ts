@@ -269,7 +269,7 @@ test("an untrusted workspace waits for Trust folder before creating a session", 
   }
 });
 
-test("/drive moves the mission into its own worktree session, and returns you after Discard", async () => {
+test("/drive works the mission in its own worktree session while you stay in your chat", async () => {
   const f = await fixture({ providerId: "test", modelId: "test", contextCapacity: 262144, async listModels() { return []; },
     async *stream() { yield { type: "text_delta", delta: "Thinking it over." }; yield { type: "finish", reason: "stop" }; } });
   for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=a@b", "commit", "-qm", "init"]])
@@ -282,9 +282,14 @@ test("/drive moves the mission into its own worktree session, and returns you af
     await host.drive!.handle("drive", { text: "--bounded Make the README friendlier" });
     const fix = host.breakage.state.fix!;
     expect(fix).toMatchObject({ mission: "Make the README friendlier", status: "running" });
-    expect(host.current!.session.id).toBe(fix.sessionId!);
-    expect(host.current!.session.workspace?.root.startsWith(fix.path)).toBe(true);
+    // You stay where you were; Drive follows the mission's chat behind you.
+    expect(host.current!.session.id).toBe(home);
+    expect(host.driveSession?.session.id).toBe(fix.sessionId!);
+    expect(host.driveSession!.session.workspace?.root.startsWith(fix.path)).toBe(true);
     expect(host.driveState?.homeSessionId).toBe(fix.sessionId!);
+    // Talking in your own chat doesn't pause it.
+    await host.handle("submit", { text: "What's in the README?", sessionId: home });
+    expect(host.driveState?.status).not.toBe("paused");
 
     // Stopping settles the mission: the worktree is committed for review (nothing changed here).
     await host.drive!.handle("drive-control", { control: "stop" });
@@ -294,9 +299,10 @@ test("/drive moves the mission into its own worktree session, and returns you af
     expect(host.breakage.state.fix?.headline).toBe("0 of 1 task verified · no checks recorded");
     expect(host.breakage.state.fix?.receipt).toContain("#### ○ Make the README friendlier");
 
-    await host.handle("breakage-discard", { sessionId: fix.sessionId });
-    await eventually(() => host.current?.session.id === home, 5000);
-    expect(host.breakage.state.fix).toBeNull();
+    await host.handle("breakage-discard", { id: fix.id, sessionId: home });
+    await eventually(() => host.breakage.state.fix === null, 5000);
+    expect(host.current?.session.id).toBe(home);
+    expect(host.driveSession).toBeNull();
   } finally { host.dispose(); await f.close(); }
 });
 

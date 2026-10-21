@@ -55,6 +55,10 @@ export class WorkspaceDrive {
         host.api.decideDrive(request, signal, progress),
       changed: (state) => {
         host.driveState = state;
+        // A mission restored in another chat (the app restarted) is followed
+        // there again, not in the chat you're in.
+        if (state && ["running", "waiting"].includes(state.status) && state.homeSessionId !== host.current?.session.id && host.driveSession?.session.id !== state.homeSessionId)
+          void host.followDriveSession(state.homeSessionId).catch(() => {});
         host.missionChanged(state);
         host.publish();
       },

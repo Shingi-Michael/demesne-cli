@@ -432,7 +432,9 @@ function renderSidebar() {
       const selected = item.id === current?.id;
       const title = selected ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
       const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
-      const working = selected ? Boolean(state.activeTurnId) && !waiting : !asks && (item.status === "running" || item.status === "queued");
+      // A mission's chat keeps its cube while Drive plans between turns.
+      const driving = Boolean(pinned && pinned.homeSessionId === item.id && ["running", "waiting"].includes(pinned.status));
+      const working = selected ? (Boolean(state.activeTurnId) || driving) && !waiting : !asks && (item.status === "running" || item.status === "queued" || driving);
       // Looking at a chat marks it seen; one that has moved on since, while
       // you were elsewhere, carries the blue dot until you open it.
       if (selected || !(item.id in seenChats)) markSeen(item.id, item.updatedAt);
@@ -1881,7 +1883,10 @@ function renderBriefing() {
     parts.push(`${driveMark(pinned)}<b class="bf-word${pinned.status === "blocked" ? " amber" : ""}">${label(pinned)}</b>${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
   } else if (pinned) {
     const time = activeMinutes(pinned);
-    parts.push(`${driveMark(pinned)}${btn("drive-show", label(pinned), {}, `bf-word${pinned.status === "blocked" ? " amber" : ""}`)}<span class="bf-about">${h(missionTitle(pinned))}${time ? ` · ${time}` : ""}</span>`);
+    // Working in its own chat: the line says what on, with the shine.
+    const working = pinned.status === "running" || pinned.status === "waiting";
+    const about = working ? time : `${missionTitle(pinned)}${time ? ` · ${time}` : ""}`;
+    parts.push(`${driveMark(pinned)}${btn("drive-show", working ? shine(`Working on ${missionTitle(pinned)}`) : label(pinned), {}, `bf-word${pinned.status === "blocked" ? " amber" : ""}`)}${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
     toggle = { action: "drive-show", open: driveShown };
     if (driveShown) fold = `<div class="drive-live">${pinnedCard(pinned)}</div>`;
   } else if (run.fix || run.away) {
@@ -2036,7 +2041,7 @@ function blockedCard(drive: NonNullable<Snapshot["drive"]>) {
 function pinnedCard(pinned: NonNullable<Snapshot["drive"]>) {
   if (pinned.status === "blocked") return blockedCard(pinned);
   const parts = missionParts(pinned), live = pinned.status === "running" || pinned.status === "waiting";
-  return `<section class="drive-pinned tone-border-${parts.tone}" aria-label="Live mission"><div class="drive-pinned-title">${h(parts.title)}</div><div class="drive-status"><strong class="tone-${parts.tone}">${parts.mark} ${h(parts.label)}</strong>${parts.summary ? `<span class="drive-summary">${h(parts.summary)}</span>` : ""}</div>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("drive-control", live ? "Pause" : "Resume", { control: live ? "pause" : "resume" })}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>${parts.details}</section>`;
+  return `<section class="drive-pinned tone-border-${parts.tone}" aria-label="Live mission"><div class="drive-pinned-title">${h(parts.title)}</div><div class="drive-status"><strong class="tone-${parts.tone}">${parts.mark} ${h(parts.label)}</strong>${parts.summary ? `<span class="drive-summary">${h(parts.summary)}</span>` : ""}</div>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("drive-control", live ? "Pause" : "Resume", { control: live ? "pause" : "resume" })}${pinned.homeSessionId !== state?.session?.id ? btn("select-session", "Watch", { id: pinned.homeSessionId }) : ""}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>${parts.details}</section>`;
 }
 /// The mission homed in this session, which reads as its newest turn.
 const driveTurnMission = () => {

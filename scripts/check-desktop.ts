@@ -394,13 +394,14 @@ try {
   for (const [word, policy] of [["Accept edits", { acceptEdits: true, autoApprove: false }], ["Plan", { acceptEdits: false, autoApprove: false }],
     ["Auto", { acceptEdits: false, autoApprove: true }], ["Ask", { acceptEdits: false, autoApprove: false }]] as const) {
     await page.keyboard.press("Shift+Tab");
-    await until(() => page.locator("#composer-mode").innerText().then(text => text.startsWith(word)), `mode word ${word}`);
+    await until(() => page.locator("#composer-mode .mode-opt.on").innerText().then(text => text === word), `mode word ${word}`);
     await until(async () => {
       const session = (await f.client.getSessionState(sessionId)).session;
       return session.acceptEdits === policy.acceptEdits && session.autoApprove === policy.autoApprove;
     }, `daemon policy for ${word}`);
     if (word === "Plan") {
-      assert(await page.locator("#mode-hint").isVisible(), "the mode hint names the four modes");
+      assert(await page.locator("#composer-mode.open").isVisible(), "the mode word opens into the four modes");
+      assert.equal(await page.locator("#composer-mode .mode-opt").count(), 4, "all four modes are in the bar");
       await capture("03-mode-plan");
     }
   }

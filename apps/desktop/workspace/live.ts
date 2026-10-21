@@ -1336,18 +1336,26 @@ const MODE_HELP: Record<Mode, string> = {
   auto: "Edits and commands run without asking",
 };
 function currentMode(): Mode {
-  return state?.planOnly ? "plan" : state?.session?.autoApprove ? "auto" : state?.session?.acceptEdits ? "edits" : "ask";
+  const saved: Mode = state?.planOnly ? "plan" : state?.session?.autoApprove ? "auto" : state?.session?.acceptEdits ? "edits" : "ask";
+  // A step still on its way to the host wins, so quick presses keep stepping.
+  if (pendingMode && pendingMode.mode !== saved && Date.now() < pendingMode.until) return pendingMode.mode;
+  pendingMode = null;
+  return saved;
 }
+let pendingMode: { mode: Mode; until: number } | null = null;
 let modeHintTimer: ReturnType<typeof setTimeout> | undefined;
-/** Steps to the next mode and names all four for a moment above the composer. */
+/** Steps to the next mode and opens the word into all four for a moment. */
 async function cycleMode(step = 1) {
   const order = Object.keys(MODES) as Mode[];
   const next = order[(order.indexOf(currentMode()) + step + order.length) % order.length]!;
-  const hint = el("mode-hint");
-  hint.innerHTML = order.map((mode) => mode === next ? `<b class="mode-${mode}">${MODES[mode]}</b>` : MODES[mode]).join(" · ");
-  hint.hidden = false;
+  // The word opens into all four modes where it sits, the new one lit, and
+  // folds back to one word a moment later.
+  pendingMode = { mode: next, until: Date.now() + 3_000 };
+  const chip = el("composer-mode");
+  for (const option of chip.querySelectorAll<HTMLElement>(".mode-opt")) option.classList.toggle("on", option.dataset.mode === next);
+  chip.classList.add("open");
   clearTimeout(modeHintTimer);
-  modeHintTimer = setTimeout(() => { hint.hidden = true; }, 1600);
+  modeHintTimer = setTimeout(() => chip.classList.remove("open"), 1600);
   if (state?.session) await api("permission-mode", { mode: next });
   else await api("mode", { planOnly: next === "plan" });
 }
@@ -1389,8 +1397,10 @@ function renderComposer() {
   // The mode word says how this chat's edits and commands are gated; a
   // click or ⇧⇥ steps to the next mode.
   const mode = currentMode(), chip = el("composer-mode");
-  chip.className = `cb mode-${mode}`;
-  chip.innerHTML = `${MODES[mode]}<kbd>⇧⇥</kbd>`;
+  chip.className = `cb mode-${mode}${chip.classList.contains("open") ? " open" : ""}`;
+  if (!chip.querySelector(".mode-opt")) chip.innerHTML = `<span class="mode-list">${(Object.keys(MODES) as Mode[]).map((item) => `<span class="mode-opt mode-${item}" data-mode="${item}">${MODES[item]}</span>`).join("")}</span><kbd>⇧⇥</kbd>`;
+  for (const option of chip.querySelectorAll<HTMLElement>(".mode-opt")) option.classList.toggle("on", option.dataset.mode === mode);
+  chip.setAttribute("aria-label", `Mode: ${MODES[mode]}`);
   chip.title = `${MODE_HELP[mode]}. Click or ⇧⇥ for the next mode.`;
   form.classList.toggle("mode-plan", mode === "plan");
   form.classList.toggle("queued", queued);

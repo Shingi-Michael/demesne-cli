@@ -461,7 +461,7 @@ export class WorkspaceHost {
   /// is; the mission's chat is in the sidebar if you want to watch.
   async openMissionWorktree(mission: string) {
     const previous = this.current?.session.id ?? null;
-    const fix = await this.breakage.openMission(mission);
+    const fix = await this.breakage.openMission(mission, previous ?? undefined);
     this.missionReturn = previous;
     // With no window there's nothing to stay in: the host moves into it.
     if (this.options.headless) await this.select(fix.sessionId!);
@@ -1538,7 +1538,7 @@ export class WorkspaceHost {
     }
     if (
       this.drive &&
-      ["drive", "drive-control", "manual"].includes(
+      ["drive", "drive-control", "drive-tell", "manual"].includes(
         method,
       )
     )

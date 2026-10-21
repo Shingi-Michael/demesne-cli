@@ -240,8 +240,23 @@ const expanded = new Set<string>(),
 /// screen, Drive's ideas under it); turns whose steps are open.
 let driveShown = false,
   ideasShown = false,
-  brokeShown = false;
+  brokeShown = false,
+  /// The "Tell Drive…" box under Drive's line, and the note it last sent.
+  tellOpen = false,
+  tellSent = "";
 let driveActionPending = "";
+/// Each mission chat and the chat it was started from.
+function missionLinks() {
+  const jobs = state ? [state.breakage.fix, ...state.breakage.inbox] : [];
+  return new Map(jobs.filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId && job.from)).map((job) => [job.sessionId!, job.from!] as const));
+}
+const chatTitle = (id: string) => state?.sessions.find((item) => item.id === id)?.title || "your chat";
+/// Your notes to a mission, as Drive received them.
+function toldNotes(drive: NonNullable<Snapshot["drive"]>) {
+  const notes = drive.told ?? [], from = missionLinks().get(drive.homeSessionId);
+  if (!notes.length) return "";
+  return `<ul class="drive-told">${notes.slice(-3).map((note) => `<li title="${h(fullTime(note.at))}"><small>From ${h(from ? chatTitle(from) : "your chat")}</small>${h(note.text)}</li>`).join("")}</ul>`;
+}
 /// Drive's page fills the main column in place of the conversation.
 const stepsOpen = new Set<string>();
 /// Steps whose diff or output is unfolded in place, keyed run:tool.
@@ -409,7 +424,9 @@ function renderSidebar() {
   openProjectFor = projectWorkspace;
   const openPath = openProjectPath ?? projectWorkspace;
   const agents = state.agents ?? [];
-  const signature = JSON.stringify([sessions, projectPaths, openPath, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, Math.floor(Date.now() / 60_000)]);
+  // A mission's chat sits under the chat it was started from.
+  const parentOf = missionLinks();
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, openPath, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -437,7 +454,10 @@ function renderSidebar() {
     const name = path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path;
     const projectMatches = Boolean(query) && path.toLowerCase().includes(query);
     const projectSessions = sessions.filter(item => projectFor(item) === path);
-    const matching = projectSessions.filter(item => projectMatches || item.title.toLowerCase().includes(query));
+    const found = projectSessions.filter(item => projectMatches || item.title.toLowerCase().includes(query));
+    const nested = (item: typeof found[number]) => found.some(parent => parent.id === parentOf.get(item.id));
+    const matching = found.filter(item => !nested(item));
+    for (const child of found.filter(nested)) matching.splice(matching.findIndex(parent => parent.id === parentOf.get(child.id)) + 1, 0, child);
     if (query && !projectMatches && !matching.length) continue;
     const expanded = Boolean(query) || path === openPath;
     const rows: string[] = [];
@@ -469,7 +489,7 @@ function renderSidebar() {
         shown++;
         continue;
       }
-      rows.push(`<div class="sidebar-item">${row(tone, title, selected, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id, item.updatedAt)}${remove}</div>`);
+      rows.push(`<div class="sidebar-item${nested(item) ? " kid" : ""}">${row(tone, title, selected, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id, item.updatedAt)}${remove}</div>`);
       shown++;
     }
     if (more && !query) rows.push(btn("project-more", `Show ${more} more`, { path }, "sidebar-more"));
@@ -515,6 +535,12 @@ function renderSidebar() {
   }
   const title = document.getElementById("workspace-title");
   if (title) { title.textContent = inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
+  // A mission's chat says where it came from, and goes back there.
+  const crumb = document.getElementById("workspace-from"), from = current && inSession() ? parentOf.get(current.id) : undefined;
+  if (crumb) {
+    crumb.hidden = !from;
+    crumb.innerHTML = from ? `from ${btn("select-session", h(chatTitle(from)), { id: from }, "workspace-from-link")}` : "";
+  }
   // The rail: a dot where something waits, a ring for Drive's progress.
   const badge = document.getElementById("rail-sessions-badge"), ring = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
   // Chats that need you: the rail's chats icon wears the amber ring, and
@@ -1891,7 +1917,10 @@ function renderBriefing() {
     inSession(), review.map((job) => [job.id, job.status, job.title, job.diff]), reviewShown, away?.status,
     pinned && (driveShown && !driveTurnMission() ? [pinned, detailsOpen.has("drive-details"), Math.floor(Date.now() / 10_000)] : [pinned.status, pinned.mission, driveTurnMission() ? driveProgress(pinned) : activeMinutes(pinned)]),
     run.fix && [run.fix.title, run.fix.status], run.away && run.away.items.map((item) => item.state),
-    state.breakage.signals, state.breakage.busy, brokeShown, driveShown, ideasShown, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
+    // Whether the mission is this chat's own turn: switching between it and
+    // the chat it came from changes the line even when nothing else does.
+    Boolean(driveTurnMission()),
+    state.breakage.signals, state.breakage.busy, brokeShown, driveShown, ideasShown, tellOpen, tellSent, pinned?.told?.length, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
   ]);
   if (signature === briefingSignature) return;
   briefingSignature = signature;
@@ -1936,8 +1965,11 @@ function renderBriefing() {
     const working = pinned.status === "running" || pinned.status === "waiting";
     const about = working ? time : `${missionTitle(pinned)}${time ? ` · ${time}` : ""}`;
     parts.push(`${driveMark(pinned)}${btn("drive-show", working ? shine(`Working on ${missionTitle(pinned)}`) : label(pinned), {}, `bf-word${pinned.status === "blocked" ? " amber" : ""}`)}${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
+    // You can write to it from here; it reads your note before its next step.
+    parts.push(btn("drive-tell-open", "Tell Drive", {}, `bf-tell${tellOpen ? " on" : ""}`));
     toggle = { action: "drive-show", open: driveShown };
-    if (driveShown) fold = `<div class="drive-live">${pinnedCard(pinned)}</div>`;
+    const tell = tellOpen ? `<form class="drive-tell" id="drive-tell-form"><input name="note" maxlength="2000" autocomplete="off" placeholder="${pinned.status === "blocked" ? "Answer Drive, and it goes again…" : "Tell Drive…"}" aria-label="Tell Drive"><kbd>↵</kbd></form>${tellSent ? '<p class="dt-sent">✓ Sent to Drive · read before its next step</p>' : ""}` : "";
+    if (tellOpen || driveShown) fold = `${tell}${driveShown ? `<div class="drive-live">${pinnedCard(pinned)}</div>` : ""}`;
   } else if (run.fix || run.away) {
     const about = run.fix ? run.fix.title : `Drive's list · ${run.away!.items.filter((item) => !["queued", "running"].includes(item.state)).length} of ${run.away!.items.length} done`;
     parts.push(`${mark("spin")}${btn("drive-show", "Drive is working", {}, "bf-word")}<span class="bf-about">${h(about)}</span>`);
@@ -1975,7 +2007,11 @@ function renderBriefing() {
     return;
   }
   if (!open) return;
+  // A note half typed survives Drive's own updates redrawing the reply.
+  const typing = reply.querySelector<HTMLInputElement>("#drive-tell-form input"), kept = typing && { value: typing.value, focus: document.activeElement === typing };
   reply.innerHTML = `<div class="dr-fold"><div><div class="dr-body">${fold}</div></div></div>`;
+  const note = reply.querySelector<HTMLInputElement>("#drive-tell-form input");
+  if (note && kept) { note.value = kept.value; if (kept.focus) note.focus({ preventScroll: true }); }
   reply.hidden = false;
   if (shown) { reply.classList.add("open"); return; }
   void reply.offsetHeight;
@@ -1990,6 +2026,7 @@ function closeBriefingCard() {
   driveShown = false;
   ideasShown = false;
   brokeShown = false;
+  tellOpen = false;
   renderBriefing();
   return true;
 }
@@ -2109,7 +2146,7 @@ function pinnedCard(pinned: NonNullable<Snapshot["drive"]>) {
     btn("drive-control", "Stop", { control: "stop" }, "dm-word stop"),
     btn("drive-details", `Details${CHEVRON}`, {}, `dm-word dm-more${open ? " open" : ""}`).replace("<button ", `<button aria-expanded="${open}" `),
   ].filter(Boolean);
-  return `<section class="drive-mission" aria-label="Live mission">${now}${steps.length ? `<ol class="dm-steps">${steps.join("")}</ol>` : ""}<p class="dm-foot">${[...facts, ...words].join('<span class="bf-sep">·</span>')}</p>${open ? `<div class="drive-details dm-details">${parts.detailsBody}</div>` : ""}</section>`;
+  return `<section class="drive-mission" aria-label="Live mission">${now}${steps.length ? `<ol class="dm-steps">${steps.join("")}</ol>` : ""}${toldNotes(pinned)}<p class="dm-foot">${[...facts, ...words].join('<span class="bf-sep">·</span>')}</p>${open ? `<div class="drive-details dm-details">${parts.detailsBody}</div>` : ""}</section>`;
 }
 /// The mission homed in this session, which reads as its newest turn.
 const driveTurnMission = () => {
@@ -2176,7 +2213,7 @@ function renderDriveTurn() {
     btn("drive-details", open ? "hide details" : "details ›", {}, "link"),
   ].join("");
   const stage = el("stage"), bottom = follow;
-  node.innerHTML = `${ask}<div class="response${live ? " running" : ""}"><ol class="drive-trail">${rows}</ol><div class="drive-turn-foot"><span class="drive-turn-meta">${meta}</span><span class="drive-turn-actions">${actions}</span></div>${open ? `<div class="drive-details">${parts.detailsBody}</div>` : ""}</div>`;
+  node.innerHTML = `${ask}<div class="response${live ? " running" : ""}"><ol class="drive-trail">${rows}</ol>${toldNotes(drive)}<div class="drive-turn-foot"><span class="drive-turn-meta">${meta}</span><span class="drive-turn-actions">${actions}</span></div>${open ? `<div class="drive-details">${parts.detailsBody}</div>` : ""}</div>`;
   if (bottom) stage.scrollTop = stage.scrollHeight;
 }
 async function openOverlay(name: OverlayName, query = "") {
@@ -3229,6 +3266,13 @@ async function dispatch(
     renderBriefing();
     return;
   }
+  if (action === "drive-tell-open") {
+    tellOpen = !tellOpen;
+    tellSent = "";
+    renderBriefing();
+    if (tellOpen) el("drive-reply").querySelector<HTMLInputElement>("#drive-tell-form input")?.focus({ preventScroll: true });
+    return;
+  }
   if (action === "drive-show" || action === "ideas-show" || action === "broke-show") {
     if (action === "drive-show") driveShown = !driveShown;
     else if (action === "broke-show") brokeShown = !brokeShown;
@@ -3573,7 +3617,8 @@ function renderState(next: Snapshot) {
     reviewOpen.clear(); reviewFiles.clear(); diffNotes.clear(); noteEditing = null;
     follow = true;
     overlay = null;
-    driveShown = ideasShown = brokeShown = false;
+    driveShown = ideasShown = brokeShown = tellOpen = false;
+    tellSent = "";
     unwatchOutput();
     expanded.clear();
     expandedCompactions.clear();
@@ -3752,6 +3797,14 @@ document.addEventListener("submit", (event) => {
       renderOverlay();
     }
     if (form.id === "setup-form") await setupAction({ key: "return" });
+    if (form.id === "drive-tell-form") {
+      const input = form.elements.namedItem("note") as HTMLInputElement, text = input.value.trim();
+      if (!text) return;
+      await api("drive-tell", { text });
+      input.value = "";
+      tellSent = text;
+      renderBriefing();
+    }
   });
 });
 document.addEventListener(

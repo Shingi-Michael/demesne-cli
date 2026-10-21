@@ -123,6 +123,32 @@ test("completed subtask memory reaches the next decision and survives journal re
   } finally { restored?.dispose(); drive.dispose(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("notes from your chat reach every later decision, keep the last eight, and survive the journal", async () => {
+  const root = mkdtempSync(join(tmpdir(), "drive-told-")), path = join(root, "mission.json");
+  const requests: DriveRequest[] = [];
+  const services = { path, observe: observation, changed() {}, perform: async () => "", delayMs: 60_000,
+    decide: async (request: DriveRequest) => { requests.push(parseDriveRequest(structuredClone(request))); return response(decision({ kind: "wait" })); } };
+  const drive = new AgentDrive(services);
+  let restored: AgentDrive | undefined;
+  try {
+    expect(() => drive.tell("too early")).toThrow("No Drive mission to tell");
+    drive.start("Add rate limiting");
+    await drive.step();
+    expect(requests[0]?.memory.told).toBeUndefined();
+    drive.tell("  Keep it under 100 requests a minute per IP  ");
+    drive.tell("   ");
+    await drive.step();
+    expect(requests[1]?.memory.told?.map((note) => note.text)).toEqual(["Keep it under 100 requests a minute per IP"]);
+    for (let n = 0; n < 9; n++) drive.tell(`note ${n}`);
+    expect(drive.state?.told?.map((note) => note.text)).toEqual(["note 1", "note 2", "note 3", "note 4", "note 5", "note 6", "note 7", "note 8"]);
+    drive.control("pause");
+    restored = new AgentDrive(services);
+    restored.control("resume");
+    await restored.step();
+    expect(requests.at(-1)?.memory.told?.at(-1)?.text).toBe("note 8");
+  } finally { restored?.dispose(); drive.dispose(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("planner progress cannot erase or replace verified ledger completions", async () => {
   const drive = new AgentDrive({ observe: observation, changed() {}, perform: async () => "Opened log", delayMs: 60_000,
     decide: async () => response(decision({ kind: "wait" }, {

@@ -810,3 +810,21 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop .dm-live { animation: bf-breathe 2.4s ease-in-out infinite; }
   .desktop .dm-word, .desktop .dm-word .ico { transition: color 140ms var(--ease), transform 180ms var(--ease); }
 }
+/* Drive linked to your chat: its chat sits under yours, says where it came
+   from, and takes notes from Drive's line. */
+.sidebar-item.kid { margin-left: 14px; }
+.sidebar-item.kid::before { content: ""; position: absolute; left: -6px; top: 6px; bottom: 6px; width: 1px; background: var(--hair); }
+.workspace-from { flex: none; font-size: 12px; color: var(--t4); white-space: nowrap; }
+.workspace-from-link { padding: 0; border: 0; background: none; font: inherit; color: var(--t3); cursor: pointer; box-shadow: 0 1px 0 var(--hair); }
+.workspace-from-link:hover { color: var(--t1); }
+.desktop #briefing .bf-tell { padding: 0; border: 0; background: none; font: inherit; color: var(--t4); cursor: pointer; }
+.desktop #briefing .bf-tell:hover, .desktop #briefing .bf-tell.on { color: var(--t1); }
+.desktop .drive-tell { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; padding: 7px 10px; border-radius: var(--r); background: var(--tone); box-shadow: 0 0 0 1px var(--hair); }
+.desktop .drive-tell input { flex: 1; min-width: 0; border: 0; background: none; color: var(--t1); font: inherit; font-size: 13px; outline: none; }
+.desktop .drive-tell input::placeholder { color: var(--t4); }
+.desktop .drive-tell kbd { font-size: 11px; color: var(--t4); }
+.desktop .dt-sent { margin: 0 0 6px; font-size: 12px; color: var(--t3); }
+.desktop .drive-told { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.desktop .drive-told li { max-width: 80%; padding: 6px 11px; border-radius: var(--r-lg); background: color-mix(in srgb, var(--acc) 9%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 22%, transparent); color: var(--t1); font-size: 13px; }
+.desktop .drive-told small { display: block; font-size: 11px; color: var(--t3); }
+@media (prefers-reduced-motion: no-preference) { .desktop #briefing .bf-tell { transition: color 140ms var(--ease); } }

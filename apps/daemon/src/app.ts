@@ -522,7 +522,7 @@ export function createDaemonApp(options: {
         const body = parseDriveFixRequest(await readJson(request));
         if (!store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace)) return apiError("not_found", "Unknown workspace", 404);
         if (!workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
-        try { return json({ fix: await driveFixes.start(body.workspace, body.signals, body.proposal, body.mission) }, 201); }
+        try { return json({ fix: await driveFixes.start(body.workspace, body.signals, body.proposal, body.mission, body.from) }, 201); }
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start the fix", 409); }
       }
       // Away mode: Next proposals run one after another while you're away.

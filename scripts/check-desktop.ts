@@ -655,6 +655,24 @@ try {
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "Drive worktrees stay within their parent project");
   assert.equal(await page.locator(".sidebar-project.active").getAttribute("data-project"), f.workspace);
   await capture("08-drive-working");
+  // The mission's chat sits under yours, and you can write to it from Drive's line.
+  await until(() => page.locator("#sidebar-sessions .sidebar-item.kid").count().then(count => count === 1), "the mission's chat sits under the chat that started it");
+  const home = await page.locator("#workspace-title").innerText();
+  await line.locator(".bf-tell").click();
+  await page.locator("#drive-tell-form input").fill("Keep the tests green");
+  await page.locator("#drive-tell-form input").press("Enter");
+  await until(() => page.locator("#drive-reply .dt-sent").isVisible(), "the note says it was sent");
+  await until(() => page.locator("#drive-reply .drive-told li").innerText().then(text => text.includes("Keep the tests green") && text.includes(`From ${home}`)), "the mission card shows your note");
+  await capture("08-drive-tell");
+  // Its own chat says where it came from and shows the note; the link goes back.
+  await page.locator('#drive-reply [data-action="select-session"]', { hasText: "Watch" }).click();
+  await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "the mission's chat names the chat it came from");
+  await until(() => page.locator("#drive-turn .drive-told li").innerText().then(text => text.includes("Keep the tests green")), "the mission's chat shows your note");
+  await capture("08-drive-chat");
+  await page.locator("#workspace-from button").click();
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "from takes you back");
+  assert(await page.locator("#workspace-from").isHidden(), "your own chat has no from");
+  await line.locator(".bf-word").click();
   await control("pause").click();
   await control("resume").waitFor();
   await control("resume").click();
@@ -763,7 +781,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

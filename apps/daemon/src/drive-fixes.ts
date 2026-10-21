@@ -132,7 +132,7 @@ export class DriveFixes {
   /// Waits for a running fix to finish (tests and shutdown).
   async settled(id: string) { await this.done.get(id); }
 
-  async start(workspace: string, signals: DriveSignal[], proposal?: DriveFixProposal, mission?: string): Promise<DriveFix> {
+  async start(workspace: string, signals: DriveSignal[], proposal?: DriveFixProposal, mission?: string, from?: string): Promise<DriveFix> {
     // One at a time; a mission's worktree stays open until you apply or discard it.
     const busy = this.fixes.find((fix) => fix.workspace === workspace && (fix.status === "starting" || fix.status === "running" || (fix.mission && ACTIVE.has(fix.status))));
     if (busy) throw new Error(busy.mission ? "A Drive mission's worktree is still open for this project. Apply or discard it first." : proposal || mission ? "Drive is already working in a worktree for this project." : "A fix is already running for this project.");
@@ -144,7 +144,7 @@ export class DriveFixes {
     const title = mission ? firstLine(mission).slice(0, 200) : proposal ? proposal.title.slice(0, 200) : signals.length === 1 ? signals[0]!.title : `${signals.length} breakages: ${signals.map((signal) => signal.title).join("; ")}`.slice(0, 200);
     const branch = mission ? `drive/mission-${slugOf(title, "work")}-${id.slice(0, 4)}` : proposal ? `drive/${proposal.kind}-${slugOf(proposal.title, "task")}-${id.slice(0, 4)}` : `drive/fix-${slugOf(signals[0]!.title, "breakage")}-${id.slice(0, 4)}`;
     const path = join(this.worktreeRoot, `${basename(top.out)}-${id}`);
-    const fix: DriveFix = { id, workspace, title, signals, ...(proposal ? { proposal } : {}), ...(mission ? { mission } : {}), branch, path, base: base.out, sessionId: null, turnId: null, status: "starting", startedAt: new Date().toISOString(), finishedAt: null };
+    const fix: DriveFix = { id, workspace, title, signals, ...(proposal ? { proposal } : {}), ...(mission ? { mission, ...(from ? { from } : {}) } : {}), branch, path, base: base.out, sessionId: null, turnId: null, status: "starting", startedAt: new Date().toISOString(), finishedAt: null };
     this.fixes.push(fix); this.save();
     try {
       mkdirSync(this.worktreeRoot, { recursive: true, mode: 0o700 });

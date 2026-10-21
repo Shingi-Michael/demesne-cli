@@ -399,7 +399,9 @@ function renderSidebar() {
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
-  const dot = (tone: string) => tone === "working" ? spinner() : `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`;
+  // One cube on screen at most: it turns in the conversation, and a working
+  // chat is a small breathing dot here.
+  const dot = (tone: string) => `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`;
   const focusedControl = document.activeElement instanceof HTMLButtonElement && list.contains(document.activeElement)
     ? { action: document.activeElement.dataset.action, args: document.activeElement.dataset.args } : null;
   const focusedRow = document.activeElement?.closest(".sidebar-item")?.querySelector(".sidebar-session");
@@ -479,7 +481,8 @@ function renderSidebar() {
     const status = link ? `<span class="sidebar-project-state">${link}</span>`
       : active && review.length ? btn("review-open", `${ICON_BRANCH}${review.length}`, { show: true }, "sidebar-project-review").replace("<button ", `<button title="${review.length} ${review.length === 1 ? "branch" : "branches"} to review" `)
       : asking ? `<span class="sidebar-project-state" title="A chat needs you">${dot("warn")}</span>`
-      : busy ? `<span class="sidebar-project-state" title="Working">${dot("working")}</span>`
+      // An open project's rows already show the work; a folded one says so.
+      : busy && !expanded ? `<span class="sidebar-project-state" title="Working">${dot("working")}</span>`
       : !expanded && latest && !here.length ? `<span class="sidebar-project-state" title="${h(fullTime(latest))}">${h(shortAge(latest))}</span>` : "";
     const agentRows = showing ? `<div class="sidebar-agent-rows">${here.map(agent => `<div class="sidebar-agent-row" title="${h(agent.address)}">${agentMark(agent)}<span>${h(agent.name)} · ${h(agentPlace(agent).replace(/^on /, ""))}</span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "sidebar-agent-message")}</div>`).join("")}</div>` : "";
     if (active && review.length && !query) rows.push(btn("review-open", `Review ${review.length} ${review.length === 1 ? "branch" : "branches"} ›`, { show: true }, "sidebar-more sidebar-review"));

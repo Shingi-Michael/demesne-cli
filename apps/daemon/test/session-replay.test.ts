@@ -113,3 +113,15 @@ test("authenticated bulk replay pages a large persisted journal through its exac
     await expect(client.replayPage(session.id, newer.lastEventId, newer.lastEventId + 1)).rejects.toMatchObject({ status: 409 });
   } finally { await app.close(); rmSync(directory, { recursive: true, force: true }); }
 });
+
+test("a call still being drafted when the turn was stopped shows as stopped, not working", () => {
+  const events = [event(1, "model.request_started", { model: "original" }),
+    event(2, "tool.call_draft", { draftId: "draft", name: "subagent", delta: "{\"task\":\"Investigate" }),
+    event(3, "turn.cancelled")];
+  const snapshot: SessionStateResponse = { session: { id: "session", title: "Stopped", createdAt: at, updatedAt: at, workspace: null,
+    turns: [{ id: "turn", sessionId: "session", status: "cancelled", content: "Look into it", responseText: "", createdAt: at,
+      completedAt: events.at(-1)!.occurredAt, permissionMode: "ask", thinkingEnabled: true }] },
+    lastEventId: 3, latestProviderCall: null, pendingPermissions: [] };
+  const tool = restoreSessionEntries(snapshot, events).find((entry) => entry.type === "tool");
+  expect(tool).toMatchObject({ name: "subagent", state: "stopped", drafting: false, waiting: false });
+});

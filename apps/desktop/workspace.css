@@ -710,24 +710,13 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop #cards .card.unfolding .card-body { animation: card-unfold 200ms var(--ease); }
 }
 @keyframes card-unfold { from { opacity: 0; transform: translateY(-3px); } }
-/* Work in progress: eight small cubes that part, turn a quarter at random
-   and close (live.ts drives the beat), and a silver shine across the words. */
-.cube-mark { --d: 3px; display: inline-block; flex: none; width: 12px; height: 12px; perspective: 60px; vertical-align: -2px; }
-.cube-mark.parted { --d: 4.6px; }
-.cube-mark .cube { position: relative; display: block; width: 12px; height: 12px; transform-style: preserve-3d; }
-.cube-mark b { position: absolute; left: 3.3px; top: 3.3px; width: 5.4px; height: 5.4px; transform-style: preserve-3d; transform: translate3d(calc(var(--x) * var(--d)), calc(var(--y) * var(--d)), calc(var(--z) * var(--d))); }
-.cube-mark i { position: absolute; inset: 0; border-radius: 0.8px; }
-.cube-mark i:nth-child(1) { transform: translateZ(2.7px); background: color-mix(in srgb, var(--t1) 88%, var(--t3)); }
-.cube-mark i:nth-child(2) { transform: rotateY(180deg) translateZ(2.7px); background: var(--t3); }
-.cube-mark i:nth-child(3) { transform: rotateY(90deg) translateZ(2.7px); background: color-mix(in srgb, var(--t2) 85%, var(--t3)); }
-.cube-mark i:nth-child(4) { transform: rotateY(-90deg) translateZ(2.7px); background: color-mix(in srgb, var(--t2) 60%, var(--t3)); }
-.cube-mark i:nth-child(5) { transform: rotateX(90deg) translateZ(2.7px); background: var(--t1); }
-.cube-mark i:nth-child(6) { transform: rotateX(-90deg) translateZ(2.7px); background: color-mix(in srgb, var(--t3) 70%, var(--t4)); }
+/* Work in progress: the working cube (working-cube.ts draws it as one SVG
+   each frame) and a silver shine across the words. */
+.cube-mark { display: inline-grid; place-items: center; flex: none; width: 12px; height: 12px; vertical-align: -2px; }
+.cube-mark svg { display: block; overflow: visible; }
 .steps .tool-row .cube-mark, .thinking-toggle .cube-mark { margin: 0 1px; }
 .shine { background: linear-gradient(100deg, var(--t3) 0%, var(--t3) 42%, var(--t1) 50%, var(--t3) 58%, var(--t3) 100%) 50% 0 / 280% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
 @media (prefers-reduced-motion: no-preference) {
-  .cube-mark .cube { transition: transform 560ms var(--ease, cubic-bezier(.45,.05,.2,1)); }
-  .cube-mark b { transition: transform 450ms var(--ease, cubic-bezier(.45,.05,.2,1)); }
   .shine { animation: shine 3s ease-in-out infinite alternate; }
 }
 @keyframes shine { from { background-position: 100% 0; } to { background-position: 0 0; } }

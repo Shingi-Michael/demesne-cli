@@ -633,6 +633,8 @@ const ICON_CHEVRON = '<svg class="ico card-chev" viewBox="0 0 24 24" aria-hidden
 let cardsOn = (() => { try { return localStorage.getItem("demesne-cards") !== "off"; } catch { return true; } })();
 const cardsFolded = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-folded") ?? "[]") as string[]; } catch { return []; } })());
 let cardsSignature = "";
+/// The card whose body is unfolding now; only it animates.
+let cardUnfolding = "";
 function card(name: string, title: string, summary: string, body: string) {
   const folded = cardsFolded.has(name);
   return `<section class="card${folded ? " folded" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${!folded}"><span class="card-title">${title}</span>${ICON_CHEVRON}<span class="card-sum">${summary}</span></button>${folded ? "" : `<div class="card-body">${body}</div>`}</section>`;
@@ -691,7 +693,30 @@ function renderCards() {
   if (servers.length)
     out.push(card("connectors", "Connectors", h(servers.map((server) => server.name).join(", ")),
       servers.map((server) => row(`<span class="card-dot ${server.state}" aria-hidden="true"></span>`, h(server.name), server.state === "ready" ? `${server.tools} tool${server.tools === 1 ? "" : "s"}` : server.state === "failed" ? "Didn’t start" : "Starting…")).join("")));
-  aside.innerHTML = out.join("");
+  // Only the cards that changed are replaced, so the others keep their
+  // hover and never repaint while the chat streams.
+  const next = new Map(out.map((html) => [/data-card="([a-z]+)"/.exec(html)![1]!, html]));
+  for (const node of [...aside.children] as HTMLElement[]) if (!next.has(node.dataset.card ?? "")) node.remove();
+  let index = 0;
+  for (const [key, html] of next) {
+    let node = aside.querySelector<HTMLElement>(`:scope > [data-card="${key}"]`);
+    if (!node || node.dataset.html !== html) {
+      const fresh = document.createElement("template");
+      fresh.innerHTML = html;
+      const replacement = fresh.content.firstElementChild as HTMLElement;
+      replacement.dataset.html = html;
+      if (key === cardUnfolding) {
+        replacement.classList.add("unfolding");
+        replacement.addEventListener("animationend", () => replacement.classList.remove("unfolding"), { once: true });
+      }
+      if (node) node.replaceWith(replacement);
+      node = replacement;
+    }
+    const at = aside.children[index] ?? null;
+    if (node !== at) aside.insertBefore(node, at);
+    index++;
+  }
+  cardUnfolding = "";
 }
 function renderStatus() {
   if (!state) return;
@@ -3022,7 +3047,7 @@ async function dispatch(
   }
   if (action === "card-fold") {
     const name = String(args.name);
-    if (cardsFolded.has(name)) cardsFolded.delete(name); else cardsFolded.add(name);
+    if (cardsFolded.has(name)) { cardsFolded.delete(name); cardUnfolding = name; } else cardsFolded.add(name);
     try { localStorage.setItem("demesne-cards-folded", JSON.stringify([...cardsFolded])); } catch {}
     renderCards();
     document.querySelector<HTMLButtonElement>(`#cards [data-card="${name}"] .card-head`)?.focus({ preventScroll: true });

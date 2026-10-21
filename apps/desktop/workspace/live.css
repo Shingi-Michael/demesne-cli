@@ -1769,10 +1769,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 .live-app:not(.start) .composer .hints:not([hidden]) + .send {
   margin-left: 6px;
 }
-#drive-reply .drive-live {
-  max-height: 42vh;
-  overflow-y: auto;
-}
 #drive-reply .drive-pinned {
   margin: 0;
 }

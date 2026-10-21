@@ -336,6 +336,7 @@ export class WorkspaceHost {
       setup: this.setup?.snapshot() ?? null,
       processes: this.processes,
       agents: this.agents,
+      connectors: this.connectors,
       queuePosition: this.queuePosition,
       verificationFingerprint: this.verificationFingerprint,
       processesError: this.processesError,
@@ -664,6 +665,8 @@ export class WorkspaceHost {
   }
   /// Other agents Heartbeat sees, placed on their projects' lines.
   agents: NearbyAgent[] = [];
+  /// MCP servers and whether Heartbeat is on, for the Connectors card.
+  connectors: { servers: { name: string; state: "starting" | "ready" | "failed"; tools: number }[]; heartbeat: boolean } = { servers: [], heartbeat: false };
   private agentsTimer: ReturnType<typeof setTimeout> | null = null;
   private agentsStarted = false;
   async refreshAgents() {
@@ -677,6 +680,13 @@ export class WorkspaceHost {
         this.publish();
       }
     } catch { /* an older daemon, or Heartbeat is off */ }
+    try {
+      const connectors = await this.client.connectors();
+      if (JSON.stringify(connectors) !== JSON.stringify(this.connectors)) {
+        this.connectors = connectors;
+        this.publish();
+      }
+    } catch { /* an older daemon */ }
     if (!this.disposed) {
       this.agentsTimer = setTimeout(() => void this.refreshAgents(), AGENTS_POLL_MS);
       this.agentsTimer.unref?.();

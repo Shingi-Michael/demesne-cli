@@ -621,6 +621,78 @@ function renderContextCard() {
   const share = (tokens: number) => (capacity ? (tokens / capacity) * 100 : 0);
   card.innerHTML = `<div class="context-head"><span>Context</span><span>${c.percentage}% · ${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span></div><div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div><div class="context-legend">${[...parts, { name: "Free", tokens: free, tone: "free" }].filter((part) => part.tokens > 0).map((part) => `<u class="tone-${part.tone}"></u><span>${part.name}</span><em>${tokensShort(part.tokens)}</em>`).join("")}</div>${btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact")}`;
 }
+/// The cards on the right: where this chat works, how full its context is,
+/// what changed, and whatever else is live (agents, Drive, a preview,
+/// connectors). A card shows only when it has something to say; its header
+/// folds it to one line.
+const ICON_PANEL = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16"/></svg>';
+const ICON_COMPUTER = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>';
+const ICON_FOLDER = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>';
+const ICON_PULSE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>';
+const ICON_CHEVRON = '<svg class="ico card-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+let cardsOn = (() => { try { return localStorage.getItem("demesne-cards") !== "off"; } catch { return true; } })();
+const cardsFolded = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-folded") ?? "[]") as string[]; } catch { return []; } })());
+let cardsSignature = "";
+function card(name: string, title: string, summary: string, body: string) {
+  const folded = cardsFolded.has(name);
+  return `<section class="card${folded ? " folded" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${!folded}"><span class="card-title">${title}</span>${ICON_CHEVRON}<span class="card-sum">${summary}</span></button>${folded ? "" : `<div class="card-body">${body}</div>`}</section>`;
+}
+function renderCards() {
+  const shown = Boolean(state) && cardsOn && inSession();
+  el("app").classList.toggle("cards-on", shown);
+  const aside = el("cards");
+  aside.hidden = !shown;
+  if (!shown) { cardsSignature = ""; return; }
+  const s = state!, root = s.workspace ?? "", branch = s.session?.workspace?.gitBranch;
+  const c = context(), plan = s.provider?.contextPlan, changes = workingChanges();
+  const files = s.files.filter((file) => file.status);
+  const here = root ? s.agents.filter((agent) => agent.project === projectSlug(root)) : [];
+  const ideas = s.driveNext.proposals;
+  const previews = s.processes.filter((command) => command.serves && command.status === "running");
+  const servers = s.connectors.servers;
+  const signature = JSON.stringify([root, branch, c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, ideas.map((idea) => [idea.id, idea.title]), previews.map((command) => command.serves), s.connectors, Boolean(s.activeTurnId), [...cardsFolded], driveActionPending]);
+  if (signature === cardsSignature) return;
+  cardsSignature = signature;
+  const name = root.split(/[\\/]/).filter(Boolean).at(-1) ?? root;
+  const parent = root.slice(0, Math.max(0, root.length - name.length - 1)).replace(/^\/(Users|home)\/[^/]+/, "~");
+  const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
+  const out: string[] = [];
+  out.push(card("environment", "Environment", h(branch ? `${name} · ${branch}` : name),
+    row(ICON_COMPUTER, "This computer") +
+    row(ICON_FOLDER, `${h(name)}${parent ? `<em> · ${h(parent)}</em>` : ""}`, "", root) +
+    (branch ? row(ICON_BRANCH.replace("sidebar-branch", ""), h(branch)) : "") +
+    row(ICON_PULSE, "Heartbeat", s.connectors.heartbeat ? '<span class="card-on">On</span>' : "Off")));
+  if (c.percentage != null) {
+    const capacity = c.capacity ?? 0;
+    const parts = plan
+      ? [{ name: "Chat", tokens: plan.estimatedMessageTokens, tone: "a" }, { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" }, { name: "Kept free", tokens: plan.reserves.totalTokens ?? 0, tone: "c" }]
+      : [{ name: "Chat", tokens: c.used ?? 0, tone: "a" }];
+    const share = (tokens: number) => (capacity ? Math.min(100, (tokens / capacity) * 100) : 0);
+    out.push(card("context", "Context", `${c.percentage}%<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>`,
+      `<div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div>` +
+      `<div class="card-legend">${parts.filter((part) => part.tokens > 0).map((part) => `<span><u class="tone-${part.tone}"></u>${part.name} ${tokensShort(part.tokens)}</span>`).join("")}</div>` +
+      `<div class="card-foot"><span>${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span>${btn("compact", s.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link")}</div>`));
+  }
+  if (files.length) {
+    const shownFiles = files.slice(0, 6);
+    out.push(card("changes", "Changes", counts(changes),
+      shownFiles.map((file) => row("", h(file.path.split("/").at(-1) ?? file.path), counts({ added: file.additions ?? 0, removed: file.deletions ?? 0 }), file.path)).join("") +
+      `<div class="card-foot"><span>${files.length === 1 ? "1 file" : `${files.length} files`}${files.length > shownFiles.length ? ` · ${files.length - shownFiles.length} more` : ""} · not committed</span>${btn("ship", "Commit & PR", {}, "card-btn")}</div>`));
+  }
+  if (here.length)
+    out.push(card("agents", "Agents", here.slice(0, 3).map(agentMark).join(""),
+      here.map((agent) => `<div class="card-row card-hover" title="${h(agent.address)}">${agentMark(agent)}<span class="card-label">${h(agent.name)}<em> · ${h(agentPlace(agent).replace(/^on /, ""))}</em></span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "card-act")}</div>`).join("")));
+  if (ideas.length)
+    out.push(card("drive", "Drive", ideas.length === 1 ? "1 idea" : `${ideas.length} ideas`,
+      ideas.slice(0, 3).map((idea) => `<div class="card-row card-hover" title="${h(idea.why ?? "")}">${ICON_SPARK}<span class="card-label">${h(idea.title)}</span>${btn("next-run", "Run", { id: idea.id }, "card-act", Boolean(driveActionPending))}</div>`).join("")));
+  if (previews.length)
+    out.push(card("preview", "Preview", h(new URL(previews[0]!.serves!).host),
+      previews.map((command) => `<div class="card-row"><span class="pv-live" aria-hidden="true"></span><span class="card-label">${h(new URL(command.serves!).host)}</span>${btn("open-link", "Open ↗", { url: command.serves }, "card-btn")}</div>`).join("")));
+  if (servers.length)
+    out.push(card("connectors", "Connectors", h(servers.map((server) => server.name).join(", ")),
+      servers.map((server) => row(`<span class="card-dot ${server.state}" aria-hidden="true"></span>`, h(server.name), server.state === "ready" ? `${server.tools} tool${server.tools === 1 ? "" : "s"}` : server.state === "failed" ? "Didn’t start" : "Starting…")).join("")));
+  aside.innerHTML = out.join("");
+}
 function renderStatus() {
   if (!state) return;
   renderSidebar();
@@ -662,7 +734,9 @@ function renderStatus() {
     state.runs.length,
     inSession(),
     driveWord(),
+    cardsOn,
   ]);
+  renderCards();
   if (signature === statusSignature) return;
   statusSignature = signature;
   // A quiet footer: a spinner while working, a word only when the state
@@ -685,7 +759,7 @@ function renderStatus() {
   // session's own view (rename, compact, history). The sidebar shows what
   // needs you; Drive lives in its footer.
   el("header").innerHTML =
-    `<div class="header-state">${branchChip()}</div>${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+    `<div class="header-state">${branchChip()}</div>${inSession() ? `<button type="button" class="header-cards${cardsOn ? " on" : ""}" data-action="cards-toggle" aria-label="Cards" aria-pressed="${cardsOn}" title="${cardsOn ? "Hide" : "Show"} cards">${ICON_PANEL}</button>` : ""}${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
 }
 function totals(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -2937,6 +3011,21 @@ async function dispatch(
   if (action === "agent-message") return setDraft(`Message ${String(args.name)} at ${String(args.address)}: `);
   if (action === "project-open" || action === "project-session") {
     document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path: args.path, ...(action === "project-session" ? { sessionId: args.id } : {}) } }));
+    return;
+  }
+  if (action === "cards-toggle") {
+    cardsOn = !cardsOn;
+    try { localStorage.setItem("demesne-cards", cardsOn ? "on" : "off"); } catch {}
+    renderStatus();
+    document.querySelector<HTMLButtonElement>(".header-cards")?.focus({ preventScroll: true });
+    return;
+  }
+  if (action === "card-fold") {
+    const name = String(args.name);
+    if (cardsFolded.has(name)) cardsFolded.delete(name); else cardsFolded.add(name);
+    try { localStorage.setItem("demesne-cards-folded", JSON.stringify([...cardsFolded])); } catch {}
+    renderCards();
+    document.querySelector<HTMLButtonElement>(`#cards [data-card="${name}"] .card-head`)?.focus({ preventScroll: true });
     return;
   }
   if (action === "cycle-mode") return cycleMode();

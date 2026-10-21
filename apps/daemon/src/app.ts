@@ -610,6 +610,11 @@ export function createDaemonApp(options: {
         return json(heartbeat ? await heartbeat.nearby() : { node: null, agents: [] });
       }
 
+      // MCP servers and Heartbeat, for the desktop's Connectors card.
+      if (request.method === "GET" && url.pathname === "/v1/connectors") {
+        return json({ servers: mcp.status(), heartbeat: Boolean(heartbeat) });
+      }
+
       if (request.method === "GET" && url.pathname === "/v1/runtime") {
         return json(processor.runtimeStatus?.() ?? {
           profile: null,

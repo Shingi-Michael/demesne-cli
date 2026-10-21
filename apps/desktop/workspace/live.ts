@@ -1463,7 +1463,7 @@ function renderHero() {
     where = branch ? `${h(name)} on ${h(branch)}` : h(name);
   const ideas = next.proposals.length;
   const drive = ideas || driveBusy
-    ? `<p class="hero-drive">${ICON_SPARK}<b>Drive</b>${driveBusy ? " is working" : ` has ${ideas} idea${ideas === 1 ? "" : "s"}`}${ideas ? ` <span class="muted">·</span> ${btn("ideas-show", ideasShown ? "hide" : "show ›", {}, "link")}` : ""}${ideas > 1 && !driveBusy ? ` <span class="muted">·</span> ${btn("next-away", `Run ${ideas === 2 ? "both" : `all ${Math.min(3, ideas)}`} overnight ›`, { count: Math.min(3, ideas) }, "link")}` : ""}</p>${ideas && ideasShown ? `<div class="hero-ideas">${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p></div>` : ""}`
+    ? `<p class="hero-drive">${ICON_SPARK}<b>Drive</b>${driveBusy ? " is working" : ` has ${ideas} idea${ideas === 1 ? "" : "s"}`}${ideas ? ` <span class="muted">·</span> ${btn("ideas-show", ideasShown ? "hide" : "show ›", {}, "link")}` : ""}</p>${ideas && ideasShown ? `<div class="hero-ideas">${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p></div>` : ""}`
     : "";
   el("hero").innerHTML =
     `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${waiting}</div><div id="hero-composer"></div>${drive}`;
@@ -1934,7 +1934,7 @@ function renderBriefing() {
   const signature = JSON.stringify([
     inSession(), review.map((job) => [job.id, job.status, job.title, job.diff]), reviewShown, away?.status,
     pinned && (driveShown && !driveTurnMission() ? [pinned, detailsOpen.has("drive-details"), [...detailsOpen].filter((key) => key.startsWith("drive-step:")), Math.floor(Date.now() / 10_000)] : [pinned.status, pinned.mission, driveTurnMission() ? driveProgress(pinned) : activeMinutes(pinned)]),
-    run.fix && [run.fix.title, run.fix.status], run.away && run.away.items.map((item) => item.state),
+    run.fix && [run.fix.title, run.fix.status], run.away && [run.away.auto, run.away.items.map((item) => item.state)], state.breakage.auto,
     // Whether the mission is this chat's own turn: switching between it and
     // the chat it came from changes the line even when nothing else does.
     Boolean(driveTurnMission()),
@@ -1948,7 +1948,7 @@ function renderBriefing() {
   const signals = state.breakage.signals, fixing = Boolean(state.breakage.fix && ["starting", "running"].includes(state.breakage.fix.status));
   const broke = signals.length > 0 && !fixing;
   if (!broke) brokeShown = false;
-  const mark = (kind: "spin" | "idea" | "amber" | "ok" | "bad") => kind === "spin" ? spinner() : `<span class="bf-dot ${kind}" aria-hidden="true"></span>`;
+  const mark = (kind: "spin" | "idea" | "amber" | "ok" | "bad" | "hollow") => kind === "spin" ? spinner() : `<span class="bf-dot ${kind}" aria-hidden="true"></span>`;
   let fold = "", toggle: { action: string; open: boolean } | null = null, progress: number | null = null;
   if (review.length && !broke) {
     const only = review.length === 1 ? review[0]! : null;
@@ -1990,18 +1990,29 @@ function renderBriefing() {
     if (tellOpen || driveShown) fold = `${tell}${driveShown ? `<div class="drive-live">${pinnedCard(pinned)}</div>` : ""}`;
   } else if (run.fix || run.away) {
     const about = run.fix ? run.fix.title : `Drive's list · ${run.away!.items.filter((item) => !["queued", "running"].includes(item.state)).length} of ${run.away!.items.length} done`;
-    parts.push(`${mark("spin")}${btn("drive-show", "Drive is working", {}, "bf-word")}<span class="bf-about">${h(about)}</span>`);
+    parts.push(`${mark("spin")}${btn("drive-show", run.away?.auto ? "Drive is working on its own" : "Drive is working", {}, "bf-word")}<span class="bf-about">${h(about)}</span>`);
   } else if (next.error && !next.proposals.length) {
     parts.push(`${mark("amber")}<span class="bf-word">Drive couldn't look for ideas</span>${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}`);
   } else if (next.proposals.length) {
-    const count = next.proposals.length;
+    const count = next.proposals.length, auto = state.breakage.auto;
     const title = `${count === 1 ? "One thing" : `${["", "", "Two", "Three", "Four", "Five"][count] ?? count} things`} I could do next`;
-    parts.push(`${mark("idea")}${btn("ideas-show", ideasShown ? title : `Drive has ${count} idea${count === 1 ? "" : "s"} for what's next`, {}, "bf-word")}`);
+    const ideasWord = `${count} idea${count === 1 ? "" : "s"}`;
+    if (auto && !auto.on) {
+      // Off here: it only runs what you start.
+      parts.push(`${mark("hollow")}<b class="bf-word">Drive is off here</b>`, btn("ideas-show", ideasShown ? title : ideasWord, {}, "bf-word"), btn("drive-auto", "Turn on", { on: true }, "link"));
+    } else {
+      parts.push(`${mark("idea")}${btn("ideas-show", ideasShown ? title : `Drive has ${ideasWord}`, {}, "bf-word")}`);
+      // On by default: the line says what Drive will do before it does it.
+      if (auto) {
+        const limits = `Up to ${auto.perDay} runs a day in this project, one at a time. Each run is in its own worktree; it never pushes or opens a PR. ${auto.usedToday} of ${auto.perDay} used today.`;
+        const when = auto.usedToday >= auto.perDay ? "done for today" : `starts the first after ${auto.quietMinutes} quiet minutes`;
+        parts.push(`<span class="bf-about" title="${h(limits)}">${when}</span>`, btn("drive-auto", "Turn off", { on: false }, "link"));
+      }
+    }
     toggle = { action: "ideas-show", open: ideasShown };
     if (ideasShown) {
-      const words = ["", "it", "both", "all three"], overnight = Math.min(3, count);
       fold = `${ideaRows(next.proposals)}<p class="bf-foot">${[
-        btn("next-away", `Run ${words[overnight]} overnight`, { count: overnight }, "link"),
+        btn("next-run", "Run the first now", { id: next.proposals[0]!.id }, "link"),
         btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading),
         next.generatedAt ? `<span>looked ${age(next.generatedAt)}</span>` : "",
       ].filter(Boolean).join('<span class="bf-sep">·</span>')}</p>`;
@@ -3253,7 +3264,7 @@ async function dispatch(
   if (action === "question-pick") return answerQuestion(String(args.text ?? ""), "suggestion");
   if (action === "question-skip") return answerQuestion(null, "skipped");
   if (action === "new-session") return api("new-session", {});
-  if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "next-away", "drive-control"].includes(action)) return driveAction(action, args);
+  if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "drive-auto", "drive-control"].includes(action)) return driveAction(action, args);
   if (action.startsWith("breakage-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
   if (["cleanup-toggle", "cleanup-delete"].includes(action)) return act(() => api(action, args));

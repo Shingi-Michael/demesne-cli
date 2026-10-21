@@ -716,6 +716,14 @@ try {
   await pressAction("next-refresh");
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
   assert(await page.evaluate(() => Boolean(document.querySelector("#stage > #briefing")) && !document.querySelector("#composer-slot #briefing")), "Drive's line sits where the conversation ends, not on the composer");
+  // Drive is on by default: the line says when it starts on its own, and one word turns it off.
+  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("starts the first after 20 quiet minutes")), "Drive's line says it starts on its own");
+  await capture("10-drive-auto");
+  await page.locator("#briefing").getByRole("button", { name: "Turn off", exact: true }).click();
+  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive is off here") && text.includes("3 ideas")), "Turn off says Drive is off here");
+  await capture("10-drive-off");
+  await page.locator("#briefing").getByRole("button", { name: "Turn on", exact: true }).click();
+  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas") && text.includes("Turn off")), "Turn on brings it back");
   await page.locator("#briefing .bf-chev").click();
   await until(() => page.locator("#briefing .bf-word").innerText().then(text => text.includes("Three things I could do next")), "the line becomes Drive's reply");
   await until(() => page.locator("#drive-reply.open .bf-row").count().then(count => count === 3), "Drive's ideas open as a reply in the conversation");

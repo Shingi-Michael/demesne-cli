@@ -176,14 +176,14 @@ export class DriveFixes {
   /// Away mode: runs the proposals one after another, each as if you pressed
   /// Run, until they're done or the deadline passes. Each finished one waits
   /// for review like any other worktree job.
-  startAway(request: DriveAwayRequest): DriveAway {
+  startAway(request: DriveAwayRequest & { auto?: boolean }): DriveAway {
     const { workspace } = request;
     if (this.away(workspace)?.status === "running") throw new Error("Drive is already working through a list for this project.");
     if (this.fixes.some((fix) => fix.workspace === workspace && fix.mission && ACTIVE.has(fix.status))) throw new Error("A Drive mission's worktree is still open for this project. Apply or discard it first.");
     const started = this.now();
     const away: DriveAway = { id: randomUUID().slice(0, 8), workspace, status: "running", startedAt: new Date(started).toISOString(), finishedAt: null,
       deadline: new Date(started + (request.minutes ?? AWAY_MINUTES) * 60_000).toISOString(),
-      items: request.items.map((item) => ({ proposal: item.proposal, signals: item.signals, state: "queued" as const })) };
+      items: request.items.map((item) => ({ proposal: item.proposal, signals: item.signals, state: "queued" as const })), ...(request.auto ? { auto: true } : {}) };
     this.aways = [...this.aways.filter((item) => item.workspace !== workspace), away];
     this.saveAway();
     const loop = this.workAway(away).catch((error) => this.endAway(away, "stopped", error instanceof Error ? error.message : String(error))).finally(() => this.awayLoops.delete(away.id));
@@ -225,6 +225,9 @@ export class DriveFixes {
     }
     if (away.status === "running") this.endAway(away, "finished");
   }
+
+  /// Drive already has worktree work going here: a run, a mission or a list.
+  working(workspace: string) { return Boolean(this.busy(workspace)) || this.away(workspace)?.status === "running"; }
 
   private busy(workspace: string) {
     return this.fixes.find((fix) => fix.workspace === workspace && (fix.status === "starting" || fix.status === "running" || (fix.mission && ACTIVE.has(fix.status))));

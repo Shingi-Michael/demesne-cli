@@ -52,9 +52,6 @@ import { loadWorkflows, workflowCommand } from "@demesne/drive/workflows.ts";
 import { WorkspaceSetup } from "./setup-controller.ts";
 import { WorkspaceSession } from "./session-model.ts";
 
-/// How many of the top Next proposals away mode works through.
-export const AWAY_RUNS = 3;
-
 export interface WorkspaceHostOptions {
   workspace?: string;
   server?: string;
@@ -1080,18 +1077,10 @@ export class WorkspaceHost {
     // The Next queue: refresh, Run (a bounded Drive mission), Plan first
     // (a read-only plan turn), Not now (a day), Never (a veto in memory).
     if (method === "next-refresh") return this.refreshNext(true);
-    // Away mode: the top proposals run one after another, each in its own
-    // worktree, and wait as an inbox for review.
-    if (method === "next-away") {
-      if (!this.breakage.supported) throw new Error("Away mode needs a newer daemon.");
-      const visible = this.snapshot().driveNext.proposals.slice(0, Math.min(AWAY_RUNS, Number(args.count) || AWAY_RUNS));
-      if (!visible.length) throw new Error("Nothing in the queue to run.");
-      await this.breakage.startAway(visible.map((item) => ({
-        proposal: { id: item.id, kind: item.kind, title: item.title, why: item.why, minutes: item.minutes, confidence: item.confidence },
-        signals: this.nextQueue.signals.filter((signal) => item.evidence.includes(signal.id)).slice(0, 5),
-      })));
-      for (const item of visible) this.hideNext(item.id, Date.now() + 6 * 3_600_000);
-      return;
+    // Drive on by default: the one switch per project.
+    if (method === "drive-auto") {
+      if (!this.breakage.supported) throw new Error("Drive on its own needs a newer daemon.");
+      return this.breakage.setAuto(args.on === true);
     }
     if (["next-run", "next-plan", "next-snooze", "next-never"].includes(method)) {
       const item = this.snapshot().driveNext.proposals.find((proposal) => proposal.id === args.id);

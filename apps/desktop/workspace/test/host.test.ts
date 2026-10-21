@@ -306,7 +306,7 @@ test("/drive works the mission in its own worktree session while you stay in you
   } finally { host.dispose(); await f.close(); }
 });
 
-test("away mode works through the top proposals and leaves each one to review", async () => {
+test("the window picks up an away run Drive started and leaves each one to review", async () => {
   Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "a@b", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "a@b" });
   const f = await fixture({ providerId: "test", modelId: "test", contextCapacity: 262144, async listModels() { return []; },
     async *stream(messages) {
@@ -324,15 +324,13 @@ test("away mode works through the top proposals and leaves each one to review", 
     await host.connect();
     await eventually(() => Boolean(host.current), 5000);
     await host.breakageStarted;
-    // The fixture daemon proposes nothing; this stands in for its queue.
-    await eventually(() => !host.nextQueue.loading, 5000);
-    const proposal = (id: string) => ({ id, kind: "tidy" as const, title: `Tidy ${id}`, why: "It's untidy.", evidence: [], minutes: 5, confidence: "high" as const, coders: 1, urgent: false, value: 1, cost: 1 });
-    host.nextQueue = { ...host.nextQueue, proposals: [proposal("A"), proposal("B"), proposal("C"), proposal("D")] as never };
     const sessionId = host.current!.session.id;
-    await host.handle("next-away", { sessionId, count: 3 });
+    // The daemon starts these on its own once the project goes quiet.
+    const tidy = (id: string) => ({ proposal: { id, kind: "tidy" as const, title: `Tidy ${id}`, why: "It's untidy." }, signals: [] });
+    await f.client.startDriveAway({ workspace: f.workspace, items: [tidy("A"), tidy("B"), tidy("C")] });
+    await host.breakage.refreshAuto();
+    expect(host.breakage.state.auto?.on).toBe(true);
     expect(host.breakage.state.away?.items.map((item) => item.proposal.title)).toEqual(["Tidy A", "Tidy B", "Tidy C"]);
-    // They leave the queue while they run; the fourth stays.
-    expect(host.snapshot().driveNext.proposals.map((item) => item.id)).toEqual(["D"]);
     await eventually(() => host.breakage.state.away?.status === "finished", 15000);
     await eventually(() => host.breakage.state.fix?.status === "ready" && host.breakage.state.inbox.length === 2, 5000);
     expect(host.breakage.state.away?.items.map((item) => item.state)).toEqual(["ready", "ready", "ready"]);

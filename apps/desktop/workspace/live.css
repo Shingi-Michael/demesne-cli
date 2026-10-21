@@ -937,12 +937,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.drive-details {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-}
 .tone-electric { color: var(--electric); }
 .tone-secondary { color: var(--secondary); }
 .tone-muted { color: var(--muted); }
@@ -2150,14 +2144,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 .drive-turn-actions .link.danger {
   color: var(--signal);
 }
-#drive-turn .drive-details {
-  font-size: 12.5px;
-  line-height: 19px;
-  color: var(--secondary);
-  margin-top: 10px;
-  max-height: 40vh;
-  overflow-y: auto;
-}
 #drive-turn .drive-pinned {
   margin: 0;
 }
@@ -2181,15 +2167,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 .menu-footer .completion-more {
   font-size: 12px;
   color: var(--electric);
-}
-#drive-turn .drive-details p {
-  margin: 0;
-}
-#drive-turn .drive-details pre {
-  margin: 0;
-  font: 12px/18px var(--font, "JetBrains Mono", monospace);
-  white-space: pre-wrap;
-  color: var(--secondary);
 }
 
 #drive-turn .drive-pinned-title { display: none; }

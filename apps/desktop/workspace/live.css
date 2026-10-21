@@ -1918,55 +1918,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
   left: auto;
   width: min(360px, calc(100% - 24px));
 }
-.model-row {
-  flex-wrap: wrap;
-  row-gap: 0;
-  padding: 6px 14px;
-}
-.model-row .name {
-  width: auto;
-  max-width: none;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.model-row .model-stats {
-  flex-basis: 100%;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 18px;
-}
-.model-thinking {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px 8px;
-  border-top: 1px solid var(--rule);
-}
-.model-thinking .section-label {
-  padding: 0;
-  margin-right: 6px;
-}
-.model-thinking .levels {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-}
-.model-thinking .levels button {
-  color: var(--secondary);
-}
-.model-thinking .levels button:hover,
-.model-thinking .levels button.on {
-  color: var(--electric);
-}
-.model-thinking .keys {
-  margin-left: auto;
-  font-size: 12px;
-}
-
 /* Opened steps read like the trail: an indented list under a hairline,
    "verb target" in one run, the result quiet on the right. */
 .tool-row {

@@ -55,7 +55,7 @@ let failSuggestions = false, offerIdeas = false;
 const gate = new Promise<void>(done => { release = done; });
 const f = await fixture({
   providerId: "test", modelId: "desktop-test", contextCapacity: 262144, maxOutputTokens: 1024,
-  async listModels() { smokeProcessor = this; return [{ id: "desktop-test", provider: "test", contextWindow: 262144 }, { id: "desktop-small", provider: "test", contextWindow: 32768 }]; },
+  async listModels() { smokeProcessor = this; return [{ id: "desktop-test", provider: "test", contextWindow: 262144 }, { id: "desktop-small", provider: "test", contextWindow: 32768 }, { id: "desktop-fast", provider: "test", contextWindow: 131072 }, { id: "desktop-wide", provider: "test", contextWindow: 1048576 }, { id: "far-away-large", provider: "other", contextWindow: 200000 }, { id: "far-away-mini", provider: "other", contextWindow: 128000 }]; },
   async *stream(messages, _tools, signal) {
     const user = messages.findLast(message => message.role === "user")?.content;
     if (_tools.some(tool => tool.name === "drive_ui")) {
@@ -446,9 +446,15 @@ try {
   await page.keyboard.press("Escape");
   await page.locator("#setup").waitFor({ state: "hidden" });
   if (await page.locator("#overlay").isVisible()) await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  // The picker lists four models, numbered, with the rest one step away.
   await page.locator("#composer-model").click();
-  await page.getByRole("textbox", { name: "Filter models" }).waitFor();
+  await page.locator("#overlay .mp-main .mp-row").first().waitFor();
+  assert(await page.locator("#overlay .mp-main .mp-key", { hasText: /^[2-4]$/ }).count() === 3, "the short list numbers the other three models");
+  assert(await page.locator("#overlay .mp-more.shut").count() === 1, "More models starts shut");
   await capture("02-models");
+  await page.locator("#overlay [data-more]").hover();
+  await until(() => page.locator("#overlay .mp-more:not(.shut) .mp-row").count().then(count => count === 2), "More models opens beside the list");
+  await capture("02-models-more");
   await page.keyboard.press("Escape");
 
 

@@ -330,19 +330,34 @@ html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[
 .desktop .settings-link { font-size: 12px; color: var(--t3); }
 .desktop .settings-link:hover { color: var(--t1); }
 @media (max-width: 1100px) { .desktop #overlay.sheet[data-screen="settings"] { grid-template-columns: 184px minmax(0, 1fr); } .desktop .settings-body { padding: 26px 22px 30px; } .desktop .settings-row { gap: 16px; } }
-.desktop .model-picker-heading { display: flex; flex-direction: column; gap: 3px; padding: 16px 16px 14px; }
-.desktop .model-picker-heading strong { font-size: 14px; color: var(--strong); font-weight: 550; }
-.desktop .model-picker-heading span { font-size: 11px; color: var(--muted); }
 .desktop #overlay.anchored, .desktop #overlay.dropped { border-radius: 12px; }
+/* The model picker: a short list with "More models" opening beside it. */
+.desktop #overlay.anchored[data-screen="models"] { left: auto; width: auto; flex-direction: row; align-items: flex-end; gap: 6px; background: none; box-shadow: none; overflow: visible; }
+.desktop .mp-main, .desktop .mp-more { display: flex; flex-direction: column; padding: 5px; border-radius: var(--r); background: var(--surface); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); }
+.desktop .mp-main { width: 236px; flex: none; }
+.desktop .mp-more { width: 220px; max-height: inherit; min-height: 0; }
+.desktop .mp-more.shut { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; pointer-events: none; }
+.desktop .mp-more input { margin: 0 0 4px; padding: 6px 9px; border: 0; border-radius: var(--r-sm); background: var(--tone); color: var(--t1); font: inherit; font-size: 12.5px; outline: none; }
+.desktop .mp-list { overflow-y: auto; min-height: 0; }
+.desktop .mp-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px; border-radius: var(--r-sm); color: var(--t1); font-size: 13px; text-align: left; }
+.desktop .mp-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop .mp-row:hover, .desktop .mp-row.selected, .desktop .mp-row.open { background: var(--tone); }
+.desktop .mp-key { color: var(--t4); font-size: 12px; }
+.desktop .mp-tick { color: var(--acc); font-size: 12px; }
+.desktop .mp-group { padding: 8px 9px 3px; font-size: 10.5px; letter-spacing: .04em; color: var(--t4); }
+.desktop .mp-group:first-child { padding-top: 3px; }
+.desktop .mp-sep { height: 1px; margin: 4px 6px; background: var(--hair); }
+.desktop .mp-thinking { display: flex; align-items: center; gap: 2px; padding: 4px 9px; font-size: 12px; color: var(--t3); }
+.desktop .mp-thinking > span { margin-right: auto; }
+.desktop .mp-thinking button { padding: 2px 6px; border-radius: var(--r-sm); color: var(--t3); }
+.desktop .mp-thinking button:hover { color: var(--t1); }
+.desktop .mp-thinking button.on { color: var(--t1); background: var(--tone); }
+.desktop .mp-empty { padding: 6px 9px; font-size: 12px; color: var(--t4); }
 .desktop #overlay.dropped .modal-title { display: none; }
 .desktop #overlay.dropped .menu-row { padding: 8px 12px; }
 .desktop #overlay.dropped .menu-row .name { width: auto; flex: none; }
 .desktop #overlay.dropped .menu-row .value { flex: 1; text-align: right; color: var(--t4); }
 .desktop #overlay.dropped .menu-footer { display: none; }
-.desktop .model-thinking { padding: 10px 16px; background: var(--ink); border-top: 1px solid var(--rule); }
-.desktop .model-thinking button { padding: 3px 7px; border-radius: 5px; }
-.desktop .model-thinking button.on { color: var(--strong); background: var(--raised); }
-.desktop .model-stats { font-size: 10px; }
 
 .desktop .drive-heading { font-family: inherit; font-size: 14px; font-weight: 550; color: var(--strong); }
 .desktop .drive-status { padding: 12px 14px; border: 1px solid var(--rule); border-radius: 9px; background: var(--ink); }
@@ -509,7 +524,6 @@ html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[
 .desktop .drive-status, .desktop .saved, .desktop #desktop-error-message, .desktop .setup-list, #desktop-recent-list { border: 0; border-radius: var(--r); box-shadow: 0 0 0 1px var(--hair); }
 .desktop #setup input { border: 0; border-radius: var(--r-sm); box-shadow: 0 0 0 1px var(--hair2); }
 .desktop #setup footer .right > button, .desktop-primary { border: 0; border-radius: var(--r); }
-.desktop .model-thinking button { border-radius: var(--r-sm); }
 body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline: 2px solid color-mix(in srgb, var(--acc) 55%, transparent); outline-offset: 2px; }
 /* Motion: what appears rises in, what folds eases, what you point at tints. */
 @keyframes desktop-rise { from { opacity: 0; transform: translateY(6px) scale(0.985); } }

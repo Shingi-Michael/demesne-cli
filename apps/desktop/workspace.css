@@ -587,15 +587,17 @@ body.drive-page-open #stage, body.drive-page-open #input-area, body.drive-page-o
 .desktop #composer .composer-bar #composer-mode.mode-edits { color: var(--ok); }
 .desktop #composer .composer-bar #composer-mode.mode-plan { color: var(--acc); }
 .desktop #composer .composer-bar #composer-mode.mode-auto { color: var(--warn); }
+/* ⇧⇥ opens the word into all four modes in place, the current one lit. */
+.desktop #composer-mode .mode-list { display: inline-flex; align-items: center; }
+.desktop #composer-mode .mode-opt { display: inline-block; max-width: 0; padding: 0; overflow: hidden; white-space: nowrap; opacity: 0; border-radius: var(--r-sm); color: var(--t4); }
+.desktop #composer-mode .mode-opt.on { max-width: 120px; opacity: 1; color: inherit; }
+.desktop #composer-mode.open .mode-opt { max-width: 120px; opacity: 1; padding: 0 6px; }
+.desktop #composer-mode.open .mode-opt.on { background: var(--tone2); }
+.desktop #composer-mode.open .mode-opt.mode-ask.on { color: var(--t1); }
 .desktop #composer.mode-plan .composer-box { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 38%, transparent), var(--shadow-2); }
-.desktop #mode-hint { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); z-index: 5; padding: 5px 12px; border-radius: var(--r-sm); background: var(--surface2); box-shadow: 0 0 0 1px var(--hair), var(--shadow-1); color: var(--t3); font-size: 12px; white-space: nowrap; pointer-events: none; }
-.desktop #mode-hint b { font-weight: 500; color: var(--t1); }
-.desktop #mode-hint b.mode-edits { color: var(--ok); }
-.desktop #mode-hint b.mode-plan { color: var(--acc); }
-.desktop #mode-hint b.mode-auto { color: var(--warn); }
 @media (prefers-reduced-motion: no-preference) {
-  .desktop #mode-hint:not([hidden]) { animation: desktop-appear 160ms var(--ease); }
   .desktop #composer .composer-box { transition: box-shadow 180ms var(--ease); }
+  .desktop #composer-mode .mode-opt { transition: max-width 240ms var(--ease), opacity 180ms var(--ease), padding 240ms var(--ease), background-color 140ms var(--ease), color 140ms var(--ease); }
 }
 
 /* Attachments: thumbnails inside the composer box above the text, a drop

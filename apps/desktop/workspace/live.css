@@ -1375,16 +1375,6 @@ button:disabled {
   top: 3px;
 }
 
-/* The braille spinner shown wherever work is running (tool rows, thinking,
-   the live activity line, the status bar). Fixed width so text never shifts. */
-.spin {
-  display: inline-block;
-  flex: none;
-  width: 1ch;
-  text-align: center;
-  color: var(--electric);
-  font-family: JetBrains Mono, monospace;
-}
 /* A thinking sub-agent's phrase, set apart from its white task name. */
 .phrase {
   color: var(--electric);
@@ -2497,11 +2487,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 }
 .steps .tool-row.waiting .verb {
   color: var(--thinking);
-}
-.steps .tool-row .spin {
-  width: 14px;
-  text-align: center;
-  color: var(--electric);
 }
 .steps .explored {
   font-size: 13px;

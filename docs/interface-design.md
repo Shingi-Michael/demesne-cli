@@ -18,14 +18,15 @@ Check layout changes in the real desktop window, not only in unit tests.
 
 - **No side panels.** Everything lives in the sidebar, the conversation column and the composer. A turn's edits, commands and checks unfold in place under their steps; Drive's missions are turns and its ideas unfold from a line at the end of the conversation; Drive has no page.
 - **No menus where a direct action fits.** Act on the row itself (the sidebar's delete icon, double-click to rename). The top bar's **⋯** is the one small menu.
-- **One line per row.** Sidebar rows have the same height and carry an icon and a word, not sentences. State is a single mark (amber ring, spinner, blue dot, red cross), with words in the tooltip.
+- **One line per row.** Sidebar rows have the same height and carry an icon and a word, not sentences. State is a single mark (amber ring, working cube, blue dot, red cross), with words in the tooltip.
+- **Work in progress is the cube.** Wherever something runs (thinking, a running step, the line under the conversation, a working chat or Drive), a 12px cube of eight cubelets parts, turns a quarter on a random axis and closes every 1.4s, and the live words carry a silver shine sweeping back and forth. All cubes turn together; under reduced motion they hold still and the shine stops.
 - **Add as little surface as possible.** Fold new facts into existing rows, chips and tooltips before adding anything new.
 
 ## Semantic colors and content
 
 Use theme roles such as `paper`, `secondary`, `muted`, `rule`, `electric`, `thinking`, `citron` and `signal`. Blue identifies primary interaction and new replies, amber needs-you and ongoing reasoning, green successful evidence and red failure. Keep a shape or label beside every color so color is never the only signal. Source syntax colors stay distinct from added/removed diff markings.
 
-The main thinking trace stays collapsed by default, including while working. Only the spinner, "Thinking" label and duration appear until the reader expands it with a click, Enter or Space. Streaming updates and completion preserve the reader's choice. Reasoning text and headings stay in the trace body.
+The main thinking trace stays collapsed by default, including while working. Only the working cube, the "Thinking" label and the duration appear until the reader expands it with a click, Enter or Space. Streaming updates and completion preserve the reader's choice. Reasoning text and headings stay in the trace body.
 
 Markdown is sanitized; code fences use syntax highlighting and math uses KaTeX. In-progress Markdown is reparsed for correctness while unchanged rendered blocks keep their nodes. Recorded file changes use immutable before/after evidence.
 

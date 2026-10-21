@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 const source = await Bun.file(new URL("../live.ts", import.meta.url)).text();
 const start = source.indexOf('    if (entry.type === "reasoning") {');
 const end = source.indexOf('    if (entry.type === "tool") {', start);
-const render = new Function("run", "detailsOpen", "detailsClosed", "active", "h", "thinkingBody", "spinner", "duration", `
+const render = new Function("run", "detailsOpen", "detailsClosed", "active", "h", "thinkingBody", "spinner", "duration", "shine", `
   let body = "";
   const flush = () => {}, CHEVRON = "chevron ";
   const i = 0, entry = run.entries[i], key = run.id + ":" + entry.id;
@@ -14,7 +14,7 @@ const render = new Function("run", "detailsOpen", "detailsClosed", "active", "h"
 const html = (status: string, raw: string, open: Set<string>, closed = new Set<string>()) => render(
   { id: "turn", status, entries: [{ id: 1, type: "reasoning", raw, durationMs: 3200 }] },
   open, closed, (run: { status: string }) => run.status === "running",
-  (text: string) => text, (text: string) => text, () => "spinner", () => "3.2s",
+  (text: string) => text, (text: string) => text, () => "spinner", () => "3.2s", (text: string) => text,
 ) as string;
 
 test("streaming thinking starts expanded and includes the complete trace", () => {

@@ -105,8 +105,6 @@ html[data-theme="demesne-light"] .agent-mark[data-provider="gemini"] { backgroun
 .sidebar-project-chats .sidebar-session { gap: 7px; padding-left: 6px; font-size: 13px; }
 .sidebar-project-chats .sidebar-empty { padding: 5px 12px; font-size: 12px; }
 .sidebar-project-chats .sidebar-more { padding-left: 30px; }
-.sidebar-session-mark.working { width: 10px; height: 10px; margin: 0 3px; border: 1.6px solid var(--line2); border-top-color: var(--acc); background: transparent; animation: sidebar-spin 900ms linear infinite; }
-@keyframes sidebar-spin { to { transform: rotate(360deg); } }
 .sidebar-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-session-age { flex: none; color: var(--t3); font-size: 11px; font-variant-numeric: tabular-nums; }
 /* The time is small, so it keeps 4.5:1 against the sidebar in light too. */
@@ -620,7 +618,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop :is(#briefing, #drive-reply) .bf-dot.ok { background: var(--ok); }
 .desktop :is(#briefing, #drive-reply) .bf-dot.amber { background: var(--warn); }
 .desktop :is(#briefing, #drive-reply) .bf-dot.hollow { box-shadow: inset 0 0 0 1.5px var(--t4); }
-.desktop #briefing .bf-spin { width: 11px; height: 11px; flex: none; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--acc) 25%, transparent); border-top-color: var(--acc); }
 .desktop #briefing .bf-progress { position: absolute; left: 32px; width: 160px; bottom: -3px; height: 1.5px; overflow: hidden; border-radius: 1px; background: var(--tone); }
 .desktop #briefing .bf-progress i { display: block; height: 100%; background: linear-gradient(90deg, transparent, var(--acc)); }
 .desktop :is(#briefing, #drive-reply) .bf-rows { display: flex; flex-direction: column; }
@@ -644,10 +641,8 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #drive-reply .dr-fold > div { min-height: 0; overflow: hidden; }
 .desktop #drive-reply .dr-body { padding: 0 0 18px 22px; }
 .desktop #drive-reply .bf-foot { box-shadow: none; }
-@keyframes bf-spin { to { transform: rotate(360deg); } }
 @keyframes bf-breathe { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: no-preference) {
-  .desktop #briefing .bf-spin { animation: bf-spin 900ms linear infinite; }
   .desktop :is(#briefing, #drive-reply) .bf-dot.idea { animation: bf-breathe 2.4s ease-in-out infinite; }
   .desktop #briefing .bf-lead { transition: background-color 200ms var(--ease), box-shadow 200ms var(--ease), color 200ms var(--ease); }
   .desktop #briefing .bf-word { transition: color 140ms var(--ease); }
@@ -715,3 +710,24 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop #cards .card.unfolding .card-body { animation: card-unfold 200ms var(--ease); }
 }
 @keyframes card-unfold { from { opacity: 0; transform: translateY(-3px); } }
+/* Work in progress: eight small cubes that part, turn a quarter at random
+   and close (live.ts drives the beat), and a silver shine across the words. */
+.cube-mark { --d: 3px; display: inline-block; flex: none; width: 12px; height: 12px; perspective: 60px; vertical-align: -2px; }
+.cube-mark.parted { --d: 4.6px; }
+.cube-mark .cube { position: relative; display: block; width: 12px; height: 12px; transform-style: preserve-3d; }
+.cube-mark b { position: absolute; left: 3.3px; top: 3.3px; width: 5.4px; height: 5.4px; transform-style: preserve-3d; transform: translate3d(calc(var(--x) * var(--d)), calc(var(--y) * var(--d)), calc(var(--z) * var(--d))); }
+.cube-mark i { position: absolute; inset: 0; border-radius: 0.8px; }
+.cube-mark i:nth-child(1) { transform: translateZ(2.7px); background: color-mix(in srgb, var(--t1) 88%, var(--t3)); }
+.cube-mark i:nth-child(2) { transform: rotateY(180deg) translateZ(2.7px); background: var(--t3); }
+.cube-mark i:nth-child(3) { transform: rotateY(90deg) translateZ(2.7px); background: color-mix(in srgb, var(--t2) 85%, var(--t3)); }
+.cube-mark i:nth-child(4) { transform: rotateY(-90deg) translateZ(2.7px); background: color-mix(in srgb, var(--t2) 60%, var(--t3)); }
+.cube-mark i:nth-child(5) { transform: rotateX(90deg) translateZ(2.7px); background: var(--t1); }
+.cube-mark i:nth-child(6) { transform: rotateX(-90deg) translateZ(2.7px); background: color-mix(in srgb, var(--t3) 70%, var(--t4)); }
+.steps .tool-row .cube-mark, .thinking-toggle .cube-mark { margin: 0 1px; }
+.shine { background: linear-gradient(100deg, var(--t3) 0%, var(--t3) 42%, var(--t1) 50%, var(--t3) 58%, var(--t3) 100%) 50% 0 / 280% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
+@media (prefers-reduced-motion: no-preference) {
+  .cube-mark .cube { transition: transform 560ms var(--ease, cubic-bezier(.45,.05,.2,1)); }
+  .cube-mark b { transition: transform 450ms var(--ease, cubic-bezier(.45,.05,.2,1)); }
+  .shine { animation: shine 3s ease-in-out infinite alternate; }
+}
+@keyframes shine { from { background-position: 100% 0; } to { background-position: 0 0; } }

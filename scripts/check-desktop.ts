@@ -2,7 +2,8 @@
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import sharp from "sharp";
 import { fixture } from "../apps/desktop/workspace/test/fixture.ts";
@@ -20,6 +21,23 @@ const completed = "Verified the desktop change.";
 const afterClose = "Daemon work completed after the window closed.";
 const thinkingPrompt = "Desktop smoke: readable thinking";
 const previewPrompt = "Desktop smoke: run the site";
+const overlapPrompt = "Desktop smoke: edit what another agent changed";
+let overlapRound = 0;
+// A stand-in Heartbeat daemon: Claude Code works in this project on this
+// machine, Codex in the second project on a paired one.
+const heartbeatSocket = join(mkdtempSync(join(tmpdir(), "hb-")), "control.sock");
+const heartbeatDaemon = Bun.listen({ unix: heartbeatSocket, socket: { data(socket, chunk) {
+  const request = JSON.parse(Buffer.from(chunk).toString("utf8").split("\n")[0]!) as { command?: string; as?: string };
+  const reply = (body: Record<string, unknown>) => { socket.write(`${JSON.stringify(body)}\n`); socket.end(); };
+  if (request.command === "status") return reply({ status: "ok", node_id: "desktop-node", active_links: [] });
+  if (request.command === "agents") return reply({ status: "ok", node_id: "desktop-node", agents: [
+    { agent_id: "claude@desktop-node/workspace-k3x7a", node: "desktop-node", transport: "hooks" },
+    { agent_id: "codex@macbook-air/sidebar-project-q2m7c", node: "macbook-air", transport: "link" },
+  ] });
+  if (request.command === "read") return reply({ status: "ok", address: request.as, messages: [] });
+  if (request.command === "listen") { socket.write(`${JSON.stringify({ status: "ok", agent_id: request.as })}\n`); return; }
+  reply({ status: "error", error: "unknown_command" });
+} } });
 let previewRound = 0;
 const thinkingText = "First reasoning paragraph.\nSecond line stays readable.\n\n" + "A detailed thought with enough words to wrap across several lines. ".repeat(12) + "\n" + "long_identifier_".repeat(90);
 let nextThought!: () => void, finishThought!: () => void;
@@ -81,6 +99,23 @@ const f = await fixture({
       yield { type: "finish", reason: "stop" };
       return;
     }
+    if (user === overlapPrompt) {
+      if (overlapRound === 0) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "overlap-read", nameDelta: "read_file", argumentsDelta: JSON.stringify({ path: "notes.ts" }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else if (overlapRound === 1) {
+        // Claude Code saves the file between this chat's read and its edit.
+        writeFileSync(join(f.workspace, "notes.ts"), "export const note = 'theirs';\n");
+        utimesSync(join(f.workspace, "notes.ts"), new Date(), new Date(Date.now() + 5_000));
+        yield { type: "tool_call_delta", index: 0, idDelta: "overlap-edit", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "notes.ts", content: "export const note = 'mine';\n" }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", delta: "I'll ask Claude Code before changing notes.ts." };
+        yield { type: "finish", reason: "stop" };
+      }
+      overlapRound++;
+      return;
+    }
     if (user === previewPrompt) {
       if (previewRound++ === 0) {
         yield { type: "tool_call_delta", index: 0, idDelta: "desktop-preview", nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: [process.execPath, "serve.ts"], background: true }) };
@@ -114,7 +149,8 @@ const f = await fixture({
       yield { type: "finish", reason: "stop" };
     }
   },
-});
+}, { heartbeatSocket });
+writeFileSync(join(f.workspace, "notes.ts"), "export const note = 'ours';\n");
 writeFileSync(join(f.workspace, "hello.ts"), "export const greeting = 'before';\n");
 writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ scripts: { check: "bun check.ts" } }));
 writeFileSync(join(f.workspace, "serve.ts"), "const server = Bun.serve({ port: 0, fetch: () => new Response('<h1>Fieldnote preview</h1>', { headers: { 'content-type': 'text/html' } }) });\nconsole.log(`  \\u001b[32mLocal:\\u001b[39m http://localhost:${server.port}/`);\n");
@@ -520,7 +556,7 @@ try {
   await secondary.locator(".sidebar-project-toggle").click();
   assert(await secondary.locator(".sidebar-session").isVisible(), "other projects expand without switching workspace");
   assert.equal(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).getAttribute("aria-expanded"), "false", "opening one project closes the other");
-  assert(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-state`).isVisible(), "a closed project shows its state on its line");
+  assert(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-state, .sidebar-project[data-project="${f.workspace}"] .sidebar-agents`).first().isVisible(), "a closed project shows its state on its line");
   await page.getByRole("searchbox", { name: "Find a conversation or project" }).fill("second project");
   assert.equal(await page.locator(".sidebar-project").count(), 1, "search keeps only projects with matching chats");
   assert(await secondary.locator(".sidebar-session").isVisible(), "search exposes matching chats in another project");
@@ -609,7 +645,30 @@ try {
   await until(() => page.locator(".step-fold .fold-cmd .pv-back").last().isVisible(), "Output swaps the page for the command's output");
   await page.locator(".step-fold .fold-cmd .pv-back").last().click();
   await until(() => page.locator("[data-preview] iframe").last().isVisible(), "Preview brings the page back");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure"] }, null, 2));
+  // Agents nearby: other agents (Heartbeat) sit on their projects' lines,
+  // and a write to a file one of them changed asks first.
+  const here = page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-agents`);
+  await until(() => here.isVisible(), "this project's line shows the agent working in it", 20_000);
+  assert.equal(await here.getAttribute("aria-label"), "1 agent working in workspace");
+  assert(await page.locator(`.sidebar-project[data-project="${join(f.root, "sidebar-project")}"] .sidebar-agents .agent-mark[data-provider="codex"]`).isVisible(), "an agent on a paired machine shows on its own project");
+  await here.click();
+  const agentRow = page.locator(".sidebar-agent-row").first();
+  await until(() => agentRow.isVisible(), "clicking the marks unfolds who is working");
+  assert.equal(await agentRow.locator("span:not(.agent-mark)").innerText(), "Claude Code · this computer");
+  await agentRow.hover();
+  await agentRow.getByRole("button", { name: "Message" }).click();
+  assert.equal(await page.locator("textarea").inputValue(), "Message Claude Code at claude@desktop-node/workspace-k3x7a: ", "Message starts a note to the agent");
+  await page.locator("textarea").fill("");
+  await type(overlapPrompt);
+  const overlap = page.locator("#approval .approval-row.overlap");
+  await until(() => overlap.isVisible(), "a write to a file another agent changed asks first");
+  assert((await overlap.innerText()).includes("Claude Code"), "the line names the agent");
+  assert((await overlap.innerText()).includes("notes.ts"), "the line names the file");
+  await capture("12-agents-nearby");
+  await page.locator("textarea").press("Enter");
+  await textIncludes("I'll ask Claude Code before changing notes.ts.");
+  assert.equal(readFileSync(join(f.workspace, "notes.ts"), "utf8"), "export const note = 'theirs';\n", "Enter asks first and leaves the other agent's change");
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {
@@ -627,4 +686,5 @@ try {
   try { await close(); } catch {}
   writeFileSync(join(output, "electron.log"), log);
   await f.close();
+  heartbeatDaemon.stop(true);
 }

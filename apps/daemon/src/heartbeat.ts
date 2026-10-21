@@ -1,12 +1,12 @@
 import type { ProviderToolDefinition } from "@demesne/providers";
 import type { HeartbeatConfig } from "@demesne/config";
 import { InvalidStateError } from "@demesne/storage";
-import { formatMail as formatMailTurn } from "@demesne/protocol";
+import { formatMail as formatMailTurn, nearbyAgents, projectSlug, type NearbyAgent } from "@demesne/protocol";
 import type { AgentTool } from "./tools.ts";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 /// Heartbeat client: demesne as an agent other agents can message.
 ///
@@ -149,7 +149,7 @@ export class HeartbeatClient {
 /// made safe, plus a short suffix. Ours is derived from the session id, so a
 /// chat keeps its address across daemon restarts.
 export function heartbeatLabel(workspaceRoot: string, sessionId: string): string {
-  const project = basename(workspaceRoot).toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "session";
+  const project = projectSlug(workspaceRoot);
   const digest = createHash("sha256").update(`demesne\0${sessionId}`).digest();
   const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
   let bits = 0, value = 0, suffix = "";
@@ -199,7 +199,7 @@ export class HeartbeatBridge {
   private readonly attachments = new Map<string, Attachment>();
   private readonly attaching = new Map<string, Promise<string | null>>();
   private nodeId: string | null = null;
-  private agents: { at: number; names: string[] } = { at: 0, names: [] };
+  private agents: { at: number; names: string[]; node: string | null; list: Array<{ agent_id?: unknown; node?: unknown }> } = { at: 0, names: [], node: null, list: [] };
   private closed = false;
 
   constructor(private readonly options: HeartbeatBridgeOptions) {}
@@ -331,10 +331,25 @@ export class HeartbeatBridge {
     if (this.refreshing) return this.refreshing;
     this.agents.at = Date.now();
     this.refreshing = this.client.call({ command: "agents" }).then((reply) => {
-      const agents = Array.isArray(reply.agents) ? reply.agents as Array<{ agent_id?: unknown }> : [];
-      this.agents = { at: Date.now(), names: agents.map((agent) => String(agent.agent_id ?? "")).filter(Boolean) };
+      const agents = Array.isArray(reply.agents) ? reply.agents as Array<{ agent_id?: unknown; node?: unknown }> : [];
+      const node = typeof reply.node_id === "string" ? reply.node_id : this.nodeId;
+      this.agents = { at: Date.now(), names: agents.map((agent) => String(agent.agent_id ?? "")).filter(Boolean), node, list: agents };
     }).catch(() => undefined).finally(() => { this.refreshing = null; });
     return this.refreshing;
+  }
+
+  /// Other agents Heartbeat sees, each placed in its project, for the
+  /// sidebar. Looks again when the list is older than `maxAge`.
+  async nearby(maxAge = 10_000): Promise<{ node: string | null; agents: NearbyAgent[] }> {
+    if (!this.closed && this.client.available() && Date.now() - this.agents.at > maxAge) await this.refreshAgents();
+    return { node: this.agents.node, agents: nearbyAgents(this.agents.list, this.agents.node) };
+  }
+
+  /// Other agents working in this project; looks again when the last look
+  /// is older than the prompt's cache.
+  async agentsIn(workspaceRoot: string): Promise<NearbyAgent[]> {
+    const project = projectSlug(workspaceRoot);
+    return (await this.nearby(AGENTS_CACHE_MS)).agents.filter((agent) => agent.project === project);
   }
 
   /// What the model is told about its address, for the system prompt.

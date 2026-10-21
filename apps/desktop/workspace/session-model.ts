@@ -9,6 +9,7 @@ import {
   type UserQuestion,
   type QuestionState,
   type TurnAttachment,
+  type NearbyAgent,
 } from "@demesne/protocol";
 import {
   restoreSessionEntries,
@@ -30,6 +31,9 @@ export interface WorkspaceApproval {
   summary: string;
   input: Record<string, unknown>;
   rule: string | null;
+  /// The write would change a file another agent changed since this chat
+  /// saw it; the window asks "Ask it first" or "Change anyway".
+  overlap?: { path: string; agents: NearbyAgent[] };
 }
 export interface WorkspaceQuestion extends Partial<Omit<QuestionState,"id" | "turnId" | "toolCallId" | "questions">> {
   id: string;
@@ -254,6 +258,8 @@ export class WorkspaceSession {
           typeof p.name === "string" ? p.name : undefined,
           p.arguments,
         ),
+        ...(isRecord(p.overlap) && typeof p.overlap.path === "string" && Array.isArray(p.overlap.agents)
+          ? { overlap: { path: p.overlap.path, agents: p.overlap.agents as NearbyAgent[] } } : {}),
       });
     if (event.type === "permission.resolved")
       this.approvals.delete(String(p.permissionId));

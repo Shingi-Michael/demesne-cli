@@ -1,12 +1,12 @@
 import type { CommandMonitor } from "./command-monitor.ts";
-import { isRecord, type PermissionMode, type StoredModelMessage, type UserQuestion } from "@demesne/protocol";
+import { isRecord, type NearbyAgent, type PermissionMode, type StoredModelMessage, type UserQuestion } from "@demesne/protocol";
 import { DEFAULT_AGENT_LIMITS, type AgentConfig } from "@demesne/config";
 import { ingestImage } from "./artifacts.ts";
 import { hydrateImageInputs } from "./image-inputs.ts";
 import { ProviderError, type ProviderMessage, type ProviderToolCall, type ProviderToolDefinition } from "@demesne/providers";
 import { DemesneStore, NotFoundError, type SnapshotFile } from "@demesne/storage";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import type { TurnInference } from "./processor.ts";
 import { providerStreamLimits } from "./provider-limits.ts";
 import { recordedToolChanges } from "./tool-change-preview.ts";
@@ -59,6 +59,22 @@ interface AgentEngineOptions extends AgentConfig {
   sessionTools?: SessionToolStore;
   /// Lines added to the system prompt for this chat (its Heartbeat address).
   sessionContext?: (sessionId: string) => string | null;
+  /// Other agents working in a project (Heartbeat), for the overlap check.
+  agentsIn?: (workspaceRoot: string) => Promise<NearbyAgent[]>;
+}
+
+/// The files a write tool changes, as the model named them.
+function writeTargets(toolName: string, input: unknown): string[] {
+  if (!isRecord(input)) return [];
+  const keys = toolName === "edit_file" || toolName === "write_file" || toolName === "delete_path" ? ["path"] : toolName === "move_path" ? ["from", "to"] : [];
+  return keys.map((key) => input[key]).filter((value): value is string => typeof value === "string" && value.length > 0);
+}
+/// The files a tool read or wrote, for the overlap check's record.
+function touchedFiles(toolName: string, input: unknown): string[] {
+  if (!isRecord(input)) return [];
+  if (toolName === "read_file") return typeof input.path === "string" ? [input.path] : [];
+  if (toolName === "read_files") return Array.isArray(input.files) ? input.files.flatMap((file) => isRecord(file) && typeof file.path === "string" ? [file.path] : []) : [];
+  return writeTargets(toolName, input);
 }
 
 export class AgentEngine {
@@ -71,6 +87,38 @@ export class AgentEngine {
     private readonly contextPlanner?: ContextPlanner,
     private readonly options: AgentEngineOptions = {},
   ) {}
+
+  /// Per chat, when it last read or wrote each file (its mtime then): a file
+  /// that has moved on since, while another agent works in the project, was
+  /// probably changed by that agent.
+  private readonly seenFiles = new Map<string, Map<string, number>>();
+
+  private mtime(workspaceRoot: string, path: string): number | null {
+    try { return statSync(resolveWorkspacePath(workspaceRoot, path, true, true)).mtimeMs; } catch { return null; }
+  }
+
+  private noteFiles(sessionId: string, workspaceRoot: string, paths: string[]): void {
+    if (!paths.length || !this.options.agentsIn) return;
+    const seen = this.seenFiles.get(sessionId) ?? new Map<string, number>();
+    this.seenFiles.set(sessionId, seen);
+    for (const path of paths) {
+      const at = this.mtime(workspaceRoot, path);
+      if (at === null) seen.delete(path); else seen.set(path, at);
+    }
+  }
+
+  /// A write to a file another agent changed since this chat last saw it.
+  private async overlap(sessionId: string, workspaceRoot: string | undefined, toolName: string, input: unknown): Promise<{ path: string; agents: NearbyAgent[] } | null> {
+    if (!workspaceRoot || !this.options.agentsIn) return null;
+    const seen = this.seenFiles.get(sessionId);
+    const path = writeTargets(toolName, input).find((target) => {
+      const before = seen?.get(target);
+      return before !== undefined && this.mtime(workspaceRoot, target) !== before;
+    });
+    if (!path) return null;
+    const agents = await this.options.agentsIn(workspaceRoot).catch(() => []);
+    return agents.length ? { path, agents } : null;
+  }
 
   /// The model sub-agents use when the agent doesn't name one; undefined
   /// means the turn's own model. Changed at runtime by /subagent.
@@ -638,7 +686,27 @@ export class AgentEngine {
       this.store.settleToolCall(toolCallId, "failed", result);
       return result;
     }
-    if (permission) {
+    // Another agent changed this file since the chat saw it: ask first, in
+    // every mode, and point the model at the agent when the answer is no.
+    const overlap = permission ? await this.overlap(sessionId, workspaceRoot, call.name, input) : null;
+    if (overlap) {
+      const who = overlap.agents.map((agent) => `${agent.name} (${agent.address})`).join(", ");
+      const refused = `Not changed: ${overlap.path} changed since you last read it, and ${who} ${overlap.agents.length === 1 ? "is" : "are"} working in this project. `
+        + `Ask ${overlap.agents.length === 1 ? "it" : "them"} with the heartbeat tool (send) before changing ${overlap.path}, then read it again.`;
+      // Nobody answers on Auto (mail, Drive): the model asks the agent instead.
+      let decision: string = "deny";
+      if (permissionMode === "ask") {
+        const { permissionId } = this.store.requestToolPermission(toolCallId, permission!.kind, `${overlap.agents[0]!.name} changed ${overlap.path}`,
+          { overlap: { path: overlap.path, agents: overlap.agents } });
+        decision = await this.permissions.wait(permissionId, turnId, sessionId, call.name, call.arguments, signal, true);
+        this.store.resolveToolPermission(permissionId, decision === "deny" ? "deny" : "allow_once");
+      }
+      if (decision === "deny") {
+        this.store.settleToolCall(toolCallId, "denied", refused);
+        return refused;
+      }
+    }
+    if (permission && !overlap) {
       // allow (Drive's coder) needs no approval, except for publishing.
       const preapproved = (permissionMode === "allow" && !publishesOutside(call.name, input))
         || this.permissions.preapproved(sessionId, call.name, input);
@@ -685,6 +753,9 @@ export class AgentEngine {
       result = result.slice(0, 256 * 1024);
       this.options.commands?.invalidate(workspaceRoot);
       this.captureSnapshotPostState(turnId, sessionId, workspaceRoot, snapshotTargets.map((file) => file.path));
+      // A command the chat ran (a formatter, a codegen) may have changed files
+      // it had seen: those changes are its own, not another agent's.
+      if (workspaceRoot) this.noteFiles(sessionId, workspaceRoot, call.name === "run_command" ? [...this.seenFiles.get(sessionId)?.keys() ?? []] : touchedFiles(call.name, input));
       this.store.settleToolCall(toolCallId, "completed", result, recordedToolChanges(workspaceRoot, snapshotTargets));
       return result;
     } catch (error) {

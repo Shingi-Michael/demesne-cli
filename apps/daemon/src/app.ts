@@ -278,7 +278,7 @@ export function createDaemonApp(options: {
       inferenceFor: (model, thinkingEnabled) => snapshotTurnInference(processor, thinkingEnabled, { model }),
       subagentModels: () => subagentModels(),
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
-      ...(heartbeat ? { sessionContext: (sessionId: string) => heartbeat.context(sessionId) } : {}),
+      ...(heartbeat ? { sessionContext: (sessionId: string) => heartbeat.context(sessionId), agentsIn: (workspaceRoot: string) => heartbeat.agentsIn(workspaceRoot) } : {}),
       ...options.agent,
     },
   );
@@ -603,6 +603,11 @@ export function createDaemonApp(options: {
         } catch (error) {
           return apiError("provider_error", error instanceof Error ? error.message : "Drive planning failed", 502);
         }
+      }
+
+      // Other agents Heartbeat sees, for the sidebar's project lines.
+      if (request.method === "GET" && url.pathname === "/v1/heartbeat/agents") {
+        return json(heartbeat ? await heartbeat.nearby() : { node: null, agents: [] });
       }
 
       if (request.method === "GET" && url.pathname === "/v1/runtime") {

@@ -76,6 +76,26 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-project-review .sidebar-branch { width: 11px; height: 11px; color: currentColor; }
 .sidebar-project-chats .sidebar-review { color: var(--ok); }
 .sidebar-project-chats .sidebar-review:hover { color: var(--ok); background: var(--ok-soft); }
+/* Agents nearby: other agents at work in a project (Heartbeat), as small
+   marks on its line; clicking them unfolds who they are, with Message. */
+.agent-mark { position: relative; display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; border-radius: 5px; background: var(--tone2); color: var(--t2); font: 600 9.5px/1 Inter, system-ui, sans-serif; text-transform: none; }
+.agent-mark[data-provider="claude"] { background: #3b2a22; color: #f2b38f; }
+.agent-mark[data-provider="codex"] { background: #22302c; color: #9fe0c7; }
+.agent-mark[data-provider="gemini"] { background: #232a3b; color: #a9c4f5; }
+html[data-theme="demesne-light"] .agent-mark[data-provider="claude"] { background: #f6e3d8; color: #9a4a22; }
+html[data-theme="demesne-light"] .agent-mark[data-provider="codex"] { background: #dcefe7; color: #1f6b52; }
+html[data-theme="demesne-light"] .agent-mark[data-provider="gemini"] { background: #e0e8f8; color: #2c4f93; }
+.sidebar-agents { flex: none; display: inline-flex; align-items: center; height: 24px; margin-right: 6px; padding: 0 3px; border-radius: var(--r-sm); transition: background-color 140ms var(--ease); }
+.sidebar-agents:hover, .sidebar-agents[aria-expanded="true"] { background: var(--tone2); }
+.sidebar-agents .agent-mark + .agent-mark { margin-left: -4px; box-shadow: 0 0 0 2px var(--side); }
+.sidebar-agent-rows { margin: 0 0 2px 12px; padding-left: 3px; border-left: 1px solid var(--line); }
+.sidebar-agent-row { position: relative; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 6px; border-radius: var(--r); color: var(--t2); font-size: 12.5px; white-space: nowrap; }
+.sidebar-agent-row:hover { background: var(--surface2); }
+.sidebar-agent-row > span:not(.agent-mark) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-agent-message { position: absolute; right: 6px; height: 22px; padding: 0 8px; border-radius: var(--r-sm); background: var(--tone2); color: var(--acc); font-size: 12px; opacity: 0; transition: opacity 140ms var(--ease); }
+.sidebar-agent-row:hover .sidebar-agent-message, .sidebar-agent-message:focus-visible { opacity: 1; }
+.approval-row.overlap .agent-mark { margin-right: 2px; }
+.approval-row.overlap code { flex: none; }
 @media (prefers-reduced-motion: no-preference) {
   .sidebar-project-chats.unfolding { animation: sidebar-unfold 200ms var(--ease); }
   .sidebar-project-toggle .ico { transition: transform 160ms var(--ease); }

@@ -54,11 +54,13 @@ export class PermissionBroker {
     toolName: string,
     argsJson: string,
     signal: AbortSignal,
+    /// Ask even where the chat allows the tool (another agent's file).
+    always = false,
   ): Promise<PermissionDecision> {
     if (signal.aborted) return Promise.reject(signal.reason);
     // The UI can enable the policy synchronously while the permission event
     // is being delivered, before this waiter has been registered.
-    if (this.sessionAllows(sessionId, toolName)) return Promise.resolve("allow_once");
+    if (!always && this.sessionAllows(sessionId, toolName)) return Promise.resolve("allow_once");
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(permissionId);

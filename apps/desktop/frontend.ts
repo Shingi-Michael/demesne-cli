@@ -24,7 +24,6 @@ const el = <T extends HTMLElement = HTMLElement>(id: string) => {
 const shell = el("desktop-shell"), home = el("desktop-home"), app = el("app"),
   toolbar = el("desktop-toolbar"), errorPanel = el("desktop-error"),
   startStatus = el("desktop-start-status"), projectsList = el("sidebar-projects"), searchField = el<HTMLInputElement>("sidebar-search"),
-  projectHead = el("desktop-project-button"),
   chooser = el<HTMLButtonElement>("desktop-choose-project");
 const native = window.demesneDesktop;
 const invoke: DesktopInvoke = <T>(command: string, args?: Record<string, unknown>) => {
@@ -110,9 +109,6 @@ function renderProjects() {
   list.replaceChildren(...recentProjects.slice(0, 6).map((path) => recentButton(path)));
   el("desktop-recent").hidden = !recentProjects.length;
   if (workspace) {
-    el("desktop-project-name").textContent = projectName(workspace);
-    projectHead.title = workspace;
-    projectHead.dataset.path = shortPath(workspace);
     document.title = `${projectName(workspace)} — Demesne`;
   }
   el("sidebar-sessions").dataset.projects = JSON.stringify(recentProjects);
@@ -164,7 +160,7 @@ async function openProject(path?: string, sessionId?: string) {
     setBusy(false);
   }
 }
-for (const id of ["desktop-choose-project", "desktop-error-choose", "sidebar-open-project", "sidebar-open-folder"])
+for (const id of ["desktop-choose-project", "desktop-error-choose", "sidebar-open-project"])
   el(id).addEventListener("click", () => { void openProject(); });
 document.addEventListener("demesne:open-project", (event) => {
   const { path, sessionId } = (event as CustomEvent<{ path: string; sessionId?: string }>).detail;
@@ -242,4 +238,4 @@ document.addEventListener("demesne:needs-you", (event) => {
 });
 el("sidebar-new-key").textContent = mac ? "⌘N" : "Ctrl+N";
 el("sidebar-settings-key").textContent = mac ? "⌘," : "Ctrl+,";
-el("sidebar-open-key").textContent = openShortcut;
+el("sidebar-open-project").title = `Open a folder (${openShortcut})`;

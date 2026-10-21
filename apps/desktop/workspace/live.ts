@@ -346,12 +346,18 @@ const projectOrder = new SidebarProjectOrder(
   () => state ? [document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace, ...JSON.parse(document.getElementById("sidebar-sessions")?.dataset.projects ?? "[]")] : [],
   renderSidebar,
 );
-const projectDisclosure: Record<string, boolean> = (() => {
+/// Projects are an accordion: one is open at a time. Until you pick one,
+/// the project you are working in is the open one; switching projects
+/// opens the new one. An empty string means every project is closed.
+let openProjectPath: string | undefined = (() => {
   try {
-    const saved = JSON.parse(localStorage.getItem("demesne-project-disclosure") ?? "{}");
-    return Object.fromEntries(Object.entries(saved).filter(([, value]) => typeof value === "boolean")) as Record<string, boolean>;
-  } catch { return {}; }
+    const saved = JSON.parse(localStorage.getItem("demesne-project-open") ?? "null");
+    return typeof saved?.path === "string" ? saved.path : undefined;
+  } catch { return undefined; }
 })();
+let openProjectFor: string | undefined;
+/// The project just opened from its line unfolds once, not on every redraw.
+let unfoldingProject = "";
 /// Conversations deleted from the sidebar, hidden at once while the daemon
 /// archives them.
 const deletedSessions = new Set<string>();
@@ -375,7 +381,13 @@ function renderSidebar() {
   const review = reviewJobs(), pinned = pinnedMission(), run = worktreeRun(), word = driveWord();
   const ideas = state.driveNext.proposals.length;
   const waiting = state.approvals.length ? "approval" : state.questions.length ? "answer" : "";
-  const signature = JSON.stringify([sessions, projectPaths, projectDisclosure, [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, Math.floor(Date.now() / 60_000)]);
+  if (openProjectFor !== undefined && openProjectFor !== projectWorkspace) {
+    openProjectPath = undefined;
+    try { localStorage.removeItem("demesne-project-open"); } catch {}
+  }
+  openProjectFor = projectWorkspace;
+  const openPath = openProjectPath ?? projectWorkspace;
+  const signature = JSON.stringify([sessions, projectPaths, openPath, [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -403,7 +415,7 @@ function renderSidebar() {
     const projectSessions = sessions.filter(item => projectFor(item) === path);
     const matching = projectSessions.filter(item => projectMatches || item.title.toLowerCase().includes(query));
     if (query && !projectMatches && !matching.length) continue;
-    const expanded = Boolean(query) || (projectDisclosure[path] ?? path === projectWorkspace);
+    const expanded = Boolean(query) || path === openPath;
     const rows: string[] = [];
     let shown = 0, more = 0;
     // Search reveals every match; each project can also expand its full history.
@@ -440,9 +452,24 @@ function renderSidebar() {
       .replace("<button ", `<button aria-label="${h(`${expanded ? "Collapse" : "Expand"} ${name}`)}" aria-expanded="${expanded}" aria-controls="project-chats-${index}"${query ? " disabled" : ""} `);
     const label = btn("project-open", `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v11H3zM3 7V4h7l2 3"/></svg><span>${h(name)}</span>`, { path }, "sidebar-project-name")
       .replace("<button ", `<button draggable="true" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="${h(path)} · Drag to reorder (Alt+↑/↓)"${path === projectWorkspace ? ' aria-current="location"' : ""} `);
-    groups.push(`<section class="sidebar-project${path === projectWorkspace ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${toggle}${label}</div><div class="sidebar-project-chats" id="project-chats-${index}"${expanded ? "" : " hidden"}>${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
+    // Each project's line says its state on the right, so a closed project
+    // still shows what it needs: branches to review, a chat waiting on you,
+    // work in progress, or when it last moved.
+    const active = path === projectWorkspace;
+    const asking = projectSessions.some(item => item.id === current?.id ? Boolean(waiting) : item.waiting);
+    const busy = projectSessions.some(item => item.id === current?.id ? Boolean(state!.activeTurnId) : item.status === "running" || item.status === "queued");
+    const latest = projectSessions.reduce((max, item) => item.turns && item.updatedAt > max ? item.updatedAt : max, "");
+    const link = active && state.connection !== "online" ? state.connection === "connecting" ? "connecting…" : "offline" : "";
+    const status = link ? `<span class="sidebar-project-state">${link}</span>`
+      : active && review.length ? btn("review-open", `${ICON_BRANCH}${review.length}`, { show: true }, "sidebar-project-review").replace("<button ", `<button title="${review.length} ${review.length === 1 ? "branch" : "branches"} to review" `)
+      : asking ? `<span class="sidebar-project-state" title="A chat needs you">${dot("warn")}</span>`
+      : busy ? `<span class="sidebar-project-state" title="Working">${dot("working")}</span>`
+      : !expanded && latest ? `<span class="sidebar-project-state" title="${h(fullTime(latest))}">${h(shortAge(latest))}</span>` : "";
+    if (active && review.length && !query) rows.push(btn("review-open", `Review ${review.length} ${review.length === 1 ? "branch" : "branches"} ›`, { show: true }, "sidebar-more sidebar-review"));
+    groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${toggle}${label}${status}</div><div class="sidebar-project-chats${path === unfoldingProject && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
   }
   list.innerHTML = groups.length ? groups.join("") : '<p class="sidebar-empty">No matching conversations or projects</p>';
+  unfoldingProject = "";
   const editing = list.querySelector<HTMLInputElement>(".sidebar-rename input");
   if (editing && document.activeElement !== editing) { editing.focus(); editing.select(); }
   // A redraw keeps keyboard focus where it was, or on the row that moved up.
@@ -454,20 +481,6 @@ function renderSidebar() {
   }
   const title = document.getElementById("workspace-title");
   if (title) { title.textContent = inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
-  // Under the project's name: its folder and branch, and the connection
-  // only when it is not there.
-  const sub = document.getElementById("desktop-project-sub");
-  if (sub) {
-    const branch = state.session?.workspace?.gitBranch ?? "";
-    const link = state.connection === "online" ? "" : state.connection === "connecting" ? "connecting…" : "offline";
-    sub.textContent = [state.workspace.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~"), branch, link].filter(Boolean).join(" · ");
-  }
-  // Branches is a fixed row with a count while Drive's work waits for review.
-  const branchesRow = document.getElementById("sidebar-branches"), count = document.getElementById("sidebar-branches-count");
-  if (branchesRow && count) {
-    branchesRow.hidden = !review.length;
-    count.textContent = String(review.length);
-  }
   // The rail: a dot where something waits, a ring for Drive's progress.
   const badge = document.getElementById("rail-sessions-badge"), ring = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
   // Chats that need you: the rail's chats icon wears the amber ring, and
@@ -2874,8 +2887,10 @@ async function dispatch(
   if (action === "project-toggle" || action === "project-more") {
     const path = String(args.path);
     if (action === "project-toggle") {
-      projectDisclosure[path] = !(projectDisclosure[path] ?? path === (document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace));
-      try { localStorage.setItem("demesne-project-disclosure", JSON.stringify(projectDisclosure)); } catch {}
+      const open = openProjectPath ?? (document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace);
+      openProjectPath = open === path ? "" : path;
+      unfoldingProject = openProjectPath;
+      try { localStorage.setItem("demesne-project-open", JSON.stringify({ path: openProjectPath })); } catch {}
     } else if (expandedProjectChats.has(path)) expandedProjectChats.delete(path);
     else expandedProjectChats.add(path);
     renderSidebar();

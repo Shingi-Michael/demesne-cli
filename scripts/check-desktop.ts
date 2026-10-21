@@ -23,6 +23,7 @@ const thinkingPrompt = "Desktop smoke: readable thinking";
 const previewPrompt = "Desktop smoke: run the site";
 const overlapPrompt = "Desktop smoke: edit what another agent changed";
 const askPrompt = "Desktop smoke: ask me first";
+const brokePrompt = "Desktop smoke: break a check";
 let overlapRound = 0;
 // A stand-in Heartbeat daemon: Claude Code works in this project on this
 // machine, Codex in the second project on a paired one.
@@ -41,6 +42,7 @@ const heartbeatDaemon = Bun.listen({ unix: heartbeatSocket, socket: { data(socke
 } } });
 let previewRound = 0;
 let askRound = 0;
+let brokeRound = 0;
 const thinkingText = "First reasoning paragraph.\nSecond line stays readable.\n\n" + "A detailed thought with enough words to wrap across several lines. ".repeat(12) + "\n" + "long_identifier_".repeat(90);
 let nextThought!: () => void, finishThought!: () => void;
 const thoughtGate = new Promise<void>(resolve => { nextThought = resolve; });
@@ -116,6 +118,16 @@ const f = await fixture({
         yield { type: "finish", reason: "stop" };
       }
       overlapRound++;
+      return;
+    }
+    if (user === brokePrompt) {
+      if (brokeRound++ === 0) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "desktop-broke", nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: [process.execPath, "-e", "console.error('error: expected after, received before'); process.exit(1)", "check"] }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", delta: "The check fails now." };
+        yield { type: "finish", reason: "stop" };
+      }
       return;
     }
     if (user === askPrompt) {
@@ -716,7 +728,22 @@ try {
   await capture("13-question");
   await page.locator("textarea").press("1");
   await textIncludes("Scoping the test job then.");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation"] }, null, 2));
+  // Something broke: Drive's line says so and unfolds in place; no box on
+  // the composer.
+  await type(brokePrompt);
+  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Run"]), "the failing check asks first");
+  await click("permission", { decision: "allow_once" });
+  await textIncludes("The check fails now.");
+  const broke = page.locator("#briefing .bf-word.bad");
+  await until(() => broke.isVisible(), "Drive's line says the check broke", 30_000);
+  assert.equal(await page.locator("#input-area .breakage-card.alert").count(), 0, "nothing sits on the composer");
+  await broke.click();
+  await until(() => page.locator("#drive-reply.open button", { hasText: "Fix in a worktree" }).isVisible(), "it unfolds with the fix");
+  await page.waitForTimeout(400);
+  await capture("14-broke");
+  await page.locator("#drive-reply.open button", { hasText: "Not now" }).click();
+  await until(() => broke.count().then(count => count === 0), "Not now puts it away");
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

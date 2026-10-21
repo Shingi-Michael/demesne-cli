@@ -1616,10 +1616,7 @@ button:disabled {
 .breakage-head small .add { color: var(--citron); }
 .breakage-head small .del { color: var(--signal); }
 .breakage-close { color: var(--muted); padding: 0 4px; font-size: 15px; }
-.breakage-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.breakage-list li { display: flex; flex-direction: column; min-width: 0; }
-.breakage-list b { color: var(--paper); font-weight: 500; }
-.breakage-list span, .breakage-meta span {
+.breakage-meta span {
   color: var(--muted);
   font-size: 12px;
   line-height: 18px;

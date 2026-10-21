@@ -232,7 +232,8 @@ const expanded = new Set<string>(),
 /// The briefing line's unfolded parts above the composer (on the start
 /// screen, Drive's ideas under it); turns whose steps are open.
 let driveShown = false,
-  ideasShown = false;
+  ideasShown = false,
+  brokeShown = false;
 let driveActionPending = "";
 /// Drive's page fills the main column in place of the conversation.
 const stepsOpen = new Set<string>();
@@ -1714,12 +1715,12 @@ let breakageSignature = "";
 let awayOpen: string | null = null;
 function renderBreakage() {
   if (!state) return;
-  const { signals, fix, busy, message } = state.breakage;
+  const { fix, busy, message } = state.breakage;
   // Finished branches are one line (under the project name on the start
   // screen, above the composer in a session); their cards show once you open
   // it. In a session, work still running folds behind "Drive is working".
   const folding = !reviewShown, running = !inSession() || driveShown;
-  const signature = JSON.stringify([folding, running, signals, fix, state.breakage.inbox, state.breakage.away, awayOpen, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0, Boolean(driveTurnMission())]);
+  const signature = JSON.stringify([folding, running, fix, state.breakage.inbox, state.breakage.away, awayOpen, busy, message, fix?.status === "running" && !fix.mission ? Math.floor(Date.now() / 1000) : 0, Boolean(driveTurnMission())]);
   if (signature === breakageSignature) return;
   breakageSignature = signature;
   // Never let a missing #breakage stop the rest of the render.
@@ -1730,10 +1731,6 @@ function renderBreakage() {
   const doing = (action: string, label: string, idle: string) => (busy === action ? label : idle);
   if (message) {
     cards.push(`<div class="breakage-card toast ${message.tone}"><div class="breakage-head"><span class="breakage-mark">${message.tone === "ok" ? "✓" : "!"}</span><span class="breakage-text">${h(message.text)}</span>${message.url ? btn("breakage-open", "Open ›", {}, "link") : ""}${close("breakage-close", "Dismiss")}</div></div>`);
-  }
-  if (signals.length) {
-    const running = fix && ["starting", "running"].includes(fix.status);
-    cards.push(`<div class="breakage-card alert"><div class="breakage-head"><span class="breakage-mark">✕</span><span class="breakage-text">${signals.length === 1 ? "Something just broke" : `${signals.length} things just broke`}</span>${close("breakage-dismiss", "Not now")}</div><ul class="breakage-list">${signals.map((signal) => `<li><b>${h(signal.title)}</b><span>${h(signal.detail.replace(/^Latest run exit (\S+) at \S+\.\s*/, "exit $1 · "))}</span></li>`).join("")}</ul><p class="breakage-note">${running ? `${fix.mission ? "A Drive mission is working in a worktree" : "A fix is already running"}; this one waits until it finishes.` : "Drive can fix it in a separate git worktree. Your files and this conversation stay as they are until you choose to apply it."}</p><div class="breakage-actions">${running ? "" : btn("breakage-fix", doing("fix", "Starting…", "▶ Fix in a worktree"), {}, "primary", Boolean(busy))}${btn("breakage-dismiss", "Not now", {}, "quiet")}${btn("breakage-never", "Never for this", {}, "quiet")}</div></div>`);
   }
   // A running mission shows on the briefing line; its card comes when it settles.
   const fixCard = (fix: NonNullable<Snapshot["breakage"]["fix"]>) => {
@@ -1880,21 +1877,40 @@ function renderBriefing() {
     inSession(), review.map((job) => [job.id, job.status, job.title, job.diff]), reviewShown, away?.status,
     pinned && (driveShown && !driveTurnMission() ? [pinned, detailsOpen.has("drive-details"), Math.floor(Date.now() / 10_000)] : [pinned.status, pinned.mission, driveTurnMission() ? driveProgress(pinned) : activeMinutes(pinned)]),
     run.fix && [run.fix.title, run.fix.status], run.away && run.away.items.map((item) => item.state),
-    driveShown, ideasShown, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
+    state.breakage.signals, state.breakage.busy, brokeShown, driveShown, ideasShown, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
   ]);
   if (signature === briefingSignature) return;
   briefingSignature = signature;
   const parts: string[] = [];
-  const mark = (kind: "spin" | "idea" | "amber" | "ok") => kind === "spin" ? spinner() : `<span class="bf-dot ${kind}" aria-hidden="true"></span>`;
+  // Something broke (CI on main, a failing check): the line says so first,
+  // and unfolds with what failed and Drive's offer to fix it in a worktree.
+  const signals = state.breakage.signals, fixing = Boolean(state.breakage.fix && ["starting", "running"].includes(state.breakage.fix.status));
+  const broke = signals.length > 0 && !fixing;
+  if (!broke) brokeShown = false;
+  const mark = (kind: "spin" | "idea" | "amber" | "ok" | "bad") => kind === "spin" ? spinner() : `<span class="bf-dot ${kind}" aria-hidden="true"></span>`;
   let fold = "", toggle: { action: string; open: boolean } | null = null, progress: number | null = null;
-  if (review.length) {
+  if (review.length && !broke) {
     const only = review.length === 1 ? review[0]! : null;
     const about = only && reviewShown ? "" : only ? `${only.title}${only.diff ? ` · +${only.diff.additions} −${only.diff.deletions}` : ""}` : away && away.status !== "running" ? "Drive ran them while you were away" : "";
     parts.push(`${mark("ok")}${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review`, {}, "bf-word")}${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
   }
   const label = (drive: NonNullable<Snapshot["drive"]>) => drive.status === "blocked" ? "Drive needs you" : drive.status === "paused" ? "Drive is paused" : "Drive is working";
   const driveMark = (drive: NonNullable<Snapshot["drive"]>) => mark(drive.status === "blocked" ? "amber" : drive.status === "paused" ? "idea" : "spin");
-  if (pinned && driveTurnMission()) {
+  if (broke) {
+    const first = signals[0]!, ci = /CI failure on (\S+)/.exec(first.title);
+    const word = signals.length > 1 ? `${signals.length} things broke` : ci ? `CI failed on ${ci[1]}` : first.source === "checks" ? "A check is failing" : first.title;
+    const about = signals.length > 1 ? "" : first.detail.replace(/^Latest run exit (\S+) at \S+\.\s*/, "");
+    parts.push(`${mark("bad")}${btn("broke-show", word, {}, "bf-word bad")}${about && !brokeShown ? `<span class="bf-about">${h(about)}</span>` : ""}`);
+    toggle = { action: "broke-show", open: brokeShown };
+    if (brokeShown) {
+      const busy = state.breakage.busy;
+      fold = `<div class="bf-rows">${signals.map((signal) => `<div class="bf-row broke"><span class="bf-dot bad" aria-hidden="true"></span><span class="bf-title">${h(signal.title)}</span><span class="bf-r">${h(signal.detail.replace(/^Latest run exit (\S+) at \S+\.\s*/, "exit $1 · "))}</span></div>`).join("")}</div><p class="bf-note">Drive can fix it in its own worktree. This chat and your files stay as they are until you apply it.</p><p class="bf-foot">${[
+        btn("breakage-fix", busy === "fix" ? "Starting…" : "Fix in a worktree", {}, "primary", Boolean(busy)),
+        btn("breakage-dismiss", "Not now", {}, "link"),
+        btn("breakage-never", "Never for this", {}, "link"),
+      ].join('<span class="bf-sep">·</span>')}</p>`;
+    }
+  } else if (pinned && driveTurnMission()) {
     // The mission is the conversation's newest turn; the strip only says how far it has got.
     const tasks = driveTaskList(pinned), done = tasks.filter((task) => task.mark === "✓").length;
     if (tasks.length > 1) progress = done / tasks.length;
@@ -1934,7 +1950,7 @@ function renderBriefing() {
   const lead = /^<span class="bf-(?:spin|dot)[^>]*><\/span>/.exec(parts[0]!)?.[0] ?? "";
   parts[0] = parts[0]!.slice(lead.length);
   const chip = `${parts.map((part) => `<span class="bf-part">${part}</span>`).join('<span class="bf-sep">·</span>')}${chevron}`;
-  node.innerHTML = `<span class="bf-lead${fold ? " open" : ""}">${fold ? ICON_SPARK : lead}</span><div class="bf-chip">${chip}</div>${progress !== null ? `<span class="bf-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : ""}`;
+  node.innerHTML = `<span class="bf-lead${fold ? " open" : ""}${broke ? " bad" : ""}">${fold && !broke ? ICON_SPARK : lead}</span><div class="bf-chip">${chip}</div>${progress !== null ? `<span class="bf-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : ""}`;
   node.classList.toggle("open", Boolean(fold));
   // Opening turns the line into Drive speaking in the conversation: its rows
   // unfold under it and scroll with everything else, so nothing is covered.
@@ -1959,6 +1975,7 @@ function closeBriefingCard() {
   if (!el("briefing").classList.contains("open")) return false;
   driveShown = false;
   ideasShown = false;
+  brokeShown = false;
   renderBriefing();
   return true;
 }
@@ -3158,8 +3175,9 @@ async function dispatch(
     renderDriveTurn();
     return;
   }
-  if (action === "drive-show" || action === "ideas-show") {
+  if (action === "drive-show" || action === "ideas-show" || action === "broke-show") {
     if (action === "drive-show") driveShown = !driveShown;
+    else if (action === "broke-show") brokeShown = !brokeShown;
     else ideasShown = !ideasShown;
     if (inSession()) renderBriefing();
     else {
@@ -3494,7 +3512,7 @@ function renderState(next: Snapshot) {
     reviewOpen.clear(); reviewFiles.clear(); diffNotes.clear(); noteEditing = null;
     follow = true;
     overlay = null;
-    driveShown = ideasShown = false;
+    driveShown = ideasShown = brokeShown = false;
     unwatchOutput();
     expanded.clear();
     expandedCompactions.clear();

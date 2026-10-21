@@ -23,7 +23,7 @@ const thinkingPrompt = "Desktop smoke: readable thinking";
 const previewPrompt = "Desktop smoke: run the site";
 const overlapPrompt = "Desktop smoke: edit what another agent changed";
 const askPrompt = "Desktop smoke: ask me first";
-const missionAskPrompt = "Desktop smoke: the mission needs you";
+const missionPushPrompt = "Desktop smoke: the mission tries to push";
 const brokePrompt = "Desktop smoke: break a check";
 let overlapRound = 0;
 // A stand-in Heartbeat daemon: Claude Code works in this project on this
@@ -64,13 +64,11 @@ const f = await fixture({
       yield { type: "finish", reason: "stop" };
       return;
     }
-    if (user === missionAskPrompt) {
-      // The mission runs a command, then asks; both wait for you.
-      const step = missionRound++;
-      if (step === 0) yield { type: "tool_call_delta", index: 0, idDelta: "mission-run", nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: [process.execPath, "-e", "console.log('ok')"] }) };
-      else if (step === 1) yield { type: "tool_call_delta", index: 0, idDelta: "mission-ask", nameDelta: "ask_user", argumentsDelta: JSON.stringify({ questions: [{ question: "Should the mission cover the sidebar too?", suggestions: ["Yes, both", "Just the composer"] }] }) };
-      else yield { type: "text_delta", delta: "Covering both." };
-      yield { type: "finish", reason: step < 2 ? "tool_calls" : "stop" };
+    if (user === missionPushPrompt) {
+      // The mission's coder tries to publish, the one step that would ask.
+      if (missionRound++ === 0) yield { type: "tool_call_delta", index: 0, idDelta: "mission-push", nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: ["git", "push", "origin", "HEAD"] }) };
+      else yield { type: "text_delta", delta: "The push was declined; the branch waits for review." };
+      yield { type: "finish", reason: missionRound === 1 ? "tool_calls" : "stop" };
       return;
     }
     if (_tools.some(tool => tool.name === "drive_ui")) {
@@ -690,19 +688,13 @@ try {
   await line.locator(".bf-word").click();
   await control("pause").click();
   await control("resume").waitFor();
-  // While Drive is paused, what the mission asks shows in your chat, marked
-  // as Drive's, and your answer goes to the mission.
+  // Drive never waits on you: its coder trying to publish is declined
+  // without asking, and nothing lands in your chat.
   const missionId = (await f.client.listSessions()).find(session => session.title.startsWith("Drive mission:"))!.id;
-  await f.client.submitTurn(missionId, { content: missionAskPrompt, permissionMode: "ask" });
-  await until(() => page.locator("#approval .approval-row.from-drive .drive-asks").isVisible(), "the mission's approval shows in your chat as Drive's");
-  await capture("08-drive-asks-approval");
-  await page.locator("#approval .approval-row.from-drive .allow").click();
-  await until(() => page.locator("#question .ask-q.from-drive").innerText().then(text => text.includes("Drive asks") && text.includes("Should the mission cover the sidebar too?")), "the mission's question shows in your chat as Drive's");
-  await capture("08-drive-asks-question");
-  await page.locator("#question .ask-choice").first().click();
-  await until(async () => (await f.client.getSessionState(missionId)).session.turns.at(-1)?.status === "completed", "your answer reaches the mission");
-  await until(() => page.locator("#question .ask-q").count().then(count => count === 0), "the question leaves your chat once answered");
-  assert.equal(await page.locator("#workspace-title").innerText(), home, "answering Drive keeps you in your chat");
+  await f.client.submitTurn(missionId, { content: missionPushPrompt, permissionMode: "allow" });
+  await until(async () => (await f.client.getSessionState(missionId)).session.turns.at(-1)?.status === "completed", "the mission carries on past its publish step");
+  assert.equal(await page.locator("#approval .approval-row").count(), 0, "Drive's publish step never asks you");
+  assert.equal(await page.locator("#workspace-title").innerText(), home, "you stay in your chat");
   if (!(await control("resume").isVisible())) await line.locator(".bf-word").click();
   await control("resume").click();
   await control("pause").waitFor();
@@ -815,7 +807,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive's asks in your chat, and its report"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

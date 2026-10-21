@@ -125,12 +125,6 @@ const AGENTS_POLL_MS = 15_000;
 
 /** All privileged operations stay here. The web renderer gets snapshots and a
  * fixed set of actions, never a daemon token, shell, arbitrary URL, or filesystem API. */
-/// Pending approvals or questions, marked with Drive's mission chat when
-/// they come from it.
-function tagAsks<T>(items: Iterable<T> | undefined, drive?: string): (T & { drive?: string })[] {
-  return [...(items ?? [])].map((item) => (drive === undefined ? item : { ...item, drive }) as T & { drive?: string });
-}
-
 export class WorkspaceHost {
   settings: CliSettings;
   setup: WorkspaceSetup | null = null;
@@ -171,6 +165,8 @@ export class WorkspaceHost {
   /// The session you were in when a mission opened its worktree session.
   private missionReturn: string | null = null;
   private missionFinishing = new Set<string>();
+  /// Why a mission stopped itself, for its report.
+  private missionBlockers = new Map<string, string>();
   /// The commit of a settled worktree mission, while it is being made.
   missionFinish: Promise<void> | null = null;
   /// Breakage alerts and the open worktree (a mission's) have loaded.
@@ -308,9 +304,8 @@ export class WorkspaceHost {
       chatgptAccount: this.model.provider === "ChatGPT" ? this.chatgptAccount : null,
       provider: this.current?.provider ?? null,
       checkpoint: this.current?.state.checkpoint ?? null,
-      // Drive's mission asking for you shows in the chat it started from too.
-      approvals: [...tagAsks(this.current?.approvals.values()), ...tagAsks(this.driveAsking?.approvals.values(), this.driveAsking?.session.title)],
-      questions: [...tagAsks(this.current?.questions.values()), ...tagAsks(this.driveAsking?.questions.values(), this.driveAsking?.session.title)],
+      approvals: [...(this.current?.approvals.values() ?? [])],
+      questions: [...(this.current?.questions.values() ?? [])],
       activeTurnId: this.active?.id ?? null,
       busy: this.busy,
       files: this.files,
@@ -505,6 +500,11 @@ export class WorkspaceHost {
           if (event.type === "command.changed" || event.type === "tool.call_completed") commands();
           // Only what changes the sidebar or the Drive line repaints; the
           // mission's streaming text never touches the chat you're in.
+          // Drive never waits on you: the one thing its coder still asks
+          // for is publishing (a push or a PR), and that is yours to do
+          // from the review card, so Drive declines it.
+          if (event.type === "permission.requested") for (const approval of session.approvals.values())
+            void this.client.resolvePermission(approval.id, "deny").then(() => { session.approvals.delete(approval.id); this.publish(); }).catch(() => {});
           if (/^turn\.|^permission\.|^question\./.test(event.type)) {
             if (event.type.startsWith("turn.")) void this.refreshSessions();
             this.publish();
@@ -521,19 +521,6 @@ export class WorkspaceHost {
     this.driveSession = null;
     this.driveProcesses = [];
   }
-  /// The mission's session when its asks belong in the chat you're in: the
-  /// chat the mission started from (or any, for a mission with no link).
-  get driveAsking() {
-    const session = this.driveSession, here = this.current?.session.id;
-    if (!session || !here || session.session.id === here) return null;
-    const from = this.breakage.missionFor(session.session.id)?.from;
-    return !from || from === here ? session : null;
-  }
-  /// The session an approval or question belongs to: yours, else Drive's.
-  private askedIn(id: string, kind: "approvals" | "questions") {
-    if (this.current?.[kind].has(id)) return this.current;
-    return this.driveAsking?.[kind].has(id) ? this.driveAsking : null;
-  }
   /// Whether Drive's mission works in the chat you're in.
   get inDriveHome() {
     const home = this.driveState && ["running", "waiting", "blocked", "paused"].includes(this.driveState.status) ? this.driveState.homeSessionId : this.driveSession?.session.id;
@@ -543,12 +530,21 @@ export class WorkspaceHost {
   /// Drive's state changed: when a worktree mission settles (completed, idle
   /// or stopped), commit what it changed and show it for review.
   missionChanged(state: import("@demesne/protocol").DriveState | null) {
-    if (!state || !["completed", "idle", "stopped"].includes(state.status)) return;
+    if (!state) return;
     const fix = this.breakage.missionFor(state.homeSessionId);
+    // Drive never waits on you: a mission that would block ends instead,
+    // with why, and its report lands in your chat.
+    if (state.status === "blocked" && fix) {
+      this.missionBlockers.set(state.id, state.activity);
+      queueMicrotask(() => { try { this.drive?.agent.control("stop"); } catch { /* already settled */ } });
+      return;
+    }
+    if (!["completed", "idle", "stopped"].includes(state.status)) return;
     const key = `${state.id}:${state.status}:${state.step}`;
     if (!fix || this.missionFinishing.has(key)) return;
     this.missionFinishing.add(key);
-    const summary = state.answer || state.completed.join("\n") || state.activity;
+    const blocker = this.missionBlockers.get(state.id);
+    const summary = blocker ? `Couldn't finish: ${blocker}` : state.answer || state.completed.join("\n") || state.activity;
     this.missionFinish = this.breakage.finishMission(fix.id, summary, missionReceipt(state, fix));
   }
 
@@ -1420,10 +1416,9 @@ export class WorkspaceHost {
     }
     if (method === "permission") {
       const id = string(args.id, "permission id", 200),
-        target = this.askedIn(id, "approvals"),
-        approval = target?.approvals.get(id),
+        approval = this.current!.approvals.get(id),
         decision = string(args.decision, "decision", 50) as PermissionDecision;
-      if (!target || !approval || !target.isActive(approval.turnId))
+      if (!approval || !this.current!.isActive(approval.turnId))
         throw new Error("This permission is no longer pending.");
       if (
         !["allow_once", "allow_session", "allow_always", "deny"].includes(
@@ -1448,23 +1443,23 @@ export class WorkspaceHost {
         await this.client.resolvePermission(id, decision);
       } catch (error) {
         if (isStalePermissionResolution(error)) {
-          target.approvals.delete(id);
+          this.current!.approvals.delete(id);
           this.publish();
         }
         throw error;
       }
-      target.approvals.delete(id);
+      this.current!.approvals.delete(id);
       this.publish();
       return;
     }
     if (method === "question-action") {
       if (!this.current) throw new Error("Choose a session first");
-      const id=string(args.id,"question id",200), selected=this.askedIn(id,"questions") ?? this.current!;
+      const id=string(args.id,"question id",200), selected=this.current!;
       const pending=selected.questions.get(id);
       if (!pending) throw new Error("This question is no longer pending");
       if (pending.revision === undefined) throw new Error("Restart the updated daemon to answer questions in the composer");
       const result=await this.client.questionAction(id,parseQuestionActionRequest(args.action));
-      if (this.current === selected || this.driveSession === selected) {
+      if (this.current === selected) {
         const latest=selected.questions.get(id);
         if (latest && result.question.revision >= (latest.revision ?? 0)) {
           if (["answered","cancelled"].includes(result.question.status)) selected.questions.delete(id);
@@ -1475,15 +1470,15 @@ export class WorkspaceHost {
       return result;
     }
     if (method === "answer") {
-      const id = string(args.id, "question id", 200), target = this.askedIn(id, "questions");
-      if (!target)
+      const id = string(args.id, "question id", 200);
+      if (!this.current!.questions.has(id))
         throw new Error("This question is no longer pending.");
       const body = parseAnswerQuestionsRequest({ answers: args.answers });
       await this.client.request(`/v1/questions/${encodeURIComponent(id)}`, {
         method: "POST",
         body: JSON.stringify(body),
       });
-      target.questions.delete(id);
+      this.current!.questions.delete(id);
       this.publish();
       return;
     }

@@ -1085,13 +1085,19 @@ export class WorkspaceHost {
         this.drive?.addMemory({ kind: "veto", text: `${item.title}: ${item.why}`, source: "you" });
         return this.hideNext(item.id, "never");
       }
+      // Plan writes its read-only plan in a chat of its own: yours, your
+      // draft and its context stay as they are, and Drive keeps going.
       if (method === "next-plan") {
-        if (this.active) throw new Error("Wait for the current turn to finish before planning a suggestion.");
-        if (this.draft.trim()) throw new Error("Send or clear your draft before planning a suggestion.");
-        if (!this.driveSession || this.inDriveHome) this.drive?.agent.intervene();
-        const result = await this.submit(`${item.title}. ${item.why}`, true);
+        if (this.connection !== "online") throw new Error("Connect to the daemon first.");
+        const { session } = await this.client.createSession({
+          workspacePath: this.workspace,
+          title: titleFromRequest(item.title),
+          ...(this.trustWorkspace ? { trustWorkspace: true } : {}),
+        });
+        const { turn } = await this.client.submitTurn(session.id, { content: `${item.title}. ${item.why}`, permissionMode: "ask", planOnly: true });
         this.hideNext(item.id, Date.now() + 6 * 3_600_000);
-        return result;
+        void this.refreshSessions();
+        return { sessionId: session.id, turnId: turn.id };
       }
       // Run works in its own git worktree, so your checkout and this
       // conversation stay as they are until you apply the result. Outside a

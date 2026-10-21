@@ -4,7 +4,7 @@ import { fixture, eventually } from "./fixture.ts";
 
 const proposal = { id: "fix-parser", kind: "fix" as const, title: "Fix the parser", why: "A check failed.", evidence: [], minutes: 5, confidence: "high" as const, coders: 1, urgent: false, value: 3, cost: 1, score: 3 };
 
-test("failed Run and Plan keep the suggestion; Plan preserves drafts and remains read-only", async () => {
+test("failed Run and Plan keep the suggestion; Plan plans read-only in its own chat", async () => {
   const f = await fixture();
   const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed() {} });
   try {
@@ -14,18 +14,20 @@ test("failed Run and Plan keep the suggestion; Plan preserves drafts and remains
     const args = { sessionId: host.current!.session.id, id: proposal.id };
     await expect(host.handle("next-run", args)).rejects.toThrow("unavailable");
     expect(host.snapshot().driveNext.proposals).toHaveLength(1);
-    host.draft = "Keep this unsent message";
-    await expect(host.handle("next-plan", args)).rejects.toThrow("draft");
-    expect(host.draft).toBe("Keep this unsent message");
-    expect(host.snapshot().driveNext.proposals).toHaveLength(1);
-    host.draft = "";
     host.connection = "offline";
     await expect(host.handle("next-plan", args)).rejects.toThrow("Connect");
     expect(host.snapshot().driveNext.proposals).toHaveLength(1);
     host.connection = "online";
-    await host.handle("next-plan", args);
-    const session = await f.client.getSessionState(args.sessionId);
-    expect(session.session.turns.at(-1)?.planOnly).toBe(true);
+    host.draft = "Keep this unsent message";
+    const planned = await host.handle("next-plan", args) as { sessionId: string };
+    // Your chat, your draft and its turns are untouched; the plan has its own chat.
+    expect(host.current!.session.id).toBe(args.sessionId);
+    expect(host.draft).toBe("Keep this unsent message");
+    expect((await f.client.getSessionState(args.sessionId)).session.turns).toHaveLength(0);
+    expect(planned.sessionId).not.toBe(args.sessionId);
+    const plan = await f.client.getSessionState(planned.sessionId);
+    expect(plan.session.title).toBe("Fix the parser");
+    expect(plan.session.turns.at(-1)?.planOnly).toBe(true);
     expect(host.snapshot().driveNext.proposals).toHaveLength(0);
     await expect(host.handle("next-run", args)).rejects.toThrow("no longer");
   } finally { host.dispose(); await f.close(); }

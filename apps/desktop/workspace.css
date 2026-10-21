@@ -752,3 +752,17 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop .ask-choice:nth-child(2) { animation-delay: 40ms; } .desktop .ask-choice:nth-child(3) { animation-delay: 80ms; } .desktop .ask-choice:nth-child(4) { animation-delay: 120ms; }
 }
 @keyframes ask-breathe { 0% { opacity: .55; transform: scale(1); } 70%, 100% { opacity: 0; transform: scale(2); } }
+/* Something broke: Drive's line says it with a red cross and unfolds in
+   place with what failed and the offer to fix it in a worktree. */
+.desktop :is(#briefing, #drive-reply) .bf-dot.bad { position: relative; border-radius: 0; background: none; }
+.desktop :is(#briefing, #drive-reply) .bf-dot.bad::before, .desktop :is(#briefing, #drive-reply) .bf-dot.bad::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 1.6px; border-radius: 1px; background: var(--bad); transform: translate(-50%, -50%) rotate(45deg); }
+.desktop :is(#briefing, #drive-reply) .bf-dot.bad::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.desktop #briefing .bf-lead.bad { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 30%, transparent); background: color-mix(in srgb, var(--bad) 8%, transparent); }
+.desktop #briefing .bf-word.bad { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--t2); }
+.desktop #briefing .bf-chip:has(.bf-word.bad) { max-width: calc(100% - 32px); }
+.desktop #drive-reply .bf-row.broke .bf-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop #briefing.open .bf-word.bad, .desktop #briefing button.bf-word.bad:hover { color: var(--t1); }
+.desktop #drive-reply .bf-row.broke .bf-r { color: var(--t4); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
+.desktop #drive-reply .bf-note { margin: 2px 10px 0; color: var(--t3); font-size: 12.5px; line-height: 1.5; }
+.desktop #drive-reply .bf-foot .primary { height: 26px; padding: 0 11px; border: 0; border-radius: var(--r-sm); background: color-mix(in srgb, var(--bad) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 35%, transparent); color: var(--t1); font: inherit; font-size: 12.5px; cursor: pointer; }
+.desktop #drive-reply .bf-foot .primary:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 22%, transparent); }

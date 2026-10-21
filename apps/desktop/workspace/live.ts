@@ -903,7 +903,9 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
               : `<span class="muted">${h(mark(tool.state))}</span> ${h(tool.state)}`;
   const row = btn(
     canFold ? "step" : "tool",
-    `${now ? spinner() : stepIcon(tool)}<span class="verb">${now && !served ? shine(verb(tool)) : served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    // A running step keeps its own icon and only its words shine: the cube
+    // means thinking or working overall, not one tool.
+    `${stepIcon(tool)}<span class="verb">${now && !served ? shine(verb(tool)) : served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -1205,7 +1207,7 @@ function stepTrail(run: WorkspaceRun, items: ToolEntry[]) {
   const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
   const step = (tool: ToolEntry) => {
     const now = tool.state === "running" || tool.waiting || tool.drafting;
-    const sign = now ? spinner() : `<span class="${tone(tool.state)}">${mark(tool.state)}</span>`;
+    const sign = now ? stepIcon(tool) : `<span class="${tone(tool.state)}">${mark(tool.state)}</span>`;
     const added = tool.phase === "change" && tool.state === "done" ? totals(run, tool).added : 0;
     return `<span class="trail-step ${now ? "now" : ""}">${sign} ${h(tool.waiting ? `waiting for you · ${name(tool)}` : clip(name(tool), 48))}${added ? ` <span class="success">+${added}</span>` : ""}</span>`;
   };

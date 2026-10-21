@@ -714,7 +714,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
    each frame) and a silver shine across the words. */
 .cube-mark { display: inline-grid; place-items: center; flex: none; width: 12px; height: 12px; vertical-align: -2px; }
 .cube-mark svg { display: block; overflow: visible; }
-.steps .tool-row .cube-mark, .thinking-toggle .cube-mark { margin: 0 1px; }
+.thinking-toggle .cube-mark { margin: 0 1px; }
 .shine { background: linear-gradient(100deg, var(--t3) 0%, var(--t3) 42%, var(--t1) 50%, var(--t3) 58%, var(--t3) 100%) 50% 0 / 280% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
 @media (prefers-reduced-motion: no-preference) {
   .shine { animation: shine 3s ease-in-out infinite alternate; }

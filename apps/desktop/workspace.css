@@ -712,6 +712,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 @media (prefers-reduced-motion: no-preference) {
   .desktop #cards .card-chev { transition: transform 160ms var(--ease), opacity 140ms var(--ease); }
   .desktop #cards .card-act { transition: opacity 140ms var(--ease); }
-  .desktop #cards .card-body { animation: card-unfold 200ms var(--ease); }
+  .desktop #cards .card.unfolding .card-body { animation: card-unfold 200ms var(--ease); }
 }
 @keyframes card-unfold { from { opacity: 0; transform: translateY(-3px); } }

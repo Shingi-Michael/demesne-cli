@@ -501,8 +501,11 @@ try {
   await until(() => page.locator("#cards [data-card=environment]").innerText().then(text => text.includes("This computer") && text.includes("Heartbeat")), "the Environment card names where the chat works");
   assert(!(await page.locator("#composer-context").isVisible()), "the composer ring stands aside while the cards show");
   await capture("04-cards");
+  // Cards that did not change are left in place: folding one repaints no other.
+  await page.evaluate(() => { (document.querySelector("#cards [data-card=context]") as HTMLElement & { kept?: boolean }).kept = true; });
   await page.locator("#cards [data-card=environment] .card-head").click();
   await until(() => page.locator("#cards [data-card=environment].folded").count().then(count => count === 1), "a card folds to one line");
+  assert(await page.evaluate(() => (document.querySelector("#cards [data-card=context]") as HTMLElement & { kept?: boolean }).kept === true), "folding one card leaves the others in place");
   await page.locator("#cards [data-card=environment] .card-head").click();
   await page.locator("#cards [data-card=environment] .card-body").waitFor();
   // The panel icon hides the cards; the ring and the branch chip come back.

@@ -19,7 +19,7 @@ describe("probeProvider", () => {
       provider: "lmstudio",
       contextWindow: 8192,
       reasoningLevels: ["off", "on"],
-      defaultReasoningLevel: "on",
+      defaultReasoningLevel: "off",
     }]);
   });
 

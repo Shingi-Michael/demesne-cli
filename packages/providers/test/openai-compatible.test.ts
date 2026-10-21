@@ -120,7 +120,7 @@ describe("OpenAICompatibleProvider", () => {
         provider: "ollama",
         contextWindow: 8_192,
         reasoningLevels: ["off", "on"],
-        defaultReasoningLevel: "on",
+        defaultReasoningLevel: "off",
       }]);
       expect(showRequest).toBeUndefined();
     } finally {
@@ -146,7 +146,7 @@ describe("OpenAICompatibleProvider", () => {
       provider: "ollama",
       contextWindow: 40_960,
       reasoningLevels: ["off", "on"],
-      defaultReasoningLevel: "on",
+      defaultReasoningLevel: "off",
     }]);
   });
 
@@ -318,11 +318,11 @@ describe("OpenAICompatibleProvider", () => {
   test("models list their thinking levels: Qwen-style off/on, OpenRouter efforts when it supports reasoning", async () => {
     const list = async (baseUrl: string, data: unknown[]) => new OpenAICompatibleProvider({ baseUrl, fetch: (async () => Response.json({ data })) as unknown as typeof fetch }).listModels();
     expect(await list("http://localhost:8081/v1", [{ id: "qwen3.8-27b" }, { id: "llama-3" }])).toEqual([
-      { id: "qwen3.8-27b", provider: "openai-compatible", reasoningLevels: ["off", "on"], defaultReasoningLevel: "on" },
+      { id: "qwen3.8-27b", provider: "openai-compatible", reasoningLevels: ["off", "on"], defaultReasoningLevel: "off" },
       { id: "llama-3", provider: "openai-compatible" },
     ]);
     const routed = await list("https://openrouter.ai/api/v1", [{ id: "a/think", supported_parameters: ["tools", "reasoning"] }, { id: "b/plain", supported_parameters: ["tools"] }]);
-    expect(routed.map((model) => [model.id, model.reasoningLevels])).toEqual([["a/think", ["off", "low", "medium", "high"]], ["b/plain", undefined]]);
+    expect(routed.map((model) => [model.id, model.reasoningLevels, model.defaultReasoningLevel])).toEqual([["a/think", ["off", "low", "medium", "high"], "off"], ["b/plain", undefined, undefined]]);
   });
 
   test("rejects cleartext non-loopback endpoints", () => {
@@ -368,8 +368,10 @@ describe("OpenAICompatibleProvider", () => {
     expect(body?.provider).toEqual(expected);
     expect(body?.model).toBe("qwen/qwen3.8-27b");
     expect(body?.max_tokens).toBe(131072);
+    // An unlisted model keeps its own default on OpenRouter; a local Qwen
+    // starts with thinking off.
     expect(body?.reasoning).toBeUndefined();
-    expect(body?.reasoning_effort).toBeUndefined();
+    expect(body?.reasoning_effort).toBe(baseUrl.includes("openrouter") ? undefined : "none");
   });
 
   test("does not follow provider redirects", async () => {

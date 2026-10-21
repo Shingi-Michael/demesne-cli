@@ -90,9 +90,9 @@ No new run starts after eight hours. One that is already running finishes. A dae
 
 ## Missions work in a worktree
 
-A new `/drive` mission doesn't touch your checkout either. Drive creates a git worktree on a branch named after the mission (`drive/mission-…`), opens a session rooted there and moves you into it. The planner, check-ins and every coding turn then run in that session, with the same limits and evidence as before. Your original session and files stay as they were.
+A new `/drive` mission doesn't touch your checkout either. Drive creates a git worktree on a branch named after the mission (`drive/mission-…`), and opens a session rooted there. You stay in the chat you were in: Drive follows the mission's chat in the background, and the planner, check-ins and every coding turn run there, with the same limits and evidence as before. None of it goes into your chat's context, and talking in your chat doesn't pause the mission. The Drive line under your conversation reads "Working on …" while it runs; unfold it for Pause, **Watch** (opens the mission's chat) and Stop. In the sidebar the mission's chat shows the working cube. Your original session and files stay as they were.
 
-When the mission settles (completed, idle or stopped), demesne commits what changed on the branch and shows the review card: diff size, files, the checks the mission ran and its summary, with **Apply to my branch**, **Open PR** and **Discard**. Applying or discarding takes you back to the session you started from. If you resume a settled mission, it keeps working in the same worktree, and the next settle adds a commit.
+When the mission settles (completed, idle or stopped), demesne commits what changed on the branch and shows the review card: diff size, files, the checks the mission ran and its summary, with **Apply to my branch**, **Open PR** and **Discard**. If you were watching the mission's chat, applying or discarding takes you back to the session you started from. If you resume a settled mission, it keeps working in the same worktree, and the next settle adds a commit.
 
 ### Mission receipts
 

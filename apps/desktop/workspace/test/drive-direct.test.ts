@@ -92,3 +92,23 @@ test("a mission's worktree session is observed at its own root, which the daemon
   const { control } = host({ current: { session: { id: "s2", title: "Mission", workspace: { root: "/worktrees/work-1a2b" } }, approvals: new Map(), questions: new Map(), runs: () => [] } });
   expect(control.observe().workspace).toBe("/worktrees/work-1a2b");
 });
+
+test("a mission in the background is observed and worked in its own chat, not the one you're in", async () => {
+  const sent: { id: string; content: string; planOnly: boolean }[] = [], started: string[] = [];
+  const turns: unknown[] = [];
+  const background = { session: { id: "m1", title: "Drive mission: Fix the parser", workspace: { root: "/worktrees/work-1a2b" } }, approvals: new Map(), questions: new Map(), runs: () => [], active: null,
+    ensureTurn: (turn: unknown) => turns.push(turn) };
+  const { control, submitted } = host({
+    driveSession: background, driveProcesses: [], busy: true, active: { id: "yours" }, publish() {},
+    drive: { agent: { workerStarted: (_id: string, _content: string, turnId: string) => started.push(turnId) } },
+    api: { async submitTurn(id: string, request: { content: string; planOnly: boolean }) { sent.push({ id, ...request }); return { turn: { id: "t9" } }; } },
+  });
+  // Your chat is busy with its own turn; Drive's chat is ready.
+  const observation = control.observe();
+  expect(observation).toMatchObject({ sessionId: "m1", workspace: "/worktrees/work-1a2b", mode: "input", ready: true });
+  expect(await control.perform({ kind: "compose", text: "Add a test for emoji identifiers" }, observation, new AbortController().signal)).toStartWith(SENT);
+  expect(sent).toEqual([{ id: "m1", content: "Add a test for emoji identifiers", permissionMode: "allow", planOnly: false } as never]);
+  expect(submitted).toEqual([]);
+  expect(turns).toEqual([{ id: "t9" }]);
+  expect(started).toEqual(["t9"]);
+});

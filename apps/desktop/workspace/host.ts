@@ -456,14 +456,68 @@ export class WorkspaceHost {
     await this.select(result.session.id);
     return result.session.id;
   }
-  /// Opens a worktree and session for a /drive mission and moves you into
-  /// it, so Drive's turns run there and your checkout stays as it is.
+  /// Opens a worktree and session for a /drive mission. Drive works it in
+  /// the background, so you stay in your chat and your checkout stays as it
+  /// is; the mission's chat is in the sidebar if you want to watch.
   async openMissionWorktree(mission: string) {
     const previous = this.current?.session.id ?? null;
     const fix = await this.breakage.openMission(mission);
     this.missionReturn = previous;
-    await this.select(fix.sessionId!);
+    // With no window there's nothing to stay in: the host moves into it.
+    if (this.options.headless) await this.select(fix.sessionId!);
+    else await this.followDriveSession(fix.sessionId!);
     void this.refreshSessions();
+  }
+
+  /// The mission's session when it isn't the one you're in: loaded and
+  /// followed in the background so Drive can watch and work it.
+  driveSession: WorkspaceSession | null = null;
+  /// Its commands, for the checks Drive reads.
+  driveProcesses: CommandRecord[] = [];
+  private driveWatch: AbortController | null = null;
+  async followDriveSession(id: string) {
+    if (this.driveSession?.session.id === id) return;
+    this.stopFollowingDrive();
+    const controller = (this.driveWatch = new AbortController());
+    const state = await this.client.getSessionState(id);
+    const events = await replaySession(
+      state,
+      (sessionId, after, signal) => this.client.streamEvents(sessionId, after, signal),
+      (sessionId, after, through, signal) => this.client.replayPage(sessionId, after, through, signal),
+    );
+    if (controller.signal.aborted || this.disposed) return;
+    const session = (this.driveSession = new WorkspaceSession(state, events));
+    const commands = () => void this.client.commands(id).then((result) => { if (this.driveSession === session) this.driveProcesses = result.commands; }).catch(() => {});
+    commands();
+    void (async () => {
+      try {
+        for await (const event of this.client.streamEvents(id, session.cursor, controller.signal)) {
+          if (controller.signal.aborted) break;
+          if (!session.apply(event)) continue;
+          this.drive?.agent.workerEvent(event);
+          if (event.type === "command.changed" || event.type === "tool.call_completed") commands();
+          // Only what changes the sidebar or the Drive line repaints; the
+          // mission's streaming text never touches the chat you're in.
+          if (/^turn\.|^permission\.|^question\./.test(event.type)) {
+            if (event.type.startsWith("turn.")) void this.refreshSessions();
+            this.publish();
+          }
+        }
+      } catch {
+        if (this.driveSession === session && !controller.signal.aborted) this.stopFollowingDrive();
+      }
+    })();
+  }
+  private stopFollowingDrive() {
+    this.driveWatch?.abort();
+    this.driveWatch = null;
+    this.driveSession = null;
+    this.driveProcesses = [];
+  }
+  /// Whether Drive's mission works in the chat you're in.
+  get inDriveHome() {
+    const home = this.driveState && ["running", "waiting", "blocked", "paused"].includes(this.driveState.status) ? this.driveState.homeSessionId : this.driveSession?.session.id;
+    return Boolean(home && home === this.current?.session.id);
   }
 
   /// Drive's state changed: when a worktree mission settles (completed, idle
@@ -480,6 +534,7 @@ export class WorkspaceHost {
 
   /// A mission's worktree is gone: go back to the session you started from.
   private async leaveMission(fix: import("@demesne/protocol").DriveFix) {
+    if (this.driveSession?.session.id === fix.sessionId) this.stopFollowingDrive();
     if (this.current?.session.id !== fix.sessionId) return;
     const back = this.missionReturn && this.sessions.some((session) => session.id === this.missionReturn) ? this.missionReturn
       : this.sessions.find((session) => session.id !== fix.sessionId && session.workspace?.root === this.workspace)?.id;
@@ -1033,7 +1088,7 @@ export class WorkspaceHost {
       if (method === "next-plan") {
         if (this.active) throw new Error("Wait for the current turn to finish before planning a suggestion.");
         if (this.draft.trim()) throw new Error("Send or clear your draft before planning a suggestion.");
-        this.drive?.agent.intervene();
+        if (!this.driveSession || this.inDriveHome) this.drive?.agent.intervene();
         const result = await this.submit(`${item.title}. ${item.why}`, true);
         this.hideNext(item.id, Date.now() + 6 * 3_600_000);
         return result;
@@ -1081,7 +1136,8 @@ export class WorkspaceHost {
     // Only the person sending a message takes over from Drive ("manual" is
     // kept for callers that take over explicitly; typing no longer sends it).
     // Clicking, navigating, opening panels and reading leave it running.
-    if (["manual", "submit", "plan-submit", "themefy"].includes(method)) {
+    // A mission in the background keeps going while you talk in your own chat.
+    if (method === "manual" || (["submit", "plan-submit", "themefy"].includes(method) && (!this.driveSession || this.inDriveHome))) {
       this.onManual?.();
       this.drive?.agent.intervene();
     }
@@ -1511,6 +1567,7 @@ export class WorkspaceHost {
     if (this.panelWatchTimer) clearInterval(this.panelWatchTimer);
     this.breakage.stop();
     this.drive?.dispose();
+    this.stopFollowingDrive();
     this.setup?.dispose();
     this.disposed = true;
     if (this.backgroundTimer) clearTimeout(this.backgroundTimer);

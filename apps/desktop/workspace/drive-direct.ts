@@ -45,16 +45,29 @@ function toolLine(tool: ToolEntry): string {
 export class DirectDriveControl {
   constructor(private host: WorkspaceHost) {}
 
+  /// The mission's session: the one you're in, unless Drive works one in
+  /// the background (a worktree mission while you stay in your chat).
+  private session() {
+    const background = this.host.driveSession, current = this.host.current;
+    return background && current?.session.id !== background.session.id ? background : current;
+  }
+  private get background() {
+    const session = this.session();
+    return Boolean(session && session !== this.host.current);
+  }
+  private sending = false;
+
   private runs(): WorkspaceRun[] {
-    return this.host.current?.runs() ?? [];
+    return this.session()?.runs() ?? [];
   }
 
   observe(): DriveObservation {
-    const session = this.host.current;
+    const session = this.session();
     if (!session) throw new Error("Open a workspace session before starting Drive.");
+    const background = this.background;
     const runs = this.runs();
     const latest = runs.at(-1);
-    const mode: DriveObservation["mode"] = session.approvals.size || session.questions.size ? "approval" : this.host.setup ? "dialog" : this.host.active ? "streaming" : "input";
+    const mode: DriveObservation["mode"] = session.approvals.size || session.questions.size ? "approval" : !background && this.host.setup ? "dialog" : (background ? session.active : this.host.active) ? "streaming" : "input";
     // A compact transcript of recent turns, newest last; older turns give way
     // first when it exceeds the row budget.
     const blocks = runs.map((run) => {
@@ -83,7 +96,7 @@ export class DirectDriveControl {
     // "start" (no turn yet) is the controller's convention, as in the UI's observation.
     const turnId = latest?.id ?? "start";
     const files = latest ? [...new Set(tools(latest).filter((tool) => FILE_TOOLS.has(tool.name)).flatMap((tool) => [tool.input.path, tool.input.from, tool.input.to]).filter((path): path is string => typeof path === "string"))] : [];
-    const checks = this.host.processes.filter((record) => record.check && record.turnId === turnId).map((record) => record.id);
+    const checks = (background ? this.host.driveProcesses : this.host.processes).filter((record) => record.check && record.turnId === turnId).map((record) => record.id);
     const id = createHash("sha256").update(JSON.stringify([session.session.id, mode, latest?.status, rows])).digest("hex").slice(0, 32);
     return {
       id,
@@ -92,7 +105,7 @@ export class DirectDriveControl {
       workspace: session.session.workspace?.root ?? this.host.workspace,
       title: session.session.title,
       mode,
-      ready: mode === "input" && !this.host.busy && this.host.connection === "online",
+      ready: mode === "input" && !this.sending && (background || !this.host.busy) && this.host.connection === "online",
       draft: "",
       surface: DIRECT_SURFACE,
       width: 500,
@@ -123,7 +136,20 @@ export class DirectDriveControl {
     const plan = /^\/plan\s+\S/.test(text);
     if (text.startsWith("/") && !plan) throw new Error("Drive may send requests or /plan prompts only.");
     // Drive's coder works with every tool allowed (publishing still asks).
-    await this.host.submit(plan ? text.replace(/^\/plan\s+/, "") : text, plan, "allow");
+    const content = plan ? text.replace(/^\/plan\s+/, "") : text;
+    const session = this.session()!;
+    if (session === this.host.current) await this.host.submit(content, plan, "allow");
+    else {
+      this.sending = true;
+      try {
+        const { turn } = await this.host.api.submitTurn(session.session.id, { content, permissionMode: "allow", planOnly: plan });
+        session.ensureTurn(turn);
+        this.host.drive?.agent.workerStarted(session.session.id, content, turn.id);
+      } finally {
+        this.sending = false;
+      }
+      this.host.publish();
+    }
     return `${SENT} ${text.slice(0, 500)}`;
   }
 
@@ -157,7 +183,7 @@ export class DirectDriveControl {
         signal.throwIfAborted();
       }
     } else if (action.target === "diff") {
-      const review = (await this.host.handle("changes", { scope: "turn", turnId: run.id })) as { files: { path: string; state: string; added: number; removed: number; rows: { kind: string; text: string }[]; unavailable?: string }[] };
+      const review = (await this.host.handle("changes", { scope: "turn", turnId: run.id, ...(this.background ? { branchSession: observation.sessionId } : {}) })) as { files: { path: string; state: string; added: number; removed: number; rows: { kind: string; text: string }[]; unavailable?: string }[] };
       signal.throwIfAborted();
       for (const file of review.files.filter((file) => !action.item || file.path === action.item)) {
         const body = file.unavailable ? [clip(file.unavailable)] : file.rows.map((row) => clip(`${row.kind === "added" ? "+" : row.kind === "removed" ? "-" : row.kind === "gap" ? "…" : " "} ${row.text}`));

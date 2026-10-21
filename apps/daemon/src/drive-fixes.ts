@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import { splitNextPrompt, type CommandRecord, type DriveAway, type DriveAwayRequest, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveFixStatus, type DriveSignal, type Turn } from "@demesne/protocol";
+import { formatDriveReport, splitNextPrompt, type CommandRecord, type DriveAway, type DriveAwayRequest, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveFixStatus, type DriveSignal, type Turn } from "@demesne/protocol";
 
 /// Drive's unattended work, each piece in its own git worktree on its own
 /// branch: fixes for breakages, Next proposals you press Run on, and /drive
@@ -22,6 +22,8 @@ export interface FixHost {
   /// Called once a job is applied, opened as a PR, or discarded, with the
   /// status it had before; Drive's calibration records proposal outcomes here.
   settled?(fix: DriveFix, before: DriveFixStatus): void;
+  /// A finished mission's report, as a turn in the chat it started from.
+  report?(sessionId: string, content: string): void;
 }
 
 type Run = (argv: string[], cwd: string, timeoutMs?: number) => Promise<{ ok: boolean; out: string; err: string }>;
@@ -292,6 +294,13 @@ export class DriveFixes {
     fix.checks = this.checks(fix);
     delete fix.error; delete fix.unchanged;
     await this.commit(fix);
+    // The chat it started from hears how it went, so its model can answer
+    // what Drive changed.
+    if (fix.from && fix.sessionId && (fix.status === "ready" || fix.status === "failed")) {
+      this.host.report?.(fix.from, formatDriveReport({ title: fix.title, fix: fix.id, chat: fix.sessionId, branch: fix.branch, status: fix.status,
+        ...(fix.diff ? { diff: fix.diff } : {}), ...(fix.headline ? { headline: fix.headline } : {}),
+        summary: fix.status === "failed" ? fix.error ?? "It stopped." : fix.summary ?? "" }));
+    }
     return fix;
   }
 

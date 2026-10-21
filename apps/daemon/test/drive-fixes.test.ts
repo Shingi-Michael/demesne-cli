@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DriveFix } from "@demesne/protocol";
+import { parseDriveReport, type DriveFix } from "@demesne/protocol";
 import { createDaemonApp } from "../src/app.ts";
 import { prBody } from "../src/drive-fixes.ts";
 import type { TurnProcessor } from "../src/processor.ts";
@@ -169,6 +169,10 @@ test("a /drive mission gets its own worktree session, survives a daemon restart,
 
   const processor: TurnProcessor = { providerId: "test", modelId: "coder", async listModels() { return []; },
     async *stream(messages) {
+      if (String(messages.find((message) => message.role === "user")?.content ?? "").startsWith("Drive report: ")) {
+        yield { type: "text_delta" as const, delta: "Drive made the parser strict on its branch." };
+        yield { type: "finish" as const, reason: "stop" }; return;
+      }
       if (messages.at(-1)!.role === "user") {
         yield { type: "tool_call_delta" as const, index: 0, idDelta: "w", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "parser.ts", content: "export const strict = true;\n" }) };
         yield { type: "finish" as const, reason: "tool_calls" }; return;
@@ -185,11 +189,11 @@ test("a /drive mission gets its own worktree session, survives a daemon restart,
   };
   const list = async () => (await call(`/v1/drive/fixes?workspace=${encodeURIComponent(workspace)}`)).body.fixes as DriveFix[];
   try {
-    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) });
-    const opened = await call("/v1/drive/fixes", { method: "POST", body: JSON.stringify({ workspace, signals: [], mission: "Make the parser strict\nand keep its tests green", from: "chat-home" }) });
+    const home = (await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) })).body.session.id as string;
+    const opened = await call("/v1/drive/fixes", { method: "POST", body: JSON.stringify({ workspace, signals: [], mission: "Make the parser strict\nand keep its tests green", from: home }) });
     expect(opened.status).toBe(201);
     const mission = opened.body.fix as DriveFix;
-    expect(mission).toMatchObject({ status: "running", title: "Make the parser strict", turnId: null, mission: "Make the parser strict\nand keep its tests green", from: "chat-home" });
+    expect(mission).toMatchObject({ status: "running", title: "Make the parser strict", turnId: null, mission: "Make the parser strict\nand keep its tests green", from: home });
     expect(mission.branch).toMatch(/^drive\/mission-make-the-parser-strict-/);
     expect(mission.sessionId).toBeTruthy();
     // While its worktree is open, nothing else starts one.
@@ -200,7 +204,7 @@ test("a /drive mission gets its own worktree session, survives a daemon restart,
     app = createDaemonApp({ databasePath, processor });
     server = Bun.serve({ port: 0, fetch: app.fetch });
     expect((await list()).find((fix) => fix.id === mission.id)?.status).toBe("running");
-    expect((await list()).find((fix) => fix.id === mission.id)?.from).toBe("chat-home");
+    expect((await list()).find((fix) => fix.id === mission.id)?.from).toBe(home);
 
     // Drive's planner submits a turn to the mission session; it edits the worktree only.
     const submitted = await call(`/v1/sessions/${mission.sessionId}/turns`, { method: "POST", body: JSON.stringify({ content: "Make parser.ts strict", permissionMode: "allow" }) });
@@ -215,6 +219,14 @@ test("a /drive mission gets its own worktree session, survives a daemon restart,
 
     const finished = await call(`/v1/drive/fixes/${mission.id}/finish`, { method: "POST", body: JSON.stringify({ summary: "Parser is strict now.", receipt: "### Drive mission receipt\n\n> Make the parser strict", headline: "1 of 1 task verified · 1 check passing" }) });
     expect(finished.body.fix).toMatchObject({ status: "ready", summary: "Parser is strict now.", headline: "1 of 1 task verified · 1 check passing", receipt: "### Drive mission receipt\n\n> Make the parser strict", diff: { files: 1, paths: ["parser.ts"] } });
+    // The chat it started from gets the report as a turn, and its model answers it.
+    let report: any = null;
+    for (let i = 0; i < 400 && report?.status !== "completed"; i++) {
+      report = (await call(`/v1/sessions/${home}`)).body.session?.turns?.at(-1);
+      if (report?.status !== "completed") await Bun.sleep(25);
+    }
+    expect(parseDriveReport(report.content)).toMatchObject({ title: "Make the parser strict", fix: mission.id, chat: mission.sessionId, branch: mission.branch, status: "ready", summary: "Parser is strict now.", diff: { files: 1, paths: ["parser.ts"] } });
+    expect(report).toMatchObject({ permissionMode: "deny", responseText: "Drive made the parser strict on its branch." });
     // The linked node_modules survived the restart as an exclusion, so it isn't committed.
     expect(out(workspace, "show", "--stat", "--format=%s", mission.branch)).not.toContain("node_modules");
     expect(out(workspace, "log", "-1", "--format=%s", mission.branch)).toBe("Make the parser strict");

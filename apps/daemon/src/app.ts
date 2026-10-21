@@ -161,6 +161,26 @@ export function createDaemonApp(options: {
       const { turn } = store.createTurn(sessionId, prompt, "allow", true, false);
       return { turnId: turn.id, done: queueTurn(turn, inference) };
     },
+    report: (sessionId, content) => {
+      // A short turn in the person's own chat: no thinking, and no tool runs
+      // without asking. It waits for a turn already running there.
+      const deliver = () => {
+        const session = store.getSession(sessionId);
+        if (!session || closing) return;
+        if (session.turns.some((turn) => turn.status === "queued" || turn.status === "running")) {
+          const unsubscribe = hub.subscribe(sessionId, () => {
+            if (store.getSession(sessionId)?.turns.some((turn) => turn.status === "queued" || turn.status === "running")) return;
+            unsubscribe(); deliver();
+          });
+          return;
+        }
+        try {
+          const { turn } = store.createTurn(sessionId, content, "deny", false, false);
+          void queueTurn(turn, snapshotTurnInference(processor, false));
+        } catch (error) { console.warn(`Couldn't report the Drive mission: ${error instanceof Error ? error.message : error}`); }
+      };
+      deliver();
+    },
     turn: (turnId) => store.getTurn(turnId),
     cancel: (turnId) => {
       const controller = activeControllers.get(turnId);

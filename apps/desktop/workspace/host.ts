@@ -125,6 +125,12 @@ const AGENTS_POLL_MS = 15_000;
 
 /** All privileged operations stay here. The web renderer gets snapshots and a
  * fixed set of actions, never a daemon token, shell, arbitrary URL, or filesystem API. */
+/// Pending approvals or questions, marked with Drive's mission chat when
+/// they come from it.
+function tagAsks<T>(items: Iterable<T> | undefined, drive?: string): (T & { drive?: string })[] {
+  return [...(items ?? [])].map((item) => (drive === undefined ? item : { ...item, drive }) as T & { drive?: string });
+}
+
 export class WorkspaceHost {
   settings: CliSettings;
   setup: WorkspaceSetup | null = null;
@@ -302,8 +308,9 @@ export class WorkspaceHost {
       chatgptAccount: this.model.provider === "ChatGPT" ? this.chatgptAccount : null,
       provider: this.current?.provider ?? null,
       checkpoint: this.current?.state.checkpoint ?? null,
-      approvals: [...(this.current?.approvals.values() ?? [])],
-      questions: [...(this.current?.questions.values() ?? [])],
+      // Drive's mission asking for you shows in the chat it started from too.
+      approvals: [...tagAsks(this.current?.approvals.values()), ...tagAsks(this.driveAsking?.approvals.values(), this.driveAsking?.session.title)],
+      questions: [...tagAsks(this.current?.questions.values()), ...tagAsks(this.driveAsking?.questions.values(), this.driveAsking?.session.title)],
       activeTurnId: this.active?.id ?? null,
       busy: this.busy,
       files: this.files,
@@ -513,6 +520,19 @@ export class WorkspaceHost {
     this.driveWatch = null;
     this.driveSession = null;
     this.driveProcesses = [];
+  }
+  /// The mission's session when its asks belong in the chat you're in: the
+  /// chat the mission started from (or any, for a mission with no link).
+  get driveAsking() {
+    const session = this.driveSession, here = this.current?.session.id;
+    if (!session || !here || session.session.id === here) return null;
+    const from = this.breakage.missionFor(session.session.id)?.from;
+    return !from || from === here ? session : null;
+  }
+  /// The session an approval or question belongs to: yours, else Drive's.
+  private askedIn(id: string, kind: "approvals" | "questions") {
+    if (this.current?.[kind].has(id)) return this.current;
+    return this.driveAsking?.[kind].has(id) ? this.driveAsking : null;
   }
   /// Whether Drive's mission works in the chat you're in.
   get inDriveHome() {
@@ -1400,9 +1420,10 @@ export class WorkspaceHost {
     }
     if (method === "permission") {
       const id = string(args.id, "permission id", 200),
-        approval = this.current!.approvals.get(id),
+        target = this.askedIn(id, "approvals"),
+        approval = target?.approvals.get(id),
         decision = string(args.decision, "decision", 50) as PermissionDecision;
-      if (!approval || !this.current!.isActive(approval.turnId))
+      if (!target || !approval || !target.isActive(approval.turnId))
         throw new Error("This permission is no longer pending.");
       if (
         !["allow_once", "allow_session", "allow_always", "deny"].includes(
@@ -1427,23 +1448,23 @@ export class WorkspaceHost {
         await this.client.resolvePermission(id, decision);
       } catch (error) {
         if (isStalePermissionResolution(error)) {
-          this.current!.approvals.delete(id);
+          target.approvals.delete(id);
           this.publish();
         }
         throw error;
       }
-      this.current!.approvals.delete(id);
+      target.approvals.delete(id);
       this.publish();
       return;
     }
     if (method === "question-action") {
       if (!this.current) throw new Error("Choose a session first");
-      const id=string(args.id,"question id",200), selected=this.current!;
+      const id=string(args.id,"question id",200), selected=this.askedIn(id,"questions") ?? this.current!;
       const pending=selected.questions.get(id);
       if (!pending) throw new Error("This question is no longer pending");
       if (pending.revision === undefined) throw new Error("Restart the updated daemon to answer questions in the composer");
       const result=await this.client.questionAction(id,parseQuestionActionRequest(args.action));
-      if (this.current === selected) {
+      if (this.current === selected || this.driveSession === selected) {
         const latest=selected.questions.get(id);
         if (latest && result.question.revision >= (latest.revision ?? 0)) {
           if (["answered","cancelled"].includes(result.question.status)) selected.questions.delete(id);
@@ -1454,15 +1475,15 @@ export class WorkspaceHost {
       return result;
     }
     if (method === "answer") {
-      const id = string(args.id, "question id", 200);
-      if (!this.current!.questions.has(id))
+      const id = string(args.id, "question id", 200), target = this.askedIn(id, "questions");
+      if (!target)
         throw new Error("This question is no longer pending.");
       const body = parseAnswerQuestionsRequest({ answers: args.answers });
       await this.client.request(`/v1/questions/${encodeURIComponent(id)}`, {
         method: "POST",
         body: JSON.stringify(body),
       });
-      this.current!.questions.delete(id);
+      target.questions.delete(id);
       this.publish();
       return;
     }

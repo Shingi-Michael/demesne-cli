@@ -3,6 +3,7 @@ import { SidebarProjectOrder } from "./sidebar-project-order.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
 import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
+import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
@@ -1147,7 +1148,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     ? `<div class="request-att">${run.attachments.map((image) => attachmentPreviews.has(image.id)
       ? `<img src="${attachmentPreviews.get(image.id)}" alt="${h(image.filename)}" title="${h(image.filename)}">`
       : `<span class="att-name" title="${h(`${image.width}×${image.height}`)}">${h(image.filename)}</span>`).join("")}</div>` : "";
-  const request = mailRequest(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+  const request = mailRequest(run) ?? driveReport(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
   const review = reviewOpen.has(run.id) && !live ? reviewHTML(run.id) : "";
   return `${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}${activity}</div>${queued}`;
 }
@@ -1230,6 +1231,23 @@ function mailRequest(run: WorkspaceRun): string | null {
     `<span class="mail-from">${ICON_MAIL}<code class="mail-address" title="${h(message.from || "unknown sender")}">${h(message.from || "unknown sender")}</code><span class="mail-kind" title="${message.authority === "owner" ? "relayed by your own agent" : "from another agent"}">${h(message.performative)}${message.authority === "owner" ? " · owner" : ""}</span></span><span class="text">${h(message.text)}</span>`);
   for (const pair of mail.pairRequests) lines.push(`<span class="mail-from">${ICON_MAIL}<code class="mail-address">${h(pair.requester)}</code><span class="mail-kind">pairing</span></span><span class="text">${h(pair.node)} asks to pair with this machine.</span>`);
   return `<div class="request mail" title="Heartbeat mail to ${h(mail.address)}">${lines.join("")}<span class="request-meta"><time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+}
+/// A finished Drive mission's report sits where an ask sits, as a receipt
+/// from Drive: what it did, what it changed, and the way to its branch and
+/// its chat. The words under it are your chat's model taking it in.
+function driveReport(run: WorkspaceRun): string | null {
+  const report = parseDriveReport(run.content);
+  if (!report) return null;
+  const open = [state!.breakage.fix, ...state!.breakage.inbox].find((job) => job?.id === report.fix && job.status === "ready");
+  const where = report.diff ? `<span class="add">+${report.diff.additions}</span> <span class="del">−${report.diff.deletions}</span> · ${report.diff.files} file${report.diff.files === 1 ? "" : "s"}` : "";
+  const actions = [
+    open ? btn("review-open", "Review", { show: true }, "link") : "",
+    state!.sessions.some((item) => item.id === report.chat) ? btn("select-session", "Open its chat", { id: report.chat }, "link") : "",
+  ].filter(Boolean).join('<span class="muted"> · </span>');
+  return `<div class="request drive-report${report.status === "failed" ? " failed" : ""}" title="${h(`Drive's report, on ${report.branch}`)}"><span class="dr-head">${ICON_SPARK}<span>Drive ${report.status === "failed" ? "stopped" : "finished"}</span><b>${h(report.title)}</b></span>`
+    + `${report.summary ? `<span class="text">${h(report.summary.length > 400 ? `${report.summary.slice(0, 399)}…` : report.summary)}</span>` : ""}`
+    + `<span class="dr-meta">${where ? `<span title="${h(report.diff!.paths.join("\n"))}">${where}</span>` : ""}${report.headline ? `<span>${h(report.headline)}</span>` : ""}${actions ? `<span class="dr-actions">${actions}</span>` : ""}</span>`
+    + `<span class="request-meta"><time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
 }
 /// "replied to claude@macbook": where a mail turn's answer went, for its
 /// receipt. A send that answers nobody in particular still counts.
@@ -1729,15 +1747,25 @@ function renderApproval() {
     ? `Always allow ${command && rule.startsWith(command) ? short + rule.slice(command.length) : rule}`
     : hunks ? `Always allow edits to ${rule && rule !== "." ? relative(rule) : "this project"}` : "Always allow";
   slot.innerHTML =
-    `<div class="approval-row" role="group" aria-label="Approval">${icon}<span class="approval-verb">${h(verb)}</span>${target ? `<code>${h(target)}</code>` : ""}<span class="approval-note">· ${note}</span><span class="approval-space"></span>` +
+    `<div class="approval-row${approval.drive ? " from-drive" : ""}" role="group" aria-label="${approval.drive ? "Drive asks" : "Approval"}">${driveAsks(approval.drive)}${icon}<span class="approval-verb">${h(verb)}</span>${target ? `<code>${h(target)}</code>` : ""}<span class="approval-note">· ${note}</span><span class="approval-space"></span>` +
     btn("approval-show", approvalOpen ? "hide" : isCommand ? "command" : hunks ? "diff" : "details", {}, `approval-show${approvalOpen ? " open" : ""}`) +
     btn("permission", `Allow ${k("↵")}`, { id: approval.id, decision: "allow_once" }, "allow") +
     (approval.rule ? btn("permission", "Always", { id: approval.id, decision: "allow_always" }, "always").replace("<button ", `<button title="${h(scope)} · saved to your config (${h(approval.rule)})" `) : "") +
     btn("permission", `Deny ${k("Esc")}`, { id: approval.id, decision: "deny" }, "deny") +
     `</div><div class="approval-fold command-inset"${approvalOpen ? "" : " hidden"}>${preview}</div>`;
 }
+/// Whose ask it is, when Drive's mission asks in the chat it started from:
+/// its chat is one click away.
+function driveAsks(chat: string | undefined) {
+  if (chat === undefined) return "";
+  const mission = state?.breakage.fix?.mission ? state.breakage.fix : null;
+  return mission?.sessionId
+    ? btn("select-session", `${ICON_SPARK}Drive asks`, { id: mission.sessionId }, "drive-asks").replace("<button ", `<button title="${h(`From its chat: ${chat}`)}" `)
+    : `<span class="drive-asks">${ICON_SPARK}Drive asks</span>`;
+}
 /// Enter with text during an approval: deny, then stop the turn and send what
-/// you typed as the next message.
+/// you typed as the next message. Drive's ask is told instead: the words go
+/// to its mission, and your chat stays as it is.
 async function denyInstead(text: string) {
   const approval = state?.approvals[0];
   if (!approval) return;
@@ -1745,6 +1773,7 @@ async function denyInstead(text: string) {
   editor.value = "";
   renderComposer();
   await api("permission", { id: approval.id, decision: "deny" });
+  if (approval.drive !== undefined) { await api("drive-tell", { text }); return; }
   await api("submit", { text });
   await api("queue-action", { action: "now" });
 }
@@ -1849,7 +1878,7 @@ function renderQuestion() {
     ? `<span>${answered ? "Answered" : "Paused"}</span>${btn("question-control", "Resume", { action: "resume" }, "ask-link")}`
     : btn("question-skip", "Skip this question", {}, "ask-link");
   el("question").innerHTML = question && item
-    ? `<div class="ask-q"><span class="ask-mark" aria-hidden="true"></span><div class="ask-body"><p class="ask-text">${h(item.question)}${question.questions.length > 1 ? `<small>${Math.min(index + 1, question.questions.length)} of ${question.questions.length}</small>` : ""}</p>${item.reason ? `<p class="ask-why">${h(item.reason)}</p>` : ""}${answered ? `<p class="ask-why">${h(question.answers?.at(-1)?.answer ?? "Skipped")}</p>` : ""}${choices.length ? `<div class="ask-choices">${choices.map((choice, n) => btn("question-pick", `<kbd>${n + 1}</kbd>${h(choice)}`, { text: choice }, "ask-choice")).join("")}</div>` : ""}<div class="ask-foot">${foot}</div></div></div>`
+    ? `<div class="ask-q${question.drive !== undefined ? " from-drive" : ""}"><span class="ask-mark" aria-hidden="true"></span><div class="ask-body">${driveAsks(question.drive)}<p class="ask-text">${h(item.question)}${question.questions.length > 1 ? `<small>${Math.min(index + 1, question.questions.length)} of ${question.questions.length}</small>` : ""}</p>${item.reason ? `<p class="ask-why">${h(item.reason)}</p>` : ""}${answered ? `<p class="ask-why">${h(question.answers?.at(-1)?.answer ?? "Skipped")}</p>` : ""}${choices.length ? `<div class="ask-choices">${choices.map((choice, n) => btn("question-pick", `<kbd>${n + 1}</kbd>${h(choice)}`, { text: choice }, "ask-choice")).join("")}</div>` : ""}<div class="ask-foot">${foot}</div></div></div>`
     : "";
   // A new question scrolls into view, as a new answer would.
   if (question && question.id !== questionShown) el("stage").scrollTop = el("stage").scrollHeight;

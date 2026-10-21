@@ -23,6 +23,7 @@ const thinkingPrompt = "Desktop smoke: readable thinking";
 const previewPrompt = "Desktop smoke: run the site";
 const overlapPrompt = "Desktop smoke: edit what another agent changed";
 const askPrompt = "Desktop smoke: ask me first";
+const missionAskPrompt = "Desktop smoke: the mission needs you";
 const brokePrompt = "Desktop smoke: break a check";
 let overlapRound = 0;
 // A stand-in Heartbeat daemon: Claude Code works in this project on this
@@ -41,7 +42,7 @@ const heartbeatDaemon = Bun.listen({ unix: heartbeatSocket, socket: { data(socke
   reply({ status: "error", error: "unknown_command" });
 } } });
 let previewRound = 0;
-let askRound = 0;
+let askRound = 0, missionRound = 0;
 let brokeRound = 0;
 // The processor itself, so the last check can let it switch models (turns
 // before it run on one fixed model).
@@ -58,6 +59,20 @@ const f = await fixture({
   async listModels() { smokeProcessor = this; return [{ id: "desktop-test", provider: "test", contextWindow: 262144 }, { id: "desktop-small", provider: "test", contextWindow: 32768 }, { id: "desktop-fast", provider: "test", contextWindow: 131072 }, { id: "desktop-wide", provider: "test", contextWindow: 1048576 }, { id: "far-away-large", provider: "other", contextWindow: 200000 }, { id: "far-away-mini", provider: "other", contextWindow: 128000 }]; },
   async *stream(messages, _tools, signal) {
     const user = messages.findLast(message => message.role === "user")?.content;
+    if (typeof user === "string" && user.startsWith("Drive report: ")) {
+      yield { type: "text_delta", delta: "Noted: Drive stopped before changing anything." };
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
+    if (user === missionAskPrompt) {
+      // The mission runs a command, then asks; both wait for you.
+      const step = missionRound++;
+      if (step === 0) yield { type: "tool_call_delta", index: 0, idDelta: "mission-run", nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: [process.execPath, "-e", "console.log('ok')"] }) };
+      else if (step === 1) yield { type: "tool_call_delta", index: 0, idDelta: "mission-ask", nameDelta: "ask_user", argumentsDelta: JSON.stringify({ questions: [{ question: "Should the mission cover the sidebar too?", suggestions: ["Yes, both", "Just the composer"] }] }) };
+      else yield { type: "text_delta", delta: "Covering both." };
+      yield { type: "finish", reason: step < 2 ? "tool_calls" : "stop" };
+      return;
+    }
     if (_tools.some(tool => tool.name === "drive_ui")) {
       // Keep planning pending so the actual UI can exercise Pause/Resume/Stop.
       await new Promise<void>(resolve => {
@@ -675,11 +690,30 @@ try {
   await line.locator(".bf-word").click();
   await control("pause").click();
   await control("resume").waitFor();
+  // While Drive is paused, what the mission asks shows in your chat, marked
+  // as Drive's, and your answer goes to the mission.
+  const missionId = (await f.client.listSessions()).find(session => session.title.startsWith("Drive mission:"))!.id;
+  await f.client.submitTurn(missionId, { content: missionAskPrompt, permissionMode: "ask" });
+  await until(() => page.locator("#approval .approval-row.from-drive .drive-asks").isVisible(), "the mission's approval shows in your chat as Drive's");
+  await capture("08-drive-asks-approval");
+  await page.locator("#approval .approval-row.from-drive .allow").click();
+  await until(() => page.locator("#question .ask-q.from-drive").innerText().then(text => text.includes("Drive asks") && text.includes("Should the mission cover the sidebar too?")), "the mission's question shows in your chat as Drive's");
+  await capture("08-drive-asks-question");
+  await page.locator("#question .ask-choice").first().click();
+  await until(async () => (await f.client.getSessionState(missionId)).session.turns.at(-1)?.status === "completed", "your answer reaches the mission");
+  await until(() => page.locator("#question .ask-q").count().then(count => count === 0), "the question leaves your chat once answered");
+  assert.equal(await page.locator("#workspace-title").innerText(), home, "answering Drive keeps you in your chat");
+  if (!(await control("resume").isVisible())) await line.locator(".bf-word").click();
   await control("resume").click();
   await control("pause").waitFor();
   await control("stop").click();
   await until(() => page.locator('[data-action="drive-control"]').filter({ hasText: /^pause$/i }).count().then(count => count === 0), "Stop ends the mission");
   await capture("09-drive-stopped");
+  // Your chat gets Drive's report as a turn, and its model takes it in.
+  await until(() => page.locator(".request.drive-report").innerText().then(text => text.includes("Drive stopped") && text.includes("Verify the Drive controls")), "the mission's report lands in the chat it started from");
+  await until(() => page.locator(".response").last().innerText().then(text => text.includes("Noted: Drive stopped")), "your chat's model answers the report");
+  assert(await page.locator('.request.drive-report [data-action="select-session"]').isVisible(), "the report links to the mission's chat");
+  await capture("09-drive-report");
   // The finished mission left a worktree without changes; its review card
   // opens from Drive's line and discards it.
   offerIdeas = true;
@@ -781,7 +815,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive's asks in your chat, and its report"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

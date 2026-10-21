@@ -179,6 +179,21 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .step-fold .diff .rm > span:nth-child(2) { color: var(--bad); }
 .desktop .step-fold .diff .ad { background: var(--ok-soft); }
 .desktop .step-fold .diff .ad > span:nth-child(2) { color: var(--ok); }
+/* Live preview: the page a running dev server serves, under its step. */
+.desktop .step-fold.pv { max-height: none; overflow: hidden; border-radius: var(--r); background: var(--surface); box-shadow: 0 0 0 1px var(--hair); }
+.desktop .pv-live { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--ok); vertical-align: 1px; }
+.desktop .pv-bar { display: flex; align-items: center; gap: 4px; height: 32px; padding: 0 8px 0 12px; font-size: 12px; color: var(--t4); }
+.desktop .pv-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "JetBrains Mono", monospace; color: var(--t3); }
+.desktop .pv-bar .sp { flex: 1; }
+.desktop .pv-btn { height: 22px; padding: 0 7px; border: 0; border-radius: var(--r-sm); background: none; font: 12px Inter, system-ui, sans-serif; color: var(--t4); cursor: pointer; }
+.desktop .pv-btn:hover, .desktop .pv-btn.on { background: var(--tone2); color: var(--t1); }
+.desktop .pv-back { float: right; margin: -3px 0 0; }
+.desktop .pv-view { display: flex; justify-content: center; height: 420px; background: var(--tone); }
+.desktop .pv-view iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.desktop .pv-view.phone iframe { width: 390px; box-shadow: 0 0 0 1px var(--hair); }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop .pv-view iframe { transition: width 220ms var(--ease); }
+}
 .desktop .answer .markdown { font-size: 14px; line-height: 1.65; }
 .desktop .markdown code:not(pre code) { background: var(--surface2); border-radius: 5px; padding: 1px 5px; font-size: 12.5px; color: var(--t1); }
 .desktop .turn-receipt { color: var(--t4); }

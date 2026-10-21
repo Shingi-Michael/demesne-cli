@@ -397,7 +397,7 @@ function renderSidebar() {
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
-  const dot = (tone: string) => `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`;
+  const dot = (tone: string) => tone === "working" ? spinner() : `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`;
   const focusedControl = document.activeElement instanceof HTMLButtonElement && list.contains(document.activeElement)
     ? { action: document.activeElement.dataset.action, args: document.activeElement.dataset.args } : null;
   const focusedRow = document.activeElement?.closest(".sidebar-item")?.querySelector(".sidebar-session");
@@ -819,11 +819,19 @@ function nextSuggestion(): string | null {
   const answer = run.entries.findLast((entry) => entry.type === "assistant");
   return answer?.type === "assistant" ? splitNextPrompt(answer.raw).next : null;
 }
-/// The same braille spinner as the terminal's thinking presence. Spans are
-/// advanced in place by one timer, so only the glyphs repaint.
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const spinnerFrame = () => SPINNER[Math.floor(Date.now() / 90) % SPINNER.length]!;
-const spinner = () => `<span class="spin" aria-hidden="true">${spinnerFrame()}</span>`;
+/// Work in progress: eight small cubes that make one. On each beat they
+/// part, the whole turns a quarter on a random axis, and they close. One
+/// timer turns every mark together, and a mark drawn mid-beat starts where
+/// the others are, so repaints never restart it.
+const cubeTurn = { x: -24, y: 36, z: 0 };
+let cubeParted = false;
+const cubeTransform = () => `rotateX(${cubeTurn.x}deg) rotateY(${cubeTurn.y}deg) rotateZ(${cubeTurn.z}deg)`;
+const CUBELETS = [-1, 1].flatMap((x) => [-1, 1].flatMap((y) => [-1, 1].map((z) => `<b style="--x:${x};--y:${y};--z:${z}"><i></i><i></i><i></i><i></i><i></i><i></i></b>`))).join("");
+const spinner = () => `<span class="cube-mark${cubeParted ? " parted" : ""}" aria-hidden="true"><span class="cube" style="transform:${cubeTransform()}">${CUBELETS}</span></span>`;
+/// Words for work in progress, with a silver shine sweeping across them.
+/// The delay keeps a repainted line in step with the sweep instead of
+/// restarting it (3s each way).
+const shine = (text: string) => `<span class="shine" style="animation-delay:-${Date.now() % 6000}ms">${h(text)}</span>`;
 /// A running sub-agent's target: its task and a phrase that cycles the whole
 /// time it runs (updated in place by a timer); its steps count on the right.
 function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
@@ -894,7 +902,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
               : `<span class="muted">${h(mark(tool.state))}</span> ${h(tool.state)}`;
   const row = btn(
     canFold ? "step" : "tool",
-    `${now ? spinner() : stepIcon(tool)}<span class="verb">${served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    `${now ? spinner() : stepIcon(tool)}<span class="verb">${now && !served ? shine(verb(tool)) : served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -974,7 +982,7 @@ function runHTML(run: WorkspaceRun, index: number) {
       flush();
       const live = active(run) && i === run.entries.length - 1;
       const open = detailsOpen.has(key) || (live && !detailsClosed.has(key));
-      body += `<div class="thinking thinking-main ${live ? "live" : ""}"><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${live ? spinner() : CHEVRON}${live ? "Thinking" : `Thought for ${duration(entry.durationMs)}`}<span class="thinking-disclosure">${open ? "Collapse" : "Show trace"}</span></button><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div></div>`;
+      body += `<div class="thinking thinking-main ${live ? "live" : ""}"><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${live ? spinner() : CHEVRON}${live ? shine("Thinking") : `Thought for ${duration(entry.durationMs)}`}<span class="thinking-disclosure">${open ? "Collapse" : "Show trace"}</span></button><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div></div>`;
     }
     if (entry.type === "tool") {
       const group: ToolEntry[] = [entry];
@@ -1079,7 +1087,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   const thinkingLive = run.entries.at(-1)?.type === "reasoning" && !latestTool && !state!.questions.length;
   const trail = "";
   const activity = live && !thinkingLive && !(latestTool && !latestTool.drafting)
-    ? `<div class="live-activity">${spinner()}${h(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
+    ? `<div class="live-activity">${spinner()}${shine(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
     : "";
   const answered = run.entries.some((e) => e.type === "assistant");
   const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}</span>`;
@@ -1857,7 +1865,7 @@ function renderBriefing() {
   if (signature === briefingSignature) return;
   briefingSignature = signature;
   const parts: string[] = [];
-  const mark = (kind: "spin" | "idea" | "amber" | "ok") => kind === "spin" ? `<span class="bf-spin" aria-hidden="true"></span>` : `<span class="bf-dot ${kind}" aria-hidden="true"></span>`;
+  const mark = (kind: "spin" | "idea" | "amber" | "ok") => kind === "spin" ? spinner() : `<span class="bf-dot ${kind}" aria-hidden="true"></span>`;
   let fold = "", toggle: { action: string; open: boolean } | null = null, progress: number | null = null;
   if (review.length) {
     const only = review.length === 1 ? review[0]! : null;
@@ -4044,10 +4052,18 @@ void window.demesne
 // Spinners and thinking sub-agents' phrases advance in place; the DOM (and
 // so the terminal's tiles) only changes when a glyph or phrase does.
 setInterval(() => {
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const frame = spinnerFrame();
-  for (const span of document.querySelectorAll<HTMLElement>(".spin")) if (span.textContent !== frame) span.textContent = frame;
-}, 90);
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || !document.querySelector(".cube-mark")) return;
+  const marks = () => document.querySelectorAll<HTMLElement>(".cube-mark");
+  const part = (on: boolean) => { cubeParted = on; for (const mark of marks()) mark.classList.toggle("parted", on); };
+  part(true);
+  setTimeout(() => {
+    const axis = (["x", "y", "z"] as const)[Math.floor(Math.random() * 3)]!;
+    cubeTurn[axis] += Math.random() < 0.5 ? 90 : -90;
+    const turn = cubeTransform();
+    for (const mark of marks()) (mark.firstElementChild as HTMLElement).style.transform = turn;
+  }, 220);
+  setTimeout(() => part(false), 760);
+}, 1400);
 setInterval(() => {
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   for (const span of document.querySelectorAll<HTMLElement>("[data-subagent-phrase]")) {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InvalidStateError } from "@demesne/storage";
@@ -18,6 +18,8 @@ class FakeHeartbeat {
   readonly listeners = new Map<string, Bun.Socket<unknown>[]>();
   readonly server: Bun.UnixSocketListener<unknown>;
   nextId = 1;
+  /// Other agents the daemon lists (hook clients such as Claude Code).
+  others = ["claude@testnode/heartbeat-k3x9a"];
   constructor(readonly path: string, readonly nodeId = "testnode") {
     const self = this;
     this.server = Bun.listen({
@@ -32,7 +34,7 @@ class FakeHeartbeat {
           switch (request.command) {
             case "status": return reply({ status: "ok", node_id: self.nodeId, active_links: [] });
             case "agents": return reply({ status: "ok", node_id: self.nodeId, agents: [
-              { agent_id: "claude@testnode/heartbeat-k3x9a", node: self.nodeId, transport: "hooks" },
+              ...self.others.map((agent_id) => ({ agent_id, node: self.nodeId, transport: "hooks" })),
               ...[...self.listeners.keys()].map((agent_id) => ({ agent_id, node: self.nodeId, transport: "control_listen" })),
             ] });
             case "read": {
@@ -316,6 +318,73 @@ describe("daemon with Heartbeat", () => {
       // Archiving releases the address.
       await fetch(new URL(`/v1/sessions/${created.session.id}`, server.url), { method: "DELETE" });
       await until(() => !daemon.listeners.has(address!));
+    } finally {
+      await server.stop(true);
+    }
+  });
+});
+
+describe("agents nearby", () => {
+  test("lists other agents by project and asks before changing a file one of them changed", async () => {
+    const daemon = fakeDaemon();
+    daemon.others = ["claude@testnode/demesne-cli-k3x7a", "codex@air/heartbeat-q2m7c"];
+    const directory = mkdtempSync(join(tmpdir(), "demesne-hb-"));
+    directories.push(directory);
+    const workspace = join(mkdtempSync(join(tmpdir(), "demesne-hb-ws-")), "demesne-cli");
+    directories.push(join(workspace, ".."));
+    mkdirSync(workspace);
+    writeFileSync(join(workspace, "search.ts"), "export const match = 1;\n");
+    let round = 0, lastResult = "";
+    const app = createDaemonApp({
+      databasePath: join(directory, "demesne.sqlite"), heartbeat: { socket: daemon.path },
+      processor: {
+        providerId: "scripted", modelId: "overlap", contextCapacity: 32_768,
+        async listModels() { return [{ id: "overlap", provider: "scripted" }]; },
+        async *stream(messages) {
+          const last = messages.at(-1);
+          if (last?.role === "tool") lastResult = String(last.content);
+          round += 1;
+          if (round === 1) {
+            yield { type: "tool_call_delta" as const, index: 0, idDelta: "read", nameDelta: "read_file", argumentsDelta: JSON.stringify({ path: "search.ts" }) };
+            yield { type: "finish" as const, reason: "tool_calls" };
+          } else if (round === 2) {
+            // Another agent saves the file between this chat's read and its edit.
+            writeFileSync(join(workspace, "search.ts"), "export const match = 2;\n");
+            utimesSync(join(workspace, "search.ts"), new Date(), new Date(Date.now() + 5_000));
+            yield { type: "tool_call_delta" as const, index: 0, idDelta: "edit", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "search.ts", content: "export const match = 3;\n" }) };
+            yield { type: "finish" as const, reason: "tool_calls" };
+          } else {
+            yield { type: "text_delta" as const, delta: "Asked first." };
+            yield { type: "finish" as const, reason: "stop" };
+          }
+        },
+      },
+    });
+    apps.push(app);
+    const server = Bun.serve({ port: 0, fetch: app.fetch });
+    try {
+      const nearby = await (await fetch(new URL("/v1/heartbeat/agents", server.url))).json() as { agents: Array<{ address: string; project: string; local: boolean }> };
+      expect(nearby.agents.map((agent) => [agent.address, agent.project, agent.local])).toEqual([
+        ["claude@testnode/demesne-cli-k3x7a", "demesne-cli", true],
+        ["codex@air/heartbeat-q2m7c", "heartbeat", false],
+      ]);
+
+      const created = await (await fetch(new URL("/v1/sessions", server.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "overlap", workspacePath: workspace, trustWorkspace: true }) })).json() as CreateSessionResponse;
+      const submitted = await (await fetch(new URL(`/v1/sessions/${created.session.id}/turns`, server.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "make search match", permissionMode: "ask" }) })).json() as SubmitTurnResponse;
+      const eventsUrl = new URL("/v1/events", server.url);
+      eventsUrl.searchParams.set("session_id", created.session.id);
+      eventsUrl.searchParams.set("after", String(submitted.eventId));
+      for await (const event of readServerSentEvents(await fetch(eventsUrl)) as AsyncIterable<EventEnvelope>) {
+        if (event.type === "permission.requested") {
+          expect(event.payload.summary).toBe("Claude Code changed search.ts");
+          expect((event.payload.overlap as { path: string; agents: Array<{ address: string }> }).agents.map((agent) => agent.address)).toEqual(["claude@testnode/demesne-cli-k3x7a"]);
+          await fetch(new URL(`/v1/permissions/${String(event.payload.permissionId)}`, server.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision: "deny" }) });
+        }
+        if (event.type === "turn.completed") break;
+      }
+      expect(lastResult).toContain("Not changed: search.ts changed since you last read it");
+      expect(lastResult).toContain("claude@testnode/demesne-cli-k3x7a");
+      expect(await Bun.file(join(workspace, "search.ts")).text()).toBe("export const match = 2;\n");
     } finally {
       await server.stop(true);
     }

@@ -3,6 +3,7 @@ import { SidebarProjectOrder } from "./sidebar-project-order.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
 import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
+import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
@@ -356,6 +357,10 @@ let openProjectPath: string | undefined = (() => {
   } catch { return undefined; }
 })();
 let openProjectFor: string | undefined;
+/// Projects whose agents are unfolded under their line.
+const agentsShown = new Set<string>();
+/// An agent's mark: its client's initial on a tone of its own.
+const agentMark = (agent: NearbyAgent) => `<span class="agent-mark" data-provider="${h(agent.provider)}" aria-hidden="true">${h((agent.provider === "codex" ? "x" : agent.name[0] ?? "?"))}</span>`;
 /// The project just opened from its line unfolds once, not on every redraw.
 let unfoldingProject = "";
 /// Conversations deleted from the sidebar, hidden at once while the daemon
@@ -387,7 +392,8 @@ function renderSidebar() {
   }
   openProjectFor = projectWorkspace;
   const openPath = openProjectPath ?? projectWorkspace;
-  const signature = JSON.stringify([sessions, projectPaths, openPath, [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, Math.floor(Date.now() / 60_000)]);
+  const agents = state.agents ?? [];
+  const signature = JSON.stringify([sessions, projectPaths, openPath, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -460,13 +466,20 @@ function renderSidebar() {
     const busy = projectSessions.some(item => item.id === current?.id ? Boolean(state!.activeTurnId) : item.status === "running" || item.status === "queued");
     const latest = projectSessions.reduce((max, item) => item.turns && item.updatedAt > max ? item.updatedAt : max, "");
     const link = active && state.connection !== "online" ? state.connection === "connecting" ? "connecting…" : "offline" : "";
+    // Other agents at work here (Heartbeat): their marks lead the state, and
+    // clicking them unfolds who they are, with Message.
+    const here = agents.filter(agent => agent.project === projectSlug(path));
+    const showing = here.length > 0 && agentsShown.has(path);
+    const marks = here.length ? btn("agents-toggle", here.slice(0, 3).map(agentMark).join(""), { path }, "sidebar-agents")
+      .replace("<button ", `<button title="${h(here.map(agent => `${agent.name} ${agentPlace(agent)}`).join(" · "))}" aria-label="${h(`${here.length} ${here.length === 1 ? "agent" : "agents"} working in ${name}`)}" aria-expanded="${showing}" `) : "";
     const status = link ? `<span class="sidebar-project-state">${link}</span>`
       : active && review.length ? btn("review-open", `${ICON_BRANCH}${review.length}`, { show: true }, "sidebar-project-review").replace("<button ", `<button title="${review.length} ${review.length === 1 ? "branch" : "branches"} to review" `)
       : asking ? `<span class="sidebar-project-state" title="A chat needs you">${dot("warn")}</span>`
       : busy ? `<span class="sidebar-project-state" title="Working">${dot("working")}</span>`
-      : !expanded && latest ? `<span class="sidebar-project-state" title="${h(fullTime(latest))}">${h(shortAge(latest))}</span>` : "";
+      : !expanded && latest && !here.length ? `<span class="sidebar-project-state" title="${h(fullTime(latest))}">${h(shortAge(latest))}</span>` : "";
+    const agentRows = showing ? `<div class="sidebar-agent-rows">${here.map(agent => `<div class="sidebar-agent-row" title="${h(agent.address)}">${agentMark(agent)}<span>${h(agent.name)} · ${h(agentPlace(agent).replace(/^on /, ""))}</span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "sidebar-agent-message")}</div>`).join("")}</div>` : "";
     if (active && review.length && !query) rows.push(btn("review-open", `Review ${review.length} ${review.length === 1 ? "branch" : "branches"} ›`, { show: true }, "sidebar-more sidebar-review"));
-    groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${toggle}${label}${status}</div><div class="sidebar-project-chats${path === unfoldingProject && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
+    groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${toggle}${label}${marks}${status}</div>${agentRows}<div class="sidebar-project-chats${path === unfoldingProject && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
   }
   list.innerHTML = groups.length ? groups.join("") : '<p class="sidebar-empty">No matching conversations or projects</p>';
   unfoldingProject = "";
@@ -1514,6 +1527,17 @@ function renderApproval() {
     approvalOpen = false;
     return;
   }
+  // Another agent changed the file since this chat read it: one amber line
+  // that names the agent; asking it first is the default (Enter).
+  if (approval.overlap) {
+    const agent = approval.overlap.agents[0]!, others = approval.overlap.agents.length - 1;
+    const file = approval.overlap.path.split("/").pop() ?? approval.overlap.path;
+    slot.innerHTML = `<div class="approval-row overlap" role="group" aria-label="Another agent changed this file" title="${h(`${agent.name} ${agentPlace(agent)} · ${agent.address}`)}">${agentMark(agent)}<span class="approval-verb">${h(agent.name)}${others ? ` and ${others} more` : ""}</span><span class="approval-note">changed</span><code title="${h(approval.overlap.path)}">${h(file)}</code><span class="approval-note">since this chat read it</span><span class="approval-space"></span>`
+      + btn("permission", `Ask it first ${k("↵")}`, { id: approval.id, decision: "deny" }, "allow")
+      + btn("permission", "Change anyway", { id: approval.id, decision: "allow_once" }, "deny")
+      + `</div>`;
+    return;
+  }
   const input = approval.input as Record<string, unknown>,
     isCommand = approval.name === "run_command",
     relative = (path: unknown) => {
@@ -2245,7 +2269,7 @@ function renderNotifications() {
     const where = { sessionId: item.id, path: item.workspace };
     if (waits) {
       const approval = mine ? state.approvals[0] : undefined, input = (approval?.input ?? {}) as Record<string, unknown>;
-      const asked = approval?.name === "run_command" ? `Wants to run: ${Array.isArray(input.argv) ? input.argv.join(" ") : String(input.command ?? "")}` : approval ? `Wants to ${approval.name.replace(/_/g, " ")}${input.path ? ` ${String(input.path).split("/").pop()}` : ""}` : "";
+      const asked = approval?.overlap ? `${approval.overlap.agents[0]?.name ?? "Another agent"} changed ${approval.overlap.path.split("/").pop()}` : approval?.name === "run_command" ? `Wants to run: ${Array.isArray(input.argv) ? input.argv.join(" ") : String(input.command ?? "")}` : approval ? `Wants to ${approval.name.replace(/_/g, " ")}${input.path ? ` ${String(input.path).split("/").pop()}` : ""}` : "";
       const body = asked || (mine && state.questions.length ? "Has a question for you" : "Is waiting for you");
       alerts.set(`${item.id}:wait:${item.updatedAt}`, { title, body, ...where });
     } else if (item.status === "failed") alerts.set(`${item.id}:failed:${item.updatedAt}`, { title, body: "Stopped with an error", ...where });
@@ -2900,6 +2924,17 @@ async function dispatch(
     });
     return;
   }
+  if (action === "agents-toggle") {
+    const path = String(args.path);
+    if (agentsShown.has(path)) agentsShown.delete(path); else agentsShown.add(path);
+    renderSidebar();
+    document.querySelectorAll<HTMLButtonElement>('#sidebar-sessions [data-action="agents-toggle"]').forEach(button => {
+      if (JSON.parse(button.dataset.args ?? "{}").path === path) button.focus({ preventScroll: true });
+    });
+    return;
+  }
+  // The chat sends it over Heartbeat; you write what to say.
+  if (action === "agent-message") return setDraft(`Message ${String(args.name)} at ${String(args.address)}: `);
   if (action === "project-open" || action === "project-session") {
     document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path: args.path, ...(action === "project-session" ? { sessionId: args.id } : {}) } }));
     return;
@@ -3720,7 +3755,7 @@ document.addEventListener("keydown", (event) => {
   if (event.target === editor && key === "enter" && !event.shiftKey) {
     // During an approval Enter allows; with text it denies and says why.
     const approval = !pendingQuestion() ? state.approvals[0] : undefined;
-    if (approval) run(() => (editor.value.trim() ? denyInstead(editor.value) : api("permission", { id: approval.id, decision: "allow_once" })));
+    if (approval) run(() => (editor.value.trim() ? denyInstead(editor.value) : api("permission", { id: approval.id, decision: approval.overlap ? "deny" : "allow_once" })));
     else run(() => submitText());
     return;
   }

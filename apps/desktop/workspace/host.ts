@@ -7,6 +7,7 @@ import type {
   ReviewScope,
   TurnAttachment,
   WorkspaceFingerprint,
+  NearbyAgent,
 } from "@demesne/protocol";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -119,6 +120,8 @@ export function daemonCredential(
 
 /// How often the sidebar looks in on chats still working in the background.
 const BACKGROUND_POLL_MS = 4_000;
+/// How often the sidebar looks for other agents (Heartbeat).
+const AGENTS_POLL_MS = 15_000;
 
 /** All privileged operations stay here. The web renderer gets snapshots and a
  * fixed set of actions, never a daemon token, shell, arbitrary URL, or filesystem API. */
@@ -332,6 +335,7 @@ export class WorkspaceHost {
       },
       setup: this.setup?.snapshot() ?? null,
       processes: this.processes,
+      agents: this.agents,
       queuePosition: this.queuePosition,
       verificationFingerprint: this.verificationFingerprint,
       processesError: this.processesError,
@@ -653,9 +657,30 @@ export class WorkspaceHost {
   async refreshSessions() {
     try {
       this.sessions = await this.client.listSessions();
+      if (!this.agentsStarted) void this.refreshAgents();
       await this.checkBackground();
       this.publish();
     } catch {}
+  }
+  /// Other agents Heartbeat sees, placed on their projects' lines.
+  agents: NearbyAgent[] = [];
+  private agentsTimer: ReturnType<typeof setTimeout> | null = null;
+  private agentsStarted = false;
+  async refreshAgents() {
+    this.agentsStarted = true;
+    if (this.agentsTimer) clearTimeout(this.agentsTimer);
+    this.agentsTimer = null;
+    try {
+      const { agents } = await this.client.heartbeatAgents();
+      if (JSON.stringify(agents) !== JSON.stringify(this.agents)) {
+        this.agents = agents;
+        this.publish();
+      }
+    } catch { /* an older daemon, or Heartbeat is off */ }
+    if (!this.disposed) {
+      this.agentsTimer = setTimeout(() => void this.refreshAgents(), AGENTS_POLL_MS);
+      this.agentsTimer.unref?.();
+    }
   }
   /// Chats in the background that wait on an approval or an answer: the
   /// sidebar marks them amber, as it does the open one.
@@ -1479,6 +1504,7 @@ export class WorkspaceHost {
     this.setup?.dispose();
     this.disposed = true;
     if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
+    if (this.agentsTimer) clearTimeout(this.agentsTimer);
     this.generation++;
     this.stream?.abort();
     if (this.timer) clearTimeout(this.timer);

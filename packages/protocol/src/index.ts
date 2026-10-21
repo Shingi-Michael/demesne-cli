@@ -816,3 +816,4 @@ export * from "./drive-review.ts";
 
 export * from "./next-prompt.ts";
 export * from "./heartbeat-mail.ts";
+export * from "./agents-nearby.ts";

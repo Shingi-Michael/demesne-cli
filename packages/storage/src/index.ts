@@ -1187,6 +1187,7 @@ export class DemesneStore {
     toolCallId: string,
     kind: "write" | "execute",
     summary: string,
+    extra: Record<string, unknown> = {},
   ): { permissionId: string; event: EventEnvelope } {
     const permissionId = crypto.randomUUID();
     const result = this.database.transaction(() => {
@@ -1201,7 +1202,7 @@ export class DemesneStore {
         "permission.requested",
         turn.sessionId,
         turn.id,
-        { permissionId, toolCallId, kind, summary, name: call.name, arguments: call.arguments_json },
+        { ...extra, permissionId, toolCallId, kind, summary, name: call.name, arguments: call.arguments_json },
         now,
       );
       return { permissionId, event };

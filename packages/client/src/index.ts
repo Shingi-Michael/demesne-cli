@@ -1,4 +1,4 @@
-import type {ReviewScope, ReviewResponse, CommandsResponse} from "@demesne/protocol";
+import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent} from "@demesne/protocol";
 import type { ThemeLibrary } from "@demesne/brand";
 import {
   type ImageArtifact,
@@ -237,6 +237,8 @@ export class DemesneClient {
     const query=new URLSearchParams({scope});if(turnId)query.set("turn",turnId);
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/review?${query}`);
   }
+  /// Other agents Heartbeat sees (empty when Heartbeat is off).
+  async heartbeatAgents(): Promise<{ node: string | null; agents: NearbyAgent[] }> { return this.request("/v1/heartbeat/agents"); }
   async commands(sessionId:string,output="all"):Promise<CommandsResponse>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands?output=${encodeURIComponent(output)}`);}
   async stopCommand(sessionId:string,id:string):Promise<{stopping:boolean}>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(id)}/stop`,{method:"POST",body:"{}"});}
   async rerunCommand(sessionId:string,id:string):Promise<{id:string}>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(id)}/rerun`,{method:"POST",body:"{}"});}

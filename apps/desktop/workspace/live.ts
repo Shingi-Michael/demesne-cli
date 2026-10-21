@@ -637,7 +637,7 @@ function renderContextCard() {
   card.innerHTML = `<div class="context-head"><span>Context</span><span>${c.percentage}% · ${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span></div><div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div><div class="context-legend">${[...parts, { name: "Free", tokens: free, tone: "free" }].filter((part) => part.tokens > 0).map((part) => `<u class="tone-${part.tone}"></u><span>${part.name}</span><em>${tokensShort(part.tokens)}</em>`).join("")}</div>${btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact")}`;
 }
 /// The cards on the right: where this chat works, how full its context is,
-/// what changed, and whatever else is live (agents, Drive, a preview,
+/// what changed, and whatever else is live (agents, a preview,
 /// connectors). A card shows only when it has something to say; its header
 /// folds it to one line.
 const ICON_PANEL = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16"/></svg>';
@@ -664,10 +664,9 @@ function renderCards() {
   const c = context(), plan = s.provider?.contextPlan, changes = workingChanges();
   const files = s.files.filter((file) => file.status);
   const here = root ? s.agents.filter((agent) => agent.project === projectSlug(root)) : [];
-  const ideas = s.driveNext.proposals;
   const previews = s.processes.filter((command) => command.serves && command.status === "running");
   const servers = s.connectors.servers;
-  const signature = JSON.stringify([root, branch, c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, ideas.map((idea) => [idea.id, idea.title]), previews.map((command) => command.serves), s.connectors, Boolean(s.activeTurnId), [...cardsFolded], driveActionPending]);
+  const signature = JSON.stringify([root, branch, c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), s.connectors, Boolean(s.activeTurnId), [...cardsFolded]]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const name = root.split(/[\\/]/).filter(Boolean).at(-1) ?? root;
@@ -699,9 +698,6 @@ function renderCards() {
   if (here.length)
     out.push(card("agents", "Agents", here.slice(0, 3).map(agentMark).join(""),
       here.map((agent) => `<div class="card-row card-hover" title="${h(agent.address)}">${agentMark(agent)}<span class="card-label">${h(agent.name)}<em> · ${h(agentPlace(agent).replace(/^on /, ""))}</em></span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "card-act")}</div>`).join("")));
-  if (ideas.length)
-    out.push(card("drive", "Drive", ideas.length === 1 ? "1 idea" : `${ideas.length} ideas`,
-      ideas.slice(0, 3).map((idea) => `<div class="card-row card-hover" title="${h(idea.why ?? "")}">${ICON_SPARK}<span class="card-label">${h(idea.title)}</span>${btn("next-run", "Run", { id: idea.id }, "card-act", Boolean(driveActionPending))}</div>`).join("")));
   if (previews.length)
     out.push(card("preview", "Preview", h(new URL(previews[0]!.serves!).host),
       previews.map((command) => `<div class="card-row"><span class="pv-live" aria-hidden="true"></span><span class="card-label">${h(new URL(command.serves!).host)}</span>${btn("open-link", "Open ↗", { url: command.serves }, "card-btn")}</div>`).join("")));

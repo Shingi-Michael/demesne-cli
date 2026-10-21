@@ -160,7 +160,7 @@ const tone = (status: string) =>
 const verb = (tool: ToolEntry) =>
   ({
     run_command: "Run",
-    ask_user: "Ask",
+    ask_user: "Asked",
     compact_session: "Compact",
     apply_theme: "Apply theme",
     view_image: "View",
@@ -836,6 +836,11 @@ const shine = (text: string) => `<span class="shine" style="animation-delay:-${D
 /// A running sub-agent's target: its task and a phrase that cycles the whole
 /// time it runs (updated in place by a timer); its steps count on the right.
 function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
+  if (tool.name === "ask_user") {
+    const asked = Array.isArray(tool.input.questions) ? tool.input.questions as { question?: unknown }[] : [];
+    const first = typeof asked[0]?.question === "string" ? asked[0].question : "";
+    return first ? `${h(first)}${asked.length > 1 ? `<span class="muted"> · ${asked.length - 1} more</span>` : ""}` : "";
+  }
   if (tool.name === "run_command" && tool.waiting) return "command";
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   if (tool.name !== "subagent" || tool.state !== "running") return h(base);
@@ -886,6 +891,8 @@ const foldable = (tool: ToolEntry) =>
   (tool.phase === "change" && tool.state !== "running" && !tool.drafting && (Boolean(tool.changes?.length) || Boolean(tool.diff))) ||
   (tool.name === "run_command" && !tool.waiting && !tool.drafting && Boolean(tool.toolCallId));
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
+  // A question still waiting is asked at the end of the conversation, not as a step.
+  if (tool.name === "ask_user" && (tool.state === "running" || tool.waiting || tool.drafting)) return "";
   const key = `${run.id}:${tool.id}`, open = stepOpen.has(key), canFold = foldable(tool);
   const now = tool.state === "running" || tool.drafting, served = serving(tool)?.serves;
   const meta = served ? `<span class="pv-live" aria-hidden="true"></span>${h(new URL(served).host)}` : tool.waiting
@@ -1007,7 +1014,7 @@ function runHTML(run: WorkspaceRun, index: number) {
         }
       if (group.length >= 3) {
         const sum = group.reduce((n, t) => n + (t.durationMs ?? 0), 0);
-        const summary=run.kind === "themefy" ? `Theme interview · ${group.filter(tool=>tool.name === "ask_user").length} questions${group.some(tool=>tool.name === "apply_theme" && tool.state === "done")?" · palette applied":""}` : `Explored · ${group.length} reads`;
+        const summary=run.kind === "themefy" ? `Theme questions · ${group.filter(tool=>tool.name === "ask_user").length}${group.some(tool=>tool.name === "apply_theme" && tool.state === "done")?" · palette applied":""}` : `Explored · ${group.length} reads`;
         steps += `<details class="explored" data-detail="${key}"${detailsOpen.has(key) ? " open" : ""}><summary>${stepIcon(group[0]!)}<span class="verb">${h(summary)}</span><span class="sp"></span><small class="meta">${duration(sum)}</small></summary><div>${group.map((tool) => toolRow(run, tool)).join("")}</div></details>`;
         i = j - 1;
       } else steps += toolRow(run, entry) + subagentTrace(run, entry, key);
@@ -1442,14 +1449,14 @@ async function questionAction(action: "pause" | "resume" | "cancel") {
   if(action === "cancel")clearReply(q.id,index);
   return result;
 }
-async function answerQuestion(value: string) {
-  const q=pendingQuestion(); if(!q || !value.trim() || answeringQuestion)return;
+async function answerQuestion(value: string | null, source: "typed" | "suggestion" | "skipped" = "typed") {
+  const q=pendingQuestion(); if(!q || (source !== "skipped" && !value?.trim()) || answeringQuestion)return;
   clearTimeout(draftTimer);
   const key=`${q.id}:${questionIndex()}`;
   answeringQuestion=true;renderComposer();
   try {
     await api("question-action",{id:q.id,action:{action:"answer",index:questionIndex(),revision:q.revision ?? 0,
-      answer:{source:"typed",answer:value.trim()}}});
+      answer:{source,answer:source === "skipped" ? null : value!.trim()}}});
     clearReply(q.id,q.answers?.length ?? 0);
     if (composerSlot===key) editor.value="";
   } finally { answeringQuestion=false;renderComposer(); }
@@ -1561,7 +1568,7 @@ function renderComposer() {
   editor.placeholder = asking
     ? "Or tell demesne what to do instead…"
     : question
-    ? answered ? "Your answers are saved. Choose Resume to continue." : question.status === "paused" ? "Type your answer to resume the interview…" : "Type your answer here…"
+    ? answered ? "Your answers are saved. Choose Resume to continue." : question.status === "paused" ? "Type your answer to carry on…" : question.questions[questionIndex()]?.suggestions?.length ? "Answer, or pick one above…" : "Type your answer…"
     : inSession()
     ? state.activeTurnId
       ? state.queue.trim() ? "Queue another follow-up…" : "Queue a follow-up…"
@@ -1798,10 +1805,20 @@ function renderQuestion() {
   questionSignature = signature;
   const index=question?.answers?.length ?? 0, answered=question && index>=question.questions.length,
     item=question?.questions[Math.min(index,question.questions.length-1)];
+  // The model asking you is its next line in the conversation: the amber
+  // ring that means "needs you", the question, and its suggested answers.
+  const paused = question?.status === "paused", choices = answered || !item ? [] : item.suggestions ?? [];
+  const foot = answered || paused
+    ? `<span>${answered ? "Answered" : "Paused"}</span>${btn("question-control", "Resume", { action: "resume" }, "ask-link")}`
+    : btn("question-skip", "Skip this question", {}, "ask-link");
   el("question").innerHTML = question && item
-    ? `<section class="question-card"><div class="approval-title"><span class="amber">?</span> ${question.mode === "interview" ? "Interview" : "A question before continuing"}<small>${question.questions.length > 1 ? `${Math.min(index+1,question.questions.length)} of ${question.questions.length}` : ""}</small></div><p class="user-question">${h(item.question)}</p>${item.reason ? `<p class="muted">${h(item.reason)}</p>` : ""}${answered ? `<p>${h(question.answers?.at(-1)?.answer ?? "Explicitly skipped")}</p>` : ""}<p class="muted">${answered ? "Your answers are saved. Resume to continue from them." : question.interrupted ? "Saved after interruption. Your answer continues the interview." : question.status === "paused" ? "Paused. Your draft is saved; answering resumes the interview." : "Type your answer in the composer below."}</p><div class="approval-actions">${btn("question-control",question.status === "paused" || answered ? "Resume" : "Pause",{action:question.status === "paused" || answered ? "resume" : "pause"})}${btn("question-control","Cancel interview",{action:"cancel"},"quiet")}</div></section>`
+    ? `<div class="ask-q"><span class="ask-mark" aria-hidden="true"></span><div class="ask-body"><p class="ask-text">${h(item.question)}${question.questions.length > 1 ? `<small>${Math.min(index + 1, question.questions.length)} of ${question.questions.length}</small>` : ""}</p>${item.reason ? `<p class="ask-why">${h(item.reason)}</p>` : ""}${answered ? `<p class="ask-why">${h(question.answers?.at(-1)?.answer ?? "Skipped")}</p>` : ""}${choices.length ? `<div class="ask-choices">${choices.map((choice, n) => btn("question-pick", `<kbd>${n + 1}</kbd>${h(choice)}`, { text: choice }, "ask-choice")).join("")}</div>` : ""}<div class="ask-foot">${foot}</div></div></div>`
     : "";
+  // A new question scrolls into view, as a new answer would.
+  if (question && question.id !== questionShown) el("stage").scrollTop = el("stage").scrollHeight;
+  questionShown = question?.id ?? "";
 }
+let questionShown = "";
 /// Stops the host polling command output that an unfolded check started.
 const unwatchOutput = () => void api("panel-watch", { panel: null }).catch(() => {});
 /// Drive has no panel. Its mission is a turn in the conversation it started
@@ -3100,6 +3117,8 @@ async function dispatch(
     return;
   }
   if (action === "question-control") return questionAction(args.action);
+  if (action === "question-pick") return answerQuestion(String(args.text ?? ""), "suggestion");
+  if (action === "question-skip") return answerQuestion(null, "skipped");
   if (action === "new-session") return api("new-session", {});
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "next-away", "drive-control"].includes(action)) return driveAction(action, args);
   if (action.startsWith("breakage-")) return act(() => api(action, args));
@@ -3733,6 +3752,11 @@ document.addEventListener("keydown", (event) => {
   if (state.setup) {
     handleSetupKey(event);
     return;
+  }
+  // 1, 2, 3… pick the model's suggested answers while nothing is typed.
+  if (!ctrl && !event.altKey && /^[1-9]$/.test(key) && (!field || (event.target === editor && !editor.value))) {
+    const choice = document.querySelectorAll<HTMLElement>("#question .ask-choice")[Number(key) - 1];
+    if (choice) { event.preventDefault(); choice.click(); return; }
   }
   if ((event.target as HTMLElement).id === "rv-note-input" && (key === "enter" || key === "escape")) {
     event.preventDefault();

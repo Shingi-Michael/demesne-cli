@@ -22,6 +22,7 @@ const afterClose = "Daemon work completed after the window closed.";
 const thinkingPrompt = "Desktop smoke: readable thinking";
 const previewPrompt = "Desktop smoke: run the site";
 const overlapPrompt = "Desktop smoke: edit what another agent changed";
+const askPrompt = "Desktop smoke: ask me first";
 let overlapRound = 0;
 // A stand-in Heartbeat daemon: Claude Code works in this project on this
 // machine, Codex in the second project on a paired one.
@@ -39,6 +40,7 @@ const heartbeatDaemon = Bun.listen({ unix: heartbeatSocket, socket: { data(socke
   reply({ status: "error", error: "unknown_command" });
 } } });
 let previewRound = 0;
+let askRound = 0;
 const thinkingText = "First reasoning paragraph.\nSecond line stays readable.\n\n" + "A detailed thought with enough words to wrap across several lines. ".repeat(12) + "\n" + "long_identifier_".repeat(90);
 let nextThought!: () => void, finishThought!: () => void;
 const thoughtGate = new Promise<void>(resolve => { nextThought = resolve; });
@@ -114,6 +116,16 @@ const f = await fixture({
         yield { type: "finish", reason: "stop" };
       }
       overlapRound++;
+      return;
+    }
+    if (user === askPrompt) {
+      if (askRound++ === 0) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "desktop-ask", nameDelta: "ask_user", argumentsDelta: JSON.stringify({ questions: [{ question: "Which direction do you want to take the CI failure now?", reason: "The last turn ended with a plan; I need your steer before acting.", suggestions: ["Scope the test job", "Fix the typecheck", "Paste the logs first"] }] }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", delta: "Scoping the test job then." };
+        yield { type: "finish", reason: "stop" };
+      }
       return;
     }
     if (user === previewPrompt) {
@@ -691,7 +703,20 @@ try {
   await page.locator("textarea").press("Enter");
   await textIncludes("I'll ask Claude Code before changing notes.ts.");
   assert.equal(readFileSync(join(f.workspace, "notes.ts"), "utf8"), "export const note = 'theirs';\n", "Enter asks first and leaves the other agent's change");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line"] }, null, 2));
+  // The model's question is its next line in the conversation, with its
+  // suggestions as answers to pick; no step row and no "interview".
+  await type(askPrompt);
+  const ask = page.locator("#stage .ask-q");
+  await until(() => ask.isVisible(), "the question shows in the conversation", 20_000);
+  assert.equal(await page.locator(".tool-row", { hasText: "ask_user" }).count(), 0, "no step row names the tool");
+  assert(!(await page.locator("#stage").innerText()).toLowerCase().includes("interview"), "nothing says interview");
+  assert.equal(await ask.locator(".ask-choice").count(), 3, "the suggestions are answers to pick");
+  assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Answer, or pick one above…");
+  await page.waitForTimeout(500);
+  await capture("13-question");
+  await page.locator("textarea").press("1");
+  await textIncludes("Scoping the test job then.");
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

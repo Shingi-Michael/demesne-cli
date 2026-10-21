@@ -2076,8 +2076,26 @@ function blockedCard(drive: NonNullable<Snapshot["drive"]>) {
 /// unfolded from the briefing line above the composer.
 function pinnedCard(pinned: NonNullable<Snapshot["drive"]>) {
   if (pinned.status === "blocked") return blockedCard(pinned);
+  // Drive speaking, like an answer: what it is doing now, its steps on the
+  // same thin guide as tool calls, and one quiet line of facts and words.
   const parts = missionParts(pinned), live = pinned.status === "running" || pinned.status === "waiting";
-  return `<section class="drive-pinned tone-border-${parts.tone}" aria-label="Live mission"><div class="drive-pinned-title">${h(parts.title)}</div><div class="drive-status"><strong class="tone-${parts.tone}">${parts.mark} ${h(parts.label)}</strong>${parts.summary ? `<span class="drive-summary">${h(parts.summary)}</span>` : ""}</div>${parts.tasks}<div class="drive-meta">${h(parts.stats)}</div><div class="next-actions">${btn("drive-control", live ? "Pause" : "Resume", { control: live ? "pause" : "resume" })}${pinned.homeSessionId !== state?.session?.id ? btn("select-session", "Watch", { id: pinned.homeSessionId }) : ""}${btn("drive-control", "Stop", { control: "stop" }, "danger")}</div>${parts.details}</section>`;
+  const status = parts.label === "Live" ? parts.summary ?? "Working" : `${parts.label}${parts.summary ? ` · ${parts.summary}` : ""}`;
+  const now = `<p class="dm-now">${parts.label === "Live" ? '<span class="dm-live" aria-hidden="true"></span>' : `<span class="dm-mark tone-${parts.tone}" aria-hidden="true">${h(parts.mark)}</span>`}<span>${h(status)}</span></p>`;
+  const steps = driveTaskList(pinned).map((task) => {
+    const kind = task.mark === "✓" ? "done" : task.mark === "◌" ? "on" : "next";
+    return `<li class="dm-step ${kind}"><span class="dm-step-mark" aria-hidden="true">${kind === "done" ? "✓" : kind === "on" ? "" : ""}</span><span>${h(task.text)}</span></li>`;
+  });
+  // Only facts with something to say: no "0 tokens" or "step 0".
+  const used = pinned.protection?.used, tokens = used ? used.planningTokens + used.workerTokens : 0;
+  const facts = [activeMinutes(pinned), tokens ? `${num(tokens)} tokens` : ""].filter(Boolean).map((fact) => `<span>${h(fact)}</span>`);
+  const open = detailsOpen.has("drive-details");
+  const words = [
+    pinned.homeSessionId !== state?.session?.id ? btn("select-session", "Watch", { id: pinned.homeSessionId }, "dm-word") : "",
+    btn("drive-control", live ? "Pause" : "Resume", { control: live ? "pause" : "resume" }, "dm-word"),
+    btn("drive-control", "Stop", { control: "stop" }, "dm-word stop"),
+    btn("drive-details", `Details${CHEVRON}`, {}, `dm-word dm-more${open ? " open" : ""}`).replace("<button ", `<button aria-expanded="${open}" `),
+  ].filter(Boolean);
+  return `<section class="drive-mission" aria-label="Live mission">${now}${steps.length ? `<ol class="dm-steps">${steps.join("")}</ol>` : ""}<p class="dm-foot">${[...facts, ...words].join('<span class="bf-sep">·</span>')}</p>${open ? `<div class="drive-details dm-details">${parts.detailsBody}</div>` : ""}</section>`;
 }
 /// The mission homed in this session, which reads as its newest turn.
 const driveTurnMission = () => {
@@ -3173,6 +3191,8 @@ async function dispatch(
     if (detailsOpen.has("drive-details")) detailsOpen.delete("drive-details");
     else detailsOpen.add("drive-details");
     renderDriveTurn();
+    briefingSignature = "";
+    renderBriefing();
     return;
   }
   if (action === "drive-show" || action === "ideas-show" || action === "broke-show") {

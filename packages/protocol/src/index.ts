@@ -16,6 +16,7 @@ export type EventType =
   | "model.usage"
   | "model.metrics"
   | "model.context_trimmed"
+  | "model.provider_switched"
   | "model.request_completed"
   | "model.request_failed"
   | "model.request_cancelled"

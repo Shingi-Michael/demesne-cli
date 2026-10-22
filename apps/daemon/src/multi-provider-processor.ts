@@ -1,6 +1,6 @@
 import type { ModelDescriptor } from "@demesne/protocol";
 import type { ProviderMessage, ProviderToolDefinition } from "@demesne/providers";
-import { snapshotTurnInference, type InferenceOverrides, type TurnProcessor } from "./processor.ts";
+import { snapshotTurnInference, type InferenceOverrides, type TurnInference, type TurnProcessor } from "./processor.ts";
 
 /** Routes model selection while keeping each queued turn bound to its original provider. */
 export class MultiProviderProcessor implements TurnProcessor {
@@ -127,6 +127,14 @@ export class MultiProviderProcessor implements TurnProcessor {
     const processor = overrides?.model ? this.routes.get(overrides.model) : this.selected;
     if (!processor) throw new Error(`Unknown model: ${overrides!.model}`);
     return snapshotTurnInference(processor, thinkingEnabled, overrides);
+  }
+
+  /// The next provider to carry a turn whose provider dropped: the selected
+  /// one first (it is the default for a reason), then the rest in config
+  /// order, skipping those already tried.
+  createFallbackInference(thinkingEnabled: boolean | undefined, tried: string[]): TurnInference | null {
+    const next = [this.selected, ...this.processors].find((processor) => !tried.includes(processor.providerId));
+    return next ? snapshotTurnInference(next, thinkingEnabled) : null;
   }
 
   async *stream(messages: ProviderMessage[], tools: ProviderToolDefinition[], signal: AbortSignal,

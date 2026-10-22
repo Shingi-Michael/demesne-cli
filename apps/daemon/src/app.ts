@@ -298,6 +298,7 @@ export function createDaemonApp(options: {
       themes,
       commands,
       inferenceFor: (model, thinkingEnabled) => snapshotTurnInference(processor, thinkingEnabled, { model }),
+      fallbackInference: (current, tried) => processor.createFallbackInference?.(current.thinkingEnabled, tried) ?? null,
       subagentModels: () => subagentModels(),
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
       sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,

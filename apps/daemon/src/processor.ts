@@ -36,6 +36,9 @@ export interface TurnProcessor {
   readonly preservesPromptCache?: boolean;
   readonly vision?: boolean;
   createTurnInference?(thinkingEnabled: boolean | undefined, overrides?: InferenceOverrides): TurnInference;
+  /// Another provider's call for the same turn, when the one serving it
+  /// dropped out mid-turn; null when every provider has been tried.
+  createFallbackInference?(thinkingEnabled: boolean | undefined, tried: string[]): TurnInference | null;
   /// The model's thinking level, chosen with the model (none: its default).
   readonly reasoning?: string;
   setModel?(modelId: string, reasoning?: string): void;

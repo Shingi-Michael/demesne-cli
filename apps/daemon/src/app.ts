@@ -58,6 +58,7 @@ import { DriveNextCache, proposeNext } from "./drive-next.ts";
 import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
+import { driveContext } from "./drive-in-chat.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
@@ -299,7 +300,8 @@ export function createDaemonApp(options: {
       inferenceFor: (model, thinkingEnabled) => snapshotTurnInference(processor, thinkingEnabled, { model }),
       subagentModels: () => subagentModels(),
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
-      ...(heartbeat ? { sessionContext: (sessionId: string) => heartbeat.context(sessionId), agentsIn: (workspaceRoot: string) => heartbeat.agentsIn(workspaceRoot) } : {}),
+      sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
+      ...(heartbeat ? { agentsIn: (workspaceRoot: string) => heartbeat.agentsIn(workspaceRoot) } : {}),
       ...options.agent,
     },
   );
@@ -326,6 +328,14 @@ export function createDaemonApp(options: {
   });
   const driveAutoTimer = setInterval(() => { try { driveAuto.tick(); } catch { /* the next minute tries again */ } }, 60_000);
   driveAutoTimer.unref?.();
+  // Every chat in a project is told what Drive has and is doing; Drive's
+  // own sessions in its worktrees are not.
+  const driveWorktrees = options.worktreeRoot ?? join(dirname(dirname(options.databasePath)), ".demesne-worktrees");
+  function driveInChat(sessionId: string): string | null {
+    const row = store.database.query("SELECT w.root FROM sessions s JOIN workspaces w ON w.id = s.workspace_id WHERE s.id = ?").get(sessionId) as { root: string } | null;
+    if (!row || row.root === driveWorktrees || row.root.startsWith(`${driveWorktrees}/`)) return null;
+    return driveContext({ auto: driveAuto.state(row.root), ideas: driveNextCache.read(row.root)?.proposals ?? [], fixes: driveFixes.list(row.root), away: driveFixes.away(row.root) });
+  }
   const activeDriveDecisions = new Set<Promise<unknown>>();
   const requestDrainWaiters = new Set<() => void>();
   let activeRequests = 0;

@@ -1375,6 +1375,8 @@ const MENTION_SKIPPED_DIRECTORIES = new Set([
 export function listWorkspaceFiles(workspaceRoot: string, limit = 2_000): string[] {
   const controller = new AbortController();
   const files: string[] = [];
+  // A Drive worktree that was discarded leaves its chat behind; it has no files.
+  if (!existsSync(workspaceRoot)) return files;
   walkFiles(
     workspaceRoot,
     workspaceRoot,

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { DriveFix, DriveProposal } from "@demesne/protocol";
-import { driveContext } from "../src/drive-in-chat.ts";
+import { driveContext, driveRunTool } from "../src/drive-in-chat.ts";
 import { listWorkspaceFiles } from "../src/tools.ts";
 
 const idea = { id: "a", kind: "tidy", title: "Tidy the parser", why: "Three copies of one loop." } as DriveProposal;
@@ -21,7 +21,7 @@ test("a chat is told Drive's ideas, its work and how the person starts it", () =
   expect(text).toContain("Waiting for review: Fix ready (+10 -3 in 2 files): Merged the loops.");
   expect(text).toContain("Recently failed: Fix failed: provider dropped.");
   expect(text).not.toContain("Fix discarded");
-  expect(text).toContain("You can't start, stop or apply Drive's work yourself");
+  expect(text).toContain("call drive_run with its number");
 });
 
 test("with nothing going on it says so, and an off switch is mentioned", () => {
@@ -33,4 +33,20 @@ test("with nothing going on it says so, and an off switch is mentioned", () => {
 
 test("a discarded worktree lists no files instead of throwing", () => {
   expect(listWorkspaceFiles(join(tmpdir(), `gone-${Date.now()}`))).toEqual([]);
+});
+
+test("drive_run starts the idea the chat names, by number or title", async () => {
+  const second = { ...idea, id: "b", title: "Speed up the build", evidence: ["s1"] } as DriveProposal;
+  const runs: string[] = [];
+  const tool = driveRunTool({
+    ideas: (root) => (root === "/w" ? { proposals: [{ ...idea, evidence: [] } as DriveProposal, second], signals: [{ id: "s1" } as never, { id: "s2" } as never] } : null),
+    run: async (_root, proposal, signals) => { runs.push(`${proposal.id}:${signals.map((signal) => signal.id).join()}`); return fix("running", { title: proposal.title, branch: "drive/b" }); },
+  });
+  const context = { workspaceRoot: "/w", signal: new AbortController().signal };
+  expect(tool.permission({ idea: "2" })).toBeNull();
+  expect(await tool.execute({ idea: "2" }, context)).toContain('Drive started "Speed up the build" on branch drive/b');
+  await tool.execute({ idea: "tidy the PARSER" }, context);
+  expect(runs).toEqual(["b:s1", "a:"]);
+  await expect(tool.execute({ idea: "9" }, context)).rejects.toThrow("1. Tidy the parser 2. Speed up the build");
+  await expect(tool.execute({ idea: "1" }, { ...context, workspaceRoot: "/elsewhere" })).rejects.toThrow("can't run ideas");
 });

@@ -61,3 +61,12 @@ test("a command's row names the program, not its install path; its arguments sta
   expect(toolTarget("run_command", { argv: ["git", "status"] })).toBe("$ git status");
   expect(toolTarget("run_command", { argv: ["./scripts/build.sh", "/tmp/out"] })).toBe("$ build.sh /tmp/out");
 });
+
+test("a provider switch is one quiet line on the guide", () => {
+  const { restoreSessionEntries } = require("../src/history.ts") as typeof import("../src/history.ts");
+  const entries = restoreSessionEntries(state, [events[0]!, event(2, "model.provider_switched", { from: { provider: "Qwen on PC", model: "qwen3.8-27b" }, to: { provider: "ChatGPT", model: "gpt-6.1-sol" }, reason: "socket closed" }),
+    event(3, "model.request_started", { model: "gpt-6.1-sol" }), event(4, "message.delta", { delta: "Done" }), event(5, "turn.completed")]);
+  const notice = entries.find((entry) => entry.type === "notice" && entry.quiet);
+  expect(notice).toMatchObject({ type: "notice", tone: "info", quiet: true, text: "Qwen on PC dropped the connection · continued on ChatGPT gpt-6.1-sol" });
+  expect(entries.findLast((entry) => entry.type === "assistant")?.receipt?.model).toBe("gpt-6.1-sol");
+});

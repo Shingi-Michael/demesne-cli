@@ -810,6 +810,17 @@ export class DemesneStore {
     return event;
   }
 
+  /// A turn carried on with another provider after its own dropped out.
+  recordProviderSwitch(turnId: string, from: { provider: string; model: string }, to: { provider: string; model: string }, reason: string): EventEnvelope {
+    const event = this.database.transaction(() => {
+      const turn = this.getTurnOrThrow(turnId);
+      if (turn.status !== "running") throw new InvalidStateError(`Turn cannot switch provider from ${turn.status}`);
+      return this.insertEvent("model.provider_switched", turn.sessionId, turnId, { from, to, reason }, new Date().toISOString());
+    })();
+    this.eventSink?.(event);
+    return event;
+  }
+
   getSessionCheckpoint(sessionId: string): SessionCheckpoint | null {
     const row = this.database.query(`SELECT c.descriptor FROM session_checkpoints c
       JOIN sessions s ON s.checkpoint_id = c.id WHERE s.id = ?`).get(sessionId) as { descriptor: string } | null;

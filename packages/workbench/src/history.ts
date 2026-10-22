@@ -72,6 +72,11 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
         context = { used: typeof plan?.estimatedInputTokens === "number" ? plan.estimatedInputTokens : null,
           capacity: typeof plan?.capacityTokens === "number" ? plan.capacityTokens : null, estimated: typeof plan?.estimatedInputTokens === "number" };
       }
+      if (event.type === "model.provider_switched") {
+        const from = payload.from as { provider?: string } | undefined, to = payload.to as { provider?: string; model?: string } | undefined;
+        entries.push({ id: id++, type: "notice", tone: "info", quiet: true,
+          text: `${from?.provider ?? "The provider"} dropped the connection · continued on ${[to?.provider, to?.model].filter(Boolean).join(" ")}` });
+      }
       if (event.type === "model.usage" && context && !context.estimated) {
         context.used = typeof payload.totalTokens === "number" ? payload.totalTokens
           : typeof payload.inputTokens === "number" && typeof payload.outputTokens === "number" ? payload.inputTokens + payload.outputTokens : null;

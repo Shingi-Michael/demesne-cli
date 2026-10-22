@@ -300,6 +300,8 @@
 .tool-row.failed .verb {
   color: var(--signal);
 }
+.tool-row.switch { cursor: default; color: var(--muted); }
+.tool-row.switch .verb { color: var(--muted); font-weight: 400; }
 .tool-row.waiting {
   color: var(--thinking);
 }

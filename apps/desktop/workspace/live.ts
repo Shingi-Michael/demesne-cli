@@ -925,6 +925,7 @@ const stepIcon = (tool: ToolEntry) => {
     : "other";
   return `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${STEP_ICONS[kind]}</svg>`;
 };
+const ICON_SWITCH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h12l-3-3"/><path d="M21 17H9l3 3"/><path d="M15 7a6 6 0 0 1 6 6"/></svg>';
 const ICON_SPARK = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>';
 const ICON_COPY = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
 const ICON_UNDO = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>';
@@ -1063,6 +1064,7 @@ function runHTML(run: WorkspaceRun, index: number) {
       } else steps += toolRow(run, entry) + subagentTrace(run, entry, key);
     }
     if (entry.type === "notice" && !entry.closesTurn) {
+      if (entry.quiet) { steps += `<div class="tool-row switch">${ICON_SWITCH}<span class="verb">${h(entry.text)}</span></div>`; continue; }
       flush();
       body += `<div class="system-band"><b>system</b><span>${h(entry.text)}</span></div>`;
     }

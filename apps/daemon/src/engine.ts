@@ -43,6 +43,9 @@ interface HistoryTurn {
 
 interface AgentEngineOptions extends AgentConfig {
   commands?: CommandMonitor;
+  /// Another provider's call for a turn whose provider dropped out; null
+  /// when there is none left to try, and the turn fails as it always did.
+  fallbackInference?: (current: TurnInference, tried: string[]) => TurnInference | null;
   /// Lets `ask_user` wait on the person at the terminal. Without it the tool
   /// is not offered, as in non-interactive (`deny`) turns.
   questions?: QuestionBroker;
@@ -127,14 +130,19 @@ export class AgentEngine {
 
   async run(turnId: string, inference: TurnInference, signal: AbortSignal): Promise<void> {
     const sessionId = this.store.getTurn(turnId)?.sessionId;
+    const used = new Set([inference]);
     try {
-      await this.runInference(turnId, inference, signal);
+      await this.runInference(turnId, inference, signal, used);
     } finally {
-      if (sessionId) await inference.release?.(sessionId);
+      if (sessionId) for (const item of used) await item.release?.(sessionId);
     }
   }
 
-  private async runInference(turnId: string, inference: TurnInference, signal: AbortSignal): Promise<void> {
+  private async runInference(turnId: string, initial: TurnInference, signal: AbortSignal, used = new Set<TurnInference>()): Promise<void> {
+    // The turn's provider can change mid-turn: when it drops the connection,
+    // the next configured one carries on with the same context.
+    let inference = initial;
+    const triedProviders = [inference.providerId];
     const turn = this.store.getTurn(turnId);
     if (!turn) throw new NotFoundError(`Turn not found: ${turnId}`);
     this.store.startTurn(turnId);
@@ -172,7 +180,7 @@ export class AgentEngine {
     const pendingContextDrops: HistoryTurn[] = [];
     const maxModelRounds = this.options.maxModelRounds ?? DEFAULT_AGENT_LIMITS.maxModelRounds;
     const maxToolCalls = this.options.maxToolCalls ?? DEFAULT_AGENT_LIMITS.maxToolCalls;
-    const streamLimits = providerStreamLimits(inference.maxOutputTokens, this.options);
+    let streamLimits = providerStreamLimits(inference.maxOutputTokens, this.options);
     if (![maxModelRounds, maxToolCalls].every((value) => Number.isSafeInteger(value) && value > 0)) throw new Error("Agent turn limits must be positive integers");
     let budgetReason: string | undefined;
 
@@ -331,6 +339,27 @@ export class AgentEngine {
             );
             pendingContextDrops.length = 0;
             continue;
+          }
+          // The provider dropped before this round showed anything: the next
+          // provider can take the same request. A chat you're in asks first
+          // (Continue · Stop); Drive, mail and other Auto turns carry on and
+          // the guide says so once.
+          if (!signal.aborted && roundText.length === 0 && assembled.size === 0 && isProviderDropped(error)) {
+            const next = this.options.fallbackInference?.(inference, triedProviders) ?? null;
+            if (next && !triedProviders.includes(next.providerId)) {
+              const reason = error instanceof Error ? error.message : String(error);
+              if (!(await this.continueElsewhere(turnId, turn.permissionMode, providerCallId, inference, next, signal))) {
+                this.store.interruptTurn(turnId, `Stopped after ${inference.providerId} dropped the connection. Send a follow-up to continue.`);
+                return;
+              }
+              this.store.recordProviderSwitch(turnId, { provider: inference.providerId, model: inference.modelId },
+                { provider: next.providerId, model: next.modelId }, reason);
+              inference = next;
+              used.add(next);
+              triedProviders.push(next.providerId);
+              streamLimits = providerStreamLimits(inference.maxOutputTokens, this.options);
+              continue;
+            }
           }
           throw error;
         }
@@ -501,6 +530,27 @@ export class AgentEngine {
     } catch (error) {
       console.error(`Snapshot post-state capture failed for session ${sessionId}; undo disabled`, error);
     }
+  }
+
+  /// Whether to carry a turn on with another provider. Only a chat you're in
+  /// (ask) is asked, as the model's own question with Continue and Stop; any
+  /// other turn has nobody at the window and continues.
+  private async continueElsewhere(turnId: string, permissionMode: PermissionMode, providerCallId: string,
+    from: TurnInference, to: TurnInference, signal: AbortSignal): Promise<boolean> {
+    const questions = permissionMode === "ask" ? this.options.questions : undefined;
+    if (!questions) return true;
+    const asked: UserQuestion[] = [{ question: `${from.providerId} dropped the connection. Continue on ${to.providerId} ${to.modelId}?`, suggestions: ["Continue", "Stop"] }];
+    const { toolCallId } = this.store.recordToolCall(turnId, providerCallId, `switch-${providerCallId}`, "ask_user", JSON.stringify({ questions: asked }));
+    this.store.startToolCall(toolCallId);
+    const { questionId, event } = this.store.requestQuestions(toolCallId, asked, "clarification", false);
+    const waiting = questions.wait(questionId, turnId, 1, signal, () => this.store.pauseQuestions(turnId));
+    this.store.publishEvent(event);
+    const answers = await waiting;
+    this.store.resolveQuestions(questionId, toolCallId, answers);
+    const answer = answers[0];
+    const go = answer?.source === "suggestion" ? answer.answer === "Continue" : answer?.source === "typed" ? !/^\s*(stop|no)\b/i.test(answer.answer ?? "") : false;
+    this.store.settleToolCall(toolCallId, "completed", go ? `Continuing on ${to.providerId}` : "Stopped");
+    return go;
   }
 
   /// A sub-agent reads and searches only, so it runs without an approval; its
@@ -865,6 +915,18 @@ function takePlannedHistoryTurns(history: HistoryTurn[], turnIds: string[]): His
     throw new Error("Context planner returned a non-prefix history reduction");
   }
   return history.splice(0, turnIds.length);
+}
+
+/// A failure of the connection or the service, not of the request: the
+/// socket closed, a timeout, a 5xx, a rate limit. Anything the model or the
+/// request did wrong (a 4xx, an incomplete answer) is not retried elsewhere.
+export function isProviderDropped(error: unknown): boolean {
+  if (error instanceof ProviderError) {
+    if (error.code && ["output_token_limit", "incomplete_response", "incomplete_tool_call", "model_not_listed"].includes(error.code)) return false;
+    if (error.status !== undefined) return error.status >= 500 || error.status === 408 || error.status === 429;
+  }
+  const text = [error instanceof Error ? error.message : String(error), error instanceof Error && error.cause instanceof Error ? error.cause.message : ""].join(" ");
+  return /socket|ECONN|EPIPE|ETIMEDOUT|ENOTFOUND|fetch failed|closed unexpectedly|network|unable to connect|did not emit an event before the timeout|exceeded the total timeout|terminated/i.test(text);
 }
 
 function isContextOverflow(error: unknown): boolean {

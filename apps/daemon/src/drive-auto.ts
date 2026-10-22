@@ -36,7 +36,11 @@ interface Saved { off: string[]; runs: Run[] }
 
 export class DriveAutoRuns {
   private saved: Saved;
+  /// Time before the daemon started doesn't count as quiet: a restart
+  /// usually means you just opened (or updated) demesne and are here.
+  private readonly startedAt: number;
   constructor(private readonly file: string, private readonly host: DriveAutoHost, private readonly now = () => Date.now()) {
+    this.startedAt = now();
     try {
       const value = JSON.parse(readFileSync(file, "utf8")) as Partial<Saved>;
       this.saved = { off: Array.isArray(value.off) ? value.off : [], runs: Array.isArray(value.runs) ? value.runs : [] };
@@ -72,8 +76,9 @@ export class DriveAutoRuns {
   private due(workspace: string): DriveAwayRequest["items"][number] | null {
     if (this.saved.off.includes(workspace) || !this.host.trusted(workspace) || this.host.busy(workspace)) return null;
     if (this.today(workspace).length >= AUTO_RUNS_PER_DAY) return null;
-    const last = this.host.lastActivity(workspace), quiet = last === null ? 0 : this.now() - last;
-    if (last === null || quiet < AUTO_QUIET_MINUTES * 60_000 || quiet > AUTO_RECENT_HOURS * 3_600_000) return null;
+    const last = this.host.lastActivity(workspace);
+    if (last === null || this.now() - last > AUTO_RECENT_HOURS * 3_600_000) return null;
+    if (this.now() - Math.max(last, this.startedAt) < AUTO_QUIET_MINUTES * 60_000) return null;
     const ideas = this.host.ideas(workspace);
     if (!ideas || this.now() - Date.parse(ideas.generatedAt) > AUTO_FRESH_HOURS * 3_600_000) return null;
     const ran = new Set(this.saved.runs.filter((run) => run.workspace === workspace).map((run) => run.idea));

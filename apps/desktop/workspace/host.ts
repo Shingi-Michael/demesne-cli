@@ -269,6 +269,7 @@ export class WorkspaceHost {
     return commands;
   }
   snapshot() {
+    const taken = this.breakage.taken();
     return {
       revision: this.revision,
       connection: this.connection,
@@ -328,6 +329,7 @@ export class WorkspaceHost {
       driveNext: {
         ...this.nextQueue,
         proposals: this.nextQueue.proposals.filter((item) => {
+          if (taken.has(item.id)) return false;
           const hidden = this.nextHidden[item.id];
           return hidden === undefined || (hidden !== "never" && hidden < Date.now());
         }),
@@ -1083,8 +1085,13 @@ export class WorkspaceHost {
       return this.breakage.setAuto(args.on === true);
     }
     if (["next-run", "next-plan", "next-snooze", "next-never"].includes(method)) {
+      // Drive may have just started this idea on its own: look before starting it twice.
+      if (method === "next-run" || method === "next-plan") await this.breakage.refreshAuto().catch(() => {});
       const item = this.snapshot().driveNext.proposals.find((proposal) => proposal.id === args.id);
-      if (!item) throw new Error("That proposal is no longer in the queue.");
+      if (!item) {
+        this.publish();
+        throw new Error(this.breakage.taken().has(String(args.id)) ? "Drive is already working on that one." : "That proposal is no longer in the queue.");
+      }
       if (method === "next-snooze") return this.hideNext(item.id, Date.now() + 24 * 3_600_000);
       if (method === "next-never") {
         this.drive?.addMemory({ kind: "veto", text: `${item.title}: ${item.why}`, source: "you" });

@@ -331,6 +331,12 @@ test("the window picks up an away run Drive started and leaves each one to revie
     await host.breakage.refreshAuto();
     expect(host.breakage.state.auto?.on).toBe(true);
     expect(host.breakage.state.away?.items.map((item) => item.proposal.title)).toEqual(["Tidy A", "Tidy B", "Tidy C"]);
+    // Ideas Drive already has in hand leave its list, so Plan or Run can't start them twice.
+    await eventually(() => !host.nextQueue.loading, 5000);
+    const idea = (id: string) => ({ ...tidy(id).proposal, evidence: [], minutes: 5, confidence: "high" as const, coders: 1, urgent: false, value: 1, cost: 1 });
+    host.nextQueue = { ...host.nextQueue, proposals: [idea("A"), idea("D")] as never };
+    expect(host.snapshot().driveNext.proposals.map((item) => item.id)).toEqual(["D"]);
+    await expect(host.handle("next-plan", { sessionId, id: "A" })).rejects.toThrow("Drive is already working on that one.");
     await eventually(() => host.breakage.state.away?.status === "finished", 15000);
     await eventually(() => host.breakage.state.fix?.status === "ready" && host.breakage.state.inbox.length === 2, 5000);
     expect(host.breakage.state.away?.items.map((item) => item.state)).toEqual(["ready", "ready", "ready"]);

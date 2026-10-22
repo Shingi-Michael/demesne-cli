@@ -18,7 +18,10 @@ function setup(overrides: Partial<DriveAutoHost> = {}) {
     ...overrides,
   };
   const file = join(mkdtempSync(join(tmpdir(), "drive-auto-")), "drive-auto.json");
+  // The daemon has been up for a while.
+  now -= 60 * 60_000;
   const auto = new DriveAutoRuns(file, host, () => now);
+  now += 60 * 60_000;
   return { auto, started, file, host, advance: (ms: number) => { now += ms; } };
 }
 
@@ -61,8 +64,27 @@ test("the switch turns it off for one project and is remembered", () => {
   expect(auto.set("/w", false).on).toBe(false);
   expect(auto.tick()).toEqual([]);
   expect(started).toEqual([]);
-  const reopened = new DriveAutoRuns(file, host, () => Date.parse("2026-10-21T10:00:00Z"));
+  let clock = Date.parse("2026-10-21T09:00:00Z");
+  const reopened = new DriveAutoRuns(file, host, () => clock);
+  clock = Date.parse("2026-10-21T10:00:00Z");
   expect(reopened.state("/w").on).toBe(false);
   expect(reopened.set("/w", true).on).toBe(true);
   expect(reopened.tick()).toEqual(["/w"]);
+});
+
+test("a daemon that just started waits out its own quiet minutes first", () => {
+  let now = Date.parse("2026-10-21T10:00:00Z");
+  const started: unknown[] = [];
+  const host: DriveAutoHost = {
+    workspaces: () => ["/w"], trusted: () => true, busy: () => false,
+    lastActivity: () => Date.parse("2026-10-21T08:00:00Z"),
+    ideas: () => ({ generatedAt: new Date(now).toISOString(), proposals: [idea("A")], signals: [] }),
+    start: (request) => { started.push(request); },
+  };
+  const auto = new DriveAutoRuns(join(mkdtempSync(join(tmpdir(), "drive-auto-")), "drive-auto.json"), host, () => now);
+  expect(auto.tick()).toEqual([]);
+  now += 19 * 60_000;
+  expect(auto.tick()).toEqual([]);
+  now += 2 * 60_000;
+  expect(auto.tick()).toEqual(["/w"]);
 });

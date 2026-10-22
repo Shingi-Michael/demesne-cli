@@ -25,7 +25,7 @@ export interface BreakageState {
   message: { text: string; tone: "ok" | "error"; url?: string } | null;
 }
 
-const LOCAL_EVERY = 2 * 60_000, GITHUB_EVERY = 5 * 60_000, FIX_EVERY = 3000;
+const LOCAL_EVERY = 2 * 60_000, GITHUB_EVERY = 5 * 60_000, FIX_EVERY = 3000, AUTO_EVERY = 15_000;
 const OPEN = new Set(["starting", "running", "ready", "failed"]);
 export const neverAlert = (signal: Pick<DriveSignal, "title">) => `Never alert: ${signal.title}`;
 
@@ -37,6 +37,7 @@ export class BreakageWatch {
   private timer: ReturnType<typeof setInterval> | null = null;
   private fixTimer: ReturnType<typeof setTimeout> | null = null;
   private awayTimer: ReturnType<typeof setTimeout> | null = null;
+  private autoTimer: ReturnType<typeof setInterval> | null = null;
   private dismissedAway: string | null = null;
   private checking = false;
   private unsupported = false;
@@ -70,13 +71,19 @@ export class BreakageWatch {
     this.options.publish();
     await this.check();
     this.timer = setInterval(() => void this.check(), LOCAL_EVERY);
+    // A run Drive starts on its own shows within seconds, not at the next check.
+    this.autoTimer = setInterval(() => {
+      const before = JSON.stringify(this.state.auto);
+      void this.refreshAuto().then(() => { if (JSON.stringify(this.state.auto) !== before) this.options.publish(); }, () => {});
+    }, AUTO_EVERY);
   }
 
   stop() {
     if (this.timer) clearInterval(this.timer);
     if (this.fixTimer) clearTimeout(this.fixTimer);
     if (this.awayTimer) clearTimeout(this.awayTimer);
-    this.timer = this.fixTimer = this.awayTimer = null;
+    if (this.autoTimer) clearInterval(this.autoTimer);
+    this.timer = this.fixTimer = this.awayTimer = this.autoTimer = null;
   }
 
   /// Reloads the open worktree work: the one on the card (running first, else
@@ -176,6 +183,14 @@ export class BreakageWatch {
   /// The open work an action names (by id), else the one on the card.
   private byId(id: unknown) {
     return typeof id === "string" && id ? [this.state.fix, ...this.state.inbox].find((fix) => fix?.id === id) ?? null : this.state.fix;
+  }
+
+  /// Ideas Drive already has in hand: running, queued, or waiting for review.
+  /// They leave Drive's list so nothing starts the same work twice.
+  taken(): Set<string> {
+    const ids = [this.state.fix, ...this.state.inbox].flatMap((fix) => (fix?.proposal ? [fix.proposal.id] : []));
+    for (const item of this.state.away?.items ?? []) if (!["skipped", "failed"].includes(item.state)) ids.push(item.proposal.id);
+    return new Set(ids);
   }
 
   /// Whether this daemon makes worktree fixes (older ones don't).

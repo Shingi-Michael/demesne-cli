@@ -699,6 +699,9 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .card-label em { font-style: normal; color: var(--t3); }
 .desktop #cards .card-right { flex: none; color: var(--t3); }
 .desktop #cards .card-on { color: var(--ok); }
+.desktop #cards .ico.beat { color: var(--ok); transform-origin: center; }
+@keyframes hb-beat { 0%, 40%, 100% { transform: scale(1); } 10% { transform: scale(1.22); } 20% { transform: scale(1.04); } 28% { transform: scale(1.16); } }
+@media (prefers-reduced-motion: no-preference) { .desktop #cards .ico.beat { animation: hb-beat 1.2s ease-out infinite; } }
 .desktop #cards .card-meter { display: inline-block; width: 28px; height: 4px; border-radius: 2px; background: var(--tone2); overflow: hidden; }
 .desktop #cards .card-meter i { display: block; height: 100%; background: var(--t2); }
 .desktop #cards .context-bar { display: flex; height: 6px; margin: 4px 0 8px; border-radius: 3px; overflow: hidden; background: var(--tone2); }

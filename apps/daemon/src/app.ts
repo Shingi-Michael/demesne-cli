@@ -58,7 +58,7 @@ import { DriveNextCache, proposeNext } from "./drive-next.ts";
 import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
-import { driveContext } from "./drive-in-chat.ts";
+import { driveContext, driveRunTool } from "./drive-in-chat.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
@@ -331,11 +331,24 @@ export function createDaemonApp(options: {
   // Every chat in a project is told what Drive has and is doing; Drive's
   // own sessions in its worktrees are not.
   const driveWorktrees = options.worktreeRoot ?? join(dirname(dirname(options.databasePath)), ".demesne-worktrees");
+  const inDriveWorktree = (root: string) => root === driveWorktrees || root.startsWith(`${driveWorktrees}/`);
+  // The ideas a chat sees and can run: the window's order, less ones Drive has in hand.
+  function chatIdeas(root: string) {
+    const cached = driveNextCache.read(root);
+    if (!cached) return { proposals: [], signals: [] };
+    const taken = new Set(driveFixes.list(root).flatMap((fix) => (fix.proposal && !["failed", "discarded"].includes(fix.status) ? [fix.proposal.id] : [])));
+    for (const item of driveFixes.away(root)?.items ?? []) if (!["skipped", "failed"].includes(item.state)) taken.add(item.proposal.id);
+    return { proposals: applyCalibration(cached.proposals, calibrationLog.calibration(root)).filter((proposal) => !taken.has(proposal.id)), signals: cached.signals };
+  }
   function driveInChat(sessionId: string): string | null {
     const row = store.database.query("SELECT w.root FROM sessions s JOIN workspaces w ON w.id = s.workspace_id WHERE s.id = ?").get(sessionId) as { root: string } | null;
-    if (!row || row.root === driveWorktrees || row.root.startsWith(`${driveWorktrees}/`)) return null;
-    return driveContext({ auto: driveAuto.state(row.root), ideas: driveNextCache.read(row.root)?.proposals ?? [], fixes: driveFixes.list(row.root), away: driveFixes.away(row.root) });
+    if (!row || inDriveWorktree(row.root)) return null;
+    return driveContext({ auto: driveAuto.state(row.root), ideas: chatIdeas(row.root).proposals, fixes: driveFixes.list(row.root), away: driveFixes.away(row.root) });
   }
+  tools.register(driveRunTool({
+    ideas: (root) => inDriveWorktree(root) || !workspaceTrust.isTrusted(root) ? null : chatIdeas(root),
+    run: (root, proposal, signals) => driveFixes.start(root, signals, proposal),
+  }));
   const activeDriveDecisions = new Set<Promise<unknown>>();
   const requestDrainWaiters = new Set<() => void>();
   let activeRequests = 0;

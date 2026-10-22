@@ -711,7 +711,8 @@ function renderCards() {
     row(ICON_COMPUTER, "This computer") +
     row(ICON_FOLDER, `${h(name)}${parent ? `<em> · ${h(parent)}</em>` : ""}`, "", root) +
     (branch ? row(ICON_BRANCH.replace("sidebar-branch", ""), h(branch)) : "") +
-    row(ICON_PULSE, "Heartbeat", s.connectors.heartbeat ? '<span class="card-on">On</span>' : "Off")));
+    // The pulse beats while Heartbeat is running.
+    row(s.connectors.heartbeat ? ICON_PULSE.replace('class="ico"', 'class="ico beat"') : ICON_PULSE, "Heartbeat", s.connectors.heartbeat ? '<span class="card-on">On</span>' : "Off")));
   if (c.percentage != null) {
     const capacity = c.capacity ?? 0;
     const parts = plan

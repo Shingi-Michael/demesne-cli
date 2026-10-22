@@ -118,11 +118,19 @@ export class BreakageWatch {
   async refreshAuto() {
     const client = this.options.client(), workspace = this.options.workspace();
     try { this.state.auto = (await client.driveAuto(workspace)).auto; } catch { this.state.auto = null; return; }
-    if (this.awayTimer) return;
+    if (this.awayTimer || this.fixTimer) return;
     const away = (await client.driveAway(workspace).catch(() => ({ away: null }))).away;
-    if (away?.status !== "running") return;
+    if (away?.status === "running") {
+      await this.refreshOpen().catch(() => {});
+      this.watchAway();
+      return;
+    }
+    // A chat can start one of Drive's ideas too (drive_run): show it like a Run.
+    const { fixes } = await client.driveFixes(workspace).catch(() => ({ fixes: [] as DriveFix[] }));
+    const running = fixes.find((fix) => (fix.status === "starting" || fix.status === "running") && !fix.mission);
+    if (!running || running.id === this.state.fix?.id) return;
     await this.refreshOpen().catch(() => {});
-    this.watchAway();
+    this.watchFix();
   }
 
   async setAuto(on: boolean) {

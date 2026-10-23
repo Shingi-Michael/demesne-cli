@@ -1045,6 +1045,27 @@ try {
   await page.locator("#deed .ct.act", { hasText: "Prove it" }).click();
   await until(() => page.locator("#deed .d4-counts .ct.ok").innerText().then(text => text.includes("1 proved")), "Prove it proves the sentence", 60_000);
   await capture("17-deed-counts");
+  // The composer finds as you type; Space opens the code under a sentence.
+  await page.locator("textarea").fill("quiet");
+  await until(() => page.locator("#deed .d3-line").innerText().then(text => text.includes("1 sentence says")), "typing finds the sentences that say it");
+  assert.equal(await page.locator("#deed .dz-s.dim").count(), 1, "the others fade");
+  assert.equal(await page.locator("#deed .dz-s mark").first().innerText(), "quiet");
+  await capture("17-deed-find");
+  await page.locator("textarea").fill("");
+  await until(() => page.locator("#deed .dz-s.dim").count().then(count => count === 0), "clearing it shows the page again");
+  await quietLine.focus();
+  await page.keyboard.press("Space");
+  await until(() => page.locator("#deed .peek").isVisible(), "Space unfolds the code under the sentence");
+  assert((await page.locator("#deed .peek").innerText()).includes("QUIET_MINUTES"), "it shows the line");
+  await capture("17-deed-code");
+  await page.keyboard.press("Space");
+  await until(() => page.locator("#deed .peek").count().then(count => count === 0), "Space folds it away");
+  // A sentence nothing tests: Drive's chat can't write one here, and it says so.
+  const untested = page.locator("#deed .dz-s", { hasText: "three ideas" });
+  await untested.click();
+  await page.locator("#deed button", { hasText: "Have Drive prove it" }).click();
+  await until(() => page.locator("#deed .dz-under", { hasText: "No test yet." }).isVisible(), "a chat that writes no test says so", 30_000);
+  await capture("17-deed-untested");
   writeFileSync(join(f.workspace, "quiet.ts"), "export const QUIET_MINUTES = 15;\nexport const PER_DAY = 3;\n");
   await until(() => page.locator("#deed .dz-s.st-false").isVisible(), "a code change breaks its sentence", 20_000);
   await until(() => page.locator(".sidebar-deed-check").innerText().then(text => text === "1 to check"), "the sidebar counts it");

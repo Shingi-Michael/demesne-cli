@@ -40,6 +40,7 @@ import {
   type PermissionAsksResponse,
   type DeedAction,
   type DeedRequest,
+  type DeedPeekResponse,
   type DeedResponse,
   type WorkspaceMapResponse,
   type WorkspaceLiveResponse,
@@ -705,6 +706,11 @@ export function createDaemonApp(options: {
         const workspace = url.searchParams.get("workspace") ?? "";
         if (!isAbsolute(workspace)) return apiError("invalid_request", "Expected a workspace", 400);
         return json({ deed: deedBook.state(workspace) } satisfies DeedResponse);
+      }
+      if (request.method === "GET" && url.pathname === "/v1/deed/peek") {
+        const workspace = url.searchParams.get("workspace") ?? "";
+        if (!isAbsolute(workspace)) return apiError("invalid_request", "Expected a workspace", 400);
+        return json({ peek: deedBook.peek(workspace, url.searchParams.get("id") ?? "") } satisfies DeedPeekResponse);
       }
       if (request.method === "POST" && url.pathname === "/v1/deed") {
         const body = await readJson(request) as DeedRequest;

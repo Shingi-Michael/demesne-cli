@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { Deed, DeedAction, DeedAnchor, DeedChange, DeedSentence, DeedState, DeedValue, DriveSignal } from "@demesne/protocol";
+import type { Deed, DeedAction, DeedAnchor, DeedChange, DeedPeek, DeedSentence, DeedState, DeedValue, DriveSignal } from "@demesne/protocol";
 import type { ProviderMessage, ProviderToolDefinition } from "@demesne/providers";
 import type { TurnInference } from "./processor.ts";
 import type { AgentTool } from "./tools.ts";
@@ -163,6 +163,16 @@ ${before}
 The code behind it until now: ${anchorList(old)}.
 
 Change the code so the sentence is true. Make the smallest change that does it, keep the rest of the software's behaviour as it is, and run the tests that cover it. Then call ${DEED_SETTLE_TOOL} with made: true and the files and lines that now make the sentence true. If it can't be made true, call ${DEED_SETTLE_TOOL} with made: false and say why in a sentence.`;
+}
+
+export function coverPrompt(sentence: DeedSentence): string {
+  return `This project's Deed says, in plain words, what the software does. This sentence is true of the code, but no test checks it:
+
+"${sentence.text}"
+
+The code that holds it: ${anchorList(sentence.anchors)}.
+
+Write a test that fails if the sentence stops being true. Follow the project's own test style, and put the test where its other tests live. Do not change the code under test. Run the test and make sure it passes. Then call ${DEED_SETTLE_TOOL} with made: true, the same files and lines, and tests: the test file you wrote. If you can't write one, call ${DEED_SETTLE_TOOL} with made: false and say why in a sentence.`;
 }
 
 const writeDefinition: ProviderToolDefinition = {
@@ -347,8 +357,9 @@ export class DeedBook {
         if (next !== sentence.state) { sentence.state = next; sentence.updatedAt = now(); changed = true; }
       }
       if ((sentence.state === "working" && !(sentence.sessionId && this.jobs.has(sentence.sessionId))) || (sentence.state === "checking" && !this.checking.has(sentence.id))) {
-        sentence.state = sentence.state === "checking" ? "check" : "failed";
-        if (sentence.state === "failed") sentence.why = "It stopped when Demesne restarted.";
+        sentence.state = sentence.state === "checking" ? "check" : sentence.covering ? "true" : "failed";
+        if (sentence.covering) { sentence.covering = undefined; sentence.proof = { state: "failed", at: now(), files: [], putBack: true, detail: "It stopped when Demesne restarted." }; }
+        else if (sentence.state === "failed") sentence.why = "It stopped when Demesne restarted.";
         sentence.updatedAt = now(); changed = true;
       }
     }
@@ -389,19 +400,22 @@ export class DeedBook {
         });
         return saved;
       }
-      case "make": case "fix": {
+      case "make": case "fix": case "cover": {
+        const cover = request.action === "cover";
         const text = request.action === "make" ? clean(request.text) : "";
         if (request.action === "make" && !text) throw new Error("A sentence needs words");
-        const existing = request.id ? find(request.id) : null;
+        const existing = "id" in request && request.id ? find(request.id) : null;
         if (existing?.state === "working") return deed;
+        if (cover && existing?.state !== "true") throw new Error("Only a sentence that holds can be covered by a test");
         // The same words on a sentence that holds (or is being checked) is nothing to do.
         if (request.action === "make" && existing && text === existing.text && !["false", "failed", "wish"].includes(existing.state)) return deed;
         const sentence: DeedSentence = existing ?? { id: randomUUID(), section: sectionFor(deed, text), text, anchors: [], state: "wish", updatedAt: now() };
         if (request.action === "make" && existing && text !== existing.text) { sentence.was = existing.state === "wish" ? undefined : existing.was ?? existing.text; sentence.why = undefined; }
         if (request.action === "make") sentence.text = text;
         const old = sentence.anchors;
-        const sessionId = this.host.startSession(`Deed · ${sentence.text.slice(0, 60)}`, workspace);
-        const prompt = makePrompt(sentence, old);
+        const sessionId = this.host.startSession(`Deed · ${cover ? "test · " : ""}${sentence.text.slice(0, 60)}`, workspace);
+        const prompt = cover ? coverPrompt(sentence) : makePrompt(sentence, old);
+        sentence.covering = cover || undefined;
         sentence.state = "working"; sentence.sessionId = sessionId; sentence.madeAt = undefined; sentence.updatedAt = now();
         if (request.action === "make") sentence.why = undefined;
         this.jobs.set(sessionId, { workspace, kind: "make", sentenceId: sentence.id });
@@ -418,8 +432,13 @@ export class DeedBook {
             if (!item || item.sessionId !== sessionId) return;
             const settled = job?.settled;
             item.updatedAt = now();
-            if (settled?.made && settled.anchors.length) {
-              Object.assign(item, { state: "true", anchors: settled.anchors, madeAt: now(), files: settled.anchors.length, why: undefined, words: undefined, values: undefined, undo: undefined, tests: settled.tests.length ? settled.tests : item.tests });
+            const covered = item.covering;
+            item.covering = undefined;
+            if (covered && !(settled?.made && settled.tests.length)) {
+              // Nothing to prove it with: the sentence is as true as before.
+              Object.assign(item, { state: "true", anchors: old, madeAt: undefined, proof: { state: "failed", at: now(), files: [], putBack: true, detail: settled?.why || "No test was written for it." } });
+            } else if (settled?.made && settled.anchors.length) {
+              Object.assign(item, { state: "true", anchors: settled.anchors, madeAt: now(), files: settled.anchors.length, why: undefined, words: undefined, values: covered ? item.values : undefined, undo: undefined, proof: covered ? item.proof : undefined, tests: settled.tests.length ? settled.tests : item.tests });
             } else {
               item.state = "failed";
               item.why = settled?.why || (settled?.made ? "The chat didn't say which code makes it true." : "The chat ended without making it true.");
@@ -580,6 +599,18 @@ export class DeedBook {
       this.update(workspace, (next) => { if (next.proving) next.proving = { ...next.proving, running: false }; });
     })();
     return saved;
+  }
+
+  /// The lines of code under a sentence, as they are now.
+  peek(workspace: string, id: string): DeedPeek | null {
+    const sentence = this.read(workspace).sentences.find((item) => item.id === id), anchor = sentence?.anchors[0];
+    if (!sentence || !anchor) return null;
+    const file = inside(workspace, anchor.path), text = file ? readText(workspace, file) : null;
+    if (!file || text === null) return null;
+    const lines = text.split("\n");
+    const at = anchor.quote && text.includes(anchor.quote) ? text.slice(0, text.indexOf(anchor.quote)).split("\n").length : anchor.line ?? 1;
+    const from = Math.max(1, Math.min(at, Math.max(1, lines.length)) - 2);
+    return { id, path: file, line: at, lines: lines.slice(from - 1, from + 6).map((line, index) => ({ n: from + index, text: line.length > 160 ? `${line.slice(0, 159)}…` : line })) };
   }
 
   /// The sentences a change to these files could break, with tests to run.

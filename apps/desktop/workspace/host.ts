@@ -1374,6 +1374,10 @@ export class WorkspaceHost {
       return root ? pointSourceIn(root, args.pick as PointPick) : null;
     }
     // The Deed: the open project's sentences, and what to do with one.
+    if (method === "deed-peek") {
+      const root = typeof args.workspace === "string" ? args.workspace : this.current?.session.workspace?.root ?? this.workspace;
+      return root ? (await this.client.deedPeek(root, String(args.id))).peek : null;
+    }
     if (method === "deed" || method === "deed-act") {
       const root = typeof args.workspace === "string" ? args.workspace : this.current?.session.workspace?.root ?? this.workspace;
       if (!root) return null;

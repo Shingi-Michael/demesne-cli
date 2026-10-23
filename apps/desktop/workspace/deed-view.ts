@@ -1,6 +1,6 @@
 /// The Deed page: a project's plain sentences, each with a mark for its state
 /// and, under the one you're on, a single line of what you can do with it.
-import type { Deed, DeedChange, DeedSentence, DeedValue } from "@demesne/protocol";
+import type { Deed, DeedChange, DeedPeek, DeedSentence, DeedValue } from "@demesne/protocol";
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -14,6 +14,41 @@ export interface DeedUi {
   focus: string | null; editing: string | null; live?: { sentence: string; value: string; to: number | string } | null;
   /// Only these sentences, and the page as it read at the start of this day (ms).
   filter?: DeedFilter | null; since?: number | null;
+  /// What the composer is finding, and the code unfolded under a sentence.
+  find?: string; peek?: { id: string; at: string; data: DeedPeek | null } | null;
+}
+
+const findWords = (find: string | undefined) => (find ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+/// Sentences that say every word of what is being typed.
+export const findHits = (deed: Deed, find: string | undefined) => {
+  const want = findWords(find);
+  return want.length ? deed.sentences.filter((sentence) => want.every((word) => sentence.text.toLowerCase().includes(word))) : [];
+};
+const markFound = (html: string, find: string | undefined) => {
+  const pattern = findWords(find).map((word) => h(word).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (!pattern.length) return html;
+  const found = new RegExp(`(${pattern.join("|")})`, "gi");
+  // Only the text between tags, so a live word keeps its marks.
+  return html.split(/(<[^>]*>)/).map((part, index) => index % 2 ? part : part.replace(found, "<mark>$1</mark>")).join("");
+};
+
+/// The lines of code under a sentence, its live values marked and, while one
+/// is being changed, showing the new value.
+export function peekHTML(sentence: DeedSentence, peek: DeedPeek, ui: DeedUi): string {
+  const tests = sentence.tests?.length ? `proved by ${sentence.tests.map((file) => file.split("/").at(-1)).join(", ")}` : "no test holds it";
+  const lines = peek.lines.map((line) => {
+    const value = sentence.values?.find((item) => item.path === peek.path && item.code.trim() === line.text.trim());
+    let body = h(line.text);
+    if (value) {
+      const at = line.text.search(new RegExp(`(?<![\\w.])${escape(value.literal)}(?![\\w])`));
+      if (at >= 0) {
+        const live = ui.live?.sentence === sentence.id && ui.live.value === value.id ? liveWord(value, ui.live.to).literal : null;
+        body = `${h(line.text.slice(0, at))}<span class="tok${live && live !== value.literal ? " on" : ""}">${live && live !== value.literal ? `‹ ${h(live)} ›` : h(value.literal)}</span>${h(line.text.slice(at + value.literal.length))}`;
+      }
+    }
+    return `<div class="pk-l${line.n === peek.line ? " at" : ""}"><i>${line.n}</i>${body}</div>`;
+  }).join("");
+  return `<div class="peek"><div class="pk-h"><span>${h(peek.path)}</span><span class="pk-dim">line ${peek.line} · ${h(tests)}</span></div>${lines}</div>`;
 }
 
 /// Sentences that need the person: their code changed, they're no longer
@@ -103,6 +138,8 @@ function proofLine(sentence: DeedSentence): string {
     const ticks = Math.min(proof.passed ?? 0, 24);
     return `<div class="dz-under made"><span class="dz-ok">✓ Proved</span><span class="dz-quiet">${ticks ? `<span class="dz-ticks">${"<i></i>".repeat(ticks)}</span>` : ""}${proof.passed ? plural(proof.passed, "test") : "its tests"} in ${names}${proof.ms && proof.ms >= 100 ? ` · ${(proof.ms / 1000).toFixed(1)}s` : ""}</span>${undo}${btn("deed-seen", "×", { id: sentence.id }, "dz-quiet dz-x")}</div>`;
   }
+  // A chat that wrote no test is no failure: the sentence is as true as before.
+  if (!proof.files.length) return `<div class="dz-under"><span class="dz-quiet">No test yet.</span><span class="dz-why">${h(proof.detail ?? "")}</span>${btn("deed-cover", "Have Drive try again", { id: sentence.id }, "dz-alt")}</div>`;
   return `<div class="dz-under drifted bad"><span class="dz-bad">${proof.putBack ? "Not proved, so it went back." : "Not proved."}</span><span class="dz-why">${h(proof.detail ?? "Its tests failed.")}</span><div class="dz-pick">${proof.putBack ? "" : btn("deed-fix", "Fix the code", { id: sentence.id }, "dz-go")}${btn("deed-prove", "Prove again", { id: sentence.id }, "dz-alt")}</div></div>`;
 }
 
@@ -115,7 +152,7 @@ function under(sentence: DeedSentence, ui: DeedUi): string {
   const chat = sentence.sessionId ? btn("select-session", "Open its chat", { id: sentence.sessionId }, "dz-quiet") : "";
   switch (sentence.state) {
     case "working":
-      return `<div class="dz-under"><span class="shine dz-shine">Making it true</span>${chat}</div>`;
+      return `<div class="dz-under"><span class="shine dz-shine">${sentence.covering ? "Writing a test that proves it" : "Making it true"}</span>${chat}</div>`;
     case "checking":
       return `<div class="dz-under"><span class="shine dz-shine">Reading the code under it</span></div>`;
     case "false":
@@ -130,7 +167,7 @@ function under(sentence: DeedSentence, ui: DeedUi): string {
       if (ui.live?.sentence === sentence.id) return liveLine(sentence, ui);
       if (sentence.proof && (sentence.proof.state !== "passed" || ui.focus === sentence.id || sentence.undo)) return proofLine(sentence);
       if (sentence.madeAt) return `<div class="dz-under made"><span class="dz-ok">✓ Made true</span><span class="dz-quiet">${h(files(sentence).join(", "))}</span>${chat}${btn("deed-seen", "×", { id: sentence.id }, "dz-quiet dz-x")}</div>`;
-      return ui.focus === sentence.id ? `<div class="dz-under"><span class="dz-quiet">${sentence.values?.length ? "Drag or click an underlined word, or click the words to change them; the code follows." : "Click the words to change them; the code follows."}</span>${sentence.tests?.length ? btn("deed-prove", "Prove it", { id: sentence.id }, "dz-quiet") : ""}</div>` : "";
+      return ui.focus === sentence.id ? `<div class="dz-under"><span class="dz-quiet">${sentence.values?.length ? "Drag or click an underlined word, or click the words to change them; the code follows." : "Click the words to change them; the code follows."} Space shows its code.</span>${sentence.tests?.length ? btn("deed-prove", "Prove it", { id: sentence.id }, "dz-quiet") : `<span class="dz-quiet">No test holds it yet.</span>${btn("deed-cover", "Have Drive prove it", { id: sentence.id }, "dz-go")}`}</div>` : "";
   }
 }
 
@@ -147,17 +184,20 @@ const MARK: Record<string, string> = { check: "amber", false: "amber", checking:
 
 function sentenceHTML(sentence: DeedSentence, ui: DeedUi): string {
   // A word being changed sets the old proof aside until Enter.
-  const proof = sentence.state === "true" && ui.live?.sentence !== sentence.id ? sentence.proof?.state : undefined;
+  // (A chat that wrote no test left it as true as it was: no red.)
+  const proof = sentence.state === "true" && ui.live?.sentence !== sentence.id && !(sentence.proof?.state === "failed" && !sentence.proof.files.length) ? sentence.proof?.state : undefined;
   const living = ui.live?.sentence === sentence.id;
   const tone = living || proof === "running" ? "blue" : proof === "failed" ? "red" : proof === "passed" || (sentence.state === "true" && sentence.madeAt) ? "green" : sentence.state === "true" ? "hol" : MARK[sentence.state] ?? "";
   const on = ui.focus === sentence.id;
-  const cls = ["dz-s", `st-${sentence.state}`, proof ? `pr-${proof}` : "", on ? "on" : "", living ? "living" : "", sentence.madeAt && sentence.state === "true" ? "fresh" : ""].filter(Boolean).join(" ");
+  const finding = findWords(ui.find).length > 0 && !ui.since;
+  const hit = finding && findHits({ sentences: [sentence] } as Deed, ui.find).length > 0;
+  const cls = ["dz-s", `st-${sentence.state}`, proof ? `pr-${proof}` : "", on ? "on" : "", finding && !hit ? "dim" : "", living ? "living" : "", sentence.madeAt && sentence.state === "true" ? "fresh" : ""].filter(Boolean).join(" ");
   const anchors = where(sentence);
   const margin = anchors.length ? `<span class="dz-anc">${anchors.map((anchor) => h(anchor)).join("<br>")}</span>` : "";
-  const words = sentence.was && sentence.state === "working" ? wordDiff(sentence.was, sentence.text) : liveWords(sentence, ui);
+  const words = sentence.was && sentence.state === "working" ? wordDiff(sentence.was, sentence.text) : hit ? markFound(liveWords(sentence, ui), ui.find) : liveWords(sentence, ui);
   if (ui.editing === sentence.id)
     return `<div class="${cls} editing" data-deed="${h(sentence.id)}"><span class="dz-mk blue"></span><textarea class="dz-edit" rows="1" spellcheck="true" aria-label="Change this sentence">${h(sentence.text)}</textarea>${margin}</div><div class="dz-under" id="deed-edit-line">${editLine(sentence, sentence.text)}</div>`;
-  return `<div class="${cls}" data-deed="${h(sentence.id)}" tabindex="0" title="${h([STATE_WORDS[sentence.state], ...anchors].filter(Boolean).join("\n"))}"><span class="dz-mk ${tone}"></span><span class="dz-words">${words}</span>${margin}</div>${on || ui.live?.sentence === sentence.id || sentence.state === "working" || sentence.state === "false" || (sentence.state === "true" && (sentence.madeAt || (sentence.proof && (sentence.proof.state !== "passed" || sentence.undo)))) ? under(sentence, ui) : ""}`;
+  return `<div class="${cls}" data-deed="${h(sentence.id)}" tabindex="0" title="${h([STATE_WORDS[sentence.state], ...anchors].filter(Boolean).join("\n"))}"><span class="dz-mk ${tone}"></span><span class="dz-words">${words}</span>${margin}</div>${ui.peek?.id === sentence.id && ui.peek.data ? peekHTML(sentence, ui.peek.data, ui) : ""}${on || ui.live?.sentence === sentence.id || sentence.state === "working" || sentence.state === "false" || (sentence.state === "true" && (sentence.madeAt || (sentence.proof && (sentence.proof.state !== "passed" || sentence.undo)))) ? under(sentence, ui) : ""}`;
 }
 const STATE_WORDS: Record<string, string> = { true: "True of the code", check: "Its code changed: check it", checking: "Checking", false: "No longer true", working: "Being made true", failed: "Not made true", wish: "A wish: not true yet" };
 
@@ -173,7 +213,8 @@ export function deedPage(deed: Deed | null, ui: DeedUi, name: string, now = Date
   }
   const rewriting = writing?.status === "running" ? ` <span class="shine dz-shine">rewriting…</span>` : writing?.status === "failed" ? ` <span class="dz-bad">${h(writing.error ?? "")}</span>` : "";
   const live = deed.sentences.some((sentence) => sentence.values?.length || sentence.tests?.length);
-  const line = `${plural(deed.sentences.length, "sentence")}, written from the code.${live || writing ? "" : ` ${btn("deed-write", "Read the code again", {}, "dz-quiet dz-inline")} to find the words you can change in place.`}${rewriting}`;
+  const finding = findWords(ui.find).length && !ui.since ? findHits(deed, ui.find).length : null;
+  const line = finding !== null ? (finding ? `${plural(finding, "sentence")} say${finding === 1 ? "s" : ""} “${h(ui.find!.trim())}”. Enter adds what you typed as a new one.` : `No sentence says “${h(ui.find!.trim())}”. Enter adds it as a new one.`) : `${plural(deed.sentences.length, "sentence")}, written from the code.${live || writing ? "" : ` ${btn("deed-write", "Read the code again", {}, "dz-quiet dz-inline")} to find the words you can change in place.`}${rewriting}`;
   return `<div class="d4-head"><div class="d3-name">${h(name)}</div><div class="d3-line">${line}</div>${deed.proving?.running ? provingLine(deed) : countsLine(deed, ui)}${weekLine(deed, ui, now)}</div>${sections(deed, ui, now)}`;
 }
 
@@ -247,7 +288,8 @@ function sections(deed: Deed, ui: DeedUi, now = Date.now()): string {
     if (!items.length && !gone.length) return "";
     const count = keep ? `<span class="h-n">${items.length} of ${all.length}</span>` : "";
     const rows = items.map((sentence) => since ? sinceRow(sentence, ui, since) : sentenceHTML(sentence, ui)).join("") + gone.map((change) => `<div class="dz-s x-changed"><span class="dz-mk"></span><span class="dz-words"><del>${h(change.was)}</del></span><span class="dz-anc dz-since">removed · ${h(sinceMark(change))}</span></div>`).join("");
-    return `<h3>${h(section)}${count}</h3><div class="dz-p">${rows}</div>`;
+    const quiet = findWords(ui.find).length > 0 && !since && !findHits({ sentences: items } as Deed, ui.find).length;
+    return `<h3${quiet ? ' class="dim"' : ""}>${h(section)}${count}</h3><div class="dz-p">${rows}</div>`;
   }).join("");
   return out || `<p class="deed-lead">${since ? "Nothing in the Deed changed since then." : "No sentence fits."}</p>`;
 }

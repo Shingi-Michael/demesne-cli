@@ -304,3 +304,46 @@ test("reading the code again keeps a sentence's place in the week when its words
   // The rewrite itself adds nothing to the log.
   expect(after.log).toEqual(before.log);
 });
+
+test("a sentence nothing tests can have a chat write its test, which then proves it", async () => {
+  const { root, deeds, turns, tool, perDay } = await live();
+  expect(perDay.tests).toBeUndefined();
+  expect(() => deeds.act(root, { action: "cover", id: "nope" })).toThrow("no longer in the deed");
+  const working = deeds.act(root, { action: "cover", id: perDay.id }).sentences[1]!;
+  expect(working).toMatchObject({ state: "working", covering: true });
+  await flush();
+  const turn = turns.at(-1)!;
+  expect(turn.mode).toBe("ask");
+  expect(turn.prompt).toContain("no test checks it");
+  writeFileSync(join(root, "src", "day.test.ts"), "// a test\n");
+  await tool("deed_settle").execute({ made: true, anchors: [{ path: "src/auto.ts", line: 2 }], tests: ["src/day.test.ts"] }, { workspaceRoot: root, signal: new AbortController().signal, sessionId: turn.sessionId });
+  turn.end();
+  await flush();
+  await flush();
+  const done = deeds.state(root).sentences[1]!;
+  expect(done).toMatchObject({ state: "true", tests: ["src/day.test.ts"], text: "It runs at most three ideas a day." });
+  expect(done.covering).toBeUndefined();
+  expect(done.values).toHaveLength(1);
+  expect(done.proof?.state).toBe("passed");
+});
+
+test("a chat that writes no test leaves the sentence as true as before, and says so", async () => {
+  const { root, deeds, turns, perDay } = await live();
+  deeds.act(root, { action: "cover", id: perDay.id });
+  await flush();
+  turns.at(-1)!.end();
+  await flush();
+  const after = deeds.state(root).sentences[1]!;
+  expect(after).toMatchObject({ state: "true", proof: { state: "failed", files: [] } });
+  expect(after.covering).toBeUndefined();
+});
+
+test("a peek shows the lines under a sentence as they are now", async () => {
+  const { root, deeds, perDay } = await live();
+  writeFileSync(join(root, "src", "auto.ts"), `// moved\n// down\n${CODE}`);
+  const peek = deeds.peek(root, perDay.id)!;
+  expect(peek.path).toBe("src/auto.ts");
+  expect(peek.line).toBe(4);
+  expect(peek.lines.find((line) => line.n === 4)!.text).toContain("PER_DAY");
+  expect(deeds.peek(root, "nope")).toBeNull();
+});

@@ -652,6 +652,12 @@ function branchChip() {
 const SHIP_PROMPT = "Commit these changes, push the branch, and open a pull request. If this is the default branch, make a new branch for them first.";
 /// The context ring's breakdown, unfolded above it until Esc or a click away.
 let contextCardOpen = false;
+// Compacting a mostly empty context frees little and loses detail, so the
+// link waits until the chat is half full; /compact works at any size.
+function worthCompacting(percentage: number | null | undefined) {
+  return (percentage ?? 0) >= 50;
+}
+
 function renderContextCard() {
   const card = el("context-card"), ring = el("composer-context");
   const c = context(), plan = state?.provider?.contextPlan;
@@ -671,7 +677,7 @@ function renderContextCard() {
     : [{ name: "Conversation", tokens: c.used ?? 0, tone: "a" }];
   const free = Math.max(0, capacity - parts.reduce((sum, part) => sum + part.tokens, 0));
   const share = (tokens: number) => (capacity ? (tokens / capacity) * 100 : 0);
-  card.innerHTML = `<div class="context-head"><span>Context</span><span>${c.percentage}% · ${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span></div><div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div><div class="context-legend">${[...parts, { name: "Free", tokens: free, tone: "free" }].filter((part) => part.tokens > 0).map((part) => `<u class="tone-${part.tone}"></u><span>${part.name}</span><em>${tokensShort(part.tokens)}</em>`).join("")}</div>${btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact")}`;
+  card.innerHTML = `<div class="context-head"><span>Context</span><span>${c.percentage}% · ${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span></div><div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div><div class="context-legend">${[...parts, { name: "Free", tokens: free, tone: "free" }].filter((part) => part.tokens > 0).map((part) => `<u class="tone-${part.tone}"></u><span>${part.name}</span><em>${tokensShort(part.tokens)}</em>`).join("")}</div>${worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : ""}`;
 }
 /// The cards on the right: where this chat works, how full its context is,
 /// what changed, and whatever else is live (agents, a preview,
@@ -725,7 +731,7 @@ function renderCards() {
     out.push(card("context", "Context", `${c.percentage}%<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>`,
       `<div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div>` +
       `<div class="card-legend">${parts.filter((part) => part.tokens > 0).map((part) => `<span><u class="tone-${part.tone}"></u>${part.name} ${tokensShort(part.tokens)}</span>`).join("")}</div>` +
-      `<div class="card-foot"><span>${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span>${btn("compact", s.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link")}</div>`));
+      `<div class="card-foot"><span>${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span>${worthCompacting(c.percentage) ? btn("compact", s.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link") : ""}</div>`));
   }
   if (files.length) {
     const shownFiles = files.slice(0, 6);

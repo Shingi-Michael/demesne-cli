@@ -386,6 +386,9 @@ try {
   await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
   await page.locator(`.sidebar-session[data-args*='${sessionId}'] .sidebar-session-name`).dblclick();
+  const renameLook = await page.locator(".sidebar-rename input").evaluate(node => { const style = getComputedStyle(node); return style.borderTopWidth + style.boxShadow + style.backgroundColor; });
+  assert.equal(renameLook, "0pxnonergba(0, 0, 0, 0)", "the name is edited on the row, with no box or ring");
+  await capture("02-rename");
   await page.locator(".sidebar-rename input").fill("Desktop smoke, renamed");
   await page.locator(".sidebar-rename input").press("Enter");
   await until(async () => (await f.client.getSessionState(sessionId)).session.title === "Desktop smoke, renamed", "double-click renames the chat in place");

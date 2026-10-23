@@ -146,11 +146,12 @@ async function applyBootstrap(result: DesktopBootstrap) {
   }
   setBusy(false, "");
 }
-async function openProject(path?: string, sessionId?: string) {
+/// `fresh` opens a new chat there carrying `draft`: Home's where word.
+async function openProject(path?: string, sessionId?: string, fresh?: { draft: string }) {
   if (busy) return;
   setBusy(true, "Opening project…");
   try {
-    const result = await request<DesktopBootstrap>(path ? "desktop-open-project" : "desktop-select-project", path ? { path, ...(sessionId ? { sessionId } : {}) } : {});
+    const result = await request<DesktopBootstrap>(path ? "desktop-open-project" : "desktop-select-project", { ...(path ? { path, ...(sessionId ? { sessionId } : {}) } : {}), ...(fresh ? { fresh: true, draft: fresh.draft } : {}) });
     // A successful recovery gets a fresh webview, including UI listeners.
     if (fatal && result.workspace && result.snapshot) { window.location.reload(); return; }
     await applyBootstrap(result);
@@ -163,8 +164,8 @@ async function openProject(path?: string, sessionId?: string) {
 for (const id of ["desktop-choose-project", "desktop-error-choose", "sidebar-open-project"])
   el(id).addEventListener("click", () => { void openProject(); });
 document.addEventListener("demesne:open-project", (event) => {
-  const { path, sessionId } = (event as CustomEvent<{ path: string; sessionId?: string }>).detail;
-  void openProject(path, sessionId);
+  const { path, sessionId, fresh, draft } = (event as CustomEvent<{ path?: string; sessionId?: string; fresh?: boolean; draft?: string }>).detail;
+  void openProject(path, sessionId, fresh ? { draft: draft ?? "" } : undefined);
 });
 el("desktop-retry").addEventListener("click", () => window.location.reload());
 document.addEventListener("keydown", (event) => {

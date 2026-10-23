@@ -407,6 +407,21 @@ export class DemesneStore {
     return result;
   }
 
+  /// Gives a chat that has no project a folder: its messages stay and its
+  /// next turn gets the project's tools. The caller checks trust.
+  setSessionWorkspace(id: string, workspaceRoot: string): Session {
+    const now = new Date().toISOString();
+    return this.database.transaction(() => {
+      const session = this.getSessionOrThrow(id);
+      if (session.workspace) throw new InvalidStateError("This chat already belongs to a project");
+      const existing = this.database.query("SELECT id FROM workspaces WHERE root = ?").get(workspaceRoot) as { id: string } | null;
+      const workspaceId = existing?.id ?? crypto.randomUUID();
+      if (!existing) this.database.query("INSERT INTO workspaces (id, root, created_at) VALUES (?, ?, ?)").run(workspaceId, workspaceRoot, now);
+      this.database.query("UPDATE sessions SET workspace_id = ?, updated_at = ? WHERE id = ?").run(workspaceId, now, id);
+      return this.getSessionOrThrow(id);
+    })();
+  }
+
   /// Removes a session and everything recorded in it, for good. The caller
   /// makes sure no turn is running in it.
   deleteSession(id: string): void {

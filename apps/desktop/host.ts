@@ -100,7 +100,10 @@ export class DesktopHost {
     this.preferencePath = join(settings.dataDirectory, "desktop-ui.json");
     this.prefs = readPreferences(this.preferencePath);
     const workspace = options.workspace === undefined ? this.prefs.lastWorkspace : desktopWorkspace(options.workspace);
-    this.ready = workspace ? this.select(workspace).then(() => {}).catch(error => {
+    // Every launch lands on Home, unless it was asked for a chat or a
+    // message: as Just a chat, or in the project it was opened with.
+    const home = !options.sessionId && !options.startup?.prompt;
+    this.ready = workspace ? this.select(workspace, undefined, options.workspace === undefined ? { home } : { fresh: home }).then(() => {}).catch(error => {
       this.send({ kind: "protocol-error", error: `Could not restore project: ${error instanceof Error ? error.message : String(error)}` });
     }) : Promise.resolve();
   }
@@ -108,10 +111,14 @@ export class DesktopHost {
   bootstrap(): DesktopBootstrap {
     return { workspace: this.host?.workspace ?? null, recentProjects: [...this.prefs.recentProjects], snapshot: this.host?.snapshot() ?? null, userName: userFirstName() };
   }
-  private async select(path: unknown, sessionId?: unknown): Promise<DesktopBootstrap> {
+  /// `home` opens on an empty chat with no project; `fresh` opens an empty
+  /// chat in the project, carrying `draft` (picked from Home's where word).
+  private async select(path: unknown, sessionId?: unknown, open: { home?: boolean; fresh?: boolean; draft?: unknown } = {}): Promise<DesktopBootstrap> {
     const workspace = desktopWorkspace(path);
     if (sessionId !== undefined && (typeof sessionId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(sessionId)))
       throw new Error("Invalid session id");
+    if (open.draft !== undefined && (typeof open.draft !== "string" || open.draft.length > 128_000)) throw new Error("Invalid draft");
+    const draft = typeof open.draft === "string" ? open.draft : "";
     const selectChat = async (host: WorkspaceHost) => {
       if (typeof sessionId !== "string") return;
       if (!host.sessions.some(session => session.id === sessionId && session.workspace?.root === workspace))
@@ -119,12 +126,16 @@ export class DesktopHost {
       await host.select(sessionId);
     };
     if (this.host?.workspace === workspace) {
+      if (open.fresh) { await this.host.handle("new-session", { draft, reuse: true }); return this.bootstrap(); }
       await selectChat(this.host);
       this.rememberSession(this.host.snapshot());
       return this.bootstrap();
     }
     if (this.switching) throw new Error("A project is already opening");
-    if (this.host?.hasUnsentDrafts) throw new Error("Send or clear your unsent drafts before changing projects");
+    // A draft carried to the new project is not left behind.
+    const left = this.host?.draft ?? "";
+    if (open.draft !== undefined && this.host) this.host.draft = "";
+    if (this.host?.hasUnsentDrafts) { this.host.draft = left; throw new Error("Send or clear your unsent drafts before changing projects"); }
     if (this.host?.busy) throw new Error("Wait for the current session action to finish before changing projects");
     if (this.host?.drive?.agent.active) throw new Error("Pause Drive before changing projects");
     this.switching = true;
@@ -133,7 +144,7 @@ export class DesktopHost {
     try {
       const settings = loadCliSettings({ workspaceRoot: workspace, serverOverride: this.options.server });
       const savedSession = this.prefs.lastSessions[sessionKey(settings.server, workspace)];
-      const selectedSession = this.options.sessionId ?? savedSession;
+      const selectedSession = open.home || open.fresh ? undefined : this.options.sessionId ?? savedSession;
       // A mission carried on in the background since the window closed comes
       // back to the window before it loads the journal.
       const reclaimed = await reclaimDrive(
@@ -145,6 +156,7 @@ export class DesktopHost {
           this.send({ kind: "update", update: encoder.encode(state) });
         } },
         drive: true,
+        ...(open.home ? { home: "plain" as const } : open.fresh ? { home: "project" as const } : {}),
         copy: text => this.native("copy", { text }),
         open: path => this.native("open", { path }),
         ...(this.options.startup?.model || this.options.startup?.prompt ? { startup: this.options.startup } : {}),
@@ -155,7 +167,7 @@ export class DesktopHost {
       // Keep the previous host until the replacement is ready. An offline
       // daemon still yields a valid project with the existing Start daemon UI.
       await candidate.connect();
-      if (savedSession && !this.options.sessionId && (!candidate.current || !candidate.sessions.some(session => session.id === savedSession) || candidate.current.session.workspace?.root !== workspace)) {
+      if (selectedSession && savedSession && !this.options.sessionId && (!candidate.current || !candidate.sessions.some(session => session.id === savedSession) || candidate.current.session.workspace?.root !== workspace)) {
         // Deleted/archived sessions or a fresh daemon must not strand the
         // desktop in a false offline state. A real offline daemon stays offline.
         try {
@@ -165,6 +177,7 @@ export class DesktopHost {
         } catch {}
       }
       await selectChat(candidate);
+      if (draft) candidate.carryDraft(draft);
       if (reclaimed && candidate.drive && candidate.driveState?.status === "paused" && candidate.connection === "online") {
         try {
           if (candidate.current?.session.id !== reclaimed.sessionId) await candidate.select(reclaimed.sessionId);
@@ -253,7 +266,8 @@ export class DesktopHost {
       return;
     }
     if (request.method === "desktop-bootstrap") return this.bootstrap();
-    if (request.method === "desktop-open-project") return this.select(request.args.path, request.args.sessionId);
+    if (request.method === "desktop-open-project")
+      return this.select(request.args.path, request.args.sessionId, { fresh: request.args.fresh === true, draft: request.args.draft });
     if (this.switching) throw new Error("Wait for the project to open");
     if (!this.host) throw new Error("Choose a project first");
     const result = await this.host.handle(request.method, request.args);

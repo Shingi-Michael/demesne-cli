@@ -435,6 +435,9 @@ export interface Session {
 }
 
 export interface UpdateSessionRequest {
+  /// Moves a chat that has no project into this folder.
+  workspacePath?: string;
+  trustWorkspace?: boolean;
   autoApprove?: boolean;
   acceptEdits?: boolean;
   title?: string;
@@ -706,8 +709,17 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
     if (typeof value.acceptEdits !== "boolean") throw new ProtocolValidationError("acceptEdits must be a boolean");
     update.acceptEdits = value.acceptEdits;
   }
-  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined) {
-    throw new ProtocolValidationError("title, preferredModel, autoApprove or acceptEdits is required");
+  if (value.workspacePath !== undefined) {
+    if (typeof value.workspacePath !== "string" || !value.workspacePath || value.workspacePath.length > 4096 || value.workspacePath.includes("\0"))
+      throw new ProtocolValidationError("workspacePath must be a path");
+    update.workspacePath = value.workspacePath;
+  }
+  if (value.trustWorkspace !== undefined) {
+    if (typeof value.trustWorkspace !== "boolean") throw new ProtocolValidationError("trustWorkspace must be a boolean");
+    update.trustWorkspace = value.trustWorkspace;
+  }
+  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.workspacePath === undefined) {
+    throw new ProtocolValidationError("title, preferredModel, autoApprove, acceptEdits or workspacePath is required");
   }
   return update;
 }

@@ -111,7 +111,12 @@ void app.whenReady().then(async () => {
     }
     if (method === "desktop-select-project") {
       const selected = await dialog.showOpenDialog(window!, { title: "Open a Demesne project", properties: ["openDirectory"] });
-      return selected.canceled ? backend!.request("desktop-bootstrap") : backend!.request("desktop-open-project", { path: selected.filePaths[0] });
+      return selected.canceled ? backend!.request("desktop-bootstrap") : backend!.request("desktop-open-project", { ...args as Record<string, unknown>, path: selected.filePaths[0] });
+    }
+    // A folder for a chat to move into: the path, or null when cancelled.
+    if (method === "desktop-pick-folder") {
+      const selected = await dialog.showOpenDialog(window!, { title: "Move this chat to a project", properties: ["openDirectory"] });
+      return selected.canceled ? null : selected.filePaths[0] ?? null;
     }
     return backend!.request(method, args as Record<string, unknown>);
   });

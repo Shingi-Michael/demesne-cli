@@ -314,6 +314,13 @@ async function open(workspace = false, welcome = false) {
   assert.equal(zoom, 1.1, "Native zoom menu is connected");
   await desktop.evaluate(({ Menu }) => Menu.getApplicationMenu()!.items.find(item => item.label === "View")!.submenu!.items.find(item => item.label === "Actual Size")!.click());
 }
+/// After a launch: Home as Just a chat, then the chat from its project's line.
+async function reopenChat(id: string) {
+  await until(async () => (await page.locator("#composer-where").textContent())?.startsWith("Just a chat") ?? false, "launch lands on Home as Just a chat");
+  const row = page.locator(`.sidebar-session[data-args*='${id}']`);
+  if (!(await row.isVisible())) await click("project-toggle", { path: f.workspace });
+  await row.click();
+}
 async function close() {
   if (!desktop) return;
   const closing = desktop; desktop = undefined;
@@ -388,8 +395,16 @@ try {
   await capture("02-file-approval");
   // A chat waiting on you stands on the map in amber, in the folder of the
   // file it wants to edit; clicking its mark goes back to it.
+  // New chat lands on Home as Just a chat; the where word under the
+  // composer unfolds its choices in place and puts it in the project.
   await click("new-session");
+  await until(async () => (await page.locator("#composer-where").textContent())?.startsWith("Just a chat") ?? false, "a new chat is Just a chat");
+  assert(!(await page.locator(".hero-map .map-btn").isVisible()), "Just a chat has no map");
+  await click("where-toggle");
+  await capture("02b-where");
+  await click("where-pick", { path: f.workspace });
   await until(() => page.locator(".hero-map .map-btn").isVisible(), "a new chat shows the start screen");
+  assert((await page.locator("#composer-where").textContent())?.startsWith("in "), "the where word names the project");
   await page.locator(".hero-map .map-btn").click();
   const waitingMark = page.locator(".land .mk-g.wait");
   await until(() => waitingMark.isVisible(), "the waiting chat stands on the map", 20_000);
@@ -452,13 +467,23 @@ try {
   assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "true");
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.getByRole("heading", { name: /^What are we building/ }).waitFor();
-  await until(() => page.locator("#workspace-title").innerText().then(text => text === "New chat"), "the top bar names the new chat");
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === "Home"), "the top bar says Home for a new chat");
   // The empty chat is the composer, not a row: New chat above already names
   // it, so Chats only lists conversations that have a turn.
-  assert.equal(await page.locator("#sidebar-sessions .sidebar-session", { hasText: "New chat" }).count(), 0, "An empty chat is not listed under Chats");
+  assert.equal(await page.locator("#sidebar-projects .sidebar-session", { hasText: "New chat" }).count(), 0, "An empty chat is not listed under Chats");
   await type(aside);
   await textIncludes(asideDone);
-  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === 2), "the second conversation joins the list once it has a turn");
+  await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === 2), "the second conversation joins the list once it has a turn");
+  // It is Just a chat: listed under Chats above Projects, and it ends with
+  // one quiet line that can move it into a project.
+  await until(() => page.locator("#sidebar-chats .sidebar-item").count().then(count => count === 1), "a plain chat is listed under Chats");
+  await until(() => page.locator("#plain-line .plain-note").isVisible(), "a plain chat ends with Move to a project");
+  assert.equal(await page.locator("#workspace-where").innerText(), "Just a chat");
+  await click("where-move");
+  await until(() => page.locator("#plain-line .where-opt").first().isVisible(), "Move to a project unfolds the projects");
+  await capture("02-plain-chat");
+  await page.keyboard.press("Escape");
+  await until(() => page.locator("#plain-line .where-opt").count().then(count => count === 0), "Esc folds the projects");
   await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
   await page.locator(`.sidebar-session[data-args*='${sessionId}'] .sidebar-session-name`).dblclick();
@@ -480,28 +505,28 @@ try {
   // Each row deletes itself from the sidebar, without a menu or a dialog;
   // the list closes up and never shows more than six. ⌘Z brings it back
   // while it waits to be archived.
-  const before = await page.locator("#sidebar-sessions .sidebar-item").count();
+  const before = await page.locator("#sidebar-projects .sidebar-item").count();
   // Empty chats (the map step opened one) are kept by the daemon but not listed.
   const kept = (await f.client.listSessions()).length;
-  const other = page.locator(`#sidebar-sessions .sidebar-item:not(:has([data-args*='${sessionId}']))`).first();
+  const other = page.locator(`#sidebar-projects .sidebar-item:not(:has([data-args*='${sessionId}']))`).first();
   const otherArgs = await other.locator(".sidebar-session").getAttribute("data-args");
   await other.hover();
   await other.locator(".sidebar-delete").click();
   assert.equal(await page.locator("#overlay:not([hidden])").count(), 0, "Deleting opens no menu or dialog");
-  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before - 1), "the deleted conversation leaves the list");
+  await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === before - 1), "the deleted conversation leaves the list");
   await page.locator("body").focus();
   await page.keyboard.press("Control+z");
-  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before), "undo brings the conversation back");
+  await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === before), "undo brings the conversation back");
   assert.equal((await f.client.listSessions()).length, kept, "An undone delete never reaches the daemon");
   // The keyboard reaches the same delete: Delete on the focused row.
-  const row = page.locator(`#sidebar-sessions .sidebar-session[data-args='${otherArgs}']`);
+  const row = page.locator(`#sidebar-projects .sidebar-session[data-args='${otherArgs}']`);
   await row.focus();
   // The trash eases in, so give its transition a moment.
   await until(() => row.locator("xpath=..").locator(".sidebar-delete").evaluate(button => getComputedStyle(button).opacity === "1").then(shown => shown || Promise.reject(new Error("trash hidden"))), "The trash shows when the keyboard is on the row");
   await page.keyboard.press("Delete");
-  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before - 1), "Delete on a row removes it");
+  await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === before - 1), "Delete on a row removes it");
   await until(async () => (await f.client.listSessions()).length === kept - 1, "the daemon archived it");
-  assert(await page.locator("#sidebar-sessions .sidebar-item").count() <= 6, "The sidebar lists at most six conversations");
+  assert(await page.locator("#sidebar-projects .sidebar-item").count() <= 6, "The sidebar lists at most six conversations");
   await capture("02-completed");
   // Settings is one sheet: sections on the left, each row with its own control.
   await page.locator(".sidebar-settings").click();
@@ -696,7 +721,9 @@ try {
   await page.locator("#overlay").waitFor({ state: "hidden" });
   await close();
   assert.equal((await f.client.health()).model, "desktop-test", "Closing the app leaves the daemon alive");
-  await open(); // No workspace/session args: private preferences must restore both.
+  await open(); // No workspace/session args: private preferences restore the project.
+  // Launch lands on Home; the chat is one click away in the sidebar.
+  await reopenChat(sessionId);
   await page.getByRole("button", { name: "Expand full history", exact: true }).waitFor();
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Reopening starts with compacted history collapsed");
   await page.getByRole("button", { name: "Expand full history", exact: true }).click();
@@ -712,6 +739,7 @@ try {
   release!();
   await until(async () => (await f.client.getSessionState(sessionId)).session.turns.at(-1)?.status === "completed", "daemon completes after window closes");
   await open();
+  await reopenChat(sessionId);
   await textIncludes(afterClose);
   await capture("06-work-survived-close");
   // Project groups expose their own chats and open the selected chat across

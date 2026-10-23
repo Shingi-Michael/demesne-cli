@@ -124,6 +124,10 @@ export class DemesneClient {
   async driveAway(workspace: string, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveAwayResponse> {
     return this.request(`/v1/drive/away?workspace=${encodeURIComponent(workspace)}`, { signal });
   }
+  /// How often this project asked for approval this week and the week before.
+  async permissionAsks(workspace: string): Promise<import("@demesne/protocol").PermissionAsksResponse> {
+    return this.request(`/v1/permissions/asks?workspace=${encodeURIComponent(workspace)}`);
+  }
   /// Drive on by default: whether it starts on its own in this project.
   async driveAuto(workspace: string): Promise<import("@demesne/protocol").DriveAutoResponse> {
     return this.request(`/v1/drive/auto?workspace=${encodeURIComponent(workspace)}`);

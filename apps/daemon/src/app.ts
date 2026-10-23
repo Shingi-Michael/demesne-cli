@@ -37,6 +37,7 @@ import {
   type UndoSessionRequest,
   type RewindSessionRequest,
   type SteerTurnRequest,
+  type PermissionAsksResponse,
   type RewindResponse,
   type UndoTurnResponse,
   type UpdateSessionResponse,
@@ -661,6 +662,10 @@ export function createDaemonApp(options: {
         if (!workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
         try { return json({ away: driveFixes.startAway(body) } satisfies DriveAwayResponse, 201); }
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start", 409); }
+      }
+      // How often this project asked this week, for the start screen's line.
+      if (request.method === "GET" && url.pathname === "/v1/permissions/asks") {
+        return json(store.permissionAsks(url.searchParams.get("workspace") ?? "") satisfies PermissionAsksResponse);
       }
       // Drive on by default, and the one switch per project that turns it off.
       if (request.method === "GET" && url.pathname === "/v1/drive/auto") {

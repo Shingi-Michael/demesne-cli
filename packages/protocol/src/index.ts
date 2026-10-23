@@ -366,6 +366,16 @@ export interface PendingPermissionSnapshot {
   turnId: string;
   toolCallId: string;
   summary: string;
+  /// The rule Always would save, and how many times in a row it was allowed
+  /// once in this project (a deny or an Always resets it).
+  rule?: string | null;
+  allowedBefore?: number;
+}
+
+/// How often this project asked, this week against the week before.
+export interface PermissionAsksResponse {
+  thisWeek: number;
+  lastWeek: number;
 }
 
 export interface Session {
@@ -882,3 +892,44 @@ export * from "./next-prompt.ts";
 export * from "./heartbeat-mail.ts";
 export * from "./drive-report.ts";
 export * from "./agents-nearby.ts";
+
+/// Builds the persisted `[permissions] allow` entry for a pending approval.
+///
+/// Host commands persist the exact argv, and every argument must be a single
+/// whitespace-free word so the rule can be expressed as a TOML string. Path
+/// tools persist the containing directory, matching the "always this session"
+/// scope; a root-level file persists as its own exact path.
+export function derivePersistedRule(toolName: string | undefined, rawArguments: unknown): string | null {
+  if (!toolName) return null;
+  if (toolName.startsWith("mcp__")) return toolName;
+  const input = parseRuleArguments(rawArguments);
+  if (toolName === "run_command") {
+    const argv = input.argv;
+    if (!Array.isArray(argv) || argv.length === 0) return null;
+    if (!argv.every((entry) => typeof entry === "string" && entry.length > 0 && !/\s/.test(entry))) return null;
+    return `run_command:${argv.join(" ")}`;
+  }
+  const target = pathFrom(input, toolName === "move_path" ? "from" : "path");
+  if (!target) return null;
+  const normalized = target.split("\\").join("/").replace(/^\.\//, "").replace(/\/+$/, "");
+  if (!normalized) return null;
+  const segments = normalized.split("/").filter(Boolean);
+  segments.pop();
+  return `${toolName}:${segments.join("/") || normalized}`;
+}
+
+function pathFrom(input: Record<string, unknown>, key: string): string | null {
+  const candidate = input[key];
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+}
+
+function parseRuleArguments(value: unknown): Record<string, unknown> {
+  if (isRecord(value)) return value;
+  if (typeof value !== "string") return {};
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}

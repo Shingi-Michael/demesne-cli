@@ -1841,6 +1841,9 @@ button:disabled {
   font-size: 12px;
   white-space: nowrap;
 }
+.approval-note.habit {
+  color: var(--t3);
+}
 .approval-space {
   flex: 1;
 }

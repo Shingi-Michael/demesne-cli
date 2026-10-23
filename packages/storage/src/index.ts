@@ -30,6 +30,7 @@ import {
   type TurnStatus,
   type ToolFileChange,
   type SessionRewindState,
+  derivePersistedRule,
 } from "@demesne/protocol";
 import { QuestionRepository } from "./questions.ts";
 export { QuestionStateError } from "./questions.ts";
@@ -627,12 +628,17 @@ export class DemesneStore {
         checkpoint,
         rewinds: this.rewindStates(id),
         pendingQuestions: this.userQuestions.list(id),
-        pendingPermissions: rows.map((row) => ({
-          id: row.permission_id,
-          turnId: row.turn_id,
-          toolCallId: row.tool_call_id,
-          summary: `${row.name}: ${row.arguments_json}`.slice(0, 500),
-        })),
+        pendingPermissions: rows.map((row) => {
+          const rule = derivePersistedRule(row.name, row.arguments_json);
+          return {
+            id: row.permission_id,
+            turnId: row.turn_id,
+            toolCallId: row.tool_call_id,
+            summary: `${row.name}: ${row.arguments_json}`.slice(0, 500),
+            rule,
+            allowedBefore: rule ? this.allowedBefore(id, rule) : 0,
+          };
+        }),
       };
     })();
   }
@@ -1409,17 +1415,57 @@ export class DemesneStore {
       this.database
         .query("UPDATE tool_calls SET permission_id = ?, permission_status = 'pending' WHERE id = ?")
         .run(permissionId, toolCallId);
+      // The row can say how often this exact thing was already allowed.
+      const rule = extra.overlap ? null : derivePersistedRule(call.name, call.arguments_json);
+      const allowedBefore = rule ? this.allowedBefore(turn.sessionId, rule) : 0;
       const event = this.insertEvent(
         "permission.requested",
         turn.sessionId,
         turn.id,
-        { ...extra, permissionId, toolCallId, kind, summary, name: call.name, arguments: call.arguments_json },
+        { ...extra, permissionId, toolCallId, kind, summary, name: call.name, arguments: call.arguments_json, rule, allowedBefore },
         now,
       );
       return { permissionId, event };
     })();
     this.eventSink?.(result.event);
     return result;
+  }
+
+  /// How many times in a row the same rule was allowed once in this
+  /// session's project. A deny or an Always ends the run, so the count is
+  /// the habit since you last said otherwise.
+  allowedBefore(sessionId: string, rule: string): number {
+    const rows = this.database.query(`
+      SELECT e.type, e.payload FROM events e
+      WHERE e.workspace_id IS NOT NULL AND e.workspace_id = (SELECT workspace_id FROM sessions WHERE id = ?)
+        AND e.type IN ('permission.requested', 'permission.resolved')
+      ORDER BY e.id DESC LIMIT 4000
+    `).all(sessionId) as { type: string; payload: string }[];
+    const rules = new Map<string, string>();
+    for (const row of rows) {
+      const payload = JSON.parse(row.payload) as { permissionId?: string; rule?: string | null; overlap?: unknown };
+      if (row.type === "permission.requested" && payload.permissionId && payload.rule && !payload.overlap) rules.set(payload.permissionId, payload.rule);
+    }
+    let count = 0;
+    // Newest first: requested rows come after their resolution in this order.
+    for (const row of rows) {
+      if (row.type !== "permission.resolved") continue;
+      const payload = JSON.parse(row.payload) as { permissionId?: string; decision?: string };
+      if (!payload.permissionId || rules.get(payload.permissionId) !== rule) continue;
+      if (payload.decision === "allow_once") count++;
+      else break;
+    }
+    return count;
+  }
+
+  /// How often this project asked for approval this week and the week before.
+  permissionAsks(workspaceRoot: string): { thisWeek: number; lastWeek: number } {
+    const week = 7 * 24 * 60 * 60_000, now = Date.now();
+    const count = (from: number, to: number) => (this.database.query(`
+      SELECT COUNT(*) AS n FROM events e JOIN workspaces w ON w.id = e.workspace_id
+      WHERE w.root = ? AND e.type = 'permission.requested' AND e.occurred_at >= ? AND e.occurred_at < ?
+    `).get(workspaceRoot, new Date(from).toISOString(), new Date(to).toISOString()) as { n: number }).n;
+    return { thisWeek: count(now - week, now + 60_000), lastWeek: count(now - 2 * week, now - week) };
   }
 
   /// The row survives a window or daemon restart. Register the live waiter

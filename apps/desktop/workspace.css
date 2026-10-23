@@ -169,6 +169,8 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .live-app.start .intro h1 { font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; color: var(--t1); }
 .desktop .live-app.start .intro p { font-size: 13.5px; line-height: 1.6; color: var(--t3); }
 .desktop .intro strong { color: var(--t2); font-weight: 500; }
+/* The start screen's score: it asks less the more you use it. */
+.live-app.start .intro p.hero-asks { margin: 2px 0 0; font-size: 12px; line-height: 18px; color: var(--t4); }
 .hero-drive { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 2px; font-size: 12.5px; line-height: 18px; color: var(--t3); }
 .hero-drive .ico { color: var(--t3); }
 .hero-drive b { color: var(--t2); font-weight: 500; }

@@ -1566,95 +1566,6 @@ button:disabled {
 /* Keep the rounded composer edge in one raster layer during adjacent panel updates. */
 .composer { transform: translateZ(0); }
 
-/* Drive's state in the panel heading: ● live, ‖ paused, × needs you. */
-
-/* Breakage alerts: cards over the conversation, top right, under menus. */
-#breakage {
-  position: absolute;
-  top: 56px;
-  right: 20px;
-  width: min(440px, calc(100% - 40px));
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  z-index: 20;
-  /* An away run can leave several cards: scroll them rather than cover the window. */
-  max-height: calc(100% - 76px);
-  overflow-y: auto;
-}
-.breakage-card {
-  background: var(--surface);
-  border: 1px solid var(--borderBright);
-  border-left: 3px solid var(--signal);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px #0007;
-  padding: 10px 14px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  line-height: 20px;
-}
-.breakage-card.running { border-left-color: var(--thinking); }
-.breakage-card.ready, .breakage-card.toast.ok { border-left-color: var(--citron); }
-.breakage-card.toast { padding-bottom: 10px; }
-.breakage-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.breakage-mark { color: var(--signal); flex: none; width: 12px; text-align: center; }
-.running .breakage-mark { color: var(--thinking); }
-.ready .breakage-mark, .toast.ok .breakage-mark { color: var(--citron); }
-.breakage-text { color: var(--strong); min-width: 0; flex: 1; }
-.breakage-head small { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.breakage-head small .add { color: var(--citron); }
-.breakage-head small .del { color: var(--signal); }
-.breakage-close { color: var(--muted); padding: 0 4px; font-size: 15px; }
-.breakage-meta span {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.breakage-title { margin: 0; color: var(--paper); }
-.breakage-note, .breakage-summary { margin: 0; color: var(--secondary); font-size: 12.5px; line-height: 19px; }
-.breakage-summary { max-height: 96px; overflow: auto; }
-.breakage-receipt { margin: 0; color: var(--strong); font-size: 12.5px; line-height: 19px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-.breakage-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.breakage-branch { color: var(--electric); font-size: 12px; overflow-wrap: anywhere; }
-.breakage-card.away:not(.running) { border-left-color: var(--citron); }
-.breakage-card.away:not(.running) .breakage-mark { color: var(--citron); }
-.away-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; line-height: 18px; }
-.away-list li { display: grid; grid-template-columns: 14px 1fr auto; column-gap: 6px; align-items: baseline; color: var(--paper); min-width: 0; }
-.away-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: inherit; padding: 0; }
-button.away-title:hover, button.away-title.open { color: var(--electric); text-decoration: underline; }
-.away-list li small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
-.away-list li small .add { color: var(--citron); }
-.away-list li small .del { color: var(--signal); }
-.away-mark { text-align: center; color: var(--muted); }
-.away-ready .away-mark { color: var(--citron); }
-.away-running .away-mark { color: var(--thinking); }
-.away-failed .away-mark { color: var(--signal); }
-.away-skipped, .away-queued { color: var(--secondary); }
-.breakage-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.breakage-actions button {
-  border: 1px solid var(--borderBright);
-  border-radius: 4px;
-  padding: 0 9px;
-  font-size: 12px;
-  color: var(--paper);
-}
-.breakage-actions button.primary { background: var(--menuSelection); border-color: var(--composerRestoredBorder); color: var(--strong); }
-.breakage-actions button.quiet { border-color: transparent; color: var(--muted); }
-.breakage-actions button:disabled { opacity: 0.6; }
-.breakage-pulse { animation: breakage-pulse 1.4s ease-in-out infinite; }
-@keyframes breakage-pulse { 50% { opacity: 0.35; } }
 
 /* A session reads as one column, like the start screen: your ask, the
    answer, a receipt line under it, then one briefing line and the composer.
@@ -1767,15 +1678,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 }
 #drive-reply .drive-pinned {
   margin: 0;
-}
-.live-app:not(.start) #breakage {
-  position: static;
-  width: 100%;
-  max-height: 44vh;
-  margin-bottom: 8px;
-}
-.live-app:not(.start) #breakage .breakage-card {
-  box-shadow: none;
 }
 
 /* Every turn stays readable: a hairline between turns, the ask's actions
@@ -2149,23 +2051,6 @@ button.away-title:hover, button.away-title.open { color: var(--electric); text-d
 #drive-turn .drive-pinned {
   margin: 0;
 }
-/* A branch ready to review: what changed, how its checks went, what to do. */
-.breakage-card.ready.compact {
-  border-left-width: 1px;
-  border-left-color: var(--borderBright);
-  gap: 4px;
-  padding: 10px 14px;
-}
-.breakage-card.compact .breakage-summary,
-.breakage-card.compact .breakage-actions {
-  margin-left: 20px;
-}
-.breakage-card.compact .breakage-summary .pass { color: var(--citron); }
-.breakage-card.compact .breakage-summary .fail { color: var(--signal); }
-.breakage-card.compact .breakage-summary .muted { color: var(--muted); }
-.breakage-card.compact .breakage-actions { align-items: baseline; }
-.breakage-card.compact .breakage-diff { margin-left: auto; }
-.breakage-card.compact .breakage-diff:hover { color: var(--electric); }
 .menu-footer .completion-more {
   font-size: 12px;
   color: var(--electric);

@@ -1136,6 +1136,21 @@ export class DemesneStore {
     return event;
   }
 
+  /// Words the person sent while the turn worked reach the model as one user
+  /// message between its steps; each keeps its own event so the window can
+  /// put it on the guide where it landed (after `afterToolCallId`'s batch).
+  steerTurn(turnId: string, steers: { id: string; text: string }[], afterToolCallId: string | null): { message: StoredModelMessage; events: EventEnvelope[] } {
+    const result = this.database.transaction(() => {
+      const turn = this.getTurnOrThrow(turnId);
+      const message = this.appendModelMessage(turnId, { role: "user", content: steerContent(steers.map((steer) => steer.text)) });
+      const now = new Date().toISOString();
+      const events = steers.map((steer) => this.insertEvent("turn.steered", turn.sessionId, turnId, { steerId: steer.id, text: steer.text, afterToolCallId }, now));
+      return { message, events };
+    })();
+    result.events.forEach((event) => this.eventSink?.(event));
+    return result;
+  }
+
   completeTurn(turnId: string): EventEnvelope[] {
     const events = this.database.transaction(() => {
       const turn = this.getTurnOrThrow(turnId);
@@ -2273,4 +2288,9 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
     };
   }
   return {};
+}
+
+/// How steered words read to the model: the person's, mid-task, to act on now.
+export function steerContent(texts: string[]): string {
+  return `The user sent this while you were working. Take it into account from your next step on:\n\n${texts.join("\n\n")}`;
 }

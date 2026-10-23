@@ -15,6 +15,7 @@ import {
   parseSubmitTurnRequest,
   parseUndoSessionRequest,
   parseRewindSessionRequest,
+  parseSteerTurnRequest,
   parseUpdateSessionRequest,
   ProtocolValidationError,
   parseDriveRequest, parseDriveNextRequest, parseDeleteSessionsRequest, parseDriveAlertsRequest, parseDriveFixRequest, parseDriveFixFinishRequest, parseDriveAwayRequest,
@@ -35,6 +36,7 @@ import {
   type TurnChangesResponse,
   type UndoSessionRequest,
   type RewindSessionRequest,
+  type SteerTurnRequest,
   type RewindResponse,
   type UndoTurnResponse,
   type UpdateSessionResponse,
@@ -501,6 +503,16 @@ export function createDaemonApp(options: {
     const { rewind, event } = store.recordRewind(sessionId, cut, plan, ran);
     const response: RewindResponse = { rewindId: rewind.id, files: plan.map((file) => file.path), commands: ran };
     return json({ ...response, eventId: event.eventId });
+  }
+
+  /// Steer: the running turn reads these words after its current step.
+  function steerSession(sessionId: string, request: SteerTurnRequest): Response {
+    const session = store.getSession(sessionId);
+    if (!session) return apiError("not_found", `Session not found: ${sessionId}`, 404);
+    const turn = session.turns.find((item) => item.status === "running");
+    if (!turn || turn.kind === "themefy" || turn.kind === "compaction" || !engine.steer(turn.id, request))
+      return apiError("invalid_state", "Nothing is running to steer; send it as a message", 409);
+    return json({ steerId: request.id, turnId: turn.id });
   }
 
   async function redoRewind(sessionId: string): Promise<Response> {
@@ -1182,6 +1194,9 @@ export function createDaemonApp(options: {
         path[3] === "undo"
       ) {
         return undoSession(path[2]!, parseUndoSessionRequest(await readOptionalJson(request)));
+      }
+      if (request.method === "POST" && path[0] === "v1" && path[1] === "sessions" && path[3] === "steer" && path.length === 4) {
+        return steerSession(path[2]!, parseSteerTurnRequest(await readOptionalJson(request)));
       }
       if (request.method === "POST" && path[0] === "v1" && path[1] === "sessions" && path[3] === "rewind" && path.length === 4) {
         return rewindSession(path[2]!, parseRewindSessionRequest(await readOptionalJson(request)));

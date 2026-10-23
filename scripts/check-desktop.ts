@@ -25,6 +25,10 @@ const overlapPrompt = "Desktop smoke: edit what another agent changed";
 const askPrompt = "Desktop smoke: ask me first";
 const missionPushPrompt = "Desktop smoke: the mission tries to push";
 const brokePrompt = "Desktop smoke: break a check";
+const steerPrompt = "Desktop smoke: steer me";
+const steerWords = "not lexer, the bug is in parser.ts";
+let releaseSteer!: () => void;
+const steerGate = new Promise<void>(resolve => { releaseSteer = resolve; });
 let overlapRound = 0;
 // A stand-in Heartbeat daemon: Claude Code works in this project on this
 // machine, Codex in the second project on a paired one.
@@ -144,6 +148,18 @@ const f = await fixture({
         yield { type: "text_delta", delta: "The check fails now." };
         yield { type: "finish", reason: "stop" };
       }
+      return;
+    }
+    if (user === steerPrompt) {
+      // Holds its first step so the window can steer it mid-flight.
+      await steerGate;
+      yield { type: "tool_call_delta", index: 0, idDelta: "desktop-steer", nameDelta: "read_file", argumentsDelta: JSON.stringify({ path: "notes.ts" }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
+    if (typeof user === "string" && user.includes(steerWords)) {
+      yield { type: "text_delta", delta: "Looking in parser.ts instead." };
+      yield { type: "finish", reason: "stop" };
       return;
     }
     if (user === askPrompt) {
@@ -646,6 +662,9 @@ try {
   }, secondProject);
   await page.locator("#sidebar-open-project").click();
   await until(() => page.locator("#sidebar-sessions").getAttribute("data-workspace").then(path => path === secondProject), "sidebar opens another project");
+  // Opening it switches chats; typing before the switch lands loses the text.
+  await until(() => evaluate<boolean>("return window.demesneInspect?.().host.session !== arguments[0];", [sessionId]), "the window is on the new project's chat");
+  await page.waitForTimeout(300);
   await type("A chat in the second project");
   await until(() => page.locator(".sidebar-project.active .sidebar-session").count().then(count => count === 1), "new chat is nested under its project");
   await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-session[data-args*="${sessionId}"]`).click();
@@ -841,6 +860,24 @@ try {
   assert(!(await page.locator("#briefing").innerText()).includes("Discarded"), "Drive's line only says what Drive is doing");
   await page.locator("textarea").press("1");
   await textIncludes("Scoping the test job then.");
+  // Enter while it works steers it: the words wait faintly at the end of the
+  // guide, then sit where the model read them, in the same turn.
+  await type(steerPrompt);
+  await until(() => evaluate<boolean>("return Boolean(document.querySelector('#send-label .stop-word'));"), "the steer turn is running");
+  await page.locator("textarea").fill(steerWords);
+  await until(() => page.locator("#send-label").innerText().then(text => text.includes("steer")), "the composer says Enter steers");
+  await page.locator("textarea").press("Enter");
+  const pendingSteer = page.locator("#stage .tool-row.steer.pending");
+  await until(() => pendingSteer.isVisible(), "the words wait on the guide");
+  assert((await pendingSteer.innerText()).includes("on its way"));
+  await capture("15-steer-pending");
+  releaseSteer();
+  await textIncludes("Looking in parser.ts instead.");
+  const steered = page.locator("#stage .tool-row.steer:not(.pending)");
+  await until(() => steered.isVisible(), "the words sit where the model read them");
+  assert((await steered.innerText()).includes(`you: ${steerWords}`));
+  assert.equal(await page.locator("#stage .request", { hasText: steerWords }).count(), 0, "steering is not a new message");
+  await capture("15-steered");
   // Something broke: Drive's line says so and unfolds in place; no box on
   // the composer.
   await type(brokePrompt);
@@ -865,7 +902,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

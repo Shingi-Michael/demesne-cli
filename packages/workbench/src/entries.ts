@@ -40,7 +40,8 @@ export interface ToolEntry {
   subagentModel?: string;
 }
 /// `quiet`: a line on the step guide (a provider switch), not a band.
-export interface NoticeEntry { id: number; type: "notice"; text: string; tone: "info" | "success" | "error"; closesTurn?: boolean; quiet?: boolean; receipt?: ResponseReceipt }
+/// `steer`: words you sent mid-turn, on the guide where the model read them.
+export interface NoticeEntry { id: number; type: "notice"; text: string; tone: "info" | "success" | "error"; closesTurn?: boolean; quiet?: boolean; steer?: boolean; receipt?: ResponseReceipt }
 export interface BlockEntry { id: number; type: "block"; lines: string[] }
 export interface PanelEntry { id: number; type: "panel"; lines: string[]; title?: string; files?: import("@demesne/protocol").WorkspaceFileInfo[] }
 export type WorkbenchEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry | BlockEntry | PanelEntry;

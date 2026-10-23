@@ -1112,11 +1112,14 @@ function runHTML(run: WorkspaceRun, index: number) {
       } else steps += toolRow(run, entry) + subagentTrace(run, entry, key);
     }
     if (entry.type === "notice" && !entry.closesTurn) {
+      if (entry.steer) { steps += steerLine(entry.text); continue; }
       if (entry.quiet) { steps += `<div class="tool-row switch">${ICON_SWITCH}<span class="verb">${h(entry.text)}</span></div>`; continue; }
       flush();
       body += `<div class="system-band"><b>system</b><span>${h(entry.text)}</span></div>`;
     }
   }
+  // Words you sent that the model hasn't read yet wait at the end of the guide.
+  if (live && run.id === state!.activeTurnId) for (const steer of state!.steers ?? []) steps += steerLine(steer.text, true);
   flush();
   const receipt = run.receipt,
     checks = items.filter(
@@ -1301,6 +1304,12 @@ function driveReport(run: WorkspaceRun): string | null {
     + `<span class="dr-meta">${where ? `<span title="${h(report.diff!.paths.join("\n"))}">${where}</span>` : ""}${report.headline ? `<span>${h(report.headline)}</span>` : ""}${actions ? `<span class="dr-actions">${actions}</span>` : ""}</span>`
     + `<span class="request-meta"><time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
 }
+/// Words you sent mid-turn: one line on the guide where the model read them,
+/// faint with "on its way" until it does.
+function steerLine(text: string, pending = false): string {
+  return `<div class="tool-row steer${pending ? " pending" : ""}"><span class="steer-mark">↳</span><span class="verb" title="${h(text)}">you: ${h(text)}</span>${pending ? '<small class="meta">on its way</small>' : ""}</div>`;
+}
+
 /// What Drive asked its coder is Drive's words, not yours: one quiet line on
 /// the guide with its first sentence, unfolding to the whole request.
 function driveAsked(run: WorkspaceRun): string | null {
@@ -1439,6 +1448,7 @@ function renderConversation() {
       }),
       state.questions.length > 0,
       active(run) ? state.queue : "",
+      active(run) ? state.steers : [],
       state.activeTurnId,
       reviewOpen.has(run.id) ? reviewVersion : 0,
       detailsOpen.has(`drive-asked:${run.id}`),
@@ -1702,7 +1712,7 @@ function renderComposer() {
     ? answered ? "Your answers are saved. Choose Resume to continue." : question.status === "paused" ? "Type your answer to carry on…" : question.questions[questionIndex()]?.suggestions?.length ? "Answer, or pick one above…" : "Type your answer…"
     : inSession()
     ? state.activeTurnId
-      ? state.queue.trim() ? "Queue another follow-up…" : "Queue a follow-up…"
+      ? "Steer it while it works…"
       : suggestion ? `${suggestion}   ⇥ Tab` : "Continue the conversation…"
     : driveSuggestion() ? `Drive suggests: ${driveSuggestion()}   ⇥ Tab` : "Describe a change, paste an error, or drop a file…";
   editor.disabled =
@@ -1724,7 +1734,7 @@ function renderComposer() {
   }).join("");
   // While a turn runs the send button is Stop; Enter queues what you type.
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
-    ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${k("Enter")} ${asking ? "send instead" : "queue"}</span>` : ""}<span class="stop-word">■ Stop</span>`
+    ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${asking ? `${k("Enter")} send instead` : `${k("↵")} steer · ${k("⌥↵")} after this turn`}</span>` : ""}<span class="stop-word">■ Stop</span>`
     : "send";
   // The send mark sits in the box's corner, faint until there is something
   // to send; while a turn runs it is Stop.
@@ -3018,7 +3028,7 @@ async function chooseCompletion(index = completionIndex) {
     } else setDraft(`${item.value} `);
   }
 }
-async function submitText(value = editor.value) {
+async function submitText(value = editor.value, wait = false) {
   if (!state) return;
   // Notes on the diff open the next message; a message may be only notes.
   const notes = !pendingQuestion() && !value.startsWith("/") ? notesMessage([...diffNotes.values()]) : "";
@@ -3031,12 +3041,12 @@ async function submitText(value = editor.value) {
   }
   if (pendingQuestion()) return answerQuestion(value);
   if (state.activeTurnId) {
-    // Enter while a turn runs queues the message as the next one.
+    // Enter while a turn runs steers it; ⌥↵ queues the next message.
     if (value.startsWith("/")) return;
     clearTimeout(draftTimer);
     editor.value = "";
     renderComposer();
-    await api("submit", { text: value });
+    await api("submit", { text: value, wait });
     return;
   }
   clearTimeout(draftTimer);
@@ -4152,7 +4162,8 @@ document.addEventListener("keydown", (event) => {
     // During an approval Enter allows; with text it denies and says why.
     const approval = !pendingQuestion() ? state.approvals[0] : undefined;
     if (approval) run(() => (editor.value.trim() ? denyInstead(editor.value) : api("permission", { id: approval.id, decision: approval.overlap ? "deny" : "allow_once" })));
-    else run(() => submitText());
+    else run(() => submitText(editor.value, event.altKey));
+    event.preventDefault();
     return;
   }
   if (

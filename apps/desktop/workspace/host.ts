@@ -205,6 +205,8 @@ export class WorkspaceHost {
   /** Plan is per chat: each chat keeps the mode it was left in. */
   private plans = new Map<string, boolean>();
   queue = "";
+  /** Words sent to the running turn that it hasn't read yet. */
+  steers: { id: string; text: string }[] = [];
   /** Send now: the queued follow-up goes out as soon as the stopped turn settles. */
   sendQueuedOnStop = false;
   draft = "";
@@ -311,6 +313,7 @@ export class WorkspaceHost {
       planOnly: this.planOnly,
       attachments: this.attachments,
       queue: this.queue,
+      steers: this.steers,
       draft: this.draft,
       draftVersion: this.draftVersion,
       restored: this.restored,
@@ -589,6 +592,7 @@ export class WorkspaceHost {
       void this.refreshProcesses();
       this.selectedSession = id;
       this.queue = "";
+      this.steers = [];
       this.draft = this.drafts.get(id) ?? "";
       this.draftVersion++;
       this.restored = false;
@@ -618,6 +622,7 @@ export class WorkspaceHost {
       )) {
         if (generation !== this.generation || controller.signal.aborted) break;
         if (!this.current!.apply(event)) continue;
+        if (event.type === "turn.steered") this.steers = this.steers.filter((steer) => steer.id !== event.payload.steerId);
         if(event.type === "tool.call_completed" && event.payload.name === "apply_theme")void this.refreshThemes().catch(error=>this.fail(error));
         this.onEvent?.(event);
         this.drive?.agent.workerEvent(event);
@@ -645,7 +650,10 @@ export class WorkspaceHost {
           if (!this.options.headless && Date.now() - this.nextRequested > 30 * 60_000) void this.refreshNext();
           // After the turn settles, look for anything it (or anyone) broke.
           setTimeout(() => void this.breakage.check(), 1500);
-          const queued = this.queue, now = this.sendQueuedOnStop;
+          // Words the turn ended before reading go out as the next message.
+          const late = this.steers.map((steer) => steer.text).join("\n\n");
+          this.steers = [];
+          const queued = [late, this.queue].filter((text) => text.trim()).join("\n\n"), now = this.sendQueuedOnStop;
           this.queue = "";
           this.sendQueuedOnStop = false;
           if (queued.trim() && (event.type === "turn.completed" || now)) {
@@ -804,13 +812,30 @@ export class WorkspaceHost {
       });
     return this.loadingFiles;
   }
-  async submit(content: string, planOnly = this.planOnly, permissionMode: "ask" | "allow" = "ask", fromDrive = false) {
+  async submit(content: string, planOnly = this.planOnly, permissionMode: "ask" | "allow" = "ask", fromDrive = false, wait = false) {
     if (!this.current || this.connection !== "online")
       throw new Error("Connect to the daemon first.");
     if (!content.trim() && this.attachments.length) content = "Take a look at the attached image.";
     if (!content.trim()) return;
+    if (this.active && !wait && !fromDrive && !this.attachments.length && this.active.kind !== "compaction" && this.active.kind !== "themefy") {
+      // Enter while a turn runs steers it: the model reads the words after
+      // its current step. If the turn has already ended, they queue.
+      const steer = { id: crypto.randomUUID(), text: content.trim() };
+      this.steers = [...this.steers, steer];
+      this.draft = "";
+      this.draftVersion++;
+      this.publish();
+      try {
+        await this.client.steer(this.current.session.id, steer);
+        return { steered: true };
+      } catch {
+        if (!this.steers.some((item) => item.id === steer.id)) return { steered: true };
+        // It ended first (or can't take words): queue them, or send them now.
+        this.steers = this.steers.filter((item) => item.id !== steer.id);
+      }
+    }
     if (this.active) {
-      // Enter while a turn runs queues the text as the next message.
+      // ⌥↵ while a turn runs queues the text as the next message.
       this.queue = this.queue.trim() ? `${this.queue}\n\n${content}` : content;
       this.draft = "";
       this.draftVersion++;
@@ -1241,7 +1266,7 @@ export class WorkspaceHost {
       await this.setup.action(args);
       return;
     }
-    if (method === "submit") return this.submit(string(args.text, "prompt"));
+    if (method === "submit") return this.submit(string(args.text, "prompt"), this.planOnly, "ask", false, args.wait === true);
     if (method === "custom-command") {
       this.commandCache = null;
       this.slashCommands();

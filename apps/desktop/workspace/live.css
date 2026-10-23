@@ -302,6 +302,11 @@
 }
 .tool-row.switch { cursor: default; color: var(--muted); }
 .tool-row.switch .verb { color: var(--muted); font-weight: 400; }
+/* Words you sent mid-turn, where the model read them. */
+.tool-row.steer { cursor: default; }
+.tool-row.steer .steer-mark { width: 14px; text-align: center; color: var(--acc); flex: none; }
+.tool-row.steer .verb { color: var(--t1); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-row.steer.pending .verb, .tool-row.steer.pending .steer-mark { opacity: .55; }
 .tool-row.waiting {
   color: var(--thinking);
 }

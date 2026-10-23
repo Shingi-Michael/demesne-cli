@@ -766,6 +766,8 @@ describe("Demesne daemon", () => {
           turnId: string;
           toolCallId: string;
           summary: string;
+          rule?: string | null;
+          allowedBefore?: number;
         }> }>(
           running.url,
           `/v1/sessions/${created.session.id}`,
@@ -775,6 +777,8 @@ describe("Demesne daemon", () => {
           turnId: submitted.turn.id,
           toolCallId,
           summary: expect.any(String),
+          rule: expect.any(String),
+          allowedBefore: 0,
         });
         await jsonRequest(running.url, `/v1/permissions/${permissionId}`, {
           method: "POST",
@@ -1249,6 +1253,50 @@ describe("Demesne daemon", () => {
       expect([refused.status, JSON.stringify(body)]).toEqual([409, expect.stringContaining("Wait for running work")]);
       expect(readFileSync(join(workspacePath, "created.txt"), "utf8")).toBe("new\n");
     } finally { gate.resolve(); }
+  });
+
+  test("counts how often the same thing was allowed, and how often the project asked this week", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws"), dataPath = join(directory, "data");
+    mkdirSync(workspacePath); mkdirSync(dataPath);
+    let round = 0;
+    const processor: TurnProcessor = {
+      providerId: "habit-provider",
+      modelId: "habit-model",
+      async listModels() { return [{ id: this.modelId, provider: this.providerId }]; },
+      async *stream() {
+        if (round++ % 2 === 0) {
+          yield { type: "tool_call_delta" as const, index: 0, idDelta: `call-${round}`, nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "src/note.txt", content: `${round}\n` }) };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: "done" };
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Habits", workspacePath, trustWorkspace: true }),
+    });
+    const id = created.session.id;
+    const asked: Record<string, unknown>[] = [];
+    const send = async (decision: string) => {
+      const submitted = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${id}/turns`, { method: "POST", body: JSON.stringify({ content: "write", permissionMode: "ask" }) });
+      for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${id}&after=${submitted.eventId}`, running.url)))) {
+        if (event.type === "permission.requested") {
+          asked.push(event.payload);
+          await jsonRequest(running.url, `/v1/permissions/${event.payload.permissionId}`, { method: "POST", body: JSON.stringify({ decision }) });
+        }
+        if (event.type === "turn.completed" || event.type === "turn.failed") break;
+      }
+    };
+    // Three allows in a row: the fourth ask knows it's a habit.
+    await send("allow_once"); await send("allow_once"); await send("allow_once"); await send("allow_once");
+    expect(asked.map((payload) => [payload.rule, payload.allowedBefore])).toEqual([["write_file:src", 0], ["write_file:src", 1], ["write_file:src", 2], ["write_file:src", 3]]);
+    // A deny resets the count.
+    await send("deny"); await send("allow_once");
+    expect(asked.at(-1)!.allowedBefore).toBe(0);
+    const asks = await jsonRequest<{ thisWeek: number; lastWeek: number }>(running.url, `/v1/permissions/asks?workspace=${encodeURIComponent(workspacePath)}`);
+    expect(asks).toEqual({ thisWeek: 6, lastWeek: 0 });
   });
 
   test("undo restores both sides of an overwritten file move", async () => {

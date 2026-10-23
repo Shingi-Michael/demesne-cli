@@ -205,6 +205,8 @@ export class WorkspaceHost {
   /** Plan is per chat: each chat keeps the mode it was left in. */
   private plans = new Map<string, boolean>();
   queue = "";
+  /** How often this project asked this week, against last week. */
+  asks: { thisWeek: number; lastWeek: number } | null = null;
   /** Words sent to the running turn that it hasn't read yet. */
   steers: { id: string; text: string }[] = [];
   /** Send now: the queued follow-up goes out as soon as the stopped turn settles. */
@@ -314,6 +316,8 @@ export class WorkspaceHost {
       attachments: this.attachments,
       queue: this.queue,
       steers: this.steers,
+      asks: this.asks,
+      allowRules: this.settings.loaded.config.permissions.allow.length,
       draft: this.draft,
       draftVersion: this.draftVersion,
       restored: this.restored,
@@ -593,6 +597,7 @@ export class WorkspaceHost {
       this.selectedSession = id;
       this.queue = "";
       this.steers = [];
+      void this.refreshAsks();
       this.draft = this.drafts.get(id) ?? "";
       this.draftVersion++;
       this.restored = false;
@@ -673,6 +678,7 @@ export class WorkspaceHost {
             this.restored = true;
           }
           void this.refreshSessions();
+          void this.refreshAsks();
         }
         this.publish();
       }
@@ -811,6 +817,16 @@ export class WorkspaceHost {
         this.loadingFiles = null;
       });
     return this.loadingFiles;
+  }
+  /// The start screen's "Asked you N times this week" line.
+  private async refreshAsks() {
+    const workspace = this.workspace;
+    if (!workspace) { this.asks = null; return; }
+    try {
+      const asks = await this.client.permissionAsks(workspace);
+      if (this.workspace !== workspace) return;
+      if (JSON.stringify(asks) !== JSON.stringify(this.asks)) { this.asks = asks; this.publish(); }
+    } catch { /* an older daemon; the line stays away */ }
   }
   async submit(content: string, planOnly = this.planOnly, permissionMode: "ask" | "allow" = "ask", fromDrive = false, wait = false) {
     if (!this.current || this.connection !== "online")

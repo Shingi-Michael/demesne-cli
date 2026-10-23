@@ -12,7 +12,7 @@ import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-t
 import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import type { WorkspaceHost } from "./host.ts";
-import type { WorkspaceRun } from "./session-model.ts";
+import type { WorkspaceRun, WorkspaceApproval } from "./session-model.ts";
 import type {
   ToolEntry,
   WorkbenchEntry,
@@ -1526,7 +1526,7 @@ function renderHero() {
     hour = new Date().getHours(),
     running = worktreeRun().fix,
     branchKeys = [...detailsOpen].filter((key) => key.startsWith("branch:")),
-    signature = JSON.stringify([state.workspace, review.map((job) => [job.id, job.status, job.title, job.diff, job.summary, job.checks]), running && [running.id, running.title, running.activity], state.breakage.busy, state.breakage.message, branchKeys, driveShown, away?.status, driveBusy, reviewShown, ideasShown, next.proposals, next.loading, next.signals.length, user, branch, hour]);
+    signature = JSON.stringify([state.workspace, review.map((job) => [job.id, job.status, job.title, job.diff, job.summary, job.checks]), running && [running.id, running.title, running.activity], state.breakage.busy, state.breakage.message, branchKeys, driveShown, away?.status, driveBusy, reviewShown, ideasShown, next.proposals, next.loading, next.signals.length, user, branch, hour, state.asks, state.allowRules]);
   if (signature === heroSignature) return;
   heroSignature = signature;
   const composer = el("composer-slot");
@@ -1543,12 +1543,17 @@ function renderHero() {
   const day = new Date().toLocaleDateString(undefined, { weekday: "long" }),
     when = `${day} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`,
     where = branch ? `${h(name)} on ${h(branch)}` : h(name);
+  // It gets quieter the more you use it: one line keeps the score.
+  const asks = state.asks, learned = state.allowRules;
+  const quieter = asks && asks.lastWeek > 0
+    ? `<p class="hero-asks">Asked you ${asks.thisWeek === 1 ? "once" : `${asks.thisWeek} times`} this week, ${asks.thisWeek === asks.lastWeek ? "same as last week" : `${asks.thisWeek < asks.lastWeek ? "down" : "up"} from ${asks.lastWeek}`}${learned ? ` · ${learned} thing${learned === 1 ? "" : "s"} it no longer asks about` : ""}</p>`
+    : "";
   const ideas = next.proposals.length;
   const drive = ideas || driveBusy
     ? `<p class="hero-drive">${ICON_SPARK}<b>Drive</b>${driveBusy ? ` ${running ? btn("drive-show", `is working ${driveShown ? "⌄" : "›"}`, {}, "link") : "is working"}` : ` has ${ideas} idea${ideas === 1 ? "" : "s"}`}${ideas ? ` <span class="muted">·</span> ${btn("ideas-show", ideasShown ? "hide" : "show ›", {}, "link")}` : ""}</p>${ideas && ideasShown ? `<div class="hero-ideas">${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p></div>` : ""}${running && driveShown ? `<div class="hero-branches">${branchRows([running])}</div>` : ""}`
     : "";
   el("hero").innerHTML =
-    `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${waiting}</div><div id="hero-composer"></div>${drive}`;
+    `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${waiting}${quieter}</div><div id="hero-composer"></div>${drive}`;
   // The composer is detached while the hero is rebuilt.
   el("hero-composer").append(composer);
 }
@@ -1831,14 +1836,19 @@ function renderApproval() {
   // A command is named on the row; where it runs and its full path are on
   // hover, so it has nothing to unfold. An edit unfolds its diff.
   const where = `${command}\nin ${folder} · not sandboxed${approval.summary && approval.summary !== command && !approval.summary.startsWith("host command") ? ` · ${approval.summary}` : ""}`;
+  // The same thing allowed three times is a habit: the row says so and
+  // Always takes Enter, so one key ends that question for good.
+  const habit = habitual(approval);
+  const always = approval.rule ? btn("permission", habit ? `Always here ${k("↵")}` : "Always", { id: approval.id, decision: "allow_always" }, habit ? "allow" : "always").replace("<button ", `<button title="${h(scope)} · saved to your config (${h(approval.rule)})" `) : "";
   slot.innerHTML =
-    `<div class="approval-row" role="group" aria-label="Approval">${icon}<span class="approval-verb">${h(verb)}</span>${target ? `<code${isCommand ? ` title="${h(where)}"` : ""}>${h(target)}</code>` : ""}${isCommand ? "" : `<span class="approval-note">· ${note}</span>`}<span class="approval-space"></span>` +
+    `<div class="approval-row" role="group" aria-label="Approval">${icon}<span class="approval-verb">${h(verb)}</span>${target ? `<code${isCommand ? ` title="${h(where)}"` : ""}>${h(target)}</code>` : ""}${isCommand ? "" : `<span class="approval-note">· ${note}</span>`}${habit ? `<span class="approval-note habit" title="You've allowed this ${approval.allowedBefore} times in a row in this project">· allowed ${approval.allowedBefore}×</span>` : ""}<span class="approval-space"></span>` +
     (isCommand ? "" : btn("approval-show", approvalOpen ? "hide" : hunks ? "diff" : "details", {}, `approval-show${approvalOpen ? " open" : ""}`)) +
-    btn("permission", `Allow ${k("↵")}`, { id: approval.id, decision: "allow_once" }, "allow") +
-    (approval.rule ? btn("permission", "Always", { id: approval.id, decision: "allow_always" }, "always").replace("<button ", `<button title="${h(scope)} · saved to your config (${h(approval.rule)})" `) : "") +
+    (habit ? always + btn("permission", "Once", { id: approval.id, decision: "allow_once" }, "always") : btn("permission", `Allow ${k("↵")}`, { id: approval.id, decision: "allow_once" }, "allow") + always) +
     btn("permission", `Deny ${k("Esc")}`, { id: approval.id, decision: "deny" }, "deny") +
     `</div>${isCommand ? "" : `<div class="approval-fold command-inset"${approvalOpen ? "" : " hidden"}>${preview}</div>`}`;
 }
+/// Allowed three times in a row in this project: Always goes under Enter.
+const habitual = (approval: WorkspaceApproval) => Boolean(approval.rule) && approval.allowedBefore >= 3 && !approval.overlap;
 /// Enter with text during an approval: deny, then stop the turn and send what
 /// you typed as the next message.
 async function denyInstead(text: string) {
@@ -4161,7 +4171,7 @@ document.addEventListener("keydown", (event) => {
   if (event.target === editor && key === "enter" && !event.shiftKey) {
     // During an approval Enter allows; with text it denies and says why.
     const approval = !pendingQuestion() ? state.approvals[0] : undefined;
-    if (approval) run(() => (editor.value.trim() ? denyInstead(editor.value) : api("permission", { id: approval.id, decision: approval.overlap ? "deny" : "allow_once" })));
+    if (approval) run(() => (editor.value.trim() ? denyInstead(editor.value) : api("permission", { id: approval.id, decision: approval.overlap ? "deny" : habitual(approval) ? "allow_always" : "allow_once" })));
     else run(() => submitText(editor.value, event.altKey));
     event.preventDefault();
     return;

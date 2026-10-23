@@ -31,6 +31,9 @@ export interface WorkspaceApproval {
   summary: string;
   input: Record<string, unknown>;
   rule: string | null;
+  /// Times in a row this rule was allowed once in the project; at three the
+  /// row puts Always under Enter.
+  allowedBefore: number;
   /// The write would change a file another agent changed since this chat
   /// saw it; the window asks "Ask it first" or "Change anyway".
   overlap?: { path: string; agents: NearbyAgent[] };
@@ -107,7 +110,8 @@ export class WorkspaceSession {
           ...item,
           name: "tool",
           input: {},
-          rule: null,
+          rule: item.rule ?? null,
+          allowedBefore: item.allowedBefore ?? 0,
         });
     for (const [id, question] of this.questions)
       if (!this.isActive(question.turnId)) this.questions.delete(id);
@@ -272,6 +276,7 @@ export class WorkspaceSession {
           typeof p.name === "string" ? p.name : undefined,
           p.arguments,
         ),
+        allowedBefore: typeof p.allowedBefore === "number" ? p.allowedBefore : 0,
         ...(isRecord(p.overlap) && typeof p.overlap.path === "string" && Array.isArray(p.overlap.agents)
           ? { overlap: { path: p.overlap.path, agents: p.overlap.agents as NearbyAgent[] } } : {}),
       });

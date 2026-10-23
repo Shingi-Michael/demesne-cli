@@ -127,7 +127,7 @@ test("snapshot fields, removed optional fields, reordered entries, and turn tran
           name: "write_file",
           summary: "Write file",
           input: { path: "one.ts" },
-          rule: null,
+          rule: null, allowedBefore: 0,
         },
       ],
       runs: [

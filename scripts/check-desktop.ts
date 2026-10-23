@@ -26,6 +26,7 @@ const askPrompt = "Desktop smoke: ask me first";
 const missionPushPrompt = "Desktop smoke: the mission tries to push";
 const brokePrompt = "Desktop smoke: break a check";
 const steerPrompt = "Desktop smoke: steer me";
+const habitPrompt = "Desktop smoke: check the version again";
 const steerWords = "not lexer, the bug is in parser.ts";
 let releaseSteer!: () => void;
 const steerGate = new Promise<void>(resolve => { releaseSteer = resolve; });
@@ -148,6 +149,13 @@ const f = await fixture({
         yield { type: "text_delta", delta: "The check fails now." };
         yield { type: "finish", reason: "stop" };
       }
+      return;
+    }
+    if (user === habitPrompt) {
+      // The same command every time: the fourth ask knows it's a habit.
+      if (messages.at(-1)?.role === "tool") yield { type: "text_delta", delta: "Version checked." };
+      else yield { type: "tool_call_delta", index: 0, idDelta: `habit-${Date.now()}`, nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: [process.execPath, "--version"] }) };
+      yield { type: "finish", reason: messages.at(-1)?.role === "tool" ? "stop" : "tool_calls" };
       return;
     }
     if (user === steerPrompt) {
@@ -893,6 +901,29 @@ try {
   await capture("14-broke");
   await page.locator("#drive-reply.open button", { hasText: "Not now" }).click();
   await until(() => broke.count().then(count => count === 0), "Not now puts it away");
+  // Allowed three times, the fourth ask says so and Always takes Enter;
+  // after that it never asks about that command again.
+  for (let time = 1; time <= 3; time++) {
+    await type(habitPrompt);
+    await until(() => page.locator("#approval .approval-row").isVisible(), `the version check asks (${time})`);
+    assert.equal(await page.locator("#approval .approval-note.habit").count(), 0, "no habit before the third allow");
+    await click("permission", { decision: "allow_once" });
+    await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the version check finished");
+  }
+  await type(habitPrompt);
+  const habit = page.locator("#approval .approval-note.habit");
+  await until(() => habit.isVisible(), "the fourth ask knows it's a habit");
+  assert((await habit.innerText()).includes("allowed 3×"));
+  assert(await page.evaluate(() => { const code = document.querySelector("#approval .approval-row code")!; return code.scrollWidth <= code.clientWidth; }), "the command still fits on the row");
+  assert((await page.locator("#approval button.allow").innerText()).includes("Always here"), "Always takes Enter");
+  await capture("16-habit");
+  await page.locator("textarea").press("Enter");
+  await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "Always ran it");
+  assert(readFileSync(join(f.home, ".demesne/config.toml"), "utf8").includes("--version"), "the rule is saved to your config");
+  await type(habitPrompt);
+  await textIncludes("Version checked.");
+  await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the fifth runs without asking");
+  assert.equal(await page.locator("#approval .approval-row").count(), 0, "it no longer asks");
   // Switching models resizes the context at once, before the new model's
   // first request.
   const sizeBefore = await page.locator("#composer-context").getAttribute("title");
@@ -902,7 +933,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

@@ -302,6 +302,7 @@ export class WorkspaceHost {
       chatgptAccount: this.model.provider === "ChatGPT" ? this.chatgptAccount : null,
       provider: this.current?.provider ?? null,
       checkpoint: this.current?.state.checkpoint ?? null,
+      rewinds: this.current?.rewinds ?? [],
       approvals: [...(this.current?.approvals.values() ?? [])],
       questions: [...(this.current?.questions.values() ?? [])],
       activeTurnId: this.active?.id ?? null,
@@ -622,6 +623,8 @@ export class WorkspaceHost {
         this.drive?.agent.workerEvent(event);
         if (
           event.type === "turn.reverted" ||
+          event.type === "session.rewound" ||
+          event.type === "session.rewind_redone" ||
           event.type === "command.changed" ||
           event.type === "tool.call_completed"
         ) {
@@ -1526,6 +1529,17 @@ export class WorkspaceHost {
         ...(typeof args.turnId === "string" ? { turnId: args.turnId } : {}),
         ...(typeof args.path === "string" ? { paths: [args.path] } : {}),
       });
+      await this.refreshFiles();
+      await this.refreshProcesses();
+      this.publish();
+      return result;
+    }
+    if (method === "rewind" || method === "rewind-redo") {
+      if (this.active) throw new Error("Wait for the current turn before rewinding.");
+      const id = this.current!.session.id;
+      const result = method === "rewind"
+        ? await this.client.rewind(id, { turnId: String(args.turnId), ...(typeof args.toolCallId === "string" ? { toolCallId: args.toolCallId } : {}) })
+        : await this.client.redoRewind(id);
       await this.refreshFiles();
       await this.refreshProcesses();
       this.publish();

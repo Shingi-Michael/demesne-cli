@@ -497,6 +497,27 @@ try {
   await until(() => page.locator(`#turn-${editTurn} .rv-note`).count().then(count => count === 0), "dropping the notes clears them from the diff");
   await page.locator(`#turn-${editTurn} .receipt-files`).click();
   await until(() => page.locator(`#turn-${editTurn} .turn-review`).count().then(count => count === 0), "the review folds away again");
+  // Rewind: a finished step can become "now" again. Back to just after the
+  // edit, the check and the answer fold into one line; Redo returns them.
+  const editLine = page.locator(`#turn-${editTurn} .step-line`).first();
+  await editLine.hover();
+  await editLine.locator(".step-rewind").click();
+  const rewound = page.locator(`#turn-${editTurn} .rewind-line`);
+  await until(() => rewound.innerText().then(text => text.includes("Rewound") && text.includes("1 step and the answer undone") && text.includes("1 command ran")), "rewinding to a step folds what came after");
+  assert.equal(await page.locator(`#turn-${editTurn} .answer`).count(), 0, "the answer is folded away");
+  assert.equal(readFileSync(join(f.workspace, "hello.ts"), "utf8"), "export const greeting = 'after';\n", "the edit itself stays");
+  await capture("03-rewound-step");
+  await rewound.locator(".rw-redo").click();
+  await until(() => page.locator(`#turn-${editTurn} .answer`).count().then(count => count === 1), "Redo brings the answer back");
+  // From the message: back to before it was sent, the edit put back too.
+  await page.locator(`#turn-${editTurn} .request`).hover();
+  await page.locator(`#turn-${editTurn} .request [data-action="rewind"]`).click();
+  await until(() => page.locator(`#turn-${editTurn} .rewind-line`).innerText().then(text => text.includes("hello.ts put back")), "rewinding to a message folds the whole turn");
+  assert.equal(readFileSync(join(f.workspace, "hello.ts"), "utf8"), "export const greeting = 'before';\n", "the file is back as it was");
+  await capture("03-rewound-message");
+  await page.locator(`#turn-${editTurn} .rw-redo`).click();
+  await until(() => page.locator(`#turn-${editTurn} .request`).count().then(count => count === 1), "Redo brings the turn back");
+  assert.equal(readFileSync(join(f.workspace, "hello.ts"), "utf8"), "export const greeting = 'after';\n", "Redo puts the edit back");
   // The mode word under the composer: ⇧⇥ steps Ask → Accept edits → Plan → Auto → Ask.
   await page.locator("textarea").focus();
   for (const [word, policy] of [["Accept edits", { acceptEdits: true, autoApprove: false }], ["Plan", { acceptEdits: false, autoApprove: false }],

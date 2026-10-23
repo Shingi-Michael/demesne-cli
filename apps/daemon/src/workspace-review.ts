@@ -314,6 +314,18 @@ export function workspaceReview(
               : {}),
           });
         }
+      // A rewind puts its files back; Redo returns them.
+      if ((event.type === "session.rewound" || event.type === "session.rewind_redone") && typeof event.payload.rewindId === "string") {
+        const rewind = store.getRewind(event.payload.rewindId);
+        for (const put of rewind?.files ?? []) {
+          const file = files.get(put.path);
+          if (!file) continue;
+          const back = event.type === "session.rewound";
+          file.after = back ? put.before : put.after;
+          file.afterExists = (back ? put.before : put.after) !== null;
+          file.state = back ? "reverted" : "applied";
+        }
+      }
       if (
         event.type === "turn.reverted" &&
         event.turnId &&

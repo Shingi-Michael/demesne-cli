@@ -26,6 +26,8 @@ import {
   type SubmitTurnResponse,
   type TurnChangesResponse,
   type UndoSessionRequest,
+  type RewindSessionRequest,
+  type RewindResponse,
   type UndoTurnResponse,
   type UpdateSessionRequest,
   type UpdateSessionResponse,
@@ -386,6 +388,14 @@ export class DemesneClient {
       method: "POST",
       body: JSON.stringify(request),
     });
+  }
+
+  async rewind(sessionId: string, request: RewindSessionRequest): Promise<RewindResponse> {
+    return this.request<RewindResponse>(`/v1/sessions/${sessionId}/rewind`, { method: "POST", body: JSON.stringify(request) });
+  }
+
+  async redoRewind(sessionId: string): Promise<{ rewindId: string; files: string[] }> {
+    return this.request(`/v1/sessions/${sessionId}/rewind/redo`, { method: "POST", body: "{}" });
   }
 
   async changes(sessionId: string, turnId?: string): Promise<TurnChangesResponse> {

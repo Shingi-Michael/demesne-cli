@@ -1000,6 +1000,83 @@ describe("Demesne daemon", () => {
     expect(afterRestart.some((message) => message.role === "user" && message.content.startsWith("first-marker"))).toBe(false);
   });
 
+  test("rewinds files and the conversation to a step or a message, with Redo until the next message", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws"), dataPath = join(directory, "data");
+    mkdirSync(workspacePath); mkdirSync(dataPath);
+    writeFileSync(join(workspacePath, "a.txt"), "one\n");
+    const write = (id: string, path: string, content: string) => ({ type: "tool_call_delta" as const, index: 0, idDelta: id, nameDelta: "write_file", argumentsDelta: JSON.stringify({ path, content }) });
+    const script = [
+      [write("call-1", "a.txt", "two\n")], [write("call-2", "b.txt", "new\n")], [{ type: "text_delta" as const, delta: "first done" }],
+      [write("call-3", "a.txt", "three\n")], [{ type: "text_delta" as const, delta: "second done" }],
+      [{ type: "text_delta" as const, delta: "fresh start" }],
+    ];
+    let round = 0;
+    const seen: ProviderMessage[][] = [];
+    const processor: TurnProcessor = {
+      providerId: "rewind-provider",
+      modelId: "rewind-model",
+      async listModels() { return [{ id: this.modelId, provider: this.providerId }]; },
+      async *stream(messages) {
+        seen.push(structuredClone(messages) as ProviderMessage[]);
+        for (const chunk of script[round++] ?? []) yield chunk;
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Rewind", workspacePath, trustWorkspace: true }),
+    });
+    const id = created.session.id;
+    const send = async (content: string) => {
+      const submitted = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${id}/turns`, { method: "POST", body: JSON.stringify({ content, permissionMode: "allow" }) });
+      for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${id}&after=${submitted.eventId}`, running.url)))) {
+        if (event.type === "tool.call_completed") steps.push(String(event.payload.toolCallId));
+        if (event.type === "turn.completed" || event.type === "turn.failed") break;
+      }
+      return submitted.turn.id;
+    };
+    const steps: string[] = [];
+    const rewind = (body: Record<string, string>) => fetch(new URL(`/v1/sessions/${id}/rewind`, running.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const redo = () => fetch(new URL(`/v1/sessions/${id}/rewind/redo`, running.url), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const read = (path: string) => existsSync(join(workspacePath, path)) ? readFileSync(join(workspacePath, path), "utf8") : null;
+    const first = await send("first");
+    const second = await send("second");
+    expect([read("a.txt"), read("b.txt")]).toEqual(["three\n", "new\n"]);
+
+    // To a step: everything after the first edit goes back, files and turns.
+    const back = await (await rewind({ turnId: first, toolCallId: steps[0]! })).json() as { files: string[]; commands: number };
+    expect(back.files.sort()).toEqual(["a.txt", "b.txt"]);
+    expect([read("a.txt"), read("b.txt")]).toEqual(["two\n", null]);
+    let state = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${id}`);
+    expect(state.rewinds).toMatchObject([{ turnId: first, toolCallId: steps[0], hiddenTurnIds: [second], redoable: true }]);
+
+    // Redo brings it all back; rewinding again works the same.
+    expect((await redo()).status).toBe(200);
+    expect([read("a.txt"), read("b.txt")]).toEqual(["three\n", "new\n"]);
+    expect((await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${id}`)).rewinds).toEqual([]);
+    expect((await rewind({ turnId: first, toolCallId: steps[0]! })).status).toBe(200);
+
+    // A file you changed since stops the rewind, and nothing moves.
+    writeFileSync(join(workspacePath, "a.txt"), "mine\n");
+    const refused = await rewind({ turnId: first });
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toContain("a.txt changed since");
+    expect(read("a.txt")).toBe("mine\n");
+    writeFileSync(join(workspacePath, "a.txt"), "two\n");
+
+    // To a message: back to before it was sent, and the model starts fresh.
+    expect((await rewind({ turnId: first })).status).toBe(200);
+    expect(read("a.txt")).toBe("one\n");
+    state = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${id}`);
+    expect(state.rewinds?.at(-1)).toMatchObject({ turnId: first, toolCallId: null, hiddenTurnIds: [first, second], redoable: true });
+    await send("again");
+    const asked = seen.at(-1)!.filter((message) => message.role !== "system");
+    expect(asked.map((message) => message.role)).toEqual(["user"]);
+    expect(JSON.stringify(asked)).not.toContain("three");
+    expect((await redo()).status).toBe(409);
+  });
+
   test("reverts a turn's file changes through /undo", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

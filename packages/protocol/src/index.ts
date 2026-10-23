@@ -41,6 +41,8 @@ export type EventType =
   | "message.completed"
   | "turn.completed"
   | "turn.reverted"
+  | "session.rewound"
+  | "session.rewind_redone"
   | "turn.cancelled"
   | "turn.interrupted"
   | "turn.failed";
@@ -424,6 +426,20 @@ export interface SessionStateResponse {
   /// `argv`/`cwd` are set for command grants: that exact command, there.
   sessionGrants?: Array<{ tool: string; pathPrefix: string; argv?: string[]; cwd?: string }>;
   checkpoint?: SessionCheckpoint | null;
+  /// Rewinds in force, oldest first.
+  rewinds?: SessionRewindState[];
+}
+
+/// A rewind as the window draws it: the turns it folds away, where it cut
+/// the turn it stopped in, and whether Redo still applies.
+export interface SessionRewindState {
+  id: string;
+  turnId: string;
+  toolCallId: string | null;
+  hiddenTurnIds: string[];
+  files: string[];
+  commands: number;
+  redoable: boolean;
 }
 
 export interface WorkspaceFilesResponse {
@@ -487,6 +503,19 @@ export interface CancelTurnResponse {
 export interface UndoSessionRequest {
   turnId?: string;
   paths?: string[];
+}
+
+/// Rewind to just after a step (toolCallId) or to just before a message
+/// (turnId alone): later file edits go back and the model forgets the rest.
+export interface RewindSessionRequest {
+  turnId: string;
+  toolCallId?: string;
+}
+
+export interface RewindResponse {
+  rewindId: string;
+  files: string[];
+  commands: number;
 }
 
 export interface UndoTurnResponse {
@@ -553,6 +582,15 @@ export function parseCreateSessionRequest(value: unknown): CreateSessionRequest 
     ...(workspacePath ? { workspacePath } : {}),
     ...(value.trustWorkspace === true ? { trustWorkspace: true } : {}),
   };
+}
+
+export function parseRewindSessionRequest(value: unknown): RewindSessionRequest {
+  if (!isRecord(value)) throw new ProtocolValidationError("Request body must be a JSON object");
+  if (typeof value.turnId !== "string" || !value.turnId.trim()) throw new ProtocolValidationError("turnId must be a non-empty string");
+  if (value.toolCallId !== undefined && (typeof value.toolCallId !== "string" || !value.toolCallId.trim())) {
+    throw new ProtocolValidationError("toolCallId must be a non-empty string");
+  }
+  return { turnId: value.turnId.trim(), ...(typeof value.toolCallId === "string" ? { toolCallId: value.toolCallId.trim() } : {}) };
 }
 
 export function parseUndoSessionRequest(value: unknown): UndoSessionRequest {

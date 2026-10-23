@@ -14,6 +14,7 @@ import {
   parseResolvePermissionRequest,
   parseSubmitTurnRequest,
   parseUndoSessionRequest,
+  parseRewindSessionRequest,
   parseUpdateSessionRequest,
   ProtocolValidationError,
   parseDriveRequest, parseDriveNextRequest, parseDeleteSessionsRequest, parseDriveAlertsRequest, parseDriveFixRequest, parseDriveFixFinishRequest, parseDriveAwayRequest,
@@ -33,6 +34,8 @@ import {
   type TurnAttachment,
   type TurnChangesResponse,
   type UndoSessionRequest,
+  type RewindSessionRequest,
+  type RewindResponse,
   type UndoTurnResponse,
   type UpdateSessionResponse,
 } from "@demesne/protocol";
@@ -73,7 +76,7 @@ import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, InferenceSchedulers } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 
 export { PlaceholderTurnProcessor, type TurnProcessor } from "./processor.ts";
@@ -464,6 +467,53 @@ export function createDaemonApp(options: {
     const { event, complete } = store.markTurnReverted(sessionId, target.turnId, reverted);
     const response: UndoTurnResponse = { turnId: target.turnId, files: reverted, complete };
     return json({ ...response, eventId: event.eventId });
+  }
+
+  /// Rewind: every file edited after the cut goes back to how it was there,
+  /// but only if nobody changed it since; then the model forgets the rest.
+  async function rewindSession(sessionId: string, request: RewindSessionRequest): Promise<Response> {
+    const session = store.getSession(sessionId);
+    const workspaceRoot = session?.workspace?.root;
+    if (!session || !workspaceRoot) return apiError("invalid_state", "Session has no workspace", 409);
+    if (session.turns.some((turn) => turn.status === "running" || turn.status === "queued") || commands.runningInWorkspace(workspaceRoot))
+      return apiError("invalid_state", "Wait for running work before rewinding", 409);
+    let cut;
+    try { cut = store.rewindCut(sessionId, request.turnId, request.toolCallId); } catch (error) {
+      if (error instanceof InvalidStateError) return apiError("invalid_state", error.message, 409);
+      if (error instanceof NotFoundError) return apiError("not_found", error.message, 404);
+      throw error;
+    }
+    if (store.contextStartMessageId(sessionId) > cut.cutMessageId + 1)
+      return apiError("invalid_state", "Rewind can't reach back past the conversation's summary", 409);
+    const later = store.rewindableChanges(sessionId, cut.cutEventId);
+    const files = new Map<string, { before: string | null; after: string | null }>();
+    for (const change of later.flatMap((tool) => tool.changes)) {
+      if (change.unavailable) return apiError("invalid_state", `Rewind can't put back ${change.path}: ${change.unavailable}`, 409);
+      const before = change.beforeExists ? change.before : null, after = change.afterExists ? change.after : null;
+      const prior = files.get(change.path);
+      files.set(change.path, { before: prior ? prior.before : before, after });
+    }
+    const plan = [...files].filter(([, file]) => file.before !== file.after).map(([path, file]) => ({ path, before: file.before, after: file.after }));
+    const failed = swapFiles(workspaceRoot, plan.map((file) => ({ path: file.path, expect: file.after, put: file.before })));
+    if (failed) return apiError("conflict", failed, 409);
+    commands.invalidate(workspaceRoot);
+    const ran = later.filter((tool) => tool.name === "run_command").length;
+    const { rewind, event } = store.recordRewind(sessionId, cut, plan, ran);
+    const response: RewindResponse = { rewindId: rewind.id, files: plan.map((file) => file.path), commands: ran };
+    return json({ ...response, eventId: event.eventId });
+  }
+
+  async function redoRewind(sessionId: string): Promise<Response> {
+    const workspaceRoot = store.getSession(sessionId)?.workspace?.root;
+    if (!workspaceRoot) return apiError("invalid_state", "Session has no workspace", 409);
+    const rewind = store.redoableRewind(sessionId);
+    if (!rewind) return apiError("invalid_state", "Nothing to redo", 409);
+    if (commands.runningInWorkspace(workspaceRoot)) return apiError("invalid_state", "Wait for running work before redoing", 409);
+    const failed = swapFiles(workspaceRoot, rewind.files.map((file) => ({ path: file.path, expect: file.before, put: file.after })));
+    if (failed) return apiError("conflict", failed.replace("Rewind", "Redo"), 409);
+    commands.invalidate(workspaceRoot);
+    const event = store.markRewindRedone(sessionId, rewind.id);
+    return json({ rewindId: rewind.id, files: rewind.files.map((file) => file.path), eventId: event.eventId });
   }
 
   async function fetch(request: Request): Promise<Response> {
@@ -1133,6 +1183,12 @@ export function createDaemonApp(options: {
       ) {
         return undoSession(path[2]!, parseUndoSessionRequest(await readOptionalJson(request)));
       }
+      if (request.method === "POST" && path[0] === "v1" && path[1] === "sessions" && path[3] === "rewind" && path.length === 4) {
+        return rewindSession(path[2]!, parseRewindSessionRequest(await readOptionalJson(request)));
+      }
+      if (request.method === "POST" && path[0] === "v1" && path[1] === "sessions" && path[3] === "rewind" && path[4] === "redo" && path.length === 5) {
+        return redoRewind(path[2]!);
+      }
 
       if(path[0]==="v1"&&path[1]==="sessions"&&path[2]&&["review","commands"].includes(path[3]??"")){
         const session=store.getSession(path[2]);if(!session?.workspace)return apiError("not_found","Workspace session not found",404);
@@ -1270,6 +1326,41 @@ function restoreFile(absolute: string, data: Uint8Array | null): void {
   } finally {
     if (existsSync(temporary)) unlinkSync(temporary);
   }
+}
+
+/// Puts each file to `put`, but only if every one still reads `expect` (null:
+/// absent); otherwise nothing is touched and the answer names the file.
+function swapFiles(root: string, files: Array<{ path: string; expect: string | null; put: string | null }>): string | null {
+  const prepared: Array<{ absolute: string; current: Uint8Array | null; put: string | null; mode: number | null }> = [];
+  try {
+    for (const file of files) {
+      const absolute = resolveWorkspacePath(root, file.path, true, true);
+      const exists = existsSync(absolute);
+      const current = exists ? new Uint8Array(readFileSync(absolute)) : null;
+      if (exists && (!lstatSync(absolute).isFile() || lstatSync(absolute).nlink > 1)) return `Rewind left everything as it was: ${file.path} isn't a plain file`;
+      const text = current === null ? null : new TextDecoder().decode(current);
+      if (text !== file.expect) return `Rewind left everything as it was: ${file.path} changed since`;
+      prepared.push({ absolute, current, put: file.put, mode: exists ? lstatSync(absolute).mode & 0o7777 : null });
+    }
+  } catch {
+    return "Rewind left everything as it was: a path is outside the workspace";
+  }
+  const applied: typeof prepared = [];
+  try {
+    for (const entry of prepared) {
+      restoreFile(entry.absolute, entry.put === null ? null : new TextEncoder().encode(entry.put));
+      // A script keeps its execute bit.
+      if (entry.put !== null && entry.mode !== null) chmodSync(entry.absolute, entry.mode);
+      applied.push(entry);
+    }
+  } catch (error) {
+    console.error("Rewind failed; putting files back", error);
+    for (const entry of applied.reverse()) {
+      try { restoreFile(entry.absolute, entry.current); } catch (rollbackError) { console.error("Rewind rollback failed for", entry.absolute, rollbackError); }
+    }
+    return "Rewind couldn't write the files, so it left everything as it was";
+  }
+  return null;
 }
 
 function hashBytes(data: Uint8Array): string {

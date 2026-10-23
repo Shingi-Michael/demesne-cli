@@ -29,9 +29,44 @@ import {
   type Turn,
   type TurnStatus,
   type ToolFileChange,
+  type SessionRewindState,
 } from "@demesne/protocol";
 import { QuestionRepository } from "./questions.ts";
 export { QuestionStateError } from "./questions.ts";
+
+/// One file a rewind put back: its text before the rewound edits and after
+/// them, so Redo can return it. null text means the file didn't exist.
+export interface RewindFile {
+  path: string;
+  before: string | null;
+  after: string | null;
+}
+
+/// A rewind hides the events and model messages after its cut, up to where
+/// the session stood when it ran; Redo brings them back.
+export interface SessionRewind {
+  id: string;
+  sessionId: string;
+  turnId: string;
+  toolCallId: string | null;
+  cutEventId: number;
+  untilEventId: number;
+  cutMessageId: number;
+  untilMessageId: number;
+  files: RewindFile[];
+  commands: number;
+  createdAt: string;
+  redoneAt: string | null;
+}
+
+/// Where a rewind cuts: after the batch of tool calls a step belongs to, or
+/// before a message.
+export interface RewindCut {
+  turnId: string;
+  toolCallId: string | null;
+  cutEventId: number;
+  cutMessageId: number;
+}
 
 export interface SnapshotFile {
   path: string;
@@ -552,6 +587,7 @@ export class DemesneStore {
     pendingQuestions: QuestionState[];
     latestProviderCall: ProviderCallSnapshot | null;
     checkpoint: SessionCheckpoint | null;
+    rewinds: SessionRewindState[];
   } | null {
     return this.database.transaction(() => {
       const session = this.getSession(id);
@@ -589,6 +625,7 @@ export class DemesneStore {
         lastEventId: latest.id,
         latestProviderCall: snapshot,
         checkpoint,
+        rewinds: this.rewindStates(id),
         pendingQuestions: this.userQuestions.list(id),
         pendingPermissions: rows.map((row) => ({
           id: row.permission_id,
@@ -651,12 +688,20 @@ export class DemesneStore {
         AND (turns.status = 'completed' OR (? AND turns.status IN ('failed', 'cancelled', 'interrupted')))
         AND turns.kind = 'chat'
         AND (sessions.context_start_message_id IS NULL OR model_messages.id >= sessions.context_start_message_id)
+        AND NOT EXISTS (SELECT 1 FROM session_rewinds r WHERE r.session_id = model_messages.session_id AND r.redone_at IS NULL
+          AND model_messages.id > r.cut_message_id AND model_messages.id <= r.until_message_id)
       ORDER BY model_messages.id
     `).all(sessionId, includeStopped ? 1 : 0) as ModelMessageRow[];
+    // The model learns where you stopped it: a step rewind ends mid-turn.
+    const stops = new Map(this.activeRewinds(sessionId).filter((rewind) => rewind.toolCallId)
+      .map((rewind) => [rewind.cutMessageId, rewind.files.map((file) => file.path)]));
     const reverted = this.database.query("SELECT turn_id, file_path FROM turn_snapshots WHERE session_id = ? AND reverted_at IS NOT NULL")
       .all(sessionId) as { turn_id: string; file_path: string }[];
     const transcript = rows.flatMap((row, index): StoredModelMessage[] => {
       const message = mapModelMessage(row);
+      const stop = stops.get(row.id);
+      if (stop) return [message, { id: row.id, turnId: row.turn_id, message: { role: "assistant",
+        content: `Recorded user rewind: the user rewound the conversation to this point. Everything after it was undone${stop.length ? ` and ${JSON.stringify(stop)} were put back as they were here` : ""}. Wait for the user's next message.` } }];
       if (rows[index + 1]?.turn_id === row.turn_id) return [message];
       const paths = reverted.filter((file) => file.turn_id === row.turn_id).map((file) => file.file_path);
       return paths.length ? [message, { id: row.id, turnId: row.turn_id, message: { role: "assistant",
@@ -766,6 +811,142 @@ export class DemesneStore {
 
   /// Marks files reverted. The turn itself is marked reverted only once every
   /// snapshot file has been reverted, so partial reverts stay undoable.
+  /// Where a rewind to this step (or, with no tool call, to just before this
+  /// message) would cut. A step cuts after its whole batch of tool calls, so
+  /// no tool call is left without its result.
+  rewindCut(sessionId: string, turnId: string, toolCallId?: string): RewindCut {
+    const turn = this.getTurn(turnId);
+    if (!turn || turn.sessionId !== sessionId) throw new NotFoundError(`Turn not found: ${turnId}`);
+    if (turn.kind) throw new InvalidStateError("Only conversation turns can be rewound");
+    const messages = this.database.query("SELECT id, role, tool_call_id, tool_calls_json FROM model_messages WHERE turn_id = ? ORDER BY id")
+      .all(turnId) as Array<{ id: number; role: string; tool_call_id: string | null; tool_calls_json: string | null }>;
+    if (!toolCallId) {
+      const created = this.database.query("SELECT id FROM events WHERE turn_id = ? AND type = 'turn.created'").get(turnId) as { id: number } | null;
+      if (!created) throw new InvalidStateError("This message has no recorded start");
+      const before = this.database.query(`SELECT COALESCE(MAX(m.id), 0) AS id FROM model_messages m
+        JOIN events e ON e.turn_id = m.turn_id AND e.type = 'turn.created' WHERE m.session_id = ? AND e.id < ?`).get(sessionId, created.id) as { id: number };
+      return { turnId, toolCallId: null, cutEventId: created.id - 1, cutMessageId: before.id };
+    }
+    // Steps carry our own ids; the model's messages carry the provider's,
+    // which can repeat within a turn, so match the same occurrence.
+    const calls = this.database.query("SELECT id, provider_call_id, provider_tool_call_id FROM tool_calls WHERE turn_id = ? ORDER BY created_at, rowid")
+      .all(turnId) as Array<{ id: string; provider_call_id: string; provider_tool_call_id: string }>;
+    const call = calls.find((item) => item.id === toolCallId);
+    if (!call) throw new InvalidStateError("That step can't be rewound to");
+    const occurrence = calls.filter((item) => item.provider_tool_call_id === call.provider_tool_call_id).indexOf(call);
+    const asked = messages.filter((message) => message.role === "assistant" && message.tool_calls_json
+      && (JSON.parse(message.tool_calls_json) as Array<{ id: string }>).some((item) => item.id === call.provider_tool_call_id))[occurrence];
+    if (!asked) throw new InvalidStateError("That step can't be rewound to");
+    const batch = (JSON.parse(asked.tool_calls_json!) as Array<{ id: string }>).map((item) => item.id);
+    const results: number[] = [];
+    for (const id of batch) {
+      const result = messages.find((message) => message.id > asked.id && message.role === "tool" && message.tool_call_id === id);
+      if (!result) throw new InvalidStateError("That step hasn't finished");
+      results.push(result.id);
+    }
+    const ours = calls.filter((item) => item.provider_call_id === call.provider_call_id && batch.includes(item.provider_tool_call_id)).map((item) => item.id);
+    const placeholders = ours.map(() => "?").join(", ");
+    const settled = this.database.query(`SELECT MAX(id) AS id FROM events WHERE turn_id = ? AND type IN ('tool.call_completed', 'tool.call_failed', 'tool.call_denied', 'tool.call_cancelled', 'tool.call_interrupted')
+      AND json_extract(payload, '$.toolCallId') IN (${placeholders})`).get(turnId, ...ours) as { id: number | null };
+    if (!settled.id) throw new InvalidStateError("That step hasn't finished");
+    return { turnId, toolCallId: ours.at(-1)!, cutEventId: settled.id, cutMessageId: Math.max(...results) };
+  }
+
+  /// The file edits recorded after a cut, oldest first, leaving out edits an
+  /// earlier rewind already took back.
+  rewindableChanges(sessionId: string, afterEventId: number): Array<{ eventId: number; turnId: string | null; name: string; changes: ToolFileChange[] }> {
+    const hidden = this.activeRewinds(sessionId);
+    return (this.database.query("SELECT * FROM events WHERE session_id = ? AND id > ? AND type = 'tool.call_completed' ORDER BY id")
+      .all(sessionId, afterEventId) as EventRow[]).map(mapEvent)
+      .filter((event) => !hidden.some((rewind) => event.eventId > rewind.cutEventId && event.eventId <= rewind.untilEventId))
+      .map((event) => ({ eventId: event.eventId, turnId: event.turnId, name: String(event.payload.name ?? ""),
+        changes: Array.isArray(event.payload.changes) ? event.payload.changes as ToolFileChange[] : [] }));
+  }
+
+  /// The first model message the next request reads (0 with no summary).
+  contextStartMessageId(sessionId: string): number {
+    const row = this.database.query("SELECT context_start_message_id AS id FROM sessions WHERE id = ?").get(sessionId) as { id: number | null } | null;
+    return row?.id ?? 0;
+  }
+
+  /// The turns a rewind folds away: those started after its cut, up to
+  /// where the session stood when it ran.
+  rewoundTurnIds(sessionId: string, rewind: Pick<SessionRewind, "cutEventId" | "untilEventId">): string[] {
+    return (this.database.query("SELECT turn_id FROM events WHERE session_id = ? AND type = 'turn.created' AND id > ? AND id <= ? ORDER BY id")
+      .all(sessionId, rewind.cutEventId, rewind.untilEventId) as Array<{ turn_id: string }>).map((row) => row.turn_id);
+  }
+
+  rewindStates(sessionId: string): SessionRewindState[] {
+    const redoable = this.redoableRewind(sessionId)?.id;
+    return this.activeRewinds(sessionId).map((rewind) => ({
+      id: rewind.id, turnId: rewind.turnId, toolCallId: rewind.toolCallId, hiddenTurnIds: this.rewoundTurnIds(sessionId, rewind),
+      files: rewind.files.map((file) => file.path), commands: rewind.commands, redoable: rewind.id === redoable,
+    }));
+  }
+
+  activeRewinds(sessionId: string): SessionRewind[] {
+    return (this.database.query("SELECT * FROM session_rewinds WHERE session_id = ? AND redone_at IS NULL ORDER BY created_at, rowid")
+      .all(sessionId) as RewindRow[]).map(mapRewind);
+  }
+
+  /// Records a rewind whose files are already back on disk: later turns'
+  /// undo snapshots retire with it, and the window hears about it.
+  recordRewind(sessionId: string, cut: RewindCut, files: RewindFile[], commands: number): { rewind: SessionRewind; event: EventEnvelope } {
+    const result = this.database.transaction(() => {
+      const now = new Date().toISOString(), id = crypto.randomUUID();
+      const until = this.database.query("SELECT COALESCE(MAX(id), 0) AS id FROM events WHERE session_id = ?").get(sessionId) as { id: number };
+      const message = this.database.query("SELECT COALESCE(MAX(id), 0) AS id FROM model_messages WHERE session_id = ?").get(sessionId) as { id: number };
+      // Whole turns after the cut can't be undone on their own any more.
+      const later = this.database.query(`SELECT s.turn_id, s.file_path FROM turn_snapshots s
+        JOIN events e ON e.turn_id = s.turn_id AND e.type = 'turn.created'
+        WHERE s.session_id = ? AND s.reverted_at IS NULL AND e.id > ?`).all(sessionId, cut.cutEventId) as Array<{ turn_id: string; file_path: string }>;
+      for (const snapshot of later) this.database.query("UPDATE turn_snapshots SET reverted_at = ? WHERE turn_id = ? AND file_path = ?").run(now, snapshot.turn_id, snapshot.file_path);
+      const event = this.insertEvent("session.rewound", sessionId, null, {
+        rewindId: id, turnId: cut.turnId, toolCallId: cut.toolCallId, hiddenTurnIds: this.rewoundTurnIds(sessionId, { cutEventId: cut.cutEventId, untilEventId: until.id }),
+        files: files.map((file) => file.path), commands,
+      }, now);
+      this.database.query(`INSERT INTO session_rewinds (id, session_id, turn_id, tool_call_id, cut_event_id, until_event_id, cut_message_id, until_message_id, files_json, snapshots_json, commands, event_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, sessionId, cut.turnId, cut.toolCallId, cut.cutEventId, until.id, cut.cutMessageId, message.id,
+        JSON.stringify(files), JSON.stringify(later), commands, event.eventId, now);
+      this.database.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now, sessionId);
+      return { rewind: this.getRewind(id)!, event };
+    })();
+    this.eventSink?.(result.event);
+    return result;
+  }
+
+  getRewind(id: string): SessionRewind | null {
+    const row = this.database.query("SELECT * FROM session_rewinds WHERE id = ?").get(id) as RewindRow | null;
+    return row ? mapRewind(row) : null;
+  }
+
+  /// The rewind Redo can still bring back: the latest one, until a new
+  /// message is sent after it.
+  redoableRewind(sessionId: string): SessionRewind | null {
+    const row = this.database.query(`SELECT * FROM session_rewinds r WHERE r.session_id = ? AND r.redone_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM events e WHERE e.session_id = r.session_id AND e.type = 'turn.created' AND e.id > r.event_id)
+      ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`).get(sessionId) as RewindRow | null;
+    if (!row) return null;
+    const latest = this.activeRewinds(sessionId).at(-1);
+    return latest?.id === row.id ? mapRewind(row) : null;
+  }
+
+  /// Marks a rewind redone once its files are back: its turns' undo
+  /// snapshots return and the model sees its messages again.
+  markRewindRedone(sessionId: string, rewindId: string): EventEnvelope {
+    const event = this.database.transaction(() => {
+      const now = new Date().toISOString();
+      const row = this.database.query("SELECT snapshots_json FROM session_rewinds WHERE id = ? AND session_id = ? AND redone_at IS NULL").get(rewindId, sessionId) as { snapshots_json: string } | null;
+      if (!row) throw new InvalidStateError("Nothing to redo");
+      for (const snapshot of JSON.parse(row.snapshots_json) as Array<{ turn_id: string; file_path: string }>)
+        this.database.query("UPDATE turn_snapshots SET reverted_at = NULL WHERE turn_id = ? AND file_path = ?").run(snapshot.turn_id, snapshot.file_path);
+      this.database.query("UPDATE session_rewinds SET redone_at = ? WHERE id = ?").run(now, rewindId);
+      return this.insertEvent("session.rewind_redone", sessionId, null, { rewindId }, now);
+    })();
+    this.eventSink?.(event);
+    return event;
+  }
+
   markTurnReverted(sessionId: string, turnId: string, files: string[]): { event: EventEnvelope; complete: boolean } {
     const result = this.database.transaction(() => {
       const now = new Date().toISOString();
@@ -1413,7 +1594,7 @@ export class DemesneStore {
 
   reviewEvents(sessionId: string, turnId?: string): EventEnvelope[] {
     this.requireSession(sessionId);
-    return (this.database.query("SELECT * FROM events WHERE session_id = ? AND (? IS NULL OR turn_id = ?) AND type IN ('tool.call_completed','turn.reverted') ORDER BY id LIMIT 10001")
+    return (this.database.query("SELECT * FROM events WHERE session_id = ? AND (? IS NULL OR turn_id = ?) AND type IN ('tool.call_completed','turn.reverted','session.rewound','session.rewind_redone') ORDER BY id LIMIT 10001")
       .all(sessionId,turnId??null,turnId??null) as EventRow[]).map(mapEvent);
   }
 
@@ -1556,6 +1737,22 @@ export class DemesneStore {
     if (!this.hasColumn("turns", "kind")) this.database.run("ALTER TABLE turns ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
     if (!this.hasColumn("turns", "from_drive")) this.database.run("ALTER TABLE turns ADD COLUMN from_drive INTEGER NOT NULL DEFAULT 0");
     if (!this.hasColumn("sessions", "checkpoint_id")) this.database.run("ALTER TABLE sessions ADD COLUMN checkpoint_id TEXT");
+    this.database.run(`CREATE TABLE IF NOT EXISTS session_rewinds (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      turn_id TEXT NOT NULL,
+      tool_call_id TEXT,
+      cut_event_id INTEGER NOT NULL,
+      until_event_id INTEGER NOT NULL,
+      cut_message_id INTEGER NOT NULL,
+      until_message_id INTEGER NOT NULL,
+      files_json TEXT NOT NULL,
+      snapshots_json TEXT NOT NULL,
+      commands INTEGER NOT NULL DEFAULT 0,
+      event_id INTEGER,
+      created_at TEXT NOT NULL,
+      redone_at TEXT
+    ); CREATE INDEX IF NOT EXISTS session_rewinds_session ON session_rewinds(session_id);`);
     this.database.run(`CREATE TABLE IF NOT EXISTS session_checkpoints (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -1994,6 +2191,29 @@ function isStoredToolCall(value: unknown): value is { id: string; name: string; 
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const call = value as Record<string, unknown>;
   return typeof call.id === "string" && typeof call.name === "string" && typeof call.arguments === "string";
+}
+
+interface RewindRow {
+  id: string;
+  session_id: string;
+  turn_id: string;
+  tool_call_id: string | null;
+  cut_event_id: number;
+  until_event_id: number;
+  cut_message_id: number;
+  until_message_id: number;
+  files_json: string;
+  commands: number;
+  created_at: string;
+  redone_at: string | null;
+}
+
+function mapRewind(row: RewindRow): SessionRewind {
+  return {
+    id: row.id, sessionId: row.session_id, turnId: row.turn_id, toolCallId: row.tool_call_id,
+    cutEventId: row.cut_event_id, untilEventId: row.until_event_id, cutMessageId: row.cut_message_id, untilMessageId: row.until_message_id,
+    files: JSON.parse(row.files_json) as RewindFile[], commands: row.commands, createdAt: row.created_at, redoneAt: row.redone_at,
+  };
 }
 
 function mapEvent(row: EventRow): EventEnvelope {

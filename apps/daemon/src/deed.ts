@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { Deed, DeedAction, DeedAnchor, DeedSentence, DriveSignal } from "@demesne/protocol";
+import type { Deed, DeedAction, DeedAnchor, DeedSentence, DeedValue, DriveSignal } from "@demesne/protocol";
 import type { ProviderMessage, ProviderToolDefinition } from "@demesne/providers";
 import type { TurnInference } from "./processor.ts";
 import type { AgentTool } from "./tools.ts";
 import { assertModelResponseComplete, withProviderDeadlines } from "./engine.ts";
+import type { ProofResult } from "./deed-proof.ts";
 
 /// The Deed: a project's plain-sentence description, written by a chat that
 /// reads the code, each sentence tied to the lines that make it true. A change
@@ -65,6 +66,77 @@ export function sectionFor(deed: Deed, text: string): string {
   return best;
 }
 
+const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/// The literal as a whole token on a line: not part of a longer name or number.
+const token = (literal: string) => new RegExp(`(?<![\\w.])${escape(literal)}(?![\\w])`);
+/// Where a word sits in a sentence, as a whole word.
+const wordAt = (text: string, word: string) => text.search(new RegExp(`(?<![\\w])${escape(word)}(?![\\w])`));
+
+/// A number as the sentence would say it: digits stay digits, words stay words.
+export function numberText(value: number, like: string): string {
+  return /^\d/.test(like) || !NUMBER_WORDS.includes(like.toLowerCase()) || !NUMBER_WORDS[value] ? String(value)
+    : like[0] === like[0]!.toUpperCase() ? NUMBER_WORDS[value]![0]!.toUpperCase() + NUMBER_WORDS[value]!.slice(1) : NUMBER_WORDS[value]!;
+}
+const numberOf = (text: string) => /^\d+(\.\d+)?$/.test(text) ? Number(text) : NUMBER_WORDS.indexOf(text.toLowerCase());
+
+/// A live word the writing chat named, checked against the sentence and the
+/// code: the word is in the sentence and its token is on that line. Null
+/// when either isn't so.
+export function pinValue(root: string, sentence: string, raw: { text?: unknown; path?: unknown; line?: unknown; literal?: unknown; choices?: unknown }): DeedValue | null {
+  if (typeof raw.text !== "string" || typeof raw.literal !== "string" || typeof raw.path !== "string" || !Number.isInteger(raw.line)) return null;
+  const text = raw.text.trim(), literal = raw.literal.trim();
+  if (!text || !literal || wordAt(sentence, text) < 0) return null;
+  const path = inside(root, raw.path), file = path ? readText(root, path) : null;
+  const code = file?.split("\n")[(raw.line as number) - 1];
+  if (!path || code === undefined || !token(literal).test(code)) return null;
+  const value = { id: randomUUID().slice(0, 8), text, path, line: raw.line as number, literal, code };
+  if (/^\d+(\.\d+)?$/.test(literal) && numberOf(text) >= 0) return { ...value, kind: "number" };
+  const choices = Array.isArray(raw.choices) ? (raw.choices as { word?: unknown; literal?: unknown }[]).flatMap((choice) =>
+    typeof choice?.word === "string" && typeof choice.literal === "string" && choice.word.trim() && choice.literal.trim() ? [{ word: choice.word.trim(), literal: choice.literal.trim() }] : []).slice(0, 6) : [];
+  if (!choices.some((choice) => choice.word === text)) choices.unshift({ word: text, literal });
+  return choices.length >= 2 ? { ...value, kind: "choice", choices } : null;
+}
+
+/// The line a value was pinned to, wherever it is now: the same text,
+/// nearest where it was. -1 when that line changed.
+function findLine(lines: string[], value: DeedValue): number {
+  let best = -1;
+  lines.forEach((line, index) => { if (line === value.code && (best < 0 || Math.abs(index + 1 - value.line) < Math.abs(best + 1 - value.line))) best = index; });
+  return best;
+}
+
+/// Changes one live word: its token on its line, and the word in the sentence.
+/// Returns the file's text before and after, for Undo.
+export function setValueIn(root: string, sentence: DeedSentence, valueId: string, to: number | string): { before: string; after: string; text: string; values: DeedValue[] } {
+  const value = sentence.values?.find((item) => item.id === valueId);
+  if (!value) throw new Error("That word is no longer live");
+  let word: string, literal: string;
+  if (value.kind === "number") {
+    const next = typeof to === "number" ? to : Number(to);
+    if (!Number.isFinite(next) || next < 0 || next > 1e9 || (!value.literal.includes(".") && !Number.isInteger(next))) throw new Error("Not a number this can be");
+    word = numberText(next, value.text); literal = String(next);
+  } else {
+    const choice = value.choices?.find((item) => item.word === to);
+    if (!choice) throw new Error("Not one of its choices");
+    word = choice.word; literal = choice.literal;
+  }
+  const before = readText(root, value.path);
+  if (before === null) throw new Error(`${value.path} is gone`);
+  const lines = before.split("\n"), at = findLine(lines, value);
+  if (at < 0) throw new Error(`That line in ${value.path} changed; check the sentence first`);
+  const code = lines[at]!.replace(token(value.literal), literal);
+  lines[at] = code;
+  const after = lines.join("\n");
+  const index = wordAt(sentence.text, value.text);
+  const text = index < 0 ? sentence.text : sentence.text.slice(0, index) + word + sentence.text.slice(index + value.text.length);
+  // Other live words on the same line now find it by its new text.
+  const values = sentence.values!.map((item) => item.id === value.id ? { ...item, text: word, literal, code, line: at + 1 }
+    : item.path === value.path && item.code === value.code ? { ...item, code, line: at + 1 } : item);
+  writeFileSync(join(root, value.path), after);
+  return { before, after, text, values };
+}
+
 const anchorList = (anchors: DeedAnchor[]) => anchors.length ? anchors.map((anchor) => `${anchor.path}${anchor.line ? `:${anchor.line}` : ""}`).join(", ") : "none yet";
 
 export const WRITE_PROMPT = `Write this project's Deed.
@@ -75,6 +147,8 @@ Read before you write: the README, the entry points and the main features. Then 
 - 3 to 8 sections with short names (a feature or area, like "Drive" or "Install").
 - 2 to 8 sentences per section. One fact per sentence, present tense, under 30 words, specific and checkable: name the numbers, keys and limits the code uses.
 - For each sentence, 1 to 3 anchors: the file (relative path) and the line where the code that makes it true starts.
+- values: the words in the sentence that are a value in the code, so the person can change them in place. A number ("20", "three") with the literal on its line ("20", "3"), or a word with a few real alternatives (a key, a mode, a name) with the literal it stands for and each alternative's word and literal. The word must appear in the sentence exactly; the literal must be on that line exactly. Leave values out when no single token holds it.
+- tests: the test files (relative paths) that check this behaviour, when there are any.
 Say nothing you did not see in the code. Do not edit any file.`;
 
 export function makePrompt(sentence: DeedSentence, old: DeedAnchor[]): string {
@@ -110,6 +184,11 @@ const writeDefinition: ProviderToolDefinition = {
                 properties: {
                   text: { type: "string", minLength: 8, maxLength: MAX_TEXT },
                   anchors: { type: "array", minItems: 1, maxItems: 3, items: { type: "object", additionalProperties: false, required: ["path"], properties: { path: { type: "string" }, line: { type: "integer", minimum: 1 } } } },
+                  values: { type: "array", maxItems: 4, items: { type: "object", additionalProperties: false, required: ["text", "path", "line", "literal"], properties: {
+                    text: { type: "string" }, path: { type: "string" }, line: { type: "integer", minimum: 1 }, literal: { type: "string" },
+                    choices: { type: "array", maxItems: 6, items: { type: "object", additionalProperties: false, required: ["word", "literal"], properties: { word: { type: "string" }, literal: { type: "string" } } } },
+                  } } },
+                  tests: { type: "array", maxItems: 4, items: { type: "string" } },
                 },
               },
             },
@@ -128,6 +207,7 @@ const settleDefinition: ProviderToolDefinition = {
       made: { type: "boolean" },
       anchors: { type: "array", maxItems: 3, items: { type: "object", additionalProperties: false, required: ["path"], properties: { path: { type: "string" }, line: { type: "integer", minimum: 1 } } } },
       why: { type: "string", maxLength: 300, description: "When it couldn't be made true: why, in one sentence." },
+      tests: { type: "array", maxItems: 4, items: { type: "string" }, description: "Test files that check the sentence now." },
     },
   },
 };
@@ -192,15 +272,24 @@ export interface DeedHost {
   startTurn(sessionId: string, prompt: string, mode: "ask" | "deny"): Promise<void>;
   archive(sessionId: string): void;
   judge(workspace: string, sentence: DeedSentence): Promise<DeedVerdict>;
+  /// Runs these test files with the project's runner.
+  test(workspace: string, files: string[], signal: AbortSignal): Promise<ProofResult>;
 }
 
-interface Job { workspace: string; kind: "write" | "make"; sentenceId?: string; written?: boolean; settled?: { made: boolean; anchors: DeedAnchor[]; why?: string } }
+/// Test files inside the project that exist.
+const testFiles = (root: string, raw: unknown) => Array.isArray(raw)
+  ? [...new Set(raw.flatMap((path) => { const file = typeof path === "string" ? inside(root, path) : null; return file && existsSync(join(root, file)) ? [file] : []; }))].slice(0, 4) : [];
+
+interface Job { workspace: string; kind: "write" | "make"; sentenceId?: string; written?: boolean; settled?: { made: boolean; anchors: DeedAnchor[]; why?: string; tests: string[] } }
 
 export class DeedBook {
   /// The chats writing a deed or making a sentence true, by session.
   private jobs = new Map<string, Job>();
   /// Sentences being checked against the code right now.
   private checking = new Set<string>();
+  /// Proofs running, by sentence; Prove it, by workspace.
+  private proofs = new Map<string, AbortController>();
+  private provingAll = new Map<string, AbortController>();
   constructor(private directory: string, private host: DeedHost) {}
 
   private path(workspace: string) { return join(this.directory, `${hash(workspace)}${hash(`${workspace}\0`)}.json`); }
@@ -242,6 +331,9 @@ export class DeedBook {
         sentence.updatedAt = now(); changed = true;
       }
     }
+    for (const sentence of deed.sentences)
+      if (sentence.proof?.state === "running" && !this.proofs.has(sentence.id)) { sentence.proof = { ...sentence.proof, state: "failed", detail: "It stopped when Demesne restarted." }; changed = true; }
+    if (deed.proving?.running && !this.provingAll.has(workspace)) { deed.proving = { ...deed.proving, running: false }; changed = true; }
     if (deed.writing?.status === "running" && !this.jobs.has(deed.writing.sessionId)) { deed.writing = { ...deed.writing, status: "failed", error: "It stopped when Demesne restarted." }; changed = true; }
     return changed ? this.save(deed) : deed;
   }
@@ -301,12 +393,15 @@ export class DeedBook {
             const settled = job?.settled;
             item.updatedAt = now();
             if (settled?.made && settled.anchors.length) {
-              Object.assign(item, { state: "true", anchors: settled.anchors, madeAt: now(), files: settled.anchors.length, why: undefined, words: undefined });
+              Object.assign(item, { state: "true", anchors: settled.anchors, madeAt: now(), files: settled.anchors.length, why: undefined, words: undefined, values: undefined, undo: undefined, tests: settled.tests.length ? settled.tests : item.tests });
             } else {
               item.state = "failed";
               item.why = settled?.why || (settled?.made ? "The chat didn't say which code makes it true." : "The chat ended without making it true.");
             }
           });
+          // Made true, then proved the same way a changed value is.
+          const made = this.read(workspace).sentences.find((candidate) => candidate.id === sentence.id);
+          if (made?.state === "true" && made.tests?.length) this.prove(workspace, made.id);
         });
         return saved;
       }
@@ -352,13 +447,120 @@ export class DeedBook {
         });
       }
       case "seen":
-        return this.update(workspace, (next) => { const item = next.sentences.find((candidate) => candidate.id === request.id); if (item) { item.madeAt = undefined; item.was = undefined; } });
+        return this.update(workspace, (next) => {
+          const item = next.sentences.find((candidate) => candidate.id === request.id);
+          if (item) { item.madeAt = undefined; item.was = undefined; item.undo = undefined; if (item.proof?.state === "passed") item.proof = undefined; }
+        });
       case "remove":
         return this.update(workspace, (next) => {
           next.sentences = next.sentences.filter((item) => item.id !== request.id);
           next.sections = next.sections.filter((section) => next.sentences.some((item) => item.section === section));
         });
+      case "set": {
+        const sentence = find(request.id);
+        if (sentence.state !== "true" || sentence.proof?.state === "running") throw new Error("Wait for this sentence to settle first");
+        const change = setValueIn(workspace, sentence, request.value, request.to);
+        const saved = this.update(workspace, (next) => {
+          const item = next.sentences.find((candidate) => candidate.id === sentence.id)!;
+          item.undo = { path: sentence.values!.find((value) => value.id === request.value)!.path, before: change.before, after: change.after, text: item.text, values: item.values! };
+          Object.assign(item, { text: change.text, values: change.values, updatedAt: now(), madeAt: undefined, was: undefined,
+            anchors: item.anchors.map((anchor) => pinAnchor(workspace, anchor) ?? anchor) });
+        });
+        if (sentence.tests?.length) return this.prove(workspace, sentence.id, true);
+        return saved;
+      }
+      case "undo": {
+        const sentence = find(request.id), undo = sentence.undo;
+        if (!undo) throw new Error("Nothing to undo here");
+        if (readText(workspace, undo.path) !== undo.after) throw new Error(`${undo.path} changed since; undo it there`);
+        this.proofs.get(sentence.id)?.abort();
+        writeFileSync(join(workspace, undo.path), undo.before);
+        return this.update(workspace, (next) => {
+          const item = next.sentences.find((candidate) => candidate.id === sentence.id)!;
+          Object.assign(item, { text: undo.text, values: undo.values, undo: undefined, proof: undefined, updatedAt: now(),
+            anchors: item.anchors.map((anchor) => pinAnchor(workspace, anchor) ?? anchor) });
+        });
+      }
+      case "prove":
+        return request.id ? this.prove(workspace, find(request.id).id) : this.proveAll(workspace);
+      case "stop":
+        this.provingAll.get(workspace)?.abort();
+        return this.state(workspace);
     }
+  }
+
+  /// Runs a sentence's tests. After a changed value, a failure puts it back.
+  private prove(workspace: string, id: string, putBack = false): Deed {
+    const sentence = this.read(workspace).sentences.find((item) => item.id === id);
+    if (!sentence?.tests?.length) throw new Error("No tests hold this sentence");
+    this.proofs.get(id)?.abort();
+    const controller = new AbortController();
+    this.proofs.set(id, controller);
+    const files = sentence.tests;
+    const saved = this.update(workspace, (next) => { const item = next.sentences.find((candidate) => candidate.id === id); if (item) item.proof = { state: "running", at: now(), files }; });
+    const done = this.host.test(workspace, files, controller.signal).catch((error) => ({ ok: false, passed: 0, failed: 1, ms: 0, detail: error instanceof Error ? error.message : String(error) }))
+      .then((result) => {
+        if (this.proofs.get(id) !== controller) return result;
+        this.proofs.delete(id);
+        this.update(workspace, (next) => {
+          const item = next.sentences.find((candidate) => candidate.id === id);
+          if (!item) return;
+          item.proof = { state: result.ok ? "passed" : "failed", at: now(), files, passed: result.passed, failed: result.failed, ms: result.ms, detail: result.detail };
+          // A changed value its tests don't hold goes back.
+          if (!result.ok && putBack && item.undo && readText(workspace, item.undo.path) === item.undo.after) {
+            writeFileSync(join(workspace, item.undo.path), item.undo.before);
+            Object.assign(item, { text: item.undo.text, values: item.undo.values, undo: undefined, anchors: item.anchors.map((anchor) => pinAnchor(workspace, anchor) ?? anchor) });
+            item.proof.putBack = true;
+          }
+          item.updatedAt = now();
+        });
+        return result;
+      });
+    this.running.set(id, done);
+    void done.finally(() => { if (this.running.get(id) === done) this.running.delete(id); });
+    return saved;
+  }
+  /// The latest proof of each sentence, for whoever waits on it.
+  private running = new Map<string, Promise<ProofResult>>();
+
+  /// Prove it: every true sentence with tests, one at a time.
+  private proveAll(workspace: string): Deed {
+    if (this.provingAll.has(workspace)) return this.state(workspace);
+    const ids = this.read(workspace).sentences.filter((sentence) => sentence.state === "true" && sentence.tests?.length).map((sentence) => sentence.id);
+    if (!ids.length) throw new Error("No sentence here has tests to run");
+    const controller = new AbortController();
+    this.provingAll.set(workspace, controller);
+    const saved = this.update(workspace, (next) => {
+      next.proving = { total: ids.length, done: 0, failed: 0, running: true, at: now() };
+      // Earlier results fade until each is run again.
+      for (const item of next.sentences) if (ids.includes(item.id) && item.proof?.state !== "running") item.proof = undefined;
+    });
+    void (async () => {
+      let failed = 0;
+      for (const [index, id] of ids.entries()) {
+        if (controller.signal.aborted) break;
+        this.prove(workspace, id);
+        const stop = () => this.proofs.get(id)?.abort();
+        controller.signal.addEventListener("abort", stop, { once: true });
+        const result = await this.running.get(id);
+        controller.signal.removeEventListener("abort", stop);
+        if (result && !result.ok && !controller.signal.aborted) {
+          failed++;
+          this.update(workspace, (next) => { const item = next.sentences.find((candidate) => candidate.id === id); if (item) item.why = `Its tests fail: ${result.detail ?? "see the output"}`; });
+        }
+        this.update(workspace, (next) => { if (next.proving) next.proving = { ...next.proving, done: index + 1, failed }; });
+      }
+      this.provingAll.delete(workspace);
+      this.update(workspace, (next) => { if (next.proving) next.proving = { ...next.proving, running: false }; });
+    })();
+    return saved;
+  }
+
+  /// The sentences a change to these files could break, with tests to run.
+  touching(workspace: string, paths: string[]): DeedSentence[] {
+    const changed = new Set(paths);
+    return this.read(workspace).sentences.filter((sentence) => sentence.tests?.length && sentence.state !== "wish"
+      && (sentence.anchors.some((anchor) => changed.has(anchor.path)) || sentence.tests.some((file) => changed.has(file)))).slice(0, 4);
   }
 
   /// Sentences written but not built: work the person asked for, for Drive.
@@ -394,7 +596,7 @@ export class DeedBook {
           const value = (input ?? {}) as { made?: unknown; anchors?: unknown; why?: unknown };
           const anchors = Array.isArray(value.anchors) ? value.anchors.map((anchor) => pinAnchor(found.workspace, anchor ?? {})).filter((anchor): anchor is DeedAnchor => Boolean(anchor)) : [];
           if (value.made === true && !anchors.length) throw new Error("Name at least one file (and line) in this project that makes the sentence true");
-          found.settled = { made: value.made === true, anchors, why: typeof value.why === "string" ? clean(value.why) : undefined };
+          found.settled = { made: value.made === true, anchors, why: typeof value.why === "string" ? clean(value.why) : undefined, tests: testFiles(found.workspace, (input as { tests?: unknown })?.tests) };
           return found.settled.made ? "Recorded: the sentence is true. Finish with one short line on what changed." : "Recorded. Finish with one short line on why.";
         },
       },
@@ -415,7 +617,9 @@ export class DeedBook {
         const anchors = Array.isArray(raw?.anchors) ? raw.anchors.map((anchor) => pinAnchor(found.workspace, anchor ?? {})).filter((anchor): anchor is DeedAnchor => Boolean(anchor)) : [];
         if (!text || !anchors.length || sentences.length >= MAX_SENTENCES) { dropped++; continue; }
         if (!names.includes(name)) names.push(name);
-        sentences.push({ id: randomUUID(), section: name, text, anchors, state: "true", updatedAt: now() });
+        const values = Array.isArray((raw as { values?: unknown }).values) ? ((raw as { values: unknown[] }).values).map((value) => pinValue(found.workspace, text, (value ?? {}) as never)).filter((value): value is DeedValue => Boolean(value)) : [];
+        const tests = testFiles(found.workspace, (raw as { tests?: unknown }).tests);
+        sentences.push({ id: randomUUID(), section: name, text, anchors, state: "true", updatedAt: now(), ...(values.length ? { values } : {}), ...(tests.length ? { tests } : {}) });
       }
     }
     if (!sentences.length) throw new Error("No sentence named a file in this project; give each one the file and line that makes it true");

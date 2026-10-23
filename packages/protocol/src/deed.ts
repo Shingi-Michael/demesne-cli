@@ -13,6 +13,37 @@ export interface DeedAnchor { path: string; line?: number; quote?: string; hash?
 /// chat ended without making it true. wish: written but not built yet.
 export type DeedState = "true" | "check" | "checking" | "false" | "working" | "failed" | "wish";
 
+/// A word in a sentence that is a value in the code: a number to drag, or a
+/// word with a few real choices. `code` is the line as it was pinned, so a
+/// change finds the same line again even after it moves.
+export interface DeedValue {
+  id: string;
+  /// The word as the sentence says it ("20", "three", "Enter").
+  text: string;
+  path: string;
+  line: number;
+  /// The token on that line it stands for ("20", "3", "\"Enter\"").
+  literal: string;
+  code: string;
+  kind: "number" | "choice";
+  /// For a choice: each word the sentence can say, and the code token it means.
+  choices?: { word: string; literal: string }[];
+}
+
+/// Running the tests that hold a sentence.
+export interface DeedProof {
+  state: "running" | "passed" | "failed";
+  at: string;
+  files: string[];
+  passed?: number;
+  failed?: number;
+  ms?: number;
+  /// What failed, in a line or two of the runner's own words.
+  detail?: string;
+  /// A changed value that failed its proof was put back.
+  putBack?: boolean;
+}
+
 export interface DeedSentence {
   id: string;
   section: string;
@@ -30,6 +61,12 @@ export interface DeedSentence {
   /// When an edit was made true; the receipt shows until it is dismissed.
   madeAt?: string;
   files?: number;
+  /// Live words, and the test files that hold the sentence.
+  values?: DeedValue[];
+  tests?: string[];
+  proof?: DeedProof;
+  /// The last value changed here, until it is undone or the line moves on.
+  undo?: { path: string; before: string; after: string; text: string; values: DeedValue[] };
   updatedAt: string;
 }
 
@@ -40,6 +77,8 @@ export interface Deed {
   writing: { sessionId: string; status: "running" | "failed"; error?: string } | null;
   sections: string[];
   sentences: DeedSentence[];
+  /// Prove it: each sentence's tests, in turn.
+  proving?: { total: number; done: number; failed: number; running: boolean; at: string } | null;
 }
 
 export interface DeedResponse { deed: Deed }
@@ -52,5 +91,11 @@ export type DeedAction =
   | { action: "words"; id: string }
   | { action: "fix"; id: string }
   | { action: "seen"; id: string }
-  | { action: "remove"; id: string };
+  | { action: "remove"; id: string }
+  /// A live word takes a new value: a number, or one of its choices.
+  | { action: "set"; id: string; value: string; to: number | string }
+  | { action: "undo"; id: string }
+  /// One sentence's tests, or every sentence's when no id is given.
+  | { action: "prove"; id?: string }
+  | { action: "stop" };
 export type DeedRequest = DeedAction & { workspace: string };

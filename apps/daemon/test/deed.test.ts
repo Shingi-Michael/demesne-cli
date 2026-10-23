@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DeedSentence } from "@demesne/protocol";
-import { anchorHolds, DeedBook, pinAnchor, sectionFor, type DeedHost, type DeedVerdict } from "../src/deed.ts";
+import { anchorHolds, DeedBook, numberText, pinAnchor, pinValue, sectionFor, type DeedHost, type DeedVerdict } from "../src/deed.ts";
 
 const CODE = ["export const QUIET_MS = 20 * 60_000;", "export const PER_DAY = 3;", "", "export function tick() {", "  return QUIET_MS;", "}", ""].join("\n");
 
@@ -25,6 +25,7 @@ function book(overrides: Partial<DeedHost> = {}) {
     startTurn: (sessionId, prompt, mode) => new Promise<void>((resolve) => { turns.push({ sessionId, prompt, mode, end: resolve }); }),
     archive: (sessionId) => { archived.push(sessionId); },
     judge: async () => ({ holds: true, why: "", words: "" }),
+    test: async () => ({ ok: true, passed: 3, failed: 0, ms: 10 }),
     ...overrides,
   };
   const deeds = new DeedBook(mkdtempSync(join(tmpdir(), "deed-data-")), host);
@@ -181,6 +182,84 @@ test("work that stopped with the daemon says so", async () => {
   const { root, deeds, id } = await written();
   deeds.act(root, { action: "make", id, text: "Drive starts the first idea after 5 quiet minutes." });
   // A new daemon has no record of the chat.
-  const restarted = new DeedBook((deeds as unknown as { directory: string }).directory, { startSession: () => "x", startTurn: async () => {}, archive: () => {}, judge: async () => ({ holds: true, why: "", words: "" }) });
+  const restarted = new DeedBook((deeds as unknown as { directory: string }).directory, { startSession: () => "x", startTurn: async () => {}, archive: () => {}, judge: async () => ({ holds: true, why: "", words: "" }), test: async () => ({ ok: true, passed: 0, failed: 0, ms: 0 }) });
   expect(restarted.state(root).sentences[0]).toMatchObject({ state: "failed", why: "It stopped when Demesne restarted." });
+});
+
+test("a live word must be in the sentence and its token on the line", () => {
+  const root = project();
+  const sentence = "Drive starts the first idea after 20 quiet minutes.";
+  expect(pinValue(root, sentence, { text: "20", path: "src/auto.ts", line: 1, literal: "20" })).toMatchObject({ kind: "number", text: "20", literal: "20", line: 1 });
+  expect(pinValue(root, sentence, { text: "30", path: "src/auto.ts", line: 1, literal: "20" })).toBeNull();
+  expect(pinValue(root, sentence, { text: "20", path: "src/auto.ts", line: 2, literal: "20" })).toBeNull();
+  // "0" is inside 60_000 but not a token of its own.
+  expect(pinValue(root, "It waits 0 minutes.", { text: "0", path: "src/auto.ts", line: 1, literal: "0" })).toBeNull();
+  // A word needs real alternatives to be live.
+  expect(pinValue(root, "Tick returns the quiet time.", { text: "quiet", path: "src/auto.ts", line: 5, literal: "QUIET_MS" })).toBeNull();
+  expect(pinValue(root, "Tick returns the quiet time.", { text: "quiet", path: "src/auto.ts", line: 5, literal: "QUIET_MS", choices: [{ word: "daily", literal: "PER_DAY" }] })).toMatchObject({ kind: "choice", choices: [{ word: "quiet", literal: "QUIET_MS" }, { word: "daily", literal: "PER_DAY" }] });
+});
+
+test("numbers keep the way the sentence says them", () => {
+  expect(numberText(10, "20")).toBe("10");
+  expect(numberText(5, "three")).toBe("five");
+  expect(numberText(5, "Three")).toBe("Five");
+  expect(numberText(42, "three")).toBe("42");
+});
+
+async function live(test?: DeedHost["test"]) {
+  const setup = book(test ? { test } : {});
+  const { root, deeds, turns, tool } = setup;
+  writeFileSync(join(root, "src", "auto.test.ts"), "// tests\n");
+  deeds.act(root, { action: "write" });
+  await flush();
+  await tool("deed_write").execute({ sections: [{ name: "Drive", sentences: [
+    { text: "Drive starts the first idea after 20 quiet minutes.", anchors: [{ path: "src/auto.ts", line: 1 }], values: [{ text: "20", path: "src/auto.ts", line: 1, literal: "20" }], tests: ["src/auto.test.ts", "missing.test.ts"] },
+    { text: "It runs at most three ideas a day.", anchors: [{ path: "src/auto.ts", line: 2 }], values: [{ text: "three", path: "src/auto.ts", line: 2, literal: "3" }] },
+  ] }] }, { workspaceRoot: root, signal: new AbortController().signal, sessionId: "s1" });
+  turns[0]!.end();
+  await flush();
+  const [quiet, perDay] = deeds.state(root).sentences;
+  return { ...setup, quiet: quiet!, perDay: perDay! };
+}
+
+test("dragging a number changes that one token in the code and the sentence", async () => {
+  const { root, deeds, perDay } = await live();
+  expect(perDay.values).toHaveLength(1);
+  const deed = deeds.act(root, { action: "set", id: perDay.id, value: perDay.values![0]!.id, to: 5 });
+  expect(deed.sentences[1]).toMatchObject({ text: "It runs at most five ideas a day.", state: "true" });
+  expect(readFileSync(join(root, "src", "auto.ts"), "utf8")).toContain("export const PER_DAY = 5;");
+  // The sentence still holds the code it now rests on; Undo puts both back.
+  expect(deeds.state(root).sentences[1]!.state).toBe("true");
+  expect(deeds.act(root, { action: "undo", id: perDay.id }).sentences[1]!.text).toBe("It runs at most three ideas a day.");
+  expect(readFileSync(join(root, "src", "auto.ts"), "utf8")).toBe(CODE);
+});
+
+test("a changed value is proved by its tests, and put back when they fail", async () => {
+  let ok = true;
+  const ran: string[][] = [];
+  const { root, deeds, quiet } = await live(async (_workspace, files) => { ran.push(files); return ok ? { ok, passed: 14, failed: 0, ms: 1400 } : { ok, passed: 13, failed: 1, ms: 900, detail: "(fail) waits 20 minutes" }; });
+  expect(quiet.tests).toEqual(["src/auto.test.ts"]);
+  const proving = deeds.act(root, { action: "set", id: quiet.id, value: quiet.values![0]!.id, to: 10 });
+  expect(proving.sentences[0]!.proof).toMatchObject({ state: "running", files: ["src/auto.test.ts"] });
+  await flush();
+  expect(deeds.state(root).sentences[0]).toMatchObject({ text: "Drive starts the first idea after 10 quiet minutes.", proof: { state: "passed", passed: 14, ms: 1400 } });
+  ok = false;
+  const value = deeds.state(root).sentences[0]!.values![0]!.id;
+  deeds.act(root, { action: "set", id: quiet.id, value, to: 1 });
+  await flush();
+  const back = deeds.state(root).sentences[0]!;
+  expect(back).toMatchObject({ text: "Drive starts the first idea after 10 quiet minutes.", proof: { state: "failed", putBack: true, detail: "(fail) waits 20 minutes" } });
+  expect(readFileSync(join(root, "src", "auto.ts"), "utf8")).toContain("QUIET_MS = 10 * 60_000");
+  expect(ran).toHaveLength(2);
+});
+
+test("Prove it runs each sentence with tests in turn and counts what failed", async () => {
+  const { root, deeds, quiet } = await live(async () => ({ ok: false, passed: 0, failed: 2, ms: 5, detail: "two failed" }));
+  const started = deeds.act(root, { action: "prove" });
+  expect(started.proving).toMatchObject({ total: 1, done: 0, running: true });
+  for (let i = 0; i < 5; i++) await flush();
+  const deed = deeds.state(root);
+  expect(deed.proving).toMatchObject({ total: 1, done: 1, failed: 1, running: false });
+  expect(deed.sentences.find((sentence) => sentence.id === quiet.id)).toMatchObject({ proof: { state: "failed" }, why: "Its tests fail: two failed" });
+  expect(deeds.touching(root, ["src/auto.ts"]).map((sentence) => sentence.id)).toEqual([quiet.id]);
 });

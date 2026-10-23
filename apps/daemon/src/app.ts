@@ -72,6 +72,7 @@ import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
 import { DeedBook, judgeSentence } from "./deed.ts";
+import { runTests } from "./deed-proof.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
@@ -195,6 +196,15 @@ export function createDaemonApp(options: {
         } catch (error) { console.warn(`Couldn't report the Drive mission: ${error instanceof Error ? error.message : error}`); }
       };
       deliver();
+    },
+    // A branch is ready once the Deed's sentences on its files hold there.
+    prove: async (fix, paths) => {
+      const results: { command: string; passed: boolean }[] = [];
+      for (const sentence of deedBook.touching(fix.workspace, paths)) {
+        const result = await runTests(fix.path, sentence.tests!, driveLifecycle.signal);
+        results.push({ command: `Deed: ${sentence.text}`, passed: result.ok });
+      }
+      return results;
     },
     turn: (turnId) => store.getTurn(turnId),
     cancel: (turnId) => {
@@ -378,6 +388,7 @@ export function createDaemonApp(options: {
       try { return await judgeSentence(workspace, sentence, inference, driveLifecycle.signal); }
       finally { lease.release(); }
     },
+    test: (workspace, files, signal) => runTests(workspace, files, AbortSignal.any([signal, driveLifecycle.signal])),
   });
   for (const tool of deedBook.tools()) tools.register(tool);
   const activeDriveDecisions = new Set<Promise<unknown>>();

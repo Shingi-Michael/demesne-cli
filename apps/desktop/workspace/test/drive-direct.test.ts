@@ -107,7 +107,7 @@ test("a mission in the background is observed and worked in its own chat, not th
   const observation = control.observe();
   expect(observation).toMatchObject({ sessionId: "m1", workspace: "/worktrees/work-1a2b", mode: "input", ready: true });
   expect(await control.perform({ kind: "compose", text: "Add a test for emoji identifiers" }, observation, new AbortController().signal)).toStartWith(SENT);
-  expect(sent).toEqual([{ id: "m1", content: "Add a test for emoji identifiers", permissionMode: "allow", planOnly: false } as never]);
+  expect(sent).toEqual([{ id: "m1", content: "Add a test for emoji identifiers", permissionMode: "allow", planOnly: false, fromDrive: true } as never]);
   expect(submitted).toEqual([]);
   expect(turns).toEqual([{ id: "t9" }]);
   expect(started).toEqual(["t9"]);

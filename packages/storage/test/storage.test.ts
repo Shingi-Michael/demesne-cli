@@ -42,6 +42,27 @@ describe("DemesneStore", () => {
     reopened.close();
   });
 
+  test("keeps which requests Drive wrote, across a reopen and an older database", () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-storage-test-"));
+    temporaryDirectories.push(directory);
+    const databasePath = join(directory, "demesne.sqlite");
+    const store = new DemesneStore(databasePath);
+    const { session } = store.createSession("Drive mission");
+    const mine = store.createTurn(session.id, "Typed by you");
+    expect(mine.turn.fromDrive).toBeUndefined();
+    store.database.run("UPDATE turns SET status = 'completed' WHERE id = ?", [mine.turn.id]);
+    const drive = store.createTurn(session.id, "Run the checks", "allow", undefined, false, "chat", [], true);
+    expect(drive.event.payload).toMatchObject({ fromDrive: true });
+    store.close();
+    const reopened = new DemesneStore(databasePath);
+    expect(reopened.getSession(session.id)?.turns.map(turn => turn.fromDrive ?? false)).toEqual([false, true]);
+    reopened.database.run("ALTER TABLE turns DROP COLUMN from_drive");
+    reopened.close();
+    const migrated = new DemesneStore(databasePath);
+    expect(migrated.getSession(session.id)?.turns.map(turn => turn.fromDrive ?? false)).toEqual([false, false]);
+    migrated.close();
+  });
+
   test("migrates schema 6 sessions to manual approval without losing history", () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-storage-test-"));
     temporaryDirectories.push(directory);

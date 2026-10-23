@@ -79,6 +79,7 @@ interface TurnRow {
   plan_only: number | null;
   kind: string;
   attachments_json: string | null;
+  from_drive: number | null;
 }
 
 interface EventRow {
@@ -877,6 +878,7 @@ export class DemesneStore {
     planOnly = false,
     kind: "chat" | "compaction" | "themefy" = "chat",
     attachments: TurnAttachment[] = [],
+    fromDrive = false,
   ): { turn: Turn; event: EventEnvelope } {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -888,7 +890,7 @@ export class DemesneStore {
       if (active.count > 0) throw new InvalidStateError("Session already has an active turn");
       this.database
         .query(
-          "INSERT INTO turns (id, session_id, content, response_text, status, created_at, permission_mode, thinking_enabled, plan_only, kind, attachments_json) VALUES (?, ?, ?, '', 'queued', ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO turns (id, session_id, content, response_text, status, created_at, permission_mode, thinking_enabled, plan_only, kind, attachments_json, from_drive) VALUES (?, ?, ?, '', 'queued', ?, ?, ?, ?, ?, ?, ?)",
         )
         .run(
           id,
@@ -900,6 +902,7 @@ export class DemesneStore {
           planOnly ? 1 : 0,
           kind,
           attachments.length ? JSON.stringify(attachments) : null,
+          fromDrive ? 1 : 0,
         );
       this.database.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now, sessionId);
       const event = this.insertEvent("turn.created", sessionId, id, {
@@ -908,6 +911,7 @@ export class DemesneStore {
         ...(planOnly ? { planOnly: true } : {}),
         ...(kind !== "chat" ? { kind } : {}),
         ...(attachments.length ? { attachments } : {}),
+        ...(fromDrive ? { fromDrive: true } : {}),
       }, now);
       return { turn: this.getTurnOrThrow(id), event };
     })();
@@ -1550,6 +1554,7 @@ export class DemesneStore {
       this.database.run("ALTER TABLE turns ADD COLUMN plan_only INTEGER NOT NULL DEFAULT 0");
     }
     if (!this.hasColumn("turns", "kind")) this.database.run("ALTER TABLE turns ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
+    if (!this.hasColumn("turns", "from_drive")) this.database.run("ALTER TABLE turns ADD COLUMN from_drive INTEGER NOT NULL DEFAULT 0");
     if (!this.hasColumn("sessions", "checkpoint_id")) this.database.run("ALTER TABLE sessions ADD COLUMN checkpoint_id TEXT");
     this.database.run(`CREATE TABLE IF NOT EXISTS session_checkpoints (
       id TEXT PRIMARY KEY,
@@ -1920,6 +1925,7 @@ function mapTurn(row: TurnRow): Turn {
     ...(row.plan_only ? { planOnly: true } : {}),
     ...(row.kind === "compaction" || row.kind === "themefy" ? { kind: row.kind } : {}),
     ...(row.attachments_json ? { attachments: JSON.parse(row.attachments_json) as TurnAttachment[] } : {}),
+    ...(row.from_drive ? { fromDrive: true } : {}),
   };
 }
 

@@ -73,7 +73,7 @@ const f = await fixture({
         return;
       }
       const input = deedTool === "deed_write"
-        ? { sections: [{ name: "Quiet", sentences: [{ text: "Drive starts after 20 quiet minutes.", anchors: [{ path: "quiet.ts", line: 1 }] }, { text: "Drive runs at most three ideas a day.", anchors: [{ path: "quiet.ts", line: 2 }] }] }] }
+        ? { sections: [{ name: "Quiet", sentences: [{ text: "Drive starts after 20 quiet minutes.", anchors: [{ path: "quiet.ts", line: 1 }], values: [{ text: "20", path: "quiet.ts", line: 1, literal: "20" }], tests: ["quiet.test.ts"] }, { text: "Drive runs at most three ideas a day.", anchors: [{ path: "quiet.ts", line: 2 }] }] }] }
         : deedTool === "deed_settle" ? { made: true, anchors: [{ path: "quiet.ts", line: 2 }] }
         : { holds: false, why: "It waits 15 minutes now.", words: "Drive starts after 15 quiet minutes.", lines: [{ path: "quiet.ts", line: 1 }] };
       yield { type: "tool_call_delta", index: 0, idDelta: `${deedTool}-1`, nameDelta: deedTool, argumentsDelta: JSON.stringify(input) };
@@ -1001,6 +1001,9 @@ try {
   // The Deed: written from the code, a code change catches the sentence it
   // breaks, the words follow, an edit makes the code follow, a wish waits.
   writeFileSync(join(f.workspace, "quiet.ts"), "export const QUIET_MINUTES = 20;\nexport const PER_DAY = 3;\n");
+  // Its test, run with bun (a bun.lock says so).
+  writeFileSync(join(f.workspace, "quiet.test.ts"), 'import { expect, test } from "bun:test";\nimport { QUIET_MINUTES } from "./quiet.ts";\ntest("waits under half an hour", () => expect(QUIET_MINUTES).toBeLessThan(30));\n');
+  writeFileSync(join(f.workspace, "bun.lock"), "");
   const deedRow = page.locator(".sidebar-deed");
   // It sits at the top of the project's chats, so unfold the project first.
   if (!await deedRow.isVisible()) await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).click();
@@ -1014,6 +1017,33 @@ try {
   assert.equal(await page.locator("#deed h3").first().innerText(), "QUIET");
   assert.equal(await page.locator("#deed .dz-s").count(), 2);
   await capture("17-deed");
+  // A live number: drag or ↑↓ it, Enter changes its line, its test proves it.
+  const twenty = quietLine.locator(".lv.num");
+  await until(() => twenty.isVisible(), "the number in the sentence is live");
+  await twenty.click();
+  await until(() => page.locator("#deed .lv.scrub").isVisible(), "clicking it holds it to drag");
+  await page.keyboard.press("Shift+ArrowUp");
+  await until(() => page.locator("#deed-live-line").innerText().then(text => text.includes("Make it so")), "the line under it says Enter makes it so");
+  assert((await page.locator("#deed .dz-code .ad").innerText()).includes("QUIET_MINUTES = 30"), "it shows the line of code");
+  await page.keyboard.press("Enter");
+  await until(() => page.locator("#deed .dz-under.drifted", { hasText: "so it went back" }).isVisible(), "a failing test puts the number back", 60_000);
+  assert(readFileSync(join(f.workspace, "quiet.ts"), "utf8").includes("QUIET_MINUTES = 20;"), "the code went back");
+  await capture("17-deed-not-proved");
+  await quietLine.locator(".lv.num").click();
+  await page.keyboard.press("Shift+ArrowDown");
+  assert.equal((await page.locator("#deed .lv.scrub").innerText()).replace(/\s/g, ""), "‹10›");
+  await capture("17-deed-live");
+  await page.keyboard.press("Enter");
+  await until(() => page.locator("#deed .dz-under.made", { hasText: "Proved" }).isVisible(), "its test proves the new number", 60_000);
+  assert(readFileSync(join(f.workspace, "quiet.ts"), "utf8").includes("QUIET_MINUTES = 10;"), "the line changed");
+  assert((await quietLine.innerText()).includes("after 10 quiet minutes"), "the sentence says the new number");
+  await capture("17-deed-proved");
+  await page.locator("#deed button", { hasText: "Undo" }).click();
+  await until(() => quietLine.innerText().then(text => text.includes("after 20 quiet minutes")), "Undo puts the words back");
+  assert(readFileSync(join(f.workspace, "quiet.ts"), "utf8").includes("QUIET_MINUTES = 20;"), "and the code");
+  // Prove it, in the title bar, runs every sentence's tests.
+  await page.locator("#deed-prove-slot button", { hasText: "Prove it" }).click();
+  await until(() => page.locator("#deed-summary").innerText().then(text => text.includes("1 proved")), "Prove it proves the sentence", 60_000);
   writeFileSync(join(f.workspace, "quiet.ts"), "export const QUIET_MINUTES = 15;\nexport const PER_DAY = 3;\n");
   await until(() => page.locator("#deed .dz-s.st-false").isVisible(), "a code change breaks its sentence", 20_000);
   await until(() => page.locator(".sidebar-deed-check").innerText().then(text => text === "1 to check"), "the sidebar counts it");

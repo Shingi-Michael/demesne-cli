@@ -1000,3 +1000,34 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .dz-pick .dz-words { font-style: italic; }
 .sidebar-deed .deed-ico { width: 13px; height: 13px; margin: 0 1.5px; flex: none; color: var(--t3); }
 .sidebar-deed-check { flex: none; margin-left: auto; color: var(--warn); font-size: 11px; }
+/* The Deed, alive: live words, the proof under a sentence, Prove it */
+#deed-prove-slot { flex: none; margin-left: 10px; }
+#deed-prove-slot[hidden] { display: none; }
+.deed-prove { padding: 3px 11px; border: 0; border-radius: 7px; background: var(--tone); color: var(--t1); box-shadow: 0 0 0 1px var(--hair); font: inherit; font-size: 12px; cursor: pointer; transition: background 140ms var(--ease, ease); }
+.deed-prove:hover { background: var(--tone2); }
+.desktop .lv { padding: 0 1px; border-bottom: 1.5px dotted color-mix(in srgb, var(--acc) 55%, transparent); cursor: pointer; outline: none; }
+.desktop .lv.num { cursor: ew-resize; touch-action: none; user-select: none; }
+.desktop .lv:hover, .desktop .lv:focus-visible { color: var(--acc); }
+.desktop .lv.scrub { display: inline-flex; align-items: center; gap: 4px; padding: 0 5px; border: 0; border-radius: 5px; background: var(--acc-soft); color: var(--acc); font-variant-numeric: tabular-nums; cursor: ew-resize; user-select: none; touch-action: none; }
+.desktop .lv.scrub i { font-style: normal; font-size: 12px; color: var(--t4); }
+.desktop .lv.pick { display: inline-flex; align-items: baseline; gap: 8px; border: 0; cursor: default; }
+.desktop .lv.pick b { padding: 0 5px; border-radius: 5px; background: var(--acc-soft); color: var(--acc); font-weight: 500; }
+.desktop .lv.pick .alts { display: inline-flex; gap: 8px; }
+.desktop .lv-alt { padding: 0; border: 0; border-bottom: 1px dotted var(--t4); background: none; color: var(--t4); font: inherit; cursor: pointer; }
+.desktop .lv-alt:hover, .desktop .lv-alt:focus-visible { color: var(--t1); border-bottom-color: var(--t2); }
+.desktop .dz-s.living { background: var(--acc-soft); color: var(--t1); }
+.desktop .dz-s.pr-passed .lv { border-bottom-color: transparent; }
+.desktop .dz-s.pr-running { color: var(--t1); }
+.desktop .dz-s.pr-failed { background: var(--bad-soft); }
+.desktop .dz-code { max-width: 520px; margin: -4px 0 12px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--hair); font: 11.5px/19px "JetBrains Mono", monospace; }
+.desktop .dz-code > div { padding: 0 10px; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.desktop .dz-code i { display: inline-block; width: 30px; font-style: normal; color: var(--t4); }
+.desktop .dz-code .rm { background: var(--bad-soft); color: var(--t3); }
+.desktop .dz-code .ad { background: var(--ok-soft); color: var(--t1); }
+.desktop .dz-ticks { display: inline-flex; gap: 2px; margin-right: 8px; vertical-align: -1px; }
+.desktop .dz-ticks i { width: 4px; height: 9px; border-radius: 1px; background: var(--ok); opacity: .8; }
+.desktop .dz-count { color: var(--t2); font-variant-numeric: tabular-nums; }
+.desktop .dz-prog { max-width: 580px; height: 2px; margin: -10px 0 16px; border-radius: 1px; background: var(--hair); }
+.desktop .dz-prog i { display: block; height: 2px; border-radius: 1px; background: var(--acc); transition: width 220ms var(--ease, ease); }
+.desktop button.dz-inline { padding: 0; border: 0; background: none; font: inherit; color: var(--t2); cursor: pointer; box-shadow: 0 1px 0 var(--hair); }
+.desktop button.dz-inline:hover { color: var(--t1); }

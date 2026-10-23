@@ -24,6 +24,9 @@ export interface FixHost {
   settled?(fix: DriveFix, before: DriveFixStatus): void;
   /// A finished mission's report, as a turn in the chat it started from.
   report?(sessionId: string, content: string): void;
+  /// The Deed's sentences on these files, proved in the worktree: a branch
+  /// is ready only once Drive has run them.
+  prove?(fix: DriveFix, paths: string[]): Promise<{ command: string; passed: boolean }[]>;
 }
 
 type Run = (argv: string[], cwd: string, timeoutMs?: number) => Promise<{ ok: boolean; out: string; err: string }>;
@@ -321,6 +324,10 @@ export class DriveFixes {
     const rows = numstat.out.split("\n").filter(Boolean).map((line) => line.split("\t"));
     if (!rows.length) { fix.unchanged = true; return this.fail(fix, new Error("The agent made no changes.")); }
     fix.diff = { files: rows.length, additions: rows.reduce((n, [a]) => n + (Number(a) || 0), 0), deletions: rows.reduce((n, [, d]) => n + (Number(d) || 0), 0), paths: rows.slice(0, 8).map((row) => row[2]!) };
+    if (this.host.prove) {
+      const proved = await this.host.prove(fix, rows.map((row) => row[2]!)).catch(() => []);
+      fix.checks = [...(fix.checks ?? []).filter((check) => !check.command.startsWith("Deed: ")), ...proved];
+    }
     Object.assign(fix, { status: "ready", finishedAt: new Date().toISOString() });
     this.save();
   }

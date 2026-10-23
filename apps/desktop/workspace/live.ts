@@ -14,7 +14,7 @@ import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-t
 import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
-import { deedPage, deedSummary, editLine, toCheck, type DeedUi } from "./deed-view.ts";
+import { deedPage, deedProve, deedSummary, editLine, isLive, numberOf, toCheck, type DeedUi } from "./deed-view.ts";
 import type { Deed, DeedAction } from "@demesne/protocol";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval } from "./session-model.ts";
@@ -1594,7 +1594,7 @@ let deedOpen = false,
   deedData: { workspace: string; deed: Deed; at: number } | null = null,
   deedLoading = false,
   deedSignature = "";
-const deedUi: DeedUi = { focus: null, editing: null };
+const deedUi: DeedUi = { focus: null, editing: null, live: null };
 /// Sentences already sent to be checked, by id and when they changed.
 const deedAsked = new Set<string>();
 const deedHere = () => (deedData && state && deedData.workspace === state.workspace ? deedData.deed : null);
@@ -1630,8 +1630,10 @@ async function deedAct(request: DeedAction) {
 function openDeed(open: boolean) {
   if (deedOpen === open) return;
   deedOpen = open;
-  deedUi.focus = deedUi.editing = null;
+  deedUi.focus = deedUi.editing = deedUi.live = null;
   deedSignature = heroSignature = sidebarSignature = "";
+  const slot = document.getElementById("deed-prove-slot");
+  if (slot && !open) { slot.innerHTML = ""; slot.hidden = true; }
   if (open) void loadDeed();
   if (state) renderState({ ...state });
 }
@@ -1647,6 +1649,11 @@ function renderDeed() {
   // While a sentence is being changed, the page holds still under the cursor.
   if (deedUi.editing && root.querySelector(".dz-edit") && deed?.sentences.some((sentence) => sentence.id === deedUi.editing)) return;
   if (deedUi.editing && !deed?.sentences.some((sentence) => sentence.id === deedUi.editing)) deedUi.editing = null;
+  // A live word stays live only while its sentence can still change.
+  if (deedUi.live && !deed?.sentences.some((sentence) => sentence.id === deedUi.live!.sentence && isLive(sentence))) deedUi.live = null;
+  const summary = document.getElementById("deed-summary"), slot = document.getElementById("deed-prove-slot");
+  if (summary) { summary.textContent = deedSummary(deed); summary.hidden = !summary.textContent; }
+  if (slot) { const prove = deedProve(deed); if (slot.innerHTML !== prove) slot.innerHTML = prove; slot.hidden = !prove; }
   const signature = JSON.stringify([deed, deedUi, state.workspace]);
   if (signature === deedSignature) return;
   deedSignature = signature;
@@ -1703,6 +1710,11 @@ async function deedComposer(value: string) {
 document.getElementById("deed")?.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
   if (target.closest("button, textarea")) return;
+  // A number's press ends in pointerup, which already picked it up; its
+  // click lands on #deed (pointer capture), so it is not a click away.
+  if (performance.now() - dragEnded < 400) return;
+  const word = target.closest<HTMLElement>(".lv[data-value]");
+  if (word) { startLive(word.dataset.sentence!, word.dataset.value!); return; }
   const row = target.closest<HTMLElement>(".dz-s[data-deed]");
   if (!row) { if (deedUi.focus) { deedUi.focus = null; renderDeed(); } return; }
   focusDeed(row.dataset.deed!, true);
@@ -1712,6 +1724,79 @@ document.getElementById("deed")?.addEventListener("keydown", (event) => {
   if (!row || (event.target as HTMLElement).closest("textarea") || event.isComposing) return;
   if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); focusDeed(row.dataset.deed!, true); }
 });
+/// A live word: a click picks it up, a drag sideways changes a number, and
+/// the keys go on from there. Nothing changes in the code until Enter.
+let dragged = false, dragEnded = 0, drag: { x: number; from: number; sentence: string; value: string; pointer: number } | null = null;
+const liveValue = (sentence: string, value: string) => {
+  const item = deedHere()?.sentences.find((candidate) => candidate.id === sentence);
+  return item && isLive(item) ? item.values?.find((candidate) => candidate.id === value) ?? null : null;
+};
+function startLive(sentence: string, value: string) {
+  const live = liveValue(sentence, value);
+  if (!live) return;
+  if (deedUi.live?.sentence !== sentence || deedUi.live.value !== value) deedUi.live = { sentence, value, to: live.kind === "number" ? numberOf(live.text) : live.text };
+  deedUi.focus = sentence; deedUi.editing = null;
+  renderDeed();
+  document.querySelector<HTMLElement>(`#deed .lv[data-value="${CSS.escape(value)}"]`)?.focus({ preventScroll: true });
+}
+function stepLive(by: number) {
+  const live = deedUi.live, value = live && liveValue(live.sentence, live.value);
+  if (!live || !value) return;
+  if (value.kind === "number") live.to = Math.max(0, Number(live.to) + by);
+  else { const words = value.choices!.map((choice) => choice.word); live.to = words[(words.indexOf(String(live.to)) + by + words.length) % words.length]!; }
+  renderDeed();
+}
+async function commitLive() {
+  const live = deedUi.live, value = live && liveValue(live.sentence, live.value);
+  deedUi.live = null;
+  if (!live || !value) return renderDeed();
+  const same = value.kind === "number" ? Number(live.to) === numberOf(value.text) : live.to === value.text;
+  if (same) return renderDeed();
+  await deedAct({ action: "set", id: live.sentence, value: live.value, to: live.to });
+}
+document.getElementById("deed")?.addEventListener("pointerdown", (event) => {
+  const word = (event.target as HTMLElement).closest<HTMLElement>(".lv[data-value]");
+  const value = word && liveValue(word.dataset.sentence!, word.dataset.value!);
+  if (!word || value?.kind !== "number" || event.button !== 0) return;
+  const from = deedUi.live?.value === value.id ? Number(deedUi.live.to) : numberOf(value.text);
+  drag = { x: event.clientX, from, sentence: word.dataset.sentence!, value: value.id, pointer: event.pointerId };
+  dragged = false;
+  el("deed").setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+document.getElementById("deed")?.addEventListener("pointermove", (event) => {
+  if (!drag || event.pointerId !== drag.pointer) return;
+  const steps = Math.round((event.clientX - drag.x) / 8);
+  if (!steps && !dragged) return;
+  if (!dragged) { dragged = true; startLive(drag.sentence, drag.value); }
+  const to = Math.max(0, drag.from + steps);
+  if (deedUi.live && deedUi.live.to !== to) { deedUi.live.to = to; renderDeed(); }
+});
+const endDrag = (event: PointerEvent) => {
+  if (!drag || event.pointerId !== drag.pointer) return;
+  if (!dragged) startLive(drag.sentence, drag.value);
+  drag = null; dragged = false; dragEnded = performance.now();
+  if (el("deed").hasPointerCapture(event.pointerId)) el("deed").releasePointerCapture(event.pointerId);
+};
+document.getElementById("deed")?.addEventListener("pointerup", endDrag);
+document.getElementById("deed")?.addEventListener("pointercancel", endDrag);
+/// Keys while a live word is picked up: ↑↓ or ← → change it, Enter makes it so, Esc puts it back.
+function deedLiveKey(event: KeyboardEvent): boolean {
+  if (!deedUi.live || event.isComposing || event.target instanceof HTMLTextAreaElement && event.target !== editor || (event.target === editor && editor.value)) return false;
+  const value = liveValue(deedUi.live.sentence, deedUi.live.value);
+  const key = event.key, step = event.shiftKey ? 10 : 1;
+  if (key === "Enter") void act(() => commitLive());
+  else if (key === "Escape") { deedUi.live = null; renderDeed(); }
+  else if (value?.kind === "number" && (key === "ArrowUp" || key === "ArrowRight")) stepLive(step);
+  else if (value?.kind === "number" && (key === "ArrowDown" || key === "ArrowLeft")) stepLive(-step);
+  else if (value?.kind === "choice" && (key === "ArrowRight" || key === "ArrowDown")) stepLive(1);
+  else if (value?.kind === "choice" && (key === "ArrowLeft" || key === "ArrowUp")) stepLive(-1);
+  else return false;
+  event.preventDefault();
+  event.stopPropagation();
+  return true;
+}
+
 /// The first click is on a sentence, the second is into its words.
 function focusDeed(id: string, click: boolean) {
   const sentence = deedHere()?.sentences.find((item) => item.id === id);
@@ -3588,6 +3673,10 @@ async function dispatch(
     if (action === "deed-leave") { deedUi.focus = null; deedSignature = ""; return renderDeed(); }
     if (action === "deed-build") { const wish = deedHere()?.sentences.find((sentence) => sentence.id === id); return wish && deedAct({ action: "make", id, text: wish.text }); }
     if (action === "deed-remove" && deedUi.focus === id) deedUi.focus = null;
+    if (action === "deed-choose") { deedUi.live = { sentence: id, value: String(args.value), to: String(args.to) }; return commitLive(); }
+    if (action === "deed-prove") return deedAct({ action: "prove", ...(id ? { id } : {}) });
+    if (action === "deed-stop") return deedAct({ action: "stop" });
+    if (action === "deed-undo") return deedAct({ action: "undo", id });
     const verb = ({ "deed-fix": "fix", "deed-words": "words", "deed-check": "check", "deed-seen": "seen", "deed-remove": "remove" } as const)[action as "deed-fix"];
     if (verb) return deedAct({ action: verb, id });
   }
@@ -4349,6 +4438,7 @@ document.addEventListener("drop", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (!state || event.isComposing) return;
+  if (deedOpen && deedLiveKey(event)) return;
   if (pointing && event.key === "Escape") {
     event.preventDefault();
     void api("desktop-point", { cancel: true }).catch(() => {});

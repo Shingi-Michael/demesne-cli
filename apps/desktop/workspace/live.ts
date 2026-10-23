@@ -72,6 +72,9 @@ const shortcut = (key: string) => /Mac/i.test(navigator.platform) ? key.replace(
 const k = (key: string) => `<kbd>${h(shortcut(key))}</kbd>`;
 /// A session view, not the start screen: it has turns, or Drive is working
 /// it (Drive plans before its first turn).
+const projectLabel = (path: string) => path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path;
+/// A chat that isn't in a project: no files, commands, Drive or Deed.
+const isPlain = (snapshot: Snapshot | null = state) => Boolean(snapshot?.session && !snapshot.session.workspace);
 const inSession = (snapshot: Snapshot | null = state) =>
   Boolean(snapshot && (snapshot.runs.length || (snapshot.drive && snapshot.drive.homeSessionId === snapshot.session?.id)));
 /// The thinking level each /model row would switch to: picked with ←→,
@@ -415,7 +418,7 @@ function renderSidebar() {
   const list = document.getElementById("sidebar-sessions");
   if (!state || !list || projectOrder.dragging) return;
   // While a title is being renamed, the list holds still under the cursor.
-  if (renaming && list.querySelector(".sidebar-rename")) return;
+  if (renaming && list.parentElement?.querySelector(".sidebar-rename")) return;
   const query = (document.getElementById("sidebar-search") as HTMLInputElement | null)?.value.trim().toLowerCase() ?? "";
   // A chat Drive runs on its own branch (a worktree) joins the list with a
   // branch mark; its branch is in the tooltip.
@@ -423,8 +426,10 @@ function renderSidebar() {
   const sessions = state.sessions.filter(item => !deletedSessions.has(item.id));
   const projectWorkspace = list.dataset.workspace || state.workspace;
   const projectPaths = projectOrder.paths();
-  // Worktree chats stay with their parent project, alongside its review actions.
-  const projectFor = (item: typeof sessions[number]) => branches.has(item.id) || item.id === state!.session?.id ? projectWorkspace : item.workspace;
+  // Worktree chats stay with their parent project, alongside its review
+  // actions. A chat with no folder is under Chats (null).
+  const projectFor = (item: typeof sessions[number]) => !item.workspace ? null : branches.has(item.id) || item.id === state!.session?.id ? projectWorkspace : item.workspace;
+  const plainNow = isPlain();
   const review = reviewJobs(), pinned = pinnedMission(), run = worktreeRun(), word = driveWord();
   const ideas = state.driveNext.proposals.length;
   const waiting = state.approvals.length ? "approval" : state.questions.length ? "answer" : "";
@@ -433,7 +438,8 @@ function renderSidebar() {
     try { localStorage.removeItem("demesne-project-open"); } catch {}
   }
   openProjectFor = projectWorkspace;
-  const openPath = openProjectPath ?? projectWorkspace;
+  // On Home or in a plain chat every project starts folded.
+  const openPath = openProjectPath ?? (plainNow ? "" : projectWorkspace);
   const agents = state.agents ?? [];
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
@@ -444,10 +450,11 @@ function renderSidebar() {
   // One cube on screen at most: it turns in the conversation, and a working
   // chat is a small breathing dot here.
   const dot = (tone: string) => `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`;
-  const focusedControl = document.activeElement instanceof HTMLButtonElement && list.contains(document.activeElement)
+  const nav = list.parentElement ?? list;
+  const focusedControl = document.activeElement instanceof HTMLButtonElement && nav.contains(document.activeElement)
     ? { action: document.activeElement.dataset.action, args: document.activeElement.dataset.args } : null;
   const focusedRow = document.activeElement?.closest(".sidebar-item")?.querySelector(".sidebar-session");
-  const focused = focusedRow ? [...list.querySelectorAll(".sidebar-session")].indexOf(focusedRow) : -1;
+  const focused = focusedRow ? [...nav.querySelectorAll(".sidebar-session")].indexOf(focusedRow) : -1;
   // One line per chat: a dot for its state, its title, its time. The dot is
   // amber when the chat needs you, a spinner while it works, blue for a
   // branch of Drive's that waits for review (those sit on the Branches row).
@@ -457,24 +464,17 @@ function renderSidebar() {
     const tip = [title, about || fullTime(updatedAt), branch && `on ${branch}`].filter(Boolean).join(" · ");
     const mark = branch ? ICON_BRANCH : "";
     const project = projectFor(sessions.find(item => item.id === id)!);
-    return btn(project === projectWorkspace ? "select-session" : "project-session", `${dot(tone)}<span class="sidebar-session-name">${h(title)}</span>${mark}${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, { id, path: project }, `sidebar-session${selected ? " selected" : ""}`)
-      .replace("<button ", `<button title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${project === projectWorkspace ? ' aria-keyshortcuts="Delete"' : ""}${selected ? ' aria-current="page"' : ""} `);
+    const here = project === projectWorkspace || project === null;
+    return btn(here ? "select-session" : "project-session", `${dot(tone)}<span class="sidebar-session-name">${h(title)}</span>${mark}${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}`)
+      .replace("<button ", `<button title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${here ? ' aria-keyshortcuts="Delete"' : ""}${selected ? ' aria-current="page"' : ""} `);
   };
-  const groups: string[] = [];
-  for (const [index, path] of projectPaths.entries()) {
-    const name = path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path;
-    const projectMatches = Boolean(query) && path.toLowerCase().includes(query);
-    const projectSessions = sessions.filter(item => projectFor(item) === path);
-    const found = projectSessions.filter(item => projectMatches || item.title.toLowerCase().includes(query));
-    const nested = (item: typeof found[number]) => found.some(parent => parent.id === parentOf.get(item.id));
-    const matching = found.filter(item => !nested(item));
-    for (const child of found.filter(nested)) matching.splice(matching.findIndex(parent => parent.id === parentOf.get(child.id)) + 1, 0, child);
-    if (query && !projectMatches && !matching.length) continue;
-    const expanded = Boolean(query) || path === openPath;
+  // Each chat's row, the first six unless searching or expanded; `path` is
+  // its project, null for Chats.
+  const chatRows = (matching: typeof sessions, path: string | null, nested: (item: typeof sessions[number]) => boolean) => {
     const rows: string[] = [];
     let shown = 0, more = 0;
-    // Search reveals every match; each project can also expand its full history.
-    const limit = query || expandedProjectChats.has(path) ? Infinity : SIDEBAR_ROWS;
+    // Search reveals every match; each list can also expand its full history.
+    const limit = query || expandedProjectChats.has(path ?? "") ? Infinity : SIDEBAR_ROWS;
     for (const item of matching) {
       if (shown >= limit) { if (item.turns) more++; continue; }
       const selected = item.id === current?.id;
@@ -485,7 +485,7 @@ function renderSidebar() {
       const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
       // A mission's chat keeps its cube while Drive plans between turns.
       const driving = Boolean(pinned && pinned.homeSessionId === item.id && ["running", "waiting"].includes(pinned.status));
-      const working = selected ? (Boolean(state.activeTurnId) || driving) && !waiting : !asks && (item.status === "running" || item.status === "queued" || driving);
+      const working = selected ? (Boolean(state!.activeTurnId) || driving) && !waiting : !asks && (item.status === "running" || item.status === "queued" || driving);
       // Looking at a chat marks it seen; one that has moved on since, while
       // you were elsewhere, carries the blue dot until you open it.
       if (selected || !(item.id in seenChats)) markSeen(item.id, item.updatedAt);
@@ -497,7 +497,7 @@ function renderSidebar() {
       // Each row carries its own delete, shown on hover: no menu, no dialog.
       // The keyboard deletes with Delete on the row itself, so the trash
       // stays out of the tab order.
-      const remove = working || path !== projectWorkspace ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" tabindex="-1" `);
+      const remove = working || (path !== projectWorkspace && path !== null) ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" tabindex="-1" `);
       if (renaming === item.id) {
         rows.push(`<div class="sidebar-item${nested(item) ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(item.id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`);
         shown++;
@@ -506,6 +506,30 @@ function renderSidebar() {
       rows.push(`<div class="sidebar-item${nested(item) ? " kid" : ""}">${row(tone, title, selected && !deedOpen, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id, item.updatedAt)}${remove}</div>`);
       shown++;
     }
+    return { rows, shown, more };
+  };
+  // Chats with no project lead the list, above Projects.
+  const plainChats = sessions.filter((item) => !item.workspace && (!query || item.title.toLowerCase().includes(query)));
+  const chats = chatRows(plainChats, null, () => false);
+  if (chats.more && !query) chats.rows.push(btn("project-more", `Show ${chats.more} more`, { path: "" }, "sidebar-more"));
+  else if (!query && expandedProjectChats.has("") && chats.shown > SIDEBAR_ROWS) chats.rows.push(btn("project-more", "Show fewer", { path: "" }, "sidebar-more"));
+  const chatList = document.getElementById("sidebar-chats");
+  if (chatList) {
+    chatList.hidden = !chats.rows.length;
+    chatList.innerHTML = chats.rows.length ? `<div class="sidebar-group-heading"><span class="sidebar-group">Chats</span></div>${chats.rows.join("")}` : "";
+  }
+  const groups: string[] = [];
+  for (const [index, path] of projectPaths.entries()) {
+    const name = path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path;
+    const projectMatches = Boolean(query) && path.toLowerCase().includes(query);
+    const projectSessions = sessions.filter(item => projectFor(item) === path);
+    const found = projectSessions.filter(item => projectMatches || item.title.toLowerCase().includes(query));
+    const nested = (item: typeof found[number]) => found.some(parent => parent.id === parentOf.get(item.id));
+    const matching = found.filter(item => !nested(item));
+    for (const child of found.filter(nested)) matching.splice(matching.findIndex(parent => parent.id === parentOf.get(child.id)) + 1, 0, child);
+    if (query && !projectMatches && !matching.length) continue;
+    const expanded = Boolean(query) || path === openPath;
+    const { rows, shown, more } = chatRows(matching, path, nested);
     // The open project's Deed leads its chats, with how many sentences need you.
     let deedLine = "";
     if (path === projectWorkspace && !query) {
@@ -544,22 +568,28 @@ function renderSidebar() {
   }
   list.innerHTML = groups.length ? groups.join("") : '<p class="sidebar-empty">No matching conversations or projects</p>';
   unfoldingProject = "";
-  const editing = list.querySelector<HTMLInputElement>(".sidebar-rename input");
+  const editing = nav.querySelector<HTMLInputElement>(".sidebar-rename input");
   if (editing && document.activeElement !== editing) { editing.focus(); editing.select(); }
   // A redraw keeps keyboard focus where it was, or on the row that moved up.
   if (focusedControl && !editing) {
-    const sameControl = [...list.querySelectorAll<HTMLButtonElement>("button")].find(button =>
+    const sameControl = [...nav.querySelectorAll<HTMLButtonElement>("button")].find(button =>
       button.dataset.action === focusedControl.action && button.dataset.args === focusedControl.args && !button.closest("[hidden]"));
-    const buttons = [...list.querySelectorAll<HTMLElement>(".sidebar-session")].filter(button => !button.closest("[hidden]"));
+    const buttons = [...nav.querySelectorAll<HTMLElement>(".sidebar-session")].filter(button => !button.closest("[hidden]"));
     (sameControl ?? (focused >= 0 ? buttons[Math.min(focused, buttons.length - 1)] : null) ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
   }
   const title = document.getElementById("workspace-title");
-  if (title) { title.textContent = deedOpen ? "Deed" : inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
+  if (title) { title.textContent = deedOpen ? "Deed" : inSession() ? current?.title ?? "Conversation" : "Home"; title.title = title.textContent; }
   // A mission's chat says where it came from, and goes back there.
   const crumb = document.getElementById("workspace-from"), from = current && inSession() ? parentOf.get(current.id) : undefined;
   if (crumb) {
     crumb.hidden = !from || deedOpen;
     crumb.innerHTML = from ? `from ${btn("select-session", h(chatTitle(from)), { id: from }, "workspace-from-link")}` : "";
+  }
+  // Where an open chat lives: Just a chat, or its project.
+  const where = document.getElementById("workspace-where");
+  if (where) {
+    where.hidden = deedOpen || !inSession() || Boolean(from);
+    where.textContent = plainNow ? "Just a chat" : projectLabel(projectWorkspace);
   }
   // The rail: a dot where something waits, a ring for Drive's progress.
   const badge = document.getElementById("rail-sessions-badge"), ring = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
@@ -578,8 +608,8 @@ function renderSidebar() {
 document.getElementById("sidebar-search")?.addEventListener("input", renderSidebar);
 // The list moves with the arrow keys, Home and End; Delete or Backspace
 // deletes the focused chat, and ⌘Z brings the last one back.
-document.getElementById("sidebar-sessions")?.addEventListener("keydown", (event) => {
-  const rows = [...document.querySelectorAll<HTMLElement>("#sidebar-sessions .sidebar-session")].filter(row => !row.closest("[hidden]"));
+document.getElementById("sidebar-projects")?.addEventListener("keydown", (event) => {
+  const rows = [...document.querySelectorAll<HTMLElement>("#sidebar-projects .sidebar-session")].filter(row => !row.closest("[hidden]"));
   const index = rows.indexOf(event.target as HTMLElement);
   if (index < 0 || event.metaKey || event.ctrlKey || event.altKey) return;
   const key = event.key;
@@ -598,7 +628,7 @@ document.getElementById("sidebar-sessions")?.addEventListener("keydown", (event)
 });
 /// The chat above or below the open one in the list, for Ctrl+Tab.
 function neighbourChat(step: number) {
-  const ids = [...document.querySelectorAll<HTMLElement>('#sidebar-sessions .sidebar-session[data-action="select-session"]')].filter(row => !row.closest("[hidden]")).map((row) => JSON.parse(row.dataset.args ?? "{}").id as string).filter(Boolean);
+  const ids = [...document.querySelectorAll<HTMLElement>('#sidebar-projects .sidebar-session[data-action="select-session"]')].filter(row => !row.closest("[hidden]")).map((row) => JSON.parse(row.dataset.args ?? "{}").id as string).filter(Boolean);
   if (!ids.length) return undefined;
   const at = ids.indexOf(state?.session?.id ?? "");
   return ids[at < 0 ? (step > 0 ? 0 : ids.length - 1) : (at + step + ids.length) % ids.length];
@@ -607,7 +637,7 @@ function neighbourChat(step: number) {
 // keeps it, Escape puts it back.
 // The first click opens the chat and redraws the row, so the second click
 // may not complete on the same element: the second press starts the rename.
-document.getElementById("sidebar-sessions")?.addEventListener("mousedown", (event) => {
+document.getElementById("sidebar-projects")?.addEventListener("mousedown", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLElement>(".sidebar-session");
   if (!button || button.dataset.action !== "select-session" || event.detail < 2 || event.button !== 0) return;
   event.preventDefault();
@@ -623,20 +653,20 @@ function endRename(save: boolean) {
   const was = state?.sessions.find((item) => item.id === id)?.title;
   if (save && id && title && title !== was) void act(() => api("rename", { id, title }));
 }
-document.getElementById("sidebar-sessions")?.addEventListener("submit", (event) => { event.preventDefault(); endRename(true); });
+document.getElementById("sidebar-projects")?.addEventListener("submit", (event) => { event.preventDefault(); endRename(true); });
 // A press anywhere else keeps the new title. Focus taken by the app itself
 // (the composer, as the chat opens) goes back to the field.
 document.addEventListener("pointerdown", (event) => {
   if (renaming && !(event.target as HTMLElement).closest(".sidebar-rename")) endRename(true);
 }, true);
-document.getElementById("sidebar-sessions")?.addEventListener("focusout", (event) => {
+document.getElementById("sidebar-projects")?.addEventListener("focusout", (event) => {
   const form = (event.target as HTMLElement).closest(".sidebar-rename");
   if (!form || !renaming) return;
   const next = (event as FocusEvent).relatedTarget as HTMLElement | null;
   if (next?.matches("textarea")) setTimeout(() => { if (renaming && form.isConnected) form.querySelector("input")?.focus(); });
   else if (next) endRename(true);
 });
-document.getElementById("sidebar-sessions")?.addEventListener("keydown", (event) => {
+document.getElementById("sidebar-projects")?.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && (event.target as HTMLElement).closest(".sidebar-rename")) { event.preventDefault(); event.stopPropagation(); endRename(false); }
 }, true);
 /// Brings back the chat deleted last, while it still waits to be archived.
@@ -719,7 +749,8 @@ function renderCards() {
   const aside = el("cards");
   aside.hidden = !shown;
   if (!shown) { cardsSignature = ""; return; }
-  const s = state!, root = s.workspace ?? "", branch = s.session?.workspace?.gitBranch;
+  // A plain chat has no folder: the card says Just a chat.
+  const s = state!, root = isPlain(s) ? "" : s.workspace ?? "", branch = s.session?.workspace?.gitBranch;
   const c = context(), plan = s.provider?.contextPlan, changes = workingChanges();
   const files = s.files.filter((file) => file.status);
   const here = root ? s.agents.filter((agent) => agent.project === projectSlug(root)) : [];
@@ -732,9 +763,9 @@ function renderCards() {
   const parent = root.slice(0, Math.max(0, root.length - name.length - 1)).replace(/^\/(Users|home)\/[^/]+/, "~");
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
   const out: string[] = [];
-  out.push(card("environment", "Environment", h(branch ? `${name} · ${branch}` : name),
+  out.push(card("environment", "Environment", root ? h(branch ? `${name} · ${branch}` : name) : "Just a chat",
     row(ICON_COMPUTER, "This computer") +
-    row(ICON_FOLDER, `${h(name)}${parent ? `<em> · ${h(parent)}</em>` : ""}`, "", root) +
+    (root ? row(ICON_FOLDER, `${h(name)}${parent ? `<em> · ${h(parent)}</em>` : ""}`, "", root) : "") +
     (branch ? row(ICON_BRANCH.replace("sidebar-branch", ""), h(branch)) : "") +
     // The pulse beats while Heartbeat is running.
     row(s.connectors.heartbeat ? ICON_PULSE.replace('class="ico"', 'class="ico beat"') : ICON_PULSE, "Heartbeat", s.connectors.heartbeat ? '<span class="card-on">On</span>' : "Off")));
@@ -880,7 +911,7 @@ const counts = (value: { added: number; removed: number }) =>
   `<span class="counts"><span class="plus">+${value.added}</span><span class="minus">−${value.removed}</span></span>`;
 /// Drive's best idea, as the start screen's ghost text; Tab takes it.
 function driveSuggestion(): string | null {
-  return !inSession() && state ? state.driveNext.proposals[0]?.title ?? null : null;
+  return !inSession() && state && !isPlain() ? state.driveNext.proposals[0]?.title ?? null : null;
 }
 /// The next prompt the model suggested at the end of the last finished turn.
 function nextSuggestion(): string | null {
@@ -1566,7 +1597,8 @@ function renderHero() {
     hour = new Date().getHours(),
     running = worktreeRun().fix,
     branchKeys = [...detailsOpen].filter((key) => key.startsWith("branch:")),
-    signature = JSON.stringify([state.workspace, review.map((job) => [job.id, job.status, job.title, job.diff, job.summary, job.checks]), running && [running.id, running.title, running.activity], state.breakage.busy, state.breakage.message, branchKeys, driveShown, away?.status, driveBusy, reviewShown, ideasShown, next.proposals, next.loading, next.signals.length, user, branch, hour, state.asks, state.allowRules, mapOpen(), mapData?.workspace, mapData?.at, mapLoading]);
+    plain = isPlain(),
+    signature = JSON.stringify([plain, state.workspace, review.map((job) => [job.id, job.status, job.title, job.diff, job.summary, job.checks]), running && [running.id, running.title, running.activity], state.breakage.busy, state.breakage.message, branchKeys, driveShown, away?.status, driveBusy, reviewShown, ideasShown, next.proposals, next.loading, next.signals.length, user, branch, hour, state.asks, state.allowRules, mapOpen(), mapData?.workspace, mapData?.at, mapLoading]);
   if (signature === heroSignature) return;
   heroSignature = signature;
   const composer = el("composer-slot");
@@ -1594,22 +1626,25 @@ function renderHero() {
     : "";
   // The map is one button under the greeting; it unfolds the land in place.
   const open = mapOpen(), surveyed = mapData && mapData.workspace === state.workspace ? mapData : null;
-  if (open && !mapLoading && (!surveyed || Date.now() - surveyed.at > 60_000)) void loadMap();
+  if (open && !plain && !mapLoading && (!surveyed || Date.now() - surveyed.at > 60_000)) void loadMap();
   const caption = !open ? "" : surveyed?.map ? restingCaption(surveyed.map) : surveyed && !mapLoading ? "This project could not be surveyed" : "Surveying…";
   const mapLine = `<p class="hero-map">${btn("map-toggle", `${ICON_MAP}Map`, {}, `map-btn${open ? " on" : ""}`).replace("<button ", `<button aria-pressed="${open}" title="${open ? "Fold the map (Esc)" : "Show the project as a map"}" `)}<span id="map-caption">${h(caption)}</span></p>`;
-  el("hero").classList.toggle("mapped", open);
-  renderSakura(!open);
-  el("hero").innerHTML =
-    `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${mapLine}${waiting}${quieter}</div>${open && surveyed?.map ? '<div id="hero-land"></div>' : ""}<div id="hero-composer"></div>${drive}`;
+  el("hero").classList.toggle("mapped", open && !plain);
+  renderSakura(!open || plain);
+  // Just a chat: the time of day and the greeting; the project's Map,
+  // branches and Drive come back once a project is picked.
+  el("hero").innerHTML = plain
+    ? `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1></div><div id="hero-composer"></div>`
+    : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${mapLine}${waiting}${quieter}</div>${open && surveyed?.map ? '<div id="hero-land"></div>' : ""}<div id="hero-composer"></div>${drive}`;
   // The composer and the land are detached while the hero is rebuilt.
   el("hero-composer").append(composer);
-  if (open && surveyed?.map) {
+  if (open && surveyed?.map && !plain) {
     el("hero-land").append(landEl);
     // It unfolds when it appears, not each time the greeting is rebuilt.
     if (!landShown) { landEl.classList.remove("unfolding"); void landEl.offsetWidth; landEl.classList.add("unfolding"); }
     drawLand(surveyed.map);
   }
-  landShown = Boolean(open && surveyed?.map);
+  landShown = Boolean(open && surveyed?.map && !plain);
 }
 /// The Deed: the open project's plain sentences, a page of its own opened
 /// from the sidebar. The composer adds a sentence; a sentence edits in place.
@@ -1884,7 +1919,7 @@ let mapData: { workspace: string; map: WorkspaceMapResponse | null; at: number }
   mapHover = -1,
   landShown = false,
   landCache: { key: string; land: Land } | null = null;
-const mapOpen = () => Boolean(state && mapOpenFor.has(state.workspace));
+const mapOpen = () => Boolean(state && !isPlain() && mapOpenFor.has(state.workspace));
 const landEl = document.createElement("div");
 landEl.className = "land";
 landEl.innerHTML = `<canvas></canvas><svg viewBox="0 0 ${LAND_W} ${LAND_H}" aria-hidden="true"></svg>`;
@@ -2118,6 +2153,81 @@ async function cycleMode(step = 1) {
   if (state?.session) await api("permission-mode", { mode: next });
   else await api("mode", { planOnly: next === "plan" });
 }
+/// Home's where word unfolds its choices under the composer; a plain chat's
+/// "Move to a project" unfolds the projects under its line.
+let whereOpen: "home" | "move" | null = null;
+function whereProjects(): string[] {
+  if (!state) return [];
+  const recent = JSON.parse(document.getElementById("sidebar-sessions")?.dataset.projects ?? "[]") as string[];
+  return [...new Set([document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace, ...recent])].filter(Boolean).slice(0, 6);
+}
+function whereRow(mode: "home" | "move") {
+  const plain = isPlain(), here = state?.workspace;
+  const choice = (label: string, args: Record<string, unknown>, on = false) =>
+    btn("where-pick", label, { ...args, mode }, `where-opt${on ? " on" : ""}`).replace("<button ", `<button aria-pressed="${on}" `);
+  return [
+    mode === "home" ? choice("Just a chat", { plain: true }, plain) : "",
+    ...whereProjects().map((path) => choice(h(projectLabel(path)), { path }, mode === "home" && !plain && path === here).replace("<button ", `<button title="${h(path)}" `)),
+    choice(`Open a folder <kbd>${/Mac/i.test(navigator.platform) ? "⌘O" : "Ctrl+O"}</kbd>`, { folder: true }),
+  ].join("");
+}
+function renderWhere() {
+  const row = el("where-row");
+  row.hidden = whereOpen !== "home";
+  const html = whereOpen === "home" ? whereRow("home") : "";
+  if (row.dataset.html !== html) { row.innerHTML = html; row.dataset.html = html; }
+}
+function toggleWhere(mode: "home" | "move" | null) {
+  whereOpen = mode;
+  composerSignature = "";
+  renderComposer();
+  renderPlainLine();
+  // The choice already made takes focus, so ←→ and Enter pick at once.
+  const host = mode === "home" ? el("where-row") : mode === "move" ? el("plain-line") : null;
+  if (host) (host.querySelector<HTMLElement>(".where-opt.on") ?? host.querySelector<HTMLElement>(".where-opt"))?.focus({ preventScroll: true });
+  else editor.focus({ preventScroll: true });
+}
+async function pickWhere(args: Record<string, any>) {
+  if (!state) return;
+  const mode = args.mode === "move" ? "move" : "home", draft = editor.value;
+  whereOpen = null;
+  composerSignature = "";
+  renderComposer();
+  renderPlainLine();
+  let path: string | null = typeof args.path === "string" ? args.path : null;
+  if (mode === "move") {
+    if (args.folder) path = await api<string | null>("desktop-pick-folder");
+    if (!path) return;
+    const moved = await api<{ here: boolean; sessionId: string }>("move-session", { path });
+    if (!moved.here) document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path, sessionId: moved.sessionId } }));
+    return;
+  }
+  const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace;
+  if (args.plain) { if (!isPlain()) await api("new-session", { plain: true, reuse: true, draft }); }
+  else if (args.folder) document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { fresh: true, draft } }));
+  else if (path === here) { if (isPlain()) await api("new-session", { reuse: true, draft }); }
+  else if (path) document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path, fresh: true, draft } }));
+  editor.focus({ preventScroll: true });
+}
+// Esc folds the where choices, from a choice or from the composer, before
+// anything else Esc does.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !whereOpen || event.isComposing) return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target?.closest(".where-opt") && target !== editor) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  toggleWhere(null);
+}, true);
+/// A plain chat ends with one quiet line: what it can't do, and the way on.
+function renderPlainLine() {
+  const node = el("plain-line");
+  const show = Boolean(state) && isPlain() && inSession() && !deedOpen && !state!.activeTurnId;
+  if (!show && whereOpen === "move") whereOpen = null;
+  node.hidden = !show;
+  const html = show ? `<p class="plain-note">Just a chat: it can’t see or change files. ${btn("where-move", `Move to a project ${whereOpen === "move" ? "⌄" : "›"}`, {}, "link").replace("<button ", `<button aria-expanded="${whereOpen === "move"}" `)}</p>${whereOpen === "move" ? `<div class="where-row" role="group" aria-label="Move this chat to">${whereRow("move")}</div>` : ""}` : "";
+  if (node.dataset.html !== html) { node.innerHTML = html; node.dataset.html = html; }
+}
 function renderComposer() {
   if (!state) return;
   const width = editor.clientWidth;
@@ -2138,6 +2248,9 @@ function renderComposer() {
     state.planOnly,
     answeringQuestion,
     driveSuggestion(),
+    isPlain(),
+    whereOpen,
+    state.workspace,
     diffNotes.size,
     pointed.map((point) => point.id).join(),
     state.attachments.map((image) => image.id).join(),
@@ -2163,6 +2276,16 @@ function renderComposer() {
   for (const option of chip.querySelectorAll<HTMLElement>(".mode-opt")) option.classList.toggle("on", option.dataset.mode === mode);
   chip.setAttribute("aria-label", `Mode: ${MODES[mode]}`);
   chip.title = `${MODE_HELP[mode]}. Click or ⇧⇥ for the next mode.`;
+  // On Home one word says where the chat will live, and unfolds the choices.
+  const whereWord = el("composer-where"), home = !inSession() && !deedOpen && !question;
+  if (!home && whereOpen === "home") whereOpen = null;
+  whereWord.hidden = !home;
+  whereWord.innerHTML = `${isPlain() ? "Just a chat" : `in ${h(projectLabel(state.workspace))}`}<span class="where-caret" aria-hidden="true">⌄</span>`;
+  whereWord.classList.toggle("open", whereOpen === "home");
+  whereWord.setAttribute("aria-expanded", String(whereOpen === "home"));
+  whereWord.title = "Where this chat lives (⌥P)";
+  el("hint-mention").hidden = isPlain();
+  renderWhere();
   form.classList.toggle("mode-plan", mode === "plan");
   form.classList.toggle("queued", queued);
   form.classList.toggle("restored", state.restored && !question);
@@ -2183,7 +2306,7 @@ function renderComposer() {
     ? state.activeTurnId
       ? "Steer it while it works…"
       : suggestion ? `${suggestion}   ⇥ Tab` : "Continue the conversation…"
-    : driveSuggestion() ? `Drive suggests: ${driveSuggestion()}   ⇥ Tab` : "Describe a change, paste an error, or drop a file…";
+    : driveSuggestion() ? `Drive suggests: ${driveSuggestion()}   ⇥ Tab` : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
   editor.disabled =
     state.connection !== "online" ||
     state.busy ||
@@ -2549,7 +2672,8 @@ function renderBriefing() {
   const done = el("branch-done"), outcome = inSession() ? branchNote() : "";
   done.innerHTML = outcome;
   done.hidden = !outcome;
-  node.hidden = !inSession() || !parts.length;
+  // A chat with no project has no Drive.
+  node.hidden = !inSession() || !parts.length || isPlain();
   if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").classList.remove("open"); return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
   // The first part's mark sits in the conversation's mark column, like an answer's d.
@@ -3754,7 +3878,7 @@ async function dispatch(
   if (action === "project-toggle" || action === "project-more") {
     const path = String(args.path);
     if (action === "project-toggle") {
-      const open = openProjectPath ?? (document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace);
+      const open = openProjectPath ?? (isPlain() ? "" : document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace);
       openProjectPath = open === path ? "" : path;
       unfoldingProject = openProjectPath;
       try { localStorage.setItem("demesne-project-open", JSON.stringify({ path: openProjectPath })); } catch {}
@@ -3762,7 +3886,7 @@ async function dispatch(
     else expandedProjectChats.add(path);
     renderSidebar();
     // Rendering replaces the control: keep keyboard focus on its replacement.
-    document.querySelectorAll<HTMLButtonElement>(`#sidebar-sessions [data-action="${action}"]`).forEach(button => {
+    document.querySelectorAll<HTMLButtonElement>(`#sidebar-projects [data-action="${action}"]`).forEach(button => {
       if (JSON.parse(button.dataset.args ?? "{}").path === path) button.focus({ preventScroll: true });
     });
     return;
@@ -3832,7 +3956,11 @@ async function dispatch(
   if (action === "question-control") return questionAction(args.action);
   if (action === "question-pick") return answerQuestion(String(args.text ?? ""), "suggestion");
   if (action === "question-skip") return answerQuestion(null, "skipped");
-  if (action === "new-session") return api("new-session", {});
+  // A new chat starts on Home as Just a chat; the where word moves it.
+  if (action === "new-session") return api("new-session", { plain: true, reuse: true });
+  if (action === "where-toggle") return toggleWhere(whereOpen === "home" ? null : "home");
+  if (action === "where-pick") return pickWhere(args);
+  if (action === "where-move") return toggleWhere(whereOpen === "move" ? null : "move");
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "drive-auto", "drive-control"].includes(action)) return driveAction(action, args);
   if (action.startsWith("breakage-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
@@ -4306,6 +4434,7 @@ function renderState(next: Snapshot) {
   renderConversation();
   renderDriveTurn();
   renderComposer();
+  renderPlainLine();
   renderApproval();
   renderQuestion();
   renderBriefing();
@@ -4615,6 +4744,20 @@ document.addEventListener("keydown", (event) => {
     run(() => dispatch("drive-open", { toggle: true }));
     return;
   }
+  // ⌥P unfolds Home's where word; in its row ←→ move, Esc folds.
+  if (event.altKey && !ctrl && event.code === "KeyP" && !inSession() && !deedOpen) {
+    event.preventDefault();
+    toggleWhere(whereOpen === "home" ? null : "home");
+    return;
+  }
+  const option = event.target instanceof Element ? event.target.closest<HTMLElement>(".where-opt") : null;
+  if (option && (key === "arrowleft" || key === "arrowright")) {
+    event.preventDefault();
+    const options = [...option.parentElement!.querySelectorAll<HTMLElement>(".where-opt")], at = options.indexOf(option);
+    options[(at + (key === "arrowleft" ? -1 : 1) + options.length) % options.length]?.focus({ preventScroll: true });
+    return;
+  }
+
   if (state.approvals.length && !field && !ctrl && !event.altKey) {
     const choice = {
       y: "allow_once",

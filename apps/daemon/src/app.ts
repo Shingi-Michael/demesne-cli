@@ -943,6 +943,20 @@ export function createDaemonApp(options: {
         let session = store.getSession(path[2]!);
         if (!session) return apiError("not_found", "Session not found", 404);
         let eventId: number | null = null;
+        if (body.workspacePath !== undefined) {
+          if (session.workspace) return apiError("invalid_state", "This chat already belongs to a project", 409);
+          if (session.turns.some((turn) => turn.status === "queued" || turn.status === "running")) return apiError("invalid_state", "Wait for the reply to finish before moving this chat", 409);
+          let workspaceRoot: string;
+          try {
+            workspaceRoot = canonicalWorkspace(body.workspacePath);
+            if (pathsOverlap(workspaceRoot, realpathSync(dirname(options.databasePath)))) return apiError("invalid_workspace", "Workspace cannot overlap the Demesne data directory", 400);
+          } catch (error) {
+            return apiError("invalid_workspace", error instanceof Error ? error.message : "Invalid workspace", 400);
+          }
+          if (body.trustWorkspace) workspaceTrust.trust(workspaceRoot);
+          else if (!workspaceTrust.isTrusted(workspaceRoot)) return apiError("workspace_untrusted", `Do you trust the files in ${workspaceRoot}?`, 403);
+          session = store.setSessionWorkspace(path[2]!, workspaceRoot);
+        }
         if (body.title !== undefined) {
           const renamed = store.renameSession(path[2]!, body.title);
           session = renamed.session;

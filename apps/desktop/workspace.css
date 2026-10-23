@@ -1072,3 +1072,20 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
 .live-app.start #stage { position: relative; z-index: 1; }
 .live-app.start .intro h1, .live-app.start .hero-eyebrow { text-shadow: 0 1px 16px var(--ink), 0 0 3px var(--ink); }
 .live-app.start #composer { background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px) saturate(1.2); }
+
+/* Where a chat lives: one word under Home's composer, unfolding its choices
+   in place; a plain chat ends with one quiet line that can move it. */
+.desktop #composer .composer-bar #composer-where { color: var(--t2); }
+#composer-where .where-caret { color: var(--t4); font-size: 11px; transition: transform 160ms var(--ease); }
+#composer-where.open .where-caret { transform: rotate(180deg); }
+.where-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 6px 2px 0; }
+.where-opt { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border: 0; border-radius: var(--r-sm, 6px); background: none; font: inherit; font-size: 12.5px; color: var(--t3); cursor: pointer; }
+.where-opt:hover, .where-opt:focus-visible { background: var(--tone); color: var(--t1); outline: none; }
+.where-opt.on { color: var(--t1); box-shadow: inset 0 0 0 1px var(--hair); }
+.where-opt kbd { border: 0; background: none; padding: 0; font-size: 11px; color: var(--t4); }
+#plain-line { max-width: 780px; margin: 2px auto 18px; padding-left: 18px; }
+#plain-line .plain-note { margin: 0; font-size: 12.5px; color: var(--t4); }
+#plain-line .plain-note .link { color: var(--t3); }
+#plain-line .plain-note .link:hover { color: var(--t1); }
+#plain-line .where-row { padding-left: 0; margin-left: -9px; }
+@media (prefers-reduced-motion: reduce) { #composer-where .where-caret { transition: none; } }

@@ -63,6 +63,9 @@ export interface WorkspaceHostOptions {
   providerAccounts?: Pick<ProviderAccounts, "signingIn" | "list" | "signIn" | "signOut" | "cancel">;
   /// Runs Drive in this host (the desktop window and headless missions).
   drive?: boolean;
+  /// Opens on Home: an empty chat, with no project ("plain") or in this
+  /// one, using again one left empty, rather than the last chat.
+  home?: "plain" | "project";
   /// Desktop hosts use trusted native IPC instead of command-line OS utilities.
   copy?: (text: string) => Promise<void>;
   open?: (path: string) => Promise<void>;
@@ -395,9 +398,10 @@ export class WorkspaceHost {
       this.sessions = await this.client.listSessions();
       this.connection = "online";
       if (this.selectedSession) await this.select(this.selectedSession);
+      else if (this.options.home === "plain") await this.newSession(undefined, { plain: true, reuse: true });
       else {
         try {
-          await this.newSession();
+          await this.newSession(undefined, { reuse: this.options.home === "project" });
         } catch (error) {
           if (isWorkspaceUntrusted(error)) return;
           throw error;
@@ -446,13 +450,23 @@ export class WorkspaceHost {
     });
     await this.connect();
   }
-  async newSession(title?: string) {
+  /// A plain chat has no project: no files, commands, Drive or Deed. With
+  /// `reuse`, an empty chat already there is opened rather than piling up.
+  async newSession(title?: string, options: { plain?: boolean; reuse?: boolean } = {}) {
+    if (options.reuse && !title) {
+      const empty = this.sessions.filter((session) => (options.plain ? !session.workspace : session.workspace?.root === this.workspace) && !session.turns.length)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      if (empty) {
+        await this.select(empty.id);
+        return empty.id;
+      }
+    }
     let result;
     try {
       result = await this.client.createSession({
-        workspacePath: this.workspace,
+        ...(options.plain ? {} : { workspacePath: this.workspace }),
         title: title ?? `Session ${new Date().toLocaleTimeString()}`,
-        ...(this.trustWorkspace ? { trustWorkspace: true } : {}),
+        ...(this.trustWorkspace && !options.plain ? { trustWorkspace: true } : {}),
       });
     } catch (error) {
       // Every caller (startup, New session, the desktop's project switch)
@@ -806,7 +820,8 @@ export class WorkspaceHost {
   async refreshFiles() {
     if (this.loadingFiles) return this.loadingFiles;
     const id = this.current?.session.id;
-    if (!id) return;
+    // A chat with no project has no files or commands to list.
+    if (!id || !this.current?.session.workspace) return;
     this.loadingFiles = this.client
       .listWorkspaceFileInfo(id)
       .then((files) => {
@@ -1024,7 +1039,7 @@ export class WorkspaceHost {
   async refreshProcesses() {
     if (this.polling) return this.polling;
     const id = this.current?.session.id;
-    if (!id) return;
+    if (!id || !this.current?.session.workspace) return;
     const output = this.watchedCommand;
     this.polling = this.client
       .commands(id, output)
@@ -1219,12 +1234,35 @@ export class WorkspaceHost {
     if (method === "trust-workspace") {
       this.trustWorkspace = true;
       await this.connect();
+      // Trust was asked for a chat in this project, not the plain one open.
+      if (this.connection === "online" && !this.current?.session.workspace) await this.newSession();
       return this.snapshot();
     }
-    if (method === "new-session")
-      return this.newSession(
+    if (method === "new-session") {
+      // Picking where a chat lives on Home takes what you typed with it.
+      const carried = typeof args.draft === "string" ? args.draft : undefined;
+      if (carried !== undefined && this.current) { this.draft = ""; this.drafts.delete(this.current.session.id); }
+      const id = await this.newSession(
         typeof args.title === "string" ? args.title : undefined,
+        { plain: args.plain === true, reuse: args.reuse === true },
       );
+      if (carried !== undefined) this.carryDraft(carried);
+      return id;
+    }
+    if (method === "move-session") {
+      // A plain chat gains a folder and keeps its messages.
+      const path = string(args.path, "project path", 4096), current = this.current;
+      if (!current || current.session.workspace) throw new Error("Only a chat that isn't in a project can move");
+      try { await this.client.updateSession(current.session.id, { workspacePath: path }); }
+      catch (error) {
+        if (isWorkspaceUntrusted(error)) throw new Error(`Open ${path} as a project and trust it before moving a chat there.`);
+        throw error;
+      }
+      this.sessions = await this.client.listSessions();
+      const here = this.sessions.find((session) => session.id === current.session.id)?.workspace?.root === this.workspace;
+      if (here) await this.select(current.session.id);
+      return { here, sessionId: current.session.id };
+    }
     if (method === "select-session") {
       await this.select(string(args.id, "session id", 200));
       return this.snapshot();
@@ -1667,6 +1705,14 @@ export class WorkspaceHost {
     if ((await child.exited) !== 0) throw new Error("Could not open the item");
   }
   /// A project switch must not discard any draft held by this UI.
+  /// Puts text into the open chat's composer, as if typed there.
+  carryDraft(text: string) {
+    if (!text.trim()) return;
+    this.draft = text;
+    this.draftVersion++;
+    this.restored = false;
+    this.publish();
+  }
   get hasUnsentDrafts() {
     return Boolean(this.draft.trim() || this.queue.trim()) ||
       [...this.drafts].some(([id, text]) => id !== this.current?.session.id && text.trim() && this.sessions.some(session => session.id === id));

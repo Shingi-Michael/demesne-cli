@@ -191,9 +191,12 @@ test("desktop switching preserves drafts, canonicalizes projects, and restores p
     expect(bootstrap(await sidecar.value("desktop-open-project", { path: other })).workspace).toBe(other);
     await sidecar.close();
     restored = new Sidecar(f);
+    // Launch lands on Home as Just a chat; the project's last chat is a
+    // click away (opening the project brings it back).
     const recovered = bootstrap(await restored.value("desktop-bootstrap"));
     expect(recovered.workspace).toBe(other);
-    expect(recovered.snapshot!.session!.id).toBe(selectedOtherSession);
+    expect(recovered.snapshot!.session!.workspace).toBeNull();
+    expect(recovered.snapshot!.runs).toEqual([]);
     expect(bootstrap(await restored.value("desktop-bootstrap")).recentProjects).toEqual([other, f.workspace]);
   } finally { await sidecar.close(); if (restored) await restored.close(); await f.close(); }
 });
@@ -350,4 +353,56 @@ test("desktop launch options send the first message to the opened project", asyn
     const [session] = await f.client.listSessions();
     expect((await f.client.getSessionState(session!.id)).session.turns.map(turn => turn.content)).toEqual(["Hello from the command line"]);
   } finally { expect(await sidecar.close()).toBe(0); await f.close(); }
+});
+
+test("launch lands on Home as Just a chat; the where word and Move to a project give a chat its folder", async () => {
+  const f = await fixture(), other = join(f.root, "other");
+  mkdirSync(other);
+  await f.client.createSession({ workspacePath: other, trustWorkspace: true });
+  const first = new Sidecar(f, ["--workspace", f.workspace]);
+  let home: Sidecar | undefined;
+  try {
+    // Opened with a project: Home with that project picked, an empty chat.
+    const opened = bootstrap(await first.value("desktop-bootstrap"));
+    expect(opened.snapshot!.session!.workspace!.root).toBe(f.workspace);
+    expect(opened.snapshot!.runs).toEqual([]);
+    await first.close();
+    // Launched again: Home as Just a chat, and an empty one is used again.
+    home = new Sidecar(f);
+    const launched = bootstrap(await home.value("desktop-bootstrap"));
+    const plainId = launched.snapshot!.session!.id;
+    expect(launched.workspace).toBe(f.workspace);
+    expect(launched.snapshot!.session!.workspace).toBeNull();
+    expect(await home.value("new-session", { plain: true, reuse: true, sessionId: plainId })).toBe(plainId);
+    // Picking the project carries what was typed into a chat there.
+    await home.value("draft", { sessionId: plainId, text: "Fix the sidebar" });
+    await home.value("new-session", { reuse: true, draft: "Fix the sidebar", sessionId: plainId });
+    let snapshot = await home.value("bootstrap") as { session: { id: string; workspace: { root: string } | null }; draft: string };
+    expect(snapshot.session.workspace!.root).toBe(f.workspace);
+    expect(snapshot.draft).toBe("Fix the sidebar");
+    // Back to Just a chat, and a reply there has no project tools.
+    await home.value("new-session", { plain: true, reuse: true, draft: "What is a CRDT?", sessionId: snapshot.session.id });
+    snapshot = await home.value("bootstrap") as typeof snapshot;
+    expect(snapshot.session.id).toBe(plainId);
+    expect(snapshot.draft).toBe("What is a CRDT?");
+    await home.value("submit", { sessionId: plainId, text: "What is a CRDT?" });
+    await eventually(async () => (await f.client.getSessionState(plainId)).session.turns.at(-1)?.status === "completed");
+    // Move to a project: here, the chat stays open with its folder.
+    expect(await home.value("move-session", { sessionId: plainId, path: f.workspace })).toEqual({ here: true, sessionId: plainId });
+    expect((await f.client.getSessionState(plainId)).session.workspace!.root).toBe(f.workspace);
+    expect(await home.request("move-session", { sessionId: plainId, path: other })).toMatchObject({ ok: false, error: "Only a chat that isn't in a project can move" });
+    // Elsewhere: the window then opens that project on the chat.
+    await home.value("new-session", { plain: true, sessionId: plainId });
+    const second = (await home.value("bootstrap") as typeof snapshot).session.id;
+    await home.value("submit", { sessionId: second, text: "Hello" });
+    await eventually(async () => (await f.client.getSessionState(second)).session.turns.at(-1)?.status === "completed");
+    expect(await home.value("move-session", { sessionId: second, path: other })).toEqual({ here: false, sessionId: second });
+    expect(bootstrap(await home.value("desktop-open-project", { path: other, sessionId: second })).snapshot!.session!.id).toBe(second);
+    // The where word opens another project on an empty chat, with the draft.
+    const back = bootstrap(await home.value("desktop-open-project", { path: f.workspace, fresh: true, draft: "Carry this" }));
+    expect(back.workspace).toBe(f.workspace);
+    expect(back.snapshot!.session!.workspace!.root).toBe(f.workspace);
+    expect(back.snapshot!.runs).toEqual([]);
+    expect(back.snapshot!.draft).toBe("Carry this");
+  } finally { await first.close(); if (home) await home.close(); await f.close(); }
 });

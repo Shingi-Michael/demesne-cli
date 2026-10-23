@@ -970,7 +970,38 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
-  return row + (open && canFold ? stepFold(run, tool) : "");
+  // A finished step can become "now" again: files and chat go back to here.
+  const back = canRewind(run) && tool.toolCallId && ["done", "failed", "denied"].includes(tool.state) && !tool.waiting
+    ? btn("rewind", `${ICON_UNDO}Rewind to here`, { turnId: run.id, toolCallId: tool.toolCallId }, "step-rewind").replace("<button ", '<button title="Put the files and the chat back to just after this step" ')
+    : "";
+  return (back ? `<div class="step-line">${row}${back}</div>` : row) + (open && canFold ? stepFold(run, tool) : "");
+}
+/// Rewind waits for running work, and only conversation turns rewind.
+const canRewind = (run: WorkspaceRun) => !state!.activeTurnId && !run.kind && run.status !== "running" && run.status !== "queued";
+/// The rewind that stopped inside this turn, if one did.
+const rewindIn = (run: WorkspaceRun) => state!.rewinds.find((rewind) => rewind.turnId === run.id && rewind.toolCallId);
+/// The rewind that folded this turn away, if one did.
+const rewoundBy = (run: WorkspaceRun) => state!.rewinds.find((rewind) => rewind.hiddenTurnIds.includes(run.id));
+/// A rewind's one line where the undone part was: what went back, and Redo
+/// until the next message.
+function rewindLine(rewind: Snapshot["rewinds"][number]) {
+  const hidden = state!.runs.filter((run) => rewind.hiddenTurnIds.includes(run.id));
+  const cut = rewind.toolCallId ? state!.runs.find((run) => run.id === rewind.turnId) : undefined;
+  const at = cut ? cut.entries.findIndex((entry) => entry.type === "tool" && entry.toolCallId === rewind.toolCallId) : -1;
+  const after = cut ? cut.entries.slice(at + 1) : [];
+  const steps = after.filter((entry) => entry.type === "tool").length + hidden.reduce((sum, run) => sum + tools(run).length, 0);
+  const undone = [
+    steps ? `${steps} step${steps === 1 ? "" : "s"}` : "",
+    hidden.length ? `${hidden.length} message${hidden.length === 1 ? "" : "s"}` : "",
+    after.some((entry) => entry.type === "assistant") ? "the answer" : "",
+  ].filter(Boolean);
+  const words = [
+    "Rewound",
+    undone.length ? `${undone.length > 1 ? `${undone.slice(0, -1).join(", ")} and ${undone.at(-1)}` : undone[0]} undone` : "",
+    rewind.files.length === 1 ? `${rewind.files[0]!.split("/").at(-1)} put back` : rewind.files.length ? `${rewind.files.length} files put back` : "",
+    rewind.commands ? `<span title="Rewind can't take back what commands did">${rewind.commands} command${rewind.commands === 1 ? "" : "s"} ran</span>` : "",
+  ].filter(Boolean);
+  return `<div class="rewind-line" title="${h(rewind.files.join("\n"))}"><span class="rw-mark" aria-hidden="true">${ICON_UNDO}</span><span class="rw-what">${words.join('<span class="muted"> · </span>')}</span>${rewind.redoable && !state!.activeTurnId ? btn("rewind-redo", "Redo", {}, "link rw-redo") : ""}</div>`;
 }
 /// What unfolds under a step: the edit's diff with a little context, or
 /// the command's recorded output (its tail), loaded when first opened.
@@ -1017,6 +1048,13 @@ function subagentTrace(run: WorkspaceRun, tool: ToolEntry, key: string) {
   return `<details class="thinking ${live ? "live" : ""}" data-detail="${key}:trace"${(live && !detailsClosed.has(`${key}:trace`)) || detailsOpen.has(`${key}:trace`) ? " open" : ""}><summary>◇ Sub-agent trace · ${steps} step${steps === 1 ? "" : "s"}</summary><div>${body}</div></details>`;
 }
 function runHTML(run: WorkspaceRun, index: number) {
+  const rewound = rewoundBy(run);
+  if (rewound) return rewindLine(rewound);
+  const cut = rewindIn(run);
+  if (cut) {
+    const at = run.entries.findIndex((entry) => entry.type === "tool" && entry.toolCallId === cut.toolCallId);
+    if (at >= 0) run = { ...run, entries: run.entries.slice(0, at + 1) };
+  }
   const items = tools(run),
     files = new Set(
       items
@@ -1031,7 +1069,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   // Completed traces fold into the receipt. While streaming, show the full
   // latest trace unless the reader explicitly collapses it.
   // A step serving a live page keeps the trace open so its preview shows.
-  const live = active(run), fold = run.status === "completed" && !stepsOpen.has(run.id) && !items.some((tool) => serving(tool));
+  const live = active(run), fold = run.status === "completed" && !cut && !stepsOpen.has(run.id) && !items.some((tool) => serving(tool));
   let body = "", steps = "";
   const flush = () => { if (steps) { body += `<div class="steps">${steps}</div>`; steps = ""; } };
   for (let i = 0; i < run.entries.length; i++) {
@@ -1097,7 +1135,8 @@ function runHTML(run: WorkspaceRun, index: number) {
   // One receipt line: what changed, the checks, the steps behind it, the
   // time, and the model only when it isn't the one in the composer.
   let footer = "";
-  if (!active(run)) {
+  if (cut) footer = rewindLine(cut);
+  else if (!active(run)) {
     const closed = run.entries.findLast(
       (e) => e.type === "notice" && e.closesTurn,
     );
@@ -1155,7 +1194,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     ? `<div class="live-activity">${spinner()}${shine(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
     : "";
   const answered = run.entries.some((e) => e.type === "assistant");
-  const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}</span>`;
+  const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}${canRewind(run) ? btn("rewind", "rewind", { turnId: run.id }).replace("<button ", '<button title="Put the files and the chat back to just before this message" ') : ""}</span>`;
   const queued = live && state!.queue.trim() ? `<div class="next-line"><span class="next-label">NEXT</span><span class="next-text">${h(state!.queue.trim())}</span>${btn("queue-action", "edit", { action: "edit" })}${btn("queue-action", "send now", { action: "now" })}${btn("queue-action", "×", { action: "drop" }, "next-drop")}</div>` : "";
   const attached = run.attachments?.length
     ? `<div class="request-att">${run.attachments.map((image) => attachmentPreviews.has(image.id)
@@ -1383,6 +1422,10 @@ function renderConversation() {
   let position = compactionCard ? 1 : 0;
   for (const [index, run] of state.runs.entries()) {
     if (compacted && !historyOpen && (compacted.hiddenIds.has(run.id) || run.id === checkpoint!.turnId)) continue;
+    // A rewind folds the turns after its cut into one line: on the turn it
+    // stopped in, or in place of the first turn it took back.
+    const folded = rewoundBy(run);
+    if (folded && (folded.toolCallId || folded.hiddenTurnIds.find((id) => state!.runs.some((item) => item.id === id)) !== run.id)) continue;
     ids.add(run.id);
     const signature = JSON.stringify([
       index === state.runs.length - 1,
@@ -1399,6 +1442,7 @@ function renderConversation() {
       state.activeTurnId,
       reviewOpen.has(run.id) ? reviewVersion : 0,
       detailsOpen.has(`drive-asked:${run.id}`),
+      state.rewinds.filter((rewind) => rewind.turnId === run.id || rewind.hiddenTurnIds.includes(run.id)),
     ]);
     let saved = runNodes.get(run.id);
     if (!saved) {
@@ -3293,6 +3337,10 @@ async function dispatch(
     heroSignature = briefingSignature = "";
     if (inSession()) renderBriefing();
     else renderHero();
+    return;
+  }
+  if (action === "rewind" || action === "rewind-redo") {
+    await act(() => api(action, args));
     return;
   }
   if (action === "drive-asked") {

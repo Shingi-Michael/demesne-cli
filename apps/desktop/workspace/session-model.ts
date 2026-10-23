@@ -119,6 +119,9 @@ export class WorkspaceSession {
   get session() {
     return this.state.session;
   }
+  get rewinds() {
+    return this.state.rewinds ?? [];
+  }
   get active() {
     return (
       this.session.turns.findLast(
@@ -147,6 +150,15 @@ export class WorkspaceSession {
       this.session.autoApprove = p.autoApprove;
     if (event.type === "session.permissions_changed" && typeof p.acceptEdits === "boolean")
       this.session.acceptEdits = p.acceptEdits;
+    // A new message seals the last rewind: Redo no longer applies.
+    if (event.type === "turn.created") for (const rewind of this.state.rewinds ?? []) rewind.redoable = false;
+    if (event.type === "session.rewound" && typeof p.rewindId === "string" && typeof p.turnId === "string")
+      this.state.rewinds = [...(this.state.rewinds ?? []).map((rewind) => ({ ...rewind, redoable: false })), {
+        id: p.rewindId, turnId: p.turnId, toolCallId: typeof p.toolCallId === "string" ? p.toolCallId : null,
+        hiddenTurnIds: Array.isArray(p.hiddenTurnIds) ? p.hiddenTurnIds.map(String) : [],
+        files: Array.isArray(p.files) ? p.files.map(String) : [], commands: Number(p.commands ?? 0), redoable: true,
+      }];
+    if (event.type === "session.rewind_redone") this.state.rewinds = (this.state.rewinds ?? []).filter((rewind) => rewind.id !== p.rewindId);
     if (event.type === "turn.created" && event.turnId)
       this.ensureTurn({
         id: event.turnId,

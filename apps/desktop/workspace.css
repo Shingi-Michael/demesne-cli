@@ -891,3 +891,16 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .drive-asked time { flex: none; margin-left: auto; font-size: 11.5px; color: var(--t4); font-variant-numeric: tabular-nums; }
 .desktop .drive-asked + .ds-said { margin: 0 0 8px 22px; }
 .desktop .ds-said { margin: -2px 0 2px 20px; padding: 7px 10px; border-radius: var(--r); background: var(--tone); color: var(--t2); line-height: 1.5; white-space: pre-wrap; }
+
+/* Rewind sits at the end of a finished step and shows on hover, over the
+   step's time; the undone part folds into one quiet line with Redo. */
+.desktop .step-line { position: relative; }
+.desktop .step-rewind { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border: 0; border-radius: var(--r-sm); background: var(--tone2, var(--tone)); color: var(--acc); font-size: 12px; opacity: 0; pointer-events: none; }
+.desktop .step-rewind .ico { width: 12px; height: 12px; }
+.desktop .step-line:hover .step-rewind, .desktop .step-rewind:focus-visible { opacity: 1; pointer-events: auto; }
+.desktop .step-line:hover .tool-row .meta { visibility: hidden; }
+.desktop .rewind-line { display: flex; align-items: baseline; gap: 8px; margin: 6px 0 2px; font-size: 12.5px; line-height: 19px; color: var(--t3); }
+.desktop .rewind-line .rw-mark { color: var(--acc); align-self: center; display: inline-flex; }
+.desktop .rewind-line .rw-mark .ico { width: 13px; height: 13px; }
+.desktop .rewind-line .rw-redo { color: var(--acc); font-size: 12.5px; }
+@media (prefers-reduced-motion: no-preference) { .desktop .step-rewind { transition: opacity 140ms var(--ease); } }

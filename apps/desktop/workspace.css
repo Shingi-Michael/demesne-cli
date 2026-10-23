@@ -1051,3 +1051,15 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .dz-s.x-changed ins { color: var(--acc); text-decoration: none; }
 .desktop .dz-s .dz-since { display: block; position: static; margin-top: -2px; opacity: 1; color: var(--t3); }
 @container (min-width: 740px) { .desktop .dz-s .dz-since { position: absolute; margin-top: 0; } }
+/* Finding in the Deed, and the code under a sentence */
+.desktop #deed h3.dim { opacity: .26; }
+.desktop .dz-s mark { padding: 0 1px; border-radius: 3px; background: var(--acc-soft); color: var(--t1); }
+.desktop .peek { max-width: 560px; margin: 6px 0 4px; border-radius: 10px; box-shadow: 0 0 0 1px var(--hair); background: var(--tone); font: 11.5px/20px "JetBrains Mono", monospace; color: var(--t2); overflow: hidden; }
+.desktop .pk-h { display: flex; justify-content: space-between; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--hair); font-size: 11px; color: var(--t2); }
+.desktop .pk-dim { color: var(--t4); white-space: nowrap; }
+.desktop .pk-l { padding: 0 12px; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.desktop .pk-l:nth-of-type(1) { padding-top: 4px; } .desktop .pk-l:last-child { padding-bottom: 6px; }
+.desktop .pk-l i { display: inline-block; width: 28px; font-style: normal; color: var(--t4); }
+.desktop .pk-l.at { color: var(--t1); }
+.desktop .tok { border-bottom: 1.5px dotted color-mix(in srgb, var(--acc) 55%, transparent); }
+.desktop .tok.on { border: 0; padding: 0 3px; border-radius: 4px; background: var(--acc-soft); color: var(--acc); }

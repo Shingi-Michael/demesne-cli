@@ -132,6 +132,9 @@ export class DemesneClient {
   async deed(workspace: string): Promise<import("@demesne/protocol").DeedResponse> {
     return this.request(`/v1/deed?workspace=${encodeURIComponent(workspace)}`);
   }
+  async deedPeek(workspace: string, id: string): Promise<import("@demesne/protocol").DeedPeekResponse> {
+    return this.request(`/v1/deed/peek?workspace=${encodeURIComponent(workspace)}&id=${encodeURIComponent(id)}`);
+  }
   async deedAct(request: import("@demesne/protocol").DeedRequest): Promise<import("@demesne/protocol").DeedResponse> {
     return this.request("/v1/deed", { method: "POST", body: JSON.stringify(request) });
   }

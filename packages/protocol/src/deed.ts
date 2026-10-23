@@ -65,6 +65,8 @@ export interface DeedSentence {
   values?: DeedValue[];
   tests?: string[];
   proof?: DeedProof;
+  /// A chat is writing the test that proves it.
+  covering?: boolean;
   /// The last value changed here, until it is undone or the line moves on.
   undo?: { path: string; before: string; after: string; text: string; values: DeedValue[] };
   updatedAt: string;
@@ -98,6 +100,10 @@ export interface Deed {
 
 export interface DeedResponse { deed: Deed }
 
+/// The lines of code under a sentence, as they are now.
+export interface DeedPeek { id: string; path: string; line: number; lines: { n: number; text: string }[] }
+export interface DeedPeekResponse { peek: DeedPeek | null }
+
 export type DeedAction =
   | { action: "write" }
   | { action: "make"; id?: string; text: string }
@@ -105,6 +111,8 @@ export type DeedAction =
   | { action: "check"; id: string }
   | { action: "words"; id: string }
   | { action: "fix"; id: string }
+  /// A chat writes the test that proves a sentence nothing tests.
+  | { action: "cover"; id: string }
   | { action: "seen"; id: string }
   | { action: "remove"; id: string }
   /// A live word takes a new value: a number, or one of its choices.

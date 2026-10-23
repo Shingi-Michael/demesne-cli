@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { Deed, DeedSentence, DeedValue } from "@demesne/protocol";
-import { deedPage, editLine, liveLine, liveWords, numberOf, numberText, toCheck, weekDays, wordDiff } from "../deed-view.ts";
+import type { Deed, DeedPeek, DeedSentence, DeedValue } from "@demesne/protocol";
+import { deedPage, editLine, findHits, liveLine, liveWords, numberOf, numberText, toCheck, weekDays, wordDiff } from "../deed-view.ts";
 
 const sentence = (over: Partial<DeedSentence> = {}): DeedSentence => ({ id: "a", section: "Drive", text: "It starts after 20 quiet minutes.", anchors: [{ path: "src/auto.ts", line: 31, quote: "x" }], state: "true", updatedAt: "", ...over });
 const deed = (sentences: DeedSentence[], over: Partial<Deed> = {}): Deed => ({ workspace: "/w", writtenAt: "2026-10-23", writing: null, sections: ["Drive"], sentences, ...over });
@@ -118,5 +118,36 @@ describe("the Deed page", () => {
     expect(text).toContain("<del>Gone words.</del>");
     expect(text).toContain('class="dz-s dim"');
     expect(text).toContain("Since");
+  });
+  test("typing finds the sentences that say every word, marked, and fades the rest", () => {
+    const page = deed([sentence({ text: "It starts after 20 quiet minutes." }), sentence({ id: "b", text: "Enter steers a running turn." })]);
+    expect(findHits(page, "QUIET start").map((hit) => hit.id)).toEqual(["a"]);
+    expect(findHits(page, "  ")).toEqual([]);
+    const text = deedPage(page, { focus: null, editing: null, find: "quiet" }, "demo");
+    expect(text).toContain("<mark>quiet</mark>");
+    expect(text).toContain("1 sentence says “quiet”");
+    expect(text.match(/class="dz-s [^"]*dim/g)?.length).toBe(1);
+    expect(deedPage(page, { focus: null, editing: null, find: "zebra" }, "demo")).toContain("No sentence says “zebra”");
+  });
+  test("Space unfolds the code under a sentence, its live value marked and following a drag", () => {
+    const one = sentence({ values: [{ id: "v1", text: "20", path: "src/auto.ts", line: 30, literal: "20", code: "export const QUIET_MINUTES = 20;", kind: "number" }], tests: ["test/auto.test.ts"] });
+    const data: DeedPeek = { id: "a", path: "src/auto.ts", line: 30, lines: [{ n: 29, text: "/// quiet" }, { n: 30, text: "export const QUIET_MINUTES = 20;" }] };
+    const open = deedPage(deed([one]), { focus: "a", editing: null, peek: { id: "a", at: "", data } }, "demo");
+    expect(open).toContain("src/auto.ts");
+    expect(open).toContain("proved by auto.test.ts");
+    expect(open).toContain('<span class="tok">20</span>');
+    const dragging = deedPage(deed([one]), { focus: "a", editing: null, peek: { id: "a", at: "", data }, live: { sentence: "a", value: "v1", to: 10 } }, "demo");
+    expect(dragging).toContain('<span class="tok on">‹ 10 ›</span>');
+    expect(deedPage(deed([one]), { focus: "a", editing: null }, "demo")).not.toContain('class="peek"');
+  });
+  test("a sentence nothing tests offers Drive to prove it, and says when a chat could not", () => {
+    const ui = { focus: "a", editing: null };
+    const bare = deedPage(deed([sentence()]), ui, "demo");
+    expect(bare).toContain("No test holds it yet.");
+    expect(bare).toContain("Have Drive prove it");
+    expect(deedPage(deed([sentence({ state: "working", covering: true })]), ui, "demo")).toContain("Writing a test that proves it");
+    const failed = deedPage(deed([sentence({ proof: { state: "failed", at: "", files: [], putBack: true, detail: "It stopped." } })]), ui, "demo");
+    expect(failed).toContain("No test yet.");
+    expect(failed).toContain("Have Drive try again");
   });
 });

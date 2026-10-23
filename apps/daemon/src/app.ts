@@ -991,6 +991,7 @@ export function createDaemonApp(options: {
           body.planOnly ?? false,
           "chat",
           attachments,
+          body.fromDrive ?? false,
         );
         for (const upload of held) {
           uploads.delete(upload.attachment.id);

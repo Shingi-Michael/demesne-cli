@@ -1161,7 +1161,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     ? `<div class="request-att">${run.attachments.map((image) => attachmentPreviews.has(image.id)
       ? `<img src="${attachmentPreviews.get(image.id)}" alt="${h(image.filename)}" title="${h(image.filename)}">`
       : `<span class="att-name" title="${h(`${image.width}×${image.height}`)}">${h(image.filename)}</span>`).join("")}</div>` : "";
-  const request = mailRequest(run) ?? driveReport(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+  const request = mailRequest(run) ?? driveReport(run) ?? driveAsked(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
   const review = reviewOpen.has(run.id) && !live ? reviewHTML(run.id) : "";
   return `${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}${activity}</div>${queued}`;
 }
@@ -1261,6 +1261,16 @@ function driveReport(run: WorkspaceRun): string | null {
     + `${report.summary ? `<span class="text">${h(report.summary.length > 400 ? `${report.summary.slice(0, 399)}…` : report.summary)}</span>` : ""}`
     + `<span class="dr-meta">${where ? `<span title="${h(report.diff!.paths.join("\n"))}">${where}</span>` : ""}${report.headline ? `<span>${h(report.headline)}</span>` : ""}${actions ? `<span class="dr-actions">${actions}</span>` : ""}</span>`
     + `<span class="request-meta"><time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+}
+/// What Drive asked its coder is Drive's words, not yours: one quiet line on
+/// the guide with its first sentence, unfolding to the whole request.
+function driveAsked(run: WorkspaceRun): string | null {
+  if (!run.fromDrive) return null;
+  const said = run.content.trim(), key = `drive-asked:${run.id}`, open = detailsOpen.has(key);
+  const first = said.split(/(?<=[.!?])\s/)[0]!.replace(/[.!?]$/, "");
+  const line = `${run.planOnly ? "Drive asked the coder for a plan" : "Drive asked the coder"}: ${first.length > 96 ? `${first.slice(0, 95)}…` : first}`;
+  const fold = btn("drive-asked", `${h(line)}${CHEVRON}`, { key }, `ds-what ds-fold${open ? " open" : ""}`).replace("<button ", `<button aria-expanded="${open}" `);
+  return `<div class="drive-asked"><span class="ds-mark" aria-hidden="true">→</span>${fold}<time>${clock(run.createdAt).slice(0, 5)}</time></div>${open ? `<div class="ds-said">${h(said)}</div>` : ""}`;
 }
 /// "replied to claude@macbook": where a mail turn's answer went, for its
 /// receipt. A send that answers nobody in particular still counts.
@@ -1388,6 +1398,7 @@ function renderConversation() {
       active(run) ? state.queue : "",
       state.activeTurnId,
       reviewOpen.has(run.id) ? reviewVersion : 0,
+      detailsOpen.has(`drive-asked:${run.id}`),
     ]);
     let saved = runNodes.get(run.id);
     if (!saved) {
@@ -3282,6 +3293,12 @@ async function dispatch(
     heroSignature = briefingSignature = "";
     if (inSession()) renderBriefing();
     else renderHero();
+    return;
+  }
+  if (action === "drive-asked") {
+    const key = String(args.key ?? "");
+    if (detailsOpen.has(key)) detailsOpen.delete(key); else detailsOpen.add(key);
+    renderConversation();
     return;
   }
   if (action === "drive-step") {

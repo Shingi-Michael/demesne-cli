@@ -801,7 +801,7 @@ export class WorkspaceHost {
       });
     return this.loadingFiles;
   }
-  async submit(content: string, planOnly = this.planOnly, permissionMode: "ask" | "allow" = "ask") {
+  async submit(content: string, planOnly = this.planOnly, permissionMode: "ask" | "allow" = "ask", fromDrive = false) {
     if (!this.current || this.connection !== "online")
       throw new Error("Connect to the daemon first.");
     if (!content.trim() && this.attachments.length) content = "Take a look at the attached image.";
@@ -825,11 +825,13 @@ export class WorkspaceHost {
         content,
         this.files.map((file) => file.path),
       );
-      const attached = this.attachments;
+      // Drive's request never carries the images you were about to send.
+      const attached = fromDrive ? [] : this.attachments;
       const result = await this.client.submitTurn(id, {
         content: expanded,
         permissionMode,
         planOnly,
+        ...(fromDrive ? { fromDrive } : {}),
         ...(attached.length ? { attachmentIds: attached.map((image) => image.id) } : {}),
       });
       if (this.current?.session.id === id) this.attachments = this.attachments.filter((image) => !attached.includes(image));

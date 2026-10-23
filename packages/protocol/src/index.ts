@@ -315,6 +315,8 @@ export interface Turn {
   /// Read-only planning turn: write and execution tools are not offered.
   planOnly?: boolean;
   kind?: "compaction" | "themefy";
+  /// Drive wrote this request to its coder; the person didn't type it.
+  fromDrive?: boolean;
   /// Images the person attached to this message.
   attachments?: TurnAttachment[];
 }
@@ -468,6 +470,8 @@ export interface SubmitTurnRequest {
   permissionMode?: PermissionMode;
   thinkingEnabled?: boolean;
   planOnly?: boolean;
+  /// Drive is sending this request to its coder.
+  fromDrive?: boolean;
 }
 
 export interface SubmitTurnResponse {
@@ -633,6 +637,9 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
   if (value.planOnly !== undefined && typeof value.planOnly !== "boolean") {
     throw new ProtocolValidationError("planOnly must be a boolean");
   }
+  if (value.fromDrive !== undefined && typeof value.fromDrive !== "boolean") {
+    throw new ProtocolValidationError("fromDrive must be a boolean");
+  }
   const attachmentIds = value.attachmentIds === undefined ? [] : value.attachmentIds;
   if (!Array.isArray(attachmentIds) || attachmentIds.length > 6 || attachmentIds.some((id) => typeof id !== "string" || !id || id.length > 64)) {
     throw new ProtocolValidationError("attachmentIds must be at most 6 artifact ids");
@@ -642,6 +649,7 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
     ...(value.permissionMode ? { permissionMode: value.permissionMode } : {}),
     ...(value.thinkingEnabled !== undefined ? { thinkingEnabled: value.thinkingEnabled } : {}),
     ...(value.planOnly !== undefined ? { planOnly: value.planOnly } : {}),
+    ...(value.fromDrive ? { fromDrive: true } : {}),
     ...(attachmentIds.length ? { attachmentIds } : {}),
   };
 }

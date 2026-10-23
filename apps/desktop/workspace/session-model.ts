@@ -50,6 +50,7 @@ export interface WorkspaceRun {
   completedAt: string | null;
   planOnly: boolean;
   kind?: string;
+  fromDrive?: boolean;
   attachments?: TurnAttachment[];
   entries: WorkbenchEntry[];
   receipt?: ResponseReceipt;
@@ -160,6 +161,7 @@ export class WorkspaceSession {
           typeof p.thinkingEnabled === "boolean" ? p.thinkingEnabled : null,
         planOnly: p.planOnly === true,
         ...(p.kind === "compaction" || p.kind === "themefy" ? { kind: p.kind } : {}),
+        ...(p.fromDrive === true ? { fromDrive: true } : {}),
         ...(Array.isArray(p.attachments) ? { attachments: p.attachments as TurnAttachment[] } : {}),
       });
     const turn = this.session.turns.find((turn) => turn.id === event.turnId);
@@ -302,6 +304,7 @@ export class WorkspaceSession {
           completedAt: turn.completedAt,
           planOnly: turn.planOnly ?? false,
           kind: turn.kind,
+          ...(turn.fromDrive ? { fromDrive: true } : {}),
           ...(turn.attachments?.length ? { attachments: turn.attachments } : {}),
           entries,
           receipt: close?.type === "notice" ? close.receipt : undefined,

@@ -698,7 +698,7 @@ try {
   // Drive never waits on you: its coder trying to publish is declined
   // without asking, and nothing lands in your chat.
   const missionId = (await f.client.listSessions()).find(session => session.title.startsWith("Drive mission:"))!.id;
-  await f.client.submitTurn(missionId, { content: missionPushPrompt, permissionMode: "allow" });
+  await f.client.submitTurn(missionId, { content: missionPushPrompt, permissionMode: "allow", fromDrive: true });
   await until(async () => (await f.client.getSessionState(missionId)).session.turns.at(-1)?.status === "completed", "the mission carries on past its publish step");
   assert.equal(await page.locator("#approval .approval-row").count(), 0, "Drive's publish step never asks you");
   assert.equal(await page.locator("#workspace-title").innerText(), home, "you stay in your chat");
@@ -713,6 +713,17 @@ try {
   await until(() => page.locator(".response").last().innerText().then(text => text.includes("Noted: Drive stopped")), "your chat's model answers the report");
   assert(await page.locator('.request.drive-report [data-action="select-session"]').isVisible(), "the report links to the mission's chat");
   await capture("09-drive-report");
+  // In the mission's chat, what Drive asked its coder is a quiet line on the
+  // guide, not a bubble you seem to have typed; it unfolds to every word.
+  await page.locator('.request.drive-report [data-action="select-session"]').click();
+  const asked = page.locator(".drive-asked").first();
+  await until(() => asked.innerText().then(text => text.startsWith("→") || text.includes("Drive asked the coder")), "Drive's request is a line on the guide");
+  assert.equal(await page.locator(".request", { hasText: missionPushPrompt.slice(0, 30) }).count(), 0, "Drive's request is no bubble");
+  await asked.locator(".ds-fold").click();
+  await until(() => page.locator(".drive-asked + .ds-said").innerText().then(text => text.trim() === missionPushPrompt.trim()), "the line unfolds to the whole request");
+  await capture("09-drive-asked");
+  await page.locator("#workspace-from button").click();
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "back in your chat");
   // The finished mission left a worktree without changes; its review card
   // opens from Drive's line and discards it.
   offerIdeas = true;

@@ -138,11 +138,11 @@ export class DirectDriveControl {
     // Drive's coder works with every tool allowed (publishing still asks).
     const content = plan ? text.replace(/^\/plan\s+/, "") : text;
     const session = this.session()!;
-    if (session === this.host.current) await this.host.submit(content, plan, "allow");
+    if (session === this.host.current) await this.host.submit(content, plan, "allow", true);
     else {
       this.sending = true;
       try {
-        const { turn } = await this.host.api.submitTurn(session.session.id, { content, permissionMode: "allow", planOnly: plan });
+        const { turn } = await this.host.api.submitTurn(session.session.id, { content, permissionMode: "allow", planOnly: plan, fromDrive: true });
         session.ensureTurn(turn);
         this.host.drive?.agent.workerStarted(session.session.id, content, turn.id);
       } finally {

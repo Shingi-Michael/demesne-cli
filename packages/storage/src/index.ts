@@ -1459,6 +1459,35 @@ export class DemesneStore {
   }
 
   /// How often this project asked for approval this week and the week before.
+  /// Chats working in a project right now (plus any named sessions, such as
+  /// Drive's worktree chats): their running turn, whether they wait on you,
+  /// and their latest tool calls, newest first.
+  liveWork(workspaceRoot: string, extraSessionIds: string[] = []): {
+    sessionId: string; title: string; turnId: string; waiting: boolean;
+    calls: { name: string; argumentsJson: string; createdAt: string }[];
+  }[] {
+    const extra = extraSessionIds.filter((id) => /^[A-Za-z0-9_-]{1,64}$/.test(id)).slice(0, 20);
+    const rows = this.database.query(`
+      SELECT s.id AS sessionId, s.title AS title, t.id AS turnId
+      FROM sessions s
+      JOIN turns t ON t.session_id = s.id
+      LEFT JOIN workspaces w ON w.id = s.workspace_id
+      WHERE (w.root = ?${extra.length ? ` OR s.id IN (${extra.map(() => "?").join(",")})` : ""})
+        AND t.status IN ('running', 'queued')
+        AND t.id = (SELECT id FROM turns WHERE session_id = s.id ORDER BY created_at DESC LIMIT 1)
+      LIMIT 20
+    `).all(workspaceRoot, ...extra) as { sessionId: string; title: string; turnId: string }[];
+    return rows.map((row) => {
+      const calls = this.database.query(`
+        SELECT name, arguments_json AS argumentsJson, created_at AS createdAt, status, permission_status AS permissionStatus
+        FROM tool_calls WHERE turn_id = ? ORDER BY created_at DESC LIMIT 20
+      `).all(row.turnId) as { name: string; argumentsJson: string; createdAt: string; status: string; permissionStatus: string }[];
+      const waiting = calls.some((call) => call.status === "pending" && call.permissionStatus === "pending")
+        || this.userQuestions.list(row.sessionId).some((question) => question.turnId === row.turnId);
+      return { ...row, waiting, calls: calls.map(({ name, argumentsJson, createdAt }) => ({ name, argumentsJson, createdAt })) };
+    });
+  }
+
   permissionAsks(workspaceRoot: string): { thisWeek: number; lastWeek: number } {
     const week = 7 * 24 * 60 * 60_000, now = Date.now();
     const count = (from: number, to: number) => (this.database.query(`

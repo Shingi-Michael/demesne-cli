@@ -147,7 +147,14 @@ const rgb = (value: string): [number, number, number] => {
 
 /// Paints the land onto a canvas sized LAND_W*2 by LAND_H*2. Colours come
 /// from the page so light and dark themes both work.
-export function paintLand(canvas: HTMLCanvasElement, land: Land, hover: number, now = Date.now()) {
+export interface LandLife {
+  /// Parcels with work happening this minute: lit blue from inside.
+  live?: ReadonlySet<number>;
+  /// Parcels with a failing check: a red border.
+  failing?: ReadonlySet<number>;
+}
+
+export function paintLand(canvas: HTMLCanvasElement, land: Land, hover: number, now = Date.now(), life: LandLife = {}) {
   const pw = LAND_W * SCALE, ph = LAND_H * SCALE;
   if (canvas.width !== pw) canvas.width = pw;
   if (canvas.height !== ph) canvas.height = ph;
@@ -160,12 +167,12 @@ export function paintLand(canvas: HTMLCanvasElement, land: Land, hover: number, 
     const background = getComputedStyle(node).backgroundColor, parts = background.match(/[\d.]+/g)?.map(Number);
     if (parts && parts.length >= 3 && (parts.length < 4 || parts[3]! > 0.5)) { ink = [parts[0]!, parts[1]!, parts[2]!]; break; }
   }
-  const accent = rgb(style.getPropertyValue("--acc") || "#7aa7ff"), warm = rgb(style.getPropertyValue("--warn") || "#e7b65a");
+  const accent = rgb(style.getPropertyValue("--acc") || "#7aa7ff"), warm = rgb(style.getPropertyValue("--warn") || "#e7b65a"), bad = rgb(style.getPropertyValue("--bad") || "#ef8a8a");
   const dark = ink[0] + ink[1] + ink[2] < 384, toward = dark ? 255 : 0;
   const image = context.createImageData(pw, ph), data = image.data;
   const tones = land.parcels.map((_, index) => (dark ? 0.028 : 0.022) + 0.016 * ((((index + 1) * 2654435761) >>> 0) % 1000) / 1000);
   const tints = land.parcels.map((parcel) => { const when = recency(parcel.district, now); return when === "today" ? 0.045 : when === "week" ? 0.025 : 0; });
-  const edges = land.parcels.map((_, index): [number[], number] => index === hover ? [accent, 0.75] : [[toward, toward, toward], dark ? 0.14 : 0.16]);
+  const edges = land.parcels.map((_, index): [number[], number] => life.failing?.has(index) ? [bad, 0.8] : index === hover ? [accent, 0.75] : life.live?.has(index) ? [accent, 0.4] : [[toward, toward, toward], dark ? 0.14 : 0.16]);
   for (let at = 0; at < pw * ph; at++) {
     const index = land.owner[at]!, tone = tones[index]!, tint = tints[index]!, p = at * 4;
     let r = ink[0] + (toward - ink[0]) * tone, g = ink[1] + (toward - ink[1]) * tone, b = ink[2] + (toward - ink[2]) * tone;
@@ -190,6 +197,16 @@ export function paintLand(canvas: HTMLCanvasElement, land: Land, hover: number, 
     const glow = context.createRadialGradient(parcel.cx, parcel.cy, 0, parcel.cx, parcel.cy, radius);
     glow.addColorStop(0, `rgba(${warm.join(",")},${strength})`);
     glow.addColorStop(1, `rgba(${warm.join(",")},0)`);
+    context.fillStyle = glow;
+    context.fillRect(parcel.cx - radius, parcel.cy - radius, radius * 2, radius * 2);
+  }
+  // Work happening now lights its parcel blue from inside.
+  for (const index of life.live ?? []) {
+    const parcel = land.parcels[index];
+    if (!parcel) continue;
+    const radius = parcel.r * 1.15, glow = context.createRadialGradient(parcel.cx, parcel.cy, 0, parcel.cx, parcel.cy, radius);
+    glow.addColorStop(0, `rgba(${accent.join(",")},${dark ? 0.2 : 0.14})`);
+    glow.addColorStop(1, `rgba(${accent.join(",")},0)`);
     context.fillStyle = glow;
     context.fillRect(parcel.cx - radius, parcel.cy - radius, radius * 2, radius * 2);
   }
@@ -248,4 +265,65 @@ export function mapCaption(districts: WorkspaceDistrict[], hovered: WorkspaceDis
   const lines = districts.reduce((sum, district) => sum + district.lines, 0);
   const changed = districts.filter((district) => recency(district, now) !== "quiet").length;
   return `${shortLines(lines)} lines in ${districts.length} place${districts.length === 1 ? "" : "s"}${changed ? ` · ${changed} changed this week` : ""}`;
+}
+
+/// The parcel a workspace-relative file belongs to: the deepest folder that
+/// holds it, the top level for files at the root, or -1.
+export function parcelOf(land: Land, path: string) {
+  let best = -1, depth = -1;
+  land.parcels.forEach((parcel, index) => {
+    const folder = parcel.district.path;
+    if (folder === null) return;
+    const holds = folder === "" ? !path.includes("/") : path === folder || path.startsWith(`${folder}/`);
+    if (holds && folder.length > depth) { best = index; depth = folder.length; }
+  });
+  return best;
+}
+
+export type MarkTone = "work" | "wait" | "fail" | "agent";
+export interface LiveMark {
+  key: string;
+  label: string;
+  tone: MarkTone;
+  parcel: number;
+  /// Where it came from this last minute, when that was another parcel.
+  from?: number;
+  /// The line beside Map while the mark is hovered.
+  detail: string;
+  /// The chat a click opens.
+  sessionId?: string;
+}
+
+/// Places marks inside their parcels, under the place name, one row each;
+/// past five, marks are dots without names.
+export function placeMarks(land: Land, marks: LiveMark[]) {
+  const rows = new Map<number, number>();
+  return marks.map((mark, order) => {
+    const parcel = land.parcels[mark.parcel];
+    if (!parcel) return null;
+    const row = rows.get(mark.parcel) ?? 0;
+    rows.set(mark.parcel, row + 1);
+    const named = order < 5;
+    const width = named ? mark.label.length * 6.2 + 14 : 10;
+    let x = parcel.cx - Math.min(width, parcel.bw * 0.8) / 2 + 4, y = parcel.cy + 32 + row * 19;
+    if (parcelAt(land, x, y) !== mark.parcel) y = parcel.cy - 30 - row * 19;
+    if (parcelAt(land, x, y) !== mark.parcel) { x = parcel.cx; y = parcel.cy + 4 + row * 16; }
+    // The dot stays clear of the land's faded edge; its name goes to
+    // whichever side has room.
+    x = Math.max(30, Math.min(LAND_W - 30, x));
+    y = Math.max(26, Math.min(LAND_H - 26, y));
+    return { mark, x, y, named, left: x + width > LAND_W - 20 };
+  }).filter((item): item is { mark: LiveMark; x: number; y: number; named: boolean; left: boolean } => item !== null);
+}
+
+/// The marks layer: a dot and a short name per mark, a ring on one that
+/// waits for you, and a dotted trail from where it was.
+export function markLayer(land: Land, placed: ReturnType<typeof placeMarks>) {
+  return placed.map(({ mark, x, y, named, left }, index) => {
+    const from = mark.from !== undefined ? land.parcels[mark.from] : undefined;
+    const trail = from ? `<path class="trail ${mark.tone}" d="M${from.cx.toFixed(1)} ${from.cy.toFixed(1)} Q ${((from.cx + x) / 2).toFixed(1)} ${(Math.min(from.cy, y) - 40).toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)}"/>` : "";
+    const ring = mark.tone === "wait" ? `<circle class="mk-ring" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8"/>` : "";
+    const action = mark.sessionId ? ` data-action="select-session" data-args="${escape(JSON.stringify({ id: mark.sessionId }))}"` : "";
+    return `${trail}<g class="mk-g ${mark.tone}" data-mark="${index}"${action}>${ring}<circle class="mk" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5"/>${named ? `<text class="who${left ? " left" : ""}" x="${(left ? x - 9 : x + 9).toFixed(1)}" y="${(y + 4).toFixed(1)}">${escape(mark.label)}</text>` : ""}<circle class="mk-hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="10"/></g>`;
+  }).join("");
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LAND_H, LAND_W, mapCaption, parcelAt, recency, squarify, survey } from "../estate.ts";
+import { LAND_H, LAND_W, mapCaption, markLayer, parcelAt, parcelOf, placeMarks, recency, squarify, survey } from "../estate.ts";
 
 const districts = [
   { path: "apps/desktop", lines: 13900, files: 67, changedAt: null },
@@ -44,5 +44,30 @@ describe("estate", () => {
     expect(recency(districts[0]!, now)).toBe("quiet");
     expect(mapCaption(districts, null, now)).toBe("28.9k lines in 4 places");
     expect(mapCaption(districts, districts[2]!, now)).toBe("packages/storage · 2.4k lines · 9 files · quiet · click to work here");
+  });
+});
+
+describe("marks", () => {
+  const land = survey([...districts, { path: "", lines: 900, files: 3, changedAt: null }]);
+  const index = (path: string | null) => land.parcels.findIndex((parcel) => parcel.district.path === path);
+
+  test("a file belongs to the deepest folder that holds it", () => {
+    expect(parcelOf(land, "apps/desktop/workspace/live.ts")).toBe(index("apps/desktop"));
+    expect(parcelOf(land, "README.md")).toBe(index(""));
+    expect(parcelOf(land, "nowhere/x.ts")).toBe(-1);
+  });
+
+  test("marks stand inside their parcel and name themselves", () => {
+    const placed = placeMarks(land, [
+      { key: "a", label: "Sidebar rename", tone: "work", parcel: index("apps/desktop"), detail: "", sessionId: "s1" },
+      { key: "b", label: "Emoji ids", tone: "wait", parcel: index("apps/desktop"), from: index("docs"), detail: "", sessionId: "s2" },
+    ]);
+    for (const item of placed) expect(parcelAt(land, item.x, item.y)).toBe(item.mark.parcel);
+    expect(placed[1]!.y).not.toBe(placed[0]!.y);
+    const svg = markLayer(land, placed);
+    expect(svg).toContain('data-action="select-session"');
+    expect(svg).toContain("Sidebar rename");
+    expect(svg).toContain("mk-ring");
+    expect(svg).toContain('class="trail wait"');
   });
 });

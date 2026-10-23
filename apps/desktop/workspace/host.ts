@@ -1370,6 +1370,12 @@ export class WorkspaceHost {
       if (!this.current) return null;
       return this.client.workspaceMap(this.current.session.id);
     }
+    if (method === "workspace-live") {
+      if (!this.current) return null;
+      const breakage = this.breakage.state;
+      const drive = [breakage.fix, ...breakage.inbox].filter((fix) => fix && (fix.status === "starting" || fix.status === "running")).map((fix) => fix!.sessionId).filter((id): id is string => Boolean(id));
+      return this.client.workspaceLive(this.current.session.id, drive);
+    }
     if (method === "model-scores") return this.client.modelScoreboard({ days: 30 });
     if (method === "model") {
       const id = string(args.id, "model", 1000);

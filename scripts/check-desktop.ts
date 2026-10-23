@@ -369,6 +369,19 @@ try {
   await until(() => desktop.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body.startsWith("Wants to edit"))), "a waiting approval sends a Mac banner");
   await page.evaluate(() => { delete (document as any).hasFocus; });
   await capture("02-file-approval");
+  // A chat waiting on you stands on the map in amber, in the folder of the
+  // file it wants to edit; clicking its mark goes back to it.
+  await click("new-session");
+  await until(() => page.locator(".hero-map .map-btn").isVisible(), "a new chat shows the start screen");
+  await page.locator(".hero-map .map-btn").click();
+  const waitingMark = page.locator(".land .mk-g.wait");
+  await until(() => waitingMark.isVisible(), "the waiting chat stands on the map", 20_000);
+  await until(() => page.locator("#map-caption").innerText().then(text => text.includes("1 waiting for you")), "the line beside Map counts it");
+  await waitingMark.locator(".mk-hit").hover();
+  await until(() => page.locator("#map-caption").innerText().then(text => text.includes("waiting for you") && text.includes("click to open its chat")), "hovering the mark names it");
+  await capture("02-map-live");
+  await waitingMark.locator(".mk-hit").click();
+  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Edit"]), "clicking the mark opens its chat");
   await click("permission", { decision: "allow_once" });
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Run"]), "command approval visible");
   assert.equal(await page.locator("#approval .approval-row code").innerText(), "bun run check", "the row names the command by its program");
@@ -451,6 +464,8 @@ try {
   // the list closes up and never shows more than six. ⌘Z brings it back
   // while it waits to be archived.
   const before = await page.locator("#sidebar-sessions .sidebar-item").count();
+  // Empty chats (the map step opened one) are kept by the daemon but not listed.
+  const kept = (await f.client.listSessions()).length;
   const other = page.locator(`#sidebar-sessions .sidebar-item:not(:has([data-args*='${sessionId}']))`).first();
   const otherArgs = await other.locator(".sidebar-session").getAttribute("data-args");
   await other.hover();
@@ -460,7 +475,7 @@ try {
   await page.locator("body").focus();
   await page.keyboard.press("Control+z");
   await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before), "undo brings the conversation back");
-  assert.equal((await f.client.listSessions()).length, before, "An undone delete never reaches the daemon");
+  assert.equal((await f.client.listSessions()).length, kept, "An undone delete never reaches the daemon");
   // The keyboard reaches the same delete: Delete on the focused row.
   const row = page.locator(`#sidebar-sessions .sidebar-session[data-args='${otherArgs}']`);
   await row.focus();
@@ -468,7 +483,7 @@ try {
   await until(() => row.locator("xpath=..").locator(".sidebar-delete").evaluate(button => getComputedStyle(button).opacity === "1").then(shown => shown || Promise.reject(new Error("trash hidden"))), "The trash shows when the keyboard is on the row");
   await page.keyboard.press("Delete");
   await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before - 1), "Delete on a row removes it");
-  await until(async () => (await f.client.listSessions()).length === before - 1, "the daemon archived it");
+  await until(async () => (await f.client.listSessions()).length === kept - 1, "the daemon archived it");
   assert(await page.locator("#sidebar-sessions .sidebar-item").count() <= 6, "The sidebar lists at most six conversations");
   await capture("02-completed");
   // Settings is one sheet: sections on the left, each row with its own control.
@@ -955,7 +970,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes", "the project map"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes", "the project map", "who is working where on the map"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

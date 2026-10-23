@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Deed, DeedSentence, DeedValue } from "@demesne/protocol";
-import { deedPage, deedProve, deedSummary, editLine, liveLine, liveWords, numberOf, numberText, toCheck, wordDiff } from "../deed-view.ts";
+import { deedPage, editLine, liveLine, liveWords, numberOf, numberText, toCheck, weekDays, wordDiff } from "../deed-view.ts";
 
 const sentence = (over: Partial<DeedSentence> = {}): DeedSentence => ({ id: "a", section: "Drive", text: "It starts after 20 quiet minutes.", anchors: [{ path: "src/auto.ts", line: 31, quote: "x" }], state: "true", updatedAt: "", ...over });
 const deed = (sentences: DeedSentence[], over: Partial<Deed> = {}): Deed => ({ workspace: "/w", writtenAt: "2026-10-23", writing: null, sections: ["Drive"], sentences, ...over });
@@ -21,7 +21,11 @@ describe("the Deed page", () => {
   test("counts what needs you and says how much is true", () => {
     const page = deed([sentence(), sentence({ id: "b", state: "check" }), sentence({ id: "c", state: "false" }), sentence({ id: "d", state: "wish" })]);
     expect(toCheck(page)).toBe(2);
-    expect(deedSummary(page)).toBe("3 sentences · 1 true · 1 wish");
+    const text = deedPage(page, { focus: null, editing: null }, "demo");
+    expect(text).toContain("4 sentences, written from the code.");
+    expect(text).toContain(">1 unproved<");
+    expect(text).toContain(">2 to check<");
+    expect(text).toContain(">1 wish<");
   });
   test("draws each state: the empty page, the drifted sentence, a wish", () => {
     expect(deedPage(deed([], { writtenAt: null }), { focus: null, editing: null }, "demo")).toContain("Write the deed");
@@ -81,10 +85,38 @@ describe("the Deed page", () => {
     expect(failed).toContain("Prove again");
   });
   test("Prove it runs every sentence, and Stop stops it", () => {
-    expect(deedProve(null)).toBe("");
-    expect(deedProve(deed([sentence({ tests: ["t.test.ts"] })]))).toContain("Prove it");
-    const proving = deed([sentence({ tests: ["t.test.ts"] })], { proving: { total: 4, done: 1, failed: 0, running: true, at: "" } });
-    expect(deedProve(proving)).toContain("Stop");
-    expect(deedPage(proving, { focus: null, editing: null }, "demo")).toContain("1 of 4");
+    const ui = { focus: null, editing: null };
+    expect(deedPage(deed([sentence()]), ui, "demo")).not.toContain("Prove it");
+    expect(deedPage(deed([sentence({ tests: ["t.test.ts"] })]), ui, "demo")).toContain("Prove it");
+    const proving = deedPage(deed([sentence({ tests: ["t.test.ts"], proof: { state: "running", at: "", files: ["t.test.ts"] } })], { proving: { total: 4, done: 1, failed: 0, running: true, at: "" } }), ui, "demo");
+    expect(proving).toContain("1 of 4");
+    expect(proving).toContain("Stop");
+    expect(proving).toContain("Drive · t.test.ts");
+  });
+  const noon = (day: number) => new Date(2026, 9, day, 12).getTime();
+  const change = (day: number, over: object = {}) => ({ at: new Date(noon(day)).toISOString(), id: "a", section: "Drive", kind: "words" as const, who: "you" as const, was: "It starts after 20 quiet minutes.", text: "It starts after 10 quiet minutes.", ...over });
+  test("a count filters the page, and says how many remain in each section", () => {
+    const page = deed([sentence({ proof: { state: "passed", at: "", files: ["t"] } }), sentence({ id: "b" }), sentence({ id: "c", section: "Chats", state: "wish", anchors: [] })], { sections: ["Drive", "Chats"] });
+    const only = deedPage(page, { focus: null, editing: null, filter: "unproved" }, "demo");
+    expect(only).toContain("1 of 2");
+    expect(only).not.toContain("Chats");
+    expect(deedPage(page, { focus: null, editing: null, filter: "wish" }, "demo")).not.toContain("<h3>Drive");
+    expect(deedPage(page, { focus: null, editing: null, filter: "unproved" }, "demo")).toContain('class="ct hol on"');
+  });
+  test("the week has a dot on the days the Deed changed", () => {
+    const page = deed([sentence({ text: "It starts after 10 quiet minutes." })], { log: [change(21), change(22)] });
+    const days = weekDays(page, noon(23));
+    expect(days.map((day) => day.label).at(-1)).toBe("Today");
+    expect(days.map((day) => day.changes.length)).toEqual([0, 0, 0, 1, 1, 0]);
+    expect(deedPage(page, { focus: null, editing: null }, "demo", noon(23)).match(/<b><\/b>/g)?.length).toBe(2);
+  });
+  test("a day's page shows the changes since, and fades the rest", () => {
+    const page = deed([sentence({ text: "It starts after 10 quiet minutes." }), sentence({ id: "b", text: "Other words." })], { log: [change(22), change(22, { id: "x", kind: "removed", was: "Gone words.", text: "Gone words." })] });
+    const text = deedPage(page, { focus: null, editing: null, since: new Date(2026, 9, 22).getTime() }, "demo", noon(23));
+    expect(text).toContain("<del>20</del><ins>10</ins>");
+    expect(text).toContain("you · Thu");
+    expect(text).toContain("<del>Gone words.</del>");
+    expect(text).toContain('class="dz-s dim"');
+    expect(text).toContain("Since");
   });
 });

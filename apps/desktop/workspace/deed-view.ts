@@ -1,6 +1,6 @@
 /// The Deed page: a project's plain sentences, each with a mark for its state
 /// and, under the one you're on, a single line of what you can do with it.
-import type { Deed, DeedSentence, DeedValue } from "@demesne/protocol";
+import type { Deed, DeedChange, DeedSentence, DeedValue } from "@demesne/protocol";
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -9,7 +9,12 @@ const btn = (action: string, label: string, data: Record<string, unknown> = {}, 
 
 /// What the window holds about the page: the sentence you're on, the words
 /// you're typing into it, and a live word you're changing but haven't made so.
-export interface DeedUi { focus: string | null; editing: string | null; live?: { sentence: string; value: string; to: number | string } | null }
+export type DeedFilter = "proved" | "check" | "wish" | "unproved";
+export interface DeedUi {
+  focus: string | null; editing: string | null; live?: { sentence: string; value: string; to: number | string } | null;
+  /// Only these sentences, and the page as it read at the start of this day (ms).
+  filter?: DeedFilter | null; since?: number | null;
+}
 
 /// Sentences that need the person: their code changed, they're no longer
 /// true, or making one true failed.
@@ -138,13 +143,13 @@ export function editLine(sentence: DeedSentence, text: string): string {
   return `<span class="dz-go">Make it so <kbd>↵</kbd></span><span class="dz-diff">${wordDiff(sentence.text, next)}</span>${touches.length ? `<span class="dz-quiet">from ${touches.map((file) => `<b>${h(file)}</b>`).join(", ")}</span>` : ""}<span class="dz-quiet">Esc keeps the old words</span>`;
 }
 
-const MARK: Record<string, string> = { check: "amber", false: "amber", checking: "amber", working: "blue", failed: "red", wish: "ghost" };
+const MARK: Record<string, string> = { check: "amber", false: "amber", checking: "amber", working: "blue", failed: "red", wish: "hol" };
 
 function sentenceHTML(sentence: DeedSentence, ui: DeedUi): string {
   // A word being changed sets the old proof aside until Enter.
   const proof = sentence.state === "true" && ui.live?.sentence !== sentence.id ? sentence.proof?.state : undefined;
   const living = ui.live?.sentence === sentence.id;
-  const tone = living || proof === "running" ? "blue" : proof === "failed" ? "red" : proof === "passed" || (sentence.state === "true" && sentence.madeAt) ? "green" : MARK[sentence.state] ?? "";
+  const tone = living || proof === "running" ? "blue" : proof === "failed" ? "red" : proof === "passed" || (sentence.state === "true" && sentence.madeAt) ? "green" : sentence.state === "true" ? "hol" : MARK[sentence.state] ?? "";
   const on = ui.focus === sentence.id;
   const cls = ["dz-s", `st-${sentence.state}`, proof ? `pr-${proof}` : "", on ? "on" : "", living ? "living" : "", sentence.madeAt && sentence.state === "true" ? "fresh" : ""].filter(Boolean).join(" ");
   const anchors = where(sentence);
@@ -157,7 +162,7 @@ function sentenceHTML(sentence: DeedSentence, ui: DeedUi): string {
 const STATE_WORDS: Record<string, string> = { true: "True of the code", check: "Its code changed: check it", checking: "Checking", false: "No longer true", working: "Being made true", failed: "Not made true", wish: "A wish: not true yet" };
 
 /// The whole page, from the empty one to the written deed.
-export function deedPage(deed: Deed | null, ui: DeedUi, name: string): string {
+export function deedPage(deed: Deed | null, ui: DeedUi, name: string, now = Date.now()): string {
   if (!deed) return `<div class="deed-lead">Opening the Deed…</div>`;
   const writing = deed.writing;
   if (!deed.writtenAt || (writing && !deed.sentences.some((sentence) => sentence.state !== "wish"))) {
@@ -167,34 +172,93 @@ export function deedPage(deed: Deed | null, ui: DeedUi, name: string): string {
     return `<div class="deed-empty">${body}</div>${deed.sentences.length ? sections(deed, ui) : ""}`;
   }
   const rewriting = writing?.status === "running" ? ` <span class="shine dz-shine">rewriting…</span>` : writing?.status === "failed" ? ` <span class="dz-bad">${h(writing.error ?? "")}</span>` : "";
-  const proving = deed.proving?.running
-    ? `<p class="deed-lead">Proving each sentence by running the tests that hold it. <span class="dz-count">${deed.proving.done} of ${deed.proving.total}</span></p><div class="dz-prog"><i style="width:${Math.round(deed.proving.done / Math.max(1, deed.proving.total) * 100)}%"></i></div>`
-    : "";
   const live = deed.sentences.some((sentence) => sentence.values?.length || sentence.tests?.length);
-  const lead = proving || `<p class="deed-lead">What ${h(name)} does, in plain words. ${live ? "The underlined words are live: drag a number or click a word, and the code follows." : `Every sentence is held true by the code beneath it. ${writing ? "" : btn("deed-write", "Read the code again", {}, "dz-quiet dz-inline")}${writing ? "" : " to find the words you can change in place."}`}${rewriting}</p>`;
-  return `${lead}${sections(deed, ui)}`;
+  const line = `${plural(deed.sentences.length, "sentence")}, written from the code.${live || writing ? "" : ` ${btn("deed-write", "Read the code again", {}, "dz-quiet dz-inline")} to find the words you can change in place.`}${rewriting}`;
+  return `<div class="d4-head"><div class="d3-name">${h(name)}</div><div class="d3-line">${line}</div>${deed.proving?.running ? provingLine(deed) : countsLine(deed, ui)}${weekLine(deed, ui, now)}</div>${sections(deed, ui, now)}`;
 }
 
-function sections(deed: Deed, ui: DeedUi): string {
-  const names = [...deed.sections, ...new Set(deed.sentences.map((sentence) => sentence.section).filter((section) => !deed.sections.includes(section)))];
-  return names.map((section) => {
-    const items = deed.sentences.filter((sentence) => sentence.section === section);
-    return items.length ? `<h3>${h(section)}</h3><div class="dz-p">${items.map((sentence) => sentenceHTML(sentence, ui)).join("")}</div>` : "";
+const proved = (sentence: DeedSentence) => sentence.state === "true" && sentence.proof?.state === "passed";
+const FILTERS: Record<DeedFilter, (sentence: DeedSentence) => boolean> = {
+  proved,
+  check: (sentence) => ["check", "false", "failed"].includes(sentence.state),
+  wish: (sentence) => sentence.state === "wish",
+  unproved: (sentence) => sentence.state === "true" && !proved(sentence),
+};
+const COUNT_WORDS: Record<DeedFilter, [string, string]> = { proved: ["proved", "ok"], check: ["to check", "am"], wish: ["wish", "wish"], unproved: ["unproved", "hol"] };
+
+/// What holds, and what needs you: each count is a filter on the page.
+function countsLine(deed: Deed, ui: DeedUi): string {
+  const counts = (Object.keys(COUNT_WORDS) as DeedFilter[]).map((name) => ({ name, n: deed.sentences.filter(FILTERS[name]).length })).filter(({ n }) => n);
+  const parts = counts.map(({ name, n }) => btn("deed-filter", `${n} ${name === "wish" && n > 1 ? "wishes" : COUNT_WORDS[name][0]}`, { f: ui.filter === name ? null : name }, `ct ${COUNT_WORDS[name][1]}${ui.filter === name ? " on" : ""}`));
+  const prove = deed.sentences.some((sentence) => sentence.tests?.length) ? btn("deed-prove", "Prove it", {}, "ct act") : "";
+  return `<div class="d4-counts">${parts.join("")}<span class="ct-sp"></span>${prove}</div>`;
+}
+
+/// Prove it running: how far, which sentence, and Stop.
+function provingLine(deed: Deed): string {
+  const p = deed.proving!, now = deed.sentences.find((sentence) => sentence.proof?.state === "running");
+  return `<div class="d4-counts"><span class="ct t1">${p.done} of ${p.total}</span>${now ? `<span class="ct run">${h(now.section)} · ${h(now.proof!.files.map((file) => file.split("/").at(-1)).join(", "))}</span>` : ""}<span class="ct-sp"></span>${btn("deed-stop", "Stop", {}, "ct act")}</div><div class="d4-prog"><i style="width:${Math.round(p.done / Math.max(1, p.total) * 100)}%"></i></div>`;
+}
+
+const DAY = 86_400_000;
+const dayStart = (time: number) => { const date = new Date(time); date.setHours(0, 0, 0, 0); return date.getTime(); };
+const dayName = (time: number) => new Date(time).toLocaleDateString("en", { weekday: "short" });
+
+/// The last six days, a dot on each one the Deed changed, and what changed.
+export function weekDays(deed: Deed, now: number): { start: number; label: string; changes: DeedChange[] }[] {
+  const today = dayStart(now);
+  return [5, 4, 3, 2, 1, 0].map((back) => {
+    const start = today - back * DAY;
+    const changes = (deed.log ?? []).filter((change) => { const at = Date.parse(change.at); return at >= start && at < start + DAY; });
+    return { start, label: back === 0 ? "Today" : dayName(start), changes };
+  });
+}
+const SAYS: Record<DeedChange["kind"], string> = { added: "added", words: "reworded", broke: "broke", mended: "came back", removed: "removed" };
+function dayCaption(label: string, changes: DeedChange[]): string {
+  if (!changes.length) return `${label} · nothing changed`;
+  const by = (kind: DeedChange["kind"]) => changes.filter((change) => change.kind === kind).length;
+  return `${label} · ${(Object.keys(SAYS) as DeedChange["kind"][]).filter(by).map((kind) => `${by(kind)} ${SAYS[kind]}`).join(", ")}`;
+}
+
+function weekLine(deed: Deed, ui: DeedUi, now: number): string {
+  const days = weekDays(deed, now), today = days.at(-1)!.start;
+  const items = days.map((day) => {
+    const on = ui.since ? ui.since === day.start && day.start !== today : false;
+    return `<button type="button" class="wk${on || (!ui.since && day.start === today) ? " on" : ""}" data-action="deed-since" data-args="${h(JSON.stringify({ t: day.start === today ? null : day.start }))}" title="${h(dayCaption(day.label, day.changes))}">${h(day.label)}${day.changes.length ? "<b></b>" : ""}</button>`;
   }).join("");
+  const tail = ui.since || ui.filter ? btn("deed-since", "Show all · Esc", { t: null, f: null }, "dz-quiet wk-x") : "";
+  return `<div class="d4-days"><span class="wk-l">${ui.since ? "Since" : "This week"}</span>${items}${tail}</div>`;
 }
 
-/// The title bar's quiet count.
-export function deedSummary(deed: Deed | null): string {
-  if (!deed?.writtenAt) return "";
-  const written = deed.sentences.filter((sentence) => sentence.state !== "wish");
-  const held = written.filter((sentence) => sentence.state === "true").length, wishes = deed.sentences.length - written.length;
-  const proved = written.filter((sentence) => sentence.proof?.state === "passed").length;
-  if (deed.proving?.running) return `Proving · ${deed.proving.done} of ${deed.proving.total}`;
-  return [plural(written.length, "sentence"), proved ? `${proved} proved` : `${held} true`, wishes ? plural(wishes, "wish").replace("wishs", "wishes") : ""].filter(Boolean).join(" · ");
+/// How a sentence reads against the start of a day: reworded, added, or broken since.
+function sinceMark(change: DeedChange) {
+  return `${change.who === "you" && change.kind !== "broke" && change.kind !== "mended" ? "you" : "the code"} · ${dayName(Date.parse(change.at))}`;
 }
 
-/// The title bar's one action: Prove it, or Stop while it runs.
-export function deedProve(deed: Deed | null): string {
-  if (!deed?.writtenAt || !deed.sentences.some((sentence) => sentence.tests?.length)) return "";
-  return deed.proving?.running ? btn("deed-stop", "Stop", {}, "deed-prove") : btn("deed-prove", "Prove it", {}, "deed-prove");
+function sections(deed: Deed, ui: DeedUi, now = Date.now()): string {
+  const names = [...deed.sections, ...new Set(deed.sentences.map((sentence) => sentence.section).filter((section) => !deed.sections.includes(section)))];
+  const since = ui.since ? (deed.log ?? []).filter((change) => Date.parse(change.at) >= ui.since!) : null;
+  const removed = since?.filter((change) => change.kind === "removed" && !since.some((other) => other.id === change.id && other.kind === "added")) ?? [];
+  if (since) for (const change of removed) if (!names.includes(change.section)) names.push(change.section);
+  const keep = ui.filter ? FILTERS[ui.filter] : null;
+  const out = names.map((section) => {
+    const all = deed.sentences.filter((sentence) => sentence.section === section), items = keep ? all.filter(keep) : all;
+    const gone = removed.filter((change) => change.section === section);
+    if (!items.length && !gone.length) return "";
+    const count = keep ? `<span class="h-n">${items.length} of ${all.length}</span>` : "";
+    const rows = items.map((sentence) => since ? sinceRow(sentence, ui, since) : sentenceHTML(sentence, ui)).join("") + gone.map((change) => `<div class="dz-s x-changed"><span class="dz-mk"></span><span class="dz-words"><del>${h(change.was)}</del></span><span class="dz-anc dz-since">removed · ${h(sinceMark(change))}</span></div>`).join("");
+    return `<h3>${h(section)}${count}</h3><div class="dz-p">${rows}</div>`;
+  }).join("");
+  return out || `<p class="deed-lead">${since ? "Nothing in the Deed changed since then." : "No sentence fits."}</p>`;
+}
+
+/// A sentence as the week changed it; the ones nobody touched fade back.
+function sinceRow(sentence: DeedSentence, ui: DeedUi, since: DeedChange[]): string {
+  const mine = since.filter((change) => change.id === sentence.id);
+  if (!mine.length) return `<div class="dz-s dim" data-deed="${h(sentence.id)}"><span class="dz-mk ${sentence.state === "true" ? "hol" : MARK[sentence.state] ?? ""}"></span><span class="dz-words">${h(sentence.text)}</span></div>`;
+  const first = mine.find((change) => change.kind === "words"), added = mine.find((change) => change.kind === "added"), last = mine.at(-1)!;
+  const words = added ? `<ins>${h(sentence.text)}</ins>` : first?.was ? wordDiff(first.was, sentence.text) : h(sentence.text);
+  const label = added ? `added · ${sinceMark(added)}` : sinceMark(last);
+  const tone = sentence.state === "true" ? "green" : MARK[sentence.state] ?? "";
+  return `<div class="dz-s x-changed st-${sentence.state}" data-deed="${h(sentence.id)}"><span class="dz-mk ${tone}"></span><span class="dz-words">${words}</span><span class="dz-anc dz-since">${h(label)}</span></div>`;
 }

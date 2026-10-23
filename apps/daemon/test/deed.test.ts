@@ -263,3 +263,44 @@ test("Prove it runs each sentence with tests in turn and counts what failed", as
   expect(deed.sentences.find((sentence) => sentence.id === quiet.id)).toMatchObject({ proof: { state: "failed" }, why: "Its tests fail: two failed" });
   expect(deeds.touching(root, ["src/auto.ts"]).map((sentence) => sentence.id)).toEqual([quiet.id]);
 });
+
+test("the Deed keeps what changed: reworded, added, removed, and code that broke or came back", async () => {
+  const { root, deeds, perDay } = await live();
+  // The first write is not a change.
+  expect(deeds.state(root).log ?? []).toEqual([]);
+  deeds.act(root, { action: "set", id: perDay.id, value: perDay.values![0]!.id, to: 5 });
+  deeds.act(root, { action: "wish", text: "Drive pauses while you type." });
+  let log = deeds.state(root).log!;
+  // (The lines are close together, so the first sentence's quoted lines moved too.)
+  expect(log.filter((change) => change.who === "you").map((change) => change.kind)).toEqual(["words", "added"]);
+  expect(log[0]).toMatchObject({ was: "It runs at most three ideas a day.", text: "It runs at most five ideas a day." });
+  const count = (kind: string) => deeds.state(root).log!.filter((change) => change.kind === kind).length;
+  const broke = count("broke");
+  writeFileSync(join(root, "src", "auto.ts"), CODE.replace("PER_DAY = 3", "PER_DAY = 4"));
+  expect(deeds.state(root).log!.at(-1)).toMatchObject({ kind: "broke", who: "code" });
+  expect(count("broke")).toBe(broke + 1);
+  const mended = count("mended");
+  writeFileSync(join(root, "src", "auto.ts"), CODE.replace("PER_DAY = 3", "PER_DAY = 5"));
+  expect(deeds.state(root).log!.at(-1)).toMatchObject({ kind: "mended", who: "code" });
+  expect(count("mended")).toBe(mended + 1);
+  const wish = deeds.state(root).sentences.find((sentence) => sentence.state === "wish")!;
+  deeds.act(root, { action: "remove", id: wish.id });
+  expect(deeds.state(root).log!.at(-1)).toMatchObject({ kind: "removed", who: "you", was: "Drive pauses while you type." });
+});
+
+test("reading the code again keeps a sentence's place in the week when its words are unchanged", async () => {
+  const { root, deeds, turns, tool, perDay } = await live();
+  deeds.act(root, { action: "set", id: perDay.id, value: perDay.values![0]!.id, to: 5 });
+  const before = deeds.state(root);
+  const kept = before.sentences[1]!;
+  deeds.act(root, { action: "write" });
+  await flush();
+  const turn = turns.at(-1)!;
+  await tool("deed_write").execute({ sections: [{ name: "Drive", sentences: [{ text: kept.text, anchors: [{ path: "src/auto.ts", line: 2 }] }, { text: "A new one.", anchors: [{ path: "src/auto.ts", line: 1 }] }] }] }, { workspaceRoot: root, signal: new AbortController().signal, sessionId: turn.sessionId });
+  turn.end();
+  await flush();
+  const after = deeds.state(root);
+  expect(after.sentences.find((sentence) => sentence.text === kept.text)!.id).toBe(kept.id);
+  // The rewrite itself adds nothing to the log.
+  expect(after.log).toEqual(before.log);
+});

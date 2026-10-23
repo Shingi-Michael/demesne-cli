@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { Deed, DeedAction, DeedAnchor, DeedSentence, DeedValue, DriveSignal } from "@demesne/protocol";
+import type { Deed, DeedAction, DeedAnchor, DeedChange, DeedSentence, DeedState, DeedValue, DriveSignal } from "@demesne/protocol";
 import type { ProviderMessage, ProviderToolDefinition } from "@demesne/providers";
 import type { TurnInference } from "./processor.ts";
 import type { AgentTool } from "./tools.ts";
@@ -282,6 +282,24 @@ const testFiles = (root: string, raw: unknown) => Array.isArray(raw)
 
 interface Job { workspace: string; kind: "write" | "make"; sentenceId?: string; written?: boolean; settled?: { made: boolean; anchors: DeedAnchor[]; why?: string; tests: string[] } }
 
+/// What the page now says differently from what it said: sentences added or
+/// removed, new words, and sentences whose code broke or came back.
+export function changesBetween(before: Deed, after: Deed, who: "you" | "code"): DeedChange[] {
+  if (!before.writtenAt) return [];
+  const at = now(), old = new Map(before.sentences.map((sentence) => [sentence.id, sentence])), seen = new Set<string>(), out: DeedChange[] = [];
+  const open = (state: DeedState) => state === "check" || state === "false";
+  for (const sentence of after.sentences) {
+    seen.add(sentence.id);
+    const was = old.get(sentence.id);
+    if (!was) { out.push({ at, id: sentence.id, section: sentence.section, kind: "added", who, text: sentence.text }); continue; }
+    if (was.text !== sentence.text) out.push({ at, id: sentence.id, section: sentence.section, kind: "words", who, was: was.text, text: sentence.text });
+    else if (was.state === "true" && open(sentence.state)) out.push({ at, id: sentence.id, section: sentence.section, kind: "broke", who: "code", text: sentence.text });
+    else if ((open(was.state) || was.state === "checking") && sentence.state === "true") out.push({ at, id: sentence.id, section: sentence.section, kind: "mended", who: "code", text: sentence.text });
+  }
+  for (const sentence of before.sentences) if (!seen.has(sentence.id)) out.push({ at, id: sentence.id, section: sentence.section, kind: "removed", who, was: sentence.text, text: sentence.text });
+  return out;
+}
+
 export class DeedBook {
   /// The chats writing a deed or making a sentence true, by session.
   private jobs = new Map<string, Job>();
@@ -300,7 +318,10 @@ export class DeedBook {
     } catch { /* not written yet */ }
     return { workspace, writtenAt: null, writing: null, sections: [], sentences: [] };
   }
+  /// Who the change being saved belongs to; a rewrite from the code logs nothing.
+  private who: "you" | "code" | null = "code";
   private save(deed: Deed): Deed {
+    deed.log = [...(deed.log ?? []), ...(this.who ? changesBetween(this.read(deed.workspace), deed, this.who) : [])].slice(-400);
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     const path = this.path(deed.workspace), temp = `${path}.${process.pid}.tmp`;
     writeFileSync(temp, JSON.stringify(deed), { mode: 0o600 });
@@ -340,6 +361,11 @@ export class DeedBook {
 
   act(workspace: string, request: DeedAction): Deed {
     const deed = this.state(workspace);
+    this.who = "you";
+    try { return this.run(workspace, request, deed); } finally { this.who = "code"; }
+  }
+
+  private run(workspace: string, request: DeedAction, deed: Deed): Deed {
     const find = (id: string) => {
       const sentence = deed.sentences.find((item) => item.id === id);
       if (!sentence) throw new Error("That sentence is no longer in the deed");
@@ -449,7 +475,7 @@ export class DeedBook {
       case "seen":
         return this.update(workspace, (next) => {
           const item = next.sentences.find((candidate) => candidate.id === request.id);
-          if (item) { item.madeAt = undefined; item.was = undefined; item.undo = undefined; if (item.proof?.state === "passed") item.proof = undefined; }
+          if (item) { item.madeAt = undefined; item.was = undefined; item.undo = undefined; }
         });
       case "remove":
         return this.update(workspace, (next) => {
@@ -624,13 +650,17 @@ export class DeedBook {
     }
     if (!sentences.length) throw new Error("No sentence named a file in this project; give each one the file and line that makes it true");
     found.written = true;
-    this.update(found.workspace, (deed) => {
+    this.who = null;
+    try { this.update(found.workspace, (deed) => {
+      // A sentence the code still says in the same words keeps its place in the week.
+      const known = new Map(deed.sentences.filter((sentence) => sentence.state !== "wish").map((sentence) => [sentence.text, sentence]));
+      for (const sentence of sentences) { const kept = known.get(sentence.text); if (kept) { sentence.id = kept.id; if (kept.proof) sentence.proof = kept.proof; } }
       // Wishes the person wrote before stay, under their own heading.
       const wishes = deed.sentences.filter((sentence) => sentence.state === "wish").map((sentence) => ({ ...sentence, section: names.includes(sentence.section) ? sentence.section : "Wishes" }));
       deed.sentences = [...sentences, ...wishes];
       deed.sections = [...names, ...(wishes.some((wish) => wish.section === "Wishes") ? ["Wishes"] : [])];
       deed.writtenAt = now();
-    });
+    }); } finally { this.who = "code"; }
     return `Recorded ${sentences.length} sentences in ${names.length} sections${dropped ? ` (${dropped} left out: no file in this project named)` : ""}. Finish with one short line.`;
   }
 }

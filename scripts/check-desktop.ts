@@ -1042,13 +1042,21 @@ try {
   await until(() => quietLine.innerText().then(text => text.includes("after 20 quiet minutes")), "Undo puts the words back");
   assert(readFileSync(join(f.workspace, "quiet.ts"), "utf8").includes("QUIET_MINUTES = 20;"), "and the code");
   // Prove it, in the title bar, runs every sentence's tests.
-  await page.locator("#deed-prove-slot button", { hasText: "Prove it" }).click();
-  await until(() => page.locator("#deed-summary").innerText().then(text => text.includes("1 proved")), "Prove it proves the sentence", 60_000);
+  await page.locator("#deed .ct.act", { hasText: "Prove it" }).click();
+  await until(() => page.locator("#deed .d4-counts .ct.ok").innerText().then(text => text.includes("1 proved")), "Prove it proves the sentence", 60_000);
+  await capture("17-deed-counts");
   writeFileSync(join(f.workspace, "quiet.ts"), "export const QUIET_MINUTES = 15;\nexport const PER_DAY = 3;\n");
   await until(() => page.locator("#deed .dz-s.st-false").isVisible(), "a code change breaks its sentence", 20_000);
   await until(() => page.locator(".sidebar-deed-check").innerText().then(text => text === "1 to check"), "the sidebar counts it");
   assert((await page.locator("#deed .dz-under.drifted").innerText()).includes("It waits 15 minutes now."), "it says why");
   await capture("17-deed-drift");
+  // A count is a filter: only what needs you, until Esc.
+  assert.equal(await page.locator("#deed .dz-s").count(), 2);
+  await page.locator("#deed .ct.am").click();
+  await until(() => page.locator("#deed .dz-s").count().then(count => count === 1), "to check keeps only the sentence that needs you");
+  assert((await page.locator("#deed h3").innerText()).includes("1 of 2"), "the heading says how many remain");
+  await page.keyboard.press("Escape");
+  await until(() => page.locator("#deed .dz-s").count().then(count => count === 2), "Esc shows the whole page");
   await page.locator("#deed button", { hasText: "Fix the words" }).click();
   await until(() => page.locator("#deed .dz-s.st-true", { hasText: "after 15 quiet minutes" }).isVisible(), "Fix the words takes the true words");
   await until(() => page.locator(".sidebar-deed-check").count().then(count => count === 0), "nothing left to check");
@@ -1069,6 +1077,9 @@ try {
   await until(() => page.locator("#deed .dz-s.st-wish", { hasText: "pauses while you type" }).isVisible(), "a new sentence waits pale");
   assert(await page.locator("#deed button", { hasText: "Leave it as a wish" }).isVisible(), "it offers Build it or a wish");
   await capture("17-deed-wish");
+  assert((await page.locator("#deed .wk.on").innerText()).startsWith("Today"), "the week starts on today");
+  assert(await page.locator("#deed .wk b").count() >= 1, "today has a dot: the Deed changed");
+  assert((await page.locator("#deed .wk.on").getAttribute("title"))?.includes("reworded"), "the day says what changed");
   await page.locator("#deed button", { hasText: "Leave it as a wish" }).click();
   // Switching models resizes the context at once, before the new model's
   // first request.

@@ -887,8 +887,9 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
     const first = typeof asked[0]?.question === "string" ? asked[0].question : "";
     return first ? `${h(first)}${asked.length > 1 ? `<span class="muted"> · ${asked.length - 1} more</span>` : ""}` : "";
   }
-  if (tool.name === "run_command" && tool.waiting) return "command";
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
+  // A command by its program's name: the full path is on hover.
+  if (tool.name === "run_command") return h(base.replace(/^\S*\//, ""));
   if (tool.name !== "subagent" || tool.state !== "running") return h(base);
   // Still being written by the model: not running yet.
   if (tool.drafting) return `${h(base || "…")}<span class="muted"> · writing</span>`;
@@ -1756,13 +1757,16 @@ function renderApproval() {
   const scope = isCommand
     ? `Always allow ${command && rule.startsWith(command) ? short + rule.slice(command.length) : rule}`
     : hunks ? `Always allow edits to ${rule && rule !== "." ? relative(rule) : "this project"}` : "Always allow";
+  // A command is named on the row; where it runs and its full path are on
+  // hover, so it has nothing to unfold. An edit unfolds its diff.
+  const where = `${command}\nin ${folder} · not sandboxed${approval.summary && approval.summary !== command && !approval.summary.startsWith("host command") ? ` · ${approval.summary}` : ""}`;
   slot.innerHTML =
-    `<div class="approval-row" role="group" aria-label="Approval">${icon}<span class="approval-verb">${h(verb)}</span>${target ? `<code>${h(target)}</code>` : ""}<span class="approval-note">· ${note}</span><span class="approval-space"></span>` +
-    btn("approval-show", approvalOpen ? "hide" : isCommand ? "command" : hunks ? "diff" : "details", {}, `approval-show${approvalOpen ? " open" : ""}`) +
+    `<div class="approval-row" role="group" aria-label="Approval">${icon}<span class="approval-verb">${h(verb)}</span>${target ? `<code${isCommand ? ` title="${h(where)}"` : ""}>${h(target)}</code>` : ""}${isCommand ? "" : `<span class="approval-note">· ${note}</span>`}<span class="approval-space"></span>` +
+    (isCommand ? "" : btn("approval-show", approvalOpen ? "hide" : hunks ? "diff" : "details", {}, `approval-show${approvalOpen ? " open" : ""}`)) +
     btn("permission", `Allow ${k("↵")}`, { id: approval.id, decision: "allow_once" }, "allow") +
     (approval.rule ? btn("permission", "Always", { id: approval.id, decision: "allow_always" }, "always").replace("<button ", `<button title="${h(scope)} · saved to your config (${h(approval.rule)})" `) : "") +
     btn("permission", `Deny ${k("Esc")}`, { id: approval.id, decision: "deny" }, "deny") +
-    `</div><div class="approval-fold command-inset"${approvalOpen ? "" : " hidden"}>${preview}</div>`;
+    `</div>${isCommand ? "" : `<div class="approval-fold command-inset"${approvalOpen ? "" : " hidden"}>${preview}</div>`}`;
 }
 /// Enter with text during an approval: deny, then stop the turn and send what
 /// you typed as the next message.

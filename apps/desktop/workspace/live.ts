@@ -14,7 +14,7 @@ import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-t
 import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
-import { deedPage, deedProve, deedSummary, editLine, isLive, numberOf, toCheck, type DeedUi } from "./deed-view.ts";
+import { deedPage, editLine, isLive, numberOf, toCheck, type DeedFilter, type DeedUi } from "./deed-view.ts";
 import type { Deed, DeedAction } from "@demesne/protocol";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval } from "./session-model.ts";
@@ -554,8 +554,6 @@ function renderSidebar() {
   }
   const title = document.getElementById("workspace-title");
   if (title) { title.textContent = deedOpen ? "Deed" : inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
-  const summary = document.getElementById("deed-summary");
-  if (summary) { summary.textContent = deedOpen ? deedSummary(deedHere()) : ""; summary.hidden = !summary.textContent; }
   // A mission's chat says where it came from, and goes back there.
   const crumb = document.getElementById("workspace-from"), from = current && inSession() ? parentOf.get(current.id) : undefined;
   if (crumb) {
@@ -1630,10 +1628,8 @@ async function deedAct(request: DeedAction) {
 function openDeed(open: boolean) {
   if (deedOpen === open) return;
   deedOpen = open;
-  deedUi.focus = deedUi.editing = deedUi.live = null;
+  deedUi.focus = deedUi.editing = deedUi.live = deedUi.filter = deedUi.since = null;
   deedSignature = heroSignature = sidebarSignature = "";
-  const slot = document.getElementById("deed-prove-slot");
-  if (slot && !open) { slot.innerHTML = ""; slot.hidden = true; }
   if (open) void loadDeed();
   if (state) renderState({ ...state });
 }
@@ -1651,9 +1647,6 @@ function renderDeed() {
   if (deedUi.editing && !deed?.sentences.some((sentence) => sentence.id === deedUi.editing)) deedUi.editing = null;
   // A live word stays live only while its sentence can still change.
   if (deedUi.live && !deed?.sentences.some((sentence) => sentence.id === deedUi.live!.sentence && isLive(sentence))) deedUi.live = null;
-  const summary = document.getElementById("deed-summary"), slot = document.getElementById("deed-prove-slot");
-  if (summary) { summary.textContent = deedSummary(deed); summary.hidden = !summary.textContent; }
-  if (slot) { const prove = deedProve(deed); if (slot.innerHTML !== prove) slot.innerHTML = prove; slot.hidden = !prove; }
   const signature = JSON.stringify([deed, deedUi, state.workspace]);
   if (signature === deedSignature) return;
   deedSignature = signature;
@@ -1780,6 +1773,15 @@ const endDrag = (event: PointerEvent) => {
 };
 document.getElementById("deed")?.addEventListener("pointerup", endDrag);
 document.getElementById("deed")?.addEventListener("pointercancel", endDrag);
+/// Esc shows the whole page again.
+function deedEscape(event: KeyboardEvent): boolean {
+  if (event.key !== "Escape" || (!deedUi.filter && !deedUi.since) || deedUi.editing || deedUi.live || event.isComposing || (event.target === editor && editor.value)) return false;
+  deedUi.filter = deedUi.since = null;
+  deedSignature = "";
+  renderDeed();
+  event.preventDefault();
+  return true;
+}
 /// Keys while a live word is picked up: ↑↓ or ← → change it, Enter makes it so, Esc puts it back.
 function deedLiveKey(event: KeyboardEvent): boolean {
   if (!deedUi.live || event.isComposing || event.target instanceof HTMLTextAreaElement && event.target !== editor || (event.target === editor && editor.value)) return false;
@@ -3674,6 +3676,8 @@ async function dispatch(
     if (action === "deed-build") { const wish = deedHere()?.sentences.find((sentence) => sentence.id === id); return wish && deedAct({ action: "make", id, text: wish.text }); }
     if (action === "deed-remove" && deedUi.focus === id) deedUi.focus = null;
     if (action === "deed-choose") { deedUi.live = { sentence: id, value: String(args.value), to: String(args.to) }; return commitLive(); }
+    if (action === "deed-filter") { deedUi.filter = (args.f as DeedFilter | null) ?? null; deedSignature = ""; return renderDeed(); }
+    if (action === "deed-since") { deedUi.since = typeof args.t === "number" ? args.t : null; if ("f" in args) deedUi.filter = null; deedSignature = ""; return renderDeed(); }
     if (action === "deed-prove") return deedAct({ action: "prove", ...(id ? { id } : {}) });
     if (action === "deed-stop") return deedAct({ action: "stop" });
     if (action === "deed-undo") return deedAct({ action: "undo", id });
@@ -4438,7 +4442,7 @@ document.addEventListener("drop", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (!state || event.isComposing) return;
-  if (deedOpen && deedLiveKey(event)) return;
+  if (deedOpen && (deedLiveKey(event) || deedEscape(event))) return;
   if (pointing && event.key === "Escape") {
     event.preventDefault();
     void api("desktop-point", { cancel: true }).catch(() => {});

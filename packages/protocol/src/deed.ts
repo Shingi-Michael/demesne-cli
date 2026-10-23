@@ -70,6 +70,19 @@ export interface DeedSentence {
   updatedAt: string;
 }
 
+/// One change to the page, kept so the week can be read back: who made it,
+/// and the words before and after.
+export interface DeedChange {
+  at: string;
+  id: string;
+  section: string;
+  kind: "added" | "words" | "broke" | "mended" | "removed";
+  /// you: made from the page; code: the code under it changed.
+  who: "you" | "code";
+  was?: string;
+  text: string;
+}
+
 export interface Deed {
   workspace: string;
   writtenAt: string | null;
@@ -79,6 +92,8 @@ export interface Deed {
   sentences: DeedSentence[];
   /// Prove it: each sentence's tests, in turn.
   proving?: { total: number; done: number; failed: number; running: boolean; at: string } | null;
+  /// What changed and when, newest last.
+  log?: DeedChange[];
 }
 
 export interface DeedResponse { deed: Deed }

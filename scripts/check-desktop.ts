@@ -572,6 +572,7 @@ try {
   await until(() => page.locator("#desktop-toolbar .chip.ship").innerText().then(text => text.includes("+1") && text.includes("−1")), "branch chip shows the changes");
   await page.locator("#composer-context").click();
   await until(() => page.locator("#context-card").innerText().then(text => text.includes("Conversation") && text.includes("Tools") && text.includes(`${percentage}%`)), "context breakdown unfolds");
+  if (percentage < 50) assert.equal(await page.locator("#context-card .context-compact").count(), 0, "Compact now waits until the context is half full");
   await capture("04-context");
   await page.keyboard.press("Escape");
   await page.locator("#context-card").waitFor({ state: "hidden" });

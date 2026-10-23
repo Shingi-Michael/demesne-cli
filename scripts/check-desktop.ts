@@ -712,7 +712,12 @@ try {
   // opens from Drive's line and discards it.
   offerIdeas = true;
   await line.getByRole("button", { name: /to review/ }).click();
-  await page.getByRole("button", { name: "Discard the worktree", exact: true }).click();
+  await until(() => page.locator("#drive-reply.open .bf-row.branch").count().then(count => count === 1), "the branch unfolds as a row under Drive's line");
+  await page.locator("#drive-reply .bf-row.branch button.bf-title").click();
+  await until(() => page.locator("#drive-reply .bf-sum").isVisible(), "its title unfolds what Drive says it did");
+  await page.locator("#drive-reply .bf-row.branch").hover();
+  await capture("09-drive-branch");
+  await page.locator("#drive-reply").getByRole("button", { name: "Discard", exact: true }).click();
   await pressAction("next-refresh");
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
   assert(await page.evaluate(() => Boolean(document.querySelector("#stage > #briefing")) && !document.querySelector("#composer-slot #briefing")), "Drive's line sits where the conversation ends, not on the composer");
@@ -801,7 +806,7 @@ try {
   await textIncludes("The check fails now.");
   const broke = page.locator("#briefing .bf-word.bad");
   await until(() => broke.isVisible(), "Drive's line says the check broke", 30_000);
-  assert.equal(await page.locator("#input-area .breakage-card.alert").count(), 0, "nothing sits on the composer");
+  assert.equal(await page.locator("#breakage, .breakage-card").count(), 0, "Drive's branches never float as cards");
   await broke.click();
   await until(() => page.locator("#drive-reply.open button", { hasText: "Fix in a worktree" }).isVisible(), "it unfolds with the fix");
   await page.waitForTimeout(400);

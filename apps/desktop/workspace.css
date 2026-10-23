@@ -529,7 +529,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 @keyframes desktop-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: no-preference) {
   .desktop #overlay:not([hidden]), .desktop #context-card:not([hidden]), .desktop #completion:not([hidden]), #notice:not([hidden]) { animation: desktop-rise 160ms var(--ease); }
-  .desktop #approval:not([hidden]), .desktop #breakage:not([hidden]), .desktop .hero-ideas, .desktop .step-fold { animation: desktop-appear 180ms var(--ease); }
+  .desktop #approval:not([hidden]), .desktop .hero-branches, .desktop .hero-ideas, .desktop .step-fold { animation: desktop-appear 180ms var(--ease); }
   .desktop #conversation > .turn, .desktop .compaction-card { animation: desktop-appear 220ms var(--ease); }
   .desktop #hero { animation: desktop-fade 260ms var(--ease); }
   #desktop-shell { transition: grid-template-columns 200ms var(--ease); }
@@ -627,26 +627,38 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #briefing .bf-chev:hover { background: var(--tone2); color: var(--t1); }
 .desktop #briefing .bf-chev .ico { width: 14px; height: 14px; }
 .desktop #briefing.open .bf-chev .ico { transform: rotate(180deg); }
-.desktop :is(#briefing, #drive-reply) .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-.desktop :is(#briefing, #drive-reply) .bf-dot.idea { background: var(--acc); }
-.desktop :is(#briefing, #drive-reply) .bf-dot.ok { background: var(--ok); }
-.desktop :is(#briefing, #drive-reply) .bf-dot.amber { background: var(--warn); }
-.desktop :is(#briefing, #drive-reply) .bf-dot.hollow { box-shadow: inset 0 0 0 1.5px var(--t4); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.idea { background: var(--acc); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.ok { background: var(--ok); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.amber { background: var(--warn); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.hollow { box-shadow: inset 0 0 0 1.5px var(--t4); }
 .desktop #briefing .bf-progress { position: absolute; left: 32px; width: 160px; bottom: -3px; height: 1.5px; overflow: hidden; border-radius: 1px; background: var(--tone); }
 .desktop #briefing .bf-progress i { display: block; height: 100%; background: linear-gradient(90deg, transparent, var(--acc)); }
-.desktop :is(#briefing, #drive-reply) .bf-rows { display: flex; flex-direction: column; }
-.desktop :is(#briefing, #drive-reply) .bf-row { position: relative; display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: var(--r-sm); color: var(--t1); font-size: 13px; }
-.desktop :is(#briefing, #drive-reply) .bf-row:hover, .desktop :is(#briefing, #drive-reply) .bf-row:focus-within { background: var(--tone); }
-.desktop :is(#briefing, #drive-reply) .bf-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desktop :is(#briefing, #drive-reply) .bf-r { margin-left: auto; color: var(--t4); font-size: 12px; }
-.desktop :is(#briefing, #drive-reply) .bf-act { position: absolute; right: 6px; display: flex; gap: 4px; opacity: 0; }
-.desktop :is(#briefing, #drive-reply) .bf-row:hover .bf-act, .desktop :is(#briefing, #drive-reply) .bf-row:focus-within .bf-act { opacity: 1; }
-.desktop :is(#briefing, #drive-reply) .bf-row:hover .bf-r, .desktop :is(#briefing, #drive-reply) .bf-row:focus-within .bf-r { opacity: 0; }
-.desktop :is(#briefing, #drive-reply) .bf-act button { height: 24px; padding: 0 9px; border: 0; border-radius: var(--r-sm); background: var(--tone2); color: var(--t2); font-size: 12px; cursor: pointer; }
-.desktop :is(#briefing, #drive-reply) .bf-act button.primary { color: var(--acc); }
-.desktop :is(#briefing, #drive-reply) .bf-act button:hover:not(:disabled) { background: var(--surface); color: var(--t1); }
-.desktop :is(#briefing, #drive-reply) .bf-foot { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; padding: 6px 10px 2px; box-shadow: inset 0 1px 0 var(--hair); font-size: 12px; color: var(--t4); }
-.desktop :is(#briefing, #drive-reply) .bf-foot .link { font-size: 12px; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-rows { display: flex; flex-direction: column; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-row { position: relative; display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: var(--r-sm); color: var(--t1); font-size: 13px; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-row:hover, .desktop :is(#briefing, #drive-reply, #hero) .bf-row:focus-within { background: var(--tone); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-r { margin-left: auto; color: var(--t4); font-size: 12px; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-act { position: absolute; right: 6px; display: flex; gap: 4px; opacity: 0; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-row:hover .bf-act, .desktop :is(#briefing, #drive-reply, #hero) .bf-row:focus-within .bf-act { opacity: 1; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-row:hover .bf-r, .desktop :is(#briefing, #drive-reply, #hero) .bf-row:focus-within .bf-r { opacity: 0; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-act button { height: 24px; padding: 0 9px; border: 0; border-radius: var(--r-sm); background: var(--tone2); color: var(--t2); font-size: 12px; cursor: pointer; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-act button.primary { color: var(--acc); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-act button:hover:not(:disabled) { background: var(--surface); color: var(--t1); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-foot { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; padding: 6px 10px 2px; box-shadow: inset 0 1px 0 var(--hair); font-size: 12px; color: var(--t4); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-foot .link { font-size: 12px; }
+/* Drive's branches: the title unfolds what it did; what changed sits on the
+   right until you point at the row, then Apply · PR · Discard · diff. */
+.desktop .hero-branches { margin: 4px 0 0 -10px; }
+.desktop :is(#briefing, #drive-reply, #hero) button.bf-title { flex: 0 1 auto; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.desktop :is(#briefing, #drive-reply, #hero) button.bf-title:hover, .desktop :is(#briefing, #drive-reply, #hero) button.bf-title.open { color: var(--t1); box-shadow: 0 1px 0 var(--hair); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-r .add, .desktop :is(#briefing, #drive-reply, #hero) .bf-sum .pass { color: var(--ok); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-r .del, .desktop :is(#briefing, #drive-reply, #hero) .bf-sum .fail { color: var(--bad); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-sum { margin: 0 0 6px 27px; max-width: 62ch; font-size: 12.5px; line-height: 1.55; color: var(--t3); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-sum .muted { color: var(--t4); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-msg { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; line-height: 18px; color: var(--t3); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-x { padding: 0 4px; border: 0; background: none; color: var(--t4); font-size: 14px; cursor: pointer; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-x:hover { color: var(--t1); }
 .desktop :is(#briefing, #drive-reply) .drive-live { margin: 2px; }
 .desktop #drive-reply { max-width: 780px; margin: 0 auto; }
 .desktop #drive-reply[hidden] { display: none; }
@@ -657,14 +669,14 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #drive-reply .bf-foot { box-shadow: none; }
 @keyframes bf-breathe { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: no-preference) {
-  .desktop :is(#briefing, #drive-reply) .bf-dot.idea { animation: bf-breathe 2.4s ease-in-out infinite; }
+  .desktop :is(#briefing, #drive-reply, #hero) .bf-dot.idea { animation: bf-breathe 2.4s ease-in-out infinite; }
   .desktop #briefing .bf-lead { transition: background-color 200ms var(--ease), box-shadow 200ms var(--ease), color 200ms var(--ease); }
   .desktop #briefing .bf-word { transition: color 140ms var(--ease); }
   .desktop #briefing .bf-chev { transition: opacity 140ms var(--ease); }
   .desktop #briefing .bf-chev .ico { transition: transform 220ms var(--ease); }
   .desktop #briefing .bf-progress i { transition: width 600ms var(--ease); }
-  .desktop :is(#briefing, #drive-reply) .bf-row { transition: background-color 140ms var(--ease); }
-  .desktop :is(#briefing, #drive-reply) .bf-act, .desktop :is(#briefing, #drive-reply) .bf-r { transition: opacity 140ms var(--ease); }
+  .desktop :is(#briefing, #drive-reply, #hero) .bf-row { transition: background-color 140ms var(--ease); }
+  .desktop :is(#briefing, #drive-reply, #hero) .bf-act, .desktop :is(#briefing, #drive-reply, #hero) .bf-r { transition: opacity 140ms var(--ease); }
   .desktop #drive-reply .dr-fold { transition: grid-template-rows 280ms var(--ease); }
   .desktop #drive-reply .bf-row, .desktop #drive-reply .drive-live, .desktop #drive-reply .bf-foot { opacity: 0; transform: translateY(4px); transition: opacity 200ms var(--ease), transform 240ms var(--ease), background-color 140ms var(--ease); }
   .desktop #drive-reply.open .bf-row, .desktop #drive-reply.open .drive-live, .desktop #drive-reply.open .bf-foot { opacity: 1; transform: none; }
@@ -771,9 +783,9 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 @keyframes ask-breathe { 0% { opacity: .55; transform: scale(1); } 70%, 100% { opacity: 0; transform: scale(2); } }
 /* Something broke: Drive's line says it with a red cross and unfolds in
    place with what failed and the offer to fix it in a worktree. */
-.desktop :is(#briefing, #drive-reply) .bf-dot.bad { position: relative; border-radius: 0; background: none; }
-.desktop :is(#briefing, #drive-reply) .bf-dot.bad::before, .desktop :is(#briefing, #drive-reply) .bf-dot.bad::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 1.6px; border-radius: 1px; background: var(--bad); transform: translate(-50%, -50%) rotate(45deg); }
-.desktop :is(#briefing, #drive-reply) .bf-dot.bad::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.bad { position: relative; border-radius: 0; background: none; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.bad::before, .desktop :is(#briefing, #drive-reply, #hero) .bf-dot.bad::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 1.6px; border-radius: 1px; background: var(--bad); transform: translate(-50%, -50%) rotate(45deg); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.bad::after { transform: translate(-50%, -50%) rotate(-45deg); }
 .desktop #briefing .bf-lead.bad { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 30%, transparent); background: color-mix(in srgb, var(--bad) 8%, transparent); }
 .desktop #briefing .bf-word.bad { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--t2); }
 .desktop #briefing .bf-chip:has(.bf-word.bad) { max-width: calc(100% - 32px); }

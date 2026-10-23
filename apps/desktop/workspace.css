@@ -360,7 +360,6 @@ html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[
 .desktop #overlay.dropped .menu-row .value { flex: 1; text-align: right; color: var(--t4); }
 .desktop #overlay.dropped .menu-footer { display: none; }
 
-.desktop .drive-heading { font-family: inherit; font-size: 14px; font-weight: 550; color: var(--strong); }
 .desktop .drive-status { padding: 12px 14px; border: 1px solid var(--rule); border-radius: 9px; background: var(--ink); }
 .desktop .drive-summary { font-size: 13px; }
 
@@ -813,6 +812,9 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .dm-now { display: flex; align-items: baseline; gap: 9px; margin: 0; color: var(--t2); font-size: 13.5px; line-height: 1.55; }
 .desktop .dm-live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); transform: translateY(-1px); }
 .desktop .dm-mark { flex: none; width: 10px; text-align: center; color: var(--t3); }
+.desktop .drive-mission.stopped .dm-mark { color: var(--bad); }
+.desktop .dm-why { margin: -2px 0 0 19px; color: var(--t3); font-size: 12.5px; line-height: 1.5; }
+.desktop .dm-quote { margin: 6px 0 0 18px; padding-left: 10px; box-shadow: inset 1px 0 0 var(--hair); color: var(--t3); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
 .desktop .dm-steps { display: flex; flex-direction: column; gap: 7px; margin: 0 0 0 3px; padding: 2px 0 2px 14px; list-style: none; box-shadow: inset 1px 0 0 var(--hair); }
 .desktop .dm-step { display: flex; align-items: center; gap: 9px; color: var(--t3); font-size: 13px; }
 .desktop .dm-step.on { color: var(--t1); }

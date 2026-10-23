@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
+import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { APP_URL, allowAppReload, assetPath, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -92,6 +93,15 @@ void app.whenReady().then(async () => {
       });
       banner.show();
       return null;
+    }
+    // Point at it: the picker runs in the named live preview frame and
+    // answers with the element clicked there, or null on Esc.
+    if (method === "desktop-point") {
+      const { frame: name, cancel } = args as Record<string, unknown>;
+      const frames = contents.mainFrame.framesInSubtree.filter(frame => frame !== contents.mainFrame && previewURL(frame.url) && (cancel || frame.name === name));
+      if (cancel) { await Promise.all(frames.map(frame => frame.executeJavaScript(POINT_CANCEL).catch(() => null))); return null; }
+      if (typeof name !== "string" || !frames[0]) throw new Error("The preview is not showing");
+      return frames[0].executeJavaScript(POINT_SCRIPT, true);
     }
     // Settings' text size: an exact level, or none to read the current one.
     if (method === "desktop-zoom") {

@@ -217,7 +217,8 @@ const f = await fixture({
 writeFileSync(join(f.workspace, "notes.ts"), "export const note = 'ours';\n");
 writeFileSync(join(f.workspace, "hello.ts"), "export const greeting = 'before';\n");
 writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ scripts: { check: "bun check.ts" } }));
-writeFileSync(join(f.workspace, "serve.ts"), "const server = Bun.serve({ port: 0, fetch: () => new Response('<h1>Fieldnote preview</h1>', { headers: { 'content-type': 'text/html' } }) });\nconsole.log(`  \\u001b[32mLocal:\\u001b[39m http://localhost:${server.port}/`);\n");
+writeFileSync(join(f.workspace, "site.html"), '<h1>Fieldnote preview</h1>\n<button id="save">Save</button>\n');
+writeFileSync(join(f.workspace, "serve.ts"), "const server = Bun.serve({ port: 0, fetch: () => new Response('<h1>Fieldnote preview</h1><button id=\"save\">Save</button>', { headers: { 'content-type': 'text/html' } }) });\nconsole.log(`  \\u001b[32mLocal:\\u001b[39m http://localhost:${server.port}/`);\n");
 // Folders for the project map.
 for (const [folder, files] of [["src", 6], ["docs", 2], ["lib", 3]] as const) {
   mkdirSync(join(f.workspace, folder), { recursive: true });
@@ -867,6 +868,26 @@ try {
   await until(() => page.locator(".step-fold .fold-cmd .pv-back").last().isVisible(), "Output swaps the page for the command's output");
   await page.locator(".step-fold .fold-cmd .pv-back").last().click();
   await until(() => page.locator("[data-preview] iframe").last().isVisible(), "Preview brings the page back");
+  // Point at it: a click inside the page lands as a chip named by the
+  // element, with the file that writes it.
+  await until(() => page.frameLocator("[data-preview] iframe").last().locator("#save").isVisible(), "the page is back with its button");
+  const pointButton = preview.locator('.pv-btn[data-action="preview-point"]');
+  await pointButton.click();
+  await until(() => pointButton.evaluate(element => element.classList.contains("on")), "Point turns on in place");
+  await page.keyboard.press("Escape");
+  await until(() => pointButton.evaluate(element => !element.classList.contains("on")), "Esc puts the pointer away");
+  await pointButton.click();
+  await until(() => pointButton.evaluate(element => element.classList.contains("on")), "Point turns on again");
+  await page.frameLocator("[data-preview] iframe").last().locator("#save").click();
+  const pointChip = page.locator("#mention-chips .point-chip");
+  await until(() => pointChip.isVisible(), "the clicked element lands in the composer as a chip");
+  assert.equal(await pointChip.innerText(), "⌖ Save button ×");
+  assert((await pointChip.getAttribute("title"))?.startsWith("site.html:2"), "the chip names the file that writes the element");
+  assert(await pointButton.evaluate(element => !element.classList.contains("on")), "a pick puts the pointer away");
+  await page.waitForTimeout(200);
+  await capture("11-point");
+  await pointChip.click();
+  await until(() => pointChip.count().then(count => count === 0), "clicking the chip drops it");
   // Agents nearby: other agents (Heartbeat) sit on their projects' lines,
   // and a write to a file one of them changed asks first.
   const here = page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-agents`);
@@ -970,7 +991,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes", "the project map", "who is working where on the map"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes", "the project map", "who is working where on the map", "pointing at the live page"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

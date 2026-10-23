@@ -719,6 +719,7 @@ try {
   await page.locator("#drive-reply .bf-row.branch").hover();
   await capture("09-drive-branch");
   await page.locator("#drive-reply").getByRole("button", { name: "Discard", exact: true }).click();
+  await until(() => page.locator("#branch-done").innerText().then(text => text.includes("Discarded Verify the Drive controls")), "what Discard did is its own quiet line");
   await pressAction("next-refresh");
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
   assert(await page.evaluate(() => Boolean(document.querySelector("#stage > #briefing")) && !document.querySelector("#composer-slot #briefing")), "Drive's line sits where the conversation ends, not on the composer");
@@ -797,6 +798,8 @@ try {
   assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Answer, or pick one above…");
   await page.waitForTimeout(500);
   await capture("13-question");
+  assert(await page.evaluate(() => { const stage = document.getElementById("stage")!; return stage.scrollWidth <= stage.clientWidth && stage.scrollLeft === 0; }), "the question never pushes the chat sideways");
+  assert(!(await page.locator("#briefing").innerText()).includes("Discarded"), "Drive's line only says what Drive is doing");
   await page.locator("textarea").press("1");
   await textIncludes("Scoping the test job then.");
   // Something broke: Drive's line says so and unfolds in place; no box on

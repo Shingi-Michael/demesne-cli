@@ -297,7 +297,7 @@ export class BreakageWatch {
         if (fix.mission) this.options.closed?.(fix);
         if (action === "apply") { this.state.message = { text: `Applied to your branch: ${fix.title}`, tone: "ok" }; this.options.applied(); }
         if (action === "pr") this.state.message = { text: `Opened a pull request from ${fix.branch}`, tone: "ok", ...(fix.prUrl ? { url: fix.prUrl } : {}) };
-        if (action === "discard") this.state.message = { text: `${fix.proposal || fix.mission ? "Discarded" : "Fix discarded"}; the worktree and branch are gone.`, tone: "ok" };
+        if (action === "discard") this.state.message = { text: `Discarded ${fix.title} · worktree and branch removed`, tone: "ok" };
       } else throw new Error(`Unknown action ${method}`);
     } catch (error) {
       this.state.message = { text: error instanceof Error ? error.message : String(error), tone: "error" };

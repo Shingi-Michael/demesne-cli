@@ -1905,7 +1905,7 @@ function renderBriefing() {
     // Whether the mission is this chat's own turn: switching between it and
     // the chat it came from changes the line even when nothing else does.
     Boolean(driveTurnMission()),
-    state.breakage.signals, state.breakage.busy, state.breakage.message, run.fix?.activity, [...detailsOpen].filter((key) => key.startsWith("branch:")), brokeShown, driveShown, ideasShown, tellOpen, tellSent, pinned?.told?.length, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
+    state.breakage.signals, state.breakage.busy, state.breakage.message, inSession(), run.fix?.activity, [...detailsOpen].filter((key) => key.startsWith("branch:")), brokeShown, driveShown, ideasShown, tellOpen, tellSent, pinned?.told?.length, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
   ]);
   if (signature === briefingSignature) return;
   briefingSignature = signature;
@@ -1994,9 +1994,11 @@ function renderBriefing() {
     toggle ??= { action: "review-open", open: reviewShown };
     if (reviewShown) { fold = branchRows(review); toggle = { action: "review-open", open: true }; }
   }
-  // What the last Apply, PR or Discard did ends the line until put away.
-  const outcome = branchNote();
-  if (outcome) parts.push(outcome.replace(/^<p class="bf-msg ([a-z]+)">/, '<span class="bf-msg $1">').replace(/<\/p>$/, "</span>"));
+  // What the last Apply, PR or Discard did is its own quiet line in the
+  // conversation, never part of Drive's line.
+  const done = el("branch-done"), outcome = inSession() ? branchNote() : "";
+  done.innerHTML = outcome;
+  done.hidden = !outcome;
   node.hidden = !inSession() || !parts.length;
   if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").classList.remove("open"); return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";

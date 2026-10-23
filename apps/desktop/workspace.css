@@ -616,6 +616,16 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #briefing .bf-lead .bf-dot { width: 6px; height: 6px; }
 .desktop #briefing .bf-chip { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; color: var(--t3); white-space: nowrap; }
 .desktop #briefing .bf-part { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+/* Drive's line is one line that never outgrows the column: its words shorten. */
+.desktop #briefing .bf-chip { max-width: 100%; overflow: hidden; }
+/* What the last Apply, PR or Discard did: a quiet step on the guide. */
+.desktop #branch-done { max-width: 780px; margin: 0 auto 10px; }
+.desktop #branch-done .bf-msg { display: flex; align-items: center; gap: 8px; margin: 0 0 0 4px; padding-left: 14px; box-shadow: -1px 0 0 var(--hair); font-size: 12.5px; line-height: 20px; color: var(--t3); }
+.desktop #branch-done .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.desktop #branch-done .bf-dot.ok { background: var(--ok); }
+.desktop #branch-done .bf-dot.bad { background: var(--bad); }
+.desktop #branch-done .bf-x { padding: 0 4px; border: 0; background: none; color: var(--t4); font-size: 14px; cursor: pointer; opacity: 0; }
+.desktop #branch-done:hover .bf-x, .desktop #branch-done .bf-x:focus-visible { opacity: 1; }
 .desktop #briefing .bf-word { padding: 0; border: 0; background: none; font: inherit; color: var(--t3); cursor: pointer; }
 .desktop #briefing button.bf-word:hover { color: var(--t1); }
 .desktop #briefing.open .bf-word { color: var(--t1); font-size: 14px; }

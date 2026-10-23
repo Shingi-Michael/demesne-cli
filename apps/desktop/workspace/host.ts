@@ -1373,6 +1373,13 @@ export class WorkspaceHost {
       const root = this.current?.session.workspace?.root ?? this.workspace;
       return root ? pointSourceIn(root, args.pick as PointPick) : null;
     }
+    // The Deed: the open project's sentences, and what to do with one.
+    if (method === "deed" || method === "deed-act") {
+      const root = typeof args.workspace === "string" ? args.workspace : this.current?.session.workspace?.root ?? this.workspace;
+      if (!root) return null;
+      if (method === "deed") return (await this.client.deed(root)).deed;
+      return (await this.client.deedAct({ ...(args.request as import("@demesne/protocol").DeedAction), workspace: root })).deed;
+    }
     if (method === "workspace-map") {
       if (!this.current) return null;
       return this.client.workspaceMap(this.current.session.id);

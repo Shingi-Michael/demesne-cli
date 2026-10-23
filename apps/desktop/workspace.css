@@ -251,6 +251,9 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .pv-view { display: flex; justify-content: center; height: 420px; background: var(--tone); }
 .desktop .pv-view iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
 .desktop .pv-view.phone iframe { width: 390px; box-shadow: 0 0 0 1px var(--hair); }
+/* Point at it: the button and the frame turn blue while the picker is live. */
+.desktop .pv-btn[data-action="preview-point"].on { color: var(--acc); background: var(--acc-soft); }
+.desktop .pv.pointing .pv-view { box-shadow: inset 0 0 0 1px var(--acc); }
 @media (prefers-reduced-motion: no-preference) {
   .desktop .pv-view iframe { transition: width 220ms var(--ease); }
 }
@@ -610,6 +613,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .rv-note input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--t1); font: inherit; padding: 0; }
 .desktop .rv-note input::placeholder { color: var(--t4); }
 .desktop #mention-chips .notes-chip { color: var(--acc); background: var(--acc-soft); border: 0; }
+.desktop #mention-chips .point-chip { color: var(--acc); background: var(--acc-soft); border: 0; }
 /* Composer mode: one word under the box, coloured by mode; ⇧⇥ steps it. */
 .desktop #composer .composer-bar #composer-mode kbd { font: 11px Inter, system-ui, sans-serif; color: var(--t4); background: none; border: 0; padding: 0; margin-left: 2px; }
 .desktop #composer .composer-bar #composer-mode.mode-edits { color: var(--ok); }

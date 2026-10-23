@@ -50,6 +50,8 @@ import { missionReceipt } from "@demesne/drive/drive-receipt.ts";
 import { expandCustomCommand, loadCustomCommands, mergeSlashCommands, type CustomCommand } from "./custom-commands.ts";
 import { loadWorkflows, workflowCommand } from "@demesne/drive/workflows.ts";
 import { WorkspaceSetup } from "./setup-controller.ts";
+import { pointSourceIn } from "./point-source.ts";
+import type { PointPick } from "./point.ts";
 import { WorkspaceSession } from "./session-model.ts";
 
 export interface WorkspaceHostOptions {
@@ -1366,6 +1368,11 @@ export class WorkspaceHost {
     }
     if (method === "models") return this.models();
     // The model scoreboard, across projects, for the model picker.
+    // Point at it: where an element picked in the live preview is written.
+    if (method === "point-source") {
+      const root = this.current?.session.workspace?.root ?? this.workspace;
+      return root ? pointSourceIn(root, args.pick as PointPick) : null;
+    }
     if (method === "workspace-map") {
       if (!this.current) return null;
       return this.client.workspaceMap(this.current.session.id);

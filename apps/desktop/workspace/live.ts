@@ -13,6 +13,7 @@ import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
 import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
+import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval } from "./session-model.ts";
 import type {
@@ -267,6 +268,10 @@ const stepOpen = new Set<string>();
 /// Live previews: the page a running dev server serves unfolds under the
 /// step that started it. Phone width and "show output" are per step.
 const previewPhone = new Set<string>(), previewOutput = new Set<string>(), previewSeen = new Set<string>();
+/// Point at it: the preview being pointed at, and what was picked so far.
+/// Picks ride with the next message as chips, like notes on the changes.
+let pointing: string | null = null;
+const pointed: Pointed[] = [];
 const serving = (tool: ToolEntry) => tool.name === "run_command" ? state?.processes.find((command) => command.toolCallId === tool.toolCallId && command.serves) ?? null : null;
 /// Review in the turn: the receipt's "N files changed" unfolds the turn's
 /// diffs under the answer. A note on a line rides with the next message.
@@ -1031,7 +1036,7 @@ function stepFold(run: WorkspaceRun, tool: ToolEntry) {
   if (record?.serves && !previewOutput.has(key)) {
     const url = record.serves, host = new URL(url).host, phone = previewPhone.has(key);
     const tab = (label: string, on: boolean, action: string, args: Record<string, unknown>) => btn(action, label, args, `pv-btn${on ? " on" : ""}`);
-    return `<div class="step-fold pv" data-preview="${h(key)}"><div class="pv-bar"><span class="pv-live" aria-hidden="true"></span><span class="pv-url" title="${h(url)}">${h(host)}</span><span class="sp"></span>${tab("Desktop", !phone, "preview-width", { key, phone: false })}${tab("Phone", phone, "preview-width", { key, phone: true })}${tab("Reload", false, "preview-reload", { key })}${tab("Output", false, "preview-output", { key })}${tab("Open ↗", false, "open-link", { url })}</div><div class="pv-view${phone ? " phone" : ""}"><iframe src="${h(url)}" title="Preview of ${h(host)}" sandbox="allow-scripts allow-same-origin allow-forms allow-modals" referrerpolicy="no-referrer"></iframe></div></div>`;
+    return `<div class="step-fold pv" data-preview="${h(key)}"><div class="pv-bar"><span class="pv-live" aria-hidden="true"></span><span class="pv-url" title="${h(url)}">${h(host)}</span><span class="sp"></span>${tab("Desktop", !phone, "preview-width", { key, phone: false })}${tab("Phone", phone, "preview-width", { key, phone: true })}${tab(pointing === key ? "Pointing · Esc" : "⌖ Point", pointing === key, "preview-point", { key }).replace("<button ", '<button title="Point at something in the page; it goes in your next message with the code behind it" ')}${tab("Reload", false, "preview-reload", { key })}${tab("Output", false, "preview-output", { key })}${tab("Open ↗", false, "open-link", { url })}</div><div class="pv-view${phone ? " phone" : ""}"><iframe src="${h(url)}" name="pv-${h(key)}" title="Preview of ${h(host)}" sandbox="allow-scripts allow-same-origin allow-forms allow-modals" referrerpolicy="no-referrer"></iframe></div></div>`;
   }
   const text = record ? `${record.stdout}${record.stderr ? `\n${record.stderr}` : ""}`.trim().split("\n").slice(-40).join("\n") : "";
   const body = text ? `<pre class="out">${h(text)}</pre>` : `<div class="out muted">${record?.outputLoaded === false ? "Loading output…" : record ? "No output." : "Output not recorded."}</div>`;
@@ -1835,6 +1840,7 @@ function renderComposer() {
     answeringQuestion,
     driveSuggestion(),
     diffNotes.size,
+    pointed.map((point) => point.id).join(),
     state.attachments.map((image) => image.id).join(),
   ]);
   if (
@@ -1887,7 +1893,7 @@ function renderComposer() {
   // / and @, and a draft shows ↵ send instead. The start screen keeps / and
   // @ and adds ↵ once there is something to send.
   const armed = Date.now() < stopArmed;
-  const draft = Boolean(editor.value.trim()) || diffNotes.size > 0 || state.attachments.length > 0, session = inSession();
+  const draft = Boolean(editor.value.trim()) || diffNotes.size > 0 || pointed.length > 0 || state.attachments.length > 0, session = inSession();
   const attachRow = el("attach-row");
   attachRow.hidden = !state.attachments.length || Boolean(question);
   attachRow.innerHTML = state.attachments.map((image) => {
@@ -1918,7 +1924,8 @@ function renderComposer() {
     .map((match) => match[1]!)
     .filter((path) => state!.files.some((file) => file.path === path || (path.endsWith("/") && file.path.startsWith(path))));
   const notes = diffNotes.size && !question ? btn("notes-clear", `${diffNotes.size} note${diffNotes.size === 1 ? "" : "s"} on the changes ×`, {}, "chip notes-chip").replace("<button ", '<button title="Sent with your next message. Click to drop them." ') : "";
-  el("mention-chips").innerHTML = notes + [...new Set(mentions)]
+  const points = question ? "" : pointed.map((point) => btn("point-remove", `⌖ ${h(pointLabel(point))} ×`, { id: point.id }, "chip point-chip").replace("<button ", `<button title="${h(point.source ? `${point.source.path}:${point.source.line}` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
+  el("mention-chips").innerHTML = points + notes + [...new Set(mentions)]
     .map((path) => btn("remove-mention", `${h(path)} ×`, { path }, "chip"))
     .join("");
 }
@@ -3195,14 +3202,41 @@ async function chooseCompletion(index = completionIndex) {
     } else setDraft(`${item.value} `);
   }
 }
+/// Point at it: the picker runs inside the preview; a click comes back as an
+/// element, the host finds the code behind it, and it lands as a chip.
+/// The Point button changes in place, so the page in the frame keeps its state.
+function pointButton(key: string) {
+  const button = document.querySelector<HTMLElement>(`[data-preview="${CSS.escape(key)}"] .pv-btn[data-action="preview-point"]`);
+  if (!button) return;
+  button.classList.toggle("on", pointing === key);
+  button.textContent = pointing === key ? "Pointing · Esc" : "⌖ Point";
+  document.querySelector(`[data-preview="${CSS.escape(key)}"]`)?.classList.toggle("pointing", pointing === key);
+}
+async function pointAt(key: string) {
+  if (pointing === key) return void api("desktop-point", { cancel: true }).catch(() => {});
+  if (pointing) await api("desktop-point", { cancel: true }).catch(() => {});
+  pointing = key;
+  pointButton(key);
+  let pick: PointPick | null = null;
+  try { pick = await api<PointPick | null>("desktop-point", { frame: `pv-${key}` }); }
+  catch (error) { notice(error instanceof Error ? error.message : String(error)); }
+  finally { if (pointing === key) pointing = null; pointButton(key); }
+  if (!pick) return;
+  let source: PointSource | null = null;
+  try { source = await api<PointSource | null>("point-source", { pick }); } catch { /* sent without a source */ }
+  pointed.push({ ...pick, id: `${Date.now()}:${pointed.length}`, source });
+  renderComposer();
+  editor.focus();
+}
 async function submitText(value = editor.value, wait = false) {
   if (!state) return;
   // Notes on the diff open the next message; a message may be only notes.
-  const notes = !pendingQuestion() && !value.startsWith("/") ? notesMessage([...diffNotes.values()]) : "";
+  const notes = !pendingQuestion() && !value.startsWith("/") ? [pointMessage(pointed), notesMessage([...diffNotes.values()])].filter(Boolean).join("\n\n") : "";
   if (!value.trim() && !notes && !state.attachments.length) return;
   if (notes) {
     value = value.trim() ? `${notes}\n\n${value}` : notes;
     diffNotes.clear();
+    pointed.length = 0;
     reviewVersion++;
     renderConversation();
   }
@@ -3813,6 +3847,12 @@ async function dispatch(
     view?.querySelectorAll<HTMLElement>(".pv-btn").forEach((button) => { if (button.dataset.action === "preview-width") button.classList.toggle("on", JSON.parse(button.dataset.args ?? "{}").phone === Boolean(args.phone)); });
     return;
   }
+  if (action === "preview-point") return pointAt(String(args.key));
+  if (action === "point-remove") {
+    const at = pointed.findIndex((point) => point.id === args.id);
+    if (at >= 0) pointed.splice(at, 1);
+    return renderComposer();
+  }
   if (action === "preview-reload") {
     const frame = document.querySelector<HTMLIFrameElement>(`[data-preview="${CSS.escape(String(args.key))}"] iframe`);
     if (frame) frame.src = frame.src;
@@ -3885,6 +3925,8 @@ function renderState(next: Snapshot) {
   if (lastSession !== next.session?.id) {
     lastSession = next.session?.id ?? "";
     reviewOpen.clear(); reviewFiles.clear(); diffNotes.clear(); noteEditing = null;
+    pointed.length = 0;
+    if (pointing) { pointing = null; void api("desktop-point", { cancel: true }).catch(() => {}); }
     follow = true;
     overlay = null;
     driveShown = ideasShown = brokeShown = tellOpen = false;
@@ -4142,6 +4184,11 @@ document.addEventListener("drop", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (!state || event.isComposing) return;
+  if (pointing && event.key === "Escape") {
+    event.preventDefault();
+    void api("desktop-point", { cancel: true }).catch(() => {});
+    return;
+  }
   const field =
     event.target instanceof HTMLInputElement ||
     event.target instanceof HTMLTextAreaElement;

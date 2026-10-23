@@ -489,7 +489,7 @@ function renderSidebar() {
       // stays out of the tab order.
       const remove = working || path !== projectWorkspace ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" tabindex="-1" `);
       if (renaming === item.id) {
-        rows.push(`<div class="sidebar-item"><form class="sidebar-rename" data-id="${h(item.id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`);
+        rows.push(`<div class="sidebar-item${nested(item) ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(item.id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`);
         shown++;
         continue;
       }

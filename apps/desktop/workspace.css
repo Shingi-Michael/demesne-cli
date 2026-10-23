@@ -45,8 +45,11 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-branch { width: 12px; height: 12px; color: var(--t4); }
 .sidebar-more { display: flex; align-items: center; width: 100%; height: 28px; padding: 0 10px 0 34px; border-radius: 9px; color: var(--t3); font-size: 12.5px; text-align: left; }
 .sidebar-more:hover { color: var(--t1); background: var(--surface2); }
-.sidebar-rename { display: flex; align-items: center; gap: 11px; height: 32px; padding: 0 6px 0 10px; }
-.sidebar-rename input { flex: 1; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid var(--acc); border-radius: 6px; background: var(--surface); color: var(--t1); font-size: 13.5px !important; outline: none; }
+/* Renaming edits the name where it sits: the row takes the selected tone,
+   no field box, no ring, and the text doesn't move. */
+.sidebar-rename { display: flex; align-items: center; gap: 11px; height: 32px; padding: 0 10px; border-radius: var(--r); background: var(--tone); }
+.sidebar-rename input { flex: 1; min-width: 0; height: 24px; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: var(--t1); font: inherit; font-size: 13.5px !important; outline: none; caret-color: var(--acc); }
+.sidebar-rename input::selection { background: color-mix(in srgb, var(--acc) 30%, transparent); color: var(--t1); }
 #sidebar-projects { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; padding-bottom: 12px; }
 .sidebar-group-heading { display: flex; align-items: center; justify-content: space-between; padding: 10px 6px 6px 10px; }
 .sidebar-group-heading .sidebar-group { padding: 0; font-weight: 500; color: var(--t3); }
@@ -106,6 +109,8 @@ html[data-theme="demesne-light"] .agent-mark[data-provider="gemini"] { backgroun
 @keyframes sidebar-unfold { from { opacity: 0; transform: translateY(-4px); } }
 .sidebar-project-chats { margin: 2px 0 4px 12px; padding-left: 3px; border-left: 1px solid var(--line); }
 .sidebar-project-chats .sidebar-session { gap: 7px; padding-left: 6px; font-size: 13px; }
+.sidebar-project-chats .sidebar-rename { gap: 7px; padding-left: 6px; }
+.sidebar-project-chats .sidebar-rename input { font-size: 13px !important; }
 .sidebar-project-chats .sidebar-empty { padding: 5px 12px; font-size: 12px; }
 .sidebar-project-chats .sidebar-more { padding-left: 30px; }
 .sidebar-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -471,7 +476,6 @@ body.desktop { --hair: rgba(255, 255, 255, 0.08); --hair2: rgba(255, 255, 255, 0
 .sidebar-nav button, .sidebar-settings, .sidebar-session, .sidebar-more { border-radius: var(--r); }
 .sidebar-search { border: 0; border-radius: var(--r); background: var(--tone); }
 .sidebar-search:focus-within { background: var(--tone2); box-shadow: 0 0 0 1px var(--hair2); }
-.sidebar-rename input { border: 0; border-radius: var(--r-sm); box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 55%, transparent); }
 .sidebar-delete { border-radius: var(--r-sm); }
 #rail-expand, .rail-button { border-radius: var(--r); }
 body.desktop kbd { border: 0; border-radius: var(--r-sm); background: var(--tone2); }

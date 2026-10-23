@@ -468,6 +468,9 @@ function renderSidebar() {
     for (const item of matching) {
       if (shown >= limit) { if (item.turns) more++; continue; }
       const selected = item.id === current?.id;
+      // Drive's own chats stay off the list: its work unfolds from its line in
+      // your chat and lands as a branch to review. One you open shows while open.
+      if (branches.has(item.id) && !selected) continue;
       const title = selected ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
       const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
       // A mission's chat keeps its cube while Drive plans between turns.

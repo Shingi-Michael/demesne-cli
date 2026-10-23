@@ -668,8 +668,9 @@ try {
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "Drive worktrees stay within their parent project");
   assert.equal(await page.locator(".sidebar-project.active").getAttribute("data-project"), f.workspace);
   await capture("08-drive-working");
-  // The mission's chat sits under yours, and you can write to it from Drive's line.
-  await until(() => page.locator("#sidebar-sessions .sidebar-item.kid").count().then(count => count === 1), "the mission's chat sits under the chat that started it");
+  // The mission makes no chat in the sidebar; you write to it from Drive's line.
+  await until(() => line.innerText().then(text => text.includes("Verify the Drive controls")), "Drive's line names the mission");
+  assert.equal(await page.locator("#sidebar-sessions .sidebar-session", { hasText: "Drive mission:" }).count(), 0, "the mission's chat stays off the sidebar");
   const home = await page.locator("#workspace-title").innerText();
   await line.locator(".bf-tell").click();
   await page.locator("#drive-tell-form input").fill("Keep the tests green");

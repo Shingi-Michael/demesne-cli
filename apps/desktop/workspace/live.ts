@@ -6,6 +6,7 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
+import { mountSakura, type Sakura } from "./sakura.ts";
 import { LAND_H, LAND_W, mapCaption, markLayer, paintLand, parcelAt, parcelOf, placeMarks, placeNames, survey, type Land, type LandLife, type LiveMark } from "./estate.ts";
 import type { WorkspaceLiveResponse, WorkspaceMapResponse } from "@demesne/protocol";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
@@ -1530,6 +1531,30 @@ function renderConversation() {
 const reviewJobs = () =>
   state ? [state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job) && (job!.status === "ready" || job!.status === "failed")) : [];
 let reviewShown = false;
+/// Home's cherry blossom lives behind the start screen only, and sleeps while
+/// a chat, the Deed or the map is showing.
+let sakura: Sakura | null = null, sakuraTried = false, sakuraDark: boolean | null = null;
+const colorProbe = document.createElement("canvas").getContext("2d");
+function inkIsDark() {
+  if (!colorProbe) return true;
+  // the canvas normalises any CSS colour to #rrggbb
+  colorProbe.fillStyle = "#000"; colorProbe.fillStyle = getComputedStyle(document.body).getPropertyValue("--ink").trim() || "#000";
+  const hex = String(colorProbe.fillStyle), [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) || 0);
+  return .2126 * r! + .7152 * g! + .0722 * b! < 128;
+}
+function renderSakura(show: boolean) {
+  const host = document.getElementById("sakura");
+  if (!host) return;
+  if (show && !sakuraTried) {
+    sakuraTried = true;
+    try { sakura = mountSakura(host, inkIsDark()); } catch { sakura = null; }
+  }
+  host.hidden = !show || !sakura;
+  if (!sakura) return;
+  const dark = inkIsDark();
+  if (dark !== sakuraDark) { sakuraDark = dark; sakura.setDark(dark); }
+  if (show) sakura.resume(); else sakura.pause();
+}
 function renderHero() {
   if (!state) return;
   const review = reviewJobs(),
@@ -1573,6 +1598,7 @@ function renderHero() {
   const caption = !open ? "" : surveyed?.map ? restingCaption(surveyed.map) : surveyed && !mapLoading ? "This project could not be surveyed" : "Surveying…";
   const mapLine = `<p class="hero-map">${btn("map-toggle", `${ICON_MAP}Map`, {}, `map-btn${open ? " on" : ""}`).replace("<button ", `<button aria-pressed="${open}" title="${open ? "Fold the map (Esc)" : "Show the project as a map"}" `)}<span id="map-caption">${h(caption)}</span></p>`;
   el("hero").classList.toggle("mapped", open);
+  renderSakura(!open);
   el("hero").innerHTML =
     `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${mapLine}${waiting}${quieter}</div>${open && surveyed?.map ? '<div id="hero-land"></div>' : ""}<div id="hero-composer"></div>${drive}`;
   // The composer and the land are detached while the hero is rebuilt.
@@ -4274,6 +4300,7 @@ function renderState(next: Snapshot) {
   el("deed").hidden = !deedOpen;
   if (start) renderHero();
   else if (wasStart || el("composer-slot").parentElement !== el("input-area")) el("input-area").append(el("composer-slot"));
+  renderSakura(start && !el("hero").classList.contains("mapped"));
   renderDeed();
   renderStatus();
   renderConversation();

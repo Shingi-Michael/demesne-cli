@@ -325,9 +325,11 @@ try {
   await capture("02-file-approval");
   await click("permission", { decision: "allow_once" });
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Run"]), "command approval visible");
-  assert(await evaluate<boolean>("const fold = document.querySelector('#approval .approval-fold'); return !!fold && fold.hidden;"), "The full command starts folded");
-  await page.locator("#approval .approval-show").click();
-  await until(() => evaluate<boolean>("const fold = document.querySelector('#approval .approval-fold'); return !!fold && !fold.hidden && fold.innerText.includes('run check');"), "command details can be inspected");
+  assert.equal(await page.locator("#approval .approval-row code").innerText(), "bun run check", "the row names the command by its program");
+  assert((await page.locator("#approval .approval-row code").getAttribute("title"))!.includes("not sandboxed"), "where it runs is on hover");
+  assert.equal(await page.locator("#approval .approval-show, #approval .approval-fold").count(), 0, "a command has nothing to unfold");
+  await until(() => page.locator(".tool-row.waiting .target").innerText().then(text => text === "bun run check"), "the waiting step names the command");
+  assert.equal(await page.evaluate(() => { const row = document.querySelector("#approval .approval-row")!; return row.scrollWidth <= row.clientWidth; }), true, "the row fits its width");
   await capture("02-command-approval");
   await click("permission", { decision: "allow_once" });
   await textIncludes(completed);

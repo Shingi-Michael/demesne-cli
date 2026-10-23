@@ -128,6 +128,13 @@ export class DemesneClient {
   async permissionAsks(workspace: string): Promise<import("@demesne/protocol").PermissionAsksResponse> {
     return this.request(`/v1/permissions/asks?workspace=${encodeURIComponent(workspace)}`);
   }
+  /// The project's Deed: its sentences and the state of each.
+  async deed(workspace: string): Promise<import("@demesne/protocol").DeedResponse> {
+    return this.request(`/v1/deed?workspace=${encodeURIComponent(workspace)}`);
+  }
+  async deedAct(request: import("@demesne/protocol").DeedRequest): Promise<import("@demesne/protocol").DeedResponse> {
+    return this.request("/v1/deed", { method: "POST", body: JSON.stringify(request) });
+  }
   /// Drive on by default: whether it starts on its own in this project.
   async driveAuto(workspace: string): Promise<import("@demesne/protocol").DriveAutoResponse> {
     return this.request(`/v1/drive/auto?workspace=${encodeURIComponent(workspace)}`);

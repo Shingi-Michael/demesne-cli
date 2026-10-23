@@ -38,6 +38,9 @@ import {
   type RewindSessionRequest,
   type SteerTurnRequest,
   type PermissionAsksResponse,
+  type DeedAction,
+  type DeedRequest,
+  type DeedResponse,
   type WorkspaceMapResponse,
   type WorkspaceLiveResponse,
   type RewindResponse,
@@ -68,6 +71,7 @@ import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
+import { DeedBook, judgeSentence } from "./deed.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
@@ -83,7 +87,7 @@ import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, InferenceSchedulers } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 export { PlaceholderTurnProcessor, type TurnProcessor } from "./processor.ts";
 
@@ -359,6 +363,23 @@ export function createDaemonApp(options: {
     ideas: (root) => inDriveWorktree(root) || !workspaceTrust.isTrusted(root) ? null : chatIdeas(root),
     run: (root, proposal, signals) => driveFixes.start(root, signals, proposal),
   }));
+  // The Deed: each project's plain sentences, kept true both ways.
+  const deedBook = new DeedBook(join(dirname(options.databasePath), "deeds"), {
+    startSession: (title, workspace) => store.createSession(title, canonicalWorkspace(workspace)).session.id,
+    startTurn: (sessionId, prompt, mode) => {
+      const { turn } = store.createTurn(sessionId, prompt, mode, false, false);
+      return queueTurn(turn, snapshotTurnInference(processor, false));
+    },
+    archive: (sessionId) => { try { store.archiveSession(sessionId); } catch { /* already gone */ } },
+    judge: async (workspace, sentence) => {
+      const inference = snapshotTurnInference(processor, false);
+      const slots = scheduler.for(inference.providerId);
+      const lease = await slots.acquire(`deed-check:${randomUUID()}`, driveLifecycle.signal, {});
+      try { return await judgeSentence(workspace, sentence, inference, driveLifecycle.signal); }
+      finally { lease.release(); }
+    },
+  });
+  for (const tool of deedBook.tools()) tools.register(tool);
   const activeDriveDecisions = new Set<Promise<unknown>>();
   const requestDrainWaiters = new Set<() => void>();
   let activeRequests = 0;
@@ -609,8 +630,10 @@ export function createDaemonApp(options: {
         if (pending) return json(await pending);
         const run = (async () => {
           const collected = await collectSignals(store.database, body.workspace);
-          const { signals } = collected;
-          const fingerprint = createHash("sha256").update(collected.fingerprint + contextKey).digest("hex").slice(0, 16);
+          // Sentences written in the Deed but not built are work the person asked for.
+          const wishes = deedBook.wishSignals(body.workspace);
+          const signals = [...collected.signals, ...wishes];
+          const fingerprint = createHash("sha256").update(collected.fingerprint + JSON.stringify(wishes.map((wish) => wish.id)) + contextKey).digest("hex").slice(0, 16);
           const cached = driveNextCache.read(body.workspace);
           const fresh = cached && cached.fingerprint === fingerprint && Date.now() - Date.parse(cached.generatedAt) < 12 * 3_600_000;
           const calibration = calibrationLog.calibration(body.workspace);
@@ -667,6 +690,20 @@ export function createDaemonApp(options: {
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start", 409); }
       }
       // How often this project asked this week, for the start screen's line.
+      if (request.method === "GET" && url.pathname === "/v1/deed") {
+        const workspace = url.searchParams.get("workspace") ?? "";
+        if (!isAbsolute(workspace)) return apiError("invalid_request", "Expected a workspace", 400);
+        return json({ deed: deedBook.state(workspace) } satisfies DeedResponse);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/deed") {
+        const body = await readJson(request) as DeedRequest;
+        if (typeof body?.workspace !== "string" || typeof body.action !== "string") return apiError("invalid_request", "Expected a workspace and an action", 400);
+        // Its chats read the code and change it: only in a folder you trust.
+        if (!isAbsolute(body.workspace) || !workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
+        const { workspace, ...action } = body;
+        try { return json({ deed: deedBook.act(workspace, action as DeedAction) } satisfies DeedResponse); }
+        catch (error) { return apiError("conflict", error instanceof Error ? error.message : String(error), 409); }
+      }
       if (request.method === "GET" && url.pathname === "/v1/permissions/asks") {
         return json(store.permissionAsks(url.searchParams.get("workspace") ?? "") satisfies PermissionAsksResponse);
       }

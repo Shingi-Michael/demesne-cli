@@ -195,7 +195,7 @@ export class AgentEngine {
       : session.workspace
       ? planModeDefinitions(selectToolsForTurn([...this.tools.definitions(),
         subagentDefinitionFor(this.options.subagentModels?.() ?? [], this.options.subagentModel ?? inference.modelId),
-        ...(this.options.sessionTools ? [sessionToolsDefinition] : [])], turn.content), turn.planOnly === true)
+        ...(this.options.sessionTools ? [sessionToolsDefinition] : [])], turn.content).concat(this.tools.sessionDefinitions(session.id)), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : canAsk ? this.tools.definitions().filter(definition=>definition.name === "ask_user") : [];
     const checkpoint = themefy ? null : this.store.getSessionCheckpoint(session.id);

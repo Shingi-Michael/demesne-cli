@@ -424,6 +424,7 @@ try {
   await page.locator(".sidebar-settings").click();
   await page.locator('#overlay[data-screen="settings"] .settings-nav-item.on').filter({ hasText: "General" }).waitFor();
   await capture("02-settings");
+  assert(await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".settings-row > div:first-child")].every(text => text.getBoundingClientRect().width >= 200)), "every settings row keeps its text readable");
   await page.locator("#overlay .settings-segments button").filter({ hasText: "Always" }).click();
   await until(() => page.evaluate("localStorage.getItem('demesne-notify')").then(value => value === "always"), "Notify me remembers Always");
   await page.locator("#overlay .settings-segments button").filter({ hasText: "When it needs you" }).click();

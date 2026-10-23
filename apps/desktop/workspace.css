@@ -306,9 +306,10 @@ html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[
 .desktop .settings-body .dialog-close { position: absolute; top: 14px; right: 14px; display: grid; place-items: center; width: 28px; height: 28px; font-size: 20px; color: var(--t3); border-radius: 6px; }
 .desktop .settings-body section + section { margin-top: 34px; }
 .desktop .settings-body h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: var(--t1); letter-spacing: -.1px; text-transform: none; font-family: inherit; }
-.desktop .settings-row { display: flex; align-items: center; gap: 28px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.desktop .settings-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; padding: 16px 0; border-bottom: 1px solid var(--line); }
 .desktop .settings-row:last-child { border-bottom: 0; }
-.desktop .settings-row > div:first-child { flex: 1; min-width: 0; }
+/* The text keeps room to read; a control that doesn't fit beside it goes under it. */
+.desktop .settings-row > div:first-child { flex: 1 1 220px; min-width: 0; }
 .desktop .settings-row b { display: block; font-size: 13.5px; font-weight: 500; color: var(--t1); }
 .desktop .settings-row p { margin: 4px 0 0; max-width: 540px; font-size: 12.5px; line-height: 1.55; color: var(--t3); }
 .desktop .settings-control { display: flex; align-items: center; gap: 10px; flex: none; }

@@ -108,7 +108,7 @@ test("a queued follow-up is sent only on success and restored on cancellation", 
     await host.connect();
     await host.submit("First request");
     await eventually(() => gates.length === 1);
-    // Typing alone is a draft; Enter (submit) queues it.
+    // Typing alone is a draft; ⌥↵ (submit with wait) queues it.
     await host.handle("draft", {
       sessionId: host.current!.session.id,
       text: "Follow-up",
@@ -117,6 +117,7 @@ test("a queued follow-up is sent only on success and restored on cancellation", 
     await host.handle("submit", {
       sessionId: host.current!.session.id,
       text: "Follow-up",
+      wait: true,
     });
     expect(host.queue).toBe("Follow-up");
     expect(host.draft).toBe("");
@@ -128,6 +129,7 @@ test("a queued follow-up is sent only on success and restored on cancellation", 
     await host.handle("submit", {
       sessionId: host.current!.session.id,
       text: "Keep this unsent",
+      wait: true,
     });
     await host.interrupt();
     await eventually(() => host.restored);
@@ -170,19 +172,65 @@ test("a queued follow-up can be edited, dropped or sent now", async () => {
     const sessionId = host.current!.session.id;
     await host.submit("First request");
     await eventually(() => gates.length === 1);
-    await host.handle("submit", { sessionId, text: "Edit me" });
+    await host.handle("submit", { sessionId, text: "Edit me", wait: true });
     await host.handle("draft", { sessionId, text: "typed since" });
     await host.handle("queue-action", { sessionId, action: "edit" });
     expect(host.queue).toBe("");
     expect(host.draft).toBe("Edit me\n\ntyped since");
-    await host.handle("submit", { sessionId, text: "Drop me" });
+    await host.handle("submit", { sessionId, text: "Drop me", wait: true });
     await host.handle("queue-action", { sessionId, action: "drop" });
     expect(host.queue).toBe("");
-    await host.handle("submit", { sessionId, text: "Right away" });
+    await host.handle("submit", { sessionId, text: "Right away", wait: true });
     await host.handle("queue-action", { sessionId, action: "now" });
     await eventually(() => calls === 2 && host.current!.session.turns.length === 2);
     expect(host.current!.session.turns[1]?.content).toBe("Right away");
     expect(host.current!.session.turns[0]?.status).not.toBe("completed");
+  } finally {
+    gates.forEach((g) => g.resolve());
+    host.dispose();
+    await f.close();
+  }
+});
+test("Enter during a turn steers it, and words it never read go out next", async () => {
+  const gates: ReturnType<typeof Promise.withResolvers<void>>[] = [],
+    seen: string[][] = [];
+  const f = await fixture({
+      providerId: "test",
+      modelId: "test",
+      async listModels() {
+        return [];
+      },
+      async *stream(messages, _tools, signal) {
+        seen.push(messages.filter((message) => message.role === "user").map((message) => String(message.content)));
+        const gate = Promise.withResolvers<void>();
+        gates.push(gate);
+        await Promise.race([gate.promise, new Promise<void>((r) => signal.addEventListener("abort", () => r(), { once: true }))]);
+        signal.throwIfAborted();
+        yield { type: "text_delta", delta: `Answer ${gates.length}.` };
+        yield { type: "finish", reason: "stop" };
+      },
+    }),
+    host = hostFor(f);
+  try {
+    await host.connect();
+    const sessionId = host.current!.session.id;
+    await host.submit("First request");
+    await eventually(() => gates.length === 1);
+    await host.handle("submit", { sessionId, text: "Use parser.ts" });
+    expect(host.queue).toBe("");
+    expect(host.snapshot().steers).toMatchObject([{ text: "Use parser.ts" }]);
+    gates[0]!.resolve();
+    // It reads the words and carries on in the same turn.
+    await eventually(() => gates.length === 2);
+    expect(seen[1]!.at(-1)).toContain("Use parser.ts");
+    await eventually(() => host.steers.length === 0);
+    expect(host.current!.session.turns).toHaveLength(1);
+    expect(host.snapshot().runs[0]!.entries.some((entry) => entry.type === "notice" && entry.steer && entry.text === "Use parser.ts")).toBe(true);
+    gates[1]!.resolve();
+    await eventually(() => host.current!.session.turns[0]?.status === "completed");
+    // Nothing running: Enter sends a message as usual.
+    await host.handle("submit", { sessionId, text: "Next one" });
+    await eventually(() => host.current!.session.turns.length === 2);
   } finally {
     gates.forEach((g) => g.resolve());
     host.dispose();

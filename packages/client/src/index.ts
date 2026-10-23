@@ -27,6 +27,7 @@ import {
   type TurnChangesResponse,
   type UndoSessionRequest,
   type RewindSessionRequest,
+  type SteerTurnRequest,
   type RewindResponse,
   type UndoTurnResponse,
   type UpdateSessionRequest,
@@ -392,6 +393,10 @@ export class DemesneClient {
 
   async rewind(sessionId: string, request: RewindSessionRequest): Promise<RewindResponse> {
     return this.request<RewindResponse>(`/v1/sessions/${sessionId}/rewind`, { method: "POST", body: JSON.stringify(request) });
+  }
+
+  async steer(sessionId: string, request: SteerTurnRequest): Promise<{ steerId: string; turnId: string }> {
+    return this.request(`/v1/sessions/${sessionId}/steer`, { method: "POST", body: JSON.stringify(request) });
   }
 
   async redoRewind(sessionId: string): Promise<{ rewindId: string; files: string[] }> {

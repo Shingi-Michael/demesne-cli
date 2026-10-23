@@ -41,6 +41,7 @@ export type EventType =
   | "message.completed"
   | "turn.completed"
   | "turn.reverted"
+  | "turn.steered"
   | "session.rewound"
   | "session.rewind_redone"
   | "turn.cancelled"
@@ -512,6 +513,14 @@ export interface RewindSessionRequest {
   toolCallId?: string;
 }
 
+/// Steer: words for the running turn, read by the model before its next
+/// step without stopping it. The window picks the id so it can match the
+/// `turn.steered` event that says the words were delivered.
+export interface SteerTurnRequest {
+  id: string;
+  text: string;
+}
+
 export interface RewindResponse {
   rewindId: string;
   files: string[];
@@ -591,6 +600,14 @@ export function parseRewindSessionRequest(value: unknown): RewindSessionRequest 
     throw new ProtocolValidationError("toolCallId must be a non-empty string");
   }
   return { turnId: value.turnId.trim(), ...(typeof value.toolCallId === "string" ? { toolCallId: value.toolCallId.trim() } : {}) };
+}
+
+export function parseSteerTurnRequest(value: unknown): SteerTurnRequest {
+  if (!isRecord(value)) throw new ProtocolValidationError("Request body must be a JSON object");
+  if (typeof value.id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(value.id)) throw new ProtocolValidationError("id must be 1-64 letters, digits, - or _");
+  if (typeof value.text !== "string" || !value.text.trim()) throw new ProtocolValidationError("text must be a non-empty string");
+  if (value.text.length > 20_000) throw new ProtocolValidationError("text must be at most 20000 characters");
+  return { id: value.id, text: value.text.trim() };
 }
 
 export function parseUndoSessionRequest(value: unknown): UndoSessionRequest {

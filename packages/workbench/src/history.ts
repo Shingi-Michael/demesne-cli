@@ -77,6 +77,10 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
         entries.push({ id: id++, type: "notice", tone: "info", quiet: true,
           text: `${from?.provider ?? "The provider"} dropped the connection · continued on ${[to?.provider, to?.model].filter(Boolean).join(" ")}` });
       }
+      if (event.type === "turn.steered" && typeof payload.text === "string") {
+        assistant = undefined;
+        entries.push({ id: id++, type: "notice", tone: "info", quiet: true, steer: true, text: payload.text });
+      }
       if (event.type === "model.usage" && context && !context.estimated) {
         context.used = typeof payload.totalTokens === "number" ? payload.totalTokens
           : typeof payload.inputTokens === "number" && typeof payload.outputTokens === "number" ? payload.inputTokens + payload.outputTokens : null;

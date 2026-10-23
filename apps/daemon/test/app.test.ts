@@ -1077,6 +1077,73 @@ describe("Demesne daemon", () => {
     expect((await redo()).status).toBe(409);
   });
 
+  test("steers a running turn: the model reads the words after its current step and carries on", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws"), dataPath = join(directory, "data");
+    mkdirSync(workspacePath); mkdirSync(dataPath);
+    let release!: () => void, started!: () => void;
+    let gate = new Promise<void>((resolve) => { release = resolve; });
+    let streaming = new Promise<void>((resolve) => { started = resolve; });
+    const script = [
+      [{ type: "tool_call_delta" as const, index: 0, idDelta: "call-1", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "lexer.ts", content: "x\n" }) }],
+      [{ type: "text_delta" as const, delta: "looks done" }],
+      [{ type: "text_delta" as const, delta: "fixed parser.ts" }],
+    ];
+    let round = 0;
+    const seen: ProviderMessage[][] = [];
+    const processor: TurnProcessor = {
+      providerId: "steer-provider",
+      modelId: "steer-model",
+      async listModels() { return [{ id: this.modelId, provider: this.providerId }]; },
+      async *stream(messages) {
+        seen.push(structuredClone(messages) as ProviderMessage[]);
+        const chunks = script[round++] ?? [];
+        if (round !== 3) { started(); await gate; }
+        for (const chunk of chunks) yield chunk;
+      },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", {
+      method: "POST", body: JSON.stringify({ title: "Steer", workspacePath, trustWorkspace: true }),
+    });
+    const id = created.session.id;
+    const steer = (body: Record<string, string>) => fetch(new URL(`/v1/sessions/${id}/steer`, running.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const submitted = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${id}/turns`, { method: "POST", body: JSON.stringify({ content: "fix the crash", permissionMode: "allow" }) });
+    const events = readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${id}&after=${submitted.eventId}`, running.url)));
+    const steered: Record<string, unknown>[] = [];
+    const done = (async () => {
+      for await (const event of events) {
+        if (event.type === "turn.steered") steered.push(event.payload);
+        if (event.type === "turn.completed" || event.type === "turn.failed") return event.type;
+      }
+    })();
+
+    // While it writes lexer.ts: the words wait for that step, then go in.
+    await streaming;
+    expect((await steer({ id: "s1", text: "not lexer, the bug is in parser.ts" })).status).toBe(200);
+    streaming = new Promise<void>((resolve) => { started = resolve; });
+    const first = release; gate = new Promise<void>((resolve) => { release = resolve; }); first();
+    // While it answers: it reads them and carries on instead of finishing.
+    await streaming;
+    expect((await steer({ id: "s2", text: "check parser.ts too" })).status).toBe(200);
+    release();
+    expect(await done).toBe("turn.completed");
+
+    expect(steered).toMatchObject([{ steerId: "s1", text: "not lexer, the bug is in parser.ts" }, { steerId: "s2", afterToolCallId: null }]);
+    expect(typeof steered[0]!.afterToolCallId).toBe("string");
+    const second = seen[1]!.filter((message) => message.role !== "system");
+    expect(second.map((message) => message.role)).toEqual(["user", "assistant", "tool", "user"]);
+    expect(second.at(-1)!.content).toContain("not lexer, the bug is in parser.ts");
+    const third = seen[2]!.filter((message) => message.role !== "system");
+    expect(third.slice(-2).map((message) => [message.role, message.content])).toEqual([["assistant", "looks done"], ["user", expect.stringContaining("check parser.ts too")]]);
+    const state = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${id}`);
+    expect(state.session.turns.at(-1)?.responseText).toBe("looks donefixed parser.ts");
+
+    // Nothing running: the window sends the words as a message instead.
+    expect((await steer({ id: "s3", text: "late" })).status).toBe(409);
+  });
+
   test("reverts a turn's file changes through /undo", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

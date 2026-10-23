@@ -96,6 +96,29 @@ export class AgentEngine {
   /// probably changed by that agent.
   private readonly seenFiles = new Map<string, Map<string, number>>();
 
+  /// Words sent to a running turn, waiting for the end of its current step.
+  private readonly steers = new Map<string, { id: string; text: string }[]>();
+  private readonly running = new Set<string>();
+
+  /// False when the turn isn't running here (finished, or never started):
+  /// the caller sends the words as the next message instead.
+  steer(turnId: string, steer: { id: string; text: string }): boolean {
+    if (!this.running.has(turnId)) return false;
+    const pending = this.steers.get(turnId) ?? [];
+    if (!pending.some((item) => item.id === steer.id)) pending.push(steer);
+    this.steers.set(turnId, pending);
+    return true;
+  }
+
+  /// Hands waiting words to the model after a step; true when there were any.
+  private deliverSteers(turnId: string, currentMessages: ProviderMessage[], afterToolCallId: string | null): boolean {
+    const pending = this.steers.get(turnId);
+    if (!pending?.length) return false;
+    this.steers.delete(turnId);
+    currentMessages.push(this.store.steerTurn(turnId, pending, afterToolCallId).message.message as ProviderMessage);
+    return true;
+  }
+
   private mtime(workspaceRoot: string, path: string): number | null {
     try { return statSync(resolveWorkspacePath(workspaceRoot, path, true, true)).mtimeMs; } catch { return null; }
   }
@@ -131,9 +154,13 @@ export class AgentEngine {
   async run(turnId: string, inference: TurnInference, signal: AbortSignal): Promise<void> {
     const sessionId = this.store.getTurn(turnId)?.sessionId;
     const used = new Set([inference]);
+    this.running.add(turnId);
     try {
       await this.runInference(turnId, inference, signal, used);
     } finally {
+      // Words that arrived too late stay with the window, which sends them next.
+      this.running.delete(turnId);
+      this.steers.delete(turnId);
       if (sessionId) for (const item of used) await item.release?.(sessionId);
     }
   }
@@ -373,7 +400,14 @@ export class AgentEngine {
       round += 1;
       if (assembled.size === 0) {
         if(themefy)throw new Error("Themefy ended without applying a theme. Your existing theme is unchanged; run /themefy to try again.");
-        this.store.appendModelMessage(turnId, { role: "assistant", content: roundText, ...(responses ? { responses } : {}) });
+        const answer = { role: "assistant" as const, content: roundText, ...(responses ? { responses } : {}) };
+        this.store.appendModelMessage(turnId, answer);
+        // Words sent while it answered: it reads them and carries on.
+        if (!finalizing && !themefy) {
+          currentMessages.push(answer);
+          if (this.deliverSteers(turnId, currentMessages, null)) continue;
+          currentMessages.pop();
+        }
         if (pendingContextDrops.length > 0) {
           const firstRetainedMessageId = history[0]?.firstMessageId ?? currentUser.id;
           this.store.trimModelContext(turnId, firstRetainedMessageId, pendingContextDrops.map((entry) => entry.id));
@@ -466,6 +500,7 @@ export class AgentEngine {
         }
       }
       if (totalToolResultBytes >= 4 * 1024 * 1024) budgetReason = "Reached the 4 MiB tool-result allowance";
+      if (!themefy) this.deliverSteers(turnId, currentMessages, callRecords.at(-1)!.toolCallId);
     }
     throw new Error("Turn could not produce its final status report. Progress is saved; send a follow-up to continue.");
   }

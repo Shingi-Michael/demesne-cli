@@ -38,6 +38,7 @@ import {
   type RewindSessionRequest,
   type SteerTurnRequest,
   type PermissionAsksResponse,
+  type WorkspaceMapResponse,
   type RewindResponse,
   type UndoTurnResponse,
   type UpdateSessionResponse,
@@ -53,6 +54,7 @@ import { QuestionBroker } from "./questions.ts";
 import { ThemeStore } from "./themes.ts";
 import { ConfigAllowlist } from "./allowlist.ts";
 import { WorkspaceTrust } from "./workspace-trust.ts";
+import { workspaceMap } from "./workspace-map.ts";
 import { canonicalWorkspace, listWorkspaceFiles, readWorkspaceText, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
 import { detectGitBranch } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
@@ -1009,6 +1011,13 @@ export function createDaemonApp(options: {
         if (!session.workspace) return apiError("invalid_state", "Session has no workspace", 409);
         if (url.searchParams.get("details") === "1") return json({ entries: workspaceFileInfo(session.workspace.root) });
         return json({ files: listWorkspaceFiles(session.workspace.root) });
+      }
+      // The project map: folders sized by lines, with when they last changed.
+      if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "map") {
+        const session = store.getSession(path[2]!);
+        if (!session) return apiError("not_found", "Session not found", 404);
+        if (!session.workspace) return apiError("invalid_state", "Session has no workspace", 409);
+        return json(await workspaceMap(session.workspace.root) satisfies WorkspaceMapResponse);
       }
 
       if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {

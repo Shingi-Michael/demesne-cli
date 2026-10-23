@@ -6,6 +6,8 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
+import { LAND_H, LAND_W, mapCaption, paintLand, parcelAt, placeNames, survey, type Land } from "./estate.ts";
+import type { WorkspaceMapResponse } from "@demesne/protocol";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
@@ -1526,7 +1528,7 @@ function renderHero() {
     hour = new Date().getHours(),
     running = worktreeRun().fix,
     branchKeys = [...detailsOpen].filter((key) => key.startsWith("branch:")),
-    signature = JSON.stringify([state.workspace, review.map((job) => [job.id, job.status, job.title, job.diff, job.summary, job.checks]), running && [running.id, running.title, running.activity], state.breakage.busy, state.breakage.message, branchKeys, driveShown, away?.status, driveBusy, reviewShown, ideasShown, next.proposals, next.loading, next.signals.length, user, branch, hour, state.asks, state.allowRules]);
+    signature = JSON.stringify([state.workspace, review.map((job) => [job.id, job.status, job.title, job.diff, job.summary, job.checks]), running && [running.id, running.title, running.activity], state.breakage.busy, state.breakage.message, branchKeys, driveShown, away?.status, driveBusy, reviewShown, ideasShown, next.proposals, next.loading, next.signals.length, user, branch, hour, state.asks, state.allowRules, mapOpen(), mapData?.workspace, mapData?.at, mapLoading]);
   if (signature === heroSignature) return;
   heroSignature = signature;
   const composer = el("composer-slot");
@@ -1552,11 +1554,92 @@ function renderHero() {
   const drive = ideas || driveBusy
     ? `<p class="hero-drive">${ICON_SPARK}<b>Drive</b>${driveBusy ? ` ${running ? btn("drive-show", `is working ${driveShown ? "⌄" : "›"}`, {}, "link") : "is working"}` : ` has ${ideas} idea${ideas === 1 ? "" : "s"}`}${ideas ? ` <span class="muted">·</span> ${btn("ideas-show", ideasShown ? "hide" : "show ›", {}, "link")}` : ""}</p>${ideas && ideasShown ? `<div class="hero-ideas">${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p></div>` : ""}${running && driveShown ? `<div class="hero-branches">${branchRows([running])}</div>` : ""}`
     : "";
+  // The map is one button under the greeting; it unfolds the land in place.
+  const open = mapOpen(), surveyed = mapData && mapData.workspace === state.workspace ? mapData : null;
+  if (open && !mapLoading && (!surveyed || Date.now() - surveyed.at > 60_000)) void loadMap();
+  const caption = !open ? "" : surveyed?.map ? mapCaption(surveyed.map.districts, null) : surveyed && !mapLoading ? "This project could not be surveyed" : "Surveying…";
+  const mapLine = `<p class="hero-map">${btn("map-toggle", `${ICON_MAP}Map`, {}, `map-btn${open ? " on" : ""}`).replace("<button ", `<button aria-pressed="${open}" title="${open ? "Fold the map (Esc)" : "Show the project as a map"}" `)}<span id="map-caption">${h(caption)}</span></p>`;
+  el("hero").classList.toggle("mapped", open);
   el("hero").innerHTML =
-    `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${waiting}${quieter}</div><div id="hero-composer"></div>${drive}`;
-  // The composer is detached while the hero is rebuilt.
+    `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${mapLine}${waiting}${quieter}</div>${open && surveyed?.map ? '<div id="hero-land"></div>' : ""}<div id="hero-composer"></div>${drive}`;
+  // The composer and the land are detached while the hero is rebuilt.
   el("hero-composer").append(composer);
+  if (open && surveyed?.map) {
+    el("hero-land").append(landEl);
+    // It unfolds when it appears, not each time the greeting is rebuilt.
+    if (!landShown) { landEl.classList.remove("unfolding"); void landEl.offsetWidth; landEl.classList.add("unfolding"); }
+    drawLand(surveyed.map);
+  }
+  landShown = Boolean(open && surveyed?.map);
 }
+/// The project map. Whether it is open is remembered per project.
+const MAP_KEY = "demesne-map-open";
+const ICON_MAP = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5"/><path d="M15 6.5V20"/></svg>';
+const mapOpenFor = new Set<string>((() => { try { return JSON.parse(localStorage.getItem(MAP_KEY) ?? "[]") as string[]; } catch { return []; } })());
+let mapData: { workspace: string; map: WorkspaceMapResponse | null; at: number } | null = null,
+  mapLoading = false,
+  mapHover = -1,
+  landShown = false,
+  landCache: { key: string; land: Land } | null = null;
+const mapOpen = () => Boolean(state && mapOpenFor.has(state.workspace));
+const landEl = document.createElement("div");
+landEl.className = "land";
+landEl.innerHTML = `<canvas></canvas><svg viewBox="0 0 ${LAND_W} ${LAND_H}" aria-hidden="true"></svg>`;
+landEl.setAttribute("role", "img");
+function toggleMap() {
+  if (!state) return;
+  if (mapOpenFor.has(state.workspace)) mapOpenFor.delete(state.workspace);
+  else mapOpenFor.add(state.workspace);
+  try { localStorage.setItem(MAP_KEY, JSON.stringify([...mapOpenFor])); } catch { /* storage may be off */ }
+  mapHover = -1;
+  heroSignature = "";
+  renderHero();
+}
+async function loadMap() {
+  if (!state || mapLoading) return;
+  const workspace = state.workspace;
+  mapLoading = true;
+  let map: WorkspaceMapResponse | null = null;
+  try { map = await api<WorkspaceMapResponse | null>("workspace-map"); } catch { /* shown as not surveyed */ }
+  mapLoading = false;
+  mapData = { workspace, map: map && Array.isArray(map.districts) ? map : null, at: Date.now() };
+  heroSignature = "";
+  renderHero();
+}
+function drawLand(map: WorkspaceMapResponse) {
+  const key = JSON.stringify(map.districts.map((district) => [district.path, district.lines, district.changedAt]));
+  if (landCache?.key !== key) landCache = { key, land: survey(map.districts) };
+  const land = landCache.land;
+  if (mapHover >= land.parcels.length) mapHover = -1;
+  paintLand(landEl.querySelector("canvas")!, land, mapHover);
+  landEl.querySelector("svg")!.innerHTML = placeNames(land);
+  landEl.setAttribute("aria-label", mapCaption(map.districts, null));
+}
+function landPoint(event: MouseEvent) {
+  const box = landEl.getBoundingClientRect();
+  return landCache ? parcelAt(landCache.land, ((event.clientX - box.left) / box.width) * LAND_W, ((event.clientY - box.top) / box.height) * LAND_H) : -1;
+}
+function hoverLand(index: number) {
+  if (!landCache || !mapData?.map || index === mapHover) return;
+  mapHover = index;
+  const district = landCache.land.parcels[index]?.district ?? null;
+  paintLand(landEl.querySelector("canvas")!, landCache.land, mapHover);
+  landEl.style.cursor = district?.path ? "pointer" : "";
+  const caption = document.getElementById("map-caption");
+  if (caption) caption.textContent = mapCaption(mapData.map.districts, district);
+}
+landEl.addEventListener("mousemove", (event) => hoverLand(landPoint(event)));
+landEl.addEventListener("mouseleave", () => hoverLand(-1));
+/// Clicking a parcel points the composer at it: an @folder/ chip.
+landEl.addEventListener("click", (event) => {
+  const path = landCache?.land.parcels[landPoint(event)]?.district.path;
+  if (!path) return;
+  const token = `@${path}/`;
+  if (!editor.value.split(/\s/).includes(token)) editor.value = `${token} ${editor.value.trimStart()}`;
+  editor.focus();
+  editor.setSelectionRange(editor.value.length, editor.value.length);
+  changedDraft();
+});
 /// Drive's proposals as rows: kind, title and estimate, with Run and Plan. The
 /// reason and the evidence it rests on show on hover. The start screen shows three; a session's briefing
 /// line unfolds them in place.
@@ -1759,7 +1842,7 @@ function renderComposer() {
   editor.style.height = `${Math.min(132, Math.max(20, editor.scrollHeight))}px`;
   const mentions = [...editor.value.matchAll(/(?:^|\s)@([^\s]+)/g)]
     .map((match) => match[1]!)
-    .filter((path) => state!.files.some((file) => file.path === path));
+    .filter((path) => state!.files.some((file) => file.path === path || (path.endsWith("/") && file.path.startsWith(path))));
   const notes = diffNotes.size && !question ? btn("notes-clear", `${diffNotes.size} note${diffNotes.size === 1 ? "" : "s"} on the changes ×`, {}, "chip notes-chip").replace("<button ", '<button title="Sent with your next message. Click to drop them." ') : "";
   el("mention-chips").innerHTML = notes + [...new Set(mentions)]
     .map((path) => btn("remove-mention", `${h(path)} ×`, { path }, "chip"))
@@ -3392,6 +3475,7 @@ async function dispatch(
     if (tellOpen) el("drive-reply").querySelector<HTMLInputElement>("#drive-tell-form input")?.focus({ preventScroll: true });
     return;
   }
+  if (action === "map-toggle") return toggleMap();
   if (action === "drive-show" || action === "ideas-show" || action === "broke-show") {
     if (action === "drive-show") driveShown = !driveShown;
     else if (action === "broke-show") brokeShown = !brokeShown;
@@ -4000,6 +4084,12 @@ document.addEventListener("keydown", (event) => {
   };
   if (state.setup) {
     handleSetupKey(event);
+    return;
+  }
+  // Esc folds the map while nothing is typed.
+  if (key === "escape" && !ctrl && !inSession() && mapOpen() && (!field || (event.target === editor && !editor.value)) && el("completion").hidden) {
+    event.preventDefault();
+    toggleMap();
     return;
   }
   // 1, 2, 3… pick the model's suggested answers while nothing is typed.

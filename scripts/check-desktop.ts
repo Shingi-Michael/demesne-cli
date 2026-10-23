@@ -218,6 +218,11 @@ writeFileSync(join(f.workspace, "notes.ts"), "export const note = 'ours';\n");
 writeFileSync(join(f.workspace, "hello.ts"), "export const greeting = 'before';\n");
 writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ scripts: { check: "bun check.ts" } }));
 writeFileSync(join(f.workspace, "serve.ts"), "const server = Bun.serve({ port: 0, fetch: () => new Response('<h1>Fieldnote preview</h1>', { headers: { 'content-type': 'text/html' } }) });\nconsole.log(`  \\u001b[32mLocal:\\u001b[39m http://localhost:${server.port}/`);\n");
+// Folders for the project map.
+for (const [folder, files] of [["src", 6], ["docs", 2], ["lib", 3]] as const) {
+  mkdirSync(join(f.workspace, folder), { recursive: true });
+  for (let index = 0; index < files; index++) writeFileSync(join(f.workspace, folder, `part${index}.ts`), "export const line = 1;\n".repeat(40 + index * 10));
+}
 writeFileSync(join(f.workspace, "check.ts"), "import {readFileSync} from 'node:fs';if(!readFileSync('hello.ts','utf8').includes(\"'after'\"))throw new Error('Wrong file');console.log('DESKTOP_CHECK_PASSED');\n");
 const git = (...values: string[]) => execFileSync("git", ["-C", f.workspace, ...values], { stdio: "pipe" });
 git("init", "-q"); git("add", ".");
@@ -302,6 +307,23 @@ let sessionId = "";
 try {
   await open(false, true);
   await capture("01-start");
+  // The greeting stays; Map under it unfolds the project as land.
+  await page.locator(".hero-map .map-btn").click();
+  const srcName = page.locator(".land svg text.pn", { hasText: "src" });
+  await until(() => srcName.isVisible(), "the map unfolds with its place names", 20_000);
+  assert(await page.locator(".intro h1").isVisible(), "the greeting stays above the map");
+  const srcBox = (await srcName.boundingBox())!;
+  await page.mouse.move(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2 + 6);
+  await until(() => page.locator("#map-caption").innerText().then(text => text.startsWith("src ·") && text.includes("click to work here")), "hovering a parcel names it on the line");
+  await capture("01-map");
+  await page.mouse.click(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2 + 6);
+  await until(() => page.locator("textarea").inputValue().then(value => value.startsWith("@src/ ")), "clicking a parcel points the composer at it");
+  await until(() => page.locator("#mention-chips .chip", { hasText: "src/" }).isVisible(), "the folder shows as a chip");
+  await capture("01-map-pointed");
+  await page.locator("textarea").fill("");
+  await page.locator("textarea").press("Escape");
+  await until(() => page.locator(".land").count().then(count => count === 0), "Esc folds the map");
+  assert.equal(await page.locator(".hero-map .map-btn").getAttribute("aria-pressed"), "false");
   await type(thinkingPrompt);
   const trace = page.locator(".thinking-main .thinking-content").last();
   const thinkingToggle = page.locator(".thinking-main .thinking-toggle").last();
@@ -933,7 +955,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes", "the project map"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

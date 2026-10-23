@@ -378,6 +378,24 @@ export interface PermissionAsksResponse {
   lastWeek: number;
 }
 
+/// One parcel of the project map: a folder and the lines of text it holds.
+export interface WorkspaceDistrict {
+  /// Workspace-relative folder ("" for files at the top level). Null for the
+  /// parcel that gathers the smallest folders.
+  path: string | null;
+  lines: number;
+  files: number;
+  /// Newest commit touching it in the last 30 days, epoch ms.
+  changedAt: number | null;
+}
+
+/// The project map: its folders sized by lines.
+export interface WorkspaceMapResponse {
+  districts: WorkspaceDistrict[];
+  lines: number;
+  files: number;
+}
+
 export interface Session {
   id: string;
   title: string;

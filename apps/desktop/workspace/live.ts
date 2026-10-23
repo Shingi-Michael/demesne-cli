@@ -6,8 +6,8 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
-import { LAND_H, LAND_W, mapCaption, paintLand, parcelAt, placeNames, survey, type Land } from "./estate.ts";
-import type { WorkspaceMapResponse } from "@demesne/protocol";
+import { LAND_H, LAND_W, mapCaption, markLayer, paintLand, parcelAt, parcelOf, placeMarks, placeNames, survey, type Land, type LandLife, type LiveMark } from "./estate.ts";
+import type { WorkspaceLiveResponse, WorkspaceMapResponse } from "@demesne/protocol";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
@@ -1557,7 +1557,7 @@ function renderHero() {
   // The map is one button under the greeting; it unfolds the land in place.
   const open = mapOpen(), surveyed = mapData && mapData.workspace === state.workspace ? mapData : null;
   if (open && !mapLoading && (!surveyed || Date.now() - surveyed.at > 60_000)) void loadMap();
-  const caption = !open ? "" : surveyed?.map ? mapCaption(surveyed.map.districts, null) : surveyed && !mapLoading ? "This project could not be surveyed" : "Surveying…";
+  const caption = !open ? "" : surveyed?.map ? restingCaption(surveyed.map) : surveyed && !mapLoading ? "This project could not be surveyed" : "Surveying…";
   const mapLine = `<p class="hero-map">${btn("map-toggle", `${ICON_MAP}Map`, {}, `map-btn${open ? " on" : ""}`).replace("<button ", `<button aria-pressed="${open}" title="${open ? "Fold the map (Esc)" : "Show the project as a map"}" `)}<span id="map-caption">${h(caption)}</span></p>`;
   el("hero").classList.toggle("mapped", open);
   el("hero").innerHTML =
@@ -1611,27 +1611,101 @@ function drawLand(map: WorkspaceMapResponse) {
   if (landCache?.key !== key) landCache = { key, land: survey(map.districts) };
   const land = landCache.land;
   if (mapHover >= land.parcels.length) mapHover = -1;
-  paintLand(landEl.querySelector("canvas")!, land, mapHover);
-  landEl.querySelector("svg")!.innerHTML = placeNames(land);
-  landEl.setAttribute("aria-label", mapCaption(map.districts, null));
+  life = lifeOn(land);
+  paintLand(landEl.querySelector("canvas")!, land, mapHover, Date.now(), life.paint);
+  landEl.querySelector("svg")!.innerHTML = placeNames(land) + markLayer(land, life.placed);
+  landEl.setAttribute("aria-label", restingCaption(map));
+  const caption = document.getElementById("map-caption");
+  if (caption && mapHover < 0 && !markShown) caption.textContent = restingCaption(map);
 }
+let markShown = false;
+/// Who is working where right now, from the daemon, refreshed while the map is open.
+let liveData: { workspace: string; marks: WorkspaceLiveResponse["marks"]; at: number } | null = null,
+  life: { paint: LandLife; placed: ReturnType<typeof placeMarks>; caption: string | null } = { paint: {}, placed: [], caption: null };
+const shortTitle = (text: string) => (text.length > 26 ? `${text.slice(0, 25).trimEnd()}…` : text);
+function lifeOn(land: Land) {
+  if (!state) return { paint: {}, placed: [], caption: null };
+  const marks: LiveMark[] = [], live = new Set<number>(), failing = new Set<number>(), failingIn: string[] = [];
+  const driveIds = new Set([state.breakage.fix, ...state.breakage.inbox].map((fix) => fix?.sessionId).filter(Boolean));
+  const current = liveData && liveData.workspace === state.workspace ? liveData.marks : [];
+  for (const work of current) {
+    const parcel = work.path ? parcelOf(land, work.path) : -1;
+    const drive = driveIds.has(work.sessionId), label = `${drive ? "Drive · " : ""}${shortTitle(work.title || "New chat")}`;
+    const fresh = work.at ? Date.now() - Date.parse(work.at) < 60_000 : false;
+    const from = fresh && work.previousPath ? parcelOf(land, work.previousPath) : -1;
+    const doing = work.waiting ? "waiting for you" : !work.path ? "thinking" : `${/edit|write|move/.test(work.tool ?? "") ? "editing" : /read|view/.test(work.tool ?? "") ? "reading" : "working in"} ${work.path.split("/").at(-1)}`;
+    if (!work.waiting && parcel >= 0) live.add(parcel);
+    if (parcel < 0) continue;
+    marks.push({ key: work.sessionId, label, tone: work.waiting ? "wait" : "work", parcel, from: from >= 0 && from !== parcel ? from : undefined, sessionId: work.sessionId,
+      detail: `${label} · ${doing}${work.at ? ` · ${age(work.at)}` : ""} · click to open its chat` });
+  }
+  // A failing check marks the folder its output names.
+  const checks = [...state.breakage.signals, ...state.driveNext.signals].filter((signal, index, all) => signal.source === "checks" && all.findIndex((other) => other.id === signal.id) === index);
+  for (const signal of checks) {
+    const text = `${signal.title}\n${signal.detail}`;
+    let parcel = -1, depth = -1;
+    land.parcels.forEach((item, index) => { const folder = item.district.path; if (folder && folder.length > depth && text.includes(`${folder}/`)) { parcel = index; depth = folder.length; } });
+    if (parcel < 0 || failing.has(parcel)) continue;
+    failing.add(parcel);
+    failingIn.push(land.parcels[parcel]!.district.path!.split("/").at(-1)!);
+    const count = text.match(/(\d+)\s+(?:tests?\s+)?fail/i)?.[1];
+    marks.push({ key: signal.id, label: count ? `${count} failing` : "failing", tone: "fail", parcel, detail: signal.title });
+  }
+  const here = state.agents.filter((agent) => agent.project === projectSlug(state!.workspace));
+  const working = current.length + here.length, waiting = current.filter((work) => work.waiting).length;
+  const parts = [working ? `${working} at work` : "", waiting ? `${waiting} waiting for you` : "",
+    failingIn.length ? `${failingIn.length === 1 ? "1 check" : `${failingIn.length} checks`} failing in ${failingIn.join(", ")}` : "",
+    here.length ? `${here.map((agent) => agent.name).join(", ")} here too` : ""].filter(Boolean);
+  return { paint: { live, failing }, placed: placeMarks(land, marks), caption: parts.length ? parts.join(" · ") : null };
+}
+function restingCaption(map: WorkspaceMapResponse) {
+  return life.caption ?? mapCaption(map.districts, null);
+}
+async function tickLive() {
+  if (!state || inSession() || !mapOpen() || document.hidden || !mapData?.map || mapData.workspace !== state.workspace) return;
+  const workspace = state.workspace;
+  let result: WorkspaceLiveResponse | null = null;
+  try { result = await api<WorkspaceLiveResponse | null>("workspace-live"); } catch { return; }
+  if (!result || !state || state.workspace !== workspace) return;
+  const before = JSON.stringify(liveData?.marks ?? []);
+  liveData = { workspace, marks: result.marks, at: Date.now() };
+  if (before !== JSON.stringify(result.marks) && landEl.isConnected && mapData?.map) {
+    drawLand(mapData.map);
+  }
+}
+setInterval(() => void tickLive(), 3000);
 function landPoint(event: MouseEvent) {
   const box = landEl.getBoundingClientRect();
   return landCache ? parcelAt(landCache.land, ((event.clientX - box.left) / box.width) * LAND_W, ((event.clientY - box.top) / box.height) * LAND_H) : -1;
 }
-function hoverLand(index: number) {
-  if (!landCache || !mapData?.map || index === mapHover) return;
+function hoverLand(index: number, mark: LiveMark | null = null) {
+  if (!landCache || !mapData?.map) return;
+  const caption = document.getElementById("map-caption");
+  if (mark) {
+    markShown = true;
+    if (caption) caption.textContent = mark.detail;
+    landEl.style.cursor = mark.sessionId ? "pointer" : "";
+    return;
+  }
+  if (index === mapHover && !markShown) return;
+  markShown = false;
   mapHover = index;
   const district = landCache.land.parcels[index]?.district ?? null;
-  paintLand(landEl.querySelector("canvas")!, landCache.land, mapHover);
+  paintLand(landEl.querySelector("canvas")!, landCache.land, mapHover, Date.now(), life.paint);
   landEl.style.cursor = district?.path ? "pointer" : "";
-  const caption = document.getElementById("map-caption");
-  if (caption) caption.textContent = mapCaption(mapData.map.districts, district);
+  if (caption) caption.textContent = district ? mapCaption(mapData.map.districts, district) : restingCaption(mapData.map);
 }
-landEl.addEventListener("mousemove", (event) => hoverLand(landPoint(event)));
+const markUnder = (event: Event) => {
+  const group = (event.target as Element).closest?.<SVGGElement>(".mk-g");
+  return group ? life.placed[Number(group.dataset.mark)]?.mark ?? null : null;
+};
+landEl.addEventListener("mousemove", (event) => {
+  hoverLand(landPoint(event), markUnder(event));
+});
 landEl.addEventListener("mouseleave", () => hoverLand(-1));
 /// Clicking a parcel points the composer at it: an @folder/ chip.
 landEl.addEventListener("click", (event) => {
+  if (markUnder(event)) return;
   const path = landCache?.land.parcels[landPoint(event)]?.district.path;
   if (!path) return;
   const token = `@${path}/`;

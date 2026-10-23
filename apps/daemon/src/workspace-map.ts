@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { WorkspaceDistrict, WorkspaceMapResponse } from "@demesne/protocol";
+import type { WorkspaceDistrict, WorkspaceMapResponse, WorkspaceMark } from "@demesne/protocol";
+import { pathsOf } from "./allowlist.ts";
 import { listWorkspaceFiles } from "./tools.ts";
 
 /// The project map: every text file counted by lines, grouped into the
@@ -112,4 +113,34 @@ export async function workspaceMap(root: string, now = Date.now()): Promise<Work
   const map = { districts, lines: files.reduce((sum, file) => sum + file.lines, 0), files: files.length };
   cache.set(root, { at: now, map });
   return map;
+}
+
+/// Turns live work rows into marks: the file each chat last touched and,
+/// when it moved folders, where it came from.
+export function liveMarks(rows: { sessionId: string; title: string; waiting: boolean; calls: { name: string; argumentsJson: string; createdAt: string }[] }[], root: string): WorkspaceMark[] {
+  const folder = (path: string) => path.split("/").slice(0, -1).join("/");
+  return rows.map((row) => {
+    const touched: { path: string; tool: string; at: string }[] = [];
+    for (const call of row.calls) {
+      let input: unknown;
+      try { input = JSON.parse(call.argumentsJson); } catch { continue; }
+      for (const raw of pathsOf(input)) {
+        const path = relative(raw, root);
+        if (path) { touched.push({ path, tool: call.name, at: call.createdAt }); break; }
+      }
+      if (touched.length && folder(touched.at(-1)!.path) !== folder(touched[0]!.path)) break;
+    }
+    const latest = touched[0] ?? null, previous = touched.find((item) => folder(item.path) !== folder(latest?.path ?? ""));
+    return { sessionId: row.sessionId, title: row.title, waiting: row.waiting, path: latest?.path ?? null, tool: latest?.tool ?? null, at: latest?.at ?? null, previousPath: previous?.path ?? null };
+  });
+}
+
+/// A tool's path made workspace-relative; null when it points outside.
+function relative(path: string, root: string): string | null {
+  let clean = path.split("\\").join("/");
+  const base = root.split("\\").join("/").replace(/\/+$/, "");
+  if (clean.startsWith(`${base}/`)) clean = clean.slice(base.length + 1);
+  else if (clean.startsWith("/")) return null;
+  clean = clean.replace(/^(\.\/)+/, "");
+  return clean && !clean.split("/").includes("..") ? clean : null;
 }

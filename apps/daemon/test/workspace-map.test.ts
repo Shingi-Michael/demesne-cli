@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { countLines, groupDistricts, workspaceMap } from "../src/workspace-map.ts";
+import { countLines, groupDistricts, liveMarks, workspaceMap } from "../src/workspace-map.ts";
 
 describe("workspace map", () => {
   test("counts lines and skips binaries", () => {
@@ -39,5 +39,22 @@ describe("workspace map", () => {
     const map = await workspaceMap(root);
     expect(map.districts).toEqual([{ path: "src", lines: 3, files: 1, changedAt: null }]);
     expect(map.lines).toBe(3);
+  });
+});
+
+describe("live marks", () => {
+  const row = (calls: [string, unknown][], waiting = false) => ({
+    sessionId: "s1", title: "Sidebar rename", waiting,
+    calls: calls.map(([name, input], index) => ({ name, argumentsJson: JSON.stringify(input), createdAt: `2026-10-23T08:0${9 - index}:00Z` })),
+  });
+
+  test("a mark stands where the chat last touched a file, and remembers the folder before", () => {
+    const [mark] = liveMarks([row([["edit_file", { path: "apps/desktop/live.ts" }], ["read_file", { path: "apps/desktop/host.ts" }], ["read_file", { path: "/repo/packages/storage/index.ts" }]])], "/repo");
+    expect(mark).toMatchObject({ path: "apps/desktop/live.ts", tool: "edit_file", previousPath: "packages/storage/index.ts", waiting: false });
+  });
+
+  test("no file yet, or one outside the project, leaves no place", () => {
+    const [mark] = liveMarks([row([["run_command", { argv: ["ls"] }], ["read_file", { path: "/elsewhere/x.ts" }], ["read_file", { path: "../up.ts" }]], true)], "/repo");
+    expect(mark).toMatchObject({ path: null, previousPath: null, waiting: true });
   });
 });

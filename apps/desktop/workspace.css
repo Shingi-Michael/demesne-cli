@@ -186,6 +186,23 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .land svg { pointer-events: none; }
 .land .pn { font: 500 11px Inter, system-ui, sans-serif; fill: var(--t2); text-anchor: middle; letter-spacing: 0.14em; text-transform: uppercase; }
 .land .ps { font: 11px Inter, system-ui, sans-serif; fill: var(--t4); text-anchor: middle; }
+/* Marks: who is working where. Blue works, amber waits for you, red is a failing check. */
+.land .mk-g { pointer-events: auto; }
+.land .mk-g .mk { stroke: var(--ink); stroke-width: 1.5; }
+.land .mk-g .mk-hit { fill: transparent; }
+.land .mk-g .who { font: 500 11px Inter, system-ui, sans-serif; }
+.land .mk-g .who.left { text-anchor: end; }
+.land .mk-g.work .mk, .land .mk-g.work .who { fill: var(--acc); }
+.land .mk-g.wait .mk, .land .mk-g.wait .who { fill: var(--warn); }
+.land .mk-g.fail .mk, .land .mk-g.fail .who { fill: var(--bad); }
+.land .mk-g[data-action] { cursor: pointer; }
+.land .mk-g:hover .mk { r: 5.5; }
+.land .mk-ring { fill: none; stroke: var(--warn); stroke-width: 1.2; opacity: 0.55; }
+.land .trail { fill: none; stroke: var(--acc); stroke-width: 1.2; stroke-dasharray: 3 4; opacity: 0.6; }
+.land .trail.wait { stroke: var(--warn); }
+@media (prefers-reduced-motion: no-preference) { .land .mk-ring { animation: mk-ring 2.4s ease-in-out infinite; } .land .trail { animation: trail-fade 60s linear both; } }
+@keyframes mk-ring { 50% { opacity: 0.15; } }
+@keyframes trail-fade { to { opacity: 0; } }
 @media (prefers-reduced-motion: no-preference) { .land.unfolding { animation: land-in 200ms var(--ease, ease) both; } }
 @keyframes land-in { from { opacity: 0; transform: translateY(-4px); } }
 .hero-drive { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 2px; font-size: 12.5px; line-height: 18px; color: var(--t3); }

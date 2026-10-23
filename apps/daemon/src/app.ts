@@ -39,6 +39,7 @@ import {
   type SteerTurnRequest,
   type PermissionAsksResponse,
   type WorkspaceMapResponse,
+  type WorkspaceLiveResponse,
   type RewindResponse,
   type UndoTurnResponse,
   type UpdateSessionResponse,
@@ -54,7 +55,7 @@ import { QuestionBroker } from "./questions.ts";
 import { ThemeStore } from "./themes.ts";
 import { ConfigAllowlist } from "./allowlist.ts";
 import { WorkspaceTrust } from "./workspace-trust.ts";
-import { workspaceMap } from "./workspace-map.ts";
+import { liveMarks, workspaceMap } from "./workspace-map.ts";
 import { canonicalWorkspace, listWorkspaceFiles, readWorkspaceText, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
 import { detectGitBranch } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
@@ -1018,6 +1019,18 @@ export function createDaemonApp(options: {
         if (!session) return apiError("not_found", "Session not found", 404);
         if (!session.workspace) return apiError("invalid_state", "Session has no workspace", 409);
         return json(await workspaceMap(session.workspace.root) satisfies WorkspaceMapResponse);
+      }
+      // Who is working on the map right now: chats here, plus named sessions (Drive's worktrees).
+      if (request.method === "GET" && path.length === 5 && path[0] === "v1" && path[1] === "sessions" && path[3] === "map" && path[4] === "live") {
+        const session = store.getSession(path[2]!);
+        if (!session) return apiError("not_found", "Session not found", 404);
+        if (!session.workspace) return apiError("invalid_state", "Session has no workspace", 409);
+        const also = (url.searchParams.get("also") ?? "").split(",").filter(Boolean);
+        const rows = store.liveWork(session.workspace.root, also);
+        // A Drive worktree's paths are relative to its own root.
+        const roots = new Map(also.map((id) => [id, store.getSession(id)?.workspace?.root ?? session.workspace!.root]));
+        const marks = rows.flatMap((row) => liveMarks([row], roots.get(row.sessionId) ?? session.workspace!.root));
+        return json({ marks } satisfies WorkspaceLiveResponse);
       }
 
       if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {

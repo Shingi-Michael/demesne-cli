@@ -389,6 +389,23 @@ export interface WorkspaceDistrict {
   changedAt: number | null;
 }
 
+/// Someone working in the project right now, for the map: a chat's running
+/// turn and the file it last touched.
+export interface WorkspaceMark {
+  sessionId: string;
+  title: string;
+  waiting: boolean;
+  /// Workspace-relative file it last read or edited, and the one before when
+  /// that was in another folder.
+  path: string | null;
+  tool: string | null;
+  at: string | null;
+  previousPath: string | null;
+}
+export interface WorkspaceLiveResponse {
+  marks: WorkspaceMark[];
+}
+
 /// The project map: its folders sized by lines.
 export interface WorkspaceMapResponse {
   districts: WorkspaceDistrict[];

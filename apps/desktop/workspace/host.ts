@@ -1366,6 +1366,10 @@ export class WorkspaceHost {
     }
     if (method === "models") return this.models();
     // The model scoreboard, across projects, for the model picker.
+    if (method === "workspace-map") {
+      if (!this.current) return null;
+      return this.client.workspaceMap(this.current.session.id);
+    }
     if (method === "model-scores") return this.client.modelScoreboard({ days: 30 });
     if (method === "model") {
       const id = string(args.id, "model", 1000);

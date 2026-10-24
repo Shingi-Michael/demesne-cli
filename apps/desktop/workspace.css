@@ -64,39 +64,49 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-project.drop-before::before { top: -3px; }
 .sidebar-project.drop-after::after { bottom: -3px; }
 .sidebar-order-status { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* Group headings: a chevron and a quiet name; pointing at one trades its
-   count for Group and sort. */
-.sidebar-project-header, .sidebar-group-row { position: relative; display: flex; align-items: center; min-width: 0; height: 30px; margin-top: 8px; border-radius: 8px; }
-.sidebar-group-toggle { display: flex; align-items: center; flex: 1; min-width: 0; height: 30px; gap: 6px; padding: 0 8px 0 6px; border-radius: 6px; color: var(--t3); font-size: 12px; font-weight: 500; text-align: left; }
-.sidebar-group-toggle:hover { color: var(--t1); }
-.sidebar-group-toggle > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-group-toggle .ico, .sidebar-project-toggle .ico { width: 11px; height: 11px; color: var(--t4); }
-.sidebar-group-toggle[aria-expanded="true"] .ico { transform: rotate(90deg); }
-.sidebar-group-count { flex: none; padding-right: 10px; color: var(--t4); font-size: 11px; font-variant-numeric: tabular-nums; }
-.sidebar-view-button { display: none; place-items: center; flex: none; width: 22px; height: 22px; margin-right: 4px; border-radius: var(--r-sm); color: var(--t3); }
-.sidebar-view-button .ico { width: 13px; height: 13px; }
-.sidebar-view-button:hover, .sidebar-view-button.on { background: var(--surface2); color: var(--t1); }
-:is(.sidebar-project-header, .sidebar-group-row):is(:hover, :focus-within) .sidebar-view-button, .sidebar-view-button.on { display: grid; }
-:is(.sidebar-project-header, .sidebar-group-row):is(:hover, :focus-within) :is(.sidebar-group-count, .sidebar-project-state), :is(.sidebar-project-header, .sidebar-group-row):has(.sidebar-view-button.on) :is(.sidebar-group-count, .sidebar-project-state) { display: none; }
-.sidebar-view-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 1px; padding: 2px 4px 6px 10px; }
-.sidebar-view-label { padding-right: 4px; color: var(--t4); font-size: 11.5px; }
-.sidebar-view-label:not(:first-child) { padding-left: 8px; }
-.sidebar-view-opt { height: 22px; padding: 0 7px; border-radius: var(--r-sm); color: var(--t3); font-size: 12px; transition: background-color 140ms var(--ease), color 140ms var(--ease); }
-.sidebar-view-opt:hover { color: var(--t1); background: var(--surface2); }
-.sidebar-view-opt.on { color: var(--t1); background: var(--tone2); }
-.sidebar-view-archived { margin-left: auto; }
-.sidebar-project-toggle { display: grid; place-items: center; flex: none; width: 23px; height: 30px; padding-left: 6px; color: var(--t3); border-radius: 6px; }
-.sidebar-project-toggle[aria-expanded="true"] .ico { transform: rotate(90deg); }
-.sidebar-project-name { display: flex; align-items: center; flex: 1; min-width: 0; height: 30px; gap: 8px; padding: 0 8px 0 0; color: var(--t3); text-align: left; font-size: 12px; font-weight: 500; border-radius: 6px; }
-.sidebar-project-name:hover { color: var(--t1); }
-.sidebar-project-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Group headings are rows at chat size: a project's folder (shut or open
+   with it) or the group's own mark, then its name in full ink. The whole
+   row folds. Pointing at one trades its count for + and Group and sort. */
+.sidebar-project-header, .sidebar-group-row { position: relative; display: flex; align-items: center; min-width: 0; height: 32px; margin-top: 6px; border-radius: var(--r); transition: background-color 140ms var(--ease); }
+:is(.sidebar-project-header, .sidebar-group-row):hover { background: var(--tone2); }
+.sidebar-project-name, .sidebar-group-toggle { display: flex; align-items: center; flex: 1; min-width: 0; height: 32px; gap: 9px; padding: 0 8px 0 9px; color: var(--t1); text-align: left; font-size: 13.5px; font-weight: 500; border-radius: var(--r); }
+:is(.sidebar-project-name, .sidebar-group-toggle) > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(.sidebar-project-name, .sidebar-group-toggle)[aria-expanded="false"] { color: var(--t2); }
+.sidebar-group-icon { width: 16px; height: 16px; flex: none; color: var(--t2); stroke-width: 1.6; }
+[aria-expanded="false"] > .sidebar-group-icon { color: var(--t3); }
 .sidebar-project-name[draggable="true"] { cursor: grab; }
 .sidebar-project-name[draggable="true"]:active { cursor: grabbing; }
-.sidebar-project.active .sidebar-project-name { color: var(--t2); }
+.sidebar-group-count { flex: none; padding-right: 10px; color: var(--t4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.sidebar-view-button, .sidebar-project-new { display: none; place-items: center; flex: none; width: 24px; height: 24px; margin-right: 2px; border-radius: var(--r-sm); color: var(--t2); }
+.sidebar-view-button { margin-right: 4px; }
+:is(.sidebar-view-button, .sidebar-project-new) .ico { width: 14px; height: 14px; }
+:is(.sidebar-view-button, .sidebar-project-new):hover, .sidebar-view-button.on { background: var(--tone2); color: var(--t1); }
+:is(.sidebar-project-header, .sidebar-group-row):is(:hover, :focus-within) :is(.sidebar-view-button, .sidebar-project-new), .sidebar-view-button.on, .sidebar-project-header:has(.sidebar-view-button.on) .sidebar-project-new { display: grid; }
+:is(.sidebar-project-header, .sidebar-group-row):is(:hover, :focus-within) :is(.sidebar-group-count, .sidebar-project-state), :is(.sidebar-project-header, .sidebar-group-row):has(.sidebar-view-button.on) :is(.sidebar-group-count, .sidebar-project-state) { display: none; }
+/* A group's chats hang from its heading on a hairline guide, the same line
+   the conversation draws under its steps; the open chat lights its piece. */
+:is(.sidebar-project-chats, .sidebar-group-chats, .sidebar-agent-rows) { margin-left: 17px; box-shadow: -1px 0 0 var(--hair2); }
+:is(.sidebar-project-chats, .sidebar-group-chats) :is(.sidebar-session, .sidebar-deed) { padding-left: 9px; border-radius: 0 var(--r) var(--r) 0; }
+:is(.sidebar-project-chats, .sidebar-group-chats) :is(.sidebar-session, .sidebar-deed).selected { box-shadow: -1px 0 0 var(--t2); }
+:is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-more { padding-left: 12px; border-radius: 0 var(--r) var(--r) 0; }
+:is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-rename { padding-left: 9px; border-radius: 0 var(--r) var(--r) 0; }
+/* Group and sort unfolds under its heading at reading size, on the guide. */
+.sidebar-view-line { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 6px 17px; padding: 4px 0 4px 10px; box-shadow: -1px 0 0 var(--hair2); }
+.sidebar-view-row { display: flex; align-items: center; gap: 1px; height: 30px; }
+.sidebar-view-label { flex: none; width: 42px; color: var(--t4); font-size: 12px; }
+.sidebar-view-opt { height: 26px; padding: 0 7px; border-radius: var(--r-sm); color: var(--t3); font-size: 13px; transition: background-color 140ms var(--ease), color 140ms var(--ease), box-shadow 140ms var(--ease); }
+.sidebar-view-opt:hover { color: var(--t1); }
+.sidebar-view-opt.on { color: var(--t1); background: var(--surface2); box-shadow: 0 0 0 1px var(--hair2); }
+.sidebar-view-archived { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 8px 0 0; border-radius: var(--r-sm); color: var(--t2); font-size: 13px; text-align: left; }
+.sidebar-view-archived:hover { color: var(--t1); }
+.sidebar-view-count { color: var(--t4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 /* A project's line ends in its state: branches to review in green, the
    amber ring when a chat needs you, a spinner, or when it last moved. */
 .sidebar-project-state { flex: none; display: inline-flex; align-items: center; padding-right: 8px; color: var(--t4); font-size: 11px; font-variant-numeric: tabular-nums; }
 .sidebar-project-state .sidebar-session-mark { margin: 0; }
+.sidebar-project-branch { gap: 4px; max-width: 96px; font-size: 11.5px; }
+.sidebar-project-branch > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-project-branch .sidebar-branch { width: 12px; height: 12px; flex: none; }
 .sidebar-project-review { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; margin-right: 6px; padding: 0 7px; border-radius: 10px; background: var(--ok-soft); color: var(--ok); font-size: 11px; font-variant-numeric: tabular-nums; transition: background-color 140ms var(--ease); }
 .sidebar-project-review:hover { background: color-mix(in srgb, var(--ok) 20%, transparent); }
 .sidebar-project-review .sidebar-branch { width: 11px; height: 11px; color: currentColor; }
@@ -114,7 +124,7 @@ html[data-theme="demesne-light"] .agent-mark[data-provider="gemini"] { backgroun
 .sidebar-agents { flex: none; display: inline-flex; align-items: center; height: 24px; margin-right: 6px; padding: 0 3px; border-radius: var(--r-sm); transition: background-color 140ms var(--ease); }
 .sidebar-agents:hover, .sidebar-agents[aria-expanded="true"] { background: var(--tone2); }
 .sidebar-agents .agent-mark + .agent-mark { margin-left: -4px; box-shadow: 0 0 0 2px var(--side); }
-.sidebar-agent-rows { margin: 0 0 2px 12px; padding-left: 3px; border-left: 1px solid var(--line); }
+.sidebar-agent-rows { margin-bottom: 2px; padding-left: 3px; }
 .sidebar-agent-row { position: relative; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 6px; border-radius: var(--r); color: var(--t2); font-size: 12.5px; white-space: nowrap; }
 .sidebar-agent-row:hover { background: var(--surface2); }
 .sidebar-agent-row > span:not(.agent-mark) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -124,10 +134,9 @@ html[data-theme="demesne-light"] .agent-mark[data-provider="gemini"] { backgroun
 .approval-row.overlap code { flex: none; }
 @media (prefers-reduced-motion: no-preference) {
   :is(.sidebar-project-chats, .sidebar-group-chats).unfolding { animation: sidebar-unfold 200ms var(--ease); }
-  .sidebar-project-toggle .ico, .sidebar-group-toggle .ico { transition: transform 160ms var(--ease); }
 }
 @keyframes sidebar-unfold { from { opacity: 0; transform: translateY(-4px); } }
-.sidebar-project-chats .sidebar-empty, .sidebar-group-chats .sidebar-empty { padding: 5px 10px 5px 34px; font-size: 12px; }
+.sidebar-project-chats .sidebar-empty, .sidebar-group-chats .sidebar-empty { padding: 5px 10px 5px 12px; font-size: 12px; }
 .sidebar-lead { margin-top: 6px; }
 /* A pinned chat with nothing to say carries the pin as its mark. */
 .sidebar-pin-mark { display: grid; place-items: center; flex: none; width: 16px; color: var(--t4); }

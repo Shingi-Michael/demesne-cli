@@ -128,6 +128,20 @@ export class DemesneClient {
   async permissionAsks(workspace: string): Promise<import("@demesne/protocol").PermissionAsksResponse> {
     return this.request(`/v1/permissions/asks?workspace=${encodeURIComponent(workspace)}`);
   }
+  /// The model sub-agents run on (null: the chat's own), and the ones they may.
+  async subagentModel(): Promise<{ model: string | null; models: { id: string; provider: string }[] }> {
+    return this.request("/v1/subagent-model");
+  }
+  async setSubagentModel(model: string | null): Promise<{ model: string | null; models: { id: string; provider: string }[]; saved: boolean }> {
+    return this.request("/v1/subagent-model", { method: "POST", body: JSON.stringify({ model }) });
+  }
+  /// The folders you trust, and taking one back.
+  async trusted(): Promise<import("@demesne/protocol").TrustedResponse> {
+    return this.request("/v1/trusted");
+  }
+  async forgetTrusted(root: string): Promise<import("@demesne/protocol").TrustedResponse> {
+    return this.request("/v1/trusted/forget", { method: "POST", body: JSON.stringify({ root }) });
+  }
   /// The project's Deed: its sentences and the state of each.
   async deed(workspace: string): Promise<import("@demesne/protocol").DeedResponse> {
     return this.request(`/v1/deed?workspace=${encodeURIComponent(workspace)}`);

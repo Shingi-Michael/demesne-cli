@@ -13,9 +13,9 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
-import { userInfo } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted } from "@demesne/client";
-import { updateUserConfig } from "@demesne/config";
+import { DEFAULT_AGENT_LIMITS, loadConfig, parseConfigFile, updateUserConfig } from "@demesne/config";
 import {
   themeByName,
   themeNames,
@@ -38,6 +38,7 @@ import { loadCliSettings, type CliSettings } from "@demesne/setup/cli-config.ts"
 import {
   createDaemonControlDependencies,
   startDaemon,
+  stopDaemon,
 } from "@demesne/setup/daemon-control.ts";
 import { replaySession } from "@demesne/workbench/history.ts";
 import { expandMentions } from "./prompt-editor.ts";
@@ -57,6 +58,8 @@ import { pointSourceIn } from "./point-source.ts";
 import type { PointPick } from "./point.ts";
 import { WorkspaceSession } from "./session-model.ts";
 import { lastAsk, waitingAsk, type AwayAsk } from "./away.ts";
+import { DEFAULT_DRIVE_LIMITS } from "@demesne/protocol";
+import { SETTINGS_KEYS, type SettingsInfo } from "./settings-page.ts";
 
 export interface WorkspaceHostOptions {
   workspace?: string;
@@ -448,7 +451,7 @@ export class WorkspaceHost {
       this.publish();
     }
   }
-  async startDaemon() {
+  private daemonControl() {
     const host = new URL(this.client.server).hostname;
     if (!["127.0.0.1", "localhost", "[::1]", "::1"].includes(host))
       throw new Error("Start the remote daemon on its host.");
@@ -456,13 +459,14 @@ export class WorkspaceHost {
     const bundled = join(dirname(process.execPath), "../demesned");
     if (!env.DEMESNE_DAEMON_BIN && existsSync(bundled))
       env.DEMESNE_DAEMON_BIN = bundled;
-    const result = await startDaemon(
-      createDaemonControlDependencies(
-        this.client.server,
-        this.settings.dataDirectory,
-        env,
-      ),
+    return createDaemonControlDependencies(
+      this.client.server,
+      this.settings.dataDirectory,
+      env,
     );
+  }
+  async startDaemon() {
+    const result = await startDaemon(this.daemonControl());
     if (!result.health) throw new Error(result.message);
     this.client = new DemesneClient({
       server: this.client.server,
@@ -823,6 +827,47 @@ export class WorkspaceHost {
       updateUserConfig(this.settings.configPath, { permissions: { allow: [...allow, rule] } });
       allow.push(rule);
     }
+  }
+  /// Settings the daemon reads only when it starts, changed since it did.
+  private restartFor = new Set<string>();
+  /// Reads config.toml again after Settings wrote it; where the daemon and
+  /// its data live stays as it was.
+  private reloadSettings() {
+    this.settings = { ...this.settings, loaded: loadConfig({ workspaceRoot: this.workspace }) };
+  }
+  /// The document in your own config.toml, not the project's.
+  private userConfig(): Record<string, unknown> {
+    try { return existsSync(this.settings.configPath) ? parseConfigFile(this.settings.configPath) : {}; }
+    catch { return {}; }
+  }
+  private userAllowRules(): string[] {
+    const permissions = this.userConfig().permissions;
+    return isRecord(permissions) && Array.isArray(permissions.allow) ? permissions.allow.filter((rule): rule is string => typeof rule === "string") : [];
+  }
+  /// Everything Settings shows that lives in config.toml or the daemon.
+  private async settingsInfo(): Promise<SettingsInfo> {
+    const config = this.settings.loaded.config, mine = new Set(this.userAllowRules());
+    const user = this.userConfig(), userMcp = isRecord(user.mcp) && isRecord(user.mcp.servers) ? user.mcp.servers : {};
+    const [trusted, subagent] = await Promise.all([
+      this.client.trusted().then((result) => result.trusted).catch(() => null),
+      this.client.subagentModel().catch(() => null),
+    ]);
+    const limits = config.drive ?? {};
+    return {
+      home: homedir(),
+      configPath: this.settings.configPath,
+      dataDirectory: this.settings.dataDirectory,
+      server: this.client.server,
+      allow: config.permissions.allow.map((rule) => ({ rule, mine: mine.has(rule) })),
+      trusted,
+      subagent: subagent ? { model: subagent.model, models: subagent.models } : { model: config.agent?.subagentModel ?? null, models: [] },
+      agent: { maxModelRounds: config.agent?.maxModelRounds ?? DEFAULT_AGENT_LIMITS.maxModelRounds, maxToolCalls: config.agent?.maxToolCalls ?? DEFAULT_AGENT_LIMITS.maxToolCalls },
+      drive: { maxActiveMinutes: limits.maxActiveMinutes ?? DEFAULT_DRIVE_LIMITS.maxActiveMinutes, maxTokens: limits.maxTokens ?? DEFAULT_DRIVE_LIMITS.maxTokens, maxTasks: limits.maxTasks ?? DEFAULT_DRIVE_LIMITS.maxTasks },
+      images: config.images?.url ? { model: config.images.model ?? null } : null,
+      heartbeat: config.heartbeat?.enabled !== false,
+      mcp: Object.entries(config.mcp.servers).map(([name, server]) => ({ name, command: [server.command, ...(server.args ?? [])].join(" "), mine: name in userMcp })),
+      restart: [...this.restartFor],
+    };
   }
   /// Chats in the background that wait on an approval or an answer: the
   /// sidebar marks them amber, as it does the open one.
@@ -1731,6 +1776,66 @@ export class WorkspaceHost {
       const path = join(directory, `${this.current!.session.id}.${format}`);
       writeFileSync(path, content, { mode: 0o600 });
       return { path };
+    }
+    if (method === "settings-info") return this.settingsInfo();
+    // One setting from Settings, written to your config.toml.
+    if (method === "settings-config") {
+      const key = string(args.key, "setting", 80), spec = SETTINGS_KEYS[key];
+      if (!spec) throw new Error("Unknown setting");
+      const value = args.value;
+      if (value === null ? !spec.clear : spec.kind === "bool" ? typeof value !== "boolean"
+        : spec.kind === "int" ? !(typeof value === "number" && Number.isInteger(value) && value > 0 && value <= spec.max!)
+        : !(typeof value === "string" && value.trim() && value.length <= 200)) throw new Error(spec.kind === "int" ? `Type a whole number from 1 to ${spec.max!.toLocaleString("en-US")}.` : "Invalid value");
+      const [section, field] = key.split(".") as [string, string];
+      updateUserConfig(this.settings.configPath, { [section]: { [field]: typeof value === "string" ? value.trim() : value } });
+      this.reloadSettings();
+      if (spec.restart) this.restartFor.add(key);
+      return this.settingsInfo();
+    }
+    if (method === "subagent-model") {
+      const model = args.model === null ? null : string(args.model, "model", 200);
+      await this.client.setSubagentModel(model);
+      this.reloadSettings();
+      return this.settingsInfo();
+    }
+    // Ask again: a rule it learned from your yeses goes back to asking.
+    if (method === "allow-rule-remove") {
+      const rule = string(args.rule, "rule", 2000);
+      const mine = this.userAllowRules();
+      if (!mine.includes(rule)) throw new Error("This rule is in the project's config; remove it there.");
+      updateUserConfig(this.settings.configPath, { permissions: { allow: mine.filter((item) => item !== rule) } });
+      this.reloadSettings();
+      return this.settingsInfo();
+    }
+    if (method === "trusted-forget") {
+      await this.client.forgetTrusted(string(args.root, "folder", 4096));
+      return this.settingsInfo();
+    }
+    // A connector: an MCP server the daemon starts, written as a command line.
+    if (method === "mcp-add" || method === "mcp-remove") {
+      const name = string(args.name, "name", 64).trim();
+      if (!/^[a-z0-9][a-z0-9-]*$/i.test(name)) throw new Error("A name is letters, digits and dashes, like github.");
+      if (method === "mcp-add") {
+        const words = string(args.command, "command", 2000).trim().split(/\s+/).filter(Boolean);
+        if (!words.length) throw new Error("Type the command that starts the server.");
+        updateUserConfig(this.settings.configPath, { mcp: { servers: { [name]: { command: words[0], ...(words.length > 1 ? { args: words.slice(1) } : {}) } } } });
+      } else updateUserConfig(this.settings.configPath, { mcp: { servers: { [name]: null } } });
+      this.reloadSettings();
+      this.restartFor.add(`mcp.${name}`);
+      return this.settingsInfo();
+    }
+    // Stops and starts the daemon so it reads config.toml again. Never while
+    // a turn or Drive is working: restarting would cut it off.
+    if (method === "restart-daemon") {
+      const busy = this.sessions.some((session) => ["running", "queued"].includes(session.turns.at(-1)?.status ?? ""))
+        || (this.driveState && ["running", "waiting", "blocked"].includes(this.driveState.status));
+      if (busy) throw new Error("Something is working. Restart the daemon when it is done.");
+      const control = this.daemonControl();
+      const stopped = await stopDaemon(control);
+      if (!stopped.stopped && stopped.message !== "Daemon is not running.") throw new Error(stopped.message);
+      await this.startDaemon();
+      this.restartFor.clear();
+      return this.settingsInfo();
     }
     if (method === "open-link") {
       const url = new URL(string(args.url, "link", 8000));

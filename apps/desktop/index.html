@@ -25,11 +25,12 @@
         <div id="sidebar-sessions" role="navigation" aria-label="Conversations"></div>
         <div id="sidebar-chats" role="navigation" aria-label="Just a chat" hidden></div>
       </nav>
+      <nav id="settings-nav" aria-label="Settings" hidden></nav>
       <div id="sidebar-order-status" role="status" class="sidebar-order-status"></div>
       <div class="sidebar-foot">
         <span class="sidebar-avatar" id="sidebar-avatar" aria-hidden="true"></span><span class="sidebar-you" id="sidebar-you"></span><small class="sidebar-plan" id="sidebar-plan"></small>
         <button type="button" id="sidebar-theme" class="sidebar-foot-button" data-action="theme-flip" aria-label="Light theme" title="Light theme"></button>
-        <button type="button" class="sidebar-settings sidebar-foot-button" data-action="overlay" data-args='{"name":"settings"}' aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+        <button type="button" class="sidebar-settings sidebar-foot-button" data-action="page-open" data-args='{"page":"settings"}' aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
       </div>
       <div class="sidebar-rail" aria-label="Collapsed navigation">
         <button type="button" class="rail-mark" id="rail-expand" aria-label="Show sidebar" title="Show sidebar"><span class="project-mark" aria-hidden="true">d.</span></button>
@@ -38,7 +39,7 @@
         <button type="button" class="rail-button" id="rail-review" data-action="review-open" data-args='{"show":true}' aria-label="Branches to review" title="Branches to review" hidden><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg><i class="rail-badge blue"></i></button>
         <div class="rail-foot">
           <button type="button" class="rail-ring" id="rail-drive" data-action="drive-open" aria-label="Drive" title="Drive" hidden><i></i></button>
-          <button type="button" class="rail-button" data-action="overlay" data-args='{"name":"settings"}' aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg></button>
+          <button type="button" class="rail-button" data-action="page-open" data-args='{"page":"settings"}' aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg></button>
         </div>
       </div>
     </aside>

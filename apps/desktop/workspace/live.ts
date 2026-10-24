@@ -17,6 +17,7 @@ import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointe
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
+import { isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
 import { deedPage, editLine, findHits, isLive, numberOf, toCheck, type DeedFilter, type DeedUi } from "./deed-view.ts";
 import type { Deed, DeedAction, DeedPeek, Routine } from "@demesne/protocol";
@@ -35,7 +36,6 @@ import type {
 
 type Snapshot = ReturnType<WorkspaceHost["snapshot"]>;
 type OverlayName =
-  | "settings"
   | "models"
   | "themes"
   | "providers"
@@ -669,7 +669,7 @@ function renderSidebar() {
     (sameControl ?? (focused >= 0 ? buttons[Math.min(focused, buttons.length - 1)] : null) ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
   }
   const title = document.getElementById("workspace-title");
-  if (title) { title.textContent = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "customize" ? "Customize" : pageOpen ? "All chats" : deedOpen ? "Deed" : inSession() ? current?.title ?? "Conversation" : "Home"; title.title = title.textContent; }
+  if (title) { title.textContent = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen ? "All chats" : deedOpen ? "Deed" : inSession() ? current?.title ?? "Conversation" : "Home"; title.title = title.textContent; }
   // A mission's chat says where it came from, and goes back there.
   const crumb = document.getElementById("workspace-from"), from = current && inSession() ? parentOf.get(current.id) : undefined;
   if (crumb) {
@@ -835,7 +835,8 @@ function card(name: string, title: string, summary: string, body: string) {
   return `<section class="card${folded ? " folded" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${!folded}"><span class="card-title">${title}</span>${ICON_CHEVRON}<span class="card-sum">${summary}</span></button>${folded ? "" : `<div class="card-body">${body}</div>`}</section>`;
 }
 function renderCards() {
-  const shown = Boolean(state) && cardsOn && inSession();
+  // A page in place of the chat (Settings, Customize…) hides the chat's cards.
+  const shown = Boolean(state) && cardsOn && inSession() && !pageOpen;
   el("app").classList.toggle("cards-on", shown);
   const aside = el("cards");
   aside.hidden = !shown;
@@ -993,6 +994,7 @@ function renderStatus() {
     inSession(),
     driveWord(),
     cardsOn,
+    pageOpen,
   ]);
   renderCards();
   if (signature === statusSignature) return;
@@ -1012,12 +1014,12 @@ function renderStatus() {
   el("composer-context").hidden = !inSession() || !c2;
   renderContextCard();
   el("status").innerHTML =
-    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
+    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("page-open", `${k("Tab")} settings`, { page: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   // The top bar carries the session's branch and ⋯, which opens the
   // session's own view (rename, compact, history). The sidebar shows what
   // needs you; Drive lives in its footer.
   el("header").innerHTML =
-    `<div class="header-state">${branchChip()}</div>${inSession() ? `<button type="button" class="header-cards${cardsOn ? " on" : ""}" data-action="cards-toggle" aria-label="Cards" aria-pressed="${cardsOn}" title="${cardsOn ? "Hide" : "Show"} cards">${ICON_PANEL}</button>` : ""}${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+    `<div class="header-state">${pageOpen ? "" : branchChip()}</div>${inSession() && !pageOpen ? `<button type="button" class="header-cards${cardsOn ? " on" : ""}" data-action="cards-toggle" aria-label="Cards" aria-pressed="${cardsOn}" title="${cardsOn ? "Hide" : "Show"} cards">${ICON_PANEL}</button>` : ""}${inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
 }
 function totals(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -1857,8 +1859,8 @@ async function deedAct(request: DeedAction) {
   keepDeed(workspace, await api<Deed | null>("deed-act", { workspace, request }));
 }
 /// A page in place of the conversation, opened from the sidebar: All chats
-/// (Active or Archived), Scheduled, or Customize. "" when closed.
-type PageKind = ChatsTab | "scheduled" | "customize";
+/// (Active or Archived), Scheduled, Customize or Settings. "" when closed.
+type PageKind = ChatsTab | "scheduled" | "customize" | "settings";
 let pageOpen: "" | PageKind = "";
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;
@@ -1893,6 +1895,116 @@ async function editCustomizable(path: string) {
   renderPage();
   document.querySelector<HTMLTextAreaElement>("#page .cz-edit textarea")?.focus({ preventScroll: true });
 }
+/// Settings: the section shown, the search, the row whose words are unfolded,
+/// and what the host read from config.toml and the daemon.
+const settingsUi = { section: "general" as SettingsSection, query: "", fold: "", error: "" };
+let settingsInfo: SettingsInfo | null = null, usageScores: ModelScore[] | null = null,
+  /// The window's zoom, read from the desktop shell when Settings opens.
+  zoomLevel: number | null = null;
+/// Settings › General, kept on this device.
+let openOn: "home" | "last" = "home", keepAwake = true;
+try { if (localStorage.getItem("demesne-open-on") === "last") openOn = "last"; if (localStorage.getItem("demesne-awake") === "off") keepAwake = false; } catch {}
+async function settingsCall(method: string, args: Record<string, unknown> = {}) {
+  try {
+    settingsInfo = await api<SettingsInfo>(method, args);
+    settingsUi.error = "";
+  } catch (error) {
+    settingsUi.error = error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error);
+  }
+  renderPage();
+}
+function loadSettings() {
+  void settingsCall("settings-info");
+  void loadArchived();
+  void api("providers-refresh").catch(() => {});
+  void api<ModelScoreboardResponse>("model-scores").then((result) => { usageScores = result.models; renderPage(); }, () => { usageScores = usageScores ?? []; renderPage(); });
+  if (window.demesne.mode === "desktop")
+    void api<{ zoom?: number }>("desktop-zoom").then((result) => { zoomLevel = typeof result?.zoom === "number" ? result.zoom : null; renderPage(); }, () => {});
+}
+function settingsView(): SettingsView {
+  const s = state!, session = s.session;
+  const here = document.getElementById("sidebar-sessions")?.dataset.workspace || s.workspace;
+  const mode = !session ? null : s.planOnly ? "plan" : session.autoApprove ? "auto" : session.acceptEdits ? "edits" : "ask";
+  return {
+    section: settingsUi.section, query: settingsUi.query, fold: settingsUi.fold, error: settingsUi.error,
+    mac: /Mac/i.test(navigator.platform), desktop: window.demesne.mode === "desktop", home: settingsInfo?.home ?? "",
+    info: settingsInfo,
+    general: { openOn, awake: keepAwake },
+    notify: notifyOn,
+    appearance: { theme: s.theme, themes: s.themes.map((name) => ({ name, label: s.themeOptions.find((item) => item.name === name)?.label ?? name })), canUndo: s.themeCanUndo, zoom: zoomLevel },
+    archived: archivedChats,
+    usage: usageScores,
+    modelWords,
+    permissions: { mode, asks: s.asks },
+    drive: { project: isPlain() ? "" : projectLabel(here), auto: isPlain() ? null : s.breakage.auto },
+    model: { words: modelWords(s.model), provider: s.model.provider ?? "", reasoning: s.reasoning ?? "", chatgpt: s.model.provider === "ChatGPT" ? s.chatgptAccount?.email ?? s.chatgptAccount?.label ?? "" : null },
+    providers: s.providers,
+    connectors: s.connectors,
+    agents: s.agents,
+    chats: { here: s.sessions.filter((item) => item.workspace === here && item.turns).length, all: s.sessions.filter((item) => item.turns).length },
+    online: s.connection === "online",
+  };
+}
+/// The sidebar holds Settings' list while it is open; the search keeps the
+/// keyboard and its caret across a redraw.
+let settingsNavHtml = "";
+function renderSettingsNav() {
+  const sidebar = document.getElementById("desktop-sidebar"), nav = document.getElementById("settings-nav");
+  if (!sidebar || !nav) return;
+  const open = pageOpen === "settings";
+  sidebar.classList.toggle("settings-open", open);
+  nav.hidden = !open;
+  if (!open) { settingsNavHtml = ""; return; }
+  const html = settingsNav({ section: settingsUi.section, query: settingsUi.query, archived: archivedChats, info: settingsInfo });
+  if (html === settingsNavHtml) return;
+  const search = document.activeElement?.id === "settings-search" ? (document.activeElement as HTMLInputElement) : null, at = search?.selectionStart ?? 0;
+  nav.innerHTML = settingsNavHtml = html;
+  if (search) { const again = el<HTMLInputElement>("settings-search"); again.focus({ preventScroll: true }); again.setSelectionRange(at, at); }
+}
+function settingsSection(id: SettingsSection) {
+  settingsUi.section = id;
+  settingsUi.query = settingsUi.fold = "";
+  const search = document.getElementById("settings-search") as HTMLInputElement | null;
+  if (search) search.value = "";
+  if (id === "usage" || id === "archived" || id === "permissions" || id === "data") loadSettings();
+  renderPage();
+  document.getElementById("page")?.scrollTo?.({ top: 0 });
+}
+/// A number typed in Settings, saved when you press Enter or leave the field.
+function saveSettingsNumber(input: HTMLInputElement) {
+  const value = parseNumber(input.value), was = Number(input.dataset.value);
+  if (value === was) { input.value = was.toLocaleString("en-US"); return; }
+  if (value === null || value <= 0) { input.value = was.toLocaleString("en-US"); settingsUi.error = "Type a whole number, like 400k or 2M."; renderPage(); return; }
+  void settingsCall("settings-config", { key: input.dataset.key, value });
+}
+/// Keeps the Mac awake while a turn or Drive runs, when Settings says so.
+let awakeAsked: boolean | null = null;
+function renderAwake() {
+  if (!state || window.demesne.mode !== "desktop") return;
+  const working = keepAwake && state.connection === "online" && (Boolean(state.activeTurnId)
+    || state.sessions.some((item) => item.status === "running" || item.status === "queued")
+    || ["running", "waiting"].includes(state.drive?.status ?? "") || reviewJobs().some((job) => job.status === "running"));
+  if (working === awakeAsked) return;
+  awakeAsked = working;
+  void api("desktop-awake", { on: working }).catch(() => {});
+}
+/// Open on Last chat: the chat you were in when the window last closed.
+let lastChatOpened = false;
+function renderLastChat() {
+  if (!state || state.connection !== "online") return;
+  const session = state.session;
+  if (!lastChatOpened) {
+    lastChatOpened = true;
+    let saved: { id?: string; path?: string } | null = null;
+    try { saved = JSON.parse(localStorage.getItem("demesne-last-chat") ?? "null"); } catch {}
+    if (openOn === "last" && saved?.id && saved.id !== session?.id && state.sessions.some((item) => item.id === saved!.id)) {
+      const here = !saved.path || saved.path === state.workspace;
+      void act(() => dispatch(here ? "select-session" : "project-session", here ? { id: saved!.id } : { id: saved!.id, path: saved!.path }));
+      return;
+    }
+  }
+  if (session && inSession()) try { localStorage.setItem("demesne-last-chat", JSON.stringify({ id: session.id, path: session.workspace?.root ?? null })); } catch {}
+}
 function openPage(kind: "" | PageKind) {
   if (kind && deedOpen) openDeed(false);
   const was = pageOpen;
@@ -1901,9 +2013,12 @@ function openPage(kind: "" | PageKind) {
   if (kind === "active" || kind === "archived") void loadArchived();
   if (kind === "scheduled") { if (was !== "scheduled") routineUi.error = ""; void loadRoutines(); }
   if (kind === "customize") { if (was !== "customize") Object.assign(customizeUi, { editing: null, error: "" }); void loadCustomize(); }
+  if (kind === "settings" && was !== "settings") { Object.assign(settingsUi, { query: "", fold: "", error: "" }); loadSettings(); }
   if (state) renderState({ ...state });
   if (kind === "active" || kind === "archived") document.querySelector<HTMLElement>("#page .cp-tab.on")?.focus({ preventScroll: true });
   if (kind === "scheduled") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
+  if (kind === "settings" && was !== "settings") document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
+  if (!kind && was === "settings") document.querySelector<HTMLElement>(".sidebar-settings")?.focus({ preventScroll: true });
 }
 async function loadArchived() {
   try {
@@ -1929,6 +2044,7 @@ async function loadRoutines(method = "routines", args: Record<string, unknown> =
   if (method === "routine-add") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
 }
 function renderPage() {
+  renderSettingsNav();
   const root = document.getElementById("page");
   if (!root || !state || !pageOpen) return;
   const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace;
@@ -1942,6 +2058,8 @@ function renderPage() {
     const area = root.querySelector<HTMLTextAreaElement>(".cz-edit textarea");
     if (area && customizeUi.editing?.text != null) customizeUi.editing.text = area.value;
     html = customizePage(customizeData, customizeUi, state.connectors, /Mac/i.test(navigator.platform));
+  } else if (pageOpen === "settings") {
+    html = settingsPage(settingsView());
   } else if (pageOpen === "active" || pageOpen === "archived") {
     const active = state.sessions.filter((item) => item.turns && !deletedSessions.has(item.id)).map((item) => ({ id: item.id, title: item.title, at: item.updatedAt, workspace: item.workspace ?? null, here: item.workspace === here }));
     html = chatsPageHtml(pageOpen, active, archivedChats);
@@ -1959,9 +2077,26 @@ function renderPage() {
     if (again) { again.value = field.value; again.focus({ preventScroll: true }); again.setSelectionRange(field.at, field.at); again.scrollTop = field.scroll; }
   }
 }
+// A number in Settings saves on Enter, or when you leave it.
+document.getElementById("page")?.addEventListener("focusout", (event) => {
+  const input = event.target as HTMLElement;
+  if (input instanceof HTMLInputElement && input.closest(".st-num")) saveSettingsNumber(input);
+});
+document.getElementById("settings-nav")?.addEventListener("input", (event) => {
+  const input = event.target as HTMLInputElement;
+  if (input.id !== "settings-search") return;
+  settingsUi.query = input.value;
+  settingsUi.fold = "";
+  renderPage();
+});
 // ⌘↵ saves the file being edited.
 document.getElementById("page")?.addEventListener("keydown", (event) => {
   const area = event.target as HTMLElement;
+  if (event.key === "Enter" && area instanceof HTMLInputElement && area.closest(".st-num")) {
+    event.preventDefault();
+    area.blur();
+    return;
+  }
   if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && area.matches(".cz-edit textarea")) {
     event.preventDefault();
     area.closest("form")?.requestSubmit();
@@ -1990,6 +2125,19 @@ document.getElementById("page")?.addEventListener("submit", (event) => {
       await loadCustomize();
       await editCustomizable((made as { path: string }).path);
     });
+    return;
+  }
+  // Settings › Connectors: a name and the command that starts the server.
+  if (form.id === "mcp-new") {
+    event.preventDefault();
+    const name = form.querySelector<HTMLInputElement>('[name="name"]')?.value.trim() ?? "", command = form.querySelector<HTMLInputElement>('[name="command"]')?.value.trim() ?? "";
+    if (name && command) void settingsCall("mcp-add", { name, command }).then(() => { if (!settingsUi.error) form.reset(); });
+    return;
+  }
+  if (form.classList.contains("st-text")) {
+    event.preventDefault();
+    const value = form.querySelector("input")?.value.trim() ?? "";
+    if (value) void settingsCall("settings-config", { key: form.dataset.key, value });
     return;
   }
   if (form.id !== "routine-new") return;
@@ -3083,15 +3231,6 @@ async function openOverlay(name: OverlayName, query = "") {
     return;
   }
   if (name === "cleanup") void act(() => api("cleanup-scan"));
-  if (name === "settings") {
-    void act(() => api("providers-refresh"));
-    if (window.demesne.mode === "desktop")
-      void api<{ zoom?: number }>("desktop-zoom").then((result) => {
-        zoomLevel = typeof result?.zoom === "number" ? result.zoom : null;
-        overlaySignature = "";
-        renderOverlay();
-      }, () => {});
-  }
   if (name === "models") {
     modelLevels.clear();
     modelIndexPending = true;
@@ -3207,166 +3346,22 @@ function renderModelPopover(hidden: number) {
     (overlayQuery ? `<div class="mp-hint">${k("↵")} switch ${k("↑↓")} choose ${k("Esc")} close</div>` : "") + `</div>`;
   el("overlay").querySelector(".mp-row.selected")?.scrollIntoView({ block: "nearest" });
 }
-/// Settings is one sheet: sections down the left, under a search that finds
-/// any setting, and the chosen section's rows on the right. Each row says
-/// what it changes and carries its own control, so nothing opens a menu.
-type SettingsRow = { title: string; description: string; control: string; keywords?: string };
-const SETTINGS_SECTIONS: { id: string; label: string; icon: string }[] = [
-  { id: "general", label: "General", icon: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>' },
-  { id: "appearance", label: "Appearance", icon: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18Z" fill="currentColor"/>' },
-  { id: "models", label: "Models", icon: '<rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>' },
-  { id: "providers", label: "Providers", icon: '<path d="M12 22v-5"/><path d="M9 8V2M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8Z"/>' },
-  { id: "conversations", label: "Conversations", icon: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/>' },
-];
-let settingsSection = "general",
-  /// The window's zoom, read from the desktop shell when Settings opens.
-  zoomLevel: number | null = null;
-const TEXT_SIZES: [string, number][] = [["Small", 0.9], ["Default", 1], ["Large", 1.1]];
-function settingsToggle(on: boolean, action: string, data: Record<string, unknown>, label: string) {
-  return `<button type="button" class="settings-toggle${on ? " on" : ""}" role="switch" aria-checked="${on}" aria-label="${h(label)}" data-action="${action}" data-args="${h(JSON.stringify(data))}"><i></i></button>`;
+/// Mac banners, each kind with its own switch in Settings › Notifications:
+/// a chat waits on you, stops with an error, Drive has a branch ready, a chat
+/// finishes. Nothing shows for the chat you are looking at, and the first
+/// look after opening only takes stock.
+let notifyOn: Record<NotifyKind, boolean> = notifyKinds(null, null);
+try { notifyOn = notifyKinds(localStorage.getItem("demesne-notify-kinds"), localStorage.getItem("demesne-notify")); } catch {}
+function setNotifyKind(kind: NotifyKind, on: boolean) {
+  notifyOn = { ...notifyOn, [kind]: on };
+  try { localStorage.setItem("demesne-notify-kinds", JSON.stringify(notifyOn)); } catch {}
 }
-function settingsSegments(options: [string, boolean, string, Record<string, unknown>][], label: string) {
-  return `<div class="settings-segments" role="group" aria-label="${h(label)}">${options.map(([text, on, action, data]) => `<button type="button" class="${on ? "on" : ""}" aria-pressed="${on}" data-action="${action}" data-args="${h(JSON.stringify(data))}">${h(text)}</button>`).join("")}</div>`;
-}
-function settingsRows(section: string): SettingsRow[] {
-  const s = state!;
-  if (section === "general")
-    return [
-      {
-        title: "Mode",
-        description: "Plan reads and proposes without changing files. Build may edit. Applies to this conversation.",
-        control: settingsSegments([["Build", !s.planOnly, "settings-set", { method: "mode", args: { planOnly: false } }], ["Plan", s.planOnly, "settings-set", { method: "mode", args: { planOnly: true } }]], "Mode"),
-        keywords: "plan build read only edits",
-      },
-      ...(s.session
-        ? [{
-            title: "Auto-approve",
-            description: "Skip permission prompts for edits, commands, deletions and publishing in this conversation. Plan stays read only.",
-            control: settingsToggle(!!s.session.autoApprove, "settings-set", { method: "auto-approve", args: { autoApprove: !s.session.autoApprove } }, "Auto-approve"),
-            keywords: "approvals permissions ask before edits",
-          }]
-        : []),
-      ...(window.demesne.mode === "desktop"
-        ? [{
-            title: "Notify me",
-            description: "Mac banners when a chat waits on you, stops with an error, or Drive has a branch ready. Always also tells you when a chat finishes.",
-            control: settingsSegments(NOTIFY_MODES.map(([mode, label]) => [label, notifyMode === mode, "notify-mode", { mode }] as [string, boolean, string, Record<string, unknown>]), "Notify me"),
-            keywords: "notifications banners alerts dock",
-          }]
-        : []),
-    ];
-  if (section === "appearance") {
-    const groups: [string, typeof s.themeOptions][] = [["Your themes", []], ["Dark", []], ["Light", []]];
-    for (const name of s.themes) {
-      const option = s.themeOptions.find((item) => item.name === name) ?? { name, label: name };
-      const group = name.startsWith("custom-") ? 0 : /light|latte/.test(name) ? 2 : 1;
-      groups[group]![1].push(option as (typeof s.themeOptions)[number]);
-    }
-    const select = `<div class="settings-select"><select id="settings-theme" aria-label="Theme">${groups.filter(([, items]) => items.length).map(([label, items]) => `<optgroup label="${h(label)}">${items.map((item) => `<option value="${h(item.name)}"${item.name === s.theme ? " selected" : ""}>${h(item.label ?? item.name)}</option>`).join("")}</optgroup>`).join("")}</select></div>`;
-    return [
-      {
-        title: "Theme",
-        description: "The palette for the whole app, saved on this device.",
-        control: (s.themeCanUndo ? btn("settings-set", "Undo", { method: "theme-undo", args: {} }, "settings-link") : "") + select,
-        keywords: "colour color dark light palette",
-      },
-      {
-        title: "Make a theme",
-        description: "Answer a few questions and Demesne builds a palette from your answers.",
-        control: btn("settings-command", "Start", { text: "/themefy " }, "settings-button"),
-        keywords: "themefy custom palette",
-      },
-      ...(window.demesne.mode === "desktop"
-        ? [{
-            title: "Text size",
-            description: "The size of everything in the window. ⌘+ and ⌘− step through more sizes.",
-            control: settingsSegments(TEXT_SIZES.map(([label, zoom]) => [label, zoomLevel === zoom, "settings-set", { method: "desktop-zoom", args: { zoom } }] as [string, boolean, string, Record<string, unknown>]), "Text size"),
-            keywords: "zoom font scale",
-          }]
-        : []),
-    ];
-  }
-  if (section === "models")
-    return [
-      {
-        title: "Model",
-        description: `${modelWords(s.model)}${s.model.provider ? ` from ${s.model.provider}` : ""}${s.reasoning ? `, ${s.reasoning} thinking` : ""}. This conversation uses it.`,
-        control: btn("overlay", "Change", { name: "models" }, "settings-button"),
-        keywords: "reasoning thinking effort",
-      },
-      ...(s.model.provider === "ChatGPT"
-        ? [{
-            title: "ChatGPT plan",
-            description: `Usage counts against ${s.chatgptAccount?.email ?? s.chatgptAccount?.label ?? "your"} plan.`,
-            control: btn("open-link", "Manage ↗", { url: "https://chatgpt.com/settings/usage" }, "settings-button"),
-            keywords: "usage billing account",
-          }]
-        : []),
-    ];
-  if (section === "providers")
-    return [
-      ...s.providers.items.map((item) => {
-        const signing = s.providers.signingIn === item.key;
-        const action = signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "";
-        return {
-          title: item.label,
-          description: signing ? "Waiting for your browser…" : `${item.active ? "In use. " : ""}${item.detail}`,
-          control: action ? btn(action, signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : "Sign in", { key: item.key }, "settings-button") : "",
-          keywords: "sign in account api key local",
-        };
-      }),
-      {
-        title: "Provider setup",
-        description: s.providers.message ?? "Add a local model server, an API key, or an account.",
-        control: btn("setup", "Open", {}, "settings-button"),
-        keywords: "add provider configure",
-      },
-    ];
-  const others = s.sessions.filter((item) => item.id !== s.session?.id).length;
-  return [
-    {
-      title: "All conversations",
-      description: `${s.sessions.length} in this project${others ? `, ${others} besides this one` : ""}.`,
-      control: btn("overlay", "Show", { name: "sessions" }, "settings-button"),
-      keywords: "sessions history chats",
-    },
-    {
-      title: "Clean up",
-      description: "Delete empty, quick and old conversations. You choose which before anything is deleted.",
-      control: btn("overlay", "Review", { name: "cleanup" }, "settings-button"),
-      keywords: "delete archive sessions",
-    },
-  ];
-}
-function renderSettings() {
-  const query = overlayQuery.trim().toLowerCase();
-  const rowHtml = (row: SettingsRow) => `<div class="settings-row"><div><b>${h(row.title)}</b><p>${h(row.description)}</p></div>${row.control ? `<div class="settings-control">${row.control}</div>` : ""}</div>`;
-  const sections = query
-    ? SETTINGS_SECTIONS.map((section) => ({ section, rows: settingsRows(section.id).filter((row) => `${section.label} ${row.title} ${row.description} ${row.keywords ?? ""}`.toLowerCase().includes(query)) })).filter((item) => item.rows.length)
-    : [{ section: SETTINGS_SECTIONS.find((item) => item.id === settingsSection) ?? SETTINGS_SECTIONS[0]!, rows: settingsRows(settingsSection) }];
-  const nav = SETTINGS_SECTIONS.map((section) => `<button type="button" class="settings-nav-item${!query && section.id === settingsSection ? " on" : ""}" data-action="settings-section" data-args="${h(JSON.stringify({ id: section.id }))}"${!query && section.id === settingsSection ? ' aria-current="page"' : ""}><svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${section.icon}</svg>${h(section.label)}</button>`).join("");
-  const body = sections.length ? sections.map(({ section, rows }) => `<section><h2>${h(section.label)}</h2>${rows.map(rowHtml).join("")}</section>`).join("") : `<p class="settings-empty">No setting matches “${h(overlayQuery)}”.</p>`;
-  el("overlay").innerHTML =
-    `<nav class="settings-nav" aria-label="Settings sections"><div class="settings-search"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="chooser-filter" placeholder="Search" aria-label="Search settings" value="${h(overlayQuery)}" autocomplete="off"></div><div class="settings-group">Settings</div>${nav}</nav><div class="settings-body">${btn("close-overlay", "×", {}, "dialog-close").replace("<button ", '<button aria-label="Close dialog" ')}${body}</div>`;
-}
-/// Mac banners. "needs" (the default) speaks only when a chat waits on you,
-/// stops with an error, or Drive has a branch ready; "always" also says when
-/// a chat finishes; "never" stays quiet. Nothing shows for the chat you are
-/// looking at, and the first look after opening only takes stock.
-type NotifyMode = "needs" | "always" | "never";
-const NOTIFY_MODES: [NotifyMode, string][] = [["needs", "When it needs you"], ["always", "Always"], ["never", "Never"]];
-let notifyMode: NotifyMode = "needs";
-try { const saved = localStorage.getItem("demesne-notify"); if (saved === "always" || saved === "never") notifyMode = saved; } catch {}
 let notified: Set<string> | null = null;
 const notifyFrom = Date.now() - 5_000;
-function setNotifyMode(mode: NotifyMode) {
-  notifyMode = mode;
-  try { localStorage.setItem("demesne-notify", mode); } catch {}
-}
 function renderNotifications() {
   if (!state || window.demesne.mode !== "desktop" || state.connection !== "online") return;
   const current = state.session, looking = document.hasFocus();
-  const alerts = new Map<string, { title: string; body: string; sessionId?: string; path?: string }>();
+  const alerts = new Map<string, { title: string; body: string; kind: NotifyKind; sessionId?: string; path?: string }>();
   for (const item of state.sessions) {
     // Whatever happened before the app opened is old news.
     if (Date.parse(item.updatedAt) < notifyFrom) continue;
@@ -3377,16 +3372,15 @@ function renderNotifications() {
       const approval = mine ? state.approvals[0] : undefined, input = (approval?.input ?? {}) as Record<string, unknown>;
       const asked = approval?.overlap ? `${approval.overlap.agents[0]?.name ?? "Another agent"} changed ${approval.overlap.path.split("/").pop()}` : approval?.name === "run_command" ? `Wants to run: ${Array.isArray(input.argv) ? input.argv.join(" ") : String(input.command ?? "")}` : approval ? `Wants to ${approval.name.replace(/_/g, " ")}${input.path ? ` ${String(input.path).split("/").pop()}` : ""}` : "";
       const body = asked || (mine && state.questions.length ? "Has a question for you" : "Is waiting for you");
-      alerts.set(`${item.id}:wait:${item.updatedAt}`, { title, body, ...where });
-    } else if (item.status === "failed") alerts.set(`${item.id}:failed:${item.updatedAt}`, { title, body: "Stopped with an error", ...where });
-    else if (item.status === "completed" && notifyMode === "always") alerts.set(`${item.id}:done:${item.updatedAt}`, { title, body: "Finished", ...where });
+      alerts.set(`${item.id}:wait:${item.updatedAt}`, { title, body, kind: "wait", ...where });
+    } else if (item.status === "failed") alerts.set(`${item.id}:failed:${item.updatedAt}`, { title, body: "Stopped with an error", kind: "error", ...where });
+    else if (item.status === "completed") alerts.set(`${item.id}:done:${item.updatedAt}`, { title, body: "Finished", kind: "done", ...where });
   }
-  for (const job of reviewJobs()) if (job.status === "ready") alerts.set(`drive:${job.id}`, { title: "Drive", body: `${job.title} is ready to review${job.diff ? ` · +${job.diff.additions} −${job.diff.deletions}` : ""}`, ...(job.sessionId ? { sessionId: job.sessionId } : {}) });
+  for (const job of reviewJobs()) if (job.status === "ready") alerts.set(`drive:${job.id}`, { title: "Drive", body: `${job.title} is ready to review${job.diff ? ` · +${job.diff.additions} −${job.diff.deletions}` : ""}`, kind: "drive", ...(job.sessionId ? { sessionId: job.sessionId } : {}) });
   const fresh = notified ? [...alerts].filter(([key]) => !notified!.has(key)) : [];
   notified = new Set([...(notified ?? []), ...alerts.keys()]);
-  if (notifyMode === "never") return;
-  for (const [, alert] of fresh) {
-    if (looking && alert.sessionId === current?.id) continue;
+  for (const [, { kind, ...alert }] of fresh) {
+    if (!notifyOn[kind] || (looking && alert.sessionId === current?.id)) continue;
     void api("desktop-notify", alert).catch(() => {});
   }
 }
@@ -3438,13 +3432,10 @@ function renderOverlay() {
     state.cleanup,
     state.themeOptions,
     state.themeCanUndo,
-    settingsSection,
-    zoomLevel,
     modelsMore,
   ]);
   if (signature === overlaySignature) return;
   overlaySignature = signature;
-  if (overlay === "settings") return renderSettings();
   overlayRows = [];
   let title = "",
     subtitle = "",
@@ -3594,7 +3585,7 @@ function renderOverlay() {
       { label: "Rename", value: "", action: "overlay", data: { name: "rename" } },
       { label: "Compact", value: `${c.estimated ? "~" : ""}${num(c.used)} of ${c.capacity ? tokensShort(c.capacity) : "—"} context used${c.percentage == null ? "" : ` · ${c.percentage}%`}`, action: "compact", data: {}, hint: state.activeTurnId ? "after this turn" : "" },
       { label: "New chat", value: "", action: "new-session", data: {}, hint: "⌘N" },
-      { label: "Settings", value: "", action: "overlay", data: { name: "settings" }, hint: "⌘," },
+      { label: "Settings", value: "", action: "page-open", data: { page: "settings" }, hint: "⌘," },
     ];
   } else if (overlay === "rename") {
     el("overlay").innerHTML =
@@ -4068,7 +4059,33 @@ async function dispatch(
   if (deedOpen && ["select-session", "new-session", "project-new", "project-session", "review-open", "drive-open"].includes(action)) openDeed(false);
   if (pageOpen && ["select-session", "new-session", "project-new", "project-session", "review-open", "drive-open"].includes(action)) openPage("");
   if (action === "chats-page") return openPage(args.tab === "archived" ? "archived" : "active");
-  if (action === "page-open") return openPage(pageOpen === args.page ? "" : args.page === "customize" ? "customize" : "scheduled");
+  if (action === "page-open") {
+    const page = String(args.page ?? "");
+    return openPage(!page || pageOpen === page ? "" : (["customize", "settings", "active", "archived"].includes(page) ? page : "scheduled") as PageKind);
+  }
+  if (action === "settings-section") return isSettingsSection(args.id) ? settingsSection(args.id) : undefined;
+  if (action === "settings-fold") { settingsUi.fold = settingsUi.fold === args.fold ? "" : String(args.fold); return renderPage(); }
+  if (action === "settings-local") {
+    if (args.key === "openOn") { openOn = args.value === "last" ? "last" : "home"; try { localStorage.setItem("demesne-open-on", openOn); } catch {} }
+    if (args.key === "awake") { keepAwake = args.value === true; try { localStorage.setItem("demesne-awake", keepAwake ? "on" : "off"); } catch {} renderAwake(); }
+    return renderPage();
+  }
+  if (action === "notify-kind") { setNotifyKind(args.kind as NotifyKind, args.on === true); return renderPage(); }
+  // A setting changes in place; the page stays to show it took.
+  if (action === "settings-set") {
+    const result = await api<{ zoom?: number } | null>(String(args.method), args.args ?? {});
+    if (args.method === "desktop-zoom" && typeof result?.zoom === "number") zoomLevel = result.zoom;
+    if (args.method === "theme") settingsUi.fold = "";
+    return renderPage();
+  }
+  if (action === "settings-command") { openPage(""); return setDraft(String(args.text)); }
+  if (action === "subagent-model") { settingsUi.fold = ""; return settingsCall("subagent-model", { model: args.model ?? null }); }
+  if (["settings-config", "allow-rule-remove", "trusted-forget", "mcp-remove"].includes(action)) return settingsCall(action, args);
+  if (action === "restart-daemon") {
+    settingsUi.error = "";
+    notice("Restarting the daemon…");
+    return settingsCall("restart-daemon");
+  }
   if (action === "routine-set" || action === "routine-remove") return loadRoutines(action, args);
   if (action === "cz-edit") return editCustomizable(String(args.path));
   if (action === "cz-cancel") { customizeUi.editing = null; return renderPage(); }
@@ -4447,28 +4464,6 @@ async function dispatch(
     editor.focus();
     return;
   }
-  if (action === "settings-section") {
-    settingsSection = String(args.id);
-    overlayQuery = "";
-    return renderOverlay();
-  }
-  // A setting changes in place; the sheet stays open to show it took.
-  if (action === "notify-mode") {
-    setNotifyMode(args.mode as NotifyMode);
-    overlaySignature = "";
-    return renderOverlay();
-  }
-  if (action === "settings-set") {
-    const result = await api<{ zoom?: number } | null>(String(args.method), args.args ?? {});
-    if (args.method === "desktop-zoom" && typeof result?.zoom === "number") zoomLevel = result.zoom;
-    overlaySignature = "";
-    return renderOverlay();
-  }
-  if (action === "settings-command") {
-    overlay = null;
-    renderOverlay();
-    return setDraft(String(args.text));
-  }
   if (action === "choose-row") {
     const row = overlayRows[args.index];
     if (row?.action === "focus-filter") {
@@ -4556,10 +4551,7 @@ async function dispatch(
     renderComposer();
     return api("clear-queue");
   }
-  if (action === "setup" && overlay === "settings") {
-    overlay = null;
-    renderOverlay();
-  }
+  if (action === "setup" && pageOpen === "settings") openPage("");
   if (action === "setup" || action === "setup-action") return api(action, args);
   if (action === "open-link") return api("open-link", { url: args.url });
   // Width and reload act on the frame in place, so the page keeps its state.
@@ -4707,6 +4699,8 @@ function renderState(next: Snapshot) {
     if (on) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
   });
   renderPage();
+  renderAwake();
+  renderLastChat();
   if (start) renderHero();
   else if (wasStart || el("composer-slot").parentElement !== el("input-area")) el("input-area").append(el("composer-slot"));
   renderSakura(start);
@@ -4824,10 +4818,6 @@ document.addEventListener("mouseover", (event) => {
   overlayIndex = index;
   renderOverlay();
 });
-document.addEventListener("change", (event) => {
-  const target = event.target as HTMLSelectElement;
-  if (target.id === "settings-theme") void act(() => dispatch("settings-set", { method: "theme", args: { name: target.value } }));
-});
 document.addEventListener("submit", (event) => {
   event.preventDefault();
   const form = event.target as HTMLFormElement;
@@ -4886,7 +4876,7 @@ el("stage").addEventListener("scroll", () => {
   lastStageTop = stage.scrollTop;
 });
 document.addEventListener("demesne:open-settings", () => {
-  if (state && !state.setup) void act(() => openOverlay("settings"));
+  if (state && !state.setup) openPage("settings");
 });
 // Images reach the composer by +, paste or a drop anywhere in the window.
 el<HTMLInputElement>("attach-input").addEventListener("change", (event) => {
@@ -4948,9 +4938,23 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   // Esc on the Deed lets go of the sentence you're on.
-  if (key === "escape" && !ctrl && pageOpen && !field) {
+  if (key === "escape" && !ctrl && pageOpen === "settings" && (settingsUi.query || settingsUi.fold) && (!field || (event.target as HTMLElement).id === "settings-search")) {
+    event.preventDefault();
+    if (settingsUi.query) settingsSection(settingsUi.section);
+    else { settingsUi.fold = ""; renderPage(); }
+    return;
+  }
+  if (key === "escape" && !ctrl && pageOpen && (!field || (event.target as HTMLElement).id === "settings-search")) {
     event.preventDefault();
     openPage("");
+    return;
+  }
+  // ↑↓ step through Settings' sections while no field has the keyboard.
+  if (pageOpen === "settings" && !field && !ctrl && !event.altKey && (key === "arrowdown" || key === "arrowup")) {
+    event.preventDefault();
+    const at = SETTINGS_ORDER.indexOf(settingsUi.section);
+    settingsSection(SETTINGS_ORDER[(at + (key === "arrowdown" ? 1 : -1) + SETTINGS_ORDER.length) % SETTINGS_ORDER.length]!);
+    document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
     return;
   }
   if (key === "escape" && !ctrl && deedOpen && deedUi.focus && (!field || (event.target === editor && !editor.value))) {
@@ -5106,12 +5110,6 @@ document.addEventListener("keydown", (event) => {
       renderOverlay();
       return;
     }
-    // ↑↓ step through Settings' sections while its search is empty.
-    if (overlay === "settings" && (key === "arrowdown" || key === "arrowup") && !overlayQuery && !(event.target instanceof HTMLSelectElement)) {
-      const at = SETTINGS_SECTIONS.findIndex((section) => section.id === settingsSection);
-      run(() => dispatch("settings-section", { id: SETTINGS_SECTIONS[(at + (key === "arrowdown" ? 1 : -1) + SETTINGS_SECTIONS.length) % SETTINGS_SECTIONS.length]!.id }));
-      return;
-    }
     if (key === "arrowdown" || key === "arrowup") {
       run(() => {
         overlayIndex =
@@ -5176,7 +5174,7 @@ document.addEventListener("keydown", (event) => {
     // The model's suggested next prompt, or Drive's idea on the start
     // screen, when one shows; else Settings.
     const suggestion = deedOpen ? null : nextSuggestion() ?? driveSuggestion();
-    run(() => (suggestion ? setDraft(suggestion) : openOverlay("settings")));
+    run(() => (suggestion ? setDraft(suggestion) : openPage("settings")));
     return;
   }
   if (key === "enter" && event.target instanceof HTMLInputElement) {

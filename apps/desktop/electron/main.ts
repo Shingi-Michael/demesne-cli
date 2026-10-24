@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, protocol, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerSaveBlocker, protocol, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -11,6 +11,8 @@ app.setName("Demesne");
 const userData = app.commandLine.getSwitchValue("user-data-dir");
 if (userData && isAbsolute(userData)) app.setPath("userData", userData);
 let window: BrowserWindow | undefined, backend: Backend | undefined, quitting = false, exited = false;
+/// The power-save blocker held while something runs, or null.
+let awakeBlocker: number | null = null;
 const args = process.argv.slice(1).filter(arg => /^--(workspace|server|session|model|prompt)=/.test(arg) || arg === "--setup");
 function log(message: string) {
   try { const dir = app.getPath("logs"); mkdirSync(dir, { recursive: true }); appendFileSync(join(dir, "desktop.log"), `${new Date().toISOString()} ${message}\n`); } catch {}
@@ -102,6 +104,14 @@ void app.whenReady().then(async () => {
       if (cancel) { await Promise.all(frames.map(frame => frame.executeJavaScript(POINT_CANCEL).catch(() => null))); return null; }
       if (typeof name !== "string" || !frames[0]) throw new Error("The preview is not showing");
       return frames[0].executeJavaScript(POINT_SCRIPT, true);
+    }
+    // Settings › General: keeps the Mac from sleeping while a chat or Drive
+    // works. The display may still sleep.
+    if (method === "desktop-awake") {
+      const on = (args as Record<string, unknown>).on === true;
+      if (on && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start("prevent-app-suspension");
+      if (!on && awakeBlocker !== null) { powerSaveBlocker.stop(awakeBlocker); awakeBlocker = null; }
+      return { on: awakeBlocker !== null };
     }
     // Settings' text size: an exact level, or none to read the current one.
     if (method === "desktop-zoom") {

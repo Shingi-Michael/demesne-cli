@@ -24,12 +24,28 @@ export class WorkspaceTrust {
     });
   }
 
+  list(): string[] {
+    return this.read();
+  }
+
   trust(root: string): void {
     const trusted = this.read();
     if (trusted.includes(root)) return;
+    this.write([...trusted, root]);
+  }
+
+  /// Takes a folder back: its chats ask again before they read its files.
+  forget(root: string): boolean {
+    const trusted = this.read();
+    if (!trusted.includes(root)) return false;
+    this.write(trusted.filter((item) => item !== root));
+    return true;
+  }
+
+  private write(trusted: string[]) {
     mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     const temporary = `${this.path}.${process.pid}.tmp`;
-    writeFileSync(temporary, JSON.stringify({ trusted: [...trusted, root].sort() }, null, 2) + "\n", { mode: 0o600 });
+    writeFileSync(temporary, JSON.stringify({ trusted: [...trusted].sort() }, null, 2) + "\n", { mode: 0o600 });
     renameSync(temporary, this.path);
   }
 }

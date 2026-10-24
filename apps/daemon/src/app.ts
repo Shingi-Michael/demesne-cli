@@ -2,7 +2,7 @@ import { collectDriveReview } from "./drive-review.ts";
 import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
 import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
-import type { ReviewScope, RoutinesResponse } from "@demesne/protocol";
+import type { ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize } from "./artifacts.ts";
 import {
   encodeServerSentEvent,
@@ -369,6 +369,11 @@ export function createDaemonApp(options: {
   // Every chat in a project is told what Drive has and is doing; Drive's
   // own sessions in its worktrees are not.
   const driveWorktrees = options.worktreeRoot ?? join(dirname(dirname(options.databasePath)), ".demesne-worktrees");
+  // The folders you said you trust; Drive's worktrees (trusted on their own) stay out.
+  const trustedRoots = () => {
+    const data = dirname(options.databasePath);
+    return workspaceTrust.list().filter((root) => !inDriveWorktree(root) && root !== data && !root.startsWith(`${data}/`));
+  };
   const inDriveWorktree = (root: string) => root === driveWorktrees || root.startsWith(`${driveWorktrees}/`);
   // The ideas a chat sees and can run: the window's order, less ones Drive has in hand.
   function chatIdeas(root: string) {
@@ -733,6 +738,16 @@ export function createDaemonApp(options: {
         const { workspace, ...action } = body;
         try { return json({ deed: deedBook.act(workspace, action as DeedAction) } satisfies DeedResponse); }
         catch (error) { return apiError("conflict", error instanceof Error ? error.message : String(error), 409); }
+      }
+      // The folders you trust, for Settings; Drive's own worktrees stay out of it.
+      if (request.method === "GET" && url.pathname === "/v1/trusted") {
+        return json({ trusted: trustedRoots() } satisfies TrustedResponse);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/trusted/forget") {
+        const body = await readJson(request) as { root?: unknown };
+        if (typeof body?.root !== "string" || !isAbsolute(body.root)) return apiError("invalid_request", "Expected a folder", 400);
+        workspaceTrust.forget(body.root);
+        return json({ trusted: trustedRoots() } satisfies TrustedResponse);
       }
       if (request.method === "GET" && url.pathname === "/v1/permissions/asks") {
         return json(store.permissionAsks(url.searchParams.get("workspace") ?? "") satisfies PermissionAsksResponse);

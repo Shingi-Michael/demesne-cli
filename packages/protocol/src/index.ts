@@ -375,6 +375,10 @@ export interface PendingPermissionSnapshot {
 }
 
 /// How often this project asked, this week against the week before.
+/// The folders you trust (GET /v1/trusted), without Drive's own worktrees.
+export interface TrustedResponse {
+  trusted: string[];
+}
 export interface PermissionAsksResponse {
   thisWeek: number;
   lastWeek: number;

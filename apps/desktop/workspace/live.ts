@@ -17,6 +17,8 @@ import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
+import { customizePage, type CustomizeUi } from "./customize-page.ts";
+import type { CustomizeView } from "./customize.ts";
 import { deedPage, editLine, findHits, isLive, numberOf, toCheck, type DeedFilter, type DeedUi } from "./deed-view.ts";
 import type { Deed, DeedAction, DeedPeek, Routine } from "@demesne/protocol";
 import type { WorkspaceHost } from "./host.ts";
@@ -1803,6 +1805,36 @@ let pageOpen: "" | PageKind = "";
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;
 const routineUi = { error: "", draft: "" };
+let customizeData: CustomizeView | null = null;
+const customizeUi: CustomizeUi = { editing: null, error: "" };
+async function customizeCall(method: string, args: Record<string, unknown> = {}) {
+  try {
+    const result = await api<unknown>(method, args);
+    customizeUi.error = "";
+    return result;
+  } catch (error) {
+    customizeUi.error = error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error);
+    renderPage();
+    return undefined;
+  }
+}
+async function loadCustomize() {
+  const view = await customizeCall("customize") as CustomizeView | undefined;
+  if (view) customizeData = view;
+  renderPage();
+}
+/// Unfolds a file under its row, or folds it when it is already open.
+async function editCustomizable(path: string) {
+  if (customizeUi.editing?.path === path) { customizeUi.editing = null; return renderPage(); }
+  customizeUi.editing = { path, text: null };
+  renderPage();
+  const read = await customizeCall("customize-read", { path }) as { text: string } | undefined;
+  if (customizeUi.editing?.path !== path) return;
+  if (!read) { customizeUi.editing = null; return renderPage(); }
+  customizeUi.editing.text = read.text;
+  renderPage();
+  document.querySelector<HTMLTextAreaElement>("#page .cz-edit textarea")?.focus({ preventScroll: true });
+}
 function openPage(kind: "" | PageKind) {
   if (kind && deedOpen) openDeed(false);
   const was = pageOpen;
@@ -1810,6 +1842,7 @@ function openPage(kind: "" | PageKind) {
   sidebarSignature = heroSignature = "";
   if (kind === "active" || kind === "archived") void loadArchived();
   if (kind === "scheduled") { if (was !== "scheduled") routineUi.error = ""; void loadRoutines(); }
+  if (kind === "customize") { if (was !== "customize") Object.assign(customizeUi, { editing: null, error: "" }); void loadCustomize(); }
   if (state) renderState({ ...state });
   if (kind === "active" || kind === "archived") document.querySelector<HTMLElement>("#page .cp-tab.on")?.focus({ preventScroll: true });
   if (kind === "scheduled") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
@@ -1846,19 +1879,61 @@ function renderPage() {
     // Typing in the new routine keeps the field as it is.
     if (document.activeElement?.closest("#routine-new")) routineUi.draft = (document.activeElement as HTMLInputElement).value;
     html = scheduledPage({ routines: routinesHere, auto: isPlain() ? null : state.breakage.auto, here: isPlain() ? "" : here, error: routineUi.error, draft: routineUi.draft });
+  } else if (pageOpen === "customize") {
+    // A file being edited keeps its words through a redraw.
+    const area = root.querySelector<HTMLTextAreaElement>(".cz-edit textarea");
+    if (area && customizeUi.editing?.text != null) customizeUi.editing.text = area.value;
+    html = customizePage(customizeData, customizeUi, state.connectors, /Mac/i.test(navigator.platform));
   } else if (pageOpen === "active" || pageOpen === "archived") {
     const active = state.sessions.filter((item) => item.turns && !deletedSessions.has(item.id)).map((item) => ({ id: item.id, title: item.title, at: item.updatedAt, workspace: item.workspace ?? null, here: item.workspace === here }));
     html = chatsPageHtml(pageOpen, active, archivedChats);
   }
   root.dataset.kind = pageOpen;
   if (root.dataset.html === html) return;
-  const typing = document.activeElement instanceof HTMLInputElement && root.contains(document.activeElement) ? document.activeElement.selectionStart : null;
+  // Whatever field has the keyboard keeps it, with its caret, across the redraw.
+  const active = document.activeElement;
+  const field = (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && root.contains(active)
+    ? { form: active.closest("form")?.className ?? "", kind: (active.closest("form") as HTMLElement | null)?.dataset.kind ?? "", value: active.value, at: active.selectionStart ?? 0, scroll: active.scrollTop } : null;
   root.innerHTML = html;
   root.dataset.html = html;
-  if (typing !== null) { const input = root.querySelector<HTMLInputElement>("#routine-new input"); input?.focus({ preventScroll: true }); input?.setSelectionRange(typing, typing); }
+  if (field) {
+    const again = [...root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("form input, form textarea")].find((node) => node.closest("form")?.className === field.form && ((node.closest("form") as HTMLElement).dataset.kind ?? "") === field.kind);
+    if (again) { again.value = field.value; again.focus({ preventScroll: true }); again.setSelectionRange(field.at, field.at); again.scrollTop = field.scroll; }
+  }
 }
+// ⌘↵ saves the file being edited.
+document.getElementById("page")?.addEventListener("keydown", (event) => {
+  const area = event.target as HTMLElement;
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && area.matches(".cz-edit textarea")) {
+    event.preventDefault();
+    area.closest("form")?.requestSubmit();
+  }
+});
 document.getElementById("page")?.addEventListener("submit", (event) => {
   const form = event.target as HTMLFormElement;
+  if (form.classList.contains("cz-edit")) {
+    event.preventDefault();
+    const path = form.dataset.path ?? "", text = form.querySelector("textarea")?.value ?? "";
+    void customizeCall("customize-save", { path, text }).then((view) => {
+      if (!view) return;
+      customizeData = view as CustomizeView;
+      customizeUi.editing = null;
+      renderPage();
+    });
+    return;
+  }
+  if (form.classList.contains("cz-new")) {
+    event.preventDefault();
+    const name = form.querySelector("input")?.value.trim() ?? "";
+    if (!name) return;
+    void customizeCall("customize-new", { kind: form.dataset.kind, name }).then(async (made) => {
+      if (!made) return;
+      form.querySelector("input")!.value = "";
+      await loadCustomize();
+      await editCustomizable((made as { path: string }).path);
+    });
+    return;
+  }
   if (form.id !== "routine-new") return;
   event.preventDefault();
   const text = form.querySelector("input")?.value.trim() ?? "";
@@ -4043,6 +4118,9 @@ async function dispatch(
   if (action === "chats-page") return openPage(args.tab === "archived" ? "archived" : "active");
   if (action === "page-open") return openPage(pageOpen === args.page ? "" : args.page === "customize" ? "customize" : "scheduled");
   if (action === "routine-set" || action === "routine-remove") return loadRoutines(action, args);
+  if (action === "cz-edit") return editCustomizable(String(args.path));
+  if (action === "cz-cancel") { customizeUi.editing = null; return renderPage(); }
+  if (action === "cz-run") { openPage(""); return setDraft(`/${String(args.name)} `); }
   if (action === "chats-restore") {
     await api("restore", { id: String(args.id) });
     deletedSessions.delete(String(args.id));

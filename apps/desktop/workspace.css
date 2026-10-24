@@ -1157,3 +1157,26 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
 .sp-new input::placeholder { color: var(--t4); }
 .sp-hint, .sp-error { margin: 8px 14px 0; color: var(--t4); font-size: 12px; }
 .sp-error { color: var(--warn); }
+/* Customize: each file a row with Edit and Run; Edit unfolds the file in place. */
+.desktop #page[data-kind="customize"] { max-width: 720px; }
+.cz-row { min-height: 46px; }
+.cz-row.on { background: var(--surface2); }
+.cz-name { flex: none; width: 150px; overflow: hidden; color: var(--t1); font-size: 13.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.cz-about { display: block; overflow: hidden; color: var(--t3); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.cz-state { flex: none; padding: 0 9px; color: var(--t3); font-size: 12.5px; }
+.cz-state.ready { color: var(--ok); }
+.cz-state.failed { color: var(--bad); }
+.cz-edit { margin: 4px 0 10px; border-radius: var(--r); background: var(--tone); box-shadow: 0 0 0 1px var(--hair) inset; }
+.live-app .cz-edit textarea { display: block; width: 100%; height: 260px; min-height: 140px; max-height: 60vh; padding: 12px 14px; border: 0; outline: none; resize: vertical; background: transparent; color: var(--t1); font: 12.5px/1.6 "JetBrains Mono", monospace; }
+.cz-edit-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 14px; box-shadow: inset 0 1px 0 var(--hair); }
+.cz-path { flex: 1; min-width: 0; overflow: hidden; color: var(--t4); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.cz-save, .cz-cancel { height: 26px; padding: 0 10px; border-radius: var(--r-sm); color: var(--t2); font-size: 12.5px; }
+.cz-save { color: var(--t1); background: var(--tone2); }
+.cz-save kbd { margin-left: 4px; background: none !important; padding: 0 !important; color: var(--t4); }
+:is(.cz-save, .cz-cancel):hover { color: var(--t1); background: var(--tone2); }
+.cz-new { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; }
+.cz-new input { flex: 1; min-width: 0; padding: 0; border: 0; outline: none; background: transparent; color: var(--t1); font-size: 13px; }
+.cz-new input::placeholder { color: var(--t4); }
+.cz-new kbd { visibility: hidden; }
+.cz-new:focus-within kbd { visibility: visible; }
+.sp-hint code { font-size: 11.5px; }

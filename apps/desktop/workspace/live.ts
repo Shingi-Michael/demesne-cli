@@ -2993,7 +2993,8 @@ function renderBriefing() {
   done.hidden = !outcome;
   // A chat with no project has no Drive.
   node.hidden = !inSession() || !parts.length || isPlain();
-  if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").classList.remove("open"); return; }
+  // The folded reply empties too, so no stale control (a Pause after Stop) waits in it.
+  if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").innerHTML = ""; el("drive-reply").classList.remove("open"); return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
   // The first part's mark sits in the conversation's mark column, like an answer's d.
   const lead = /^<span class="bf-(?:spin|dot)[^>]*><\/span>/.exec(parts[0]!)?.[0] ?? "";
@@ -3392,12 +3393,21 @@ document.addEventListener("demesne:open-chat", (event) => {
   const here = !path || path === (document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace);
   void act(() => dispatch(here ? "select-session" : "project-session", here ? { id: sessionId } : { id: sessionId, path }));
 });
-async function driveAction(method: string, args: Record<string, unknown> = {}) {
-  if (driveActionPending) return;
+let driveActionDone: Promise<unknown> = Promise.resolve();
+async function driveAction(method: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  // Pause, resume and stop wait for the one on its way instead of being
+  // dropped: Stop clicked while Resume is still answering still stops.
+  if (driveActionPending) {
+    if (method !== "drive-control") return;
+    await driveActionDone.catch(() => {});
+    return driveAction(method, args);
+  }
   driveActionPending = method;
   renderBriefing();
+  const run = api(method, args);
+  driveActionDone = run;
   try {
-    return await api(method, args);
+    return await run;
   } catch (error) {
     notice(error instanceof Error ? error.message : String(error));
     throw error;

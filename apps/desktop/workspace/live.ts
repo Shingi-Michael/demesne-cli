@@ -1003,7 +1003,7 @@ function renderStatus() {
   el("status").hidden = inSession();
   // The context used, as a small ring; the numbers wait in its tooltip.
   const c2 = c.percentage == null ? "" : `<span class="ring" style="--usage:${Math.min(100, c.percentage)}%"></span>`;
-  el("composer-model").innerHTML = `${h(state.model.displayName ?? state.model.id) || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
+  el("composer-model").innerHTML = `${h(state.model.displayName ?? models.find((model) => model.id === state!.model.id)?.displayName ?? state.model.id) || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
   el("composer-context").innerHTML = c2;
   el("composer-context").title = c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`;
   el("composer-context").hidden = !inSession() || !c2;
@@ -3261,7 +3261,7 @@ function renderModelPopover(hidden: number) {
     levels = model?.reasoningLevels ?? [],
     level = model ? modelLevel(model) : undefined;
   const thinking = model && levels.length
-    ? `<div class="mp-thinking"><span>Thinking</span>${levels.map((item) => btn("model", h(item[0]!.toUpperCase() + item.slice(1)), { id: model.id, reasoning: item }, item === level ? "on" : "")).join("")}</div>`
+    ? `<div class="mp-thinking"><span>Thinking</span><div class="mp-levels">${levels.map((item) => btn("model", h(item[0]!.toUpperCase() + item.slice(1)), { id: model.id, reasoning: item }, item === level ? "on" : "")).join("")}</div></div>`
     : "";
   const short = rows.filter(([row]) => row.kind === "short").map(([row, index]) => item(row, index)).join("");
   const more = rows.filter(([row]) => row.kind === "more").map(([row, index]) => item(row, index)).join("");
@@ -3537,7 +3537,11 @@ function renderOverlay() {
     // The models you use most (the one in use always among them) make the
     // short list; the rest wait under "More models", by provider.
     const inUse = models.find((model) => model.id === state!.model.id);
-    const mine = (model: ModelDescriptor) => Number(model.provider === state!.model.provider);
+    const sizes = new Map<string, number>();
+    for (const model of models) sizes.set(model.provider, (sizes.get(model.provider) ?? 0) + 1);
+    // Ties go to the provider in use, unless it is a large catalog: picking
+    // one OpenRouter model shouldn't fill the list with strangers.
+    const mine = (model: ModelDescriptor) => Number(model.provider === state!.model.provider && (sizes.get(model.provider) ?? 0) <= LARGE_CATALOG);
     let short = [...models].sort((a, b) => turns(b) - turns(a) || mine(b) - mine(a)).slice(0, SHORT_MODELS);
     if (inUse && !short.includes(inUse)) short = [inUse, ...short.slice(0, SHORT_MODELS - 1)];
     overlayRows = short.map((model) => rowOf(model, "short"));
@@ -3550,8 +3554,6 @@ function renderOverlay() {
         .filter((row) => !query || `${row.label} ${row.group} ${row.data.id}`.toLowerCase().includes(query));
       // A large catalog (OpenRouter's hundreds) collapses to one row until
       // a search looks through it.
-      const sizes = new Map<string, number>();
-      for (const model of models) sizes.set(model.provider, (sizes.get(model.provider) ?? 0) + 1);
       const large = [...sizes].filter(([, size]) => size > LARGE_CATALOG).map(([provider]) => provider.toUpperCase());
       overlayRows.push(...(query ? rest : rest.filter((row) => !large.includes(row.group))));
       if (!query)
@@ -4527,7 +4529,8 @@ async function dispatch(
       return;
     }
     if (row?.action === "more-models") {
-      modelsMore = !modelsMore || Boolean(args.open);
+      // Hovering already opened it; a click or Enter keeps it open.
+      modelsMore = true;
       if (modelsMore && args.step) overlayIndex = Math.min(overlayRows.length, args.index + 1);
       renderOverlay();
       el("overlay").querySelector<HTMLInputElement>("input")?.focus();
@@ -4862,13 +4865,24 @@ document.addEventListener("input", (event) => {
     overlayQuery = input.value;
     overlayIndex = 0;
     renderOverlay();
+    // A model search highlights its first match, so Enter picks it.
+    const first = overlay === "models" && overlayQuery ? overlayRows.findIndex((row) => row.kind === "rest") : -1;
+    if (first > 0) {
+      overlayIndex = first;
+      renderOverlay();
+    }
   }
   if (input.closest("#setup")) setupInput(input);
 });
-// Hovering "More models" opens its column, as a submenu would.
+// Hovering "More models" opens its column, as a submenu would; pointing
+// back at the short list shuts it again, unless a search is open.
 document.addEventListener("mouseover", (event) => {
-  if (overlay !== "models" || modelsMore || !(event.target as Element).closest?.("[data-more]")) return;
-  modelsMore = true;
+  if (overlay !== "models") return;
+  const row = (event.target as Element).closest?.(".mp-main .mp-row");
+  if (!row) return;
+  const more = row.hasAttribute("data-more");
+  if (more === modelsMore || (!more && overlayQuery)) return;
+  modelsMore = more;
   renderOverlay();
 });
 document.addEventListener("change", (event) => {
@@ -5143,6 +5157,21 @@ document.addEventListener("keydown", (event) => {
         renderOverlay();
         return;
       }
+    }
+    // While searching models, ↑↓ and Enter work on the matches, not the
+    // short list above them.
+    if (overlay === "models" && overlayQuery && (key === "arrowdown" || key === "arrowup" || key === "enter")) {
+      const matches = overlayRows.flatMap((row, index) => row.kind === "rest" && row.action === "model" ? [index] : []);
+      event.preventDefault();
+      if (!matches.length) return;
+      if (key === "enter") {
+        run(() => dispatch("choose-row", { index: matches.includes(overlayIndex) ? overlayIndex : matches[0]! }));
+        return;
+      }
+      const at = matches.indexOf(overlayIndex);
+      overlayIndex = matches[at < 0 ? 0 : (at + (key === "arrowdown" ? 1 : -1) + matches.length) % matches.length]!;
+      renderOverlay();
+      return;
     }
     // ↑↓ step through Settings' sections while its search is empty.
     if (overlay === "settings" && (key === "arrowdown" || key === "arrowup") && !overlayQuery && !(event.target instanceof HTMLSelectElement)) {

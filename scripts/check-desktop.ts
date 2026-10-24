@@ -674,6 +674,11 @@ try {
   await page.locator("#overlay [data-more]").hover();
   await until(() => page.locator("#overlay .mp-more:not(.shut) .mp-row").count().then(count => count === 2), "More models opens beside the list");
   await capture("02-models-more");
+  // Clicking the row it opened from keeps it open; the short list shuts it.
+  await page.locator("#overlay [data-more]").click();
+  assert(await page.locator("#overlay .mp-more.shut").count() === 0, "clicking More models keeps it open");
+  await page.locator("#overlay .mp-main .mp-row").first().hover();
+  await until(() => page.locator("#overlay .mp-more.shut").count().then(count => count === 1), "pointing back at the short list shuts More models");
   await page.keyboard.press("Escape");
 
 

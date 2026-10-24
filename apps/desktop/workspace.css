@@ -410,7 +410,7 @@ html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[
 /* The model picker: a short list with "More models" opening beside it. */
 .desktop #overlay.anchored[data-screen="models"] { left: auto; width: auto; flex-direction: row; align-items: flex-end; gap: 6px; background: none; box-shadow: none; overflow: visible; }
 .desktop .mp-main, .desktop .mp-more { display: flex; flex-direction: column; padding: 5px; border-radius: var(--r); background: var(--surface); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); }
-.desktop .mp-main { width: 236px; flex: none; }
+.desktop .mp-main { width: 268px; flex: none; }
 .desktop .mp-more { width: 220px; max-height: inherit; min-height: 0; }
 .desktop .mp-more.shut { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; pointer-events: none; }
 .desktop .mp-more input { margin: 0 0 4px; padding: 6px 9px; border: 0; border-radius: var(--r-sm); background: var(--tone); color: var(--t1); font: inherit; font-size: 12.5px; outline: none; }
@@ -423,9 +423,11 @@ html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[
 .desktop .mp-group { padding: 8px 9px 3px; font-size: 10.5px; letter-spacing: .04em; color: var(--t4); }
 .desktop .mp-group:first-child { padding-top: 3px; }
 .desktop .mp-sep { height: 1px; margin: 4px 6px; background: var(--hair); }
-.desktop .mp-thinking { display: flex; align-items: center; gap: 2px; padding: 4px 9px; font-size: 12px; color: var(--t3); }
-.desktop .mp-thinking > span { margin-right: auto; }
-.desktop .mp-thinking button { padding: 2px 6px; border-radius: var(--r-sm); color: var(--t3); }
+/* Thinking sits over its own row of levels, so six of them fit. */
+.desktop .mp-thinking { padding: 4px 9px 6px; font-size: 12px; color: var(--t3); }
+.desktop .mp-thinking > span { display: block; margin-bottom: 4px; }
+.desktop .mp-levels { display: flex; flex-wrap: wrap; gap: 2px; }
+.desktop .mp-thinking button { flex: 1 1 auto; padding: 3px 4px; border-radius: var(--r-sm); color: var(--t3); text-align: center; }
 .desktop .mp-thinking button:hover { color: var(--t1); }
 .desktop .mp-thinking button.on { color: var(--t1); background: var(--tone); }
 .desktop .mp-empty { padding: 6px 9px; font-size: 12px; color: var(--t4); }

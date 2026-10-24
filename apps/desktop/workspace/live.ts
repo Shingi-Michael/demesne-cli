@@ -426,6 +426,8 @@ function groupIsOpen(key: string) {
 }
 /// The heading whose Group and sort line is unfolded beneath it.
 let viewOpenAt = "";
+/// How many chats are archived, read when Group and sort unfolds.
+let archivedCount: number | null = null;
 let openProjectFor: string | undefined;
 /// Projects whose agents are unfolded under their line.
 const agentsShown = new Set<string>();
@@ -439,7 +441,16 @@ const deletedSessions = new Set<string>();
 const ICON_BRANCH = '<svg class="ico sidebar-branch" viewBox="0 0 24 24" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>';
 const ICON_ARCHIVE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg>';
 const ICON_PIN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>';
-const ICON_GROUP_FOLD = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>';
+/// A project's folder is its fold: shut while folded, open while its chats show.
+const ICON_FOLDER_SHUT = '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5a1 1 0 0 1 1-1h4.6l2 2.2h8.4a1 1 0 0 1 1 1v9.8a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></svg>';
+const ICON_FOLDER_OPEN = '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18.5V6.5a1 1 0 0 1 1-1h4.6l2 2.2h7.4a1 1 0 0 1 1 1V10"/><path d="M3.5 18.5 6 11.2a1 1 0 0 1 .95-.7H21a.8.8 0 0 1 .76 1.05L19.5 18.5z"/></svg>';
+const ICON_GROUP_ICONS: Record<string, string> = {
+  pinned: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>',
+  plain: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-8l-4 3v-3H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z"/></svg>',
+  d: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="1.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/></svg>',
+  s: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M12 8v4l2.5 1.5"/></svg>',
+};
+const ICON_PLUS_SMALL = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12"/><path d="M6 12h12"/></svg>';
 const ICON_SORT = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m13 16 4 4 4-4"/></svg>';
 const VIEW_WORDS = { project: "Project", date: "Date", status: "Status", recent: "Recent", name: "Name" } as const;
 /// The day a chat falls under when the list is grouped by date.
@@ -479,7 +490,7 @@ function renderSidebar() {
   const agents = state.agents ?? [];
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, deedOpen, pageOpen, deedCount(), plainNow, Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, deedOpen, pageOpen, deedCount(), plainNow, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -549,7 +560,8 @@ function renderSidebar() {
     if (viewOpenAt !== key) return "";
     const choice = (word: keyof typeof VIEW_WORDS, args: Record<string, string>, on: boolean) =>
       btn("sidebar-view", VIEW_WORDS[word], args, `sidebar-view-opt${on ? " on" : ""}`).replace("<button ", `<button aria-pressed="${on}" `);
-    return `<div class="sidebar-view-line" role="group" aria-label="Group and sort"><span class="sidebar-view-label">Group</span>${(["project", "date", "status"] as const).map((group) => choice(group, { group }, sidebarView.group === group)).join("")}<span class="sidebar-view-label">Sort</span>${(["recent", "name"] as const).map((sort) => choice(sort, { sort }, sidebarView.sort === sort)).join("")}${btn("chats-page", "Archived ›", { tab: "archived" }, "sidebar-view-opt sidebar-view-archived")}</div>`;
+    const archived = btn("chats-page", `<span>Archived chats</span><span class="sidebar-view-count">${archivedCount === null ? "" : `${archivedCount} `}›</span>`, { tab: "archived" }, "sidebar-view-archived");
+    return `<div class="sidebar-view-line" role="group" aria-label="Group and sort"><div class="sidebar-view-row"><span class="sidebar-view-label">Group</span>${(["project", "date", "status"] as const).map((group) => choice(group, { group }, sidebarView.group === group)).join("")}</div><div class="sidebar-view-row"><span class="sidebar-view-label">Sort</span>${(["recent", "name"] as const).map((sort) => choice(sort, { sort }, sidebarView.sort === sort)).join("")}</div>${archived}</div>`;
   };
   // Every heading folds its group; pointing at it trades the count for
   // Group and sort.
@@ -557,7 +569,8 @@ function renderSidebar() {
     .replace("<button ", `<button title="Group and sort" aria-label="Group and sort" aria-expanded="${viewOpenAt === key}" `);
   const group = (key: string, label: string, rows: string[], count: number) => {
     const open = isOpen(key);
-    const toggle = btn("group-toggle", `${ICON_GROUP_FOLD}<span>${h(label)}</span>`, { key }, "sidebar-group-toggle").replace("<button ", `<button aria-expanded="${open}" `);
+    const icon = ICON_GROUP_ICONS[key] ?? ICON_GROUP_ICONS[key.split(":")[0]!] ?? "";
+    const toggle = btn("group-toggle", `${icon}<span>${h(label)}</span>`, { key }, "sidebar-group-toggle").replace("<button ", `<button aria-expanded="${open}" `);
     return `<section class="sidebar-group-block" data-group="${h(key)}"><div class="sidebar-group-row">${toggle}<span class="sidebar-group-count">${count || ""}</span>${viewButton(key)}</div>${viewLine(key)}<div class="sidebar-group-chats${key === unfoldingGroup && open ? " unfolding" : ""}"${open ? "" : " hidden"}>${rows.join("")}</div></section>`;
   };
   // The open project's Deed leads its chats, with how many sentences need you.
@@ -589,10 +602,11 @@ function renderSidebar() {
       const key = `p:${path}`, expanded = isOpen(key), active = path === projectWorkspace;
       const rows = groupRows(key, matching, (item) => shortAge(item.updatedAt), nested);
       if (active && !query) rows.push(reviewLine());
-      const toggle = btn("project-toggle", ICON_GROUP_FOLD, { path }, "sidebar-project-toggle")
-        .replace("<button ", `<button aria-label="${h(`${expanded ? "Collapse" : "Expand"} ${name}`)}" aria-expanded="${expanded}" aria-controls="project-chats-${index}"${query ? " disabled" : ""} `);
-      const label = btn("project-open", `<span>${h(name)}</span>`, { path }, "sidebar-project-name")
-        .replace("<button ", `<button draggable="true" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="${h(path)} · Drag to reorder (Alt+↑/↓)"${active ? ' aria-current="location"' : ""} `);
+      // The whole line is the fold, its folder shut or open with it; + starts
+      // a chat in the project.
+      const label = btn("project-toggle", `${expanded ? ICON_FOLDER_OPEN : ICON_FOLDER_SHUT}<span>${h(name)}</span>`, { path }, "sidebar-project-name")
+        .replace("<button ", `<button draggable="true" aria-expanded="${expanded}" aria-controls="project-chats-${index}" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="${h(path)} · Drag to reorder (Alt+↑/↓)"${active ? ' aria-current="location"' : ""}${query ? " aria-disabled=\"true\"" : ""} `);
+      const start = btn("project-new", ICON_PLUS_SMALL, { path }, "sidebar-project-new").replace("<button ", `<button title="${h(`New chat in ${name}`)}" aria-label="${h(`New chat in ${name}`)}" `);
       // Each project's line says its state on the right, so a closed project
       // still shows what it needs: branches to review, a chat waiting on you,
       // work in progress, or how many chats it holds.
@@ -610,9 +624,11 @@ function renderSidebar() {
         : asking ? `<span class="sidebar-project-state" title="A chat needs you">${dot("warn")}</span>`
         // An open project's rows already show the work; a folded one says so.
         : busy && !expanded ? `<span class="sidebar-project-state" title="Working">${dot("working")}</span>`
-        : here.length ? "" : `<span class="sidebar-group-count">${found.length || ""}</span>`;
+        // An open project names its branch; a folded one, how many chats it holds.
+        : expanded && active && state.session?.workspace?.gitBranch ? `<span class="sidebar-project-state sidebar-project-branch" title="On ${h(state.session.workspace.gitBranch)}">${ICON_BRANCH}<span>${h(state.session.workspace.gitBranch)}</span></span>`
+        : here.length || expanded ? "" : `<span class="sidebar-group-count">${found.length || ""}</span>`;
       const agentRows = showing ? `<div class="sidebar-agent-rows">${here.map(agent => `<div class="sidebar-agent-row" title="${h(agent.address)}">${agentMark(agent)}<span>${h(agent.name)} · ${h(agentPlace(agent).replace(/^on /, ""))}</span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "sidebar-agent-message")}</div>`).join("")}</div>` : "";
-      groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${toggle}${label}${marks}${status}${viewButton(key)}</div>${viewLine(key)}${agentRows}<div class="sidebar-project-chats${key === unfoldingGroup && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${active && !query ? deedLine() : ""}${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
+      groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${label}${marks}${status}${start}${viewButton(key)}</div>${viewLine(key)}${agentRows}<div class="sidebar-project-chats${key === unfoldingGroup && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${active && !query ? deedLine() : ""}${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
     }
     // Chats with no project follow, under Just a chat.
     const plainChats = sorted(rest.filter((item) => !item.workspace && matches(item)));
@@ -4113,8 +4129,8 @@ async function dispatch(
 ) {
   if (action === "deed-open") return openDeed(true);
   // Going to a chat leaves the Deed.
-  if (deedOpen && ["select-session", "new-session", "project-open", "project-session", "review-open", "drive-open"].includes(action)) openDeed(false);
-  if (pageOpen && ["select-session", "new-session", "project-open", "project-session", "review-open", "drive-open"].includes(action)) openPage("");
+  if (deedOpen && ["select-session", "new-session", "project-new", "project-session", "review-open", "drive-open"].includes(action)) openDeed(false);
+  if (pageOpen && ["select-session", "new-session", "project-new", "project-session", "review-open", "drive-open"].includes(action)) openPage("");
   if (action === "chats-page") return openPage(args.tab === "archived" ? "archived" : "active");
   if (action === "page-open") return openPage(pageOpen === args.page ? "" : args.page === "customize" ? "customize" : "scheduled");
   if (action === "routine-set" || action === "routine-remove") return loadRoutines(action, args);
@@ -4146,6 +4162,8 @@ async function dispatch(
   }
   if (action === "project-toggle" || action === "group-toggle" || action === "project-more") {
     const key = action === "project-toggle" ? `p:${String(args.path)}` : String(args.key);
+    // While searching every project shows its matches; folding waits.
+    if (action === "project-toggle" && (document.getElementById("sidebar-search") as HTMLInputElement | null)?.value.trim()) return;
     if (action === "project-more") {
       if (expandedProjectChats.has(key)) expandedProjectChats.delete(key); else expandedProjectChats.add(key);
     } else {
@@ -4165,6 +4183,15 @@ async function dispatch(
   if (action === "sidebar-view-open") {
     viewOpenAt = viewOpenAt === String(args.key) ? "" : String(args.key);
     renderSidebar();
+    if (viewOpenAt) void api<{ sessions: unknown[] }>("archived-list").then((result) => { archivedCount = result.sessions.length; renderSidebar(); }, () => {});
+    return;
+  }
+  // + on a project's line: a new chat there, switching to it if need be.
+  if (action === "project-new") {
+    const path = String(args.path), here = document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace;
+    if (path === here) await api("new-session", { reuse: true });
+    else document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path, fresh: true, draft: "" } }));
+    editor.focus({ preventScroll: true });
     return;
   }
   if (action === "sidebar-view") {
@@ -4198,7 +4225,7 @@ async function dispatch(
   }
   // The chat sends it over Heartbeat; you write what to say.
   if (action === "agent-message") return setDraft(`Message ${String(args.name)} at ${String(args.address)}: `);
-  if (action === "project-open" || action === "project-session") {
+  if (action === "project-session") {
     document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path: args.path, ...(action === "project-session" ? { sessionId: args.id } : {}) } }));
     return;
   }

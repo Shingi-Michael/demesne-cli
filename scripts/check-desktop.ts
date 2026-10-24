@@ -451,12 +451,14 @@ try {
   await until(() => evaluate<boolean>("return document.activeElement?.id === 'sidebar-search';"), "Ctrl+K puts you in Search");
   await page.getByRole("searchbox", { name: "Search chats and projects" }).press("Escape");
   assert(await page.locator("#sidebar-projects").isVisible(), "projects stay visible after search");
-  const projectToggle = page.locator(".sidebar-project.active .sidebar-project-toggle");
+  // The project's whole line is its fold, its folder shut or open with it.
+  const projectToggle = page.locator(".sidebar-project.active .sidebar-project-name");
+  assert.equal(await page.locator(".sidebar-project-toggle").count(), 0, "no separate chevron: the line folds");
   await projectToggle.click();
   assert.equal(await projectToggle.getAttribute("aria-expanded"), "false");
   assert(!await page.locator(".sidebar-session[aria-current='page']").isVisible(), "collapsing a project hides its chats");
   await page.reload();
-  await until(() => page.locator(".sidebar-project.active .sidebar-project-toggle").getAttribute("aria-expanded").then(value => value === "false"), "project collapse persists across reload");
+  await until(() => page.locator(".sidebar-project.active .sidebar-project-name").getAttribute("aria-expanded").then(value => value === "false"), "project collapse persists across reload");
   await projectToggle.click();
   assert(await page.locator(".sidebar-session[aria-current='page']").isVisible(), "expanding restores its chats");
   // A settled chat carries no mark; double-clicking its title renames it in place.
@@ -537,6 +539,7 @@ try {
   await page.locator(".sidebar-project.active .sidebar-project-header").hover();
   await page.locator(".sidebar-project.active .sidebar-view-button").click();
   await until(() => page.locator(".sidebar-view-line").isVisible(), "Group and sort unfolds under the heading");
+  await until(() => page.locator(".sidebar-view-count").innerText().then(text => /^\d+ ›$/.test(text)), "Archived chats says how many");
   assert.equal(await page.locator("#overlay:not([hidden])").count(), 0, "Group and sort is no menu");
   await capture("02-group-sort");
   await page.locator(".sidebar-view-opt", { hasText: "Date" }).click();
@@ -856,12 +859,12 @@ try {
   await until(() => page.locator("#sidebar-sessions").getAttribute("data-workspace").then(path => path === f.workspace), "chat selection switches to its project");
   await until(() => page.locator(".sidebar-session[aria-current='page']").getAttribute("data-args").then(args => Boolean(args?.includes(sessionId))), "cross-project selection opens the exact chat");
   const secondary = page.locator(`.sidebar-project[data-project="${secondProject}"]`);
-  await secondary.locator(".sidebar-project-toggle").click();
+  await secondary.locator(".sidebar-project-name").click();
   assert(await secondary.locator(".sidebar-session").isVisible(), "other projects expand without switching workspace");
-  assert.equal(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).getAttribute("aria-expanded"), "true", "each project folds on its own");
-  await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).click();
+  assert.equal(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-name`).getAttribute("aria-expanded"), "true", "each project folds on its own");
+  await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-name`).click();
   assert(await page.locator(`.sidebar-project[data-project="${f.workspace}"] :is(.sidebar-project-state, .sidebar-agents, .sidebar-group-count)`).first().isVisible(), "a folded project shows its state on its line");
-  await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).click();
+  await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-name`).click();
   await page.getByRole("searchbox", { name: "Search chats and projects" }).fill("second project");
   assert.equal(await page.locator(".sidebar-project").count(), 1, "search keeps only projects with matching chats");
   assert(await secondary.locator(".sidebar-session").isVisible(), "search exposes matching chats in another project");
@@ -879,9 +882,11 @@ try {
   assert.deepEqual(await projectOrder(), [f.workspace, secondProject], "keyboard moves a project down");
   await page.keyboard.press("Alt+ArrowUp");
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "keyboard moves a project up");
-  await secondary.locator(".sidebar-project-name").click();
+  // + on a project's line starts a chat there, switching projects.
+  await secondary.locator(".sidebar-project-header").hover();
+  await secondary.locator(".sidebar-project-new").click();
   await until(() => page.locator(".sidebar-project.active").getAttribute("data-project").then(path => path === secondProject), "opening the reordered project");
-  await primary.locator(".sidebar-project-name").click();
+  await primary.locator(`.sidebar-session[data-args*="${sessionId}"]`).click();
   await until(() => page.locator(".sidebar-project.active").getAttribute("data-project").then(path => path === f.workspace), "switching back to the second project in manual order");
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "switching projects preserves manual ordering");
   await page.locator("textarea").focus();
@@ -1131,7 +1136,7 @@ try {
   writeFileSync(join(f.workspace, "bun.lock"), "");
   const deedRow = page.locator(".sidebar-deed");
   // It sits at the top of the project's chats, so unfold the project first.
-  if (!await deedRow.isVisible()) await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).click();
+  if (!await deedRow.isVisible()) await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-name`).click();
   await until(() => deedRow.isVisible(), "the open project leads with its Deed");
   await deedRow.click();
   await until(() => page.locator("#deed").isVisible(), "the Deed opens in place of the chat");

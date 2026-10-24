@@ -295,8 +295,9 @@ async function open(workspace = false, welcome = false) {
     }, f.workspace);
     await page.getByRole("button", { name: "Open a project", exact: false }).click();
   }
-  await until(() => evaluate<boolean>("const editor=document.querySelector('textarea');return !!editor && editor.getBoundingClientRect().width>0 && document.body.innerText.includes('desktop-test');"), "connected desktop project", 30_000);
+  await until(() => evaluate<boolean>("const editor=document.querySelector('textarea');return !!editor && editor.getBoundingClientRect().width>0 && document.body.innerText.includes('Desktop Test');"), "connected desktop project", 30_000);
   assert.equal(await evaluate("return document.getElementById('sidebar-sessions')?.dataset.workspace;"), f.workspace);
+  assert((await page.locator("#composer-model").innerText()).startsWith("Desktop Test"), "a model with no name reads in words, not its raw id");
   assert.equal(await page.evaluate(() => typeof (window as any).require), "undefined", "No Node in the renderer");
   assert.equal(await page.evaluate(() => typeof (window as any).process), "undefined", "No process or environment in the renderer");
   const isolation = await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.getLastWebPreferences());
@@ -326,14 +327,9 @@ let sessionId = "";
 try {
   await open(false, true);
   await capture("01-start");
-  // A quiet project: Home offers a few ways in, and one only fills the composer.
-  const starter = page.locator("#hero .home-starter").first();
-  await until(() => starter.isVisible(), "a quiet project shows ways in");
-  const starterText = await starter.innerText();
-  await starter.click();
-  await until(() => page.locator("textarea").inputValue().then(value => value === starterText), "a way in fills the composer");
-  assert.equal(await page.locator(".land, .hero-map").count(), 0, "Home has no map");
-  await page.locator("textarea").fill("");
+  // Home: the greeting, then one paragraph of what happened (nothing yet), no map.
+  await until(() => page.locator(".intro p.away").innerText().then(text => text.length > 0), "Home says what happened while you were away");
+  assert.equal(await page.locator(".hero-map, .land").count(), 0, "the map is gone");
   await type(thinkingPrompt);
   const trace = page.locator(".thinking-main .thinking-content").last();
   const thinkingToggle = page.locator(".thinking-main .thinking-toggle").last();
@@ -383,17 +379,26 @@ try {
   // composer unfolds its choices in place and puts it in the project.
   await click("new-session");
   await until(async () => (await page.locator("#composer-where").textContent())?.startsWith("Just a chat") ?? false, "a new chat is Just a chat");
+  assert.equal(await page.locator(".intro p.away").count(), 0, "Just a chat has no project news");
   await click("where-toggle");
   await capture("02b-where");
   await click("where-pick", { path: f.workspace });
+  await until(() => page.locator(".intro p.away").isVisible(), "a new chat in the project shows the start screen");
   assert((await page.locator("#composer-where").textContent())?.startsWith("in "), "the where word names the project");
-  // Home lists the chats to pick up, the one waiting on you first.
-  const waitingChat = page.locator("#hero .home-chat", { hasText: "waiting for you" }).first();
-  await until(() => waitingChat.isVisible(), "Home offers the waiting chat to pick up", 20_000);
-  await capture("02-home-pick-up");
-  await waitingChat.click();
-  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Edit"]), "picking it up opens its chat");
-  await click("permission", { decision: "allow_once" });
+  // Home says which chat waits on you and on what; its phrase unfolds the
+  // approval right there, and Allow answers it without opening the chat.
+  const waitingPhrase = page.locator(".intro p.away .away-link.warn");
+  await until(() => page.locator(".intro p.away").innerText().then(text => text.includes("is waiting on your yes to edit hello.ts")), "Home names the chat waiting on you", 20_000);
+  await waitingPhrase.click();
+  const homeApproval = page.locator(".away-fold .approval-row");
+  await until(() => homeApproval.isVisible(), "the phrase unfolds the approval in place");
+  assert((await homeApproval.innerText()).includes("hello.ts"), "the row names the file");
+  await capture("02-home-away");
+  // Pick up goes back to the last chat, with the last thing you asked there.
+  assert((await page.locator(".hero-pick").innerText()).includes("Pick up"), "Pick up names the last chat");
+  await homeApproval.locator('[data-action="away-permission"]', { hasText: "Allow" }).click();
+  await until(() => homeApproval.count().then(count => count === 0), "Allow folds the row");
+  await page.locator(".hero-pick").click();
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Run"]), "command approval visible");
   assert.equal(await page.locator("#approval .approval-row code").innerText(), "bun run check", "the row names the command by its program");
   assert((await page.locator("#approval .approval-row code").getAttribute("title"))!.includes("not sandboxed"), "where it runs is on hover");
@@ -661,16 +666,16 @@ try {
   // Pointing at a model without thinking: the line says None, the panel keeps its height.
   const panelHeight = () => evaluate<number>("return document.querySelector('#overlay .mp')?.offsetHeight ?? 0;");
   const height = await panelHeight();
-  await page.locator("#overlay .mp-row", { hasText: "desktop-small" }).hover();
+  await page.locator("#overlay .mp-row", { hasText: "Desktop Small" }).hover();
   await until(() => page.locator("#overlay .mp-level").innerText().then(text => text === "None"), "Thinking follows the row you point at");
   assert.equal(await panelHeight(), height, "the panel keeps its height");
   await page.locator("#overlay .mp-row", { hasText: "More models" }).click();
-  await until(() => page.locator("#overlay .mp-row", { hasText: "far-away-large" }).isVisible(), "More models unfolds in the same panel");
+  await until(() => page.locator("#overlay .mp-row", { hasText: "Far Away Large" }).isVisible(), "More models unfolds in the same panel");
   assert.equal(await page.locator("#overlay .mp-group", { hasText: "other" }).count(), 1, "the rest come by provider");
   await capture("02-models-more");
   await page.getByRole("textbox", { name: "Filter models" }).fill("far");
   await until(() => page.locator("#overlay .mp-row").count().then(count => count === 2), "a search lists only its matches");
-  assert.equal(await page.locator("#overlay .mp-row b").first().innerText(), "far", "the match is marked");
+  assert.equal(await page.locator("#overlay .mp-row b").first().innerText(), "Far", "the match is marked");
   await page.keyboard.press("Escape");
 
 
@@ -1238,7 +1243,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes", "Home's ways in and chats to pick up", "pointing at the live page", "the Deed"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

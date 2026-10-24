@@ -56,6 +56,7 @@ import { WorkspaceSetup } from "./setup-controller.ts";
 import { pointSourceIn } from "./point-source.ts";
 import type { PointPick } from "./point.ts";
 import { WorkspaceSession } from "./session-model.ts";
+import { lastAsk, waitingAsk, type AwayAsk } from "./away.ts";
 
 export interface WorkspaceHostOptions {
   workspace?: string;
@@ -317,6 +318,9 @@ export class WorkspaceHost {
         status: session.turns.at(-1)?.status,
         workspace: session.workspace?.root,
         waiting: this.waitingSessions.has(session.id),
+        // Home answers what a chat waits on, and picks up the last thing you asked.
+        ask: this.waitingAsks.get(session.id) ?? null,
+        lastAsk: lastAsk(session.turns),
         ...(session.pinnedAt ? { pinned: true } : {}),
       })),
       runs: this.current?.runs() ?? [],
@@ -811,9 +815,20 @@ export class WorkspaceHost {
       this.agentsTimer.unref?.();
     }
   }
+  /// Always: the rule goes into your config and is allowed from now on.
+  private saveAllowRule(rule: string | null | undefined) {
+    if (!rule) throw new Error("This operation cannot create a persistent rule.");
+    const allow = this.settings.loaded.config.permissions.allow;
+    if (!allow.includes(rule)) {
+      updateUserConfig(this.settings.configPath, { permissions: { allow: [...allow, rule] } });
+      allow.push(rule);
+    }
+  }
   /// Chats in the background that wait on an approval or an answer: the
   /// sidebar marks them amber, as it does the open one.
   waitingSessions = new Set<string>();
+  /// What each of them waits on, for Home.
+  waitingAsks = new Map<string, AwayAsk>();
   private backgroundTimer: ReturnType<typeof setTimeout> | null = null;
   /// While another chat of this project is still working, look in on it now
   /// and then, so the sidebar shows when it asks for you or settles.
@@ -821,14 +836,17 @@ export class WorkspaceHost {
     // This project's chats, and the ones Drive runs on their own branch.
     const branched = new Set([this.breakage.state.fix, ...this.breakage.state.inbox].map((job) => job?.sessionId).filter(Boolean));
     const busy = this.sessions.filter((session) => session.id !== this.current?.session.id && (session.workspace?.root === this.workspace || branched.has(session.id)) && ["running", "queued"].includes(session.turns.at(-1)?.status ?? ""));
-    const waiting = new Set<string>();
+    const waiting = new Set<string>(), asks = new Map<string, AwayAsk>();
     await Promise.all(busy.map(async (session) => {
       try {
         const state = await this.client.getSessionState(session.id);
         if (state.pendingPermissions.length || state.pendingQuestions?.length) waiting.add(session.id);
+        const ask = waitingAsk(state.pendingPermissions, state.pendingQuestions);
+        if (ask) asks.set(session.id, ask);
       } catch {}
     }));
     this.waitingSessions = waiting;
+    this.waitingAsks = asks;
     if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
     this.backgroundTimer = busy.length && !this.disposed ? setTimeout(() => { this.backgroundTimer = null; void this.refreshSessions(); }, BACKGROUND_POLL_MS) : null;
   }
@@ -1542,17 +1560,7 @@ export class WorkspaceHost {
         throw new Error("Invalid permission decision");
       if (decision === "allow_session" && approval.name === "run_command")
         throw new Error("Host commands require individual approval.");
-      if (decision === "allow_always") {
-        if (!approval.rule)
-          throw new Error("This operation cannot create a persistent rule.");
-        const allow = this.settings.loaded.config.permissions.allow;
-        if (!allow.includes(approval.rule)) {
-          updateUserConfig(this.settings.configPath, {
-            permissions: { allow: [...allow, approval.rule] },
-          });
-          allow.push(approval.rule);
-        }
-      }
+      if (decision === "allow_always") this.saveAllowRule(approval.rule);
       try {
         await this.client.resolvePermission(id, decision);
       } catch (error) {
@@ -1564,6 +1572,24 @@ export class WorkspaceHost {
       }
       this.current!.approvals.delete(id);
       this.publish();
+      return;
+    }
+    // Home answers a chat in the background without opening it.
+    if (method === "away-permission") {
+      const sessionId = string(args.session, "session", 200), id = string(args.id, "permission id", 200),
+        decision = string(args.decision, "decision", 50) as PermissionDecision,
+        ask = this.waitingAsks.get(sessionId);
+      if (ask?.kind !== "permission" || ask.id !== id) throw new Error("This permission is no longer pending.");
+      if (!["allow_once", "allow_always", "deny"].includes(decision)) throw new Error("Invalid permission decision");
+      if (decision === "allow_always") this.saveAllowRule(ask.rule);
+      try {
+        await this.client.resolvePermission(id, decision);
+      } finally {
+        this.waitingAsks.delete(sessionId);
+        this.waitingSessions.delete(sessionId);
+        this.publish();
+        void this.refreshSessions();
+      }
       return;
     }
     if (method === "question-action") {

@@ -200,29 +200,28 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .live-app.start .intro h1 { font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; color: var(--t1); }
 .desktop .live-app.start .intro p { font-size: 13.5px; line-height: 1.6; color: var(--t3); }
 .desktop .intro strong { color: var(--t2); font-weight: 500; }
-/* The start screen's score: it asks less the more you use it. */
-.live-app.start .intro p.hero-asks { margin: 2px 0 0; font-size: 12px; line-height: 18px; color: var(--t4); }
-/* Under Home's composer: Drive's top ideas, the chats to pick up, or a few
-   ways in. Each is a quiet label over its rows, on the same column. */
-.home-section { width: 100%; display: flex; flex-direction: column; gap: 6px; }
-.home-label { display: flex; align-items: center; gap: 7px; margin: 0; padding: 0 4px; font-size: 12px; font-weight: 500; line-height: 18px; color: var(--t3); }
-.home-label .ico { width: 13px; height: 13px; color: var(--t3); }
-.home-label .link { font-size: 12px; font-weight: 400; }
-.home-aside { display: flex; gap: 12px; margin-left: auto; }
-.home-chats { display: flex; flex-direction: column; }
-.home-chat { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 7px 8px; border-radius: var(--r-sm, 6px); color: var(--t1); font-size: 13px; text-align: left; }
-.home-chat:hover, .home-chat:focus-visible { background: var(--tone); }
-.home-chat .sidebar-session-mark { flex: none; }
-.home-chat-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.home-chat-age { flex: none; color: var(--t4); font-size: 12px; font-variant-numeric: tabular-nums; }
-.home-chat-age.warn { color: var(--warn); }
-.home-chat-age.working { color: var(--acc); }
-.home-chat-age.bad { color: var(--bad); }
-.home-starters { display: flex; flex-wrap: wrap; gap: 6px; }
-.home-starter { padding: 6px 11px; border-radius: 999px; background: var(--tone); color: var(--t2); font-size: 12.5px; }
-.home-starter:hover { background: var(--tone2, var(--tone)); color: var(--t1); }
-.home-section .proposal-row { margin-bottom: 0; }
-.home-section .proposal-list { display: flex; flex-direction: column; gap: 5px; }
+/* Home's paragraph: what happened while you were away. Each underlined
+   phrase unfolds its thing under it; the underline's colour says the kind. */
+.desktop .live-app.start .intro p.away { margin: 6px 0 0; max-width: 600px; font-size: 14.5px; line-height: 24px; color: var(--t2); }
+.away i { font-style: normal; color: var(--t1); }
+.away code { font: 12.5px "JetBrains Mono", ui-monospace, monospace; color: var(--t2); background: var(--tone); padding: 1px 5px; border-radius: 5px; }
+.away .away-link { display: inline; padding: 0; border: 0; background: none; font: inherit; font-weight: 500; color: var(--t1); cursor: pointer; box-shadow: 0 1px 0 var(--hair2); transition: box-shadow 140ms var(--ease, ease); }
+.away .away-link:hover, .away .away-link.on { box-shadow: 0 1.5px 0 var(--t2); }
+.away .away-link.warn { box-shadow: 0 1.5px 0 var(--warn); }
+.away .away-link.bad { box-shadow: 0 1.5px 0 var(--bad); }
+.away .away-link.live { box-shadow: 0 1.5px 0 var(--acc); }
+.away-bar { position: relative; display: block; max-width: 600px; height: 1.5px; margin: 2px 0 0; overflow: hidden; background: var(--hair); border-radius: 1px; }
+.away-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 40%; background: var(--acc); }
+@media (prefers-reduced-motion: no-preference) { .away-bar::after { animation: away-sweep 1.8s var(--ease, ease) infinite; } }
+@keyframes away-sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.away-fold { display: flex; flex-direction: column; gap: 4px; width: 100%; margin: 8px 0 4px; padding-left: 12px; box-shadow: -1px 0 0 var(--hair2); }
+/* Back to the chat you were last in, with the last thing you asked. */
+.hero-pick { display: flex; align-items: baseline; gap: 8px; width: 100%; margin: 10px 0 0; padding: 0; border: 0; background: none; font: inherit; font-size: 12.5px; line-height: 18px; color: var(--t4); white-space: nowrap; overflow: hidden; text-align: left; cursor: pointer; }
+.hero-pick b { flex: none; font-weight: 500; color: var(--t2); }
+.hero-pick q { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--t3); }
+.hero-pick .pick-age { flex: none; }
+.hero-pick .pick-go { margin-left: auto; color: var(--t2); }
+.hero-pick:hover b, .hero-pick:hover .pick-go { color: var(--t1); }
 .desktop .live-app.start .composer textarea::placeholder { color: var(--t4); }
 .desktop .live-app.start .hints button { font-size: 12.5px; color: var(--t3); }
 .desktop #input-area { padding: 12px 32px 22px; }
@@ -597,7 +596,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 @keyframes desktop-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: no-preference) {
   .desktop #overlay:not([hidden]), .desktop #context-card:not([hidden]), .desktop #completion:not([hidden]), #notice:not([hidden]) { animation: desktop-rise 160ms var(--ease); }
-  .desktop #approval:not([hidden]), .desktop .hero-branches, .desktop .home-section, .desktop .step-fold { animation: desktop-appear 180ms var(--ease); }
+  .desktop #approval:not([hidden]), .desktop .away-fold, .desktop .step-fold { animation: desktop-appear 180ms var(--ease); }
   .desktop #conversation > .turn, .desktop .compaction-card { animation: desktop-appear 220ms var(--ease); }
   .desktop #hero { animation: desktop-fade 260ms var(--ease); }
   #desktop-shell { transition: grid-template-columns 200ms var(--ease); }
@@ -726,7 +725,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop :is(#briefing, #drive-reply, #hero) .bf-foot .link { font-size: 12px; }
 /* Drive's branches: the title unfolds what it did; what changed sits on the
    right until you point at the row, then Apply · PR · Discard · diff. */
-.desktop .hero-branches { margin: 4px 0 0 -10px; }
 .desktop :is(#briefing, #drive-reply, #hero) button.bf-title { flex: 0 1 auto; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .desktop :is(#briefing, #drive-reply, #hero) button.bf-title:hover, .desktop :is(#briefing, #drive-reply, #hero) button.bf-title.open { color: var(--t1); box-shadow: 0 1px 0 var(--hair); }
 .desktop :is(#briefing, #drive-reply, #hero) .bf-r .add, .desktop :is(#briefing, #drive-reply, #hero) .bf-sum .pass { color: var(--ok); }
@@ -1094,10 +1092,7 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
 #sakura canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
 .live-app.start #stage { position: relative; z-index: 1; }
 .live-app.start .intro h1, .live-app.start .hero-eyebrow { text-shadow: 0 1px 16px var(--ink), 0 0 3px var(--ink); }
-/* On Home the box and its bar are one frosted card, not a box over a strip. */
-.desktop .live-app.start #composer { gap: 2px; padding: 0 0 6px; border-radius: var(--r-lg); background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px) saturate(1.2); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); }
-.desktop .live-app.start #composer .composer-box { background: transparent; box-shadow: none; }
-.desktop .live-app.start #composer.mode-plan { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 38%, transparent), var(--shadow-2); }
+.live-app.start #composer { background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px) saturate(1.2); }
 
 /* Where a chat lives: one word under Home's composer, unfolding its choices
    in place; a plain chat ends with one quiet line that can move it. */

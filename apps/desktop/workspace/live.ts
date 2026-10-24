@@ -16,8 +16,9 @@ import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
+import { scheduledPage } from "./scheduled-page.ts";
 import { deedPage, editLine, findHits, isLive, numberOf, toCheck, type DeedFilter, type DeedUi } from "./deed-view.ts";
-import type { Deed, DeedAction, DeedPeek } from "@demesne/protocol";
+import type { Deed, DeedAction, DeedPeek, Routine } from "@demesne/protocol";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval } from "./session-model.ts";
 import type {
@@ -476,7 +477,7 @@ function renderSidebar() {
   const agents = state.agents ?? [];
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, deedOpen, chatsPage, deedCount(), plainNow, Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, deedOpen, pageOpen, deedCount(), plainNow, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -517,7 +518,7 @@ function renderSidebar() {
   // shows Pin and Archive there instead. The tooltip and the accessible name
   // say in words what the mark shows.
   const row = (item: typeof sessions[number], right: string, nested: boolean) => {
-    const id = item.id, title = titleOf(item), tone = tones.get(id) ?? "", selected = id === current?.id && !deedOpen && !chatsPage;
+    const id = item.id, title = titleOf(item), tone = tones.get(id) ?? "", selected = id === current?.id && !deedOpen && !pageOpen;
     const about = STATE_WORDS[tone] ?? "", branch = branches.get(id);
     const tip = [title, about || fullTime(item.updatedAt), branch && `on ${branch}`].filter(Boolean).join(" · ");
     const project = projectFor(item);
@@ -647,17 +648,17 @@ function renderSidebar() {
     (sameControl ?? (focused >= 0 ? buttons[Math.min(focused, buttons.length - 1)] : null) ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
   }
   const title = document.getElementById("workspace-title");
-  if (title) { title.textContent = chatsPage ? "All chats" : deedOpen ? "Deed" : inSession() ? current?.title ?? "Conversation" : "Home"; title.title = title.textContent; }
+  if (title) { title.textContent = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "customize" ? "Customize" : pageOpen ? "All chats" : deedOpen ? "Deed" : inSession() ? current?.title ?? "Conversation" : "Home"; title.title = title.textContent; }
   // A mission's chat says where it came from, and goes back there.
   const crumb = document.getElementById("workspace-from"), from = current && inSession() ? parentOf.get(current.id) : undefined;
   if (crumb) {
-    crumb.hidden = !from || deedOpen || Boolean(chatsPage);
+    crumb.hidden = !from || deedOpen || Boolean(pageOpen);
     crumb.innerHTML = from ? `from ${btn("select-session", h(chatTitle(from)), { id: from }, "workspace-from-link")}` : "";
   }
   // Where an open chat lives: Just a chat, or its project.
   const where = document.getElementById("workspace-where");
   if (where) {
-    where.hidden = deedOpen || Boolean(chatsPage) || !inSession() || Boolean(from);
+    where.hidden = deedOpen || Boolean(pageOpen) || !inSession() || Boolean(from);
     where.textContent = plainNow ? "Just a chat" : projectLabel(projectWorkspace);
   }
   // The rail: a dot where something waits, a ring for Drive's progress.
@@ -1795,35 +1796,78 @@ async function deedAct(request: DeedAction) {
   const workspace = state.workspace;
   keepDeed(workspace, await api<Deed | null>("deed-act", { workspace, request }));
 }
-/// All chats, in place of the conversation: "" when closed.
-let chatsPage: "" | ChatsTab = "";
+/// A page in place of the conversation, opened from the sidebar: All chats
+/// (Active or Archived), Scheduled, or Customize. "" when closed.
+type PageKind = ChatsTab | "scheduled" | "customize";
+let pageOpen: "" | PageKind = "";
 let archivedChats: ChatsPageChat[] | null = null;
-function openChats(tab: "" | ChatsTab) {
-  if (tab && deedOpen) openDeed(false);
-  chatsPage = tab;
+let routinesHere: Routine[] | null = null;
+const routineUi = { error: "", draft: "" };
+function openPage(kind: "" | PageKind) {
+  if (kind && deedOpen) openDeed(false);
+  const was = pageOpen;
+  pageOpen = kind;
   sidebarSignature = heroSignature = "";
-  if (tab) void loadArchived();
+  if (kind === "active" || kind === "archived") void loadArchived();
+  if (kind === "scheduled") { if (was !== "scheduled") routineUi.error = ""; void loadRoutines(); }
   if (state) renderState({ ...state });
-  if (tab) document.querySelector<HTMLElement>("#chats-page .cp-tab.on")?.focus({ preventScroll: true });
+  if (kind === "active" || kind === "archived") document.querySelector<HTMLElement>("#page .cp-tab.on")?.focus({ preventScroll: true });
+  if (kind === "scheduled") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
 }
 async function loadArchived() {
   try {
     const result = await api<{ sessions: Array<{ id: string; title: string; archivedAt: string; workspace?: string }> }>("archived-list");
     archivedChats = result.sessions.map((chat) => ({ id: chat.id, title: chat.title, at: chat.archivedAt, workspace: chat.workspace ?? null }));
   } catch { archivedChats = archivedChats ?? []; }
-  renderChatsPage();
+  renderPage();
 }
-function renderChatsPage() {
-  const root = document.getElementById("chats-page");
-  if (!root || !state || !chatsPage) return;
+async function loadRoutines(method = "routines", args: Record<string, unknown> = {}) {
+  try {
+    routinesHere = await api<Routine[]>(method, args);
+    routineUi.error = "";
+    if (method === "routine-add") {
+      routineUi.draft = "";
+      const input = document.querySelector<HTMLInputElement>("#routine-new input");
+      if (input) input.value = "";
+    }
+  } catch (error) {
+    routinesHere = routinesHere ?? [];
+    routineUi.error = error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error);
+  }
+  renderPage();
+  if (method === "routine-add") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
+}
+function renderPage() {
+  const root = document.getElementById("page");
+  if (!root || !state || !pageOpen) return;
   const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace;
-  const active = state.sessions.filter((item) => item.turns && !deletedSessions.has(item.id)).map((item) => ({ id: item.id, title: item.title, at: item.updatedAt, workspace: item.workspace ?? null, here: item.workspace === here }));
-  const html = chatsPageHtml(chatsPage, active, archivedChats);
-  if (root.dataset.html !== html) { root.innerHTML = html; root.dataset.html = html; }
+  let html = "";
+  if (pageOpen === "scheduled") {
+    // Typing in the new routine keeps the field as it is.
+    if (document.activeElement?.closest("#routine-new")) routineUi.draft = (document.activeElement as HTMLInputElement).value;
+    html = scheduledPage({ routines: routinesHere, auto: isPlain() ? null : state.breakage.auto, here: isPlain() ? "" : here, error: routineUi.error, draft: routineUi.draft });
+  } else if (pageOpen === "active" || pageOpen === "archived") {
+    const active = state.sessions.filter((item) => item.turns && !deletedSessions.has(item.id)).map((item) => ({ id: item.id, title: item.title, at: item.updatedAt, workspace: item.workspace ?? null, here: item.workspace === here }));
+    html = chatsPageHtml(pageOpen, active, archivedChats);
+  }
+  root.dataset.kind = pageOpen;
+  if (root.dataset.html === html) return;
+  const typing = document.activeElement instanceof HTMLInputElement && root.contains(document.activeElement) ? document.activeElement.selectionStart : null;
+  root.innerHTML = html;
+  root.dataset.html = html;
+  if (typing !== null) { const input = root.querySelector<HTMLInputElement>("#routine-new input"); input?.focus({ preventScroll: true }); input?.setSelectionRange(typing, typing); }
 }
+document.getElementById("page")?.addEventListener("submit", (event) => {
+  const form = event.target as HTMLFormElement;
+  if (form.id !== "routine-new") return;
+  event.preventDefault();
+  const text = form.querySelector("input")?.value.trim() ?? "";
+  routineUi.draft = text;
+  if (text) void loadRoutines("routine-add", { text });
+});
 function openDeed(open: boolean) {
   if (deedOpen === open) return;
-  if (open && chatsPage) openChats("");
+  if (open && pageOpen) openPage("");
   deedOpen = open;
   deedUi.focus = deedUi.editing = deedUi.live = deedUi.filter = deedUi.since = deedUi.peek = null;
   deedUi.find = "";
@@ -3995,13 +4039,15 @@ async function dispatch(
   if (action === "deed-open") return openDeed(true);
   // Going to a chat leaves the Deed.
   if (deedOpen && ["select-session", "new-session", "project-open", "project-session", "review-open", "drive-open"].includes(action)) openDeed(false);
-  if (chatsPage && ["select-session", "new-session", "project-open", "project-session", "review-open", "drive-open"].includes(action)) openChats("");
-  if (action === "chats-page") return openChats(args.tab === "archived" ? "archived" : "active");
+  if (pageOpen && ["select-session", "new-session", "project-open", "project-session", "review-open", "drive-open"].includes(action)) openPage("");
+  if (action === "chats-page") return openPage(args.tab === "archived" ? "archived" : "active");
+  if (action === "page-open") return openPage(pageOpen === args.page ? "" : args.page === "customize" ? "customize" : "scheduled");
+  if (action === "routine-set" || action === "routine-remove") return loadRoutines(action, args);
   if (action === "chats-restore") {
     await api("restore", { id: String(args.id) });
     deletedSessions.delete(String(args.id));
     archivedChats = archivedChats?.filter((chat) => chat.id !== args.id) ?? null;
-    renderChatsPage();
+    renderPage();
     return;
   }
   if (action.startsWith("deed-")) {
@@ -4592,15 +4638,20 @@ function renderState(next: Snapshot) {
   }
   // Drive working this session is a session, even before its first turn:
   // its mission is the conversation's turn.
-  const start = !inSession(next) && !deedOpen && !chatsPage;
+  const start = !inSession(next) && !deedOpen && !pageOpen;
   el("app").classList.toggle("start", start);
   el("app").classList.toggle("deeding", deedOpen);
-  el("app").classList.toggle("paging", Boolean(chatsPage));
+  el("app").classList.toggle("paging", Boolean(pageOpen));
   el("hero").hidden = !start;
-  el("conversation").hidden = start || deedOpen || Boolean(chatsPage);
+  el("conversation").hidden = start || deedOpen || Boolean(pageOpen);
   el("deed").hidden = !deedOpen;
-  el("chats-page").hidden = !chatsPage;
-  renderChatsPage();
+  el("page").hidden = !pageOpen;
+  document.querySelectorAll<HTMLElement>('.sidebar-nav [data-action="page-open"]').forEach((button) => {
+    const on = JSON.parse(button.dataset.args ?? "{}").page === pageOpen;
+    button.classList.toggle("on", on);
+    if (on) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
+  });
+  renderPage();
   if (start) renderHero();
   else if (wasStart || el("composer-slot").parentElement !== el("input-area")) el("input-area").append(el("composer-slot"));
   renderSakura(start && !el("hero").classList.contains("mapped"));
@@ -4839,9 +4890,9 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   // Esc on the Deed lets go of the sentence you're on.
-  if (key === "escape" && !ctrl && chatsPage && !field) {
+  if (key === "escape" && !ctrl && pageOpen && !field) {
     event.preventDefault();
-    openChats("");
+    openPage("");
     return;
   }
   if (key === "escape" && !ctrl && deedOpen && deedUi.focus && (!field || (event.target === editor && !editor.value))) {

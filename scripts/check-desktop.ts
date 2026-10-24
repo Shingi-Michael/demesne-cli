@@ -546,16 +546,16 @@ try {
   await page.locator(".sidebar-view-opt", { hasText: "Project" }).click();
   await until(() => page.locator(".sidebar-project.active .sidebar-view-line").isVisible(), "back by project, the line stays under the first heading");
   await page.locator(".sidebar-view-archived").click();
-  await until(() => page.locator("#chats-page .cp-row").first().isVisible(), "Archived opens All chats");
+  await until(() => page.locator("#page .cp-row").first().isVisible(), "Archived opens All chats");
   assert.equal(await page.locator("#workspace-title").innerText(), "All chats");
   assert(!await page.locator("#input-area").isVisible(), "All chats has no composer");
   await capture("02-all-chats");
-  await page.locator(`#chats-page .cp-restore[data-args*='${archivedId}']`).click();
+  await page.locator(`#page .cp-restore[data-args*='${archivedId}']`).click();
   await until(async () => (await f.client.listSessions()).length === kept, "Restore brings the chat back to the daemon's list");
   await until(() => page.locator(`#sidebar-projects .sidebar-session[data-args*='${archivedId}']`).isVisible(), "the restored chat is back in the sidebar");
   await page.locator("body").focus();
   await page.keyboard.press("Escape");
-  await until(() => page.locator("#chats-page").isHidden(), "Esc leaves All chats");
+  await until(() => page.locator("#page").isHidden(), "Esc leaves All chats");
   await page.locator(".sidebar-project.active .sidebar-view-button").click();
   // A pinned chat leads the list, above its project.
   const pinRow = page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-item:has(.sidebar-session[data-args*='${archivedId}'])`);
@@ -576,6 +576,27 @@ try {
   await capture("02-light");
   await page.locator("#sidebar-theme").click();
   await until(() => evaluate<string>("return document.documentElement.dataset.theme;").then(theme => theme === themeBefore), "the moon switches it back");
+  // Scheduled: a routine is one sentence, when and then what.
+  await page.locator('.sidebar-nav [data-action="page-open"]', { hasText: "Scheduled" }).click();
+  await until(() => page.locator('#page[data-kind="scheduled"] #routine-new input').isVisible(), "Scheduled opens in place of the chat");
+  assert.equal(await page.locator("#workspace-title").innerText(), "Scheduled");
+  await page.locator("#routine-new input").fill("list the PRs");
+  await page.locator("#routine-new input").press("Enter");
+  await until(() => page.locator("#page .sp-error").isVisible(), "a routine without a time says how to write one");
+  await page.locator("#routine-new input").fill("Every weekday at 8:30, summarize what changed overnight");
+  await page.locator("#routine-new input").press("Enter");
+  await until(() => page.locator("#page .sp-row", { hasText: "Summarize what changed overnight" }).isVisible(), "the new routine joins the list");
+  assert((await page.locator("#page .sp-row", { hasText: "Summarize what changed overnight" }).innerText()).includes("Weekdays · 8:30"), "the routine says when it runs");
+  assert.equal((await f.client.routines()).routines.length, 1, "the daemon keeps the routine");
+  await capture("02-scheduled");
+  const routineRow = page.locator("#page .sp-row", { hasText: "Summarize what changed overnight" });
+  await routineRow.locator(".sp-switch").click();
+  await until(() => routineRow.locator(".sp-switch").innerText().then(text => text === "Off"), "a routine switches off on its row");
+  await routineRow.hover();
+  await routineRow.locator(".sp-remove").click();
+  await until(async () => (await f.client.routines()).routines.length === 0, "Delete removes the routine");
+  await page.locator('.sidebar-nav [data-action="page-open"]', { hasText: "Scheduled" }).click();
+  await until(() => page.locator("#page").isHidden(), "Scheduled folds away from its row");
   // Settings is one sheet: sections on the left, each row with its own control.
   await page.locator(".sidebar-settings").click();
   await page.locator('#overlay[data-screen="settings"] .settings-nav-item.on').filter({ hasText: "General" }).waitFor();

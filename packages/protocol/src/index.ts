@@ -437,6 +437,28 @@ export interface Session {
   acceptEdits?: boolean;
 }
 
+/// A chat that starts on its own: one sentence, when and then what.
+export interface Routine {
+  id: string;
+  /// The sentence as written.
+  text: string;
+  /// What the chat is asked, its first message.
+  prompt: string;
+  /// Days of the week, 0 is Sunday, and the local time "HH:MM".
+  days: number[];
+  at: string;
+  /// The project the chat opens in; null for Just a chat.
+  workspace: string | null;
+  on: boolean;
+  createdAt: string;
+  resumedAt?: string;
+  runs: Array<{ at: string; sessionId: string }>;
+  /// "Weekdays · 8:30", and the next time it runs.
+  when?: string;
+  next?: string | null;
+}
+export interface RoutinesResponse { routines: Routine[] }
+
 export interface UpdateSessionRequest {
   pinned?: boolean;
   /// Moves a chat that has no project into this folder.

@@ -2,7 +2,7 @@ import { collectDriveReview } from "./drive-review.ts";
 import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
 import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
-import type { ReviewScope } from "@demesne/protocol";
+import type { ReviewScope, RoutinesResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize } from "./artifacts.ts";
 import {
   encodeServerSentEvent,
@@ -71,6 +71,7 @@ import { DriveNextCache, proposeNext } from "./drive-next.ts";
 import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
+import { Routines } from "./routines.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
 import { DeedBook, judgeSentence } from "./deed.ts";
 import { runTests } from "./deed-proof.ts";
@@ -353,6 +354,21 @@ export function createDaemonApp(options: {
   });
   const driveAutoTimer = setInterval(() => { try { driveAuto.tick(); } catch { /* the next minute tries again */ } }, 60_000);
   driveAutoTimer.unref?.();
+  // Routines: chats that start on their own at their time, with or without a window.
+  const routines = new Routines(join(dirname(options.databasePath), "routines.json"), {
+    trusted: (workspace) => workspaceTrust.isTrusted(workspace),
+    start: (routine) => {
+      const title = routine.prompt.length > 60 ? `${routine.prompt.slice(0, 57).trimEnd()}…` : routine.prompt;
+      const sessionId = store.createSession(title, routine.workspace ? canonicalWorkspace(routine.workspace) : undefined).session.id;
+      // Nobody is at the window to approve, so a project's routine runs on
+      // Auto, like a Drive mission; a plain chat has no tools to approve.
+      const { turn } = store.createTurn(sessionId, routine.prompt, routine.workspace ? "allow" : "deny", false, false);
+      void queueTurn(turn, snapshotTurnInference(processor, false));
+      return sessionId;
+    },
+  });
+  const routinesTimer = setInterval(() => { try { routines.tick(); } catch { /* the next minute tries again */ } }, 60_000);
+  routinesTimer.unref?.();
   // Every chat in a project is told what Drive has and is doing; Drive's
   // own sessions in its worktrees are not.
   const driveWorktrees = options.worktreeRoot ?? join(dirname(dirname(options.databasePath)), ".demesne-worktrees");
@@ -734,6 +750,27 @@ export function createDaemonApp(options: {
         // Turning it off also stops a run it started on its own, after the current one.
         if (!body.on && driveFixes.away(body.workspace)?.auto) driveFixes.stopAway(body.workspace);
         return json({ auto: driveAuto.set(body.workspace, body.on) } satisfies DriveAutoResponse);
+      }
+      if (request.method === "GET" && url.pathname === "/v1/routines") {
+        return json({ routines: routines.list() } satisfies RoutinesResponse);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/routines") {
+        const body = await readJson(request) as { text?: unknown; workspace?: unknown };
+        if (typeof body?.text !== "string" || !body.text.trim() || body.text.length > 2000) return apiError("invalid_request", "Expected the routine as a sentence", 400);
+        if (body.workspace !== undefined && body.workspace !== null && typeof body.workspace !== "string") return apiError("invalid_request", "workspace must be a path", 400);
+        const added = routines.add(body.text, typeof body.workspace === "string" ? canonicalWorkspace(body.workspace) : null);
+        if ("error" in added) return apiError("invalid_routine", added.error, 400);
+        return json({ routines: routines.list() } satisfies RoutinesResponse);
+      }
+      if ((request.method === "PATCH" || request.method === "DELETE") && path.length === 3 && path[0] === "v1" && path[1] === "routines") {
+        if (request.method === "DELETE") {
+          if (!routines.remove(path[2]!)) return apiError("not_found", "Routine not found", 404);
+        } else {
+          const body = await readJson(request) as { on?: unknown };
+          if (typeof body?.on !== "boolean") return apiError("invalid_request", "Expected on", 400);
+          if (!routines.set(path[2]!, body.on)) return apiError("not_found", "Routine not found", 404);
+        }
+        return json({ routines: routines.list() } satisfies RoutinesResponse);
       }
       if (request.method === "POST" && url.pathname === "/v1/drive/away/stop") {
         const body = await readJson(request) as { workspace?: unknown };
@@ -1401,6 +1438,7 @@ export function createDaemonApp(options: {
       closing = true;
       driveLifecycle.abort(new DOMException("Daemon shutting down", "AbortError"));
       clearInterval(driveAutoTimer);
+      clearInterval(routinesTimer);
       for (const close of [...activeStreamClosers]) close();
       if (activeRequests > 0) {
         await new Promise<void>((resolve) => requestDrainWaiters.add(resolve));

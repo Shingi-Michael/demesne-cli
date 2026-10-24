@@ -1109,9 +1109,9 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
 @media (prefers-reduced-motion: reduce) { #composer-where .where-caret { transition: none; } }
 
 /* All chats: the whole list in place of the conversation, with Archived. */
-.live-app.paging #stage > :not(#chats-page) { display: none !important; }
+.live-app.paging #stage > :not(#page) { display: none !important; }
 .live-app.paging #input-area { display: none; }
-.desktop #chats-page { max-width: 680px; margin: 0 auto; padding: 28px 0 32px; color: var(--t2); }
+.desktop #page { max-width: 680px; margin: 0 auto; padding: 28px 0 32px; color: var(--t2); }
 .cp-title { margin: 0 0 6px; color: var(--t1); font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
 .cp-tabs { display: flex; gap: 18px; margin-bottom: 14px; }
 .cp-tab { height: 26px; padding: 0; color: var(--t3); font-size: 13px; box-shadow: inset 0 -1.5px 0 transparent; transition: color 140ms var(--ease), box-shadow 140ms var(--ease); }
@@ -1127,3 +1127,33 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
 .cp-restore { flex: none; height: 26px; padding: 0 10px; border-radius: var(--r-sm); color: var(--t2); font-size: 12.5px; transition: background-color 140ms var(--ease), color 140ms var(--ease); }
 .cp-restore:hover { color: var(--t1); background: var(--tone2); }
 .cp-empty { padding: 16px 10px; color: var(--t3); font-size: 13px; }
+/* Scheduled: routines and Drive's quiet-time runs, the week's runs, and a
+   new routine written as one sentence. */
+.desktop #page[data-kind="scheduled"] { max-width: 720px; }
+.cp-lede { margin: 0 0 18px; color: var(--t3); font-size: 13px; }
+.cp-head { display: flex; justify-content: space-between; margin: 18px 0 4px; padding: 0 10px; color: var(--t3); font-size: 12px; font-weight: 500; }
+.cp-head span + span { color: var(--t4); font-weight: 400; font-variant-numeric: tabular-nums; }
+.sp-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 10px; border-radius: var(--r); box-shadow: inset 0 -1px 0 var(--hair); }
+.sp-row:hover { background: var(--surface2); }
+.sp-when { flex: none; width: 150px; color: var(--t3); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.sp-what { display: flex; flex-direction: column; flex: 1; min-width: 0; color: var(--t2); font-size: 13.5px; }
+.sp-what b { overflow: hidden; color: var(--t1); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.sp-sub { overflow: hidden; color: var(--t3); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sp-row:not(:has(b)) .sp-what { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-row:not(:has(b)) .sp-sub { display: inline; }
+.sp-where { flex: none; max-width: 120px; overflow: hidden; color: var(--t3); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.sp-row.off :is(.sp-what b, .sp-when) { color: var(--t3); }
+.sp-switch, .sp-open, .sp-remove { flex: none; height: 26px; padding: 0 9px; border-radius: var(--r-sm); color: var(--t3); font-size: 12.5px; transition: background-color 140ms var(--ease), color 140ms var(--ease), opacity 140ms var(--ease); }
+.sp-switch { min-width: 38px; }
+.sp-switch.on { color: var(--ok); }
+.sp-open { color: var(--t1); }
+:is(.sp-switch, .sp-open, .sp-remove):hover { color: var(--t1); background: var(--tone2); }
+.sp-remove { opacity: 0; }
+.sp-row:hover .sp-remove, .sp-remove:focus-visible { opacity: 1; }
+.sp-remove:hover { color: var(--bad); background: var(--bad-soft); }
+.sp-new { display: flex; align-items: center; gap: 10px; height: 44px; margin-top: 18px; padding: 0 14px; border-radius: var(--r-lg); background: var(--tone); box-shadow: 0 0 0 1px var(--hair) inset; transition: box-shadow 160ms var(--ease), background-color 160ms var(--ease); }
+.sp-new:focus-within { background: var(--tone2); box-shadow: 0 0 0 1px var(--hair2) inset; }
+.sp-new input { flex: 1; min-width: 0; padding: 0; border: 0; outline: none; background: transparent; color: var(--t1); font-size: 13.5px; }
+.sp-new input::placeholder { color: var(--t4); }
+.sp-hint, .sp-error { margin: 8px 14px 0; color: var(--t4); font-size: 12px; }
+.sp-error { color: var(--warn); }

@@ -15,6 +15,7 @@ import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-t
 import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
+import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { deedPage, editLine, findHits, isLive, numberOf, toCheck, type DeedFilter, type DeedUi } from "./deed-view.ts";
 import type { Deed, DeedAction, DeedPeek } from "@demesne/protocol";
 import type { WorkspaceHost } from "./host.ts";
@@ -384,7 +385,7 @@ const UNDO_MS = 5_000;
 const pendingDeletes = new Map<string, ReturnType<typeof setTimeout>>();
 /// The chat whose title is being renamed in place, in the sidebar.
 let renaming: string | null = null;
-/// Initially show six chats per project; Show more and search reveal the rest.
+/// Initially show six chats per group; Show more and search reveal the rest.
 const SIDEBAR_ROWS = 6;
 const expandedProjectChats = new Set<string>();
 const projectOrder = new SidebarProjectOrder(
@@ -392,28 +393,60 @@ const projectOrder = new SidebarProjectOrder(
   () => state ? [document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace, ...JSON.parse(document.getElementById("sidebar-sessions")?.dataset.projects ?? "[]")] : [],
   renderSidebar,
 );
-/// Projects are an accordion: one is open at a time. Until you pick one,
-/// the project you are working in is the open one; switching projects
-/// opens the new one. An empty string means every project is closed.
-let openProjectPath: string | undefined = (() => {
+/// How the list is laid out: by project, by day, or by what each chat
+/// needs; newest first or by name. Group and sort unfolds under a heading.
+type SidebarView = { group: "project" | "date" | "status"; sort: "recent" | "name" };
+const sidebarView: SidebarView = (() => {
   try {
-    const saved = JSON.parse(localStorage.getItem("demesne-project-open") ?? "null");
-    return typeof saved?.path === "string" ? saved.path : undefined;
-  } catch { return undefined; }
+    const saved = JSON.parse(localStorage.getItem("demesne-sidebar-view") ?? "null");
+    return { group: ["project", "date", "status"].includes(saved?.group) ? saved.group : "project", sort: saved?.sort === "name" ? "name" : "recent" };
+  } catch { return { group: "project", sort: "recent" }; }
 })();
+/// Groups folded or unfolded by hand: "p:" and a project's folder,
+/// "pinned", "plain", or a day or state ("d:Today", "s:Working"). Without
+/// one, the project you are in is open and other projects are folded.
+const foldedGroups: Record<string, boolean> = (() => {
+  try { return JSON.parse(localStorage.getItem("demesne-sidebar-folded") ?? "{}") ?? {}; } catch { return {}; }
+})();
+function saveSidebarLayout() {
+  try {
+    localStorage.setItem("demesne-sidebar-view", JSON.stringify(sidebarView));
+    localStorage.setItem("demesne-sidebar-folded", JSON.stringify(foldedGroups));
+  } catch { /* storage may be off */ }
+}
+/// Whether a group shows its chats. On Home or in a plain chat every project
+/// starts folded.
+function groupIsOpen(key: string) {
+  if (key in foldedGroups) return !foldedGroups[key];
+  const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace;
+  return !key.startsWith("p:") || (!isPlain() && key === `p:${here}`);
+}
+/// The heading whose Group and sort line is unfolded beneath it.
+let viewOpenAt = "";
 let openProjectFor: string | undefined;
 /// Projects whose agents are unfolded under their line.
 const agentsShown = new Set<string>();
 /// An agent's mark: its client's initial on a tone of its own.
 const agentMark = (agent: NearbyAgent) => `<span class="agent-mark" data-provider="${h(agent.provider)}" aria-hidden="true">${h((agent.provider === "codex" ? "x" : agent.name[0] ?? "?"))}</span>`;
-/// The project just opened from its line unfolds once, not on every redraw.
-let unfoldingProject = "";
+/// The group just unfolded from its heading animates once, not on every redraw.
+let unfoldingGroup = "";
 /// Conversations deleted from the sidebar, hidden at once while the daemon
 /// archives them.
 const deletedSessions = new Set<string>();
 const ICON_BRANCH = '<svg class="ico sidebar-branch" viewBox="0 0 24 24" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>';
-const ICON_TRASH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg>';
-/// Project groups hold their chats; worktree chats remain with their parent.
+const ICON_ARCHIVE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg>';
+const ICON_PIN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>';
+const ICON_GROUP_FOLD = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>';
+const ICON_SORT = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m13 16 4 4 4-4"/></svg>';
+const VIEW_WORDS = { project: "Project", date: "Date", status: "Status", recent: "Recent", name: "Name" } as const;
+/// The day a chat falls under when the list is grouped by date.
+function sidebarDay(date: string) {
+  const then = new Date(date), now = new Date();
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - new Date(then.getFullYear(), then.getMonth(), then.getDate()).getTime()) / 86_400_000);
+  return days <= 0 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? "This week" : days < 30 ? "This month" : "Earlier";
+}
+/// Pinned chats lead, then one group per project and Just a chat; worktree
+/// chats remain with their parent.
 function renderSidebar() {
   const list = document.getElementById("sidebar-sessions");
   if (!state || !list || projectOrder.dragging) return;
@@ -427,23 +460,23 @@ function renderSidebar() {
   const projectWorkspace = list.dataset.workspace || state.workspace;
   const projectPaths = projectOrder.paths();
   // Worktree chats stay with their parent project, alongside its review
-  // actions. A chat with no folder is under Chats (null).
+  // actions. A chat with no folder is under Just a chat (null).
   const projectFor = (item: typeof sessions[number]) => !item.workspace ? null : branches.has(item.id) || item.id === state!.session?.id ? projectWorkspace : item.workspace;
   const plainNow = isPlain();
   const review = reviewJobs(), pinned = pinnedMission(), run = worktreeRun(), word = driveWord();
   const ideas = state.driveNext.proposals.length;
   const waiting = state.approvals.length ? "approval" : state.questions.length ? "answer" : "";
-  if (openProjectFor !== undefined && openProjectFor !== projectWorkspace) {
-    openProjectPath = undefined;
-    try { localStorage.removeItem("demesne-project-open"); } catch {}
+  // Switching to a project unfolds it.
+  if (openProjectFor !== undefined && openProjectFor !== projectWorkspace && foldedGroups[`p:${projectWorkspace}`]) {
+    delete foldedGroups[`p:${projectWorkspace}`];
+    saveSidebarLayout();
   }
   openProjectFor = projectWorkspace;
-  // On Home or in a plain chat every project starts folded.
-  const openPath = openProjectPath ?? (plainNow ? "" : projectWorkspace);
+  const isOpen = (key: string) => Boolean(query) || groupIsOpen(key);
   const agents = state.agents ?? [];
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, openPath, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, deedOpen, deedCount(), Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, deedOpen, chatsPage, deedCount(), plainNow, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -455,119 +488,155 @@ function renderSidebar() {
     ? { action: document.activeElement.dataset.action, args: document.activeElement.dataset.args } : null;
   const focusedRow = document.activeElement?.closest(".sidebar-item")?.querySelector(".sidebar-session");
   const focused = focusedRow ? [...nav.querySelectorAll(".sidebar-session")].indexOf(focusedRow) : -1;
-  // One line per chat: a dot for its state, its title, its time. The dot is
-  // amber when the chat needs you, a spinner while it works, blue for a
-  // branch of Drive's that waits for review (those sit on the Branches row).
-  // The tooltip and the accessible name say in words what the dot shows.
-  const row = (tone: string, title: string, selected: boolean, age: string, id: string, updatedAt: string) => {
+  const titleOf = (item: typeof sessions[number]) => item.id === current?.id ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
+  // What a chat's dot says: amber when it needs you, a breathing dot while
+  // it works, a cross when it failed, blue for a reply you haven't seen.
+  const toneOf = (item: typeof sessions[number]) => {
+    const selected = item.id === current?.id;
+    const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
+    // A mission's chat keeps its mark while Drive plans between turns.
+    const driving = Boolean(pinned && pinned.homeSessionId === item.id && ["running", "waiting"].includes(pinned.status));
+    const working = selected ? (Boolean(state!.activeTurnId) || driving) && !waiting : !asks && (item.status === "running" || item.status === "queued" || driving);
+    // Looking at a chat marks it seen; one that has moved on since, while
+    // you were elsewhere, carries the blue dot until you open it.
+    if (selected || !(item.id in seenChats)) markSeen(item.id, item.updatedAt);
+    const fresh = !selected && item.status === "completed" && seenChats[item.id] !== item.updatedAt;
+    return asks ? "warn" : working ? "working" : item.status === "failed" ? "bad" : fresh ? "acc" : "";
+  };
+  const tones = new Map(sessions.map((item) => [item.id, toneOf(item)] as const));
+  // Drive's own chats stay off the list: its work unfolds from its line in
+  // your chat and lands as a branch to review. One you open shows while open.
+  // An empty chat is the composer itself, and the New chat row above already
+  // names it; it joins the list once it has a turn.
+  const listed = sessions.filter((item) => (!branches.has(item.id) || item.id === current?.id) && (titleOf(item) !== "New chat" || tones.get(item.id) === "working" || (item.id === current?.id && Boolean(waiting))));
+  const matches = (item: typeof sessions[number]) => !query || titleOf(item).toLowerCase().includes(query) || Boolean(item.workspace?.toLowerCase().includes(query));
+  const sorted = (items: typeof sessions) => sidebarView.sort === "name" ? [...items].sort((a, b) => titleOf(a).localeCompare(titleOf(b))) : items;
+  const whereWords = (item: typeof sessions[number]) => { const project = projectFor(item); return project ? projectLabel(project) : "Just a chat"; };
+  // One line per chat: a mark for its state, its title, and on the right its
+  // time (or its project, when the list is by date or state). Pointing at it
+  // shows Pin and Archive there instead. The tooltip and the accessible name
+  // say in words what the mark shows.
+  const row = (item: typeof sessions[number], right: string, nested: boolean) => {
+    const id = item.id, title = titleOf(item), tone = tones.get(id) ?? "", selected = id === current?.id && !deedOpen && !chatsPage;
     const about = STATE_WORDS[tone] ?? "", branch = branches.get(id);
-    const tip = [title, about || fullTime(updatedAt), branch && `on ${branch}`].filter(Boolean).join(" · ");
-    const mark = branch ? ICON_BRANCH : "";
-    const project = projectFor(sessions.find(item => item.id === id)!);
+    const tip = [title, about || fullTime(item.updatedAt), branch && `on ${branch}`].filter(Boolean).join(" · ");
+    const project = projectFor(item);
     const here = project === projectWorkspace || project === null;
-    return btn(here ? "select-session" : "project-session", `${dot(tone)}<span class="sidebar-session-name">${h(title)}</span>${mark}${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}`)
-      .replace("<button ", `<button title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${here ? ' aria-keyshortcuts="Delete"' : ""}${selected ? ' aria-current="page"' : ""} `);
+    const mark = tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
+    const side = tone || (id === current?.id && !inSession()) ? "" : right;
+    const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${branch ? ICON_BRANCH : ""}${side ? `<span class="sidebar-session-age">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}`)
+      .replace("<button ", `<button title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
+    // Pin and Archive sit on the row itself: no menu, no dialog. The keyboard
+    // archives with Delete on the row, so they stay out of the tab order.
+    const pin = btn("pin-session", ICON_PIN, { id, pinned: !item.pinned }, `sidebar-pin${item.pinned ? " on" : ""}`).replace("<button ", `<button title="${item.pinned ? "Unpin" : "Pin"}" aria-label="${h(`${item.pinned ? "Unpin" : "Pin"} ${title}`)}" tabindex="-1" `);
+    const archive = tone === "working" ? "" : btn("delete-session", ICON_ARCHIVE, { id }, "sidebar-delete").replace("<button ", `<button title="Archive" aria-label="Archive ${h(title)}" tabindex="-1" `);
+    if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
+    return `<div class="sidebar-item${nested ? " kid" : ""}">${open}<span class="sidebar-row-actions">${pin}${archive}</span></div>`;
   };
-  // Each chat's row, the first six unless searching or expanded; `path` is
-  // its project, null for Chats.
-  const chatRows = (matching: typeof sessions, path: string | null, nested: (item: typeof sessions[number]) => boolean) => {
-    const rows: string[] = [];
-    let shown = 0, more = 0;
-    // Search reveals every match; each list can also expand its full history.
-    const limit = query || expandedProjectChats.has(path ?? "") ? Infinity : SIDEBAR_ROWS;
-    for (const item of matching) {
-      if (shown >= limit) { if (item.turns) more++; continue; }
-      const selected = item.id === current?.id;
-      // Drive's own chats stay off the list: its work unfolds from its line in
-      // your chat and lands as a branch to review. One you open shows while open.
-      if (branches.has(item.id) && !selected) continue;
-      const title = selected ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
-      const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
-      // A mission's chat keeps its cube while Drive plans between turns.
-      const driving = Boolean(pinned && pinned.homeSessionId === item.id && ["running", "waiting"].includes(pinned.status));
-      const working = selected ? (Boolean(state!.activeTurnId) || driving) && !waiting : !asks && (item.status === "running" || item.status === "queued" || driving);
-      // Looking at a chat marks it seen; one that has moved on since, while
-      // you were elsewhere, carries the blue dot until you open it.
-      if (selected || !(item.id in seenChats)) markSeen(item.id, item.updatedAt);
-      const fresh = !selected && item.status === "completed" && seenChats[item.id] !== item.updatedAt;
-      const tone = asks ? "warn" : working ? "working" : item.status === "failed" ? "bad" : fresh ? "acc" : "";
-      // An empty chat is the composer itself, and the New chat row above
-      // already names it; it joins the list once it has a turn.
-      if (title === "New chat" && !working && !waiting) continue;
-      // Each row carries its own delete, shown on hover: no menu, no dialog.
-      // The keyboard deletes with Delete on the row itself, so the trash
-      // stays out of the tab order.
-      const remove = working || (path !== projectWorkspace && path !== null) ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" tabindex="-1" `);
-      if (renaming === item.id) {
-        rows.push(`<div class="sidebar-item${nested(item) ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(item.id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`);
-        shown++;
-        continue;
-      }
-      rows.push(`<div class="sidebar-item${nested(item) ? " kid" : ""}">${row(tone, title, selected && !deedOpen, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id, item.updatedAt)}${remove}</div>`);
-      shown++;
+  // A group's rows, the first six unless searching or expanded.
+  const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false) => {
+    const limit = query || expandedProjectChats.has(key) ? Infinity : SIDEBAR_ROWS;
+    const rows = items.slice(0, limit).map((item) => row(item, right(item), nested(item)));
+    if (items.length > limit) rows.push(btn("project-more", `Show ${items.length - limit} more`, { key }, "sidebar-more"));
+    else if (!query && expandedProjectChats.has(key) && items.length > SIDEBAR_ROWS) rows.push(btn("project-more", "Show fewer", { key }, "sidebar-more"));
+    return rows;
+  };
+  // Group and sort, unfolded in place under the heading it was opened from.
+  const viewLine = (key: string) => {
+    if (viewOpenAt !== key) return "";
+    const choice = (word: keyof typeof VIEW_WORDS, args: Record<string, string>, on: boolean) =>
+      btn("sidebar-view", VIEW_WORDS[word], args, `sidebar-view-opt${on ? " on" : ""}`).replace("<button ", `<button aria-pressed="${on}" `);
+    return `<div class="sidebar-view-line" role="group" aria-label="Group and sort"><span class="sidebar-view-label">Group</span>${(["project", "date", "status"] as const).map((group) => choice(group, { group }, sidebarView.group === group)).join("")}<span class="sidebar-view-label">Sort</span>${(["recent", "name"] as const).map((sort) => choice(sort, { sort }, sidebarView.sort === sort)).join("")}${btn("chats-page", "Archived ›", { tab: "archived" }, "sidebar-view-opt sidebar-view-archived")}</div>`;
+  };
+  // Every heading folds its group; pointing at it trades the count for
+  // Group and sort.
+  const viewButton = (key: string) => btn("sidebar-view-open", ICON_SORT, { key }, `sidebar-view-button${viewOpenAt === key ? " on" : ""}`)
+    .replace("<button ", `<button title="Group and sort" aria-label="Group and sort" aria-expanded="${viewOpenAt === key}" `);
+  const group = (key: string, label: string, rows: string[], count: number) => {
+    const open = isOpen(key);
+    const toggle = btn("group-toggle", `${ICON_GROUP_FOLD}<span>${h(label)}</span>`, { key }, "sidebar-group-toggle").replace("<button ", `<button aria-expanded="${open}" `);
+    return `<section class="sidebar-group-block" data-group="${h(key)}"><div class="sidebar-group-row">${toggle}<span class="sidebar-group-count">${count || ""}</span>${viewButton(key)}</div>${viewLine(key)}<div class="sidebar-group-chats${key === unfoldingGroup && open ? " unfolding" : ""}"${open ? "" : " hidden"}>${rows.join("")}</div></section>`;
+  };
+  // The open project's Deed leads its chats, with how many sentences need you.
+  const deedLine = () => {
+    const count = deedCount();
+    return `<div class="sidebar-deed-item">${btn("deed-open", `${ICON_DEED}<span class="sidebar-session-name">Deed</span>${count ? `<span class="sidebar-deed-check">${count} to check</span>` : ""}`, {}, `sidebar-deed${deedOpen ? " selected" : ""}`).replace("<button ", `<button title="What this project does, in plain sentences held true by its code"${deedOpen ? ' aria-current="page"' : ""} `)}</div>`;
+  };
+  const reviewLine = () => review.length ? btn("review-open", `Review ${review.length} ${review.length === 1 ? "branch" : "branches"} ›`, { show: true }, "sidebar-more sidebar-review") : "";
+  // Pinned chats lead the list, whichever project they are in.
+  const pinnedChats = sorted(listed.filter((item) => item.pinned && matches(item)));
+  const pinnedList = document.getElementById("sidebar-pinned");
+  if (pinnedList) {
+    pinnedList.hidden = !pinnedChats.length;
+    pinnedList.innerHTML = pinnedChats.length ? group("pinned", "Pinned", groupRows("pinned", pinnedChats, (item) => shortAge(item.updatedAt)), 0) : "";
+  }
+  const rest = listed.filter((item) => !item.pinned);
+  const groups: string[] = [];
+  let plainGroup = "";
+  if (sidebarView.group === "project") {
+    for (const [index, path] of projectPaths.entries()) {
+      const name = projectLabel(path);
+      const projectMatches = Boolean(query) && path.toLowerCase().includes(query);
+      const projectSessions = sessions.filter(item => projectFor(item) === path);
+      const found = rest.filter(item => projectFor(item) === path && (projectMatches || titleOf(item).toLowerCase().includes(query)));
+      const nested = (item: typeof found[number]) => found.some(parent => parent.id === parentOf.get(item.id));
+      const matching = sorted(found.filter(item => !nested(item)));
+      for (const child of found.filter(nested)) matching.splice(matching.findIndex(parent => parent.id === parentOf.get(child.id)) + 1, 0, child);
+      if (query && !projectMatches && !matching.length) continue;
+      const key = `p:${path}`, expanded = isOpen(key), active = path === projectWorkspace;
+      const rows = groupRows(key, matching, (item) => shortAge(item.updatedAt), nested);
+      if (active && !query) rows.push(reviewLine());
+      const toggle = btn("project-toggle", ICON_GROUP_FOLD, { path }, "sidebar-project-toggle")
+        .replace("<button ", `<button aria-label="${h(`${expanded ? "Collapse" : "Expand"} ${name}`)}" aria-expanded="${expanded}" aria-controls="project-chats-${index}"${query ? " disabled" : ""} `);
+      const label = btn("project-open", `<span>${h(name)}</span>`, { path }, "sidebar-project-name")
+        .replace("<button ", `<button draggable="true" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="${h(path)} · Drag to reorder (Alt+↑/↓)"${active ? ' aria-current="location"' : ""} `);
+      // Each project's line says its state on the right, so a closed project
+      // still shows what it needs: branches to review, a chat waiting on you,
+      // work in progress, or how many chats it holds.
+      const asking = projectSessions.some(item => item.id === current?.id ? Boolean(waiting) : item.waiting);
+      const busy = projectSessions.some(item => item.id === current?.id ? Boolean(state!.activeTurnId) : item.status === "running" || item.status === "queued");
+      const link = active && state.connection !== "online" ? state.connection === "connecting" ? "connecting…" : "offline" : "";
+      // Other agents at work here (Heartbeat): their marks lead the state, and
+      // clicking them unfolds who they are, with Message.
+      const here = agents.filter(agent => agent.project === projectSlug(path));
+      const showing = here.length > 0 && agentsShown.has(path);
+      const marks = here.length ? btn("agents-toggle", here.slice(0, 3).map(agentMark).join(""), { path }, "sidebar-agents")
+        .replace("<button ", `<button title="${h(here.map(agent => `${agent.name} ${agentPlace(agent)}`).join(" · "))}" aria-label="${h(`${here.length} ${here.length === 1 ? "agent" : "agents"} working in ${name}`)}" aria-expanded="${showing}" `) : "";
+      const status = link ? `<span class="sidebar-project-state">${link}</span>`
+        : active && review.length ? btn("review-open", `${ICON_BRANCH}${review.length}`, { show: true }, "sidebar-project-review").replace("<button ", `<button title="${review.length} ${review.length === 1 ? "branch" : "branches"} to review" `)
+        : asking ? `<span class="sidebar-project-state" title="A chat needs you">${dot("warn")}</span>`
+        // An open project's rows already show the work; a folded one says so.
+        : busy && !expanded ? `<span class="sidebar-project-state" title="Working">${dot("working")}</span>`
+        : here.length ? "" : `<span class="sidebar-group-count">${found.length || ""}</span>`;
+      const agentRows = showing ? `<div class="sidebar-agent-rows">${here.map(agent => `<div class="sidebar-agent-row" title="${h(agent.address)}">${agentMark(agent)}<span>${h(agent.name)} · ${h(agentPlace(agent).replace(/^on /, ""))}</span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "sidebar-agent-message")}</div>`).join("")}</div>` : "";
+      groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${toggle}${label}${marks}${status}${viewButton(key)}</div>${viewLine(key)}${agentRows}<div class="sidebar-project-chats${key === unfoldingGroup && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${active && !query ? deedLine() : ""}${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
     }
-    return { rows, shown, more };
-  };
-  // Chats with no project lead the list, above Projects.
-  const plainChats = sessions.filter((item) => !item.workspace && (!query || item.title.toLowerCase().includes(query)));
-  const chats = chatRows(plainChats, null, () => false);
-  if (chats.more && !query) chats.rows.push(btn("project-more", `Show ${chats.more} more`, { path: "" }, "sidebar-more"));
-  else if (!query && expandedProjectChats.has("") && chats.shown > SIDEBAR_ROWS) chats.rows.push(btn("project-more", "Show fewer", { path: "" }, "sidebar-more"));
+    // Chats with no project follow, under Just a chat.
+    const plainChats = sorted(rest.filter((item) => !item.workspace && matches(item)));
+    if (plainChats.length) plainGroup = group("plain", "Just a chat", groupRows("plain", plainChats, (item) => shortAge(item.updatedAt)), plainChats.length);
+  } else {
+    // By date or by state, every chat in one list, each naming its project.
+    // The open project's Deed and branches to review lead it.
+    const lead = query || plainNow ? "" : deedLine() + reviewLine();
+    if (lead) groups.push(`<div class="sidebar-lead">${lead}</div>`);
+    const buckets = new Map<string, typeof sessions>();
+    const STATE_GROUPS: Record<string, string> = { warn: "Needs you", working: "Working", bad: "Failed", acc: "New replies", "": "Done" };
+    const order = sidebarView.group === "date" ? ["Today", "Yesterday", "This week", "This month", "Earlier"] : Object.values(STATE_GROUPS);
+    for (const label of order) buckets.set(label, []);
+    for (const item of sorted(rest.filter(matches))) buckets.get(sidebarView.group === "date" ? sidebarDay(item.updatedAt) : STATE_GROUPS[tones.get(item.id) ?? ""]!)!.push(item);
+    for (const [label, items] of buckets) {
+      if (!items.length) continue;
+      const key = `${sidebarView.group === "date" ? "d" : "s"}:${label}`;
+      groups.push(group(key, label, groupRows(key, items, whereWords), items.length));
+    }
+  }
+  list.innerHTML = groups.length || plainGroup || pinnedChats.length ? groups.join("") : `<p class="sidebar-empty">${query ? "No matching conversations or projects" : "No chats yet"}</p>`;
   const chatList = document.getElementById("sidebar-chats");
   if (chatList) {
-    chatList.hidden = !chats.rows.length;
-    chatList.innerHTML = chats.rows.length ? `<div class="sidebar-group-heading"><span class="sidebar-group">Chats</span></div>${chats.rows.join("")}` : "";
+    chatList.hidden = !plainGroup;
+    chatList.innerHTML = plainGroup;
   }
-  const groups: string[] = [];
-  for (const [index, path] of projectPaths.entries()) {
-    const name = path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path;
-    const projectMatches = Boolean(query) && path.toLowerCase().includes(query);
-    const projectSessions = sessions.filter(item => projectFor(item) === path);
-    const found = projectSessions.filter(item => projectMatches || item.title.toLowerCase().includes(query));
-    const nested = (item: typeof found[number]) => found.some(parent => parent.id === parentOf.get(item.id));
-    const matching = found.filter(item => !nested(item));
-    for (const child of found.filter(nested)) matching.splice(matching.findIndex(parent => parent.id === parentOf.get(child.id)) + 1, 0, child);
-    if (query && !projectMatches && !matching.length) continue;
-    const expanded = Boolean(query) || path === openPath;
-    const { rows, shown, more } = chatRows(matching, path, nested);
-    // The open project's Deed leads its chats, with how many sentences need you.
-    let deedLine = "";
-    if (path === projectWorkspace && !query) {
-      const count = deedCount();
-      deedLine = (`<div class="sidebar-deed-item">${btn("deed-open", `${ICON_DEED}<span class="sidebar-session-name">Deed</span>${count ? `<span class="sidebar-deed-check">${count} to check</span>` : ""}`, {}, `sidebar-deed${deedOpen ? " selected" : ""}`).replace("<button ", `<button title="What this project does, in plain sentences held true by its code"${deedOpen ? ' aria-current="page"' : ""} `)}</div>`);
-    }
-    if (more && !query) rows.push(btn("project-more", `Show ${more} more`, { path }, "sidebar-more"));
-    else if (!query && expandedProjectChats.has(path) && shown > SIDEBAR_ROWS) rows.push(btn("project-more", "Show fewer", { path }, "sidebar-more"));
-    const toggle = btn("project-toggle", '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>', { path }, "sidebar-project-toggle")
-      .replace("<button ", `<button aria-label="${h(`${expanded ? "Collapse" : "Expand"} ${name}`)}" aria-expanded="${expanded}" aria-controls="project-chats-${index}"${query ? " disabled" : ""} `);
-    const label = btn("project-open", `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v11H3zM3 7V4h7l2 3"/></svg><span>${h(name)}</span>`, { path }, "sidebar-project-name")
-      .replace("<button ", `<button draggable="true" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="${h(path)} · Drag to reorder (Alt+↑/↓)"${path === projectWorkspace ? ' aria-current="location"' : ""} `);
-    // Each project's line says its state on the right, so a closed project
-    // still shows what it needs: branches to review, a chat waiting on you,
-    // work in progress, or when it last moved.
-    const active = path === projectWorkspace;
-    const asking = projectSessions.some(item => item.id === current?.id ? Boolean(waiting) : item.waiting);
-    const busy = projectSessions.some(item => item.id === current?.id ? Boolean(state!.activeTurnId) : item.status === "running" || item.status === "queued");
-    const latest = projectSessions.reduce((max, item) => item.turns && item.updatedAt > max ? item.updatedAt : max, "");
-    const link = active && state.connection !== "online" ? state.connection === "connecting" ? "connecting…" : "offline" : "";
-    // Other agents at work here (Heartbeat): their marks lead the state, and
-    // clicking them unfolds who they are, with Message.
-    const here = agents.filter(agent => agent.project === projectSlug(path));
-    const showing = here.length > 0 && agentsShown.has(path);
-    const marks = here.length ? btn("agents-toggle", here.slice(0, 3).map(agentMark).join(""), { path }, "sidebar-agents")
-      .replace("<button ", `<button title="${h(here.map(agent => `${agent.name} ${agentPlace(agent)}`).join(" · "))}" aria-label="${h(`${here.length} ${here.length === 1 ? "agent" : "agents"} working in ${name}`)}" aria-expanded="${showing}" `) : "";
-    const status = link ? `<span class="sidebar-project-state">${link}</span>`
-      : active && review.length ? btn("review-open", `${ICON_BRANCH}${review.length}`, { show: true }, "sidebar-project-review").replace("<button ", `<button title="${review.length} ${review.length === 1 ? "branch" : "branches"} to review" `)
-      : asking ? `<span class="sidebar-project-state" title="A chat needs you">${dot("warn")}</span>`
-      // An open project's rows already show the work; a folded one says so.
-      : busy && !expanded ? `<span class="sidebar-project-state" title="Working">${dot("working")}</span>`
-      : !expanded && latest && !here.length ? `<span class="sidebar-project-state" title="${h(fullTime(latest))}">${h(shortAge(latest))}</span>` : "";
-    const agentRows = showing ? `<div class="sidebar-agent-rows">${here.map(agent => `<div class="sidebar-agent-row" title="${h(agent.address)}">${agentMark(agent)}<span>${h(agent.name)} · ${h(agentPlace(agent).replace(/^on /, ""))}</span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "sidebar-agent-message")}</div>`).join("")}</div>` : "";
-    if (active && review.length && !query) rows.push(btn("review-open", `Review ${review.length} ${review.length === 1 ? "branch" : "branches"} ›`, { show: true }, "sidebar-more sidebar-review"));
-    groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${toggle}${label}${marks}${status}</div>${agentRows}<div class="sidebar-project-chats${path === unfoldingProject && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${deedLine}${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
-  }
-  list.innerHTML = groups.length ? groups.join("") : '<p class="sidebar-empty">No matching conversations or projects</p>';
-  unfoldingProject = "";
+  unfoldingGroup = "";
   const editing = nav.querySelector<HTMLInputElement>(".sidebar-rename input");
   if (editing && document.activeElement !== editing) { editing.focus(); editing.select(); }
   // A redraw keeps keyboard focus where it was, or on the row that moved up.
@@ -578,17 +647,17 @@ function renderSidebar() {
     (sameControl ?? (focused >= 0 ? buttons[Math.min(focused, buttons.length - 1)] : null) ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
   }
   const title = document.getElementById("workspace-title");
-  if (title) { title.textContent = deedOpen ? "Deed" : inSession() ? current?.title ?? "Conversation" : "Home"; title.title = title.textContent; }
+  if (title) { title.textContent = chatsPage ? "All chats" : deedOpen ? "Deed" : inSession() ? current?.title ?? "Conversation" : "Home"; title.title = title.textContent; }
   // A mission's chat says where it came from, and goes back there.
   const crumb = document.getElementById("workspace-from"), from = current && inSession() ? parentOf.get(current.id) : undefined;
   if (crumb) {
-    crumb.hidden = !from || deedOpen;
+    crumb.hidden = !from || deedOpen || Boolean(chatsPage);
     crumb.innerHTML = from ? `from ${btn("select-session", h(chatTitle(from)), { id: from }, "workspace-from-link")}` : "";
   }
   // Where an open chat lives: Just a chat, or its project.
   const where = document.getElementById("workspace-where");
   if (where) {
-    where.hidden = deedOpen || !inSession() || Boolean(from);
+    where.hidden = deedOpen || Boolean(chatsPage) || !inSession() || Boolean(from);
     where.textContent = plainNow ? "Just a chat" : projectLabel(projectWorkspace);
   }
   // The rail: a dot where something waits, a ring for Drive's progress.
@@ -820,9 +889,49 @@ function renderCards() {
   }
   cardUnfolding = "";
 }
+/// The sidebar's foot: who you are and what pays for the models, the theme
+/// switch, and Settings.
+const ICON_SUN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>';
+const ICON_MOON = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+const isLightTheme = (name: string) => {
+  const option = state?.themeOptions.find((item) => item.name === name) as { appearance?: string } | undefined;
+  return option?.appearance ? option.appearance === "light" : /light|latte/.test(name);
+};
+function renderFoot() {
+  if (!state) return;
+  const you = state.you || "You", first = you.split(/\s+/)[0] || you;
+  const plan = state.chatgptAccount?.planEnabled ? "ChatGPT plan" : state.model.provider || "";
+  const light = isLightTheme(state.theme);
+  const html = [first, plan, light].join("\0");
+  const foot = document.querySelector<HTMLElement>(".sidebar-foot");
+  if (!foot || foot.dataset.html === html) return;
+  foot.dataset.html = html;
+  el("sidebar-avatar").textContent = first[0]?.toUpperCase() ?? "";
+  el("sidebar-you").textContent = first;
+  el("sidebar-you").title = you;
+  el("sidebar-plan").textContent = plan;
+  el("sidebar-plan").title = state.chatgptAccount?.email ?? plan;
+  const theme = el("sidebar-theme"), word = light ? "Dark theme" : "Light theme";
+  theme.innerHTML = light ? ICON_MOON : ICON_SUN;
+  theme.title = word;
+  theme.setAttribute("aria-label", word);
+}
+/// The sun and moon swap between your last light and dark themes.
+function flipTheme(): void {
+  if (!state) return;
+  const light = isLightTheme(state.theme), names = state.themes;
+  try { localStorage.setItem(light ? "demesne-theme-light" : "demesne-theme-dark", state.theme); } catch {}
+  let saved: string | null = null;
+  try { saved = localStorage.getItem(light ? "demesne-theme-dark" : "demesne-theme-light"); } catch {}
+  const next = saved && names.includes(saved) && isLightTheme(saved) !== light ? saved
+    : names.includes(light ? "demesne" : "demesne-light") ? (light ? "demesne" : "demesne-light")
+    : names.find((name) => isLightTheme(name) !== light);
+  if (next) void act(() => dispatch("settings-set", { method: "theme", args: { name: next } }));
+}
 function renderStatus() {
   if (!state) return;
   renderSidebar();
+  renderFoot();
   const c = context(),
     last = state.runs.at(-1),
     phase = state.approvals.length
@@ -1686,8 +1795,35 @@ async function deedAct(request: DeedAction) {
   const workspace = state.workspace;
   keepDeed(workspace, await api<Deed | null>("deed-act", { workspace, request }));
 }
+/// All chats, in place of the conversation: "" when closed.
+let chatsPage: "" | ChatsTab = "";
+let archivedChats: ChatsPageChat[] | null = null;
+function openChats(tab: "" | ChatsTab) {
+  if (tab && deedOpen) openDeed(false);
+  chatsPage = tab;
+  sidebarSignature = heroSignature = "";
+  if (tab) void loadArchived();
+  if (state) renderState({ ...state });
+  if (tab) document.querySelector<HTMLElement>("#chats-page .cp-tab.on")?.focus({ preventScroll: true });
+}
+async function loadArchived() {
+  try {
+    const result = await api<{ sessions: Array<{ id: string; title: string; archivedAt: string; workspace?: string }> }>("archived-list");
+    archivedChats = result.sessions.map((chat) => ({ id: chat.id, title: chat.title, at: chat.archivedAt, workspace: chat.workspace ?? null }));
+  } catch { archivedChats = archivedChats ?? []; }
+  renderChatsPage();
+}
+function renderChatsPage() {
+  const root = document.getElementById("chats-page");
+  if (!root || !state || !chatsPage) return;
+  const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace;
+  const active = state.sessions.filter((item) => item.turns && !deletedSessions.has(item.id)).map((item) => ({ id: item.id, title: item.title, at: item.updatedAt, workspace: item.workspace ?? null, here: item.workspace === here }));
+  const html = chatsPageHtml(chatsPage, active, archivedChats);
+  if (root.dataset.html !== html) { root.innerHTML = html; root.dataset.html = html; }
+}
 function openDeed(open: boolean) {
   if (deedOpen === open) return;
+  if (open && chatsPage) openChats("");
   deedOpen = open;
   deedUi.focus = deedUi.editing = deedUi.live = deedUi.filter = deedUi.since = deedUi.peek = null;
   deedUi.find = "";
@@ -3859,6 +3995,15 @@ async function dispatch(
   if (action === "deed-open") return openDeed(true);
   // Going to a chat leaves the Deed.
   if (deedOpen && ["select-session", "new-session", "project-open", "project-session", "review-open", "drive-open"].includes(action)) openDeed(false);
+  if (chatsPage && ["select-session", "new-session", "project-open", "project-session", "review-open", "drive-open"].includes(action)) openChats("");
+  if (action === "chats-page") return openChats(args.tab === "archived" ? "archived" : "active");
+  if (action === "chats-restore") {
+    await api("restore", { id: String(args.id) });
+    deletedSessions.delete(String(args.id));
+    archivedChats = archivedChats?.filter((chat) => chat.id !== args.id) ?? null;
+    renderChatsPage();
+    return;
+  }
   if (action.startsWith("deed-")) {
     const id = String(args.id ?? "");
     if (action === "deed-write") return deedAct({ action: "write" });
@@ -3875,20 +4020,47 @@ async function dispatch(
     const verb = ({ "deed-fix": "fix", "deed-words": "words", "deed-check": "check", "deed-seen": "seen", "deed-remove": "remove" } as const)[action as "deed-fix"];
     if (verb) return deedAct({ action: verb, id });
   }
-  if (action === "project-toggle" || action === "project-more") {
-    const path = String(args.path);
-    if (action === "project-toggle") {
-      const open = openProjectPath ?? (isPlain() ? "" : document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace);
-      openProjectPath = open === path ? "" : path;
-      unfoldingProject = openProjectPath;
-      try { localStorage.setItem("demesne-project-open", JSON.stringify({ path: openProjectPath })); } catch {}
-    } else if (expandedProjectChats.has(path)) expandedProjectChats.delete(path);
-    else expandedProjectChats.add(path);
+  if (action === "project-toggle" || action === "group-toggle" || action === "project-more") {
+    const key = action === "project-toggle" ? `p:${String(args.path)}` : String(args.key);
+    if (action === "project-more") {
+      if (expandedProjectChats.has(key)) expandedProjectChats.delete(key); else expandedProjectChats.add(key);
+    } else {
+      foldedGroups[key] = groupIsOpen(key);
+      if (!foldedGroups[key]) unfoldingGroup = key;
+      saveSidebarLayout();
+    }
     renderSidebar();
     // Rendering replaces the control: keep keyboard focus on its replacement.
     document.querySelectorAll<HTMLButtonElement>(`#sidebar-projects [data-action="${action}"]`).forEach(button => {
-      if (JSON.parse(button.dataset.args ?? "{}").path === path) button.focus({ preventScroll: true });
+      if (button.dataset.args === JSON.stringify(args)) button.focus({ preventScroll: true });
     });
+    return;
+  }
+  // Group and sort unfolds under the heading it was opened from; a choice
+  // rearranges the list at once and the line stays until you fold it.
+  if (action === "sidebar-view-open") {
+    viewOpenAt = viewOpenAt === String(args.key) ? "" : String(args.key);
+    renderSidebar();
+    return;
+  }
+  if (action === "sidebar-view") {
+    const regroup = (args.group === "project" || args.group === "date" || args.group === "status") && args.group !== sidebarView.group;
+    if (regroup) sidebarView.group = args.group;
+    if (args.sort === "recent" || args.sort === "name") sidebarView.sort = args.sort;
+    saveSidebarLayout();
+    if (regroup) {
+      // The line moves to the first heading of the new layout.
+      viewOpenAt = "";
+      renderSidebar();
+      viewOpenAt = JSON.parse(document.querySelector<HTMLElement>("#sidebar-projects [data-action='sidebar-view-open']")?.dataset.args ?? "{}").key ?? "";
+    }
+    renderSidebar();
+    document.querySelector<HTMLElement>(`#sidebar-projects .sidebar-view-opt[data-args='${JSON.stringify(args)}']`)?.focus({ preventScroll: true });
+    return;
+  }
+  if (action === "theme-flip") { flipTheme(); return; }
+  if (action === "pin-session") {
+    await api("pin", { id: String(args.id), pinned: args.pinned === true });
     return;
   }
   if (action === "agents-toggle") {
@@ -4420,12 +4592,15 @@ function renderState(next: Snapshot) {
   }
   // Drive working this session is a session, even before its first turn:
   // its mission is the conversation's turn.
-  const start = !inSession(next) && !deedOpen;
+  const start = !inSession(next) && !deedOpen && !chatsPage;
   el("app").classList.toggle("start", start);
   el("app").classList.toggle("deeding", deedOpen);
+  el("app").classList.toggle("paging", Boolean(chatsPage));
   el("hero").hidden = !start;
-  el("conversation").hidden = start || deedOpen;
+  el("conversation").hidden = start || deedOpen || Boolean(chatsPage);
   el("deed").hidden = !deedOpen;
+  el("chats-page").hidden = !chatsPage;
+  renderChatsPage();
   if (start) renderHero();
   else if (wasStart || el("composer-slot").parentElement !== el("input-area")) el("input-area").append(el("composer-slot"));
   renderSakura(start && !el("hero").classList.contains("mapped"));
@@ -4664,6 +4839,11 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   // Esc on the Deed lets go of the sentence you're on.
+  if (key === "escape" && !ctrl && chatsPage && !field) {
+    event.preventDefault();
+    openChats("");
+    return;
+  }
   if (key === "escape" && !ctrl && deedOpen && deedUi.focus && (!field || (event.target === editor && !editor.value))) {
     event.preventDefault();
     deedUi.focus = null;
@@ -4720,8 +4900,13 @@ document.addEventListener("keydown", (event) => {
     });
     return;
   }
+  // ⌘K is Search in the sidebar: the list narrows as you type.
   if (ctrl && key === "k") {
-    run(() => openOverlay("settings"));
+    event.preventDefault();
+    const search = document.getElementById("sidebar-search") as HTMLInputElement | null;
+    if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("rail-expand")?.click();
+    search?.focus();
+    search?.select();
     return;
   }
   // Ctrl+Tab and Ctrl+Shift+Tab step through the chats in the sidebar.

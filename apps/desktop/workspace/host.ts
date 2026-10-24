@@ -12,6 +12,8 @@ import type {
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
+import { execFileSync } from "node:child_process";
+import { userInfo } from "node:os";
 import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted } from "@demesne/client";
 import { updateUserConfig } from "@demesne/config";
 import {
@@ -127,6 +129,17 @@ const AGENTS_POLL_MS = 15_000;
 
 /** All privileged operations stay here. The web renderer gets snapshots and a
  * fixed set of actions, never a daemon token, shell, arbitrary URL, or filesystem API. */
+/// Who is at the keyboard, for the sidebar's foot: the account's full name
+/// on macOS, otherwise the login name.
+const YOU = (() => {
+  try {
+    if (process.platform === "darwin") {
+      const full = execFileSync("id", ["-F"], { encoding: "utf8", timeout: 1_000 }).trim();
+      if (full) return full;
+    }
+  } catch { /* fall back to the login name */ }
+  try { return userInfo().username; } catch { return ""; }
+})();
 export class WorkspaceHost {
   settings: CliSettings;
   setup: WorkspaceSetup | null = null;
@@ -303,12 +316,14 @@ export class WorkspaceHost {
         status: session.turns.at(-1)?.status,
         workspace: session.workspace?.root,
         waiting: this.waitingSessions.has(session.id),
+        ...(session.pinnedAt ? { pinned: true } : {}),
       })),
       runs: this.current?.runs() ?? [],
       cursor: this.current?.cursor ?? 0,
       model: this.model,
       reasoning: this.reasoning,
       chatgptAccount: this.model.provider === "ChatGPT" ? this.chatgptAccount : null,
+      you: YOU,
       provider: this.current?.provider ?? null,
       checkpoint: this.current?.state.checkpoint ?? null,
       rewinds: this.current?.rewinds ?? [],
@@ -1597,6 +1612,20 @@ export class WorkspaceHost {
       const id = args.id === undefined ? this.current!.session.id : string(args.id, "session", 200);
       await this.client.updateSession(id, { title });
       if (id === this.current?.session.id) this.current.session.title = title;
+      await this.refreshSessions();
+      return;
+    }
+    if (method === "pin") {
+      await this.client.updateSession(string(args.id, "session", 200), { pinned: args.pinned === true });
+      await this.refreshSessions();
+      return;
+    }
+    // All chats: the archived ones, newest first, and Restore.
+    if (method === "archived-list") {
+      return { sessions: (await this.client.listArchivedSessions()).map((session) => ({ id: session.id, title: session.title, archivedAt: session.archivedAt ?? session.updatedAt, updatedAt: session.updatedAt, turns: session.turns.length, workspace: session.workspace?.root })) };
+    }
+    if (method === "restore") {
+      await this.client.restoreSession(string(args.id, "session", 200));
       await this.refreshSessions();
       return;
     }

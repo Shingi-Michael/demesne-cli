@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import sharp from "sharp";
 import { fixture } from "../apps/desktop/workspace/test/fixture.ts";
 
@@ -434,19 +434,22 @@ try {
   assert(commands.commands.some(command => command.status === "completed" && command.exitCode === 0 && command.stdout.includes("DESKTOP_CHECK_PASSED")), "Approved command output was recorded");
   assert(await evaluate<boolean>("return !!document.querySelector('.katex') && !!document.querySelector('pre code');"), "Markdown, code and math rendered in Chromium");
   await until(() => page.locator(".sidebar-session[aria-current='page']").innerText().then(text => text.includes("Desktop smoke")), "sidebar tracks the current conversation title");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).fill("no-such-conversation");
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).fill("no-such-conversation");
   await textIncludes("No matching conversations");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
-  assert.equal(await page.getByRole("searchbox", { name: "Find a conversation or project" }).inputValue(), "", "Escape clears the search");
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).press("Escape");
+  assert.equal(await page.getByRole("searchbox", { name: "Search chats and projects" }).inputValue(), "", "Escape clears the search");
   await until(() => page.locator(".sidebar-session[aria-current='page']").isVisible(), "the list is back after search");
   assert(await page.locator("#sidebar-drive, #drive-page").count() === 0, "Drive has no sidebar row and no page");
   // Projects stay visible, and each project owns a collapsible list of chats.
   assert.equal(await page.locator("#desktop-project-button, #sidebar-open-folder, #sidebar-branches").count(), 0, "The sidebar names the project once, in its group");
   assert((await page.locator(".sidebar-project.active .sidebar-project-name").getAttribute("title"))?.startsWith(f.workspace), "The project's line carries its folder");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).focus();
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).focus();
   await until(() => page.locator("#sidebar-projects").isVisible(), "projects are visible");
-  assert((await page.locator("#sidebar-open-project").getAttribute("title"))?.startsWith("Open a folder"), "Projects' + opens another folder");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
+  // ⌘K is Search: the row itself becomes the field.
+  await page.locator("textarea").focus();
+  await page.keyboard.press("Control+k");
+  await until(() => evaluate<boolean>("return document.activeElement?.id === 'sidebar-search';"), "Ctrl+K puts you in Search");
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).press("Escape");
   assert(await page.locator("#sidebar-projects").isVisible(), "projects stay visible after search");
   const projectToggle = page.locator(".sidebar-project.active .sidebar-project-toggle");
   await projectToggle.click();
@@ -474,9 +477,9 @@ try {
   await type(aside);
   await textIncludes(asideDone);
   await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === 2), "the second conversation joins the list once it has a turn");
-  // It is Just a chat: listed under Chats above Projects, and it ends with
-  // one quiet line that can move it into a project.
-  await until(() => page.locator("#sidebar-chats .sidebar-item").count().then(count => count === 1), "a plain chat is listed under Chats");
+  // It is Just a chat: listed under Just a chat below the projects, and it
+  // ends with one quiet line that can move it into a project.
+  await until(() => page.locator("#sidebar-chats .sidebar-item").count().then(count => count === 1), "a plain chat is listed under Just a chat");
   await until(() => page.locator("#plain-line .plain-note").isVisible(), "a plain chat ends with Move to a project");
   assert.equal(await page.locator("#workspace-where").innerText(), "Just a chat");
   await click("where-move");
@@ -521,13 +524,58 @@ try {
   // The keyboard reaches the same delete: Delete on the focused row.
   const row = page.locator(`#sidebar-projects .sidebar-session[data-args='${otherArgs}']`);
   await row.focus();
-  // The trash eases in, so give its transition a moment.
-  await until(() => row.locator("xpath=..").locator(".sidebar-delete").evaluate(button => getComputedStyle(button).opacity === "1").then(shown => shown || Promise.reject(new Error("trash hidden"))), "The trash shows when the keyboard is on the row");
+  // Pin and Archive ease in, so give their transition a moment.
+  await until(() => row.locator("xpath=..").locator(".sidebar-row-actions").evaluate(actions => getComputedStyle(actions).opacity === "1").then(shown => shown || Promise.reject(new Error("actions hidden"))), "Pin and Archive show when the keyboard is on the row");
   await page.keyboard.press("Delete");
   await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === before - 1), "Delete on a row removes it");
   await until(async () => (await f.client.listSessions()).length === kept - 1, "the daemon archived it");
   assert(await page.locator("#sidebar-projects .sidebar-item").count() <= 6, "The sidebar lists at most six conversations");
   await capture("02-completed");
+  // Group and sort unfolds under a heading; Archived opens All chats, where
+  // Restore brings the chat back.
+  const archivedId = JSON.parse(otherArgs ?? "{}").id as string;
+  await page.locator(".sidebar-project.active .sidebar-project-header").hover();
+  await page.locator(".sidebar-project.active .sidebar-view-button").click();
+  await until(() => page.locator(".sidebar-view-line").isVisible(), "Group and sort unfolds under the heading");
+  assert.equal(await page.locator("#overlay:not([hidden])").count(), 0, "Group and sort is no menu");
+  await capture("02-group-sort");
+  await page.locator(".sidebar-view-opt", { hasText: "Date" }).click();
+  await until(() => page.locator('.sidebar-group-block[data-group="d:Today"] .sidebar-session').first().isVisible(), "by date, today's chats sit under Today");
+  assert(await page.locator('.sidebar-group-block[data-group="d:Today"] .sidebar-session-age', { hasText: basename(f.workspace) }).count() > 0, "by date, each row names where it lives");
+  await capture("02-by-date");
+  await page.locator(".sidebar-view-opt", { hasText: "Project" }).click();
+  await until(() => page.locator(".sidebar-project.active .sidebar-view-line").isVisible(), "back by project, the line stays under the first heading");
+  await page.locator(".sidebar-view-archived").click();
+  await until(() => page.locator("#chats-page .cp-row").first().isVisible(), "Archived opens All chats");
+  assert.equal(await page.locator("#workspace-title").innerText(), "All chats");
+  assert(!await page.locator("#input-area").isVisible(), "All chats has no composer");
+  await capture("02-all-chats");
+  await page.locator(`#chats-page .cp-restore[data-args*='${archivedId}']`).click();
+  await until(async () => (await f.client.listSessions()).length === kept, "Restore brings the chat back to the daemon's list");
+  await until(() => page.locator(`#sidebar-projects .sidebar-session[data-args*='${archivedId}']`).isVisible(), "the restored chat is back in the sidebar");
+  await page.locator("body").focus();
+  await page.keyboard.press("Escape");
+  await until(() => page.locator("#chats-page").isHidden(), "Esc leaves All chats");
+  await page.locator(".sidebar-project.active .sidebar-view-button").click();
+  // A pinned chat leads the list, above its project.
+  const pinRow = page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-item:has(.sidebar-session[data-args*='${archivedId}'])`);
+  await pinRow.hover();
+  await pinRow.locator(".sidebar-pin").click();
+  await until(() => page.locator(`#sidebar-pinned .sidebar-session[data-args*='${archivedId}']`).isVisible(), "Pin moves the chat to Pinned");
+  assert(await f.client.getSessionState(archivedId).then(state => Boolean(state.session.pinnedAt)), "the daemon keeps the pin");
+  await capture("02-pinned");
+  const pinnedRow = page.locator(`#sidebar-pinned .sidebar-item:has(.sidebar-session[data-args*='${archivedId}'])`);
+  await pinnedRow.hover();
+  await pinnedRow.locator(".sidebar-pin").click();
+  await until(() => page.locator("#sidebar-pinned").isHidden(), "Unpin puts it back with its project");
+  // The foot: who you are, the theme switch, Settings.
+  assert((await page.locator("#sidebar-you").innerText()).length > 0, "the foot names you");
+  const themeBefore = await evaluate<string>("return document.documentElement.dataset.theme;");
+  await page.locator("#sidebar-theme").click();
+  await until(() => evaluate<string>("return document.documentElement.dataset.theme;").then(theme => theme !== themeBefore), "the sun switches the theme");
+  await capture("02-light");
+  await page.locator("#sidebar-theme").click();
+  await until(() => evaluate<string>("return document.documentElement.dataset.theme;").then(theme => theme === themeBefore), "the moon switches it back");
   // Settings is one sheet: sections on the left, each row with its own control.
   await page.locator(".sidebar-settings").click();
   await page.locator('#overlay[data-screen="settings"] .settings-nav-item.on').filter({ hasText: "General" }).waitFor();
@@ -750,7 +798,8 @@ try {
   await desktop!.evaluate(({ dialog }, workspace) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
   }, secondProject);
-  await page.locator("#sidebar-open-project").click();
+  await page.locator("textarea").focus();
+  await page.keyboard.press("Control+o");
   await until(() => page.locator("#sidebar-sessions").getAttribute("data-workspace").then(path => path === secondProject), "sidebar opens another project");
   // Opening it switches chats; typing before the switch lands loses the text.
   await until(() => evaluate<boolean>("return window.demesneInspect?.().host.session !== arguments[0];", [sessionId]), "the window is on the new project's chat");
@@ -763,12 +812,14 @@ try {
   const secondary = page.locator(`.sidebar-project[data-project="${secondProject}"]`);
   await secondary.locator(".sidebar-project-toggle").click();
   assert(await secondary.locator(".sidebar-session").isVisible(), "other projects expand without switching workspace");
-  assert.equal(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).getAttribute("aria-expanded"), "false", "opening one project closes the other");
-  assert(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-state, .sidebar-project[data-project="${f.workspace}"] .sidebar-agents`).first().isVisible(), "a closed project shows its state on its line");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).fill("second project");
+  assert.equal(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).getAttribute("aria-expanded"), "true", "each project folds on its own");
+  await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).click();
+  assert(await page.locator(`.sidebar-project[data-project="${f.workspace}"] :is(.sidebar-project-state, .sidebar-agents, .sidebar-group-count)`).first().isVisible(), "a folded project shows its state on its line");
+  await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).click();
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).fill("second project");
   assert.equal(await page.locator(".sidebar-project").count(), 1, "search keeps only projects with matching chats");
   assert(await secondary.locator(".sidebar-session").isVisible(), "search exposes matching chats in another project");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).press("Escape");
   const projectOrder = () => page.locator(".sidebar-project").evaluateAll(groups => groups.map(group => (group as HTMLElement).dataset.project));
   const primary = page.locator(`.sidebar-project[data-project="${f.workspace}"]`);
   await secondary.locator(".sidebar-project-name").dragTo(primary.locator(".sidebar-project-header"), { targetPosition: { x: 80, y: 2 } });

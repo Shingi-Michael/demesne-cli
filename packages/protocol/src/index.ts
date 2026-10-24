@@ -10,6 +10,7 @@ export type EventType =
   | "session.renamed"
   | "session.permissions_changed"
   | "session.archived"
+  | "session.restored"
   | "session.compacted"
   | "turn.created"
   | "agent.started"
@@ -424,6 +425,8 @@ export interface Session {
   /// Set when the session has been archived; archived sessions are excluded
   /// from the default listing but remain readable and exportable.
   archivedAt?: string | null;
+  /// Set while the chat is pinned to the top of the sidebar.
+  pinnedAt?: string | null;
   /// Model this session was last switched to through the CLI. It is a hint for
   /// the user, not an automatic daemon-side switch.
   preferredModel?: string | null;
@@ -435,6 +438,7 @@ export interface Session {
 }
 
 export interface UpdateSessionRequest {
+  pinned?: boolean;
   /// Moves a chat that has no project into this folder.
   workspacePath?: string;
   trustWorkspace?: boolean;
@@ -718,8 +722,12 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
     if (typeof value.trustWorkspace !== "boolean") throw new ProtocolValidationError("trustWorkspace must be a boolean");
     update.trustWorkspace = value.trustWorkspace;
   }
-  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.workspacePath === undefined) {
-    throw new ProtocolValidationError("title, preferredModel, autoApprove, acceptEdits or workspacePath is required");
+  if (value.pinned !== undefined) {
+    if (typeof value.pinned !== "boolean") throw new ProtocolValidationError("pinned must be a boolean");
+    update.pinned = value.pinned;
+  }
+  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.workspacePath === undefined && update.pinned === undefined) {
+    throw new ProtocolValidationError("title, preferredModel, autoApprove, acceptEdits, pinned or workspacePath is required");
   }
   return update;
 }

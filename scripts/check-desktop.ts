@@ -235,11 +235,6 @@ writeFileSync(join(f.workspace, "hello.ts"), "export const greeting = 'before';\
 writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ scripts: { check: "bun check.ts" } }));
 writeFileSync(join(f.workspace, "site.html"), '<h1>Fieldnote preview</h1>\n<button id="save">Save</button>\n');
 writeFileSync(join(f.workspace, "serve.ts"), "const server = Bun.serve({ port: 0, fetch: () => new Response('<h1>Fieldnote preview</h1><button id=\"save\">Save</button>', { headers: { 'content-type': 'text/html' } }) });\nconsole.log(`  \\u001b[32mLocal:\\u001b[39m http://localhost:${server.port}/`);\n");
-// Folders for the project map.
-for (const [folder, files] of [["src", 6], ["docs", 2], ["lib", 3]] as const) {
-  mkdirSync(join(f.workspace, folder), { recursive: true });
-  for (let index = 0; index < files; index++) writeFileSync(join(f.workspace, folder, `part${index}.ts`), "export const line = 1;\n".repeat(40 + index * 10));
-}
 writeFileSync(join(f.workspace, "check.ts"), "import {readFileSync} from 'node:fs';if(!readFileSync('hello.ts','utf8').includes(\"'after'\"))throw new Error('Wrong file');console.log('DESKTOP_CHECK_PASSED');\n");
 const git = (...values: string[]) => execFileSync("git", ["-C", f.workspace, ...values], { stdio: "pipe" });
 git("init", "-q"); git("add", ".");
@@ -331,23 +326,14 @@ let sessionId = "";
 try {
   await open(false, true);
   await capture("01-start");
-  // The greeting stays; Map under it unfolds the project as land.
-  await page.locator(".hero-map .map-btn").click();
-  const srcName = page.locator(".land svg text.pn", { hasText: "src" });
-  await until(() => srcName.isVisible(), "the map unfolds with its place names", 20_000);
-  assert(await page.locator(".intro h1").isVisible(), "the greeting stays above the map");
-  const srcBox = (await srcName.boundingBox())!;
-  await page.mouse.move(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2 + 6);
-  await until(() => page.locator("#map-caption").innerText().then(text => text.startsWith("src ·") && text.includes("click to work here")), "hovering a parcel names it on the line");
-  await capture("01-map");
-  await page.mouse.click(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2 + 6);
-  await until(() => page.locator("textarea").inputValue().then(value => value.startsWith("@src/ ")), "clicking a parcel points the composer at it");
-  await until(() => page.locator("#mention-chips .chip", { hasText: "src/" }).isVisible(), "the folder shows as a chip");
-  await capture("01-map-pointed");
+  // A quiet project: Home offers a few ways in, and one only fills the composer.
+  const starter = page.locator("#hero .home-starter").first();
+  await until(() => starter.isVisible(), "a quiet project shows ways in");
+  const starterText = await starter.innerText();
+  await starter.click();
+  await until(() => page.locator("textarea").inputValue().then(value => value === starterText), "a way in fills the composer");
+  assert.equal(await page.locator(".land, .hero-map").count(), 0, "Home has no map");
   await page.locator("textarea").fill("");
-  await page.locator("textarea").press("Escape");
-  await until(() => page.locator(".land").count().then(count => count === 0), "Esc folds the map");
-  assert.equal(await page.locator(".hero-map .map-btn").getAttribute("aria-pressed"), "false");
   await type(thinkingPrompt);
   const trace = page.locator(".thinking-main .thinking-content").last();
   const thinkingToggle = page.locator(".thinking-main .thinking-toggle").last();
@@ -393,27 +379,20 @@ try {
   await until(() => desktop.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body.startsWith("Wants to edit"))), "a waiting approval sends a Mac banner");
   await page.evaluate(() => { delete (document as any).hasFocus; });
   await capture("02-file-approval");
-  // A chat waiting on you stands on the map in amber, in the folder of the
-  // file it wants to edit; clicking its mark goes back to it.
   // New chat lands on Home as Just a chat; the where word under the
   // composer unfolds its choices in place and puts it in the project.
   await click("new-session");
   await until(async () => (await page.locator("#composer-where").textContent())?.startsWith("Just a chat") ?? false, "a new chat is Just a chat");
-  assert(!(await page.locator(".hero-map .map-btn").isVisible()), "Just a chat has no map");
   await click("where-toggle");
   await capture("02b-where");
   await click("where-pick", { path: f.workspace });
-  await until(() => page.locator(".hero-map .map-btn").isVisible(), "a new chat shows the start screen");
   assert((await page.locator("#composer-where").textContent())?.startsWith("in "), "the where word names the project");
-  await page.locator(".hero-map .map-btn").click();
-  const waitingMark = page.locator(".land .mk-g.wait");
-  await until(() => waitingMark.isVisible(), "the waiting chat stands on the map", 20_000);
-  await until(() => page.locator("#map-caption").innerText().then(text => text.includes("1 waiting for you")), "the line beside Map counts it");
-  await waitingMark.locator(".mk-hit").hover();
-  await until(() => page.locator("#map-caption").innerText().then(text => text.includes("waiting for you") && text.includes("click to open its chat")), "hovering the mark names it");
-  await capture("02-map-live");
-  await waitingMark.locator(".mk-hit").click();
-  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Edit"]), "clicking the mark opens its chat");
+  // Home lists the chats to pick up, the one waiting on you first.
+  const waitingChat = page.locator("#hero .home-chat", { hasText: "waiting for you" }).first();
+  await until(() => waitingChat.isVisible(), "Home offers the waiting chat to pick up", 20_000);
+  await capture("02-home-pick-up");
+  await waitingChat.click();
+  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Edit"]), "picking it up opens its chat");
   await click("permission", { decision: "allow_once" });
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Run"]), "command approval visible");
   assert.equal(await page.locator("#approval .approval-row code").innerText(), "bun run check", "the row names the command by its program");
@@ -1259,7 +1238,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes", "the project map", "who is working where on the map", "pointing at the live page", "the Deed"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes", "Home's ways in and chats to pick up", "pointing at the live page", "the Deed"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

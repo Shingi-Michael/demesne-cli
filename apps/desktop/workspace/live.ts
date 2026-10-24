@@ -7,8 +7,6 @@ import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { mountSakura, type Sakura } from "./sakura.ts";
-import { LAND_H, LAND_W, mapCaption, markLayer, paintLand, parcelAt, parcelOf, placeMarks, placeNames, survey, type Land, type LandLife, type LiveMark } from "./estate.ts";
-import type { WorkspaceLiveResponse, WorkspaceMapResponse } from "@demesne/protocol";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
@@ -1691,7 +1689,7 @@ const reviewJobs = () =>
   state ? [state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job) && (job!.status === "ready" || job!.status === "failed")) : [];
 let reviewShown = false;
 /// Home's cherry blossom lives behind the start screen only, and sleeps while
-/// a chat, the Deed or the map is showing.
+/// a chat or the Deed is showing.
 let sakura: Sakura | null = null, sakuraTried = false, sakuraDark: boolean | null = null;
 const colorProbe = document.createElement("canvas").getContext("2d");
 function inkIsDark() {
@@ -1721,17 +1719,15 @@ function renderHero() {
     away = state.breakage.away,
     driveBusy = Boolean(state.breakage.fix && (state.breakage.fix.status === "starting" || state.breakage.fix.status === "running")) || away?.status === "running",
     user = document.body.dataset.user ?? "",
-    branch = state.session?.workspace?.gitBranch ?? "",
     hour = new Date().getHours(),
     running = worktreeRun().fix,
     branchKeys = [...detailsOpen].filter((key) => key.startsWith("branch:")),
     plain = isPlain(),
-    signature = JSON.stringify([plain, state.workspace, review.map((job) => [job.id, job.status, job.title, job.diff, job.summary, job.checks]), running && [running.id, running.title, running.activity], state.breakage.busy, state.breakage.message, branchKeys, driveShown, away?.status, driveBusy, reviewShown, ideasShown, next.proposals, next.loading, next.signals.length, user, branch, hour, state.asks, state.allowRules, mapOpen(), mapData?.workspace, mapData?.at, mapLoading]);
+    signature = JSON.stringify([plain, state.workspace, review.map((job) => [job.id, job.status, job.title, job.diff, job.summary, job.checks]), running && [running.id, running.title, running.activity], state.breakage.busy, state.breakage.message, branchKeys, driveShown, away?.status, driveBusy, reviewShown, ideasShown, next.proposals, next.loading, next.signals.length, user, hour, state.asks, state.allowRules, recentChats(plain).map((item) => [item.id, item.title, item.status, item.waiting, item.updatedAt]), starters(plain)]);
   if (signature === heroSignature) return;
   heroSignature = signature;
   const composer = el("composer-slot");
   composer.remove();
-  const name = state.workspace.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || state.workspace;
   // Drive's finished branches are one line; it unfolds a quiet row per
   // branch right under it, and what the last Apply or PR did follows them.
   const waiting = (review.length
@@ -1741,38 +1737,59 @@ function renderHero() {
   // composer's ghost text (Tab takes it); the rest of its ideas unfold from
   // one quiet line under the composer.
   const day = new Date().toLocaleDateString(undefined, { weekday: "long" }),
-    when = `${day} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`,
-    where = branch ? `${h(name)} on ${h(branch)}` : h(name);
+    when = `${day} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`;
   // It gets quieter the more you use it: one line keeps the score.
   const asks = state.asks, learned = state.allowRules;
   const quieter = asks && asks.lastWeek > 0
     ? `<p class="hero-asks">Asked you ${asks.thisWeek === 1 ? "once" : `${asks.thisWeek} times`} this week, ${asks.thisWeek === asks.lastWeek ? "same as last week" : `${asks.thisWeek < asks.lastWeek ? "down" : "up"} from ${asks.lastWeek}`}${learned ? ` · ${learned} thing${learned === 1 ? "" : "s"} it no longer asks about` : ""}</p>`
     : "";
-  const ideas = next.proposals.length;
+  // Under the composer: Drive's top ideas, then the chats to pick up, so
+  // Home is a place to start from, not only a box to type in.
+  const ideas = next.proposals.length, shown = ideasShown ? next.proposals : next.proposals.slice(0, HOME_IDEAS);
   const drive = ideas || driveBusy
-    ? `<p class="hero-drive">${ICON_SPARK}<b>Drive</b>${driveBusy ? ` ${running ? btn("drive-show", `is working ${driveShown ? "⌄" : "›"}`, {}, "link") : "is working"}` : ` has ${ideas} idea${ideas === 1 ? "" : "s"}`}${ideas ? ` <span class="muted">·</span> ${btn("ideas-show", ideasShown ? "hide" : "show ›", {}, "link")}` : ""}</p>${ideas && ideasShown ? `<div class="hero-ideas">${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p></div>` : ""}${running && driveShown ? `<div class="hero-branches">${branchRows([running])}</div>` : ""}`
+    ? `<section class="home-section"><h2 class="home-label">${ICON_SPARK}Drive${driveBusy ? ` <span class="muted">·</span> ${running ? btn("drive-show", `working ${driveShown ? "⌄" : "›"}`, {}, "link") : "working"}` : ""}${ideas ? `<span class="home-aside">${ideas > HOME_IDEAS ? btn("ideas-show", ideasShown ? "fewer" : `all ${ideas}`, {}, "link") : ""}${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}</span>` : ""}</h2>${ideas ? proposalRows(shown) : ""}${running && driveShown ? `<div class="hero-branches">${branchRows([running])}</div>` : ""}</section>`
     : "";
-  // The map is one button under the greeting; it unfolds the land in place.
-  const open = mapOpen(), surveyed = mapData && mapData.workspace === state.workspace ? mapData : null;
-  if (open && !plain && !mapLoading && (!surveyed || Date.now() - surveyed.at > 60_000)) void loadMap();
-  const caption = !open ? "" : surveyed?.map ? restingCaption(surveyed.map) : surveyed && !mapLoading ? "This project could not be surveyed" : "Surveying…";
-  const mapLine = `<p class="hero-map">${btn("map-toggle", `${ICON_MAP}Map`, {}, `map-btn${open ? " on" : ""}`).replace("<button ", `<button aria-pressed="${open}" title="${open ? "Fold the map (Esc)" : "Show the project as a map"}" `)}<span id="map-caption">${h(caption)}</span></p>`;
-  el("hero").classList.toggle("mapped", open && !plain);
-  renderSakura(!open || plain);
-  // Just a chat: the time of day and the greeting; the project's Map,
-  // branches and Drive come back once a project is picked.
+  const recent = recentChats(plain);
+  const pickUp = recent.length
+    ? `<section class="home-section"><h2 class="home-label">Pick up where you left off</h2><div class="home-chats">${recent.map((item) => {
+      const tone = item.waiting ? "warn" : item.status === "running" || item.status === "queued" ? "working" : item.status === "failed" ? "bad" : "";
+      const right = item.waiting ? "waiting for you" : tone === "working" ? "working" : tone === "bad" ? "didn't finish" : age(item.updatedAt);
+      return btn("select-session", `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span><span class="home-chat-title">${h(item.title)}</span><span class="home-chat-age${tone ? ` ${tone}` : ""}">${h(right)}</span>`, { id: item.id }, "home-chat");
+    }).join("")}</div></section>`
+    : "";
+  // A quiet project: a few ways in, each only fills the composer.
+  const ways = starters(plain);
+  const start = !recent.length && !ideas && ways.length
+    ? `<section class="home-section"><h2 class="home-label">Start with</h2><div class="home-starters">${ways.map((text) => btn("home-starter", h(text), { text }, "home-starter")).join("")}</div></section>`
+    : "";
+  renderSakura(true);
   el("hero").innerHTML = plain
-    ? `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1></div><div id="hero-composer"></div>`
-    : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${mapLine}${waiting}${quieter}</div>${open && surveyed?.map ? '<div id="hero-land"></div>' : ""}<div id="hero-composer"></div>${drive}`;
-  // The composer and the land are detached while the hero is rebuilt.
+    ? `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1></div><div id="hero-composer"></div>${pickUp}${start}`
+    : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${waiting}${quieter}</div><div id="hero-composer"></div>${drive}${pickUp}${start}`;
+  // The composer is detached while the hero is rebuilt.
   el("hero-composer").append(composer);
-  if (open && surveyed?.map && !plain) {
-    el("hero-land").append(landEl);
-    // It unfolds when it appears, not each time the greeting is rebuilt.
-    if (!landShown) { landEl.classList.remove("unfolding"); void landEl.offsetWidth; landEl.classList.add("unfolding"); }
-    drawLand(surveyed.map);
-  }
-  landShown = Boolean(open && surveyed?.map && !plain);
+}
+/// How many of Drive's ideas Home shows before "all N".
+const HOME_IDEAS = 3, HOME_CHATS = 4;
+/// The chats Home offers to pick up: this project's (or, as Just a chat, the
+/// plain ones), newest first, leaving out Drive's worktree chats and the
+/// empty chat Home itself is.
+function recentChats(plain: boolean) {
+  if (!state) return [];
+  const drive = new Set([state.breakage.fix, ...state.breakage.inbox].map((job) => job?.sessionId).filter(Boolean));
+  return state.sessions
+    .filter((item) => !deletedSessions.has(item.id) && !drive.has(item.id) && item.turns > 0 && item.id !== (inSession() ? state!.session?.id : "")
+      && (plain ? !item.workspace : item.workspace === state!.workspace))
+    .sort((a, b) => Number(Boolean(b.waiting)) - Number(Boolean(a.waiting)) || b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, HOME_CHATS);
+}
+/// Ways into a quiet project, from what it has: its checks, then reading it.
+function starters(plain: boolean) {
+  if (plain) return ["Explain an idea to me", "Help me plan a project", "Draft a message"];
+  const ways = ["Explain how this project is put together", "Find something small to fix"];
+  if (state?.commands.some((command) => command.name === "/test" || command.name === "/check")) ways.unshift("Run the checks and fix what fails");
+  else ways.unshift("Run the tests and tell me what fails");
+  return ways;
 }
 /// The Deed: the open project's plain sentences, a page of its own opened
 /// from the sidebar. The composer adds a sentence; a sentence edits in place.
@@ -2181,148 +2198,6 @@ function focusDeed(id: string, click: boolean) {
   if (!deedUi.editing) document.querySelector<HTMLElement>(`#deed [data-deed="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
 }
 
-/// The project map. Whether it is open is remembered per project.
-const MAP_KEY = "demesne-map-open";
-const ICON_MAP = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5"/><path d="M15 6.5V20"/></svg>';
-const mapOpenFor = new Set<string>((() => { try { return JSON.parse(localStorage.getItem(MAP_KEY) ?? "[]") as string[]; } catch { return []; } })());
-let mapData: { workspace: string; map: WorkspaceMapResponse | null; at: number } | null = null,
-  mapLoading = false,
-  mapHover = -1,
-  landShown = false,
-  landCache: { key: string; land: Land } | null = null;
-const mapOpen = () => Boolean(state && !isPlain() && mapOpenFor.has(state.workspace));
-const landEl = document.createElement("div");
-landEl.className = "land";
-landEl.innerHTML = `<canvas></canvas><svg viewBox="0 0 ${LAND_W} ${LAND_H}" aria-hidden="true"></svg>`;
-landEl.setAttribute("role", "img");
-function toggleMap() {
-  if (!state) return;
-  if (mapOpenFor.has(state.workspace)) mapOpenFor.delete(state.workspace);
-  else mapOpenFor.add(state.workspace);
-  try { localStorage.setItem(MAP_KEY, JSON.stringify([...mapOpenFor])); } catch { /* storage may be off */ }
-  mapHover = -1;
-  heroSignature = "";
-  renderHero();
-}
-async function loadMap() {
-  if (!state || mapLoading) return;
-  const workspace = state.workspace;
-  mapLoading = true;
-  let map: WorkspaceMapResponse | null = null;
-  try { map = await api<WorkspaceMapResponse | null>("workspace-map"); } catch { /* shown as not surveyed */ }
-  mapLoading = false;
-  mapData = { workspace, map: map && Array.isArray(map.districts) ? map : null, at: Date.now() };
-  heroSignature = "";
-  renderHero();
-}
-function drawLand(map: WorkspaceMapResponse) {
-  const key = JSON.stringify(map.districts.map((district) => [district.path, district.lines, district.changedAt]));
-  if (landCache?.key !== key) landCache = { key, land: survey(map.districts) };
-  const land = landCache.land;
-  if (mapHover >= land.parcels.length) mapHover = -1;
-  life = lifeOn(land);
-  paintLand(landEl.querySelector("canvas")!, land, mapHover, Date.now(), life.paint);
-  landEl.querySelector("svg")!.innerHTML = placeNames(land) + markLayer(land, life.placed);
-  landEl.setAttribute("aria-label", restingCaption(map));
-  const caption = document.getElementById("map-caption");
-  if (caption && mapHover < 0 && !markShown) caption.textContent = restingCaption(map);
-}
-let markShown = false;
-/// Who is working where right now, from the daemon, refreshed while the map is open.
-let liveData: { workspace: string; marks: WorkspaceLiveResponse["marks"]; at: number } | null = null,
-  life: { paint: LandLife; placed: ReturnType<typeof placeMarks>; caption: string | null } = { paint: {}, placed: [], caption: null };
-const shortTitle = (text: string) => (text.length > 26 ? `${text.slice(0, 25).trimEnd()}…` : text);
-function lifeOn(land: Land) {
-  if (!state) return { paint: {}, placed: [], caption: null };
-  const marks: LiveMark[] = [], live = new Set<number>(), failing = new Set<number>(), failingIn: string[] = [];
-  const driveIds = new Set([state.breakage.fix, ...state.breakage.inbox].map((fix) => fix?.sessionId).filter(Boolean));
-  const current = liveData && liveData.workspace === state.workspace ? liveData.marks : [];
-  for (const work of current) {
-    const parcel = work.path ? parcelOf(land, work.path) : -1;
-    const drive = driveIds.has(work.sessionId), label = `${drive ? "Drive · " : ""}${shortTitle(work.title || "New chat")}`;
-    const fresh = work.at ? Date.now() - Date.parse(work.at) < 60_000 : false;
-    const from = fresh && work.previousPath ? parcelOf(land, work.previousPath) : -1;
-    const doing = work.waiting ? "waiting for you" : !work.path ? "thinking" : `${/edit|write|move/.test(work.tool ?? "") ? "editing" : /read|view/.test(work.tool ?? "") ? "reading" : "working in"} ${work.path.split("/").at(-1)}`;
-    if (!work.waiting && parcel >= 0) live.add(parcel);
-    if (parcel < 0) continue;
-    marks.push({ key: work.sessionId, label, tone: work.waiting ? "wait" : "work", parcel, from: from >= 0 && from !== parcel ? from : undefined, sessionId: work.sessionId,
-      detail: `${label} · ${doing}${work.at ? ` · ${age(work.at)}` : ""} · click to open its chat` });
-  }
-  // A failing check marks the folder its output names.
-  const checks = [...state.breakage.signals, ...state.driveNext.signals].filter((signal, index, all) => signal.source === "checks" && all.findIndex((other) => other.id === signal.id) === index);
-  for (const signal of checks) {
-    const text = `${signal.title}\n${signal.detail}`;
-    let parcel = -1, depth = -1;
-    land.parcels.forEach((item, index) => { const folder = item.district.path; if (folder && folder.length > depth && text.includes(`${folder}/`)) { parcel = index; depth = folder.length; } });
-    if (parcel < 0 || failing.has(parcel)) continue;
-    failing.add(parcel);
-    failingIn.push(land.parcels[parcel]!.district.path!.split("/").at(-1)!);
-    const count = text.match(/(\d+)\s+(?:tests?\s+)?fail/i)?.[1];
-    marks.push({ key: signal.id, label: count ? `${count} failing` : "failing", tone: "fail", parcel, detail: signal.title });
-  }
-  const here = state.agents.filter((agent) => agent.project === projectSlug(state!.workspace));
-  const working = current.length + here.length, waiting = current.filter((work) => work.waiting).length;
-  const parts = [working ? `${working} at work` : "", waiting ? `${waiting} waiting for you` : "",
-    failingIn.length ? `${failingIn.length === 1 ? "1 check" : `${failingIn.length} checks`} failing in ${failingIn.join(", ")}` : "",
-    here.length ? `${here.map((agent) => agent.name).join(", ")} here too` : ""].filter(Boolean);
-  return { paint: { live, failing }, placed: placeMarks(land, marks), caption: parts.length ? parts.join(" · ") : null };
-}
-function restingCaption(map: WorkspaceMapResponse) {
-  return life.caption ?? mapCaption(map.districts, null);
-}
-async function tickLive() {
-  if (!state || inSession() || !mapOpen() || document.hidden || !mapData?.map || mapData.workspace !== state.workspace) return;
-  const workspace = state.workspace;
-  let result: WorkspaceLiveResponse | null = null;
-  try { result = await api<WorkspaceLiveResponse | null>("workspace-live"); } catch { return; }
-  if (!result || !state || state.workspace !== workspace) return;
-  const before = JSON.stringify(liveData?.marks ?? []);
-  liveData = { workspace, marks: result.marks, at: Date.now() };
-  if (before !== JSON.stringify(result.marks) && landEl.isConnected && mapData?.map) {
-    drawLand(mapData.map);
-  }
-}
-setInterval(() => void tickLive(), 3000);
-function landPoint(event: MouseEvent) {
-  const box = landEl.getBoundingClientRect();
-  return landCache ? parcelAt(landCache.land, ((event.clientX - box.left) / box.width) * LAND_W, ((event.clientY - box.top) / box.height) * LAND_H) : -1;
-}
-function hoverLand(index: number, mark: LiveMark | null = null) {
-  if (!landCache || !mapData?.map) return;
-  const caption = document.getElementById("map-caption");
-  if (mark) {
-    markShown = true;
-    if (caption) caption.textContent = mark.detail;
-    landEl.style.cursor = mark.sessionId ? "pointer" : "";
-    return;
-  }
-  if (index === mapHover && !markShown) return;
-  markShown = false;
-  mapHover = index;
-  const district = landCache.land.parcels[index]?.district ?? null;
-  paintLand(landEl.querySelector("canvas")!, landCache.land, mapHover, Date.now(), life.paint);
-  landEl.style.cursor = district?.path ? "pointer" : "";
-  if (caption) caption.textContent = district ? mapCaption(mapData.map.districts, district) : restingCaption(mapData.map);
-}
-const markUnder = (event: Event) => {
-  const group = (event.target as Element).closest?.<SVGGElement>(".mk-g");
-  return group ? life.placed[Number(group.dataset.mark)]?.mark ?? null : null;
-};
-landEl.addEventListener("mousemove", (event) => {
-  hoverLand(landPoint(event), markUnder(event));
-});
-landEl.addEventListener("mouseleave", () => hoverLand(-1));
-/// Clicking a parcel points the composer at it: an @folder/ chip.
-landEl.addEventListener("click", (event) => {
-  if (markUnder(event)) return;
-  const path = landCache?.land.parcels[landPoint(event)]?.district.path;
-  if (!path) return;
-  const token = `@${path}/`;
-  if (!editor.value.split(/\s/).includes(token)) editor.value = `${token} ${editor.value.trimStart()}`;
-  editor.focus();
-  editor.setSelectionRange(editor.value.length, editor.value.length);
-  changedDraft();
-});
 /// Drive's proposals as rows: kind, title and estimate, with Run and Plan. The
 /// reason and the evidence it rests on show on hover. The start screen shows three; a session's briefing
 /// line unfolds them in place.
@@ -4392,7 +4267,6 @@ async function dispatch(
     if (tellOpen) el("drive-reply").querySelector<HTMLInputElement>("#drive-tell-form input")?.focus({ preventScroll: true });
     return;
   }
-  if (action === "map-toggle") return toggleMap();
   if (action === "drive-show" || action === "ideas-show" || action === "broke-show") {
     if (action === "drive-show") driveShown = !driveShown;
     else if (action === "broke-show") brokeShown = !brokeShown;
@@ -4550,6 +4424,12 @@ async function dispatch(
     if (args.method === "desktop-zoom" && typeof result?.zoom === "number") zoomLevel = result.zoom;
     overlaySignature = "";
     return renderOverlay();
+  }
+  // A Home starter only fills the composer; you send it.
+  if (action === "home-starter") {
+    setDraft(String(args.text));
+    editor.focus();
+    return;
   }
   if (action === "settings-command") {
     overlay = null;
@@ -4796,7 +4676,7 @@ function renderState(next: Snapshot) {
   renderPage();
   if (start) renderHero();
   else if (wasStart || el("composer-slot").parentElement !== el("input-area")) el("input-area").append(el("composer-slot"));
-  renderSakura(start && !el("hero").classList.contains("mapped"));
+  renderSakura(start);
   renderDeed();
   renderStatus();
   renderConversation();
@@ -5044,12 +4924,6 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     deedUi.focus = null;
     renderDeed();
-    return;
-  }
-  // Esc folds the map while nothing is typed.
-  if (key === "escape" && !ctrl && !inSession() && mapOpen() && (!field || (event.target === editor && !editor.value)) && el("completion").hidden) {
-    event.preventDefault();
-    toggleMap();
     return;
   }
   // 1, 2, 3… pick the model's suggested answers while nothing is typed.

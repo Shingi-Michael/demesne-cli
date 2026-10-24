@@ -380,41 +380,6 @@ export interface PermissionAsksResponse {
   lastWeek: number;
 }
 
-/// One parcel of the project map: a folder and the lines of text it holds.
-export interface WorkspaceDistrict {
-  /// Workspace-relative folder ("" for files at the top level). Null for the
-  /// parcel that gathers the smallest folders.
-  path: string | null;
-  lines: number;
-  files: number;
-  /// Newest commit touching it in the last 30 days, epoch ms.
-  changedAt: number | null;
-}
-
-/// Someone working in the project right now, for the map: a chat's running
-/// turn and the file it last touched.
-export interface WorkspaceMark {
-  sessionId: string;
-  title: string;
-  waiting: boolean;
-  /// Workspace-relative file it last read or edited, and the one before when
-  /// that was in another folder.
-  path: string | null;
-  tool: string | null;
-  at: string | null;
-  previousPath: string | null;
-}
-export interface WorkspaceLiveResponse {
-  marks: WorkspaceMark[];
-}
-
-/// The project map: its folders sized by lines.
-export interface WorkspaceMapResponse {
-  districts: WorkspaceDistrict[];
-  lines: number;
-  files: number;
-}
-
 export interface Session {
   id: string;
   title: string;

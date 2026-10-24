@@ -51,6 +51,7 @@ import { BreakageWatch } from "./breakage.ts";
 import { missionReceipt } from "@demesne/drive/drive-receipt.ts";
 import { expandCustomCommand, loadCustomCommands, mergeSlashCommands, type CustomCommand } from "./custom-commands.ts";
 import { loadWorkflows, workflowCommand } from "@demesne/drive/workflows.ts";
+import { customizeView, newCustomizable, readCustomizable, writeCustomizable } from "./customize.ts";
 import { WorkspaceSetup } from "./setup-controller.ts";
 import { pointSourceIn } from "./point-source.ts";
 import type { PointPick } from "./point.ts";
@@ -1624,6 +1625,19 @@ export class WorkspaceHost {
     }
     if (method === "routine-set") return (await this.client.setRoutine(string(args.id, "routine", 200), args.on === true)).routines;
     if (method === "routine-remove") return (await this.client.removeRoutine(string(args.id, "routine", 200))).routines;
+    // Customize: this project's instructions, commands and workflows, read
+    // and written in place; a plain chat has only yours.
+    if (method === "customize" || method === "customize-read" || method === "customize-save" || method === "customize-new") {
+      const root = this.current && !this.current.session.workspace ? null : this.current?.session.workspace?.root ?? this.workspace;
+      if (method === "customize") return customizeView(root);
+      if (method === "customize-read") return { text: readCustomizable(string(args.path, "path", 4096), root) };
+      if (method === "customize-new") return { path: newCustomizable(args.kind === "workflow" ? "workflow" : "command", string(args.name, "name", 80), root) };
+      if (typeof args.text !== "string") throw new Error("Expected the file's text");
+      writeCustomizable(string(args.path, "path", 4096), args.text, root);
+      this.commandCache = null;
+      this.publish();
+      return customizeView(root);
+    }
     if (method === "pin") {
       await this.client.updateSession(string(args.id, "session", 200), { pinned: args.pinned === true });
       await this.refreshSessions();

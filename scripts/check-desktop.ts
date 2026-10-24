@@ -2,7 +2,7 @@
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import sharp from "sharp";
@@ -597,6 +597,31 @@ try {
   await until(async () => (await f.client.routines()).routines.length === 0, "Delete removes the routine");
   await page.locator('.sidebar-nav [data-action="page-open"]', { hasText: "Scheduled" }).click();
   await until(() => page.locator("#page").isHidden(), "Scheduled folds away from its row");
+  // Customize: the project's instructions, commands and workflows, edited in place.
+  await page.locator('.sidebar-nav [data-action="page-open"]', { hasText: "Customize" }).click();
+  await until(() => page.locator('#page[data-kind="customize"] .cz-row').first().isVisible(), "Customize opens in place of the chat");
+  const instructionsPath = join(f.workspace, "DEMESNE.md");
+  const hadInstructions = existsSync(instructionsPath) ? readFileSync(instructionsPath, "utf8") : null;
+  await page.locator(`#page .cz-edit-button[data-args*='DEMESNE.md'], #page .cz-edit-button[data-args*='AGENTS.md']`).first().click();
+  await until(() => page.locator("#page .cz-edit textarea").isVisible(), "Edit unfolds the instructions under their row");
+  const instructionsFile = await page.locator("#page .cz-edit").getAttribute("data-path");
+  const instructionsBefore = await page.locator("#page .cz-edit textarea").inputValue();
+  await page.locator("#page .cz-edit textarea").fill(`${instructionsBefore}\nKeep replies short.\n`);
+  await page.locator("#page .cz-edit textarea").press("Control+Enter");
+  await until(() => page.locator("#page .cz-edit").count().then(count => count === 0), "Ctrl+Enter saves and folds the file");
+  assert(readFileSync(instructionsFile!, "utf8").includes("Keep replies short."), "the instructions file is written in place");
+  await page.locator('#page .cz-new[data-kind="command"] input').fill("ship-it");
+  await page.locator('#page .cz-new[data-kind="command"] input').press("Enter");
+  await until(() => page.locator("#page .cz-edit textarea").isVisible(), "a new command opens for its words");
+  await capture("02-customize");
+  await page.locator("#page .cz-save").click();
+  await until(() => page.locator("#page .cz-row", { hasText: "/ship-it" }).isVisible(), "the new command is listed");
+  await page.locator("#page .cz-row", { hasText: "/ship-it" }).locator('[data-action="cz-run"]').click();
+  await until(() => page.locator("textarea").first().inputValue().then(value => value.startsWith("/ship-it")), "Run puts the command in the composer");
+  assert(await page.locator("#page").isHidden(), "Run leaves Customize");
+  await page.locator("textarea").first().fill("");
+  rmSync(join(f.workspace, ".demesne", "commands", "ship-it.md"));
+  if (hadInstructions === null) rmSync(instructionsFile!); else writeFileSync(instructionsFile!, hadInstructions);
   // Settings is one sheet: sections on the left, each row with its own control.
   await page.locator(".sidebar-settings").click();
   await page.locator('#overlay[data-screen="settings"] .settings-nav-item.on').filter({ hasText: "General" }).waitFor();

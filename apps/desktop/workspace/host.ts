@@ -1615,6 +1615,15 @@ export class WorkspaceHost {
       await this.refreshSessions();
       return;
     }
+    // Scheduled: routines, each one sentence; a new one belongs to this
+    // window's project, or to no project in a plain chat.
+    if (method === "routines") return (await this.client.routines()).routines;
+    if (method === "routine-add") {
+      const plain = Boolean(this.current && !this.current.session.workspace);
+      return (await this.client.addRoutine(string(args.text, "routine", 2000), plain ? null : this.current?.session.workspace?.root ?? this.workspace)).routines;
+    }
+    if (method === "routine-set") return (await this.client.setRoutine(string(args.id, "routine", 200), args.on === true)).routines;
+    if (method === "routine-remove") return (await this.client.removeRoutine(string(args.id, "routine", 200))).routines;
     if (method === "pin") {
       await this.client.updateSession(string(args.id, "session", 200), { pinned: args.pinned === true });
       await this.refreshSessions();

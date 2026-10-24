@@ -145,6 +145,19 @@ export class DemesneClient {
   async setDriveAuto(workspace: string, on: boolean): Promise<import("@demesne/protocol").DriveAutoResponse> {
     return this.request("/v1/drive/auto", { method: "POST", body: JSON.stringify({ workspace, on }) });
   }
+  /// Routines: chats that start on their own at their time.
+  async routines(): Promise<import("@demesne/protocol").RoutinesResponse> {
+    return this.request("/v1/routines");
+  }
+  async addRoutine(text: string, workspace: string | null): Promise<import("@demesne/protocol").RoutinesResponse> {
+    return this.request("/v1/routines", { method: "POST", body: JSON.stringify({ text, workspace }) });
+  }
+  async setRoutine(id: string, on: boolean): Promise<import("@demesne/protocol").RoutinesResponse> {
+    return this.request(`/v1/routines/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ on }) });
+  }
+  async removeRoutine(id: string): Promise<import("@demesne/protocol").RoutinesResponse> {
+    return this.request(`/v1/routines/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
   /// Starts nothing more; a run already working finishes.
   async stopDriveAway(workspace: string): Promise<import("@demesne/protocol").DriveAwayResponse> {
     return this.request("/v1/drive/away/stop", { method: "POST", body: JSON.stringify({ workspace }) });

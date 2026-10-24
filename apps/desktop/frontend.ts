@@ -34,7 +34,6 @@ const request = <T>(method: string, args: Record<string, unknown> = {}) =>
   invoke<T>("desktop_request", { method, args });
 const listeners: (() => void)[] = [];
 const mac = /Mac/i.test(navigator.platform);
-const openShortcut = mac ? "⌘O" : "Ctrl+O";
 let workspace: string | null = null, mounted = false, busy = true, fatal = false;
 let recentProjects: string[] = [];
 const bridge = createDesktopBridge(invoke, showError);
@@ -48,7 +47,7 @@ const errorMessage = (error: unknown): string => {
 function setBusy(value: boolean, message?: string) {
   busy = value;
   shell.setAttribute("aria-busy", String(value));
-  for (const id of ["desktop-choose-project", "desktop-error-choose", "desktop-retry", "sidebar-open-project"])
+  for (const id of ["desktop-choose-project", "desktop-error-choose", "desktop-retry"])
     el<HTMLButtonElement>(id).disabled = value;
   for (const button of projectsList.querySelectorAll<HTMLButtonElement>("button")) button.disabled = value;
   for (const button of el("desktop-recent-list").querySelectorAll<HTMLButtonElement>("button")) button.disabled = value;
@@ -161,7 +160,7 @@ async function openProject(path?: string, sessionId?: string, fresh?: { draft: s
     setBusy(false);
   }
 }
-for (const id of ["desktop-choose-project", "desktop-error-choose", "sidebar-open-project"])
+for (const id of ["desktop-choose-project", "desktop-error-choose"])
   el(id).addEventListener("click", () => { void openProject(); });
 document.addEventListener("demesne:open-project", (event) => {
   const { path, sessionId, fresh, draft } = (event as CustomEvent<{ path?: string; sessionId?: string; fresh?: boolean; draft?: string }>).detail;
@@ -238,5 +237,5 @@ document.addEventListener("demesne:needs-you", (event) => {
   void request("desktop-badge", { count }).catch(() => {});
 });
 el("sidebar-new-key").textContent = mac ? "⌘N" : "Ctrl+N";
-el("sidebar-settings-key").textContent = mac ? "⌘," : "Ctrl+,";
-el("sidebar-open-project").title = `Open a folder (${openShortcut})`;
+el("sidebar-search-key").textContent = mac ? "⌘K" : "Ctrl+K";
+document.querySelector(".sidebar-settings")?.setAttribute("title", `Settings (${mac ? "⌘," : "Ctrl+,"})`);

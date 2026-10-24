@@ -129,7 +129,8 @@ Output can be text, JSON or a stream of events. Anything that would need your ap
 | --- | --- |
 | Send / new line | Enter / Shift+Enter |
 | Take the suggested prompt | Tab on an empty composer |
-| Settings | Tab (no suggestion) or Ctrl+K |
+| Settings | Tab (no suggestion) or ⌘, |
+| Search chats | ⌘K |
 | Drive | Alt+J |
 | This conversation’s menu | ⋯ in the top bar |
 | Back to live output | Ctrl+G |

@@ -935,6 +935,7 @@ export function createDaemonApp(options: {
 
       if (request.method === "GET" && url.pathname === "/v1/sessions") {
         const query = url.searchParams.get("query")?.trim();
+        if (url.searchParams.get("archived") === "1") return json({ sessions: store.listSessions(100, { archivedOnly: true }) });
         return json({ sessions: query ? store.searchSessions(query) : store.listSessions() });
       }
 
@@ -965,6 +966,7 @@ export function createDaemonApp(options: {
         if (body.preferredModel !== undefined) {
           session = store.setSessionPreferredModel(path[2]!, body.preferredModel);
         }
+        if (body.pinned !== undefined) session = store.setSessionPinned(path[2]!, body.pinned);
         if (body.autoApprove !== undefined) {
           const updated = store.setSessionAutoApprove(path[2]!, body.autoApprove);
           session = updated.session;
@@ -984,6 +986,12 @@ export function createDaemonApp(options: {
       if (request.method === "DELETE" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {
         const { session, event } = store.archiveSession(path[2]!);
         heartbeat?.detach(session.id);
+        const response: ArchiveSessionResponse = { session, eventId: event.eventId };
+        return json(response);
+      }
+
+      if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "restore") {
+        const { session, event } = store.restoreSession(path[2]!);
         const response: ArchiveSessionResponse = { session, eventId: event.eventId };
         return json(response);
       }

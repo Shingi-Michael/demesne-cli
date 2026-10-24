@@ -408,6 +408,22 @@ describe("DemesneStore", () => {
     store.close();
   });
 
+  test("pins a chat, lists the archived ones, and restores one", () => {
+    const store = new DemesneStore(":memory:");
+    const { session } = store.createSession("Keep me");
+    expect(store.setSessionPinned(session.id, true).pinnedAt).toBeTruthy();
+    expect(store.setSessionPinned(session.id, false).pinnedAt).toBeUndefined();
+    store.archiveSession(session.id);
+    expect(store.listSessions(100, { archivedOnly: true }).map((entry) => entry.id)).toEqual([session.id]);
+    const restored = store.restoreSession(session.id);
+    expect(restored.event.type).toBe("session.restored");
+    expect(restored.session.archivedAt).toBeUndefined();
+    expect(store.listSessions().map((entry) => entry.id)).toEqual([session.id]);
+    expect(store.listSessions(100, { archivedOnly: true })).toEqual([]);
+    expect(() => store.restoreSession(session.id)).toThrow("not archived");
+    store.close();
+  });
+
   test("stores plan-only turns and reports them on the turn", () => {
     const store = new DemesneStore(":memory:");
     const { session } = store.createSession("Plan mode");

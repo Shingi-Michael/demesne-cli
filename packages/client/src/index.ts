@@ -331,6 +331,12 @@ export class DemesneClient {
   async archiveSession(sessionId: string): Promise<ArchiveSessionResponse> {
     return this.request<ArchiveSessionResponse>(`/v1/sessions/${sessionId}`, { method: "DELETE" });
   }
+  async listArchivedSessions(): Promise<Session[]> {
+    return (await this.request<{ sessions: Session[] }>("/v1/sessions?archived=1")).sessions;
+  }
+  async restoreSession(sessionId: string): Promise<ArchiveSessionResponse> {
+    return this.request<ArchiveSessionResponse>(`/v1/sessions/${sessionId}/restore`, { method: "POST" });
+  }
 
   /// The project map: folders sized by lines.
   async workspaceMap(sessionId: string): Promise<import("@demesne/protocol").WorkspaceMapResponse> {

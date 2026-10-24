@@ -97,6 +97,7 @@ interface SessionRow {
   workspace_root: string | null;
   context_start_message_id: number | null;
   archived_at: string | null;
+  pinned_at: string | null;
   preferred_model: string | null;
   auto_approve: number;
   accept_edits: number;
@@ -300,7 +301,7 @@ export class DemesneStore {
     const row = this.database
       .query(`
         SELECT sessions.id, sessions.title, sessions.created_at, sessions.updated_at,
-               sessions.workspace_id, sessions.archived_at, sessions.preferred_model, sessions.auto_approve, sessions.accept_edits,
+               sessions.workspace_id, sessions.archived_at, sessions.pinned_at, sessions.preferred_model, sessions.auto_approve, sessions.accept_edits,
                workspaces.root AS workspace_root
         FROM sessions
         LEFT JOIN workspaces ON workspaces.id = sessions.workspace_id
@@ -322,15 +323,18 @@ export class DemesneStore {
         ? { id: row.workspace_id, root: row.workspace_root }
         : null,
       ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
+      ...(row.pinned_at ? { pinnedAt: row.pinned_at } : {}),
       ...(row.preferred_model ? { preferredModel: row.preferred_model } : {}),
       turns: turns.map(mapTurn),
     };
   }
 
-  listSessions(limit = 100, options: { includeArchived?: boolean } = {}): Session[] {
+  listSessions(limit = 100, options: { includeArchived?: boolean; archivedOnly?: boolean } = {}): Session[] {
     const boundedLimit = Math.max(1, Math.min(limit, 100));
     const rows = this.database
-      .query(options.includeArchived
+      .query(options.archivedOnly
+        ? "SELECT id FROM sessions WHERE archived_at IS NOT NULL ORDER BY archived_at DESC, id LIMIT ?"
+        : options.includeArchived
         ? "SELECT id FROM sessions ORDER BY updated_at DESC, id LIMIT ?"
         : "SELECT id FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC, id LIMIT ?")
       .all(boundedLimit) as Array<{ id: string }>;
@@ -358,6 +362,15 @@ export class DemesneStore {
   /// Records the model a session was last switched to. The daemon does not
   /// auto-switch: the preference is a hint so resuming a session can tell the
   /// user which model it used without forcing an expensive model reload.
+  /// A pinned chat leads the sidebar, above its project.
+  setSessionPinned(id: string, pinned: boolean): Session {
+    return this.database.transaction(() => {
+      this.getSessionOrThrow(id);
+      this.database.query("UPDATE sessions SET pinned_at = ? WHERE id = ?").run(pinned ? new Date().toISOString() : null, id);
+      return this.getSessionOrThrow(id);
+    })();
+  }
+
   setSessionPreferredModel(id: string, model: string | null): Session {
     return this.database.transaction(() => {
       this.getSessionOrThrow(id);
@@ -458,6 +471,20 @@ export class DemesneStore {
       const now = new Date().toISOString();
       this.database.query("UPDATE sessions SET archived_at = ? WHERE id = ?").run(now, id);
       const event = this.insertEvent("session.archived", id, null, {}, now);
+      return { session: this.getSessionOrThrow(id), event };
+    })();
+    this.eventSink?.(result.event);
+    return result;
+  }
+
+  /// Brings an archived chat back to the list.
+  restoreSession(id: string): { session: Session; event: EventEnvelope } {
+    const result = this.database.transaction(() => {
+      const session = this.getSessionOrThrow(id);
+      if (!session.archivedAt) throw new InvalidStateError("Session is not archived");
+      const now = new Date().toISOString();
+      this.database.query("UPDATE sessions SET archived_at = NULL WHERE id = ?").run(id);
+      const event = this.insertEvent("session.restored", id, null, {}, now);
       return { session: this.getSessionOrThrow(id), event };
     })();
     this.eventSink?.(result.event);
@@ -1961,6 +1988,9 @@ export class DemesneStore {
     }
     if (!this.hasColumn("sessions", "archived_at")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN archived_at TEXT");
+    }
+    if (!this.hasColumn("sessions", "pinned_at")) {
+      this.database.run("ALTER TABLE sessions ADD COLUMN pinned_at TEXT");
     }
     if (!this.hasColumn("sessions", "preferred_model")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN preferred_model TEXT");

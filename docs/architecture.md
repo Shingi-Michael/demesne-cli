@@ -108,7 +108,7 @@ All production routes except `/healthz` require the daemon bearer token. This is
 | --- | --- |
 | Health and capacity | `GET /healthz`, `GET /v1/status`, `GET /v1/runtime` |
 | Models | `GET /v1/models`, `POST /v1/model`, `GET/POST /v1/subagent-model` |
-| Sessions | `GET/POST /v1/sessions`, `GET/PATCH/DELETE /v1/sessions/:id` |
+| Sessions | `GET/POST /v1/sessions` (`?archived=1` lists archived chats), `GET/PATCH/DELETE /v1/sessions/:id` (PATCH takes `pinned`), `POST /v1/sessions/:id/restore` |
 | Turns and history | Session turn submission, compact, replay, export, changes, review and undo routes |
 | Live events | `GET /v1/events` with session and event cursor |
 | Tools | Permission resolution, [question actions and recovery](questions.md), workspace file and command routes |

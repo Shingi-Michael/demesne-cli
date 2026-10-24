@@ -9,23 +9,30 @@ body.desktop kbd { font-family: "JetBrains Mono", monospace; }
 #desktop-shell:has(#desktop-sidebar[hidden]) { grid-template-columns: 0 minmax(0, 1fr); }
 #desktop-sidebar { grid-column: 1; grid-row: 1 / -1; position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--side); padding: 14px 12px 10px; }
 .ico { flex: none; display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-/* Search and workspace actions sit above project groups; Settings stays below. */
+/* New chat and Search sit above the groups; who you are and Settings stay below. */
 .sidebar-nav { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
-.sidebar-nav button, .sidebar-settings { display: flex; width: 100%; align-items: center; gap: 11px; height: 32px; padding: 0 10px; border-radius: 9px; color: var(--t2); font-size: 13.5px; text-align: left; }
-.sidebar-nav button:hover, .sidebar-settings:hover { background: var(--surface2); color: var(--t1); }
+.sidebar-nav button { display: flex; width: 100%; align-items: center; gap: 11px; height: 32px; padding: 0 10px; border-radius: 9px; color: var(--t2); font-size: 13.5px; text-align: left; }
+.sidebar-nav button:hover { background: var(--surface2); color: var(--t1); }
 .sidebar-nav button.on { background: var(--surface2); color: var(--t1); }
-.sidebar-nav button .ico, .sidebar-settings .ico { color: var(--t3); }
-#desktop-sidebar .sidebar-nav kbd, #desktop-sidebar .sidebar-settings kbd { margin-left: auto; border: 0; background: none; padding: 0; color: var(--t4); }
-.sidebar-foot { display: flex; flex-direction: column; gap: 1px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); }
+.sidebar-nav button .ico, .sidebar-search .ico { color: var(--t3); }
+#desktop-sidebar .sidebar-nav kbd { margin-left: auto; border: 0; background: none; padding: 0; color: var(--t4); }
+.sidebar-foot { display: flex; align-items: center; gap: 9px; height: 40px; margin: auto -12px -10px; padding: 0 12px 0 22px; box-shadow: 0 -1px 0 var(--hair); color: var(--t2); }
+.sidebar-avatar { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--tone2); color: var(--t1); font-size: 10px; font-weight: 600; }
+.sidebar-you { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.sidebar-plan { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t4); font-size: 11.5px; }
+.sidebar-foot-button { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: var(--r-sm); color: var(--t3); transition: background-color 140ms var(--ease), color 140ms var(--ease); }
+.sidebar-foot-button:hover { background: var(--surface2); color: var(--t1); }
+.sidebar-foot-button .ico { width: 15px; height: 15px; }
 .project-mark { display: block; flex: none; width: 24px; height: 24px; border-radius: 7px; background: linear-gradient(145deg, #3a5f94, #20344f); color: #dce9ff; font: 600 11px/24px "JetBrains Mono", monospace; text-align: center; letter-spacing: -0.02em; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset; }
-.sidebar-settings { margin-top: 6px; }
 body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); border: 1px solid var(--line2); border-radius: 5px; padding: 3px 5px; background: var(--surface); }
-.sidebar-search { display: flex; align-items: center; gap: 9px; margin: 0 0 10px; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--t4); }
-.sidebar-search:focus-within { border-color: var(--line2); }
-.sidebar-search .ico { width: 15px; height: 15px; }
-.sidebar-search input { min-width: 0; width: 100%; background: transparent; border: 0; outline: none; color: var(--t1); font-size: 13px !important; }
-.sidebar-search input::placeholder { color: var(--t4); }
-.sidebar-group { padding: 14px 10px 6px; color: var(--t4); font-size: 12px; }
+/* Search is a row like New chat until you type into it. */
+.sidebar-search { display: flex; align-items: center; gap: 11px; height: 32px; padding: 0 10px; border-radius: 9px; color: var(--t2); cursor: text; transition: background-color 140ms var(--ease), box-shadow 140ms var(--ease); }
+.sidebar-search:hover { background: var(--surface2); }
+.sidebar-search:focus-within kbd, .sidebar-search:has(input:not(:placeholder-shown)) kbd { visibility: hidden; }
+.sidebar-search input { min-width: 0; flex: 1; padding: 0; background: transparent; border: 0; outline: none; color: var(--t1); font-size: 13.5px !important; }
+.sidebar-search input::placeholder { color: var(--t2); }
+.sidebar-search:focus-within input::placeholder { color: var(--t4); }
+.sidebar-search input::-webkit-search-cancel-button { display: none; }
 #sidebar-sessions { min-height: 0; }
 .sidebar-session, .sidebar-deed { display: flex; align-items: center; gap: 11px; width: 100%; height: 32px; padding: 0 10px; border-radius: 9px; color: var(--t2); text-align: left; font-size: 13.5px; white-space: nowrap; }
 .sidebar-session:hover, .sidebar-deed:hover { background: var(--surface2); }
@@ -51,28 +58,41 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-rename input { flex: 1; min-width: 0; height: 24px; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: var(--t1); font: inherit; font-size: 13.5px !important; outline: none; caret-color: var(--acc); }
 .sidebar-rename input::selection { background: color-mix(in srgb, var(--acc) 30%, transparent); color: var(--t1); }
 #sidebar-projects { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; padding-bottom: 12px; }
-.sidebar-group-heading { display: flex; align-items: center; justify-content: space-between; padding: 10px 6px 6px 10px; }
-.sidebar-group-heading .sidebar-group { padding: 0; font-weight: 500; color: var(--t3); }
-.sidebar-group-heading > button { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--t3); }
-.sidebar-group-heading > button:hover { background: var(--surface2); color: var(--t1); }
 .sidebar-project { position: relative; margin-bottom: 6px; }
 .sidebar-project.dragging { opacity: 0.45; }
 .sidebar-project.drop-before::before, .sidebar-project.drop-after::after { content: ""; position: absolute; left: 4px; right: 4px; height: 2px; border-radius: 2px; background: var(--acc); pointer-events: none; }
 .sidebar-project.drop-before::before { top: -3px; }
 .sidebar-project.drop-after::after { bottom: -3px; }
 .sidebar-order-status { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.sidebar-project-header { display: flex; align-items: center; min-width: 0; border-radius: 8px; }
-.sidebar-project-header:hover { background: var(--surface2); }
-.sidebar-project-toggle { display: grid; place-items: center; flex: none; width: 24px; height: 32px; color: var(--t3); border-radius: 6px; }
-.sidebar-project-toggle .ico { width: 12px; height: 12px; }
+/* Group headings: a chevron and a quiet name; pointing at one trades its
+   count for Group and sort. */
+.sidebar-project-header, .sidebar-group-row { position: relative; display: flex; align-items: center; min-width: 0; height: 30px; margin-top: 8px; border-radius: 8px; }
+.sidebar-group-toggle { display: flex; align-items: center; flex: 1; min-width: 0; height: 30px; gap: 6px; padding: 0 8px 0 6px; border-radius: 6px; color: var(--t3); font-size: 12px; font-weight: 500; text-align: left; }
+.sidebar-group-toggle:hover { color: var(--t1); }
+.sidebar-group-toggle > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-group-toggle .ico, .sidebar-project-toggle .ico { width: 11px; height: 11px; color: var(--t4); }
+.sidebar-group-toggle[aria-expanded="true"] .ico { transform: rotate(90deg); }
+.sidebar-group-count { flex: none; padding-right: 10px; color: var(--t4); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sidebar-view-button { display: none; place-items: center; flex: none; width: 22px; height: 22px; margin-right: 4px; border-radius: var(--r-sm); color: var(--t3); }
+.sidebar-view-button .ico { width: 13px; height: 13px; }
+.sidebar-view-button:hover, .sidebar-view-button.on { background: var(--surface2); color: var(--t1); }
+:is(.sidebar-project-header, .sidebar-group-row):is(:hover, :focus-within) .sidebar-view-button, .sidebar-view-button.on { display: grid; }
+:is(.sidebar-project-header, .sidebar-group-row):is(:hover, :focus-within) :is(.sidebar-group-count, .sidebar-project-state), :is(.sidebar-project-header, .sidebar-group-row):has(.sidebar-view-button.on) :is(.sidebar-group-count, .sidebar-project-state) { display: none; }
+.sidebar-view-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 1px; padding: 2px 4px 6px 10px; }
+.sidebar-view-label { padding-right: 4px; color: var(--t4); font-size: 11.5px; }
+.sidebar-view-label:not(:first-child) { padding-left: 8px; }
+.sidebar-view-opt { height: 22px; padding: 0 7px; border-radius: var(--r-sm); color: var(--t3); font-size: 12px; transition: background-color 140ms var(--ease), color 140ms var(--ease); }
+.sidebar-view-opt:hover { color: var(--t1); background: var(--surface2); }
+.sidebar-view-opt.on { color: var(--t1); background: var(--tone2); }
+.sidebar-view-archived { margin-left: auto; }
+.sidebar-project-toggle { display: grid; place-items: center; flex: none; width: 23px; height: 30px; padding-left: 6px; color: var(--t3); border-radius: 6px; }
 .sidebar-project-toggle[aria-expanded="true"] .ico { transform: rotate(90deg); }
-.sidebar-project-name { display: flex; align-items: center; flex: 1; min-width: 0; height: 32px; gap: 8px; padding: 0 8px 0 2px; color: var(--t2); text-align: left; font-size: 13px; font-weight: 500; border-radius: 6px; }
+.sidebar-project-name { display: flex; align-items: center; flex: 1; min-width: 0; height: 30px; gap: 8px; padding: 0 8px 0 0; color: var(--t3); text-align: left; font-size: 12px; font-weight: 500; border-radius: 6px; }
+.sidebar-project-name:hover { color: var(--t1); }
 .sidebar-project-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-project-name[draggable="true"] { cursor: grab; }
 .sidebar-project-name[draggable="true"]:active { cursor: grabbing; }
-.sidebar-project-name .ico { width: 15px; height: 15px; color: var(--t3); }
-.sidebar-project.active .sidebar-project-name { color: var(--t1); }
-.sidebar-project.active .sidebar-project-name .ico { color: var(--acc); }
+.sidebar-project.active .sidebar-project-name { color: var(--t2); }
 /* A project's line ends in its state: branches to review in green, the
    amber ring when a chat needs you, a spinner, or when it last moved. */
 .sidebar-project-state { flex: none; display: inline-flex; align-items: center; padding-right: 8px; color: var(--t4); font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -103,32 +123,34 @@ html[data-theme="demesne-light"] .agent-mark[data-provider="gemini"] { backgroun
 .approval-row.overlap .agent-mark { margin-right: 2px; }
 .approval-row.overlap code { flex: none; }
 @media (prefers-reduced-motion: no-preference) {
-  .sidebar-project-chats.unfolding { animation: sidebar-unfold 200ms var(--ease); }
-  .sidebar-project-toggle .ico { transition: transform 160ms var(--ease); }
+  :is(.sidebar-project-chats, .sidebar-group-chats).unfolding { animation: sidebar-unfold 200ms var(--ease); }
+  .sidebar-project-toggle .ico, .sidebar-group-toggle .ico { transition: transform 160ms var(--ease); }
 }
 @keyframes sidebar-unfold { from { opacity: 0; transform: translateY(-4px); } }
-.sidebar-project-chats { margin: 2px 0 4px 12px; padding-left: 3px; border-left: 1px solid var(--line); }
-.sidebar-project-chats .sidebar-session, .sidebar-project-chats .sidebar-deed { gap: 7px; padding-left: 6px; font-size: 13px; }
-.sidebar-project-chats .sidebar-rename { gap: 7px; padding-left: 6px; }
-.sidebar-project-chats .sidebar-rename input { font-size: 13px !important; }
-.sidebar-project-chats .sidebar-empty { padding: 5px 12px; font-size: 12px; }
-.sidebar-project-chats .sidebar-more { padding-left: 30px; }
+.sidebar-project-chats .sidebar-empty, .sidebar-group-chats .sidebar-empty { padding: 5px 10px 5px 34px; font-size: 12px; }
+.sidebar-lead { margin-top: 6px; }
+/* A pinned chat with nothing to say carries the pin as its mark. */
+.sidebar-pin-mark { display: grid; place-items: center; flex: none; width: 16px; color: var(--t4); }
+.sidebar-pin-mark .ico { width: 12px; height: 12px; }
 .sidebar-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-session-age { flex: none; color: var(--t3); font-size: 11px; font-variant-numeric: tabular-nums; }
 /* The time is small, so it keeps 4.5:1 against the sidebar in light too. */
 html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
-/* Hovering a row swaps its time for a delete icon; one click archives it. */
+/* Hovering a row swaps its time for Pin and Archive; one click does it. */
 .sidebar-item { position: relative; }
-.sidebar-delete { position: absolute; top: 50%; right: 6px; display: grid; place-items: center; width: 24px; height: 24px; margin-top: -12px; border-radius: 6px; color: var(--t3); background: var(--surface2); opacity: 0; pointer-events: none; transition: opacity 120ms; }
-/* The trash shows on hover, and when the keyboard is on the row, where
-   Delete works too. */
-.sidebar-item:hover .sidebar-delete, .sidebar-delete:focus-visible, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-delete { opacity: 1; pointer-events: auto; }
-.sidebar-item:has(.sidebar-delete):hover .sidebar-session-age, .sidebar-item:has(.sidebar-delete):has(.sidebar-session:focus-visible) .sidebar-session-age { visibility: hidden; }
+.sidebar-row-actions { position: absolute; top: 50%; right: 5px; display: flex; gap: 1px; margin-top: -11px; opacity: 0; pointer-events: none; transition: opacity 140ms var(--ease); }
+.sidebar-row-actions button { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--t3); }
+.sidebar-row-actions button:hover { color: var(--t1); background: var(--tone2); }
+.sidebar-row-actions .sidebar-pin.on { color: var(--t1); }
+.sidebar-row-actions .ico { width: 13px; height: 13px; }
+/* They show on hover, and when the keyboard is on the row, where Delete
+   archives too. */
+.sidebar-item:hover .sidebar-row-actions, .sidebar-row-actions:focus-within, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-row-actions { opacity: 1; pointer-events: auto; }
+.sidebar-item:hover .sidebar-session-age, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-session-age { visibility: hidden; }
+.sidebar-item:hover .sidebar-session-name, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-session-name { padding-right: 40px; }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-delete { transition: none; }
+  .sidebar-row-actions { transition: none; }
 }
-.sidebar-delete:hover { color: var(--bad); background: var(--bad-soft); }
-.sidebar-delete .ico { width: 14px; height: 14px; }
 .sidebar-empty { padding: 6px 10px; color: var(--t4); font-size: 12.5px; line-height: 1.5; }
 /* The rail: the sidebar folded to 60px, with dots for what needs you. */
 .sidebar-rail { display: none; }
@@ -512,10 +534,8 @@ html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[
 body.desktop { --hair: rgba(255, 255, 255, 0.08); --hair2: rgba(255, 255, 255, 0.13); --tone: rgba(255, 255, 255, 0.04); --tone2: rgba(255, 255, 255, 0.07); --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.25); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.3); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.5); --r-sm: 6px; --r: 10px; --r-lg: 14px; --ease: cubic-bezier(0.2, 0.7, 0.2, 1); }
 /* Sidebar: the tone difference is the edge; rows and search have no line. */
 #desktop-sidebar { border-right: 0; }
-.sidebar-nav button, .sidebar-settings, .sidebar-session, .sidebar-deed, .sidebar-more { border-radius: var(--r); }
-.sidebar-search { border: 0; border-radius: var(--r); background: var(--tone); }
-.sidebar-search:focus-within { background: var(--tone2); box-shadow: 0 0 0 1px var(--hair2); }
-.sidebar-delete { border-radius: var(--r-sm); }
+.sidebar-nav button, .sidebar-search, .sidebar-session, .sidebar-deed, .sidebar-more { border-radius: var(--r); }
+.sidebar-search:focus-within, .sidebar-search:has(input:not(:placeholder-shown)) { background: var(--tone2); box-shadow: 0 0 0 1px var(--hair2); }
 #rail-expand, .rail-button { border-radius: var(--r); }
 body.desktop kbd { border: 0; border-radius: var(--r-sm); background: var(--tone2); }
 #desktop-toggle-sidebar, #desktop-toolbar .header-more { border-radius: var(--r-sm); }
@@ -578,8 +598,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   #desktop-shell { transition: grid-template-columns 200ms var(--ease); }
   .desktop button, .sidebar-session, .sidebar-nav button, .sidebar-settings, .menu-row, .tool-row, #desktop-toolbar .chip, .desktop .composer-bar .cb, .desktop .settings-nav-item, .desktop .settings-segments button, .desktop .settings-toggle { transition: background-color 140ms var(--ease), color 140ms var(--ease), box-shadow 140ms var(--ease), opacity 140ms var(--ease); }
   .desktop #composer .composer-box, .sidebar-search, .desktop .settings-search, .desktop .filter-wrap input { transition: box-shadow 160ms var(--ease), background-color 160ms var(--ease); }
-  .sidebar-delete { transition: opacity 140ms var(--ease), transform 140ms var(--ease); transform: scale(0.9); }
-  .sidebar-item:hover .sidebar-delete, .sidebar-delete:focus-visible, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-delete { transform: none; }
   .desktop .settings-toggle i { transition: left 160ms var(--ease), background-color 160ms var(--ease); }
   .desktop .ring { transition: --usage 300ms var(--ease); }
   .desktop #composer .send { transition: color 140ms var(--ease), background-color 140ms var(--ease), transform 140ms var(--ease); }
@@ -1089,3 +1107,23 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
 #plain-line .plain-note .link:hover { color: var(--t1); }
 #plain-line .where-row { padding-left: 0; margin-left: -9px; }
 @media (prefers-reduced-motion: reduce) { #composer-where .where-caret { transition: none; } }
+
+/* All chats: the whole list in place of the conversation, with Archived. */
+.live-app.paging #stage > :not(#chats-page) { display: none !important; }
+.live-app.paging #input-area { display: none; }
+.desktop #chats-page { max-width: 680px; margin: 0 auto; padding: 28px 0 32px; color: var(--t2); }
+.cp-title { margin: 0 0 6px; color: var(--t1); font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.cp-tabs { display: flex; gap: 18px; margin-bottom: 14px; }
+.cp-tab { height: 26px; padding: 0; color: var(--t3); font-size: 13px; box-shadow: inset 0 -1.5px 0 transparent; transition: color 140ms var(--ease), box-shadow 140ms var(--ease); }
+.cp-tab:hover { color: var(--t1); }
+.cp-tab.on { color: var(--t1); box-shadow: inset 0 -1.5px 0 var(--t1); }
+.cp-count { color: var(--t4); font-variant-numeric: tabular-nums; }
+.cp-row { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 0 10px; border-radius: var(--r); box-shadow: inset 0 -1px 0 var(--hair); }
+.cp-row:hover { background: var(--surface2); }
+.cp-when { flex: none; width: 92px; color: var(--t3); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.cp-open, .cp-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font-size: 13.5px; text-align: left; }
+.cp-open b, .cp-what b { font-weight: 500; }
+.cp-where { color: var(--t3); font-size: 12.5px; }
+.cp-restore { flex: none; height: 26px; padding: 0 10px; border-radius: var(--r-sm); color: var(--t2); font-size: 12.5px; transition: background-color 140ms var(--ease), color 140ms var(--ease); }
+.cp-restore:hover { color: var(--t1); background: var(--tone2); }
+.cp-empty { padding: 16px 10px; color: var(--t3); font-size: 13px; }

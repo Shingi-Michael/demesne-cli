@@ -408,28 +408,40 @@ html[data-theme*="light"] .desktop #overlay.sheet[data-screen="settings"], html[
 @media (max-width: 1100px) { .desktop #overlay.sheet[data-screen="settings"] { grid-template-columns: 184px minmax(0, 1fr); } .desktop .settings-body { padding: 26px 22px 30px; } .desktop .settings-row { gap: 16px; } }
 .desktop #overlay.anchored, .desktop #overlay.dropped { border-radius: 12px; }
 /* The model picker: a short list with "More models" opening beside it. */
-.desktop #overlay.anchored[data-screen="models"] { left: auto; width: auto; flex-direction: row; align-items: flex-end; gap: 6px; background: none; box-shadow: none; overflow: visible; }
-.desktop .mp-main, .desktop .mp-more { display: flex; flex-direction: column; padding: 5px; border-radius: var(--r); background: var(--surface); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); }
-.desktop .mp-main { width: 268px; flex: none; }
-.desktop .mp-more { width: 220px; max-height: inherit; min-height: 0; }
-.desktop .mp-more.shut { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; pointer-events: none; }
-.desktop .mp-more input { margin: 0 0 4px; padding: 6px 9px; border: 0; border-radius: var(--r-sm); background: var(--tone); color: var(--t1); font: inherit; font-size: 12.5px; outline: none; }
-.desktop .mp-list { overflow-y: auto; min-height: 0; }
-.desktop .mp-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px; border-radius: var(--r-sm); color: var(--t1); font-size: 13px; text-align: left; }
+.desktop #overlay.anchored[data-screen="models"] { left: auto; width: 300px; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+/* The model picker: one panel. Search on top, your models, then how hard
+   the highlighted one thinks, then More models, which unfolds in place. */
+.desktop .mp { display: flex; flex-direction: column; min-height: 0; max-height: inherit; padding: 6px; }
+.desktop .mp-search { display: flex; align-items: center; gap: 8px; flex: none; height: 32px; margin-bottom: 3px; padding: 0 9px; border-radius: var(--r-sm); background: var(--tone); color: var(--t4); }
+.desktop .mp-search .ico { width: 14px; height: 14px; flex: none; }
+.desktop .mp-search input { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--t1); font: inherit; font-size: 13px; outline: none; }
+.desktop .mp-search input::placeholder { color: var(--t4); }
+.desktop .mp-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.desktop .mp-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 9px; border-radius: var(--r-sm); color: var(--t1); font-size: 13px; text-align: left; flex: none; }
 .desktop .mp-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desktop .mp-row:hover, .desktop .mp-row.selected, .desktop .mp-row.open { background: var(--tone); }
-.desktop .mp-key { color: var(--t4); font-size: 12px; }
-.desktop .mp-tick { color: var(--acc); font-size: 12px; }
-.desktop .mp-group { padding: 8px 9px 3px; font-size: 10.5px; letter-spacing: .04em; color: var(--t4); }
-.desktop .mp-group:first-child { padding-top: 3px; }
-.desktop .mp-sep { height: 1px; margin: 4px 6px; background: var(--hair); }
-/* Thinking sits over its own row of levels, so six of them fit. */
-.desktop .mp-thinking { padding: 4px 9px 6px; font-size: 12px; color: var(--t3); }
-.desktop .mp-thinking > span { display: block; margin-bottom: 4px; }
-.desktop .mp-levels { display: flex; flex-wrap: wrap; gap: 2px; }
-.desktop .mp-thinking button { flex: 1 1 auto; padding: 3px 4px; border-radius: var(--r-sm); color: var(--t3); text-align: center; }
-.desktop .mp-thinking button:hover { color: var(--t1); }
-.desktop .mp-thinking button.on { color: var(--t1); background: var(--tone); }
+.desktop .mp-row .name b { font-weight: 600; }
+.desktop .mp-row.dim { color: var(--t3); }
+.desktop .mp-row.selected { background: var(--tone2); color: var(--t1); }
+.desktop .mp-key { flex: none; color: var(--t4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.desktop .mp-tick { flex: none; color: var(--acc); font-size: 12px; }
+.desktop .mp-group { display: flex; justify-content: space-between; padding: 8px 9px 3px; font-size: 11px; color: var(--t4); }
+.desktop .mp-group:first-child { padding-top: 4px; }
+.desktop .mp-sep { flex: none; height: 1px; margin: 4px 6px; background: var(--hair); }
+.desktop .mp-thinking { display: flex; align-items: center; gap: 10px; flex: none; height: 34px; padding: 0 9px; font-size: 12px; color: var(--t3); }
+.desktop .mp-thinking-label { flex: none; width: 56px; }
+.desktop .mp-level { flex: none; width: 64px; text-align: right; color: var(--t1); font-size: 12.5px; white-space: nowrap; }
+.desktop .mp-level.off { color: var(--t4); }
+.desktop .mp-track { position: relative; flex: 1; display: flex; align-items: center; height: 22px; }
+.desktop .mp-track::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; margin: 0 calc(50% / var(--stops, 6)); background: var(--hair2); }
+.desktop .mp-track.none::before { margin: 0; background: none; border-top: 1px dashed var(--hair2); }
+.desktop .mp-fill { position: absolute; top: 50%; height: 2px; margin-top: -0.5px; border-radius: 1px; background: var(--acc); left: calc(50% / var(--stops, 6)); }
+.desktop .mp-stop { position: relative; flex: 1; display: grid; place-items: center; height: 22px; padding: 0; border-radius: var(--r-sm); }
+.desktop .mp-stop i { width: 7px; height: 7px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--t4); transition: transform 140ms var(--ease), background-color 140ms var(--ease); }
+.desktop .mp-stop.on i { background: var(--acc); box-shadow: none; }
+.desktop .mp-stop.at i { width: 13px; height: 13px; background: var(--t1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 35%, transparent); }
+.desktop .mp-stop:hover i { transform: scale(1.25); }
+.desktop .mp-stop:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+.desktop .mp-hint { display: flex; gap: 6px; align-items: center; padding: 4px 9px 2px; color: var(--t4); font-size: 11px; }
 .desktop .mp-empty { padding: 6px 9px; font-size: 12px; color: var(--t4); }
 .desktop #overlay.dropped .modal-title { display: none; }
 .desktop #overlay.dropped .menu-row { padding: 8px 12px; }

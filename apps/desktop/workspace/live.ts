@@ -208,7 +208,7 @@ let overlay: OverlayName | null = null,
   modelsLoading = false,
   /// The model picker opens on the current model once the list arrives.
   modelIndexPending = false,
-  /// The picker's "More models" column is open.
+  /// The picker's "More models" list is unfolded in its panel.
   modelsMore = false,
   modelsQuery = "",
   overlayRows: {
@@ -3243,34 +3243,68 @@ function placeOverlay() {
   box.style.bottom = `${main.bottom - anchor.top + 8}px`;
   box.style.maxHeight = `${Math.max(160, anchor.top - main.top - 20)}px`;
 }
+/// A thinking level in full: "Extra high", not "xhigh".
+const LEVEL_WORDS: Record<string, string> = { xhigh: "Extra high", none: "None", off: "Off" };
+const levelWord = (level: string) => LEVEL_WORDS[level] ?? level[0]!.toUpperCase() + level.slice(1);
+/// A model's name with the search's matches in bold.
+const marked = (text: string, query: string) => {
+  const lower = text.toLowerCase(), q = query.toLowerCase();
+  let out = "", from = 0;
+  for (let at = lower.indexOf(q); q && at >= 0; at = lower.indexOf(q, from)) {
+    out += `${h(text.slice(from, at))}<b>${h(text.slice(at, at + q.length))}</b>`;
+    from = at + q.length;
+  }
+  return out + h(text.slice(from));
+};
+/// The model picker is one panel anchored to the model word: search on top,
+/// your models, then how hard the highlighted one thinks, as a track with a
+/// stop per level. More models unfolds in the same panel.
 function renderModelPopover(hidden: number) {
-  const open = modelsMore || Boolean(overlayQuery);
   let lastGroup = "";
+  const counts = new Map<string, number>();
+  for (const model of models) counts.set(model.provider, (counts.get(model.provider) ?? 0) + 1);
   const item = (row: (typeof overlayRows)[number], index: number) => {
     const current = row.action === "model" && row.data.id === state!.model.id;
-    const mark = current ? '<span class="mp-tick" aria-label="current">✓</span>' : row.kind === "short" ? `<span class="mp-key">${index + 1}</span>` : row.kind === "more" ? '<span class="mp-key">›</span>' : "";
-    const label = row.kind === "rest" && row.group !== lastGroup ? `<div class="mp-group">${h(row.group ?? "")}</div>` : "";
+    const right = current ? '<span class="mp-tick" aria-label="current">✓</span>'
+      : row.kind === "short" ? `<span class="mp-key">${index + 1}</span>`
+      : row.kind === "more" ? `<span class="mp-key">${h(row.value)} ${modelsMore ? "‹" : "›"}</span>`
+      : row.value ? `<span class="mp-key">${h(row.value)}</span>` : "";
+    let label = "";
+    if (row.kind === "rest" && row.group !== lastGroup) {
+      const all = counts.get(row.group ?? "") ?? 0, shown = overlayRows.filter((other) => other.kind === "rest" && other.group === row.group && other.action === "model").length;
+      const count = overlayQuery ? `${shown} of ${all}` : row.action === "focus-filter" ? String(all) : `${shown} more`;
+      label = `<div class="mp-group"><span>${h(row.group ?? "")}</span><span>${count}</span></div>`;
+    }
     if (row.kind === "rest") lastGroup = row.group ?? "";
-    const title = [row.value, row.description].filter(Boolean).join(" · ");
-    return label + btn("choose-row", `<span class="name">${h(row.label)}</span>${mark}`, { index }, `mp-row${index === overlayIndex ? " selected" : ""}${row.kind === "more" && open ? " open" : ""}`)
-      .replace("<button ", `<button ${row.kind === "more" ? 'data-more="1" ' : ""}${title ? `title="${h(title)}" ` : ""}`);
+    const title = [row.data.id !== row.label ? row.data.id : "", row.description].filter(Boolean).join(" · ");
+    const name = overlayQuery && row.action === "model" ? marked(row.label, overlayQuery) : h(row.label);
+    return label + btn("choose-row", `<span class="name">${name}</span>${right}`, { index }, `mp-row${index === overlayIndex ? " selected" : ""}${row.kind === "more" || row.action === "focus-filter" ? " dim" : ""}`)
+      .replace("<button ", `<button data-index="${index}" ${title ? `title="${h(String(title))}" ` : ""}`);
   };
   const rows = overlayRows.map((row, index) => [row, index] as const);
   const highlighted = overlayRows[overlayIndex],
     model = models.find((item) => item.id === (highlighted?.action === "model" ? highlighted.data.id : state!.model.id)),
     levels = model?.reasoningLevels ?? [],
-    level = model ? modelLevel(model) : undefined;
-  const thinking = model && levels.length
-    ? `<div class="mp-thinking"><span>Thinking</span><div class="mp-levels">${levels.map((item) => btn("model", h(item[0]!.toUpperCase() + item.slice(1)), { id: model.id, reasoning: item }, item === level ? "on" : "")).join("")}</div></div>`
-    : "";
+    level = model ? modelLevel(model) : undefined,
+    at = level ? levels.indexOf(level) : -1;
+  // One stop per level; the line stays (flat, None) for a model without
+  // thinking, so the panel keeps its height as you move down the list.
+  const stops = levels.map((item, index) => btn("model", '<i aria-hidden="true"></i>', { id: model!.id, reasoning: item }, `mp-stop${index < at ? " on" : index === at ? " at" : ""}`)
+    .replace("<button ", `<button title="${h(levelWord(item))}" aria-label="${h(`Thinking ${levelWord(item)}`)}" aria-pressed="${index === at}" `)).join("");
+  // Stop i sits at the middle of its share of the track; the fill runs from
+  // the first stop to the chosen one.
+  const fill = at > 0 ? `<span class="mp-fill" style="width:calc(${at} * 100% / ${levels.length})"></span>` : "";
+  const thinking = `<div class="mp-thinking" title="←→ change it"><span class="mp-thinking-label">Thinking</span><span class="mp-track${levels.length ? "" : " none"}" style="--stops:${Math.max(1, levels.length)}" role="group" aria-label="Thinking">${fill}${stops}</span><span class="mp-level${levels.length ? "" : " off"}">${levels.length && level ? h(levelWord(level)) : "None"}</span></div>`;
   const short = rows.filter(([row]) => row.kind === "short").map(([row, index]) => item(row, index)).join("");
-  const more = rows.filter(([row]) => row.kind === "more").map(([row, index]) => item(row, index)).join("");
   const rest = rows.filter(([row]) => row.kind === "rest").map(([row, index]) => item(row, index)).join("");
-  // The search box lives in the "More models" column; while that is shut it
-  // stays focused but out of sight, so typing opens the column with matches.
+  const more = rows.filter(([row]) => row.kind === "more").map(([row, index]) => item(row, index)).join("");
+  const empty = modelsLoading && !models.length ? "Loading models…" : overlayQuery ? "No matches." : "No models.";
+  const list = (overlayQuery ? rest : short + (rest ? `<div class="mp-sep"></div>${rest}` : "")) || `<div class="mp-empty">${empty}</div>`;
   el("overlay").innerHTML =
-    `<div class="mp-more${open ? "" : " shut"}"><input id="chooser-filter" placeholder="Search models…" aria-label="Filter models" value="${h(overlayQuery)}" autocomplete="off"><div class="mp-list">${rest || `<div class="mp-empty">${modelsLoading && !models.length ? "Loading models…" : "No matches."}</div>`}${hidden ? `<div class="mp-empty">${hidden} more · keep typing</div>` : ""}</div></div>` +
-    `<div class="mp-main">${short || `<div class="mp-empty">${modelsLoading ? "Loading models…" : "No models."}</div>`}${thinking ? `<div class="mp-sep"></div>${thinking}` : ""}${more ? `<div class="mp-sep"></div>${more}` : ""}</div>`;
+    `<div class="mp"><label class="mp-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="chooser-filter" placeholder="Search ${models.length || ""} models" aria-label="Filter models" value="${h(overlayQuery)}" autocomplete="off" spellcheck="false"></label>` +
+    `<div class="mp-list">${list}${hidden ? `<div class="mp-empty">${hidden} more · keep typing</div>` : ""}</div>` +
+    `<div class="mp-sep"></div>${thinking}${more ? `<div class="mp-sep"></div>${more}` : ""}` +
+    (overlayQuery ? `<div class="mp-hint">${k("↵")} switch ${k("↑↓")} choose ${k("Esc")} close</div>` : "") + `</div>`;
   el("overlay").querySelector(".mp-row.selected")?.scrollIntoView({ block: "nearest" });
 }
 /// Settings is one sheet: sections down the left, under a search that finds
@@ -3526,8 +3560,8 @@ function renderOverlay() {
       const level = modelLevel(model), score = scoreOf(model);
       return {
         label: model.displayName ?? model.id,
-        value: [model.contextWindow ? `${tokensShort(model.contextWindow)} context` : "", model.maxOutputTokens ? `${tokensShort(model.maxOutputTokens)} out` : ""].filter(Boolean).join(" · "),
-        group: model.provider.toUpperCase(),
+        value: model.contextWindow ? tokensShort(model.contextWindow) : "",
+        group: model.provider,
         action: "model",
         data: { id: model.id, ...(level ? { reasoning: level } : {}) },
         kind,
@@ -3535,7 +3569,8 @@ function renderOverlay() {
       };
     };
     // The models you use most (the one in use always among them) make the
-    // short list; the rest wait under "More models", by provider.
+    // short list; the rest unfold under "More models", by provider. A search
+    // looks through every provider at once, in place of the list.
     const inUse = models.find((model) => model.id === state!.model.id);
     const sizes = new Map<string, number>();
     for (const model of models) sizes.set(model.provider, (sizes.get(model.provider) ?? 0) + 1);
@@ -3544,27 +3579,26 @@ function renderOverlay() {
     const mine = (model: ModelDescriptor) => Number(model.provider === state!.model.provider && (sizes.get(model.provider) ?? 0) <= LARGE_CATALOG);
     let short = [...models].sort((a, b) => turns(b) - turns(a) || mine(b) - mine(a)).slice(0, SHORT_MODELS);
     if (inUse && !short.includes(inUse)) short = [inUse, ...short.slice(0, SHORT_MODELS - 1)];
-    overlayRows = short.map((model) => rowOf(model, "short"));
-    if (models.length > short.length) overlayRows.push({ label: "More models", value: "", action: "more-models", data: {}, kind: "more" });
-    if (modelsMore || overlayQuery) {
-      const query = overlayQuery.toLowerCase();
+    const query = overlayQuery.toLowerCase();
+    if (!query) overlayRows = short.map((model) => rowOf(model, "short"));
+    if (query || modelsMore) {
       const rest = (query ? [...models] : models.filter((model) => !short.includes(model)))
         .sort((a, b) => a.provider.localeCompare(b.provider) || turns(b) - turns(a))
         .map((model) => rowOf(model, "rest"))
         .filter((row) => !query || `${row.label} ${row.group} ${row.data.id}`.toLowerCase().includes(query));
-      // A large catalog (OpenRouter's hundreds) collapses to one row until
+      // A large catalog (OpenRouter's hundreds) stays behind one row until
       // a search looks through it.
-      const large = [...sizes].filter(([, size]) => size > LARGE_CATALOG).map(([provider]) => provider.toUpperCase());
+      const large = [...sizes].filter(([, size]) => size > LARGE_CATALOG).map(([provider]) => provider);
       overlayRows.push(...(query ? rest : rest.filter((row) => !large.includes(row.group))));
       if (!query)
         for (const group of large)
-          overlayRows.push({ label: `All ${sizes.get(models.find((model) => model.provider.toUpperCase() === group)!.provider)} models`, value: "type to search", group, action: "focus-filter", data: {}, kind: "rest" });
+          overlayRows.push({ label: `Search all ${sizes.get(group)}`, value: "", group, action: "focus-filter", data: {}, kind: "rest" });
     }
+    if (!query && models.length > short.length) overlayRows.push({ label: modelsMore ? "Fewer models" : "More models", value: String(models.length - short.length), action: "more-models", data: {}, kind: "more" });
     // A new search highlights its first match.
     if (overlayQuery !== modelsQuery) {
       modelsQuery = overlayQuery;
-      const first = overlayRows.findIndex((row) => row.kind === "rest");
-      if (overlayQuery && first >= 0) overlayIndex = first;
+      if (overlayQuery) overlayIndex = 0;
     }
     if (modelIndexPending && !overlayQuery) {
       // Opens on the model you are using, so ←→ changes its thinking.
@@ -4529,9 +4563,9 @@ async function dispatch(
       return;
     }
     if (row?.action === "more-models") {
-      // Hovering already opened it; a click or Enter keeps it open.
-      modelsMore = true;
-      if (modelsMore && args.step) overlayIndex = Math.min(overlayRows.length, args.index + 1);
+      modelsMore = !modelsMore || Boolean(args.open);
+      // Unfolding from the keyboard steps onto the first of the rest.
+      if (modelsMore && args.step) overlayIndex = SHORT_MODELS;
       renderOverlay();
       el("overlay").querySelector<HTMLInputElement>("input")?.focus();
       return;
@@ -4865,24 +4899,16 @@ document.addEventListener("input", (event) => {
     overlayQuery = input.value;
     overlayIndex = 0;
     renderOverlay();
-    // A model search highlights its first match, so Enter picks it.
-    const first = overlay === "models" && overlayQuery ? overlayRows.findIndex((row) => row.kind === "rest") : -1;
-    if (first > 0) {
-      overlayIndex = first;
-      renderOverlay();
-    }
   }
   if (input.closest("#setup")) setupInput(input);
 });
-// Hovering "More models" opens its column, as a submenu would; pointing
-// back at the short list shuts it again, unless a search is open.
+// Pointing at a model in the picker highlights it, so Thinking is for the
+// row you are on.
 document.addEventListener("mouseover", (event) => {
   if (overlay !== "models") return;
-  const row = (event.target as Element).closest?.(".mp-main .mp-row");
-  if (!row) return;
-  const more = row.hasAttribute("data-more");
-  if (more === modelsMore || (!more && overlayQuery)) return;
-  modelsMore = more;
+  const index = Number((event.target as Element).closest?.<HTMLElement>("#overlay .mp-row")?.dataset.index ?? NaN);
+  if (Number.isNaN(index) || index === overlayIndex) return;
+  overlayIndex = index;
   renderOverlay();
 });
 document.addEventListener("change", (event) => {

@@ -61,7 +61,7 @@ let failSuggestions = false, offerIdeas = false;
 const gate = new Promise<void>(done => { release = done; });
 const f = await fixture({
   providerId: "test", modelId: "desktop-test", contextCapacity: 262144, maxOutputTokens: 1024,
-  async listModels() { smokeProcessor = this; return [{ id: "desktop-test", provider: "test", contextWindow: 262144 }, { id: "desktop-small", provider: "test", contextWindow: 32768 }, { id: "desktop-fast", provider: "test", contextWindow: 131072 }, { id: "desktop-wide", provider: "test", contextWindow: 1048576 }, { id: "far-away-large", provider: "other", contextWindow: 200000 }, { id: "far-away-mini", provider: "other", contextWindow: 128000 }]; },
+  async listModels() { smokeProcessor = this; return [{ id: "desktop-test", provider: "test", contextWindow: 262144, reasoningLevels: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultReasoningLevel: "low" }, { id: "desktop-small", provider: "test", contextWindow: 32768 }, { id: "desktop-fast", provider: "test", contextWindow: 131072 }, { id: "desktop-wide", provider: "test", contextWindow: 1048576 }, { id: "far-away-large", provider: "other", contextWindow: 200000 }, { id: "far-away-mini", provider: "other", contextWindow: 128000 }]; },
   async *stream(messages, _tools, signal) {
     const user = messages.findLast(message => message.role === "user")?.content;
     // The Deed: its writing chat, a chat making a sentence true, and a check.
@@ -667,18 +667,31 @@ try {
   if (await page.locator("#overlay").isVisible()) await page.getByRole("button", { name: "Close dialog", exact: true }).click();
   // The picker lists four models, numbered, with the rest one step away.
   await page.locator("#composer-model").click();
-  await page.locator("#overlay .mp-main .mp-row").first().waitFor();
-  assert(await page.locator("#overlay .mp-main .mp-key", { hasText: /^[2-4]$/ }).count() === 3, "the short list numbers the other three models");
-  assert(await page.locator("#overlay .mp-more.shut").count() === 1, "More models starts shut");
+  await page.locator("#overlay .mp-row").first().waitFor();
+  assert(await page.locator("#overlay .mp-key", { hasText: /^[2-4]$/ }).count() === 3, "the short list numbers the other three models");
+  assert(await page.getByRole("textbox", { name: "Filter models" }).isVisible(), "the search sits on top, in sight");
+  assert.equal(await evaluate<string>("return document.activeElement?.id;"), "chooser-filter", "the search has the keyboard");
+  assert.equal(await page.locator("#overlay .mp").count(), 1, "the picker is one panel");
+  // Thinking is a track with a stop per level, inside the panel.
+  const panel = (await page.locator("#overlay .mp").boundingBox())!;
+  const stops = page.locator("#overlay .mp-stop");
+  assert.equal(await stops.count(), 6, "a stop for each of the model's six levels");
+  for (const stop of await stops.all()) { const r = (await stop.boundingBox())!; assert(r.x >= panel.x && r.x + r.width <= panel.x + panel.width, "every thinking stop sits inside the panel"); }
+  assert.equal(await page.locator("#overlay .mp-level").innerText(), "Low");
   await capture("02-models");
-  await page.locator("#overlay [data-more]").hover();
-  await until(() => page.locator("#overlay .mp-more:not(.shut) .mp-row").count().then(count => count === 2), "More models opens beside the list");
+  // Pointing at a model without thinking: the line says None, the panel keeps its height.
+  const panelHeight = () => evaluate<number>("return document.querySelector('#overlay .mp')?.offsetHeight ?? 0;");
+  const height = await panelHeight();
+  await page.locator("#overlay .mp-row", { hasText: "desktop-small" }).hover();
+  await until(() => page.locator("#overlay .mp-level").innerText().then(text => text === "None"), "Thinking follows the row you point at");
+  assert.equal(await panelHeight(), height, "the panel keeps its height");
+  await page.locator("#overlay .mp-row", { hasText: "More models" }).click();
+  await until(() => page.locator("#overlay .mp-row", { hasText: "far-away-large" }).isVisible(), "More models unfolds in the same panel");
+  assert.equal(await page.locator("#overlay .mp-group", { hasText: "other" }).count(), 1, "the rest come by provider");
   await capture("02-models-more");
-  // Clicking the row it opened from keeps it open; the short list shuts it.
-  await page.locator("#overlay [data-more]").click();
-  assert(await page.locator("#overlay .mp-more.shut").count() === 0, "clicking More models keeps it open");
-  await page.locator("#overlay .mp-main .mp-row").first().hover();
-  await until(() => page.locator("#overlay .mp-more.shut").count().then(count => count === 1), "pointing back at the short list shuts More models");
+  await page.getByRole("textbox", { name: "Filter models" }).fill("far");
+  await until(() => page.locator("#overlay .mp-row").count().then(count => count === 2), "a search lists only its matches");
+  assert.equal(await page.locator("#overlay .mp-row b").first().innerText(), "far", "the match is marked");
   await page.keyboard.press("Escape");
 
 

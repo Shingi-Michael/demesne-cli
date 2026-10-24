@@ -195,52 +195,34 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .live-app.start .stage { padding: 40px 32px 80px; }
 .desktop .hero { max-width: 680px; gap: 18px; }
 .desktop .live-app.start .intro { gap: 6px; }
-.hero-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--t3); font-size: 12.5px; line-height: 18px; }
+.hero-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--t2); font-size: 12.5px; line-height: 18px; }
 .hero-eyebrow .ico { color: var(--t3); }
 .desktop .live-app.start .intro h1 { font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; color: var(--t1); }
 .desktop .live-app.start .intro p { font-size: 13.5px; line-height: 1.6; color: var(--t3); }
 .desktop .intro strong { color: var(--t2); font-weight: 500; }
 /* The start screen's score: it asks less the more you use it. */
 .live-app.start .intro p.hero-asks { margin: 2px 0 0; font-size: 12px; line-height: 18px; color: var(--t4); }
-/* The project map: one quiet button under the greeting unfolds the land in place. */
-.live-app.start .intro p.hero-map { display: flex; align-items: center; gap: 10px; margin: 4px 0 0; font-size: 12px; line-height: 18px; color: var(--t4); }
-.hero-map .map-btn { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 7px; border: 0; border-radius: var(--r-sm, 6px); background: var(--tone); color: var(--t2); font: inherit; font-size: 12px; cursor: pointer; transition: background 140ms var(--ease, ease), color 140ms var(--ease, ease); }
-.hero-map .map-btn .ico { width: 13px; height: 13px; }
-.hero-map .map-btn:hover { background: var(--tone2, var(--tone)); color: var(--t1); }
-.hero-map .map-btn.on { background: var(--acc-soft); color: var(--acc); }
-#map-caption { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desktop .hero.mapped { max-width: 960px; }
-.desktop .live-app.start .hero.mapped .intro h1 { font-size: 21px; }
-#hero-land { width: 100%; }
-.land { position: relative; width: 100%; aspect-ratio: 880 / 400; }
-.land canvas, .land svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.land svg { pointer-events: none; }
-.land .pn { font: 500 11px Inter, system-ui, sans-serif; fill: var(--t2); text-anchor: middle; letter-spacing: 0.14em; text-transform: uppercase; }
-.land .ps { font: 11px Inter, system-ui, sans-serif; fill: var(--t4); text-anchor: middle; }
-/* Marks: who is working where. Blue works, amber waits for you, red is a failing check. */
-.land .mk-g { pointer-events: auto; }
-.land .mk-g .mk { stroke: var(--ink); stroke-width: 1.5; }
-.land .mk-g .mk-hit { fill: transparent; }
-.land .mk-g .who { font: 500 11px Inter, system-ui, sans-serif; }
-.land .mk-g .who.left { text-anchor: end; }
-.land .mk-g.work .mk, .land .mk-g.work .who { fill: var(--acc); }
-.land .mk-g.wait .mk, .land .mk-g.wait .who { fill: var(--warn); }
-.land .mk-g.fail .mk, .land .mk-g.fail .who { fill: var(--bad); }
-.land .mk-g[data-action] { cursor: pointer; }
-.land .mk-g:hover .mk { r: 5.5; }
-.land .mk-ring { fill: none; stroke: var(--warn); stroke-width: 1.2; opacity: 0.55; }
-.land .trail { fill: none; stroke: var(--acc); stroke-width: 1.2; stroke-dasharray: 3 4; opacity: 0.6; }
-.land .trail.wait { stroke: var(--warn); }
-@media (prefers-reduced-motion: no-preference) { .land .mk-ring { animation: mk-ring 2.4s ease-in-out infinite; } .land .trail { animation: trail-fade 60s linear both; } }
-@keyframes mk-ring { 50% { opacity: 0.15; } }
-@keyframes trail-fade { to { opacity: 0; } }
-@media (prefers-reduced-motion: no-preference) { .land.unfolding { animation: land-in 200ms var(--ease, ease) both; } }
-@keyframes land-in { from { opacity: 0; transform: translateY(-4px); } }
-.hero-drive { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 2px; font-size: 12.5px; line-height: 18px; color: var(--t3); }
-.hero-drive .ico { color: var(--t3); }
-.hero-drive b { color: var(--t2); font-weight: 500; }
-.hero-drive .link { color: var(--acc); font-size: 12.5px; }
-.hero-ideas { width: 100%; margin-top: -6px; }
+/* Under Home's composer: Drive's top ideas, the chats to pick up, or a few
+   ways in. Each is a quiet label over its rows, on the same column. */
+.home-section { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.home-label { display: flex; align-items: center; gap: 7px; margin: 0; padding: 0 4px; font-size: 12px; font-weight: 500; line-height: 18px; color: var(--t3); }
+.home-label .ico { width: 13px; height: 13px; color: var(--t3); }
+.home-label .link { font-size: 12px; font-weight: 400; }
+.home-aside { display: flex; gap: 12px; margin-left: auto; }
+.home-chats { display: flex; flex-direction: column; }
+.home-chat { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 7px 8px; border-radius: var(--r-sm, 6px); color: var(--t1); font-size: 13px; text-align: left; }
+.home-chat:hover, .home-chat:focus-visible { background: var(--tone); }
+.home-chat .sidebar-session-mark { flex: none; }
+.home-chat-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-chat-age { flex: none; color: var(--t4); font-size: 12px; font-variant-numeric: tabular-nums; }
+.home-chat-age.warn { color: var(--warn); }
+.home-chat-age.working { color: var(--acc); }
+.home-chat-age.bad { color: var(--bad); }
+.home-starters { display: flex; flex-wrap: wrap; gap: 6px; }
+.home-starter { padding: 6px 11px; border-radius: 999px; background: var(--tone); color: var(--t2); font-size: 12.5px; }
+.home-starter:hover { background: var(--tone2, var(--tone)); color: var(--t1); }
+.home-section .proposal-row { margin-bottom: 0; }
+.home-section .proposal-list { display: flex; flex-direction: column; gap: 5px; }
 .desktop .live-app.start .composer textarea::placeholder { color: var(--t4); }
 .desktop .live-app.start .hints button { font-size: 12.5px; color: var(--t3); }
 .desktop #input-area { padding: 12px 32px 22px; }
@@ -615,7 +597,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 @keyframes desktop-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: no-preference) {
   .desktop #overlay:not([hidden]), .desktop #context-card:not([hidden]), .desktop #completion:not([hidden]), #notice:not([hidden]) { animation: desktop-rise 160ms var(--ease); }
-  .desktop #approval:not([hidden]), .desktop .hero-branches, .desktop .hero-ideas, .desktop .step-fold { animation: desktop-appear 180ms var(--ease); }
+  .desktop #approval:not([hidden]), .desktop .hero-branches, .desktop .home-section, .desktop .step-fold { animation: desktop-appear 180ms var(--ease); }
   .desktop #conversation > .turn, .desktop .compaction-card { animation: desktop-appear 220ms var(--ease); }
   .desktop #hero { animation: desktop-fade 260ms var(--ease); }
   #desktop-shell { transition: grid-template-columns 200ms var(--ease); }
@@ -1112,7 +1094,10 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
 #sakura canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
 .live-app.start #stage { position: relative; z-index: 1; }
 .live-app.start .intro h1, .live-app.start .hero-eyebrow { text-shadow: 0 1px 16px var(--ink), 0 0 3px var(--ink); }
-.live-app.start #composer { background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px) saturate(1.2); }
+/* On Home the box and its bar are one frosted card, not a box over a strip. */
+.desktop .live-app.start #composer { gap: 2px; padding: 0 0 6px; border-radius: var(--r-lg); background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px) saturate(1.2); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); }
+.desktop .live-app.start #composer .composer-box { background: transparent; box-shadow: none; }
+.desktop .live-app.start #composer.mode-plan { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 38%, transparent), var(--shadow-2); }
 
 /* Where a chat lives: one word under Home's composer, unfolding its choices
    in place; a plain chat ends with one quiet line that can move it. */

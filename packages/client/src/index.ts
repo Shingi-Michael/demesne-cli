@@ -351,14 +351,6 @@ export class DemesneClient {
     return this.request<ArchiveSessionResponse>(`/v1/sessions/${sessionId}/restore`, { method: "POST" });
   }
 
-  /// The project map: folders sized by lines.
-  async workspaceMap(sessionId: string): Promise<import("@demesne/protocol").WorkspaceMapResponse> {
-    return this.request(`/v1/sessions/${sessionId}/map`);
-  }
-  /// Who is working in the project right now; `also` adds sessions by id (Drive's worktree chats).
-  async workspaceLive(sessionId: string, also: string[] = []): Promise<import("@demesne/protocol").WorkspaceLiveResponse> {
-    return this.request(`/v1/sessions/${sessionId}/map/live${also.length ? `?also=${encodeURIComponent(also.join(","))}` : ""}`);
-  }
   async listWorkspaceFiles(sessionId: string): Promise<string[]> {
     return (await this.request<{ files: string[] }>(`/v1/sessions/${sessionId}/files`)).files;
   }

@@ -7,6 +7,7 @@ import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { mountSakura, type Sakura } from "./sakura.ts";
+import { awaySentences, type AwayAsk, type AwayPart } from "./away.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
@@ -72,6 +73,10 @@ const h = (value: unknown) =>
   );
 const shortcut = (key: string) => /Mac/i.test(navigator.platform) ? key.replace(/^Ctrl\+/, "⌘") : key;
 const k = (key: string) => `<kbd>${h(shortcut(key))}</kbd>`;
+/// A model by its name, or its id in words when the provider gives no name:
+/// "qwen/qwen3.8-27b-instruct" reads "Qwen3.8 27B Instruct".
+const modelWords = (model: { id: string; displayName?: string | null }) => model.displayName?.trim() || model.id.split("/").at(-1)!.split(/[-_]/).filter(Boolean)
+  .map((word) => /^\d+(\.\d+)?[bkm]$/i.test(word) ? word.toUpperCase() : /^(gpt|glm|llm|vl|it)$/i.test(word) ? word.toUpperCase() : word.replace(/^./, (c) => c.toUpperCase())).join(" ");
 /// A session view, not the start screen: it has turns, or Drive is working
 /// it (Drive plans before its first turn).
 const projectLabel = (path: string) => path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path;
@@ -1001,7 +1006,7 @@ function renderStatus() {
   el("status").hidden = inSession();
   // The context used, as a small ring; the numbers wait in its tooltip.
   const c2 = c.percentage == null ? "" : `<span class="ring" style="--usage:${Math.min(100, c.percentage)}%"></span>`;
-  el("composer-model").innerHTML = `${h(state.model.displayName ?? models.find((model) => model.id === state!.model.id)?.displayName ?? state.model.id) || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
+  el("composer-model").innerHTML = `${h(state.model.id ? modelWords({ id: state.model.id, displayName: state.model.displayName ?? models.find((model) => model.id === state!.model.id)?.displayName }) : "") || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
   el("composer-context").innerHTML = c2;
   el("composer-context").title = c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`;
   el("composer-context").hidden = !inSession() || !c2;
@@ -1712,84 +1717,104 @@ function renderSakura(show: boolean) {
   if (dark !== sakuraDark) { sakuraDark = dark; sakura.setDark(dark); }
   if (show) sakura.resume(); else sakura.pause();
 }
+/// When the window was last in front of you, kept on this computer: Home
+/// says what happened since.
+const LEFT_KEY = "demesne-left-at";
+let leftAt: number | null = (() => { try { const at = Number(localStorage.getItem(LEFT_KEY)); return at > 0 ? at : null; } catch { return null; } })();
+const leaving = () => { leftAt = Date.now(); try { localStorage.setItem(LEFT_KEY, String(leftAt)); } catch { /* storage may be off */ } };
+window.addEventListener("blur", leaving);
+window.addEventListener("pagehide", leaving);
+document.addEventListener("visibilitychange", () => { if (document.hidden) leaving(); });
+/// The chat whose approval is unfolded under Home's paragraph.
+let awayAskShown: string | null = null;
+/// Routines, for what ran on a schedule while you were away.
+let homeRoutines: { at: number; routines: Routine[] } | null = null, homeRoutinesLoading = false;
+function loadHomeRoutines() {
+  if (homeRoutinesLoading || (homeRoutines && Date.now() - homeRoutines.at < 60_000)) return;
+  homeRoutinesLoading = true;
+  void api<Routine[]>("routines").then((routines) => { homeRoutines = { at: Date.now(), routines: Array.isArray(routines) ? routines : [] }; }, () => { homeRoutines = { at: Date.now(), routines: [] }; })
+    .finally(() => { homeRoutinesLoading = false; heroSignature = ""; renderHero(); });
+}
+const awayPart = (part: AwayPart) => typeof part === "string" ? h(part)
+  : "name" in part ? `<i>${h(part.name)}</i>`
+  : "code" in part ? `<code>${h(part.code)}</code>`
+  : btn(part.action, h(part.text), part.args ?? {}, `away-link${part.tone ? ` ${part.tone}` : ""}${part.open ? " on" : ""}`).replace("<button ", part.open === undefined ? "<button " : `<button aria-expanded="${part.open}" `);
+/// A chat's approval on Home: the same amber row the chat shows, answered
+/// here while the chat carries on.
+function awayApproval(sessionId: string, ask: Extract<AwayAsk, { kind: "permission" }>) {
+  const icon = ask.verb === "run" ? APPROVAL_ICONS.command : /edit|append/.test(ask.verb) ? APPROVAL_ICONS.edit : APPROVAL_ICONS.other;
+  const habit = Boolean(ask.rule) && ask.allowedBefore >= 3;
+  const always = ask.rule ? btn("away-permission", habit ? "Always here" : "Always", { session: sessionId, id: ask.id, decision: "allow_always" }, habit ? "allow" : "always").replace("<button ", `<button title="Saved to your config (${h(ask.rule)})" `) : "";
+  return `<div class="approval-row" role="group" aria-label="Approval">${icon}<span class="approval-verb">${h(ask.verb.replace(/^./, (c) => c.toUpperCase()))}</span>${ask.target ? `<code>${h(ask.target)}</code>` : ""}<span class="approval-space"></span>`
+    + (habit ? always + btn("away-permission", "Once", { session: sessionId, id: ask.id, decision: "allow_once" }, "always") : btn("away-permission", "Allow", { session: sessionId, id: ask.id, decision: "allow_once" }, "allow") + always)
+    + btn("away-permission", "Deny", { session: sessionId, id: ask.id, decision: "deny" }, "deny")
+    + btn("select-session", "Open chat ›", { id: sessionId }, "always")
+    + `</div>`;
+}
 function renderHero() {
   if (!state) return;
   const review = reviewJobs(),
     next = state.driveNext,
-    away = state.breakage.away,
-    driveBusy = Boolean(state.breakage.fix && (state.breakage.fix.status === "starting" || state.breakage.fix.status === "running")) || away?.status === "running",
     user = document.body.dataset.user ?? "",
+    branch = state.session?.workspace?.gitBranch ?? "",
     hour = new Date().getHours(),
     running = worktreeRun().fix,
-    branchKeys = [...detailsOpen].filter((key) => key.startsWith("branch:")),
-    plain = isPlain(),
-    signature = JSON.stringify([plain, state.workspace, review.map((job) => [job.id, job.status, job.title, job.diff, job.summary, job.checks]), running && [running.id, running.title, running.activity], state.breakage.busy, state.breakage.message, branchKeys, driveShown, away?.status, driveBusy, reviewShown, ideasShown, next.proposals, next.loading, next.signals.length, user, hour, state.asks, state.allowRules, recentChats(plain).map((item) => [item.id, item.title, item.status, item.waiting, item.updatedAt]), starters(plain)]);
+    plain = isPlain();
+  const here = plain ? [] : state.sessions.filter((session) => session.workspace === state!.workspace && session.id !== state!.session?.id);
+  if (!plain) loadHomeRoutines();
+  const waiting = here.filter((session) => session.waiting);
+  if (awayAskShown && !waiting.some((session) => session.id === awayAskShown && session.ask?.kind === "permission")) awayAskShown = null;
+  // Routines that ran here since you left; their chats are named once.
+  const ran = (homeRoutines?.routines ?? []).filter((routine) => routine.workspace === state!.workspace)
+    .flatMap((routine) => routine.runs.filter((run) => leftAt != null && Date.parse(run.at) > leftAt!).map((run) => ({ title: state!.sessions.find((session) => session.id === run.sessionId)?.title || routine.text, at: run.at, sessionId: run.sessionId })))
+    .filter((run) => !waiting.some((session) => session.id === run.sessionId))
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  const sentences = plain ? [] : awaySentences({
+    now: Date.now(),
+    leftAt,
+    branches: review.map((job) => ({ title: job.title, status: job.status === "failed" ? "failed" : "ready", finishedAt: job.finishedAt, failedCheck: job.checks?.find((check) => !check.passed)?.command, unchanged: job.unchanged })),
+    running: running ? { title: running.title, steps: running.activity?.steps ?? 0 } : null,
+    waiting: waiting.map((session) => ({ sessionId: session.id, title: chatTitle(session.id), ask: session.ask })),
+    busy: here.filter((session) => !session.waiting && (session.status === "running" || session.status === "queued") && !ran.some((run) => run.sessionId === session.id)).map((session) => ({ sessionId: session.id, title: chatTitle(session.id) })),
+    routines: ran,
+    deed: deedCount(),
+    ideas: next.proposals.length,
+    asks: state.asks,
+    shown: { branches: reviewShown, drive: driveShown, ideas: ideasShown, ask: awayAskShown },
+  });
+  // Back to the chat you were last in, with the last thing you asked there.
+  const last = [...here].filter((session) => session.turns > 0).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+  const asked = waiting.find((session) => session.id === awayAskShown)?.ask;
+  const signature = JSON.stringify([plain, state.workspace, sentences, review.map((job) => [job.id, job.status, job.diff, job.summary, job.checks]), running && [running.id, running.activity], state.breakage.busy, state.breakage.message, [...detailsOpen].filter((key) => key.startsWith("branch:")), next.proposals, next.loading, ideasShown && next.generatedAt && age(next.generatedAt), user, branch, hour, asked, last && [last.id, last.title, last.lastAsk, age(last.updatedAt)]]);
   if (signature === heroSignature) return;
   heroSignature = signature;
   const composer = el("composer-slot");
   composer.remove();
-  // Drive's finished branches are one line; it unfolds a quiet row per
-  // branch right under it, and what the last Apply or PR did follows them.
-  const waiting = (review.length
-    ? `<p>${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ${reviewShown ? "⌄" : "›"}`, {}, "link")}<span class="muted"> · ${away && away.status !== "running" ? "Drive ran them while you were away" : "each in its own worktree"}</span></p>${reviewShown ? `<div class="hero-branches">${branchRows(review)}</div>` : ""}`
-    : "") + branchNote();
-  // A greeting and the composer, nothing else: Drive's best idea is the
-  // composer's ghost text (Tab takes it); the rest of its ideas unfold from
-  // one quiet line under the composer.
+  const name = state.workspace.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || state.workspace;
   const day = new Date().toLocaleDateString(undefined, { weekday: "long" }),
-    when = `${day} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`;
-  // It gets quieter the more you use it: one line keeps the score.
-  const asks = state.asks, learned = state.allowRules;
-  const quieter = asks && asks.lastWeek > 0
-    ? `<p class="hero-asks">Asked you ${asks.thisWeek === 1 ? "once" : `${asks.thisWeek} times`} this week, ${asks.thisWeek === asks.lastWeek ? "same as last week" : `${asks.thisWeek < asks.lastWeek ? "down" : "up"} from ${asks.lastWeek}`}${learned ? ` · ${learned} thing${learned === 1 ? "" : "s"} it no longer asks about` : ""}</p>`
+    when = `${day} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`,
+    where = branch ? `${h(name)} on ${h(branch)}` : h(name);
+  // One paragraph: what happened while you were away, what needs you first.
+  // Each underlined phrase unfolds that thing right under it.
+  const paragraph = sentences.length ? `<p class="away">${sentences.map((sentence) => sentence.map(awayPart).join("")).join(" ")}</p>` : "";
+  const folds = [
+    reviewShown && review.length ? branchRows(review) : "",
+    asked?.kind === "permission" ? awayApproval(awayAskShown!, asked) : "",
+    driveShown && running ? branchRows([running]) : "",
+    ideasShown && next.proposals.length ? `${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p>` : "",
+  ].filter(Boolean);
+  const fold = (folds.length ? `<div class="away-fold">${folds.join("")}</div>` : "") + branchNote();
+  // While Drive works, its phrase carries a moving line.
+  const bar = running ? '<span class="away-bar" aria-hidden="true"></span>' : "";
+  const pick = last
+    ? btn("select-session", `<span class="pick-word">Pick up</span><b>${h(chatTitle(last.id))}</b>${last.lastAsk ? `<q>${h(last.lastAsk)}</q>` : ""}<span class="pick-age">${h(age(last.updatedAt))}</span><span class="pick-go" aria-hidden="true">›</span>`, { id: last.id }, "hero-pick")
     : "";
-  // Under the composer: Drive's top ideas, then the chats to pick up, so
-  // Home is a place to start from, not only a box to type in.
-  const ideas = next.proposals.length, shown = ideasShown ? next.proposals : next.proposals.slice(0, HOME_IDEAS);
-  const drive = ideas || driveBusy
-    ? `<section class="home-section"><h2 class="home-label">${ICON_SPARK}Drive${driveBusy ? ` <span class="muted">·</span> ${running ? btn("drive-show", `working ${driveShown ? "⌄" : "›"}`, {}, "link") : "working"}` : ""}${ideas ? `<span class="home-aside">${ideas > HOME_IDEAS ? btn("ideas-show", ideasShown ? "fewer" : `all ${ideas}`, {}, "link") : ""}${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}</span>` : ""}</h2>${ideas ? proposalRows(shown) : ""}${running && driveShown ? `<div class="hero-branches">${branchRows([running])}</div>` : ""}</section>`
-    : "";
-  const recent = recentChats(plain);
-  const pickUp = recent.length
-    ? `<section class="home-section"><h2 class="home-label">Pick up where you left off</h2><div class="home-chats">${recent.map((item) => {
-      const tone = item.waiting ? "warn" : item.status === "running" || item.status === "queued" ? "working" : item.status === "failed" ? "bad" : "";
-      const right = item.waiting ? "waiting for you" : tone === "working" ? "working" : tone === "bad" ? "didn't finish" : age(item.updatedAt);
-      return btn("select-session", `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span><span class="home-chat-title">${h(item.title)}</span><span class="home-chat-age${tone ? ` ${tone}` : ""}">${h(right)}</span>`, { id: item.id }, "home-chat");
-    }).join("")}</div></section>`
-    : "";
-  // A quiet project: a few ways in, each only fills the composer.
-  const ways = starters(plain);
-  const start = !recent.length && !ideas && ways.length
-    ? `<section class="home-section"><h2 class="home-label">Start with</h2><div class="home-starters">${ways.map((text) => btn("home-starter", h(text), { text }, "home-starter")).join("")}</div></section>`
-    : "";
-  renderSakura(true);
+  // Just a chat: the time of day and the greeting; the project's news comes
+  // back once a project is picked.
   el("hero").innerHTML = plain
-    ? `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1></div><div id="hero-composer"></div>${pickUp}${start}`
-    : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${waiting}${quieter}</div><div id="hero-composer"></div>${drive}${pickUp}${start}`;
-  // The composer is detached while the hero is rebuilt.
+    ? `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1></div><div id="hero-composer"></div>`
+    : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${paragraph}${bar}${fold}${pick}</div><div id="hero-composer"></div>`;
   el("hero-composer").append(composer);
-}
-/// How many of Drive's ideas Home shows before "all N".
-const HOME_IDEAS = 3, HOME_CHATS = 4;
-/// The chats Home offers to pick up: this project's (or, as Just a chat, the
-/// plain ones), newest first, leaving out Drive's worktree chats and the
-/// empty chat Home itself is.
-function recentChats(plain: boolean) {
-  if (!state) return [];
-  const drive = new Set([state.breakage.fix, ...state.breakage.inbox].map((job) => job?.sessionId).filter(Boolean));
-  return state.sessions
-    .filter((item) => !deletedSessions.has(item.id) && !drive.has(item.id) && item.turns > 0 && item.id !== (inSession() ? state!.session?.id : "")
-      && (plain ? !item.workspace : item.workspace === state!.workspace))
-    .sort((a, b) => Number(Boolean(b.waiting)) - Number(Boolean(a.waiting)) || b.updatedAt.localeCompare(a.updatedAt))
-    .slice(0, HOME_CHATS);
-}
-/// Ways into a quiet project, from what it has: its checks, then reading it.
-function starters(plain: boolean) {
-  if (plain) return ["Explain an idea to me", "Help me plan a project", "Draft a message"];
-  const ways = ["Explain how this project is put together", "Find something small to fix"];
-  if (state?.commands.some((command) => command.name === "/test" || command.name === "/check")) ways.unshift("Run the checks and fix what fails");
-  else ways.unshift("Run the tests and tell me what fails");
-  return ways;
 }
 /// The Deed: the open project's plain sentences, a page of its own opened
 /// from the sidebar. The composer adds a sentence; a sentence edits in place.
@@ -3265,7 +3290,7 @@ function settingsRows(section: string): SettingsRow[] {
     return [
       {
         title: "Model",
-        description: `${s.model.displayName ?? s.model.id}${s.model.provider ? ` from ${s.model.provider}` : ""}${s.reasoning ? `, ${s.reasoning} thinking` : ""}. This conversation uses it.`,
+        description: `${modelWords(s.model)}${s.model.provider ? ` from ${s.model.provider}` : ""}${s.reasoning ? `, ${s.reasoning} thinking` : ""}. This conversation uses it.`,
         control: btn("overlay", "Change", { name: "models" }, "settings-button"),
         keywords: "reasoning thinking effort",
       },
@@ -3434,7 +3459,7 @@ function renderOverlay() {
     const rowOf = (model: ModelDescriptor, kind: "short" | "rest") => {
       const level = modelLevel(model), score = scoreOf(model);
       return {
-        label: model.displayName ?? model.id,
+        label: modelWords(model),
         value: model.contextWindow ? tokensShort(model.contextWindow) : "",
         group: model.provider,
         action: "model",
@@ -3965,7 +3990,7 @@ async function submitText(value = editor.value, wait = false) {
     }
     if (id === "context" || id === "status") {
       const c = context();
-      notice(`${c.estimated ? "~" : ""}${num(c.used)} of ${c.capacity ? tokensShort(c.capacity) : "—"} context used${c.percentage == null ? "" : ` · ${c.percentage}%`} · ${state!.model.displayName ?? state!.model.id}`);
+      notice(`${c.estimated ? "~" : ""}${num(c.used)} of ${c.capacity ? tokensShort(c.capacity) : "—"} context used${c.percentage == null ? "" : ` · ${c.percentage}%`} · ${modelWords(state!.model)}`);
       clear();
       return;
     }
@@ -4226,6 +4251,20 @@ async function dispatch(
     else renderHero();
     return;
   }
+  // Home: a chat's phrase unfolds what it waits on; the row answers it there.
+  if (action === "away-ask") {
+    awayAskShown = awayAskShown === args.id ? null : String(args.id ?? "");
+    heroSignature = "";
+    renderHero();
+    return;
+  }
+  if (action === "away-permission") {
+    awayAskShown = null;
+    await act(() => api("away-permission", args));
+    heroSignature = "";
+    renderHero();
+    return;
+  }
   if (action === "branch-more") {
     const key = String(args.key ?? "");
     if (detailsOpen.has(key)) detailsOpen.delete(key); else detailsOpen.add(key);
@@ -4424,12 +4463,6 @@ async function dispatch(
     if (args.method === "desktop-zoom" && typeof result?.zoom === "number") zoomLevel = result.zoom;
     overlaySignature = "";
     return renderOverlay();
-  }
-  // A Home starter only fills the composer; you send it.
-  if (action === "home-starter") {
-    setDraft(String(args.text));
-    editor.focus();
-    return;
   }
   if (action === "settings-command") {
     overlay = null;

@@ -60,7 +60,7 @@ void app.whenReady().then(async () => {
     // the window translucent under the shell (the page paints the tint).
     ...(process.platform === "darwin" ? {
       titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 17 },
-      vibrancy: "sidebar" as const, visualEffectState: "active" as const, backgroundColor: "#00000000",
+      vibrancy: "fullscreen-ui" as const, visualEffectState: "active" as const, backgroundColor: "#00000000",
       // Full screen stays on the desktop's Space: a full-screen Space has no
       // wallpaper behind the window, so the glass would go flat there.
       simpleFullscreen: true,

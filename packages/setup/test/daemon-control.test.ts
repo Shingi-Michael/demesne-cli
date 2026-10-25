@@ -4,15 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   daemonHealth,
-  daemonStatus,
-  ensureDaemon,
-  readDaemonLog,
   resolveDaemonCommand,
   startDaemon,
   stopDaemon,
   type DaemonControlDependencies,
-  type DaemonHealth,
-} from "../src/daemon-control.ts";
+  type DaemonHealth} from "../src/daemon-control.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -112,17 +108,6 @@ describe("daemonHealth", () => {
   });
 });
 
-describe("daemonStatus", () => {
-  test("reports the pid file alongside health", async () => {
-    const directory = temporaryDirectory();
-    const state = createFakeDependencies(directory);
-    writeFileSync(join(directory, "daemon.pid"), "1234\n");
-    const status = await daemonStatus(state.deps);
-    expect(status.running).toBe(false);
-    expect(status.pid).toBe(1234);
-  });
-});
-
 describe("startDaemon", () => {
   test("returns immediately when the daemon is already running", async () => {
     const state = createFakeDependencies(temporaryDirectory());
@@ -202,6 +187,29 @@ describe("startDaemon", () => {
   });
 });
 
+describe("resolveDaemonCommand", () => {
+  test("a compiled CLI finds demesned beside its own executable", () => {
+    const dir = mkdtempSync(join(tmpdir(), "demesne-bin-"));
+    try {
+      const daemon = join(dir, "demesned");
+      writeFileSync(daemon, "");
+      // Compiled binaries report Bun's virtual filesystem as their module dir.
+      const command = resolveDaemonCommand({}, { moduleDir: "/$bunfs/root", execPath: join(dir, "demesne") });
+      expect(command).toEqual([daemon]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an explicit DEMESNE_DAEMON_BIN still wins", () => {
+    const command = resolveDaemonCommand(
+      { DEMESNE_DAEMON_BIN: "/opt/demesned" },
+      { moduleDir: "/$bunfs/root", execPath: "/nowhere/demesne" },
+    );
+    expect(command).toEqual(["/opt/demesned"]);
+  });
+});
+
 describe("stopDaemon", () => {
   test("falls back to the lock owner when the pid file is missing", async () => {
     const directory = temporaryDirectory();
@@ -256,75 +264,5 @@ describe("stopDaemon", () => {
     const result = await stopDaemon(state.deps);
     expect(result.stopped).toBe(false);
     expect(result.message).toContain("not running");
-  });
-});
-
-describe("ensureDaemon", () => {
-  test("does nothing when the daemon is healthy", async () => {
-    const state = createFakeDependencies(temporaryDirectory());
-    state.health = { status: "ok", provider: "p", model: "m" };
-    const result = await ensureDaemon(state.deps, "prompt", async () => false);
-    expect(result).toEqual({ started: false, remember: false });
-  });
-
-  test("never policy explains how to start the daemon", async () => {
-    const state = createFakeDependencies(temporaryDirectory());
-    await expect(ensureDaemon(state.deps, "never", async () => true))
-      .rejects.toThrow(/daemon start/);
-  });
-
-  test("prompt policy starts only after acceptance and asks to remember", async () => {
-    const state = createFakeDependencies(temporaryDirectory());
-    state.pendingHealth = { status: "ok", provider: "p", model: "m" };
-    const declined = ensureDaemon(state.deps, "prompt", async () => false);
-    await expect(declined).rejects.toThrow(/not running/);
-    expect(state.spawned).toEqual([]);
-
-    const result = await ensureDaemon(state.deps, "prompt", async () => true);
-    expect(result).toEqual({ started: true, remember: true });
-    expect(state.spawned).toHaveLength(1);
-  });
-
-  test("always policy starts without prompting", async () => {
-    const state = createFakeDependencies(temporaryDirectory());
-    state.pendingHealth = { status: "ok", provider: "p", model: "m" };
-    const result = await ensureDaemon(state.deps, "always", async () => {
-      throw new Error("should not prompt");
-    });
-    expect(result).toEqual({ started: true, remember: false });
-  });
-});
-
-describe("readDaemonLog", () => {
-  test("returns the tail of the log and tolerates a missing file", () => {
-    const directory = temporaryDirectory();
-    const state = createFakeDependencies(directory);
-    expect(readDaemonLog(state.deps)).toBe("");
-    writeFileSync(join(directory, "daemon.log"), Array.from({ length: 50 }, (_, index) => `line ${index}`).join("\n"));
-    const tail = readDaemonLog(state.deps, 3);
-    expect(tail.split("\n")).toEqual(["line 47", "line 48", "line 49"]);
-  });
-});
-
-describe("resolveDaemonCommand", () => {
-  test("a compiled CLI finds demesned beside its own executable", () => {
-    const dir = mkdtempSync(join(tmpdir(), "demesne-bin-"));
-    try {
-      const daemon = join(dir, "demesned");
-      writeFileSync(daemon, "");
-      // Compiled binaries report Bun's virtual filesystem as their module dir.
-      const command = resolveDaemonCommand({}, { moduleDir: "/$bunfs/root", execPath: join(dir, "demesne") });
-      expect(command).toEqual([daemon]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("an explicit DEMESNE_DAEMON_BIN still wins", () => {
-    const command = resolveDaemonCommand(
-      { DEMESNE_DAEMON_BIN: "/opt/demesned" },
-      { moduleDir: "/$bunfs/root", execPath: "/nowhere/demesne" },
-    );
-    expect(command).toEqual(["/opt/demesned"]);
   });
 });

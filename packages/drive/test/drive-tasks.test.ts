@@ -7,14 +7,10 @@ import { currentDriveTask } from "../src/drive-tasks.ts";
 import { ProjectMemory } from "../src/drive-memory.ts";
 import {
   driveReopenReason,
-  parseDriveRequest,
   parseDriveLedger,
-  validateDriveDecisionContext,
   type DriveAction,
-  type DriveDecision,
   type DriveFacts,
   type DriveObservation,
-  type DriveResponse,
 } from "@demesne/protocol";
 
 const initialFacts = (): DriveFacts => ({

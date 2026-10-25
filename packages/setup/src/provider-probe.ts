@@ -1,7 +1,7 @@
 import { OpenAICompatibleProvider } from "@demesne/providers";
 import type { ModelDescriptor } from "@demesne/protocol";
 
-/// Direct provider probing for `demesne setup` and `demesne doctor`. These run
+/// Direct provider probing for the desktop's setup. These run
 /// before the daemon exists, so they talk to the OpenAI-compatible endpoint
 /// themselves instead of going through `/v1/models`.
 
@@ -24,7 +24,7 @@ export interface ProbeResult {
   error?: string;
 }
 
-export interface ProbeOptions {
+interface ProbeOptions {
   fetch?: typeof fetch;
   timeoutMs?: number;
 }

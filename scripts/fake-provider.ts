@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-/// A scripted OpenAI-compatible provider for exercising the CLI without a model.
+/// A scripted OpenAI-compatible provider for exercising Demesne without a model.
 ///
 /// The harness is easiest to judge against a turn that actually runs tools, but
 /// pointing a real model at it is slow and nondeterministic. This serves a fixed
@@ -16,7 +16,7 @@
 ///   wrap   a reply long enough to wrap — tests prose alignment
 ///   slow   a reply streamed in small chunks over ~20s — tests interrupting
 ///
-/// Point the CLI at it with a config that names this URL:
+/// Point Demesne at it with a config that names this URL:
 ///   [provider]
 ///   url = "http://127.0.0.1:11437/v1"
 ///   model = "qwen3.8-27b"

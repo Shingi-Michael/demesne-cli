@@ -12,7 +12,6 @@ import type { StructuredToolResult, ImageOutput } from "./artifacts.ts";
 
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
 export const MCP_REQUEST_TIMEOUT_MS = 30_000;
-const MCP_OUTPUT_LIMIT_BYTES = 256 * 1024;
 const MCP_RESULT_LIMIT_BYTES = 256 * 1024;
 const MCP_IMAGE_FRAME_LIMIT = 32 * 1024 * 1024;
 

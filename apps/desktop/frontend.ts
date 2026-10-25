@@ -86,8 +86,6 @@ function showActionError(error: unknown) {
     setTimeout(() => { notice.hidden = true; }, 6000);
   }
 }
-/// A path at home reads as ~/code/blog.
-const shortPath = (path: string) => path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
 function recentButton(path: string) {
   const button = document.createElement("button");
   button.type = "button";

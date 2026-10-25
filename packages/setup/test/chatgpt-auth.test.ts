@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ChatGPTAuth } from "@demesne/chatgpt-auth";
 import { loadConfig, updateUserConfig } from "@demesne/config";
-import { configureChatGPT, discoverChatGPT, runChatGPTAuthCommand } from "../src/chatgpt-auth.ts";
+import { configureChatGPT, discoverChatGPT} from "../src/chatgpt-auth.ts";
 import { writeSetupConfig } from "../src/setup.ts";
 import { initialWizard, reduceWizard, wizardChatGPTConnected } from "../src/setup-wizard.ts";
 const account = { id: "fixture-account", label: "person@example.test", signedIn: true, planEnabled: true, acknowledged: true };
@@ -99,66 +99,6 @@ test("an explicit omitted Sol model is verified with the selected account and ap
     expect(requests).toEqual(["https://api.openai.com/v1/models", "https://api.openai.com/v1/responses"]);
     expect(result.models.map(model => model.id)).toEqual(["account-model", "gpt-6.1-sol"]);
   } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test("saved-account use persists explicitly verified Sol without replacing an existing local provider", async () => {
-  const root = mkdtempSync(join(tmpdir(), "chatgpt-use-")), path = join(root, "config.toml");
-  try {
-    savedAccount(root);
-    updateUserConfig(path, { provider: { id: "local", url: "http://127.0.0.1:1234/v1", model: "local-model", context_window: 32768 } });
-    const requests: string[] = [];
-    await runChatGPTAuthCommand(["auth", "use", "chatgpt", "--account", account.id, "--model", "gpt-6.1-sol"], {
-      configPath: path, dataDirectory: root, open: async () => { throw new Error("Saved-account use must not sign in again"); },
-      acknowledge: async () => { throw new Error("Already acknowledged"); },
-      fetch: (async (input: string | URL | Request) => {
-        requests.push(String(input));
-        if (String(input).endsWith("/models")) return catalog();
-        expect(String(input)).toBe("https://api.openai.com/v1/responses"); return verification();
-      }) as unknown as typeof fetch,
-    });
-    const config = loadConfig({ userConfigPath: path, includeProject: false, env: {} }).config;
-    expect(config.provider.model).toBe("local-model");
-    expect(config.additionalProviders?.chatgpt).toMatchObject({ auth: "chatgpt", authProfile: account.id, model: "gpt-6.1-sol" });
-    expect(requests).toHaveLength(2);
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test("denied explicit Sol verification leaves the configuration unchanged", async () => {
-  const root = mkdtempSync(join(tmpdir(), "chatgpt-use-")), path = join(root, "config.toml");
-  try {
-    savedAccount(root);
-    updateUserConfig(path, { theme: "light", provider: { id: "local", model: "local-model" } });
-    const before = readFileSync(path, "utf8");
-    let inferences = 0;
-    await expect(runChatGPTAuthCommand(["auth", "use", "chatgpt", "--model", "gpt-6.1-sol"], {
-      configPath: path, dataDirectory: root, open: async () => false, acknowledge: async () => false,
-      fetch: (async (input: string | URL | Request) => {
-        if (String(input).endsWith("/models")) return catalog();
-        inferences++;
-        return Response.json({ error: { code: "model_not_found" } }, { status: 404 });
-      }) as unknown as typeof fetch,
-    })).rejects.toThrow("model_not_found");
-    expect(inferences).toBe(1);
-    expect(readFileSync(path, "utf8")).toBe(before);
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test("explicit model selection cannot bypass plan scopes or acknowledgement", async () => {
-  for (const fixture of [{ scopes: ["resource.invoke"] }, { acknowledged: false }]) {
-    const root = mkdtempSync(join(tmpdir(), "chatgpt-use-")), path = join(root, "config.toml");
-    try {
-      savedAccount(root, fixture);
-      updateUserConfig(path, { theme: "light", provider: { id: "local", model: "local-model" } });
-      const before = readFileSync(path, "utf8");
-      let requests = 0;
-      await expect(runChatGPTAuthCommand(["auth", "use", "chatgpt", "--model", "gpt-6.1-sol"], {
-        configPath: path, dataDirectory: root, open: async () => false, acknowledge: async () => false,
-        fetch: (async () => { requests++; throw new Error("Unacknowledged plan must not reach the provider"); }) as unknown as typeof fetch,
-      })).rejects.toThrow();
-      expect(requests).toBe(0);
-      expect(readFileSync(path, "utf8")).toBe(before);
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  }
 });
 
 test("setup selects account-specific models in server order and shows the first-use notice only until acknowledged", () => {

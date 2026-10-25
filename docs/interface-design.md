@@ -1,6 +1,6 @@
 # Interface design
 
-[Documentation index](README.md) · [Desktop workspace code](../apps/desktop/workspace/README.md) · [Keyboard reference](cli-reference.md#keyboard-and-focus)
+[Documentation index](README.md) · [Desktop workspace code](../apps/desktop/workspace/README.md) · [Keyboard reference](commands.md#keyboard-and-focus)
 
 This document is the contract for the desktop interface as built. What each screen looks like is described in the [desktop guide](desktop.md#workspace-layout); this page covers the rules changes must keep.
 

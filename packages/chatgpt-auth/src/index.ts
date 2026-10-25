@@ -50,7 +50,7 @@ export class ChatGPTAuth {
   }
   private get(vault: Vault, id: string): Registration {
     const account = vault.accounts.find(a => a.id === id);
-    if (!account) throw new ChatGPTAuthError("ChatGPT account not found. Run demesne auth login chatgpt.", "account_missing");
+    if (!account) throw new ChatGPTAuthError("ChatGPT account not found. Sign in under Settings › Providers.", "account_missing");
     return account;
   }
   async beginLogin(options: { accountId?: string; consent?: boolean; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<ChatGPTLogin> {
@@ -134,7 +134,7 @@ export class ChatGPTAuth {
   async accessToken(id: string, signal?: AbortSignal): Promise<string> {
     return this.locked(async () => {
       const vault = this.read(), account = this.get(vault, id), now = Date.now();
-      if (!account.accessToken) throw new ChatGPTAuthError("ChatGPT is signed out. Run demesne auth login chatgpt --account " + id, "signed_out");
+      if (!account.accessToken) throw new ChatGPTAuthError("ChatGPT is signed out. Sign in under Settings › Providers.", "signed_out");
       if (!planEnabled(account)) throw new ChatGPTAuthError("ChatGPT plan use is not enabled. Sign in again with --consent.", "plan_disabled");
       if ((account.expiresAt ?? 0) > now + 60_000 || (account.earliestRefreshAt ?? 0) > now && (account.expiresAt ?? 0) > now) return account.accessToken;
       if (!account.refreshToken) throw new ChatGPTAuthError("Sign in to ChatGPT again to renew this session.", "signed_out");

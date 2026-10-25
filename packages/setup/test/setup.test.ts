@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "@demesne/config";
-import { runSetup, writeSetupConfig } from "../src/setup.ts";
+import { writeSetupConfig } from "../src/setup.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -85,72 +85,5 @@ enabled = false
       contextWindow: 8_192,
       maxOutputTokens: 1_536,
     })).toThrow(/HTTPS/);
-  });
-});
-
-describe("runSetup", () => {
-  const nonInteractiveStreams = {
-    input: { isTTY: false } as unknown as NodeJS.ReadStream,
-    output: { isTTY: false, write: () => true } as unknown as NodeJS.WriteStream,
-  };
-
-  test("writes configuration without prompting when given provider and model", async () => {
-    const home = temporaryDirectory();
-    const result = await runSetup({
-      home,
-      yes: true,
-      providerUrl: "http://127.0.0.1:11434/v1",
-      model: "qwen3.8-8k-b256:latest",
-      contextWindow: 8_192,
-      maxOutputTokens: 1_536,
-      theme: "dark",
-      ...nonInteractiveStreams,
-    });
-    expect(result.nonInteractive).toBe(true);
-    expect(result.providerId).toBe("ollama");
-    const loaded = loadConfig({
-      env: {},
-      userConfigPath: join(home, ".demesne", "config.toml"),
-      projectConfigPath: null,
-    });
-    expect(loaded.config.provider.model).toBe("qwen3.8-8k-b256:latest");
-    expect(loaded.config.provider.contextWindow).toBe(8_192);
-    expect(loaded.config.theme).toBe("dark");
-  });
-
-  test("defaults the context window and output reserve for automation", async () => {
-    const home = temporaryDirectory();
-    const result = await runSetup({
-      home,
-      yes: true,
-      providerUrl: "https://models.example.com/v1",
-      model: "remote-model",
-      ...nonInteractiveStreams,
-    });
-    expect(result.contextWindow).toBe(32_768);
-    expect(result.maxOutputTokens).toBe(1_536);
-    expect(result.providerId).toBe("openai-compatible");
-  });
-
-  test("explains how to run non-interactively without a terminal", async () => {
-    await expect(runSetup({
-      home: temporaryDirectory(),
-      providerUrl: "http://127.0.0.1:11434/v1",
-      ...nonInteractiveStreams,
-    })).rejects.toThrow(/--provider-url and --model/);
-  });
-
-  test("never leaves a partially written file on validation failure", async () => {
-    const home = temporaryDirectory();
-    await expect(runSetup({
-      home,
-      yes: true,
-      providerUrl: "http://127.0.0.1:11434/v1",
-      model: "local",
-      contextWindow: 1_024,
-      maxOutputTokens: 2_048,
-      ...nonInteractiveStreams,
-    })).rejects.toThrow(/smaller than the context window/);
-    expect(existsSync(join(home, ".demesne", "config.toml"))).toBe(false);
   });
 });

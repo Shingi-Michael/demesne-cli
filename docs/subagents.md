@@ -70,15 +70,8 @@ The relevant sizing flags are `--parallel 3 --ctx-size 98304 --load-mode none --
 
 On 2026-10-02, short synthetic tests observed three active slots, about 25.9 GiB peak dedicated GPU memory, and at least 12.9 GiB free host RAM during the three-slot trial. Cached 5,026-token prompts producing 128 tokens each took 7.1 seconds as a three-request batch; a single cached request took 3.4 seconds. The roughly 1.45× throughput comparison uses three times that single-request latency, **not a measured serial three-request batch**. Reasoning was disabled for that throughput measurement. A later integration check ran three read-only file-investigation subagents, six model requests total, with verified reports in about 10 seconds.
 
-The [saved measurement report](measurements/qwen-concurrency-2026-10-02.json) includes the synthetic trials. Its `finalState` records the immediate test cleanup, before the later three-slot rollout; it is not live installation status.
-
 These checks establish short-workload feasibility, not performance at three full 32K contexts, images, or long coding sessions. Initial mmap loading hit the RAM guard; buffered loading completed. Hardware headroom and current applications still matter. The standalone long-context configuration and the three-slot configuration are alternatives on that server, not simultaneous profiles advertised by Demesne.
 
 ## Check an installation
 
-```sh
-demesne ps --json
-demesne models
-```
-
-Confirm `providerInferenceSlots` matches the provider/server. Inspect the model server's slot/context metadata separately. When a worker looks slow, distinguish queued time, initial prompt processing, generation, and repeated tool rounds before increasing concurrency. See [troubleshooting](troubleshooting.md#qwen-thinking-for-too-long-or-subagents-waiting).
+The daemon's `GET /v1/status` reports the slots it loaded. Confirm `providerInferenceSlots` matches the provider/server. Inspect the model server's slot/context metadata separately. When a worker looks slow, distinguish queued time, initial prompt processing, generation, and repeated tool rounds before increasing concurrency. See [troubleshooting](troubleshooting.md#qwen-thinking-for-too-long-or-subagents-waiting).

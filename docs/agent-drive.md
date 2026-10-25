@@ -110,54 +110,17 @@ While a mission's worktree is open, no other worktree job (a breakage fix or a p
 
 ## Workflows
 
-A [workflow file](cli-reference.md#workflows) turns a process you repeat (reproduce, fix, tidy, review) into a mission with fixed steps. `/<workflow> <goal>` starts it like `/drive`, in its own worktree, always bounded.
+A [workflow file](commands.md#workflows) turns a process you repeat (reproduce, fix, tidy, review) into a mission with fixed steps. `/<workflow> <goal>` starts it like `/drive`, in its own worktree, always bounded.
 
 Each step is one task in the [task ledger](#project-memory-and-task-ledger), and the planner works only on the current one. When the planner says a step is done, Drive runs that step's `check:` command itself in the mission's workspace. The step passes only on the command's real exit code: zero, or non-zero for `expect: fail` (a missing command or a timeout never counts). A failed check rejects the completion and tells the planner what failed, with the end of the output, so it sends the coder back. Checks are copied into the mission when it starts, so editing the file or the coder changing it mid-mission doesn't change them. Checks stop after 10 minutes.
 
-The live block lists the steps with each step's check and its last result, and the review card's receipt headline counts steps, for example "bugfix · 3 of 3 steps passed · 2 checks". A step without a check counts once it is finished. `demesne drive --workflow bugfix "<goal>"` runs one with no window and exits 0 only when every step passed.
+The live block lists the steps with each step's check and its last result, and the review card's receipt headline counts steps, for example "bugfix · 3 of 3 steps passed · 2 checks". A step without a check counts once it is finished.
 
 ## Drive keeps working when you close the window
 
 Closing the window doesn't stop a running mission. The window's host hands it to a small background process with no window (the same desktop host, started with `--drive-away`). That process resumes the mission on the same session and keeps going until the mission settles. A worktree mission is then committed for review, just as it would be with the window open, and the process exits. When you open the project again, the window stops the background process and resumes the mission itself, so you're back in the same session with Drive still working. A mission that settled while you were away shows its review card.
 
 Only a running mission is handed off. Pause or Stop it before closing if you want it to wait. Its limits still apply, and its active time keeps counting while it works in the background. Approvals still ask: a mission waiting on one waits until you reopen the window. The process writes to `drive/away.log` in the data directory, and `<journal>.away.json` next to the mission journal records which process has it. [Implementation](../apps/desktop/drive-away.ts)
-
-## Drive in CI
-
-`demesne drive "MISSION"` runs a mission with no window: the same planner, limits and worktree as `/drive`, until the mission settles. It prints the [mission receipt](#mission-receipts) as Markdown, adds it to the job summary when `GITHUB_STEP_SUMMARY` is set, and with `--pr N` posts it as a comment on that pull request (this needs `gh` and a token that can comment). A worktree mission's change is committed on its `drive/mission-…` branch, which the receipt names; `--here` leaves the change in the checkout instead. Progress goes to stderr. It exits 0 only when the mission completed and every task is verified, so a step fails when the work isn't proven.
-
-Nobody can answer an approval in CI, so anything that asks (publishing, for example) is denied rather than left waiting. A new folder has to be trusted, so pass `--trust-workspace`.
-
-```yaml
-# .github/workflows/drive.yml: comment "/drive <mission>" on a pull request
-on:
-  issue_comment:
-    types: [created]
-permissions:
-  contents: read
-  pull-requests: write
-jobs:
-  drive:
-    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/drive ') && github.event.comment.author_association == 'OWNER'
-    runs-on: macos-14   # releases ship the demesne CLI for macOS
-    timeout-minutes: 60
-    env:
-      GH_TOKEN: ${{ github.token }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: refs/pull/${{ github.event.issue.number }}/head
-      - run: |
-          curl -fsSL https://raw.githubusercontent.com/Shingi-Michael/demesne-cli/main/scripts/install.sh | DEMESNE_NO_APP=1 sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: demesne auth login openrouter && demesne daemon start
-      - run: demesne --trust-workspace drive --here --pr ${{ github.event.issue.number }} "${MISSION#/drive }"
-        env:
-          MISSION: ${{ github.event.comment.body }}
-```
-
-Pass the mission through an environment variable, as above, never by pasting `${{ github.event.comment.body }}` into the script. Limit who can start it: a mission runs commands with the job's token and secrets. [Implementation](../apps/desktop/workspace/headless-drive.ts)
 
 ## Breakage alerts: fix it in a worktree
 

@@ -1,12 +1,12 @@
 # Desktop workspace
 
-This folder holds the daemon-connected interface the [desktop app](../README.md) shows in its window. The desktop host runs `host.ts` and `state-wire.ts` from here, and the window loads `live.ts`, `markdown.ts`, `ui.css`, `live.css` and `assets/`. Code shared with the CLI lives in `packages/drive`, `packages/workbench` and `packages/setup`. Non-interactive commands such as `demesne prompt` use the plain streaming CLI instead.
+This folder holds the daemon-connected interface the [desktop app](../README.md) shows in its window. The desktop host runs `host.ts` and `state-wire.ts` from here, and the window loads `live.ts`, `markdown.ts`, `ui.css`, `live.css` and `assets/`. Code shared with the daemon lives in `packages/drive`, `packages/workbench` and `packages/setup`.
 
-[Documentation index](../../../docs/README.md) · [Desktop app](../../../docs/desktop.md) · [Commands and keyboard](../../../docs/cli-reference.md) · [Interface design](../../../docs/interface-design.md)
+[Documentation index](../../../docs/README.md) · [Desktop app](../../../docs/desktop.md) · [Commands and keyboard](../../../docs/commands.md) · [Interface design](../../../docs/interface-design.md)
 
 ## What it covers
 
-The interface uses your existing config, daemon, models, workspace tools, session journal, approvals and Drive controller. It supports live conversation and reasoning, file changes, checks, mentions, model and theme settings, queued follow-ups, questions, provider setup and browser sign-in. Setup backs up the user config. If a daemon is already running, restart it after changing its provider settings, as with `demesne setup`. The keyboard is documented in [Commands and keyboard](../../../docs/cli-reference.md#keyboard-and-focus).
+The interface uses your existing config, daemon, models, workspace tools, session journal, approvals and Drive controller. It supports live conversation and reasoning, file changes, checks, mentions, model and theme settings, queued follow-ups, questions, provider setup and browser sign-in. Setup backs up the user config. If a daemon is already running, restart it after changing its provider settings. The keyboard is documented in [Commands and keyboard](../../../docs/commands.md#keyboard-and-focus).
 
 Drive uses direct daemon operations and recorded evidence. It cannot answer permissions or questions; user intervention pauses it. See [Agent Drive](../../../docs/agent-drive.md).
 

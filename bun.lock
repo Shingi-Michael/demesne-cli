@@ -13,19 +13,6 @@
         "typescript": "7.0.2",
       },
     },
-    "apps/cli": {
-      "name": "@demesne/cli",
-      "dependencies": {
-        "@demesne/brand": "workspace:*",
-        "@demesne/chatgpt-auth": "workspace:*",
-        "@demesne/client": "workspace:*",
-        "@demesne/config": "workspace:*",
-        "@demesne/protocol": "workspace:*",
-        "@demesne/providers": "workspace:*",
-        "@demesne/setup": "workspace:*",
-        "@demesne/workbench": "workspace:*",
-      },
-    },
     "apps/daemon": {
       "name": "@demesne/daemon",
       "dependencies": {
@@ -128,8 +115,6 @@
     "@demesne/brand": ["@demesne/brand@workspace:packages/brand"],
 
     "@demesne/chatgpt-auth": ["@demesne/chatgpt-auth@workspace:packages/chatgpt-auth"],
-
-    "@demesne/cli": ["@demesne/cli@workspace:apps/cli"],
 
     "@demesne/client": ["@demesne/client@workspace:packages/client"],
 

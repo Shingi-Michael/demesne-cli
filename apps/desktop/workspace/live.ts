@@ -32,13 +32,11 @@ import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval } from "./session-model.ts";
 import type {
   ToolEntry,
-  WorkbenchEntry,
 } from "@demesne/workbench/entries.ts";
 import type {
   ModelDescriptor,
   ModelScore,
   ModelScoreboardResponse,
-  DriveState,
 } from "@demesne/protocol";
 
 type Snapshot = ReturnType<WorkspaceHost["snapshot"]>;
@@ -158,10 +156,6 @@ const age = (date: string) => {
               month: "short",
               day: "numeric",
             });
-};
-const pathHTML = (path: string) => {
-  const slash = path.lastIndexOf("/");
-  return `<span class="folder">${h(path.slice(0, slash + 1))}</span>${h(path.slice(slash + 1))}`;
 };
 const active = (run: WorkspaceRun) =>
   run.status === "running" || run.status === "queued";
@@ -371,11 +365,6 @@ function context() {
   };
 }
 let sidebarSignature = "";
-/// A day bucket for the inbox: today's rows carry no heading.
-const dayGroup = (date: string) => {
-  const ms = Date.now() - Date.parse(date);
-  return ms < 86_400_000 ? "" : ms < 172_800_000 ? "Yesterday" : ms < 7 * 86_400_000 ? "This week" : "Earlier";
-};
 /// "2h", "yesterday", "Oct 3": the quiet time beside a settled session.
 const shortAge = (date: string) => {
   const ms = Date.now() - Date.parse(date);
@@ -1860,24 +1849,6 @@ const elapsed = (since: string) => {
   const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(since)) / 1000));
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 };
-/// A running turn's steps as one line: the last few, what runs now, and how
-/// long the turn has run; the step count opens the full rows.
-function stepTrail(run: WorkspaceRun, items: ToolEntry[]) {
-  if (!items.length) return "";
-  const shown = items.slice(-4), earlier = items.length - shown.length;
-  const name = (tool: ToolEntry) => {
-    const detail = tool.name === "run_command" ? String(tool.detail ?? "").replace(/^\$\s*/, "") : String(tool.input.path ?? tool.detail ?? "").split(/[\\/]/).at(-1) ?? "";
-    return `${verb(tool).toLowerCase()} ${detail}`.trim();
-  };
-  const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
-  const step = (tool: ToolEntry) => {
-    const now = tool.state === "running" || tool.waiting || tool.drafting;
-    const sign = now ? stepIcon(tool) : `<span class="${tone(tool.state)}">${mark(tool.state)}</span>`;
-    const added = tool.phase === "change" && tool.state === "done" ? totals(run, tool).added : 0;
-    return `<span class="trail-step ${now ? "now" : ""}">${sign} ${h(tool.waiting ? `waiting for you · ${name(tool)}` : clip(name(tool), 48))}${added ? ` <span class="success">+${added}</span>` : ""}</span>`;
-  };
-  return `<div class="step-trail">${earlier ? `<span class="muted">${earlier} earlier ·</span>` : ""}${shown.map(step).join("")}<span class="trail-meta">${btn("toggle-steps", `${items.length} step${items.length === 1 ? "" : "s"}`, { id: run.id }, "receipt-steps")} · <span data-since="${h(run.createdAt)}">${elapsed(run.createdAt)}</span></span></div>`;
-}
 /** Text deltas keep the response shell, tool rows and finished Markdown blocks.
  * Structural transitions (tools, fold/unfold, receipts) rebuild only the shell
  * and move the existing Markdown nodes into it. */
@@ -5115,11 +5086,6 @@ async function dispatch(
     ].includes(action)
   )
     return api(action, args);
-}
-
-/// The paths a turn's completed edits touched.
-function changedPaths(run: WorkspaceRun) {
-  return [...new Set(tools(run).filter((t) => t.phase === "change" && t.state === "done").flatMap((t) => t.changes?.map((c) => c.path) ?? [String(t.input.path ?? t.detail ?? "")]))];
 }
 /// Opens a turn's steps and unfolds the ones asked for (its edits, its
 /// checks, or every step), loading a command's recorded output as a click

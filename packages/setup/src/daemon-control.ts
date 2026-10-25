@@ -1,8 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { AutoStartPolicy } from "@demesne/config";
 
-/// Daemon lifecycle management for the CLI: health probes, starting a detached
+/// Daemon lifecycle management for the desktop host: health probes, starting a detached
 /// daemon, stopping it, tailing its log, and applying the configured
 /// auto-start policy. All process and network effects are injectable so the
 /// state machine can be tested without spawning anything.
@@ -14,7 +13,7 @@ export interface DaemonHealth {
   version?: string;
 }
 
-export interface SpawnedDaemon {
+interface SpawnedDaemon {
   pid: number;
   unref(): void;
 }
@@ -80,11 +79,11 @@ export function resolveDaemonCommand(
   const installed = env.PATH ? Bun.which("demesned", { PATH: env.PATH }) : null;
   if (installed) return [installed];
   // In a source checkout the TypeScript source is authoritative: a stale
-  // dist/demesned would silently run an older daemon than the CLI.
+  // dist/demesned would silently run an older daemon than the host.
   const source = join(moduleDir, "../../daemon/src/main.ts");
   if (existsSync(source)) return [execPath, source];
-  // A compiled CLI's moduleDir is Bun's virtual /$bunfs/root, so look beside
-  // the real executable, where release archives and `bun run build` put it.
+  // A compiled host's moduleDir is Bun's virtual /$bunfs/root, so look beside
+  // the real executable, where the app bundle puts it.
   const beside = join(dirname(execPath), "demesned");
   if (existsSync(beside)) return [beside];
   const sibling = join(moduleDir, "demesned");
@@ -113,16 +112,6 @@ export async function daemonHealth(deps: DaemonControlDependencies): Promise<Dae
   }
 }
 
-export async function daemonStatus(deps: DaemonControlDependencies): Promise<{
-  running: boolean;
-  health: DaemonHealth | null;
-  pid: number | null;
-}> {
-  const health = await daemonHealth(deps);
-  const pid = readPid(deps) ?? (health ? lockOwnerDaemonPid(deps) : null);
-  return { running: health !== null, health, pid };
-}
-
 export async function startDaemon(
   deps: DaemonControlDependencies,
   options: { timeoutMs?: number } = {},
@@ -139,7 +128,7 @@ export async function startDaemon(
       pid: owner,
       health: null,
       message: `Daemon pid ${owner} holds ${deps.dataDirectory} but is not healthy at ${deps.server}. `
-        + "Stop it with `demesne daemon stop` before starting another.",
+        + "Quit that process before starting another.",
     };
   }
 
@@ -163,8 +152,8 @@ export async function startDaemon(
       stdout: logFd,
       stderr: logFd,
       stdin: "ignore",
-      // Its own session: closing the terminal that ran `demesne daemon start`
-      // (or that auto-started it) must not take the daemon down with it.
+      // Its own session: closing the window that started it must not take
+      // the daemon down with it.
       detached: true,
     });
   } finally {
@@ -233,44 +222,6 @@ export async function stopDaemon(
     }
   }
   return { stopped: false, message: "Daemon did not stop in time. Check the daemon log." };
-}
-
-/// Applies the configured auto-start policy. Returns whether the caller should
-/// remember an accepted prompt as `[daemon] auto_start = "always"`.
-export async function ensureDaemon(
-  deps: DaemonControlDependencies,
-  policy: AutoStartPolicy,
-  prompt: (question: string) => Promise<boolean>,
-): Promise<{ started: boolean; remember: boolean }> {
-  if (await daemonHealth(deps)) return { started: false, remember: false };
-
-  if (policy === "never") throw daemonNotRunningError(deps);
-
-  if (policy === "prompt") {
-    const accepted = await prompt(`Demesne daemon is not running at ${deps.server}. Start it now? [Y/n] `);
-    if (!accepted) throw daemonNotRunningError(deps);
-    const result = await startDaemon(deps);
-    if (!result.started && !result.health) throw new Error(result.message);
-    return { started: true, remember: true };
-  }
-
-  const result = await startDaemon(deps);
-  if (!result.started && !result.health) throw new Error(result.message);
-  return { started: true, remember: false };
-}
-
-export function readDaemonLog(deps: DaemonControlDependencies, maxLines = 40): string {
-  const path = join(deps.dataDirectory, "daemon.log");
-  if (!existsSync(path)) return "";
-  const lines = readFileSync(path, "utf8").split("\n");
-  return lines.slice(Math.max(0, lines.length - maxLines)).join("\n").trimEnd();
-}
-
-function daemonNotRunningError(deps: DaemonControlDependencies): Error {
-  return new Error(
-    `Demesne daemon is not running at ${deps.server}. `
-      + 'Start it with "demesne daemon start" or set [daemon] auto_start = "always".',
-  );
 }
 
 function pidPath(deps: DaemonControlDependencies): string {

@@ -9,7 +9,7 @@ interface ProviderRoundMeasurement {
   accounted: boolean;
 }
 
-export interface TurnThroughputSnapshot {
+interface TurnThroughputSnapshot {
   outputTokens: number | null;
   providerDurationMs: number | null;
   tokensPerSecond: number | null;

@@ -10,7 +10,7 @@ Native workspace file tools validate paths, reject symlink escapes and exclude p
 
 ### Workspace trust
 
-A workspace's `DEMESNE.md`/`AGENTS.md`, `.demesne/commands/` and `.demesne/config.toml` can steer the agent, so the daemon refuses to create a session in a folder you haven't trusted (`403 workspace_untrusted`). The desktop window and an interactive CLI ask "Do you trust the files in this folder?"; a headless run must pass `--trust-workspace`. Trust is stored in `<data_dir>/trusted-workspaces.json` (mode `0600`), applies to the folder and its subfolders, and is removed by editing that file. Directory ownership and mode bits are not checked; trust is your decision about the content, not about the filesystem.
+A workspace's `DEMESNE.md`/`AGENTS.md`, `.demesne/commands/` and `.demesne/config.toml` can steer the agent, so the daemon refuses to create a session in a folder you haven't trusted (`403 workspace_untrusted`). The desktop window asks "Do you trust the files in this folder?". Trust is stored in `<data_dir>/trusted-workspaces.json` (mode `0600`), applies to the folder and its subfolders, and is removed by editing that file. Directory ownership and mode bits are not checked; trust is your decision about the content, not about the filesystem.
 
 - Writes and commands use the permission broker unless an applicable explicit grant exists. Session grants and persistent config grants are different lifetimes.
 - Command grants match argv in their allowed scope; a trailing wildcard deliberately broadens the allowed arguments.

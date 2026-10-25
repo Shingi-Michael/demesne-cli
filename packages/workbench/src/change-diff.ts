@@ -1,5 +1,5 @@
 export interface CodeDiffRow { kind: "context" | "added" | "removed" | "gap"; text: string; old?: number; next?: number }
-export interface CodeDiff { rows: CodeDiffRow[]; added: number; removed: number }
+interface CodeDiff { rows: CodeDiffRow[]; added: number; removed: number }
 
 const lines = (text: string): string[] => text === "" ? [] : (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n");
 

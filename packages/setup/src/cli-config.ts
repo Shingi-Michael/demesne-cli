@@ -2,9 +2,8 @@ import { loadConfig, userConfigPath, type AutoStartPolicy, type LoadedConfig, ty
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/// Resolves everything the CLI needs from configuration files and the
-/// environment. The `--server` flag is the highest-precedence override because
-/// it is explicit for the current invocation.
+/// Resolves what the desktop host needs from configuration files and the
+/// environment. An explicit server URL is the highest-precedence override.
 
 export interface CliSettings {
   loaded: LoadedConfig;
@@ -22,7 +21,7 @@ export interface CliSettings {
   configPath: string;
 }
 
-export interface LoadCliSettingsOptions {
+interface LoadCliSettingsOptions {
   serverOverride?: string;
   workspaceRoot?: string;
   env?: Record<string, string | undefined>;
@@ -66,7 +65,7 @@ export function loadAccountSettings(options: Pick<LoadCliSettingsOptions, "env" 
   };
 }
 
-/// The daemon and the CLI share `daemon.host` / `daemon.port`, so a configured
+/// The daemon and the desktop host share `daemon.host` / `daemon.port`, so a configured
 /// port moves both ends without also setting DEMESNE_SERVER.
 function defaultServer(config: { daemon: { host?: string; port?: number } }): string {
   const host = config.daemon.host ?? "127.0.0.1";

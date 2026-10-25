@@ -2,13 +2,13 @@ import { palette, type Theme, type PaletteColor } from "./theme.ts";
 
 export const THEME_INPUT_COLORS = ["background", "surface", "raised", "text", "secondary", "accent", "accentBright", "warning",
   "syntaxKeyword", "syntaxString", "syntaxNumber", "syntaxComment", "syntaxType", "syntaxFunction"] as const;
-export type ThemeInputColor = typeof THEME_INPUT_COLORS[number];
+type ThemeInputColor = typeof THEME_INPUT_COLORS[number];
 export interface ThemeInput { label: string; appearance: "dark" | "light"; colors: Record<ThemeInputColor, string> }
 export interface ThemeLibrary { selected: Theme; themes: Theme[]; canUndo: boolean; persisted: boolean }
 const hex = /^#[0-9a-f]{6}$/i;
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const mix = (a: string, b: string, weight: number) => "#" + [1,3,5].map(i => Math.round(parseInt(a.slice(i,i+2),16)*(1-weight)+parseInt(b.slice(i,i+2),16)*weight).toString(16).padStart(2,"0")).join("");
-export function luminance(color: string): number {
+function luminance(color: string): number {
   const channels = [1,3,5].map(i => { const v=parseInt(color.slice(i,i+2),16)/255; return v<=0.04045?v/12.92:((v+0.055)/1.055)**2.4; });
   return channels[0]!*0.2126+channels[1]!*0.7152+channels[2]!*0.0722;
 }
@@ -18,7 +18,7 @@ function readable(color: string, backgrounds: string[], appearance: "dark" | "li
   for(let step=0;step<=100;step++) { const candidate=mix(color,endpoint,step/100);if(backgrounds.every(bg=>contrast(candidate,bg)>=4.5))return candidate; }
   throw new Error("The surfaces cannot support readable text. Use darker dark-mode surfaces or lighter light-mode surfaces.");
 }
-export function parseThemeInput(value: unknown): ThemeInput {
+function parseThemeInput(value: unknown): ThemeInput {
   if(!record(value) || typeof value.label !== "string" || !value.label.trim() || value.label.length>60 || /[\u0000-\u001f\u007f]/.test(value.label)
     || !["dark","light"].includes(String(value.appearance)) || !record(value.colors))throw new Error("A theme needs a label, dark/light appearance, and hex colors");
   if(Object.keys(value).some(k=>!["label","appearance","colors"].includes(k)) || Object.keys(value.colors).some(k=>!THEME_INPUT_COLORS.includes(k as ThemeInputColor)))throw new Error("Theme contains unsupported properties");

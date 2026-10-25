@@ -4,11 +4,14 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ## [Unreleased]
 
+### Removed
+
+- The terminal app: the `demesne` command (terminal chat, `setup`, `doctor`, `auth`, `prompt`, `drive`, `daemon`), `install.sh` and the CLI release tarballs. Demesne is now only the desktop app, which carries its own daemon. Sign-in and setup live in the app under Settings › Providers.
+
 ### Added
 
-- Workflows: a markdown file in `.demesne/workflows/` (or `~/.demesne/workflows/`) lists steps, and `/<name> <goal>` runs them in order as one Drive mission in its own worktree. A step's `check:` command is run by Drive itself and must pass (or fail, with `expect: fail`) before the next step starts. The live block shows each step's check, and the receipt counts steps. `demesne drive --workflow <name>` runs one with no window.
+- Workflows: a markdown file in `.demesne/workflows/` (or `~/.demesne/workflows/`) lists steps, and `/<name> <goal>` runs them in order as one Drive mission in its own worktree. A step's `check:` command is run by Drive itself and must pass (or fail, with `expect: fail`) before the next step starts. The live block shows each step's check, and the receipt counts steps.
 
-- `demesne drive "mission"` runs Drive with no window, for CI: it prints the mission receipt, adds it to the GitHub job summary, posts it to a pull request with `--pr N`, and exits 0 only when every task is verified. Approvals are denied rather than left waiting.
 - Releases include the desktop app: `demesne-desktop-darwin-arm64.zip` for Apple silicon Macs and `demesne-desktop-linux-amd64.deb` for Ubuntu 22.04/24.04, so installing demesne no longer needs Bun or Rust.
 - Label a GitHub issue `drive` to queue it for Drive: open ones become Next proposals, and the PR Drive opens for one says `Closes #n`.
 - Away mode: **Run top 3 away** (a link in the Next heading) has the daemon work through Drive's top proposals one after another, each in its own worktree. Finished branches fold into one "While you were away" card, a line each; click one to open its Apply / Open PR / Discard.
@@ -55,7 +58,6 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 - The NEXT/composer pixel mismatch uses a stable compositor layer without hiding pixels or increasing capture tolerance.
 - Renderer output-pipe closure, asynchronous `EPIPE` and startup/shutdown races now terminate cleanly instead of displaying an uncaught Electron main-process exception. Packaging includes the pipe lifecycle helper.
 
-Earlier intermediate UI changes are retained in [historical development notes](docs/history/pre-graphics-evolution.md). Their commands and defaults may be obsolete.
 
 ## [0.1.0] - 2026-09-18
 

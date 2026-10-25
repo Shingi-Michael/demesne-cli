@@ -3,7 +3,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Shingi-Michael/demesne-cli/actions/workflows/ci.yml"><img src="https://github.com/Shingi-Michael/demesne-cli/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5AA9E6?style=flat-square&amp;labelColor=0B1218" alt="MIT license"></a>
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-1.4.0-5AA9E6?style=flat-square&amp;labelColor=0B1218" alt="Bun 1.4.0"></a>
 </p>
@@ -26,7 +25,7 @@ bun install --frozen-lockfile
 bun run desktop
 ```
 
-Choose a project, connect a model and open **Drive**. You need [Bun 1.4](https://bun.sh), plus [Node.js](docs/desktop.md#prerequisites) to build the window from source, or [download the app](#install) instead. The model can run on your machine, come from your ChatGPT plan, or be an OpenRouter account. To start demesne from the terminal or run it from a script, see [Install](#install).
+Choose a project, connect a model and open **Drive**. You need [Bun 1.4](https://bun.sh), plus [Node.js](docs/desktop.md#prerequisites) to build the window from source, or [download the app](#install) instead. The model can run on your machine, come from your ChatGPT plan, or be an OpenRouter account.
 
 ## How Drive works
 
@@ -53,7 +52,7 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 
 <table>
 <tr>
-<td width="50%" valign="top"><b>Models</b><br>Use a local server, your ChatGPT plan or OpenRouter. ChatGPT connects directly to OpenAI's Responses API, including GPT-6.1 Sol for eligible accounts: <code>demesne auth login chatgpt --model gpt-6.1-sol</code>. You can sign in and out under <b>Settings › Providers</b> without restarting. The model picker keeps score from your own work (turns finished, tool errors, speed, checks passing), so you can see whether a local model is good enough for a project. <a href="docs/authentication.md">Providers and model access</a></td>
+<td width="50%" valign="top"><b>Models</b><br>Use a local server, your ChatGPT plan or OpenRouter. ChatGPT connects directly to OpenAI's Responses API, including GPT-6.1 Sol for eligible accounts. You can sign in and out under <b>Settings › Providers</b> without restarting. The model picker keeps score from your own work (turns finished, tool errors, speed, checks passing), so you can see whether a local model is good enough for a project. <a href="docs/authentication.md">Providers and model access</a></td>
 <td width="50%" valign="top"><b>Sessions</b><br>A local daemon runs every turn, so closing the window doesn't stop the work. A running Drive mission keeps going in the background too. Open it again and carry on. <code>/compact</code> shortens a long session.</td>
 </tr>
 <tr>
@@ -66,11 +65,7 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 </tr>
 <tr>
 <td valign="top"><b>Next prompt</b><br>After each turn the composer suggests what to ask next. Press <b>Tab</b> to use it.</td>
-<td valign="top"><b>Start from the terminal</b><br>Run <code>demesne</code> in a project folder and the desktop window opens on it. <code>demesne prompt</code> runs without a window.</td>
-</tr>
-<tr>
 <td valign="top"><b>Heartbeat</b><br>With <a href="https://github.com/tkamucheka/heartbeat">Heartbeat</a> on the machine, every chat has an address other agents can message, on this machine or a paired one. Mail arrives as a turn, even while the chat is idle. <a href="docs/heartbeat.md">Heartbeat</a></td>
-<td valign="top"></td>
 </tr>
 </table>
 
@@ -78,16 +73,10 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 
 ## Install
 
-<details>
-<summary><b>Desktop app</b> (macOS and Ubuntu 22.04/24.04, unsigned preview builds)</summary>
-
-Download it from the [latest release](https://github.com/Shingi-Michael/demesne-cli/releases/latest): `demesne-desktop-darwin-arm64.zip` for Apple silicon Macs, `demesne-desktop-linux-amd64.deb` for Ubuntu. You don't need Bun or Node.js to run it.
+Demesne is a desktop app for macOS and Ubuntu 22.04/24.04 (unsigned preview builds). Download it from the [latest release](https://github.com/Shingi-Michael/demesne-cli/releases/latest): `demesne-desktop-darwin-arm64.zip` for Apple silicon Macs, `demesne-desktop-linux-amd64.deb` for Ubuntu. You don't need Bun or Node.js to run it.
 
 ```sh
-# macOS: the install script puts the app in ~/Applications and demesne on your PATH
-curl -fsSL https://raw.githubusercontent.com/Shingi-Michael/demesne-cli/main/scripts/install.sh | sh
-
-# macOS by hand: unzip, move to Applications, and clear the unsigned-download flag
+# macOS: unzip, move to Applications, and clear the unsigned-download flag
 unzip demesne-desktop-darwin-arm64.zip && mv Demesne.app /Applications/
 xattr -dr com.apple.quarantine /Applications/Demesne.app
 
@@ -95,32 +84,7 @@ xattr -dr com.apple.quarantine /Applications/Demesne.app
 sudo apt install ./demesne-desktop-linux-amd64.deb
 ```
 
-To run it from source instead, use `bun run desktop` (needs [Node.js and a few platform packages](docs/desktop.md#prerequisites)). The [desktop guide](docs/desktop.md) has more.
-</details>
-
-<details>
-<summary><b>Terminal</b> (<code>demesne</code> opens the desktop window on the current folder)</summary>
-
-```sh
-bun run build
-bun run build:desktop
-./dist/demesne setup
-./dist/demesne daemon start
-./dist/demesne
-```
-
-Keep `dist/node_modules` next to the binaries. To use demesne in other projects, link `dist/demesne` and `dist/demesned` onto your PATH and run `demesne` from the project folder. It opens the desktop window on that folder. `demesne chat "message"` also sends a first message. It looks for the app in `/Applications` on macOS, then `demesne-desktop` on your PATH, then this checkout's build. `DEMESNE_DESKTOP_BIN` points it at a different app. If you're working on demesne itself, `bun run demesne` does the same from source. More in [command reference](docs/cli-reference.md) and [troubleshooting](docs/troubleshooting.md).
-</details>
-
-<details>
-<summary><b>Scripts and CI</b> (no window)</summary>
-
-```sh
-demesne prompt --output json "Explain the test layout"
-```
-
-Output can be text, JSON or a stream of events. Anything that would need your approval is denied instead of waiting. More in [headless usage](docs/cli-reference.md#headless-output).
-</details>
+To run it from source instead, use `bun run desktop`, or `bun run build:desktop` to build the app (needs [Node.js and a few platform packages](docs/desktop.md#prerequisites)). The [desktop guide](docs/desktop.md) has more.
 
 <details>
 <summary><b>Keyboard shortcuts</b></summary>
@@ -138,7 +102,7 @@ Output can be text, JSON or a stream of events. Anything that would need your ap
 | Zoom | ⌘= / ⌘- / ⌘0 |
 | Quit the window (work continues) | Ctrl+Q |
 
-[All commands](docs/cli-reference.md)
+[All commands](docs/commands.md)
 </details>
 
 ---

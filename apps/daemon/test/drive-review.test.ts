@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { fixture, eventually } from "../../desktop/workspace/test/fixture.ts";
 import type {
   DriveRequest,
-  DriveReview,
   DriveProgress,
 } from "@demesne/protocol";
 const request = (

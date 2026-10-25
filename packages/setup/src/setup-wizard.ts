@@ -1,10 +1,8 @@
 import type { ChatGPTAccount } from "@demesne/chatgpt-auth";
 import { assertProviderUrl } from "@demesne/config";
-import { formatFooterLine, formatTokenCount, sanitizeTerminalLine, truncateText, visibleLength, wrapDisplayText, type Painter, type PaletteColor } from "@demesne/brand";
-import { keycap, keyHints } from "@demesne/workbench/session-chrome.ts";
 import type { ProbeResult } from "./provider-probe.ts";
 
-/// `demesne setup` as the redesign's three-step wizard: Provider → Model →
+/// First-run setup as a three-step wizard: Provider → Model →
 /// Review. State changes are pure so the flow is testable without a terminal;
 /// the caller performs the returned effects (probing, writing, leaving).
 export type WizardStep = "provider" | "custom" | "auth" | "accounts" | "plan" | "model" | "review" | "done";
@@ -51,14 +49,14 @@ export function initialWizard(configPath: string, theme: WizardTheme = "auto"): 
 
 /// Reachable servers first, keeping the probe order within each group, then
 /// OpenRouter and a custom URL (Figma 34:431).
-export function providerOptions(state: WizardState): Array<ProbeResult | "custom" | "openrouter" | "chatgpt"> {
+function providerOptions(state: WizardState): Array<ProbeResult | "custom" | "openrouter" | "chatgpt"> {
   const probes = state.probes ?? [];
   return [...probes.filter((probe) => probe.reachable), ...probes.filter((probe) => !probe.reachable), "openrouter", "chatgpt", "custom"];
 }
 
 /// Models in the order the list shows them: the recommendation (the first
 /// with the largest context) on top, the rest in the server's order.
-export function modelOrder(provider: ProbeResult | null): number[] {
+function modelOrder(provider: ProbeResult | null): number[] {
   const models = provider?.models ?? [];
   if (provider?.target.id === "ChatGPT") return models.map((_, i) => i);
   const recommended = recommendedModel(provider);
@@ -228,216 +226,4 @@ export function reduceWizard(state: WizardState, key: WizardKey, text = ""): { s
 
 export function wizardSaved(state: WizardState, backup: string | null): WizardState {
   return { ...state, step: "done", saved: { backup }, error: null };
-}
-
-/// Renders the wizard for the terminal size. The painter decides color; the
-/// layout reads the same without it. `now` drives the sign-in countdown.
-export function renderWizard(state: WizardState, width: number, height: number, paint: Painter, now = Date.now()): string[] {
-  const rows: string[] = Array.from({ length: height }, () => "");
-  const column = Math.max(2, Math.floor((width - Math.min(72, width - 4)) / 2));
-  const inner = Math.min(72, width - column - 2);
-  const pad = (text: string) => " ".repeat(column) + text;
-  const safe = (text: string) => sanitizeTerminalLine(text);
-  let row = 0;
-  const line = (text = "") => { if (row < height - 2) rows[row++] = text; };
-
-  // Top bar with the stepper.
-  const steps: Array<[string, boolean, boolean]> = [
-    ["Provider", ["provider", "custom", "auth", "accounts", "plan"].includes(state.step), !["provider", "custom", "auth", "accounts", "plan"].includes(state.step)],
-    ["Model", state.step === "model", state.step === "review" || state.step === "done"],
-    ["Review", state.step === "review", state.step === "done"],
-  ];
-  const stepper = steps.map(([label, current, done], index) => done ? paint.text("✓ ", "citron") + paint.text(label, "secondary")
-    : paint.text(`${index + 1} ${label}`, current ? "electric" : "muted")).join(paint.text(" ── ", "rule"));
-  const brand = `  ${paint.bold("demesne", "electric")} ${paint.text("setup", "secondary")}`;
-  rows[row++] = brand + " ".repeat(Math.max(1, width - visibleLength(brand) - visibleLength(stepper) - 2)) + stepper;
-  rows[row++] = paint.text("─".repeat(width), "rule");
-  line();
-
-  const hint = (text: string, tone: PaletteColor = "muted") => line(pad(paint.text(truncateText(text, inner), tone)));
-  const wrapped = (text: string, tone: PaletteColor = "muted") => { for (const part of wrapDisplayText(text, inner)) hint(part, tone); };
-
-  // Bordered boxes (Figma 34:431): rounded corners, hairline dividers, and
-  // the selected row washed with a blue left edge.
-  const content = inner - 4;
-  const edge = (left: string, right: string, tone: PaletteColor = "rule") => line(pad(paint.text(`${left}${"─".repeat(Math.max(0, inner - 2))}${right}`, tone)));
-  const boxRow = (left: string, right = "", selected = false, tone: PaletteColor = "rule") => {
-    const body = ` ${formatFooterLine(left, right, content)} `;
-    line(pad(`${selected ? paint.text("▎", "electric") : paint.text("│", tone)}${selected ? paint.wash(body, "menuSelection") : body}${paint.text("│", tone)}`));
-  };
-  const box = (rows: Array<[string, string?]>, tone: PaletteColor = "rule") => {
-    edge("╭", "╮", tone);
-    for (const [left, right] of rows) boxRow(left, right ?? "", false, tone);
-    edge("╰", "╯", tone);
-  };
-  /// A bordered list scrolled to keep `selected` in view. Dividers separate
-  /// items when every item fits with them; otherwise they are dropped first.
-  const list = (count: number, selected: number, rowsEach: number, reserve: number, draw: (index: number) => Array<[string, string?]>) => {
-    const space = height - 2 - row - reserve;
-    const dividers = count * (rowsEach + 1) + 1 <= space;
-    const visible = Math.max(1, Math.min(count, dividers ? count : Math.floor((space - 2) / rowsEach)));
-    const start = Math.max(0, Math.min(selected - Math.floor(visible / 2), count - visible));
-    edge("╭", "╮");
-    for (let index = start; index < start + visible; index++) {
-      if (dividers && index > start) edge("├", "┤");
-      for (const [left, right] of draw(index)) boxRow(left, right ?? "", index === selected);
-    }
-    edge("╰", "╯");
-  };
-  const input = (text: string, placeholder: string) => {
-    edge("╭", "╮", "electric");
-    boxRow(`${paint.text(truncateText(safe(text) || placeholder, content - 1), text ? "paper" : "muted")}${paint.text("▏", "electric")}`, "", false, "electric");
-    edge("╰", "╯", "electric");
-  };
-
-  if (state.step === "provider") {
-    const found = state.probes?.filter((probe) => probe.reachable).length ?? 0;
-    line(pad(paint.bold("Where should demesne run its model?", "paper")));
-    hint(state.probes === null ? "Looking for local servers…" : `Found ${found} local server${found === 1 ? "" : "s"}. You can change this later with demesne setup.`);
-    line();
-    const options = providerOptions(state);
-    const unreachable = state.probes?.some((probe) => !probe.reachable) ?? false;
-    list(options.length, state.providerIndex, 2, unreachable ? 2 : 0, (index) => {
-      const item = options[index]!, selected = index === state.providerIndex;
-      const title = (mark: string, markTone: PaletteColor, name: string, dim = false) =>
-        `${paint.text(mark, markTone)}  ${paint.text(safe(name), dim ? "muted" : selected ? "electric" : "paper")}`;
-      const detail = (text: string) => `   ${paint.text(safe(text), "muted")}`;
-      if (item === "chatgpt") return [[title("↗", "electric", "Continue with ChatGPT")], [detail("Use your ChatGPT plan · browser sign-in")]];
-      if (item === "openrouter") return [[title("↗", "electric", "OpenRouter")], [detail("Hosted models · sign in with your browser")]];
-      if (item === "custom") return [[title("+", "secondary", "Custom URL")], [detail("Any OpenAI-compatible endpoint")]];
-      const models = `${item.models.length} model${item.models.length === 1 ? "" : "s"}`;
-      return [[title(item.reachable ? "✓" : "·", item.reachable ? "citron" : "muted", item.target.label, !item.reachable),
-        item.reachable && index === 0 ? paint.text("detected", "secondary") : ""], [detail(`${item.target.url} · ${item.reachable ? models : "not reachable"}`)]];
-    });
-    if (unreachable) { line(); wrapped("Unreachable servers stay listed so you can start them and press r to rescan."); }
-  } else if (state.step === "accounts") {
-    line(pad(paint.bold("Choose a ChatGPT account", "paper")));
-    wrapped("Saved registrations stay separate, including different workspaces."); line();
-    for (const [index, account] of [...(state.accounts ?? []), null].entries()) {
-      boxRow(safe(account?.label ?? "Continue with ChatGPT · add another account"), account ? account.planEnabled ? "Using ChatGPT plan" : "Sign in again" : "", index === (state.accountIndex ?? 0));
-    }
-    wrapped("↑↓ choose · Enter continue · s sign out · Esc back");
-    if (!state.accounts) wrapped("Loading accounts…");
-  } else if (state.step === "plan") {
-    line(pad(paint.bold("You’re using your ChatGPT plan", "paper"))); line();
-    wrapped("Eligible requests from Demesne count toward your ChatGPT plan usage and available credits."); line();
-    wrapped("Manage usage: https://chatgpt.com/settings/usage");
-    wrapped("Enter · Got it     o · Manage usage     Esc · back");
-  } else if (state.step === "auth") {
-    // Figma 36:543: the callback card, the link as a fallback, and where the key goes.
-    const { status, url } = state.auth;
-    line(pad(paint.bold(state.authProvider === "chatgpt" ? "Continue with ChatGPT" : status === "failed" ? "Connect OpenRouter" : "Finish signing in to OpenRouter", "paper")));
-    wrapped(safe(state.auth.message));
-    line();
-    if (status === "waiting") {
-      const dots = url ? [0, 1, 2].map((dot) => paint.text("●", dot === Math.floor(now / 400) % 3 ? "thinking" : "rule")).join("") : "";
-      const left = Math.max(0, (state.auth.expiresAt ?? 0) - now);
-      const countdown = state.auth.expiresAt ? `times out in ${Math.floor(left / 60_000)}:${String(Math.floor(left / 1000) % 60).padStart(2, "0")}` : "";
-      box([[`${paint.bold("Waiting for approval", "thinking")} ${dots}`, paint.text(countdown, "muted")],
-        [paint.text(url ? "Listening on localhost for a one-time callback." : "Starting the one-time callback…", "secondary")]], "thinking");
-    } else if (status === "loading") box([[paint.bold("◌ Authorization received", "electric")], [paint.text("Checking your key and loading the model catalog…", "secondary")]], "electric");
-    else box([[paint.bold("× Sign-in did not complete", "signal")], [paint.text("Press r or Enter to try again.", "secondary")]], "signal");
-    if (url && status === "waiting") {
-      line();
-      hint("Browser didn't open?", "secondary");
-      const action = state.auth.copied ? paint.text("copied", "citron") : `${keycap(paint, "c")} ${paint.text("copy", "muted")}`;
-      box([[paint.text(truncateText(url, content - 8), "paper"), action]]);
-    }
-    line();
-    if (state.authProvider === "chatgpt") wrapped("Tokens are saved in Demesne’s protected local credential file. Review applies the provider configuration.");
-    else {
-    wrapped(`Your API key goes from OpenRouter straight to this machine and is saved only in ${safe(state.configPath)} when you confirm Review. It is never shown on screen.`);
-    wrapped("Already have a key? Set OPENROUTER_API_KEY and run demesne setup again.");
-    }
-  } else if (state.step === "custom") {
-    line(pad(paint.bold("Enter your server address", "paper")));
-    wrapped("Any OpenAI-compatible endpoint: vLLM, llama.cpp, LM Studio, Ollama, or a hosted gateway.");
-    line();
-    hint("Base URL");
-    input(state.custom.text, "http://127.0.0.1:8000/v1");
-    if (state.custom.checking) hint("◌ Checking…", "thinking");
-    else if (state.custom.error) hint(`× ${state.custom.error}`, "signal");
-    else hint("Enter checks the address and lists its models.");
-    line();
-    hint("Remote servers need https://. Plain http:// works only for localhost.");
-    wrapped(`Needs an API key? Add it in ${safe(state.configPath)} after setup; it is never typed here.`);
-  } else if (state.step === "model") {
-    const provider = state.provider!;
-    line(pad(paint.bold("Which model should it use?", "paper")));
-    hint(provider.reachable ? `${provider.models.length} model${provider.models.length === 1 ? "" : "s"} on ${provider.target.label} · ${provider.target.url}` : `${provider.target.url} did not answer; enter the model id to use.`,
-      provider.reachable ? "muted" : "thinking");
-    line();
-    if (provider.models.length) {
-      // One recommendation, listed first: the first model with the largest context.
-      const order = modelOrder(provider), recommended = recommendedModel(provider);
-      list(order.length, order.indexOf(state.modelIndex), 2, 2, (position) => {
-        const index = order[position]!, model = provider.models[index]!, selected = index === state.modelIndex;
-        const facts = [model.contextWindow ? `${model.contextWindow.toLocaleString("en-US")} ctx` : "context unknown",
-          model.maxOutputTokens ? `${formatTokenCount(model.maxOutputTokens)} output` : "", index === recommended ? "largest context on this server" : ""].filter(Boolean);
-        return [[paint.text(safe(model.displayName ?? model.id), selected ? "electric" : "paper"), index === recommended ? paint.text("recommended", "citron") : ""],
-          [paint.text(facts.join(" · "), "muted")]];
-      });
-    } else {
-      hint("Model id");
-      input(state.modelText, "model-name");
-    }
-    line();
-    hint("Context size is read from the server when it reports one. You can adjust it on the next step.");
-  } else if (state.step === "review") {
-    line(pad(paint.bold("Ready to write your config", "paper")));
-    hint("Detected values are filled in. Select a line and press e to change it.");
-    line();
-    const values: Record<(typeof REVIEW_ROWS)[number], [string, string]> = {
-      Provider: [state.provider?.target.label ?? "", state.provider?.target.url ?? ""],
-      Model: [selectedModel(state), ""],
-      "Context window": [state.review.contextWindow.toLocaleString("en-US"), state.review.detected ? "detected" : "default"],
-      "Max output": [state.review.maxOutputTokens.toLocaleString("en-US"), state.provider?.models[state.modelIndex]?.maxOutputTokens ? "detected" : "default"],
-      Theme: [state.review.theme, state.review.theme === "auto" ? "follows your terminal" : ""],
-    };
-    // Figma 34:570: a bordered table; the selected value is blue.
-    const labelWidth = 16;
-    list(REVIEW_ROWS.length, state.reviewIndex, 1, state.editing?.error ? 3 : 2, (index) => {
-      const name = REVIEW_ROWS[index]!, selected = index === state.reviewIndex;
-      const [value, note] = values[name];
-      const shown = selected && state.editing ? `${state.editing.text}▏` : value;
-      const left = `${paint.text(name.padEnd(labelWidth), "muted")}${paint.text(safe(shown), selected ? "electric" : "paper")}  ${paint.text(safe(note), "muted")}`;
-      return [[left, selected && !state.editing && index >= 2 ? paint.text("e edit", "secondary") : ""]];
-    });
-    if (state.editing?.error) hint(`× ${state.editing.error}`, "signal");
-    line();
-    if (state.provider?.target.id === "ChatGPT") wrapped("Max output is a context-planning reserve; the ChatGPT plan API does not accept an output cap.");
-    hint(`Writes ${state.configPath} · an existing file is backed up first.`);
-  } else {
-    line(pad(paint.text("✓ ", "citron") + paint.bold("demesne is ready", "paper")));
-    hint(`Connected to ${state.provider?.target.label ?? "your provider"} · ${selectedModel(state)} · ${formatTokenCount(state.review.contextWindow)} context`);
-    line();
-    // The backup sits beside the config, so its name alone says where it is.
-    const backup = state.saved?.backup ?? null, folder = state.configPath.slice(0, state.configPath.lastIndexOf("/") + 1);
-    const previous = backup ? `previous file → ${safe(folder && backup.startsWith(folder) ? backup.slice(folder.length) : backup)}` : "";
-    const saved = `${paint.text("Saved", "citron")}  ${paint.text(safe(state.configPath), "paper")}`;
-    box(visibleLength(saved) + previous.length + 2 <= content ? [[saved, paint.text(previous, "muted")]]
-      : [[saved], ...(previous ? [[paint.text(previous, "muted")] as [string]] : [])], "citron");
-    line();
-    hint("NEXT");
-    for (const [command, description] of [["demesne", "start a session in the current folder"], ["demesne doctor", "check the connection any time"], ["demesne setup", "change provider or model later"]]) {
-      line(pad(`${paint.text(command.padEnd(18), "electric")}${paint.text(description, "secondary")}`));
-    }
-  }
-  if (state.error) { line(); hint(`× ${state.error}`, "signal"); }
-
-  // Keycap footer: the keys on the left, the step's main action on the right.
-  const action = (label: string) => `${paint.text(label, "secondary")} ${keycap(paint, "Enter")}`;
-  const listed = Boolean(state.provider?.models.length);
-  const [keys, right]: [Array<[string, string]>, string] = state.step === "provider" ? [[["↑↓", "choose"], ["r", "rescan"], ["Esc", "quit"]], action("Continue")]
-    : state.step === "accounts" ? [[["↑↓", "choose"], ["s", "sign out"], ["Esc", "back"]], action("Continue")]
-    : state.step === "plan" ? [[["o", "Manage usage"], ["Esc", "back"]], action("Got it")]
-    : state.step === "auth" ? [[...(state.auth.url && state.auth.status === "waiting" ? [["c", "copy link"], ["o", "reopen browser"]] as Array<[string, string]> : []), ["r", "retry"], ["Esc", "back"]],
-      state.auth.status === "failed" ? action("Retry") : ""]
-    : state.step === "custom" ? state.custom.checking ? [[], paint.text("Checking the server…", "thinking")] : [[["Esc", "back"]], action("Continue")]
-    : state.step === "model" ? [listed ? [["↑↓", "choose"], ["Esc", "back"]] : [["Esc", "back"]], action("Continue")]
-    : state.step === "review" ? state.editing ? [[["Esc", "cancel edit"]], action("Save")] : [[["↑↓", "select"], ["e", "edit"], ["Backspace", "back"], ["Esc", "quit"]], action("Write config")]
-    : [[["q", "quit"]], action("Open demesne here")];
-  rows[height - 2] = paint.text("─".repeat(width), "rule");
-  rows[height - 1] = `  ${formatFooterLine(keyHints(paint, keys), right, width - 4)}`;
-  return rows.map((text) => truncateText(text, width));
 }

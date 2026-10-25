@@ -22,16 +22,15 @@ bun run daemon
 bun run desktop
 ```
 
-The desktop window needs [Electron and the platform dependencies](docs/desktop.md#prerequisites). `bun run demesne` in a terminal opens the same window on the current folder. Without provider configuration the daemon uses a deterministic placeholder processor. Unit tests and desktop checks use deterministic/fake providers; normal verification does not need paid inference or a second local model process.
+The desktop window needs [Electron and the platform dependencies](docs/desktop.md#prerequisites). Without provider configuration the daemon uses a deterministic placeholder processor. Unit tests and desktop checks use deterministic/fake providers; normal verification does not need paid inference or a second local model process.
 
-For distributable binaries, build the CLI and daemon, then the desktop app:
+To build the app, with its own daemon and desktop host:
 
 ```sh
-bun run build
 bun run build:desktop
 ```
 
-Keep the daemon’s native image dependencies in `dist/node_modules` with the CLI. Rebuilding does not replace an already-running daemon or desktop window. See [rebuilds and running processes](docs/troubleshooting.md#rebuilds-and-running-processes).
+Rebuilding does not replace an already-running daemon or desktop window. See [rebuilds and running processes](docs/troubleshooting.md#rebuilds-and-running-processes).
 
 ## Desktop development
 
@@ -44,20 +43,19 @@ Keep the authenticated daemon client and credentials in the backend. Native dial
 | Location | Responsibility |
 | --- | --- |
 | `apps/daemon/` | HTTP API, coding turns, tools, approvals, scheduling, reviews, proposals and artifact ingestion |
-| `apps/cli/` | Commands, headless client and desktop launcher |
 | `apps/desktop/` | Electron window, restricted native bridge, Bun host sidecar, desktop integration checks |
 | `apps/desktop/workspace/` | The interface the window shows: renderer, authenticated host, state wire, Markdown, Drive control |
 | `packages/drive/` | Drive controller, memory, task ledger, checkpoints, protection, receipts, workflows |
 | `packages/workbench/` | Conversation entries, history, diffs, tool previews and allow rules |
-| `packages/setup/` | CLI config, ChatGPT/OpenRouter sign-in, setup wizard, provider probe, daemon control |
+| `packages/setup/` | Host config, ChatGPT/OpenRouter sign-in, first-run setup state, provider probe, daemon control |
 | `packages/protocol/` | API/event types, validation and Drive contracts |
 | `packages/client/` | Typed authenticated HTTP/SSE client |
 | `packages/config/` | TOML/environment loading, defaults and private config writes |
 | `packages/providers/` | Chat Completions and ChatGPT Responses adapters |
 | `packages/chatgpt-auth/` | Registration, OAuth callback, token verification, storage and refresh |
 | `packages/storage/` | SQLite sessions, journal, checkpoints, artifacts and command records |
-| `packages/brand/` | Themes, slash-command grammar and plain terminal formatting |
-| `scripts/` | Build, install, desktop launch and checks, and deterministic provider utilities |
+| `packages/brand/` | Themes and slash-command grammar |
+| `scripts/` | Build, desktop launch and checks, and deterministic provider utilities |
 
 ## Implementation conventions
 
@@ -71,14 +69,14 @@ Keep the authenticated daemon client and credentials in the backend. Native dial
 
 ## Verification
 
-Run `bun run typecheck` and `bun test` before every code PR. [CI](.github/workflows/ci.yml) and the [desktop workflow](.github/workflows/desktop.yml) only run when started by hand, so these local checks are what a PR is merged on. On headless Linux run the desktop check with `bun scripts/prepare-desktop.ts && dbus-run-session -- xvfb-run -a bun run desktop:check`; that is not a GPU or Wayland test, and native macOS checks remain separate.
+Run `bun run typecheck` and `bun test` before every code PR. There is no GitHub CI, so these local checks are what a PR is merged on. On headless Linux run the desktop check with `bun scripts/prepare-desktop.ts && dbus-run-session -- xvfb-run -a bun run desktop:check`; that is not a GPU or Wayland test, and native macOS checks remain separate.
 
 | Change | Additional relevant checks |
 | --- | --- |
 | Desktop UI/bridge/lifecycle | `bun run desktop:check`; Electron boundary tests and desktop bundle build |
 | Interface behavior/layout | `bun test apps/desktop/workspace/test`; `bun run desktop:check` |
 | Drive | `bun test packages/drive/test` and the daemon Drive tests; `bun run desktop:check` when its turn or ideas change |
-| Packaging | Both builds and relevant checks against packaged assets |
+| Packaging | `bun run build:desktop` and `bun scripts/check-desktop-backend.ts` against the packaged daemon |
 | Provider/auth/tool execution | Adapter, auth, engine and approval fixtures; never real credentials in test fixtures |
 | Documentation only | Validate relative links/anchors, source names, script commands and config examples; preview diagrams |
 

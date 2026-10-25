@@ -1214,7 +1214,7 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
    On the Mac the shell is translucent over the window's vibrancy; elsewhere
    it is the same colour, solid. No scrollbars; radii 8 and 12. */
 html[data-theme="demesne"] body.desktop {
-  --shell: #161617; --shell-glass: rgb(22 22 23 / 0.78); --panel: #111112; --panel-edge: rgb(235 235 235 / 0.045);
+  --shell: #161617; --shell-glass: rgb(22 22 23 / 0.4); --panel: #111112; --panel-edge: rgb(235 235 235 / 0.045);
   --ink: var(--shell); --side: var(--shell); --surface: #19191a; --surface2: #1f1f20; --surface3: #272728; --raised: #1f1f20;
   --hair: rgb(235 235 235 / 0.07); --hair2: rgb(235 235 235 / 0.12); --tone: rgb(235 235 235 / 0.05); --tone2: rgb(235 235 235 / 0.09);
   --t1: #ebebeb; --t2: rgb(235 235 235 / 0.72); --t3: rgb(235 235 235 / 0.52); --t4: rgb(235 235 235 / 0.38);
@@ -1224,7 +1224,7 @@ html[data-theme="demesne"] body.desktop {
   --r-sm: 8px; --r: 8px; --r-lg: 12px;
 }
 html[data-theme="demesne-light"] body.desktop {
-  --shell: #f2f2f2; --shell-glass: rgb(245 245 245 / 0.84); --panel: #ffffff; --panel-edge: rgb(46 46 46 / 0.08);
+  --shell: #f2f2f2; --shell-glass: rgb(245 245 245 / 0.5); --panel: #ffffff; --panel-edge: rgb(46 46 46 / 0.08);
   --ink: var(--shell); --side: var(--shell); --surface: #ffffff; --surface2: #f4f4f4; --surface3: #ebebeb; --raised: #f4f4f4;
   --hair: rgb(46 46 46 / 0.08); --hair2: rgb(46 46 46 / 0.14); --tone: rgb(46 46 46 / 0.04); --tone2: rgb(46 46 46 / 0.07);
   --t1: #2e2e2e; --t2: rgb(46 46 46 / 0.76); --t3: rgb(46 46 46 / 0.56); --t4: rgb(46 46 46 / 0.42);
@@ -1237,6 +1237,8 @@ body.desktop { background: var(--shell, var(--ink)); }
 #desktop-shell { background: var(--shell, var(--ink)); }
 html.glass, html.glass body.desktop { background: transparent; }
 html.glass #desktop-shell { background: var(--shell-glass, var(--ink)); }
+/* Full screen has no desktop behind the window, so the shell goes solid. */
+html.glass.fullscreen #desktop-shell { background: var(--shell, var(--ink)); }
 #desktop-sidebar, #desktop-toolbar { background: transparent; border: 0; box-shadow: none; }
 /* The panel: the deepest plane, with a hairline edge. Inside it --ink is the
    panel, so everything that paints "the background" paints the panel. */

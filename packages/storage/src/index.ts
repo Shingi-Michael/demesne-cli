@@ -33,6 +33,7 @@ import {
   type ProofClaim,
   applyProofEvents,
   derivePersistedRule,
+  openedPullRequest,
 } from "@demesne/protocol";
 import { QuestionRepository } from "./questions.ts";
 export { QuestionStateError } from "./questions.ts";
@@ -101,6 +102,7 @@ interface SessionRow {
   archived_at: string | null;
   pinned_at: string | null;
   back_at: string | null;
+  pr_url: string | null;
   preferred_model: string | null;
   auto_approve: number;
   accept_edits: number;
@@ -304,7 +306,7 @@ export class DemesneStore {
     const row = this.database
       .query(`
         SELECT sessions.id, sessions.title, sessions.created_at, sessions.updated_at,
-               sessions.workspace_id, sessions.archived_at, sessions.pinned_at, sessions.back_at, sessions.preferred_model, sessions.auto_approve, sessions.accept_edits,
+               sessions.workspace_id, sessions.archived_at, sessions.pinned_at, sessions.back_at, sessions.pr_url, sessions.preferred_model, sessions.auto_approve, sessions.accept_edits,
                workspaces.root AS workspace_root
         FROM sessions
         LEFT JOIN workspaces ON workspaces.id = sessions.workspace_id
@@ -328,6 +330,7 @@ export class DemesneStore {
       ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
       ...(row.pinned_at ? { pinnedAt: row.pinned_at } : {}),
       ...(row.back_at ? { backAt: row.back_at } : {}),
+      ...(row.pr_url ? { prUrl: row.pr_url } : {}),
       ...(row.preferred_model ? { preferredModel: row.preferred_model } : {}),
       turns: turns.map(mapTurn),
     };
@@ -380,6 +383,15 @@ export class DemesneStore {
     return this.database.transaction(() => {
       this.getSessionOrThrow(id);
       this.database.query("UPDATE sessions SET back_at = ? WHERE id = ?").run(at, id);
+      return this.getSessionOrThrow(id);
+    })();
+  }
+
+  /// Its pull request on the row: set when a tool opens one, or by hand.
+  setSessionPrUrl(id: string, url: string | null): Session {
+    return this.database.transaction(() => {
+      this.getSessionOrThrow(id);
+      this.database.query("UPDATE sessions SET pr_url = ? WHERE id = ?").run(url, id);
       return this.getSessionOrThrow(id);
     })();
   }
@@ -1640,6 +1652,8 @@ export class DemesneStore {
         SET status = ?, result_text = ?, error_message = ?, completed_at = ?
         WHERE id = ?
       `).run(outcome, resultText, outcome === "failed" ? resultText : null, now, toolCallId);
+      const opened = outcome === "completed" ? openedPullRequest(call.name, call.arguments_json, resultText) : null;
+      if (opened) this.database.query("UPDATE sessions SET pr_url = ? WHERE id = ?").run(opened, turn.sessionId);
       const type = outcome === "completed"
         ? "tool.call_completed"
         : outcome === "denied"
@@ -2012,6 +2026,20 @@ export class DemesneStore {
     }
     if (!this.hasColumn("sessions", "back_at")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN back_at TEXT");
+    }
+    if (!this.hasColumn("sessions", "pr_url")) {
+      this.database.run("ALTER TABLE sessions ADD COLUMN pr_url TEXT");
+      // Chats that opened a pull request before rows kept them.
+      const opened = this.database.query(`
+        SELECT turns.session_id AS session_id, tool_calls.name AS name, tool_calls.arguments_json AS arguments_json, tool_calls.result_text AS result_text
+        FROM tool_calls JOIN turns ON turns.id = tool_calls.turn_id
+        WHERE tool_calls.status = 'completed' AND tool_calls.result_text LIKE '%github.com/%/pull/%'
+        ORDER BY tool_calls.created_at
+      `).all() as Array<{ session_id: string; name: string; arguments_json: string; result_text: string }>;
+      for (const call of opened) {
+        const url = openedPullRequest(call.name, call.arguments_json, call.result_text);
+        if (url) this.database.query("UPDATE sessions SET pr_url = ? WHERE id = ?").run(url, call.session_id);
+      }
     }
     if (!this.hasColumn("sessions", "preferred_model")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN preferred_model TEXT");

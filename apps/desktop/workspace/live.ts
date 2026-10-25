@@ -23,6 +23,8 @@ import { deedPage, editLine, findHits, isLive, numberOf, toCheck, type DeedFilte
 import type { Deed, DeedAction, DeedPeek, PlanLimits, ProofClaim, Routine } from "@demesne/protocol";
 import { glanceHTML, type Glance } from "./glance.ts";
 import { backChoices, backState } from "./back-later.ts";
+import { agoWords, prHandable, prHandText, prStanding } from "./pr-row.ts";
+import { pullRequestNews, type SessionPullRequest } from "../../../packages/protocol/src/pull-requests.ts";
 import { PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, PLAN_LIMIT_SHOWN, planUsed, planWindows } from "@demesne/protocol";
 import { claimTitle, locate, lookedAt, proofLine } from "./proof-marks.ts";
 import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.ts";
@@ -455,6 +457,43 @@ const ICON_ARCHIVE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><r
 const ICON_BELL = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>';
 /// The row whose Bring it back words are unfolded under it.
 let backOpenFor: string | null = null;
+const ICON_PR = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M6 8v8"/><path d="M18 16V9a3 3 0 0 0-3-3h-3"/><path d="m14 4-2 2 2 2"/></svg>';
+/// Its pull request on the row: what gh last said about each chat's pull
+/// request, the row whose news is unfolded, and when you last looked at each
+/// (its activityAt then). A pull request you haven't looked at counts from
+/// when it opened.
+const pullRequests = new Map<string, SessionPullRequest>();
+let prOpenFor: string | null = null, prOpenSince = "", prKey = "";
+const PR_SEEN_KEY = "demesne-pr-seen";
+const prSeen: Record<string, string> = (() => {
+  try { return JSON.parse(localStorage.getItem(PR_SEEN_KEY) ?? "{}") ?? {}; } catch { return {}; }
+})();
+const prSeenAt = (id: string, pr: SessionPullRequest) => prSeen[id] ?? pr.createdAt;
+function markPrSeen(id: string, at: string) {
+  if (prSeen[id] === at) return;
+  prSeen[id] = at;
+  try { localStorage.setItem(PR_SEEN_KEY, JSON.stringify(prSeen)); } catch { /* storage may be off */ }
+}
+const prNew = (id: string, pr: SessionPullRequest) => pr.state === "open" && pr.activityAt > prSeenAt(id, pr);
+/// Whether a chat is away, back, or neither; "when its PR merges" asks gh.
+const backOf = (item: { id: string; backAt?: string }) => backState(item.backAt, Date.now(), pullRequests.get(item.id)?.state === "merged");
+/// Asks the daemon what gh says; `fresh` asks gh again now for that chat.
+async function refreshPullRequests(fresh?: string) {
+  const ids = (state?.sessions ?? []).filter((item) => item.prUrl).map((item) => item.id);
+  for (const id of [...pullRequests.keys()]) if (!ids.includes(id)) pullRequests.delete(id);
+  if (!ids.length) return;
+  let found: Record<string, SessionPullRequest>;
+  try { found = await api<Record<string, SessionPullRequest>>("session-prs", fresh ? { ids: [fresh], fresh: true } : { ids }); } catch { return; }
+  let changed = false;
+  for (const [id, pr] of Object.entries(found)) {
+    if (JSON.stringify(pullRequests.get(id)) !== JSON.stringify(pr)) changed = true;
+    pullRequests.set(id, pr);
+    // An unfolded row shows its news, so it counts as looked at.
+    if (prOpenFor === id) markPrSeen(id, pr.activityAt);
+  }
+  if (changed) { renderSidebar(); renderNotifications(); }
+}
+setInterval(() => { if (prKey) void refreshPullRequests(); }, 60_000);
 const ICON_PIN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>';
 /// A project's folder is its fold: shut while folded, open while its chats show.
 const ICON_FOLDER_SHUT = '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5a1 1 0 0 1 1-1h4.6l2 2.2h8.4a1 1 0 0 1 1 1v9.8a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></svg>';
@@ -487,6 +526,8 @@ function renderSidebar() {
   // branch mark; its branch is in the tooltip.
   const branches = new Map([state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId)).map((job) => [job.sessionId!, job.branch] as const));
   const sessions = state.sessions.filter(item => !deletedSessions.has(item.id));
+  const prs = sessions.filter((item) => item.prUrl).map((item) => `${item.id}=${item.prUrl}`).join(",");
+  if (prs !== prKey) { prKey = prs; void refreshPullRequests(); }
   const projectWorkspace = list.dataset.workspace || state.workspace;
   const projectPaths = projectOrder.paths();
   // Worktree chats stay with their parent project, alongside its review
@@ -506,7 +547,7 @@ function renderSidebar() {
   const agents = state.agents ?? [];
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, deedOpen, pageOpen, deedCount(), plainNow, Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), deedOpen, pageOpen, deedCount(), plainNow, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -538,7 +579,7 @@ function renderSidebar() {
   // your chat and lands as a branch to review. One you open shows while open.
   // An empty chat is the composer itself, and the New chat row above already
   // names it; it joins the list once it has a turn.
-  const listed = sessions.filter((item) => (!branches.has(item.id) || item.id === current?.id) && (backState(item.backAt) !== "away" || item.id === current?.id) && (titleOf(item) !== "New chat" || tones.get(item.id) === "working" || (item.id === current?.id && Boolean(waiting))));
+  const listed = sessions.filter((item) => (!branches.has(item.id) || item.id === current?.id) && (backOf(item) !== "away" || item.id === current?.id) && (titleOf(item) !== "New chat" || tones.get(item.id) === "working" || (item.id === current?.id && Boolean(waiting))));
   const matches = (item: typeof sessions[number]) => !query || titleOf(item).toLowerCase().includes(query) || Boolean(item.workspace?.toLowerCase().includes(query));
   const sorted = (items: typeof sessions) => sidebarView.sort === "name" ? [...items].sort((a, b) => titleOf(a).localeCompare(titleOf(b))) : items;
   const whereWords = (item: typeof sessions[number]) => { const project = projectFor(item); return project ? projectLabel(project) : "Just a chat"; };
@@ -552,7 +593,8 @@ function renderSidebar() {
     const project = projectFor(item);
     const here = project === projectWorkspace || project === null;
     const mark = tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
-    const side = tone || (id === current?.id && !inSession()) ? "" : right;
+    const pr = pullRequests.get(id);
+    const side = tone || pr || (id === current?.id && !inSession()) ? "" : right;
     const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${branch ? ICON_BRANCH : ""}${side ? `<span class="sidebar-session-age">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}`)
       .replace("<button ", `<button data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
     // Pin and Archive sit on the row itself: no menu, no dialog. The keyboard
@@ -561,10 +603,26 @@ function renderSidebar() {
     const archive = tone === "working" ? "" : btn("delete-session", ICON_ARCHIVE, { id }, "sidebar-delete").replace("<button ", `<button title="Archive" aria-label="Archive ${h(title)}" tabindex="-1" `);
     // Bring it back later: the bell unfolds a few times under the row.
     const bell = btn("back-open", ICON_BELL, { id }, `sidebar-bell${backOpenFor === id ? " on" : ""}`).replace("<button ", `<button title="Bring it back later" aria-label="${h(`Bring ${title} back later`)}" aria-expanded="${backOpenFor === id}" tabindex="-1" `);
-    const backLine = backOpenFor === id ? `<div class="sidebar-back-line" role="group" aria-label="Bring it back"><span class="sidebar-back-label">Bring it back</span>${backChoices().map((choice) => btn("bring-back", h(choice.label), { id, at: choice.at }, "sidebar-back-opt")).join("")}</div>` : "";
-    const back = backState(item.backAt) === "back";
+    const backLine = backOpenFor === id ? `<div class="sidebar-back-line" role="group" aria-label="Bring it back"><span class="sidebar-back-label">Bring it back</span>${backChoices(new Date(), pr?.state === "open" ? pr.number : undefined).map((choice) => btn("bring-back", h(choice.label), { id, at: choice.at }, "sidebar-back-opt")).join("")}</div>` : "";
+    const back = backOf(item) === "back";
+    // Its pull request sits where the time would: #N, a blue dot for news
+    // since you looked, purple once merged. The number unfolds the news.
+    const fresh = pr ? prNew(id, pr) : false;
+    const prWords = pr ? `#${pr.number} ${pr.state === "open" ? fresh ? "has news" : pr.draft ? "draft" : "open" : pr.state}` : "";
+    const chip = pr ? btn("pr-open", `${ICON_PR}<span>#${pr.number}</span>${fresh ? '<span class="sidebar-pr-dot" aria-hidden="true"></span>' : ""}`, { id }, `sidebar-pr ${pr.state}${fresh ? " new" : ""}${prOpenFor === id ? " on" : ""}`)
+      .replace("<button ", `<button title="${h(`${pr.title} · ${prWords}`)}" aria-label="${h(`Pull request ${prWords}`)}" aria-expanded="${prOpenFor === id}" tabindex="-1" `) : "";
+    const prLine = pr && prOpenFor === id ? (() => {
+      const github = btn("pr-github", "GitHub", { id }, "sidebar-back-opt");
+      if (pr.state === "merged") return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">Merged ${h(agoWords(pr.mergedAt ?? pr.activityAt))}</span>${tone === "working" ? "" : btn("delete-session", "Archive", { id }, "sidebar-back-opt key")}${github}</div>`;
+      if (pr.state === "closed") return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">Closed without merging</span>${github}</div>`;
+      const news = pullRequestNews(pr, prOpenSince);
+      const head = news.length ? `<b>${news.length} new on #${pr.number}</b>` : `<b>#${pr.number}</b> ${h(pr.title)}`;
+      const lines = (news.length ? news : prStanding(pr)).map((line) => `<span class="sidebar-pr-note">${h(line)}</span>`).join("");
+      const hand = prHandable(pr, prOpenSince) ? btn("pr-hand", "Hand it to the chat", { id }, "sidebar-back-opt key") : "";
+      return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">${head}</span>${lines}${hand}${github}</div>`;
+    })() : "";
     if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
-    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}">${open}<span class="sidebar-row-actions">${bell}${pin}${archive}</span></div>${backLine}`;
+    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${bell}${pin}${archive}${chip}</span></div>${backLine}${prLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
   const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false) => {
@@ -600,11 +658,11 @@ function renderSidebar() {
   const reviewLine = () => review.length ? btn("review-open", `Review ${review.length} ${review.length === 1 ? "branch" : "branches"} ›`, { show: true }, "sidebar-more sidebar-review") : "";
   // Chats you asked to bring back lead the list once they're due, until you
   // open them; the time they came back sits on the right.
-  const backChats = listed.filter((item) => backState(item.backAt) === "back" && item.id !== current?.id && matches(item));
+  const backChats = listed.filter((item) => backOf(item) === "back" && item.id !== current?.id && matches(item));
   const backList = document.getElementById("sidebar-back");
   if (backList) {
     backList.hidden = !backChats.length;
-    backList.innerHTML = backChats.length ? group("back", "Back now", groupRows("back", backChats, (item) => new Date(item.backAt!).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })), 0) : "";
+    backList.innerHTML = backChats.length ? group("back", "Back now", groupRows("back", backChats, (item) => item.backAt === "merge" ? "merged" : new Date(item.backAt!).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })), 0) : "";
   }
   const isBack = (item: typeof sessions[number]) => backChats.includes(item);
   // Pinned chats lead the list, whichever project they are in.
@@ -3683,7 +3741,7 @@ let notified: Set<string> | null = null;
 const notifyFrom = Date.now() - 5_000;
 // A chat set to come back returns on the minute, with or without other news.
 setInterval(() => {
-  if (!state?.sessions.some((item) => backState(item.backAt) === "away" || (backState(item.backAt) === "back" && !notified?.has(`${item.id}:back:${item.backAt}`)))) return;
+  if (!state?.sessions.some((item) => backOf(item) === "away" || (backOf(item) === "back" && !notified?.has(`${item.id}:back:${item.backAt}`)))) return;
   renderSidebar();
   renderNotifications();
 }, 15_000);
@@ -3706,7 +3764,7 @@ function renderNotifications() {
     else if (item.status === "completed") alerts.set(`${item.id}:done:${item.updatedAt}`, { title, body: "Finished", kind: "done", ...where });
   }
   // A chat you asked to bring back, once it's due (and it fell due while open).
-  for (const item of state.sessions) if (backState(item.backAt) === "back" && Date.parse(item.backAt!) >= notifyFrom)
+  for (const item of state.sessions) if (backOf(item) === "back" && Date.parse(item.backAt === "merge" ? pullRequests.get(item.id)?.mergedAt ?? "" : item.backAt!) >= notifyFrom)
     alerts.set(`${item.id}:back:${item.backAt}`, { title: item.title, body: "Back, as you asked", kind: "wait", sessionId: item.id, path: item.workspace });
   for (const job of reviewJobs()) if (job.status === "ready") alerts.set(`drive:${job.id}`, { title: "Drive", body: `${job.title} is ready to review${job.diff ? ` · +${job.diff.additions} −${job.diff.deletions}` : ""}`, kind: "drive", ...(job.sessionId ? { sessionId: job.sessionId } : {}) });
   const fresh = notified ? [...alerts].filter(([key]) => !notified!.has(key)) : [];
@@ -4575,6 +4633,40 @@ async function dispatch(
     return;
   }
   if (action === "theme-flip") { flipTheme(); return; }
+  if (action === "pr-open") {
+    const id = String(args.id), pr = pullRequests.get(id);
+    prOpenFor = prOpenFor === id ? null : id;
+    if (prOpenFor && pr) {
+      prOpenSince = prSeenAt(id, pr);
+      markPrSeen(id, pr.activityAt);
+      void refreshPullRequests(id);
+    }
+    renderSidebar();
+    // Enter takes the first word: hand the news to the chat, or archive it.
+    document.querySelector<HTMLButtonElement>(".sidebar-pr-line .key")?.focus({ preventScroll: true });
+    return;
+  }
+  if (action === "pr-github") {
+    const pr = pullRequests.get(String(args.id));
+    if (pr) await api("open-link", { url: pr.url });
+    return;
+  }
+  if (action === "pr-hand") {
+    const id = String(args.id), pr = pullRequests.get(id);
+    if (!pr) return;
+    const text = prHandText(pr, prOpenSince);
+    prOpenFor = null;
+    if (state?.session?.id !== id) {
+      const path = state?.sessions.find((item) => item.id === id)?.workspace;
+      if (path && path !== (el("sidebar-sessions").dataset.workspace || state?.workspace)) document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path, sessionId: id } }));
+      else await api("select-session", { id });
+      for (let tries = 0; tries < 80 && state?.session?.id !== id; tries++) await new Promise((done) => setTimeout(done, 50));
+      if (state?.session?.id !== id) return;
+    }
+    renderSidebar();
+    setDraft(text);
+    return;
+  }
   if (action === "back-open") {
     backOpenFor = backOpenFor === String(args.id) ? null : String(args.id);
     renderSidebar();

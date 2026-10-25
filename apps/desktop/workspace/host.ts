@@ -328,6 +328,7 @@ export class WorkspaceHost {
         lastAsk: lastAsk(session.turns),
         ...(session.pinnedAt ? { pinned: true } : {}),
         ...(session.backAt ? { backAt: session.backAt } : {}),
+        ...(session.prUrl ? { prUrl: session.prUrl } : {}),
       })),
       runs: this.current?.runs() ?? [],
       cursor: this.current?.cursor ?? 0,
@@ -619,7 +620,7 @@ export class WorkspaceHost {
     try {
       const state = await this.client.getSessionState(id);
       // A chat that came back is done coming back once you open it.
-      if (backState(state.session.backAt) === "back") void this.client.updateSession(id, { backAt: null }).then(() => this.refreshSessions()).catch(() => {});
+      if (backState(state.session.backAt, Date.now(), this.mergedPullRequests.has(id)) === "back") void this.client.updateSession(id, { backAt: null }).then(() => this.refreshSessions()).catch(() => {});
       const events = await replaySession(
         state,
         (sessionId, after, signal) =>
@@ -877,6 +878,8 @@ export class WorkspaceHost {
   /// Chats in the background that wait on an approval or an answer: the
   /// sidebar marks them amber, as it does the open one.
   waitingSessions = new Set<string>();
+  /// Chats whose pull request has merged, for "when its PR merges".
+  private readonly mergedPullRequests = new Set<string>();
   /// What each of them waits on, for Home.
   waitingAsks = new Map<string, AwayAsk>();
   private backgroundTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1509,6 +1512,14 @@ export class WorkspaceHost {
     if (method === "model-scores") return this.client.modelScoreboard({ days: 30 });
     if (method === "plan-limits") return (await this.client.planLimits()).limits;
     // Rest on a chat: its card, read from that chat's own state.
+    // Its pull request on the row: what gh last said about the chats' PRs.
+    if (method === "session-prs") {
+      const ids = Array.isArray(args.ids) ? args.ids.filter((id): id is string => typeof id === "string" && id.length <= 200).slice(0, 100) : [];
+      if (!ids.length) return {};
+      const { pullRequests } = await this.client.sessionPullRequests(ids, args.fresh === true);
+      for (const [id, pr] of Object.entries(pullRequests)) pr.state === "merged" ? this.mergedPullRequests.add(id) : this.mergedPullRequests.delete(id);
+      return pullRequests;
+    }
     if (method === "session-glance") {
       const id = string(args.id, "id", 200);
       const [state, changes] = await Promise.all([this.client.getSessionState(id), this.client.changes(id).then((response) => response.changes).catch(() => null)]);

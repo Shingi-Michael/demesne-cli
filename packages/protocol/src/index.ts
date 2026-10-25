@@ -3,6 +3,7 @@ export * from "./drive.ts";
 export * from "./deed.ts";
 export * from "./panels.ts";
 export * from "./plan-limits.ts";
+import { isPullRequestUrl } from "./pull-requests.ts";
 
 export type EventType =
   | "command.changed"
@@ -402,6 +403,8 @@ export interface Session {
   /// Bring it back later: off the list until then, at the top once it's due,
   /// until you open it.
   backAt?: string | null;
+  /// The pull request this chat opened, kept for its row.
+  prUrl?: string | null;
   /// Model this session was last switched to through the CLI. It is a hint for
   /// the user, not an automatic daemon-side switch.
   preferredModel?: string | null;
@@ -436,8 +439,11 @@ export interface RoutinesResponse { routines: Routine[] }
 
 export interface UpdateSessionRequest {
   pinned?: boolean;
-  /// When the chat comes back to the top of the sidebar; null clears it.
+  /// When the chat comes back to the top of the sidebar, or "merge" for
+  /// when its pull request merges; null clears it.
   backAt?: string | null;
+  /// The chat's pull request; null forgets it.
+  prUrl?: string | null;
   /// Moves a chat that has no project into this folder.
   workspacePath?: string;
   trustWorkspace?: boolean;
@@ -752,12 +758,17 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
     update.pinned = value.pinned;
   }
   if (value.backAt !== undefined) {
-    if (value.backAt !== null && (typeof value.backAt !== "string" || value.backAt.length > 40 || !Number.isFinite(Date.parse(value.backAt))))
-      throw new ProtocolValidationError("backAt must be a time or null");
-    update.backAt = value.backAt === null ? null : new Date(value.backAt).toISOString();
+    if (value.backAt !== null && value.backAt !== "merge" && (typeof value.backAt !== "string" || value.backAt.length > 40 || !Number.isFinite(Date.parse(value.backAt))))
+      throw new ProtocolValidationError("backAt must be a time, \"merge\" or null");
+    update.backAt = value.backAt === null || value.backAt === "merge" ? value.backAt : new Date(value.backAt).toISOString();
   }
-  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.workspacePath === undefined && update.pinned === undefined && update.backAt === undefined) {
-    throw new ProtocolValidationError("title, preferredModel, autoApprove, acceptEdits, pinned, backAt or workspacePath is required");
+  if (value.prUrl !== undefined) {
+    if (value.prUrl !== null && (typeof value.prUrl !== "string" || value.prUrl.length > 300 || !isPullRequestUrl(value.prUrl)))
+      throw new ProtocolValidationError("prUrl must be a GitHub pull request link or null");
+    update.prUrl = value.prUrl;
+  }
+  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.workspacePath === undefined && update.pinned === undefined && update.backAt === undefined && update.prUrl === undefined) {
+    throw new ProtocolValidationError("title, preferredModel, autoApprove, acceptEdits, pinned, backAt, prUrl or workspacePath is required");
   }
   return update;
 }
@@ -979,6 +990,7 @@ export * from "./heartbeat-mail.ts";
 export * from "./drive-report.ts";
 export * from "./agents-nearby.ts";
 export * from "./proofs.ts";
+export * from "./pull-requests.ts";
 
 /// Builds the persisted `[permissions] allow` entry for a pending approval.
 ///

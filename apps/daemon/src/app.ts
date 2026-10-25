@@ -23,7 +23,7 @@ import {
   type SessionCleanupResponse,
   type DriveAlertsResponse,
   type DriveFixAction,
-  type DriveFixesResponse, type DriveAwayResponse, type DriveAutoResponse, type PlanLimitsResponse, planUsed,
+  type DriveFixesResponse, type SessionPullRequestsResponse, type DriveAwayResponse, type DriveAutoResponse, type PlanLimitsResponse, planUsed,
   type ApiErrorBody,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
@@ -63,6 +63,7 @@ import { formatSessionMarkdown } from "./session-export.ts";
 import { SessionReplay } from "./session-replay.ts";
 import { DRIVE_QUICK_TOKENS, DRIVE_THOUGHT_TOKENS, planDrive } from "./drive-planner.ts";
 import { collectDriveSignals } from "./drive-signals.ts";
+import { SessionPullRequests } from "./session-prs.ts";
 import { SessionToolStore } from "./session-tools.ts";
 import { DriveNextCache, proposeNext } from "./drive-next.ts";
 import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
@@ -234,6 +235,7 @@ export function createDaemonApp(options: {
       : null),
   });
   const replay = new SessionReplay(store);
+  const pullRequests = new SessionPullRequests();
   const processor: TurnProcessor = options.processor ?? new PlaceholderTurnProcessor();
   const allowlist = new ConfigAllowlist(options.allowlistPath ?? null);
   const invalidRules = allowlist.invalidEntries();
@@ -1088,6 +1090,7 @@ export function createDaemonApp(options: {
         }
         if (body.pinned !== undefined) session = store.setSessionPinned(path[2]!, body.pinned);
         if (body.backAt !== undefined) session = store.setSessionBackAt(path[2]!, body.backAt);
+        if (body.prUrl !== undefined) session = store.setSessionPrUrl(path[2]!, body.prUrl);
         if (body.autoApprove !== undefined) {
           const updated = store.setSessionAutoApprove(path[2]!, body.autoApprove);
           session = updated.session;
@@ -1209,6 +1212,20 @@ export function createDaemonApp(options: {
         if (!session.workspace) return apiError("invalid_state", "Session has no workspace", 409);
         if (url.searchParams.get("details") === "1") return json({ entries: workspaceFileInfo(session.workspace.root) });
         return json({ files: listWorkspaceFiles(session.workspace.root) });
+      }
+
+      // Its pull request on the row: what gh says about the chats' pull requests.
+      if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "sessions" && path[2] === "prs") {
+        const ids = (url.searchParams.get("ids") ?? "").split(",").filter(Boolean).slice(0, 100);
+        const fresh = url.searchParams.get("fresh") === "1";
+        const found = await Promise.all(ids.map(async (id) => {
+          const session = store.getSession(id);
+          if (!session?.prUrl) return null;
+          const pr = await pullRequests.get(session.prUrl, session.workspace?.root ?? null, fresh);
+          return pr ? [id, pr] as const : null;
+        }));
+        const response: SessionPullRequestsResponse = { pullRequests: Object.fromEntries(found.filter((entry) => entry !== null)) };
+        return json(response);
       }
 
       if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {

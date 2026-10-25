@@ -46,6 +46,17 @@ const heartbeatDaemon = Bun.listen({ unix: heartbeatSocket, socket: { data(socke
   if (request.command === "listen") { socket.write(`${JSON.stringify({ status: "ok", agent_id: request.as })}\n`); return; }
   reply({ status: "error", error: "unknown_command" });
 } } });
+// A stand-in gh for the pull request on a row: `gh pr view` prints what the
+// check last wrote; everything else fails, as if gh had no GitHub here.
+const ghBin = mkdtempSync(join(tmpdir(), "gh-")), ghPr = join(ghBin, "pr.json");
+writeFileSync(join(ghBin, "gh"), `#!/bin/sh\nif [ "$1" = pr ] && [ "$2" = view ]; then cat "${ghPr}"; exit 0; fi\nexit 1\n`, { mode: 0o755 });
+process.env.PATH = `${ghBin}:${process.env.PATH}`;
+const ghPullRequest = (state: "OPEN" | "MERGED") => writeFileSync(ghPr, JSON.stringify({
+  number: 287, title: "Peek the folded sidebar", url: "https://github.com/demesne/fieldnote/pull/287", state, isDraft: false,
+  createdAt: new Date(Date.now() - 3_600_000).toISOString(), mergedAt: state === "MERGED" ? new Date(Date.now() - 60_000).toISOString() : null, closedAt: null,
+  reviews: [{ author: { login: "mike" }, state: "COMMENTED", body: "The peek opens too soon.", submittedAt: new Date(Date.now() - 600_000).toISOString() }],
+  comments: [], statusCheckRollup: [{ __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: "SUCCESS", completedAt: new Date(Date.now() - 3_000_000).toISOString() }],
+}));
 let previewRound = 0;
 let askRound = 0, missionRound = 0;
 let brokeRound = 0;
@@ -603,6 +614,37 @@ try {
   await until(() => page.locator("#sidebar-back").isHidden(), "and Back now empties");
   await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
+  // Its pull request on the row: #287 where the time was, a blue dot for the
+  // review since; the number unfolds it, Hand it to the chat puts it in the
+  // composer, and merged turns it purple with Archive.
+  ghPullRequest("OPEN");
+  await f.client.updateSession(asideId, { prUrl: "https://github.com/demesne/fieldnote/pull/287" });
+  await page.locator(`.sidebar-session[data-args*='${asideId}']`).click();
+  await textIncludes(asideDone);
+  await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
+  await textIncludes(completed);
+  const prRow = page.locator(`.sidebar-item:has(.sidebar-session[data-args*='${asideId}'])`).first();
+  await prRow.locator(".sidebar-pr.new", { hasText: "#287" }).waitFor();
+  await page.mouse.move(600, 400);
+  await capture("02-pr-row");
+  await prRow.locator(".sidebar-pr").click();
+  await page.locator(".sidebar-pr-line", { hasText: "2 new on #287" }).waitFor();
+  assert.ok(await page.locator(".sidebar-pr-line", { hasText: "mike: The peek opens too soon." }).isVisible(), "the review's words unfold");
+  assert.equal(await prRow.locator(".sidebar-pr-dot").count(), 0, "looking at it clears the dot");
+  await capture("02-pr-news");
+  await page.keyboard.press("Enter");
+  await until(async () => (await current())?.includes(asideId), "Hand it to the chat opens the chat");
+  await until(() => page.locator("textarea").inputValue().then(value => value.startsWith("Pull request #287") && value.includes("The peek opens too soon.")), "the news waits in the composer");
+  await page.locator("textarea").fill("");
+  await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
+  await textIncludes(completed);
+  ghPullRequest("MERGED");
+  await prRow.locator(".sidebar-pr").click();
+  await page.locator(".sidebar-pr-line", { hasText: "Merged" }).locator(".sidebar-back-opt", { hasText: "Archive" }).waitFor();
+  await prRow.locator(".sidebar-pr.merged").waitFor();
+  await capture("02-pr-merged");
+  await prRow.locator(".sidebar-pr").click();
+  await until(() => page.locator(".sidebar-pr-line").count().then(count => count === 0), "the number folds it again");
   // Each row deletes itself from the sidebar, without a menu or a dialog;
   // the list closes up and never shows more than six. ⌘Z brings it back
   // while it waits to be archived.
@@ -1419,7 +1461,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

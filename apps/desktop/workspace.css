@@ -1406,3 +1406,26 @@ html.mac-chrome.fullscreen #desktop-shell:has(#desktop-sidebar[hidden]) #desktop
 .sidebar-item.back .sidebar-session { background: color-mix(in srgb, var(--warn) 9%, transparent); }
 .sidebar-item.back .sidebar-session-age { color: var(--warn); }
 #sidebar-back .sidebar-group-icon { color: var(--warn); }
+/* Its pull request on the row (pass 76 D): #N where the time sits, a blue
+   dot for news since you looked, purple once merged. The rest of the row's
+   actions join it on hover. */
+.sidebar-item.has-pr .sidebar-row-actions { opacity: 1; }
+.sidebar-item.has-pr .sidebar-row-actions > :not(.sidebar-pr) { opacity: 0; transition: opacity 140ms var(--ease); }
+.sidebar-item.has-pr:hover .sidebar-row-actions > *, .sidebar-item.has-pr .sidebar-row-actions:focus-within > *, .sidebar-item.has-pr:has(.sidebar-session:focus-visible) .sidebar-row-actions > * { opacity: 1; }
+.sidebar-row-actions .sidebar-pr { pointer-events: auto; display: flex; gap: 3px; width: auto; padding: 0 5px; color: var(--t3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sidebar-row-actions .sidebar-pr .ico { width: 12px; height: 12px; }
+.sidebar-row-actions .sidebar-pr.new, .sidebar-row-actions .sidebar-pr.on { color: var(--t1); }
+.sidebar-pr-dot { width: 6px; height: 6px; margin-left: 1px; border-radius: 50%; background: var(--acc); }
+.sidebar-row-actions .sidebar-pr.merged { color: #b294f0; }
+html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color: #7a4fcf; }
+.sidebar-row-actions .sidebar-pr.closed span { text-decoration: line-through; }
+.sidebar-item.has-pr .sidebar-session-name { padding-right: 56px; }
+.sidebar-item.has-pr:hover .sidebar-session-name, .sidebar-item.has-pr:has(.sidebar-session:focus-visible) .sidebar-session-name { padding-right: 116px; }
+.sidebar-pr-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0 0 4px 12px; padding: 3px 8px 6px 12px; box-shadow: -1px 0 0 var(--hair2); color: var(--t3); font-size: 12px; line-height: 18px; }
+.sidebar-pr-head { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-pr-head b { color: var(--t1); font-weight: 500; }
+.sidebar-pr-note { flex-basis: 100%; color: var(--t2); overflow-wrap: anywhere; }
+.sidebar-pr-line .sidebar-back-opt { padding: 0; border: 0; background: none; color: var(--t2); font: inherit; cursor: pointer; }
+.sidebar-pr-line .sidebar-back-opt:hover, .sidebar-pr-line .sidebar-back-opt:focus-visible { color: var(--t1); }
+.sidebar-pr-line .sidebar-back-opt.key { color: var(--t1); }
+.sidebar-pr-line .sidebar-back-opt.key::after { content: " ↵"; color: var(--t4, var(--t3)); }

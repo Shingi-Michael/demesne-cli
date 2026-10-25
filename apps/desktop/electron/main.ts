@@ -60,7 +60,7 @@ void app.whenReady().then(async () => {
     // the window translucent under the shell (the page paints the tint).
     ...(process.platform === "darwin" ? {
       titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 17 },
-      vibrancy: "sidebar" as const, visualEffectState: "active" as const, backgroundColor: "#00000000",
+      vibrancy: "under-window" as const, visualEffectState: "active" as const, backgroundColor: "#00000000",
     } : {}),
     webPreferences: { preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true },
   });

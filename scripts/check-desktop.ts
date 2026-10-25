@@ -705,7 +705,7 @@ try {
   await capture("02-themes");
   await page.locator(`#page .st-choice[data-args*='"demesne-light"']`).click();
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#F6F8FA");
-  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#f2f2f2", "The desktop wears its own light palette");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "rgb(242 242 242)", "The desktop wears its own light palette");
   assert(await page.locator('#page[data-kind="settings"]').isVisible(), "Settings stays open while the theme changes");
   await capture("02-light-settings");
   await page.locator("#page .settings-segments button").filter({ hasText: "Large" }).click();
@@ -721,7 +721,16 @@ try {
   await page.locator("#page .st-word").first().click();
   await page.locator(`#page .st-choice[data-args*='"demesne"']`).click();
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#0B1218");
-  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#161617", "The desktop wears its own dark palette");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "rgb(22 22 23)", "The desktop wears its own dark palette");
+  const accent = () => page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--acc").trim());
+  const neutralAccent = await accent();
+  await page.locator("#page .st-inks button[aria-label='Warm']").click();
+  await until(() => page.evaluate(() => document.documentElement.dataset.ink === "warm"), "the Warm ink is worn");
+  assert.notEqual(await accent(), neutralAccent, "the accent follows the ink");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "rgb(30 24 19)", "the warm ink tints the panel");
+  await capture("02-ink-warm");
+  await page.locator("#page .st-inks button[aria-label='Neutral']").click();
+  await until(() => page.evaluate(() => document.documentElement.dataset.ink === undefined), "back to the Neutral ink");
   // The rows backed by config.toml and the daemon.
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Drive" }).click();
   const tokens = page.getByRole("textbox", { name: "Tokens" });
@@ -1351,7 +1360,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

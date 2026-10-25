@@ -1241,9 +1241,6 @@ html.glass #desktop-shell { background: var(--shell-glass, var(--ink)); }
    and menus stay solid. */
 html.glass #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { --ink: var(--panel-glass, var(--panel)); background: var(--panel-glass, var(--panel)); }
 html.glass #drive-peek { background: var(--panel-glass, var(--panel)); }
-/* Full screen has no desktop behind the window, so it goes solid. */
-html.glass.fullscreen #desktop-shell { background: var(--shell, var(--ink)); }
-html.glass.fullscreen #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { --ink: var(--panel, var(--ink)); background: var(--panel, var(--ink)); }
 #desktop-sidebar, #desktop-toolbar { background: transparent; border: 0; box-shadow: none; }
 /* The panel: the deepest plane, with a hairline edge. Inside it --ink is the
    panel, so everything that paints "the background" paints the panel. */

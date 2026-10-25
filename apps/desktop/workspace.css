@@ -1329,3 +1329,7 @@ html.mac-chrome.fullscreen #desktop-shell:has(#desktop-sidebar[hidden]) #desktop
 @media (prefers-reduced-motion: no-preference) { #drive-peek.work .dp-words i { animation: live-breathe 1.6s ease-in-out infinite; } }
 #desktop-shell > .live-app { position: relative; z-index: 1; }
 #desktop-shell:has(#drive-peek:not([hidden])) > .live-app { margin-right: 40px; }
+
+/* Words arrive softly: each new run of a streaming answer fades in. */
+@keyframes md-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: no-preference) { .markdown .md-in { animation: md-in 200ms ease-out both; } }

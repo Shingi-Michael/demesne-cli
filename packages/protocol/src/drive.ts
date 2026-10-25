@@ -162,7 +162,9 @@ export interface DriveAwayResponse { away: DriveAway | null }
 /// Drive on by default: once a project has been quiet for `quietMinutes`,
 /// Drive runs its top Next idea in a worktree on its own, at most `perDay`
 /// times a day. One switch per project turns it off.
-export interface DriveAuto { workspace: string; on: boolean; quietMinutes: number; perDay: number; usedToday: number }
+export interface DriveAuto { workspace: string; on: boolean; quietMinutes: number; perDay: number; usedToday: number;
+  /// Set while your plan's window is this full (90% or more): Drive starts no runs of its own.
+  planPaused?: number }
 export interface DriveAutoResponse { auto: DriveAuto }
 export interface DriveRequest {
   mode?: DriveMode; ledger?: DriveLedger; facts?: DriveFacts;

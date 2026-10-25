@@ -20,7 +20,8 @@ import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
 import { deedPage, editLine, findHits, isLive, numberOf, toCheck, type DeedFilter, type DeedUi } from "./deed-view.ts";
-import type { Deed, DeedAction, DeedPeek, ProofClaim, Routine } from "@demesne/protocol";
+import type { Deed, DeedAction, DeedPeek, PlanLimits, ProofClaim, Routine } from "@demesne/protocol";
+import { PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, PLAN_LIMIT_SHOWN, planUsed, planWindows } from "@demesne/protocol";
 import { claimTitle, locate, lookedAt, proofLine } from "./proof-marks.ts";
 import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.ts";
 import type { WorkspaceHost } from "./host.ts";
@@ -1006,6 +1007,7 @@ function renderStatus() {
   const rim = rimState(phase);
   applyRim(rim);
   renderDrivePeek();
+  renderPlanLimit();
   if (signature + JSON.stringify(rim) === statusSignature) return;
   statusSignature = signature + JSON.stringify(rim);
   // A quiet footer: a spinner while working, a word only when the state
@@ -1030,6 +1032,45 @@ function renderStatus() {
   el("header").innerHTML =
     `<div class="header-state">${pageOpen ? "" : branchChip()}${rimWords(rim)}</div>${inSession() && !pageOpen ? `<button type="button" class="header-cards${cardsOn ? " on" : ""}" data-action="cards-toggle" aria-label="Cards" aria-pressed="${cardsOn}" title="${cardsOn ? "Hide" : "Show"} cards">${ICON_PANEL}</button>` : ""}${inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
 }
+/// Your plan's limit (pass 75 D): nothing under half; past it a small ring
+/// and the fuller window's percentage sit beside the model word, amber from
+/// 75%. Pointing at it gives the resets, the week, and Drive's rule.
+let planLimits: PlanLimits[] = [], planLimitsAt = 0, planLimitsTurn: string | null = null, planLimitSignature = "";
+async function loadPlanLimits() {
+  planLimitsAt = Date.now();
+  try { planLimits = await api<PlanLimits[]>("plan-limits") ?? []; } catch { return; }
+  renderPlanLimit();
+}
+const resetWords = (at: string | null) => {
+  if (!at) return "";
+  const date = new Date(at), time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `, resets ${date.getTime() - Date.now() < 86_400_000 ? time : `${date.toLocaleDateString([], { weekday: "short" })} ${time}`}`;
+};
+function renderPlanLimit() {
+  const node = document.getElementById("composer-limit");
+  if (!node || !state) return;
+  const limits = planLimits.find((item) => item.provider === state!.model.provider);
+  const top = limits && planUsed(limits);
+  const used = top ? Math.round(top.window.usedPercent) : 0;
+  const signature = JSON.stringify([limits, used, Math.floor(Date.now() / 60_000)]);
+  if (signature === planLimitSignature) return;
+  planLimitSignature = signature;
+  node.hidden = !top || used < PLAN_LIMIT_SHOWN;
+  if (node.hidden || !limits || !top) { node.innerHTML = ""; node.removeAttribute("title"); return; }
+  node.classList.toggle("warn", used >= PLAN_LIMIT_AMBER);
+  node.innerHTML = `<span class="ring" style="--usage:${used}%"></span>${used}% of your ${h(top.name)} limit`;
+  const plan = limits.plan ? `${limits.provider} ${limits.plan[0]!.toUpperCase()}${limits.plan.slice(1)}` : `${limits.provider} plan`;
+  const windows = planWindows(limits).map(({ name, window }) => `${name === "weekly" ? "This week" : `${name[0]!.toUpperCase()}${name.slice(1)} window`} ${Math.round(window.usedPercent)}%${resetWords(window.resetsAt)}`);
+  node.title = [plan, ...windows, used >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`].join("\n");
+}
+// Each answer brings fresh numbers: look right after a turn ends, every 20
+// seconds while one works, and every minute otherwise.
+setInterval(() => {
+  if (!state || document.hidden) return;
+  const turn = state.activeTurnId ?? null, since = Date.now() - planLimitsAt;
+  if ((planLimitsTurn && !turn) || since > (turn ? 20_000 : 60_000)) void loadPlanLimits();
+  planLimitsTurn = turn;
+}, 2_000);
 /// The rim says the state (pass 74 B): the panel's hairline edge carries the
 /// open chat's state, readable from across the room. A blue light runs along
 /// it while a turn works, a still amber arc means it waits on you, and a red
@@ -3191,7 +3232,7 @@ function renderBriefing() {
       // On by default: the line says what Drive will do before it does it.
       if (auto) {
         const limits = `Up to ${auto.perDay} runs a day in this project, one at a time. Each run is in its own worktree; it never pushes or opens a PR. ${auto.usedToday} of ${auto.perDay} used today.`;
-        const when = auto.usedToday >= auto.perDay ? "done for today" : `starts the first after ${auto.quietMinutes} quiet minutes`;
+        const when = auto.planPaused ? `waits while your plan is at ${auto.planPaused}%` : auto.usedToday >= auto.perDay ? "done for today" : `starts the first after ${auto.quietMinutes} quiet minutes`;
         parts.push(`<span class="bf-about" title="${h(limits)}">${when}</span>`, btn("drive-auto", "Turn off", { on: false }, "link"));
       }
     }

@@ -58,9 +58,12 @@ const thoughtGate = new Promise<void>(resolve => { nextThought = resolve; });
 const thoughtFinish = new Promise<void>(resolve => { finishThought = resolve; });
 let round = 0, release: (() => void) | undefined;
 let failSuggestions = false, offerIdeas = false;
+// The plan's usage windows the stand-in provider reports.
+let smokeLimits: import("@demesne/protocol").PlanLimits[] = [];
 const gate = new Promise<void>(done => { release = done; });
 const f = await fixture({
   providerId: "test", modelId: "desktop-test", contextCapacity: 262144, maxOutputTokens: 1024,
+  planLimits: () => smokeLimits,
   async listModels() { smokeProcessor = this; return [{ id: "desktop-test", provider: "test", contextWindow: 262144, reasoningLevels: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultReasoningLevel: "low" }, { id: "desktop-small", provider: "test", contextWindow: 32768 }, { id: "desktop-fast", provider: "test", contextWindow: 131072 }, { id: "desktop-wide", provider: "test", contextWindow: 1048576 }, { id: "far-away-large", provider: "other", contextWindow: 200000 }, { id: "far-away-mini", provider: "other", contextWindow: 128000 }]; },
   async *stream(messages, _tools, signal) {
     const user = messages.findLast(message => message.role === "user")?.content;
@@ -935,6 +938,7 @@ try {
   const preferences = JSON.parse(readFileSync(join(f.home, ".demesne/desktop-ui.json"), "utf8"));
   assert.equal(preferences.lastWorkspace, f.workspace);
   await capture("05-restored");
+  assert(await page.locator("#composer-limit").isHidden(), "no plan word while the plan says nothing");
   await type(followUp);
   await textIncludes("The daemon is still working.");
   // Words arrive softly: the streaming answer's new words fade in, then settle at full.
@@ -946,9 +950,21 @@ try {
   await close();
   release!();
   await until(async () => (await f.client.getSessionState(sessionId)).session.turns.at(-1)?.status === "completed", "daemon completes after window closes");
+  smokeLimits = [{ provider: "test", plan: "plus", at: new Date().toISOString(),
+    primary: { usedPercent: 78, windowMinutes: 300, resetsAt: new Date(Date.now() + 3_600_000).toISOString() },
+    secondary: { usedPercent: 41, windowMinutes: 10080, resetsAt: null } }];
   await open();
   await reopenChat(sessionId);
   await textIncludes(afterClose);
+  // Your plan's limit: past half, the fuller window sits beside the model word, amber from 75%.
+  const limitWord = page.locator("#composer-limit");
+  await limitWord.waitFor();
+  assert.equal((await limitWord.textContent())?.trim(), "78% of your 5-hour limit", "the plan's fuller window shows under the composer");
+  assert.match(await limitWord.getAttribute("class") ?? "", /\bwarn\b/, "amber from 75%");
+  const limitTip = await limitWord.getAttribute("title") ?? "";
+  assert.match(limitTip, /^test Plus\n5-hour window 78%, resets .+\nThis week 41%\nDrive pauses its own runs at 90%$/, `the tooltip gives resets, the week and Drive's rule: ${limitTip}`);
+  assert.equal((await f.client.planLimits()).limits[0]?.primary?.usedPercent, 78, "the daemon serves the provider's numbers");
+  await capture("06-plan-limit");
   await capture("06-work-survived-close");
   // Project groups expose their own chats and open the selected chat across
   // workspace boundaries, rather than restoring a different conversation.
@@ -1360,7 +1376,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

@@ -5,7 +5,7 @@ import type {
   ProviderStreamEvent,
   ProviderToolDefinition,
 } from "@demesne/providers";
-import type { RuntimeProfileStatus } from "@demesne/protocol";
+import type { PlanLimits, RuntimeProfileStatus } from "@demesne/protocol";
 import type { RuntimeProfileVerifier } from "./ollama-runtime.ts";
 import type { InferenceOverrides, StreamOptions, TurnInference, TurnProcessor } from "./processor.ts";
 
@@ -38,6 +38,11 @@ export class ProviderTurnProcessor implements TurnProcessor {
 
   get modelId(): string {
     return this.currentModelId;
+  }
+
+  planLimits(): PlanLimits[] {
+    const limits = this.provider.planLimits?.();
+    return limits ? [limits] : [];
   }
 
   get reasoning(): string | undefined {

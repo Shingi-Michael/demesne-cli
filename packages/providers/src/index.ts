@@ -51,6 +51,8 @@ export interface ProviderAdapter {
   readonly vision?: boolean;
   listModels(signal?: AbortSignal): Promise<ModelDescriptor[]>;
   stream(request: ProviderRequest, signal: AbortSignal): AsyncIterable<ProviderStreamEvent>;
+  /// The plan's usage windows, as last reported (subscription providers only).
+  planLimits?(): import("@demesne/protocol").PlanLimits | null;
   /// Release a conversation that can be paused at an external tool boundary.
   release?(cacheKey?: string): Promise<void>;
 }

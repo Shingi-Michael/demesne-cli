@@ -1502,6 +1502,7 @@ export class WorkspaceHost {
       return (await this.client.deedAct({ ...(args.request as import("@demesne/protocol").DeedAction), workspace: root })).deed;
     }
     if (method === "model-scores") return this.client.modelScoreboard({ days: 30 });
+    if (method === "plan-limits") return (await this.client.planLimits()).limits;
     if (method === "model") {
       const id = string(args.id, "model", 1000);
       const reasoning = args.reasoning === undefined ? undefined : string(args.reasoning, "reasoning", 16);

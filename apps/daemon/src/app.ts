@@ -23,7 +23,7 @@ import {
   type SessionCleanupResponse,
   type DriveAlertsResponse,
   type DriveFixAction,
-  type DriveFixesResponse, type DriveAwayResponse, type DriveAutoResponse,
+  type DriveFixesResponse, type DriveAwayResponse, type DriveAutoResponse, type PlanLimitsResponse, planUsed,
   type ApiErrorBody,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
@@ -349,6 +349,10 @@ export function createDaemonApp(options: {
       return cached && { ...cached, proposals: applyCalibration(cached.proposals, calibrationLog.calibration(workspace)) };
     },
     start: (request) => { driveFixes.startAway(request); },
+    planUsed: () => {
+      const limits = processor.planLimits?.().find((item) => item.provider === processor.providerId);
+      return limits ? planUsed(limits)?.window.usedPercent ?? null : null;
+    },
   });
   const driveAutoTimer = setInterval(() => { try { driveAuto.tick(); } catch { /* the next minute tries again */ } }, 60_000);
   driveAutoTimer.unref?.();
@@ -814,6 +818,10 @@ export function createDaemonApp(options: {
       }
       if (request.method === "GET" && url.pathname === "/v1/permissions/asks") {
         return json(store.permissionAsks(url.searchParams.get("workspace") ?? "") satisfies PermissionAsksResponse);
+      }
+      // Your plan's usage windows (ChatGPT), for the word under the composer.
+      if (request.method === "GET" && url.pathname === "/v1/limits") {
+        return json({ limits: processor.planLimits?.() ?? [] } satisfies PlanLimitsResponse);
       }
       // Drive on by default, and the one switch per project that turns it off.
       if (request.method === "GET" && url.pathname === "/v1/drive/auto") {

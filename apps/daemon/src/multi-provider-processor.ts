@@ -1,4 +1,4 @@
-import type { ModelDescriptor } from "@demesne/protocol";
+import type { ModelDescriptor, PlanLimits } from "@demesne/protocol";
 import type { ProviderMessage, ProviderToolDefinition } from "@demesne/providers";
 import { snapshotTurnInference, type InferenceOverrides, type TurnInference, type TurnProcessor } from "./processor.ts";
 
@@ -86,6 +86,10 @@ export class MultiProviderProcessor implements TurnProcessor {
       profile: null, state: "unconfigured" as const, expected: null, observed: null,
       mismatches: [], observedAt: null,
     };
+  }
+
+  planLimits(): PlanLimits[] {
+    return this.processors.flatMap((processor) => processor.planLimits?.() ?? []);
   }
 
   availableModels() {

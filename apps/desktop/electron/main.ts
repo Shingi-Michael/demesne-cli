@@ -61,6 +61,9 @@ void app.whenReady().then(async () => {
     ...(process.platform === "darwin" ? {
       titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 17 },
       vibrancy: "sidebar" as const, visualEffectState: "active" as const, backgroundColor: "#00000000",
+      // Full screen stays on the desktop's Space: a full-screen Space has no
+      // wallpaper behind the window, so the glass would go flat there.
+      simpleFullscreen: true,
     } : {}),
     webPreferences: { preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true },
   });
@@ -76,8 +79,14 @@ void app.whenReady().then(async () => {
   contents.on("will-navigate", event => { if (!allowAppReload(event.url, true)) event.preventDefault(); });
   contents.on("will-frame-navigate", event => { if (!allowAppReload(event.url, event.isMainFrame) && (event.isMainFrame || !previewURL(event.url))) event.preventDefault(); });
   contents.on("will-attach-webview", event => event.preventDefault());
-  window.on("enter-full-screen", () => emit("demesne:desktop-action", { action: "fullscreen", on: true }));
-  window.on("leave-full-screen", () => emit("demesne:desktop-action", { action: "fullscreen", on: false }));
+  // Simple full screen sends no full-screen events, so the page hears of it
+  // through the resize that comes with it.
+  let fullscreen = false;
+  const fullscreenChanged = () => {
+    const on = Boolean(window?.isFullScreen() || window?.isSimpleFullScreen());
+    if (on !== fullscreen) { fullscreen = on; emit("demesne:desktop-action", { action: "fullscreen", on }); }
+  };
+  window.on("enter-full-screen", fullscreenChanged).on("leave-full-screen", fullscreenChanged).on("resize", fullscreenChanged);
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
@@ -149,7 +158,12 @@ void app.whenReady().then(async () => {
     ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
     { label: "File", submenu: [{ label: "Open project…", accelerator: "CmdOrCtrl+O", click: () => emit("demesne:desktop-action", { action: "open-project" }) }, { label: "Settings…", accelerator: "CmdOrCtrl+,", click: () => emit("demesne:desktop-action", { action: "settings" }) }, { type: "separator" }, { role: process.platform === "darwin" ? "close" : "quit" }] },
     { role: "editMenu" },
-    { label: "View", submenu: [{ label: "Zoom In", accelerator: "CmdOrCtrl+=", click: () => applyZoom(1) }, { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: () => applyZoom(-1) }, { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: () => applyZoom(0) }, { role: "togglefullscreen" }] },
+    { label: "View", submenu: [{ label: "Zoom In", accelerator: "CmdOrCtrl+=", click: () => applyZoom(1) }, { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: () => applyZoom(-1) }, { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: () => applyZoom(0) }, { label: "Toggle Full Screen", accelerator: process.platform === "darwin" ? "Ctrl+Cmd+F" : "F11", click: () => {
+      if (!window) return;
+      if (process.platform === "darwin") window.setSimpleFullScreen(!window.isSimpleFullScreen());
+      else window.setFullScreen(!window.isFullScreen());
+      fullscreenChanged();
+    } }] },
     { role: "windowMenu" },
   ]));
   window.on("close", event => {

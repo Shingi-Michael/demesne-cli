@@ -22,6 +22,7 @@ import type { CustomizeView } from "./customize.ts";
 import { deedPage, editLine, findHits, isLive, numberOf, toCheck, type DeedFilter, type DeedUi } from "./deed-view.ts";
 import type { Deed, DeedAction, DeedPeek, ProofClaim, Routine } from "@demesne/protocol";
 import { claimTitle, locate, lookedAt, proofLine } from "./proof-marks.ts";
+import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.ts";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval } from "./session-model.ts";
 import type {
@@ -1002,8 +1003,11 @@ function renderStatus() {
     pageOpen,
   ]);
   renderCards();
-  if (signature === statusSignature) return;
-  statusSignature = signature;
+  const rim = rimState(phase);
+  applyRim(rim);
+  renderDrivePeek();
+  if (signature + JSON.stringify(rim) === statusSignature) return;
+  statusSignature = signature + JSON.stringify(rim);
   // A quiet footer: a spinner while working, a word only when the state
   // needs attention (failed, approval, offline…). "ready" says nothing.
   const working = Boolean(state.activeTurnId) && !["approval", "waiting", "failed"].includes(phase);
@@ -1024,7 +1028,99 @@ function renderStatus() {
   // session's own view (rename, compact, history). The sidebar shows what
   // needs you; Drive lives in its footer.
   el("header").innerHTML =
-    `<div class="header-state">${pageOpen ? "" : branchChip()}</div>${inSession() && !pageOpen ? `<button type="button" class="header-cards${cardsOn ? " on" : ""}" data-action="cards-toggle" aria-label="Cards" aria-pressed="${cardsOn}" title="${cardsOn ? "Hide" : "Show"} cards">${ICON_PANEL}</button>` : ""}${inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+    `<div class="header-state">${pageOpen ? "" : branchChip()}${rimWords(rim)}</div>${inSession() && !pageOpen ? `<button type="button" class="header-cards${cardsOn ? " on" : ""}" data-action="cards-toggle" aria-label="Cards" aria-pressed="${cardsOn}" title="${cardsOn ? "Hide" : "Show"} cards">${ICON_PANEL}</button>` : ""}${inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+}
+/// The rim says the state (pass 74 B): the panel's hairline edge carries the
+/// open chat's state, readable from across the room. A blue light runs along
+/// it while a turn works, a still amber arc means it waits on you, and a red
+/// dash marks a failed check or turn until you next touch the window.
+type Rim = { kind: "work" | "wait" | "fail"; words: string } | null;
+let rimFailSeen = "", rimFailShown = "";
+function rimState(phase: string): Rim {
+  if (!state || !inSession() || pageOpen || deedOpen) return null;
+  if (phase === "approval") {
+    const tool = state.approvals[0];
+    return { kind: "wait", words: tool ? `Waiting on you · ${approvalWords(tool)}` : "Waiting on you" };
+  }
+  if (phase === "waiting") return { kind: "wait", words: "Waiting on your answer" };
+  if (phase === "running" || phase === "checking") {
+    const last = state.runs.at(-1), step = last ? tools(last).findLast((tool) => tool.state === "running") : undefined;
+    const doing: Record<string, string> = { Run: "Running", Read: "Reading", Write: "Writing", Edit: "Editing", Search: "Searching", List: "Listing", Agent: "Asking an agent" };
+    const target = step ? (step.name === "run_command" ? (step.detail ?? "").replace(/^\$\s*/, "").replace(/^\S*\//, "") : String(step.input.path ?? step.detail ?? "")) : "";
+    const words = step ? `${doing[verb(step)] ?? verb(step)}${target && verb(step) !== "Agent" ? ` ${target}` : ""}` : phase === "checking" ? "Checking" : "Working";
+    return { kind: "work", words: words.length > 48 ? `${words.slice(0, 47)}…` : words };
+  }
+  const last = state.runs.at(-1);
+  if (!last || active(last)) return null;
+  const check = tools(last).find((t) => t.phase === "verify" && t.name === "run_command" && t.input.background !== true && (t.state === "failed" || t.state === "denied"));
+  if (last.status !== "failed" && !check) return null;
+  rimFailShown = last.id;
+  if (rimFailSeen === last.id) return null;
+  return { kind: "fail", words: check ? "Check failed" : "Turn failed" };
+}
+/// A short name for what an approval asks: "run bun test?", "edit hello.ts?".
+function approvalWords(tool: WorkspaceApproval) {
+  const input = tool.input ?? {};
+  // The program by its name, not its path: "bun run check", as the row says.
+  const argv = Array.isArray(input.argv) ? input.argv.map(String).map((part, index) => index ? part : part.split(/[\\/]/).at(-1)!).join(" ") : typeof input.command === "string" ? input.command : "";
+  const path = typeof input.path === "string" ? input.path.split(/[\\/]/).at(-1) : "";
+  const words = tool.name === "run_command" && argv ? `run ${argv}` : path ? `${/write|create/.test(tool.name) ? "write" : "edit"} ${path}` : tool.name.replaceAll("_", " ");
+  return words ? `${words.length > 40 ? `${words.slice(0, 39)}…` : words}?` : "";
+}
+function rimWords(rim: Rim) {
+  if (!rim) return "";
+  // A dot, not the cube: the cube lives in the conversation, and only once.
+  return `<span class="header-live ${rim.kind}"><i aria-hidden="true"></i><span>${h(rim.words)}</span></span>`;
+}
+function applyRim(rim: Rim) {
+  const app = el("app");
+  for (const kind of ["work", "wait", "fail"]) app.classList.toggle(`rim-${kind}`, rim?.kind === kind);
+}
+// Looking at the window (a click or a key) settles a failure's red dash.
+for (const type of ["pointerdown", "keydown"] as const)
+  document.addEventListener(type, () => {
+    if (rimFailShown && rimFailSeen !== rimFailShown && el("app").classList.contains("rim-fail")) {
+      rimFailSeen = rimFailShown;
+      queueMicrotask(() => { statusSignature = ""; renderStatus(); });
+    }
+  }, true);
+/// Drive's panel waits behind yours (pass 74 D): while Drive works in its
+/// own worktree chat, that chat sits behind the open one with one edge
+/// showing, its title along it. Click the edge and the two swap. A finished
+/// branch turns the edge green until you open it; inside Drive's chat the
+/// edge is the chat it came from.
+const peekSeen = new Set<string>();
+type Peek = { sessionId: string; kind: "work" | "ready" | "back"; words: string };
+function drivePeek(): Peek | null {
+  if (!state || !inSession() || pageOpen || deedOpen) return null;
+  const current = state.session?.id;
+  const jobs = [state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId));
+  const name = (job: (typeof jobs)[number]) => (job.mission ? job.mission.split("\n")[0]!.replace(/^--(bounded|continuous)\s+/, "") : job.title) || "Drive's branch";
+  const mine = jobs.find((job) => job.sessionId === current);
+  if (mine) {
+    if (mine.status === "ready") peekSeen.add(mine.id);
+    return mine.from && state.sessions.some((item) => item.id === mine.from) ? { sessionId: mine.from, kind: "back", words: `Back to ${chatTitle(mine.from)}` } : null;
+  }
+  const running = jobs.find((job) => job.status === "starting" || job.status === "running");
+  if (running) return { sessionId: running.sessionId!, kind: "work", words: `Drive · ${name(running)}` };
+  const ready = jobs.find((job) => job.status === "ready" && !peekSeen.has(job.id));
+  return ready ? { sessionId: ready.sessionId!, kind: "ready", words: `Ready · ${name(ready)}` } : null;
+}
+let peekSignature = "";
+function renderDrivePeek() {
+  const peek = drivePeek(), node = document.getElementById("drive-peek");
+  if (!node) return;
+  const signature = JSON.stringify(peek);
+  if (signature === peekSignature) return;
+  peekSignature = signature;
+  node.hidden = !peek;
+  if (!peek) return;
+  node.className = peek.kind;
+  node.dataset.action = "select-session";
+  node.dataset.args = JSON.stringify({ id: peek.sessionId });
+  node.title = peek.kind === "back" ? peek.words : `${peek.words} · open Drive's chat`;
+  node.setAttribute("aria-label", node.title);
+  node.innerHTML = `<span class="dp-words"><i aria-hidden="true"></i><span>${h(peek.words)}</span></span>`;
 }
 function totals(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -5062,6 +5158,77 @@ el("stage").addEventListener("scroll", () => {
   else if (stage.scrollTop < lastStageTop - 2) follow = false;
   lastStageTop = stage.scrollTop;
 });
+// The edge is a timeline: the scrollbar is gone, and pointing at the
+// panel's right edge shows the chat's shape on a hairline. Marks are measured
+// from the rendered turns; the line repaints when they move or the chat
+// scrolls, and only while it shows.
+let timeline: Mark[] = [], timelineFrame = 0, timelineHot: Mark | null = null;
+function timelineFacts(stage: HTMLElement): TurnFacts[] {
+  const base = stage.getBoundingClientRect().top - stage.scrollTop;
+  const top = (node: Element | null) => node ? Math.round(node.getBoundingClientRect().top - base) : null;
+  return (state?.runs ?? []).flatMap((run) => {
+    const node = document.getElementById(`turn-${run.id}`);
+    if (!node || !node.isConnected) return [];
+    const items = tools(run);
+    const edited = [...new Set(items.filter((t) => t.phase === "change" && t.state === "done").flatMap((t) => t.changes?.map((c) => c.path) ?? [String(t.input.path ?? t.detail ?? "")]).filter(Boolean))];
+    const check = items.find((t) => t.phase === "verify" && t.name === "run_command" && t.input.background !== true && (t.state === "failed" || t.state === "denied"));
+    const failed = check ? { name: String(check.detail ?? check.name).replace(/^\$\s*/, ""), at: clock(run.createdAt).slice(0, 5) }
+      : run.status === "failed" ? { name: "the turn failed", at: clock(run.createdAt).slice(0, 5) } : null;
+    return [{
+      ask: run.content, time: clock(run.createdAt).slice(0, 5),
+      askTop: top(node.querySelector(".request")), answerTop: top(node.querySelector(".answer")),
+      stepsTop: top(node.querySelector(".steps, .step-trail")), receiptTop: top(node.querySelector(".turn-receipt")),
+      edited, failed,
+    }];
+  });
+}
+function paintTimeline() {
+  timelineFrame = 0;
+  const line = el("timeline"), stage = el("stage"), conversation = el("conversation");
+  const long = Boolean(state) && !conversation.hidden && stage.scrollHeight > stage.clientHeight + 40;
+  line.hidden = !long;
+  if (!long) { timeline = []; return; }
+  line.style.top = `${stage.offsetTop + 14}px`;
+  line.style.height = `${Math.max(0, stage.clientHeight - 28)}px`;
+  const view = line.querySelector<HTMLElement>(".tl-view")!;
+  view.style.top = `${(stage.scrollTop / stage.scrollHeight) * 100}%`;
+  view.style.height = `${(stage.clientHeight / stage.scrollHeight) * 100}%`;
+  if (!line.classList.contains("on")) return;
+  timeline = timelineMarks(timelineFacts(stage), stage.scrollHeight);
+  line.querySelector(".tl-marks")!.innerHTML = timeline.map((mark) =>
+    `<i class="tl-m ${mark.kind}${mark === timelineHot || (timelineHot && mark.top === timelineHot.top && mark.kind === timelineHot.kind) ? " hot" : ""}" style="top:${(mark.at * 100).toFixed(2)}%"></i>`).join("");
+}
+const repaintTimeline = () => { if (!timelineFrame) timelineFrame = requestAnimationFrame(paintTimeline); };
+function timelineAt(event: PointerEvent | MouseEvent): Mark | null {
+  const line = el("timeline"), box = line.getBoundingClientRect();
+  if (!box.height) return null;
+  return markNear(timeline, (event.clientY - box.top) / box.height, 10 / box.height);
+}
+function showTimelineLabel(mark: Mark | null) {
+  timelineHot = mark;
+  const line = el("timeline"), label = line.querySelector<HTMLElement>(".tl-label")!;
+  label.hidden = !mark;
+  if (mark) {
+    label.innerHTML = `${h(mark.label)}${mark.meta ? ` <span>· ${h(mark.meta)}</span>` : ""}`;
+    label.style.top = `${(mark.at * 100).toFixed(2)}%`;
+  }
+  for (const node of line.querySelectorAll<HTMLElement>(".tl-m")) node.classList.remove("hot");
+  if (mark) line.querySelectorAll<HTMLElement>(".tl-m")[timeline.indexOf(mark)]?.classList.add("hot");
+}
+el("timeline").addEventListener("pointerenter", () => { el("timeline").classList.add("on"); paintTimeline(); });
+el("timeline").addEventListener("pointerleave", () => { el("timeline").classList.remove("on"); showTimelineLabel(null); });
+el("timeline").addEventListener("pointermove", (event) => { const mark = timelineAt(event); if (mark !== timelineHot) showTimelineLabel(mark); });
+el("timeline").addEventListener("click", (event) => {
+  const stage = el("stage"), line = el("timeline"), box = line.getBoundingClientRect();
+  const mark = timelineAt(event);
+  // A mark goes to its place; anywhere else on the line goes to that point.
+  const top = mark ? mark.top - 18 : ((event.clientY - box.top) / box.height) * stage.scrollHeight - stage.clientHeight / 2;
+  follow = false;
+  stage.scrollTo({ top: Math.max(0, top), behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+});
+el("stage").addEventListener("scroll", repaintTimeline, { passive: true });
+new ResizeObserver(repaintTimeline).observe(el("conversation"));
+new ResizeObserver(repaintTimeline).observe(el("stage"));
 document.addEventListener("demesne:open-settings", () => {
   if (state && !state.setup) openPage("settings");
 });

@@ -1214,25 +1214,45 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
    On the Mac the shell is translucent over the window's vibrancy; elsewhere
    it is the same colour, solid. No scrollbars; radii 8 and 12. */
 html[data-theme="demesne"] body.desktop {
-  --shell: #161617; --shell-glass: rgb(22 22 23 / 0.06); --panel-glass: rgb(17 17 18 / 0.5); --panel: #111112; --panel-edge: rgb(235 235 235 / 0.045);
-  --ink: var(--shell); --side: var(--shell); --surface: #19191a; --surface2: #1f1f20; --surface3: #272728; --raised: #1f1f20;
-  --hair: rgb(235 235 235 / 0.07); --hair2: rgb(235 235 235 / 0.12); --tone: rgb(235 235 235 / 0.05); --tone2: rgb(235 235 235 / 0.09);
-  --t1: #ebebeb; --t2: rgb(235 235 235 / 0.72); --t3: rgb(235 235 235 / 0.52); --t4: rgb(235 235 235 / 0.38);
-  --strong: #ebebeb; --paper: rgb(235 235 235 / 0.86); --secondary: rgb(235 235 235 / 0.72); --muted: rgb(235 235 235 / 0.52);
-  --menuSelection: #1f1f20; --userSurface: #19191a; --toolSurface: #19191a; --toolActive: #1f1f20; --syntaxComment: rgb(235 235 235 / 0.42); --contextFree: rgb(235 235 235 / 0.3);
+  /* The ink in three channels: the text, the shell and the panel. Settings ›
+     Appearance › Ink swaps them; Glass sets how much of the blur shows. */
+  --ink-fg: 235 235 235; --ink-base: 22 22 23; --ink-deep: 17 17 18;
+}
+html[data-theme="demesne-light"] body.desktop { --ink-fg: 46 46 46; --ink-base: 242 242 242; --ink-deep: 255 255 255; }
+html[data-theme="demesne"] body.desktop, html[data-theme="demesne-light"] body.desktop {
+  --shell: rgb(var(--ink-base)); --shell-glass: rgb(var(--ink-base) / var(--shell-a, 0.06)); --panel: rgb(var(--ink-deep)); --panel-glass: rgb(var(--ink-deep) / var(--panel-a, 0.5)); --panel-edge: rgb(var(--ink-fg) / 0.045);
+  --ink: var(--shell); --side: var(--shell);
+  --hair: rgb(var(--ink-fg) / 0.07); --hair2: rgb(var(--ink-fg) / 0.12); --tone: rgb(var(--ink-fg) / 0.05); --tone2: rgb(var(--ink-fg) / 0.09);
+  --t1: rgb(var(--ink-fg)); --t2: rgb(var(--ink-fg) / 0.72); --t3: rgb(var(--ink-fg) / 0.52); --t4: rgb(var(--ink-fg) / 0.38);
+  --strong: rgb(var(--ink-fg)); --paper: rgb(var(--ink-fg) / 0.86); --secondary: rgb(var(--ink-fg) / 0.72); --muted: rgb(var(--ink-fg) / 0.52);
+  --syntaxComment: rgb(var(--ink-fg) / 0.42); --contextFree: rgb(var(--ink-fg) / 0.3);
   --composerQueuedBorder: color-mix(in srgb, var(--warn) 40%, transparent); --composerStoppedBorder: color-mix(in srgb, var(--bad) 40%, transparent); --composerRestoredBorder: color-mix(in srgb, var(--acc) 40%, transparent);
+  --acc-soft: color-mix(in srgb, var(--acc) 12%, transparent);
   --r-sm: 8px; --r: 8px; --r-lg: 12px;
+}
+html[data-theme="demesne"] body.desktop {
+  --surface: color-mix(in srgb, rgb(var(--ink-fg)) 2%, rgb(var(--ink-base))); --surface2: color-mix(in srgb, rgb(var(--ink-fg)) 4.5%, rgb(var(--ink-base))); --surface3: color-mix(in srgb, rgb(var(--ink-fg)) 8%, rgb(var(--ink-base)));
+  --raised: var(--surface2); --menuSelection: var(--surface2); --userSurface: var(--surface); --toolSurface: var(--surface); --toolActive: var(--surface2);
 }
 html[data-theme="demesne-light"] body.desktop {
-  --shell: #f2f2f2; --shell-glass: rgb(245 245 245 / 0.12); --panel-glass: rgb(255 255 255 / 0.55); --panel: #ffffff; --panel-edge: rgb(46 46 46 / 0.08);
-  --ink: var(--shell); --side: var(--shell); --surface: #ffffff; --surface2: #f4f4f4; --surface3: #ebebeb; --raised: #f4f4f4;
-  --hair: rgb(46 46 46 / 0.08); --hair2: rgb(46 46 46 / 0.14); --tone: rgb(46 46 46 / 0.04); --tone2: rgb(46 46 46 / 0.07);
-  --t1: #2e2e2e; --t2: rgb(46 46 46 / 0.76); --t3: rgb(46 46 46 / 0.56); --t4: rgb(46 46 46 / 0.42);
-  --strong: #2e2e2e; --paper: rgb(46 46 46 / 0.88); --secondary: rgb(46 46 46 / 0.76); --muted: rgb(46 46 46 / 0.56);
-  --menuSelection: #f4f4f4; --userSurface: #ffffff; --toolSurface: #ffffff; --toolActive: #f4f4f4; --syntaxComment: rgb(46 46 46 / 0.45); --contextFree: rgb(46 46 46 / 0.3);
+  --hair: rgb(var(--ink-fg) / 0.08); --hair2: rgb(var(--ink-fg) / 0.14); --tone: rgb(var(--ink-fg) / 0.04); --tone2: rgb(var(--ink-fg) / 0.07);
+  --t2: rgb(var(--ink-fg) / 0.76); --t3: rgb(var(--ink-fg) / 0.56); --t4: rgb(var(--ink-fg) / 0.42);
+  --paper: rgb(var(--ink-fg) / 0.88); --secondary: rgb(var(--ink-fg) / 0.76); --muted: rgb(var(--ink-fg) / 0.56); --syntaxComment: rgb(var(--ink-fg) / 0.45);
+  --panel-edge: rgb(var(--ink-fg) / 0.08);
   --composerQueuedBorder: color-mix(in srgb, var(--warn) 45%, transparent); --composerStoppedBorder: color-mix(in srgb, var(--bad) 45%, transparent); --composerRestoredBorder: color-mix(in srgb, var(--acc) 45%, transparent);
-  --r-sm: 8px; --r: 8px; --r-lg: 12px;
+  --acc-soft: color-mix(in srgb, var(--acc) 10%, transparent);
+  --surface: rgb(var(--ink-deep)); --surface2: color-mix(in srgb, rgb(var(--ink-fg)) 4.5%, rgb(var(--ink-deep))); --surface3: color-mix(in srgb, rgb(var(--ink-fg)) 9%, rgb(var(--ink-deep)));
+  --raised: var(--surface2); --menuSelection: var(--surface2); --userSurface: var(--surface); --toolSurface: var(--surface); --toolActive: var(--surface2);
 }
+/* Inks: the same one-ink rules, tinted, with an accent that belongs. */
+html[data-theme="demesne"][data-ink="warm"] body.desktop { --ink-fg: 240 230 218; --ink-base: 30 24 19; --ink-deep: 24 19 15; --acc: #e3965a; --electric: #e3965a; }
+html[data-theme="demesne"][data-ink="cool"] body.desktop { --ink-fg: 226 233 245; --ink-base: 18 22 30; --ink-deep: 14 17 24; --acc: #79a6f2; --electric: #79a6f2; }
+html[data-theme="demesne"][data-ink="moss"] body.desktop { --ink-fg: 226 238 227; --ink-base: 19 25 20; --ink-deep: 15 20 16; --acc: #78c48a; --electric: #78c48a; }
+html[data-theme="demesne"][data-ink="rose"] body.desktop { --ink-fg: 245 228 236; --ink-base: 30 20 25; --ink-deep: 24 16 20; --acc: #e886ad; --electric: #e886ad; }
+html[data-theme="demesne-light"][data-ink="warm"] body.desktop { --ink-fg: 58 44 32; --ink-base: 244 237 228; --ink-deep: 255 251 246; --acc: #b85f22; --electric: #b85f22; }
+html[data-theme="demesne-light"][data-ink="cool"] body.desktop { --ink-fg: 34 44 62; --ink-base: 234 239 247; --ink-deep: 250 252 255; --acc: #2f6fdb; --electric: #2f6fdb; }
+html[data-theme="demesne-light"][data-ink="moss"] body.desktop { --ink-fg: 36 52 38; --ink-base: 234 242 234; --ink-deep: 251 254 251; --acc: #2f8a4c; --electric: #2f8a4c; }
+html[data-theme="demesne-light"][data-ink="rose"] body.desktop { --ink-fg: 62 36 48; --ink-base: 246 235 240; --ink-deep: 255 250 252; --acc: #c2477a; --electric: #c2477a; }
 body.desktop { background: var(--shell, var(--ink)); }
 #desktop-shell { background: var(--shell, var(--ink)); }
 html.glass, html.glass body.desktop { background: transparent; }
@@ -1333,3 +1353,12 @@ html.mac-chrome.fullscreen #desktop-shell:has(#desktop-sidebar[hidden]) #desktop
 /* Words arrive softly: each new run of a streaming answer fades in. */
 @keyframes md-in { from { opacity: 0; } }
 @media (prefers-reduced-motion: no-preference) { .markdown .md-in { animation: md-in 200ms ease-out both; } }
+
+/* Settings › Appearance: the Glass slider and the Ink swatches. */
+.st-range { display: inline-flex; align-items: center; gap: 10px; color: var(--t4); font-size: 11.5px; }
+.st-range input { -webkit-appearance: none; appearance: none; width: 180px; height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--tone2), var(--t3)); outline: none; }
+.st-range input::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.35), 0 0 0 0.5px rgb(0 0 0 / 0.2); cursor: grab; }
+.st-range input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--acc-soft), 0 1px 4px rgb(0 0 0 / 0.35); }
+.st-inks { display: inline-flex; gap: 8px; }
+.st-inks button { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: var(--swatch); box-shadow: inset 0 0 0 1px rgb(127 127 127 / 0.3); cursor: pointer; transition: box-shadow 140ms var(--ease, ease); }
+.st-inks button.on { box-shadow: 0 0 0 2px var(--panel, var(--ink)), 0 0 0 3.5px var(--t1); }

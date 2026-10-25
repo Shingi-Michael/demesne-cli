@@ -17,7 +17,7 @@ import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointe
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
-import { isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
+import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
 import { deedPage, editLine, findHits, isLive, numberOf, toCheck, type DeedFilter, type DeedUi } from "./deed-view.ts";
 import type { Deed, DeedAction, DeedPeek, ProofClaim, Routine } from "@demesne/protocol";
@@ -2099,6 +2099,23 @@ let settingsInfo: SettingsInfo | null = null, usageScores: ModelScore[] | null =
 /// Settings › General, kept on this device.
 let openOn: "home" | "last" = "home", keepAwake = true;
 try { if (localStorage.getItem("demesne-open-on") === "last") openOn = "last"; if (localStorage.getItem("demesne-awake") === "off") keepAwake = false; } catch {}
+/// Settings › Appearance › Glass and Ink, kept on this device.
+let glassLevel = GLASS_DEFAULT, inkName: Ink = "neutral";
+try {
+  const saved = Number(localStorage.getItem("demesne-glass"));
+  if (localStorage.getItem("demesne-glass") !== null && Number.isFinite(saved)) glassLevel = Math.min(100, Math.max(0, saved));
+  const ink = localStorage.getItem("demesne-ink");
+  if (isInk(ink)) inkName = ink;
+} catch {}
+function applyGlass() {
+  const { shell, panel } = glassAlphas(glassLevel), root = document.documentElement.style;
+  root.setProperty("--shell-a", String(shell)); root.setProperty("--panel-a", String(panel));
+}
+function applyInk() {
+  if (inkName === "neutral") delete document.documentElement.dataset.ink;
+  else document.documentElement.dataset.ink = inkName;
+}
+applyGlass(); applyInk();
 async function settingsCall(method: string, args: Record<string, unknown> = {}) {
   try {
     settingsInfo = await api<SettingsInfo>(method, args);
@@ -2126,7 +2143,7 @@ function settingsView(): SettingsView {
     info: settingsInfo,
     general: { openOn, awake: keepAwake },
     notify: notifyOn,
-    appearance: { theme: s.theme, themes: s.themes.map((name) => ({ name, label: s.themeOptions.find((item) => item.name === name)?.label ?? name })), canUndo: s.themeCanUndo, zoom: zoomLevel },
+    appearance: { theme: s.theme, themes: s.themes.map((name) => ({ name, label: s.themeOptions.find((item) => item.name === name)?.label ?? name })), canUndo: s.themeCanUndo, zoom: zoomLevel, glass: glassLevel, ink: inkName },
     archived: archivedChats,
     usage: usageScores,
     modelWords,
@@ -2272,6 +2289,17 @@ function renderPage() {
     if (again) { again.value = field.value; again.focus({ preventScroll: true }); again.setSelectionRange(field.at, field.at); again.scrollTop = field.scroll; }
   }
 }
+// Glass follows the slider as it moves, and is kept when you let go.
+document.getElementById("page")?.addEventListener("input", (event) => {
+  const input = event.target as HTMLElement;
+  if (!(input instanceof HTMLInputElement) || !input.matches("[data-glass]")) return;
+  glassLevel = Math.min(100, Math.max(0, Number(input.value) || 0));
+  applyGlass();
+});
+document.getElementById("page")?.addEventListener("change", (event) => {
+  const input = event.target as HTMLElement;
+  if (input instanceof HTMLInputElement && input.matches("[data-glass]")) try { localStorage.setItem("demesne-glass", String(glassLevel)); } catch {}
+});
 // A number in Settings saves on Enter, or when you leave it.
 document.getElementById("page")?.addEventListener("focusout", (event) => {
   const input = event.target as HTMLElement;
@@ -4342,6 +4370,7 @@ async function dispatch(
   if (action === "settings-fold") { settingsUi.fold = settingsUi.fold === args.fold ? "" : String(args.fold); return renderPage(); }
   if (action === "settings-local") {
     if (args.key === "openOn") { openOn = args.value === "last" ? "last" : "home"; try { localStorage.setItem("demesne-open-on", openOn); } catch {} }
+    if (args.key === "ink" && isInk(args.value)) { inkName = args.value; try { localStorage.setItem("demesne-ink", inkName); } catch {} applyInk(); }
     if (args.key === "awake") { keepAwake = args.value === true; try { localStorage.setItem("demesne-awake", keepAwake ? "on" : "off"); } catch {} renderAwake(); }
     return renderPage();
   }

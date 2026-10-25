@@ -137,7 +137,7 @@ export interface SettingsView {
   fold: string;
   general: { openOn: "home" | "last"; awake: boolean };
   notify: Record<NotifyKind, boolean>;
-  appearance: { theme: string; themes: { name: string; label: string }[]; canUndo: boolean; zoom: number | null };
+  appearance: { theme: string; themes: { name: string; label: string }[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink };
   archived: ChatsPageChat[] | null;
   usage: ModelScore[] | null;
   modelWords: (model: { id: string; displayName?: string }) => string;
@@ -150,6 +150,17 @@ export interface SettingsView {
   chats: { here: number; all: number };
   online: boolean;
 }
+
+/// Settings › Appearance › Ink: the hue every grey is made from (Demesne's own themes).
+export const INKS = [["neutral", "Neutral", "#8e8e93"], ["warm", "Warm", "#c58b5c"], ["cool", "Cool", "#6f8fd6"], ["moss", "Moss", "#7da37a"], ["rose", "Rose", "#c47a9b"]] as const;
+export type Ink = (typeof INKS)[number][0];
+export const isInk = (value: unknown): value is Ink => INKS.some(([id]) => id === value);
+/// Glass, 0 (clear) to 100 (solid), as the shell's and the panel's opacity.
+export function glassAlphas(glass: number) {
+  const g = Math.min(100, Math.max(0, glass)) / 100;
+  return { shell: Math.round(g * g * 1000) / 1000, panel: Math.round((0.33 + 0.67 * g) * 1000) / 1000 };
+}
+export const GLASS_DEFAULT = 25;
 
 export interface SettingsRow { title: string; line?: string; control?: string; keywords?: string; fold?: string }
 interface Group { name: string; right?: string; rows: SettingsRow[]; hint?: string }
@@ -204,6 +215,8 @@ function pages(view: SettingsView): Page[] {
       { title: "Theme", line: "The palette for the whole app", control: (view.appearance.canUndo ? link("settings-set", "Undo", { method: "theme-undo", args: {} }) : "") + word("theme", themeLabel, view.fold === "theme"), keywords: "colour color dark light palette theme",
         fold: view.fold === "theme" ? themeGroups.filter(([, items]) => items.length).map(([heading, items]) => choices(`${heading} themes`, items.map((item) => [item.label, item.name === view.appearance.theme, "settings-set", { method: "theme", args: { name: item.name } }]), heading)).join("") : "" },
       { title: "Make a theme", line: "Answer a few questions and Demesne builds a palette from your answers", control: link("settings-command", "Start", { text: "/themefy " }), keywords: "themefy custom palette" },
+      ...(view.desktop && view.mac ? [{ title: "Glass", line: "How much of the desktop shows through the window", control: `<label class="st-range">Clear<input type="range" min="0" max="100" step="1" value="${view.appearance.glass}" data-glass aria-label="Glass">Solid</label>`, keywords: "glass transparent translucent blur vibrancy opacity" }] : []),
+      ...(/^demesne(-light)?$/.test(view.appearance.theme) ? [{ title: "Ink", line: "The colour every grey is made from, and the accent with it", control: `<span class="st-inks" role="group" aria-label="Ink">${INKS.map(([id, label, swatch]) => `<button type="button" class="${view.appearance.ink === id ? "on" : ""}" style="--swatch:${swatch}" title="${label}" aria-label="${label}" aria-pressed="${view.appearance.ink === id}" data-action="settings-local" data-args="${h(JSON.stringify({ key: "ink", value: id }))}"></button>`).join("")}</span>`, keywords: "ink tint hue colour color accent warm cool" }] : []),
       ...(view.desktop ? [{ title: "Text size", line: "The size of everything in the window", control: segments(([["Small", 0.9], ["Default", 1], ["Large", 1.1]] as [string, number][]).map(([label, zoom]) => [label, view.appearance.zoom === zoom, "settings-set", { method: "desktop-zoom", args: { zoom } }]), "Text size"), keywords: "zoom font scale" }] : []),
     ] },
   ] });

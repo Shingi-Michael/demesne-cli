@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { homeWords, notifyKinds, parseNumber, ruleWords, settingsNav, settingsPage, settingsSearch, shortNumber, SETTINGS_ORDER, type SettingsInfo, type SettingsView } from "../settings-page.ts";
+import { glassAlphas, GLASS_DEFAULT, homeWords, notifyKinds, parseNumber, ruleWords, settingsNav, settingsPage, settingsSearch, shortNumber, SETTINGS_ORDER, type SettingsInfo, type SettingsView } from "../settings-page.ts";
 
 const info: SettingsInfo = {
   home: "/Users/mike",
@@ -20,7 +20,7 @@ const view = (patch: Partial<SettingsView> = {}): SettingsView => ({
   section: "general", query: "", mac: true, desktop: true, home: info.home, info, error: "", fold: "",
   general: { openOn: "home", awake: true },
   notify: { wait: true, error: true, drive: true, done: false },
-  appearance: { theme: "demesne", themes: [{ name: "demesne", label: "Demesne" }, { name: "demesne-light", label: "Demesne Light" }], canUndo: false, zoom: 1 },
+  appearance: { theme: "demesne", themes: [{ name: "demesne", label: "Demesne" }, { name: "demesne-light", label: "Demesne Light" }], canUndo: false, zoom: 1, glass: 25, ink: "neutral" },
   archived: [], usage: [], modelWords: (model) => model.id,
   permissions: { mode: "ask", asks: { thisWeek: 12, lastWeek: 31 } },
   drive: { project: "demesne-cli", auto: { on: true, quietMinutes: 20, perDay: 3, usedToday: 1 } },
@@ -91,4 +91,19 @@ test("the theme word unfolds its choices in place", () => {
   const open = settingsPage(view({ section: "appearance", fold: "theme" }));
   expect(open).toContain("Demesne Light");
   expect(open).toContain('st-choice on');
+});
+
+test("glass runs from clear to solid, and the default is the built look", () => {
+  expect(glassAlphas(GLASS_DEFAULT)).toEqual({ shell: 0.063, panel: 0.498 });
+  expect(glassAlphas(0)).toEqual({ shell: 0, panel: 0.33 });
+  expect(glassAlphas(100)).toEqual({ shell: 1, panel: 1 });
+  expect(glassAlphas(140)).toEqual(glassAlphas(100));
+});
+
+test("Glass shows on the Mac, Ink only for Demesne's own themes", () => {
+  const page = settingsPage(view({ section: "appearance", appearance: { ...view().appearance, glass: 40, ink: "warm" } }));
+  expect(page).toContain('value="40" data-glass');
+  expect(page).toMatch(/class="on"[^>]*title="Warm"/);
+  expect(settingsPage(view({ section: "appearance", mac: false }))).not.toContain("data-glass");
+  expect(settingsPage(view({ section: "appearance", appearance: { ...view().appearance, theme: "custom-sunset" } }))).not.toContain("st-inks");
 });

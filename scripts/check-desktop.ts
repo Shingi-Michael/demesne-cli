@@ -80,6 +80,22 @@ const f = await fixture({
       yield { type: "finish", reason: "tool_calls" };
       return;
     }
+    // Proof marks: the pass pairs the smoke answer's claims with its steps; a
+    // check reads hello.ts and quotes it.
+    if (_tools.some(tool => tool.name === "proof_marks")) {
+      const claims = typeof user === "string" && user.includes(completed)
+        ? [{ text: "Check passed", step: 2, quote: "DESKTOP_CHECK_PASSED" }, { text: completed.replace(/\.$/, "") }]
+        : [];
+      yield { type: "tool_call_delta", index: 0, idDelta: "proof-marks", nameDelta: "proof_marks", argumentsDelta: JSON.stringify({ claims }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
+    if (_tools.some(tool => tool.name === "proof_verdict")) {
+      if (messages.some(message => message.role === "tool")) yield { type: "tool_call_delta", index: 0, idDelta: "proof-verdict", nameDelta: "proof_verdict", argumentsDelta: JSON.stringify({ holds: true, quote: "greeting = 'after'" }) };
+      else yield { type: "tool_call_delta", index: 0, idDelta: "proof-read", nameDelta: "read_file", argumentsDelta: JSON.stringify({ path: "hello.ts" }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
     if (typeof user === "string" && user.startsWith("Drive report: ")) {
       yield { type: "text_delta", delta: "Noted: Drive stopped before changing anything." };
       yield { type: "finish", reason: "stop" };
@@ -417,6 +433,36 @@ try {
   const commands = await f.client.commands(sessionId);
   assert(commands.commands.some(command => command.status === "completed" && command.exitCode === 0 && command.stdout.includes("DESKTOP_CHECK_PASSED")), "Approved command output was recorded");
   assert(await evaluate<boolean>("return !!document.querySelector('.katex') && !!document.querySelector('pre code');"), "Markdown, code and math rendered in Chromium");
+  // Proof marks: the claim its check backs carries a green line; its proof
+  // unfolds under the paragraph with the step's own lines, and Open the
+  // step unfolds that step on the guide. The claim nothing checked is
+  // dotted; Prove it reads the file and the line turns green.
+  const turnId = completedSession.turns.at(-1)!.id;
+  const proved = page.locator(`#turn-${turnId} .claim.proved`);
+  await until(() => proved.count().then(count => count === 1), "a claim a step proved gets its green line", 20_000);
+  assert.equal(await proved.innerText(), "Check passed");
+  assert((await proved.getAttribute("title"))!.startsWith("Ran bun run check · step 2"), "hovering a mark names its step");
+  const proofLine = page.locator(`#turn-${turnId} .proof-line`);
+  assert((await proofLine.innerText()).includes("1 proved") && (await proofLine.innerText()).includes("1 not checked"), "one count line under the answer");
+  await proved.click();
+  const proof = page.locator(`#turn-${turnId} .proof-fold.ok`);
+  await until(() => proof.isVisible(), "the proof unfolds under the paragraph");
+  assert((await proof.innerText()).includes("DESKTOP_CHECK_PASSED"), "the proof quotes the step's output");
+  assert.equal(await page.locator(`#turn-${turnId} .markdown > .proof-fold`).count(), 0, "the proof sits in the list item, not after the list");
+  await capture("02c-proof");
+  await proof.locator('[data-action="proof-step"]').click();
+  await until(() => page.locator(`#turn-${turnId} .tool-row.open`).count().then(count => count === 1), "Open the step unfolds it on the guide");
+  const unchecked = page.locator(`#turn-${turnId} .claim.unchecked`);
+  assert.equal(await unchecked.innerText(), completed.replace(/\.$/, ""));
+  await unchecked.click();
+  const unproven = page.locator(`#turn-${turnId} .proof-fold:not(.ok)`);
+  await until(() => unproven.innerText().then(text => text.includes("Nothing in this turn checked this.") && text.includes("This turn only edited hello.ts and ran bun run check.")), "an unchecked claim says what the turn did look at");
+  await page.locator("textarea").press("Enter");
+  await until(() => page.locator(`#turn-${turnId} .claim.proved`).count().then(count => count === 2), "Enter proves it: the check reads the file and the dotted line turns green", 20_000);
+  assert((await proofLine.innerText()).includes("All 2 proved"), "the count says all proved");
+  assert((await page.locator(`#turn-${turnId} .proof-fold.ok`).last().innerText()).includes("greeting = 'after'"), "the check's proof quotes what it read");
+  await page.keyboard.press("Escape");
+  await until(() => page.locator(`#turn-${turnId} .proof-fold`).count().then(count => count === 0), "Esc folds the proof");
   await until(() => page.locator(".sidebar-session[aria-current='page']").innerText().then(text => text.includes("Desktop smoke")), "sidebar tracks the current conversation title");
   await page.getByRole("searchbox", { name: "Search chats and projects" }).fill("no-such-conversation");
   await textIncludes("No matching conversations");

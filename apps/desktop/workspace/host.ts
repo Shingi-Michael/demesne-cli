@@ -861,7 +861,7 @@ export class WorkspaceHost {
       allow: config.permissions.allow.map((rule) => ({ rule, mine: mine.has(rule) })),
       trusted,
       subagent: subagent ? { model: subagent.model, models: subagent.models } : { model: config.agent?.subagentModel ?? null, models: [] },
-      agent: { maxModelRounds: config.agent?.maxModelRounds ?? DEFAULT_AGENT_LIMITS.maxModelRounds, maxToolCalls: config.agent?.maxToolCalls ?? DEFAULT_AGENT_LIMITS.maxToolCalls },
+      agent: { maxModelRounds: config.agent?.maxModelRounds ?? DEFAULT_AGENT_LIMITS.maxModelRounds, maxToolCalls: config.agent?.maxToolCalls ?? DEFAULT_AGENT_LIMITS.maxToolCalls, proofMarks: config.agent?.proofMarks !== false },
       drive: { maxActiveMinutes: limits.maxActiveMinutes ?? DEFAULT_DRIVE_LIMITS.maxActiveMinutes, maxTokens: limits.maxTokens ?? DEFAULT_DRIVE_LIMITS.maxTokens, maxTasks: limits.maxTasks ?? DEFAULT_DRIVE_LIMITS.maxTasks },
       images: config.images?.url ? { model: config.images.model ?? null } : null,
       heartbeat: config.heartbeat?.enabled !== false,
@@ -1764,6 +1764,11 @@ export class WorkspaceHost {
       await this.refreshProcesses();
       this.publish();
       return result;
+    }
+    // A proof mark: Prove it, Drop the sentence, Correct the sentence.
+    if (method === "proof") {
+      const action = args.action === "drop" ? "drop" : args.action === "correct" ? "correct" : "check";
+      return this.client.proofAction(this.current!.session.id, string(args.turnId, "turn", 200), string(args.claimId, "claim", 64), { action });
     }
     if (method === "export") {
       const format = args.format === "json" ? "json" : "md",

@@ -71,6 +71,7 @@ import { DriveAutoRuns } from "./drive-auto.ts";
 import { Routines } from "./routines.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
 import { DeedBook, judgeSentence } from "./deed.ts";
+import { checkClaim, proofPass } from "./proofs.ts";
 import { runTests } from "./deed-proof.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
@@ -416,6 +417,67 @@ export function createDaemonApp(options: {
   let closing = false;
   let closePromise: Promise<void> | undefined;
 
+  /// Proof marks and their checks run after turns; shutdown waits for them.
+  const proofWork = new Set<Promise<unknown>>();
+  const trackProof = (task: Promise<unknown>) => { proofWork.add(task); void task.then(() => proofWork.delete(task), () => proofWork.delete(task)); };
+  /// After an answer: one model call pairs its claims with the turn's steps.
+  /// Only conversation turns that ran a step; never a Drive worktree's.
+  function proofPassFor(turnId: string) {
+    if (options.agent?.proofMarks === false || closing) return;
+    const turn = store.getTurn(turnId);
+    if (!turn || turn.status !== "completed" || turn.kind || turn.planOnly) return;
+    const workspace = store.getSession(turn.sessionId)?.workspace?.root;
+    if (!workspace || workspace.startsWith(driveWorktrees)) return;
+    const answer = turn.responseText.trim();
+    const steps = store.turnToolCalls(turnId).filter((step) => step.status === "completed" && step.name !== "ask_user");
+    if (answer.length < 60 || !steps.length) return;
+    trackProof((async () => {
+      const inference = snapshotTurnInference(processor, false);
+      const lease = await scheduler.for(inference.providerId).acquire(`proofs:${turnId}`, driveLifecycle.signal, {});
+      try {
+        const claims = await proofPass({ answer, steps, inference, signal: driveLifecycle.signal });
+        if (claims.length && store.getTurn(turnId)) store.recordProofs(turnId, claims);
+      } finally { lease.release(); }
+    })().catch((error) => { if (!driveLifecycle.signal.aborted) console.error(`Proof marks failed for turn ${turnId}`, error); }));
+  }
+  /// Prove it: a read-only check settles one claim; drop and correct are
+  /// one event each.
+  async function proofAction(sessionId: string, turnId: string, claimId: string, body: unknown): Promise<Response> {
+    const session = store.getSession(sessionId);
+    const turn = store.getTurn(turnId);
+    if (!session || !turn || turn.sessionId !== sessionId) return apiError("not_found", "Turn not found", 404);
+    const claim = store.turnProofs(turnId).find((item) => item.id === claimId);
+    if (!claim) return apiError("not_found", "Claim not found", 404);
+    const action = typeof body === "object" && body && typeof (body as { action?: unknown }).action === "string" ? (body as { action: string }).action : "";
+    if (claim.state === "checking") return apiError("invalid_state", "That claim is being checked", 409);
+    if (action === "drop") return json({ claim: { ...claim, state: "dropped" }, event: store.updateProof(turnId, claimId, { state: "dropped" }).eventId });
+    if (action === "correct") {
+      if (claim.state !== "false" || !claim.words) return apiError("invalid_state", "Only a claim the check rewrote can be corrected", 409);
+      return json({ claim: { ...claim, state: "proved" }, event: store.updateProof(turnId, claimId, { state: "proved", why: null }).eventId });
+    }
+    if (action !== "check") return apiError("invalid_request", "Unknown proof action", 400);
+    if (claim.state !== "unchecked" && claim.state !== "false") return apiError("invalid_state", "That claim is already proved", 409);
+    if (!session.workspace) return apiError("invalid_state", "This chat has no project to check in", 409);
+    const workspaceRoot = session.workspace.root;
+    store.updateProof(turnId, claimId, { state: "checking", step: "", why: null, quote: null, words: null });
+    trackProof((async () => {
+      const inference = snapshotTurnInference(processor, false);
+      let last = "";
+      try {
+        const verdict = await checkClaim({ claim, answer: turn.responseText, workspaceRoot, sessionId, tools, inference, scheduler: scheduler.for(inference.providerId), signal: driveLifecycle.signal,
+          progress: (step) => { if (step !== last) { last = step; store.updateProof(turnId, claimId, { state: "checking", step }); } } });
+        if (!store.getTurn(turnId)) return;
+        if (verdict.holds === true) store.updateProof(turnId, claimId, { state: "proved", quote: verdict.quote ?? null, step: verdict.step ?? null, why: null, words: null, toolCallId: null });
+        else if (verdict.holds === false) store.updateProof(turnId, claimId, { state: "false", why: verdict.why, quote: verdict.quote ?? null, step: verdict.step ?? null, words: verdict.words ?? null });
+        else store.updateProof(turnId, claimId, { state: "unchecked", why: verdict.why, step: verdict.step ?? null, quote: null });
+      } catch (error) {
+        if (driveLifecycle.signal.aborted || !store.getTurn(turnId)) return;
+        store.updateProof(turnId, claimId, { state: "unchecked", why: `The check failed: ${error instanceof Error ? error.message : String(error)}`, step: null, quote: null });
+      }
+    })());
+    return json({ claim: { ...claim, state: "checking" } }, 202);
+  }
+
   function queueTurn(turn: Turn, inference: TurnInference): Promise<void> {
     const controller = new AbortController();
     activeControllers.set(turn.id, controller);
@@ -447,6 +509,7 @@ export function createDaemonApp(options: {
     } finally {
       const pending = pendingCompactions.get(turn.id);
       pendingCompactions.delete(turn.id);
+      if (!signal.aborted) proofPassFor(turn.id);
       if (pending && !signal.aborted && !closing && store.getTurn(turn.id)?.status === "completed") {
         try {
           const submitted = store.createTurn(turn.sessionId, `/compact${pending.instructions ? ` ${pending.instructions}` : ""}`, "deny", false, false, "compaction");
@@ -1337,6 +1400,9 @@ export function createDaemonApp(options: {
       if (request.method === "POST" && path[0] === "v1" && path[1] === "sessions" && path[3] === "rewind" && path[4] === "redo" && path.length === 5) {
         return redoRewind(path[2]!);
       }
+      if (request.method === "POST" && path[0] === "v1" && path[1] === "sessions" && path[3] === "proofs" && path.length === 6) {
+        return proofAction(path[2]!, path[4]!, path[5]!, await readOptionalJson(request));
+      }
 
       if(path[0]==="v1"&&path[1]==="sessions"&&path[2]&&["review","commands"].includes(path[3]??"")){
         const session=store.getSession(path[2]);if(!session?.workspace)return apiError("not_found","Workspace session not found",404);
@@ -1450,6 +1516,7 @@ export function createDaemonApp(options: {
       await scheduler.close(new DOMException("Daemon shutting down", "AbortError"));
       await Promise.allSettled(activeTurns);
       await Promise.allSettled(activeDriveDecisions);
+      await Promise.allSettled(proofWork);
       await mcpReady.catch(() => undefined);
       mcp.stop();
       heartbeat?.stop();

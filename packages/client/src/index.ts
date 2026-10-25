@@ -25,6 +25,7 @@ import {
   type SubmitTurnRequest,
   type SubmitTurnResponse,
   type TurnChangesResponse,
+  type SessionPullRequestsResponse,
   type UndoSessionRequest,
   type RewindSessionRequest,
   type ProofActionRequest,
@@ -459,6 +460,11 @@ export class DemesneClient {
 
   async redoRewind(sessionId: string): Promise<{ rewindId: string; files: string[] }> {
     return this.request(`/v1/sessions/${sessionId}/rewind/redo`, { method: "POST", body: "{}" });
+  }
+
+  /// The pull requests these chats opened, as gh last saw them.
+  async sessionPullRequests(sessionIds: string[], fresh = false): Promise<SessionPullRequestsResponse> {
+    return this.request<SessionPullRequestsResponse>(`/v1/sessions/prs?ids=${sessionIds.map(encodeURIComponent).join(",")}${fresh ? "&fresh=1" : ""}`);
   }
 
   async changes(sessionId: string, turnId?: string): Promise<TurnChangesResponse> {

@@ -578,6 +578,23 @@ describe("DemesneStore", () => {
     store.close();
   });
 
+  test("a chat keeps the pull request a tool opened", () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-storage-test-"));
+    temporaryDirectories.push(directory);
+    const store = new DemesneStore(join(directory, "demesne.sqlite"));
+    const { session } = store.createSession("PR", directory);
+    const { turn } = store.createTurn(session.id, "Open a PR", "ask", false);
+    store.startTurn(turn.id);
+    const { providerCallId } = store.startProviderCall(turn.id, "provider", "model");
+    store.settleProviderCall(providerCallId, "completed");
+    const { toolCallId } = store.recordToolCall(turn.id, providerCallId, "provider-pr", "run_command", JSON.stringify({ argv: ["gh", "pr", "create", "--fill"] }));
+    store.startToolCall(toolCallId);
+    store.settleToolCall(toolCallId, "completed", "https://github.com/a/b/pull/12\n");
+    expect(store.getSession(session.id)?.prUrl).toBe("https://github.com/a/b/pull/12");
+    expect(store.setSessionPrUrl(session.id, null).prUrl).toBeUndefined();
+    store.close();
+  });
+
   test("persists workspace, tool, and permission lifecycle events", () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-storage-test-"));
     temporaryDirectories.push(directory);

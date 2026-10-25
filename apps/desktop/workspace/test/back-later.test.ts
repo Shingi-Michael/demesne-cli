@@ -19,3 +19,9 @@ test("away until it's due, then back", () => {
   expect(backState("2026-10-25T20:00:00Z", Date.parse("2026-10-25T19:00:00Z"))).toBe("away");
   expect(backState("2026-10-25T20:00:00Z", Date.parse("2026-10-25T20:00:00Z"))).toBe("back");
 });
+
+test("a chat with an open pull request can wait for it to merge", () => {
+  expect(backChoices(new Date(2026, 9, 25, 21, 0), 287).at(-1)).toEqual({ label: "when #287 merges", at: "merge" });
+  expect(backState("merge", Date.now(), false)).toBe("away");
+  expect(backState("merge", Date.now(), true)).toBe("back");
+});

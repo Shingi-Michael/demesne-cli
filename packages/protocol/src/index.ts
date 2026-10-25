@@ -399,6 +399,9 @@ export interface Session {
   archivedAt?: string | null;
   /// Set while the chat is pinned to the top of the sidebar.
   pinnedAt?: string | null;
+  /// Bring it back later: off the list until then, at the top once it's due,
+  /// until you open it.
+  backAt?: string | null;
   /// Model this session was last switched to through the CLI. It is a hint for
   /// the user, not an automatic daemon-side switch.
   preferredModel?: string | null;
@@ -433,6 +436,8 @@ export interface RoutinesResponse { routines: Routine[] }
 
 export interface UpdateSessionRequest {
   pinned?: boolean;
+  /// When the chat comes back to the top of the sidebar; null clears it.
+  backAt?: string | null;
   /// Moves a chat that has no project into this folder.
   workspacePath?: string;
   trustWorkspace?: boolean;
@@ -746,8 +751,13 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
     if (typeof value.pinned !== "boolean") throw new ProtocolValidationError("pinned must be a boolean");
     update.pinned = value.pinned;
   }
-  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.workspacePath === undefined && update.pinned === undefined) {
-    throw new ProtocolValidationError("title, preferredModel, autoApprove, acceptEdits, pinned or workspacePath is required");
+  if (value.backAt !== undefined) {
+    if (value.backAt !== null && (typeof value.backAt !== "string" || value.backAt.length > 40 || !Number.isFinite(Date.parse(value.backAt))))
+      throw new ProtocolValidationError("backAt must be a time or null");
+    update.backAt = value.backAt === null ? null : new Date(value.backAt).toISOString();
+  }
+  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.workspacePath === undefined && update.pinned === undefined && update.backAt === undefined) {
+    throw new ProtocolValidationError("title, preferredModel, autoApprove, acceptEdits, pinned, backAt or workspacePath is required");
   }
   return update;
 }

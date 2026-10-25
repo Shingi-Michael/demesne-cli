@@ -100,6 +100,7 @@ interface SessionRow {
   context_start_message_id: number | null;
   archived_at: string | null;
   pinned_at: string | null;
+  back_at: string | null;
   preferred_model: string | null;
   auto_approve: number;
   accept_edits: number;
@@ -303,7 +304,7 @@ export class DemesneStore {
     const row = this.database
       .query(`
         SELECT sessions.id, sessions.title, sessions.created_at, sessions.updated_at,
-               sessions.workspace_id, sessions.archived_at, sessions.pinned_at, sessions.preferred_model, sessions.auto_approve, sessions.accept_edits,
+               sessions.workspace_id, sessions.archived_at, sessions.pinned_at, sessions.back_at, sessions.preferred_model, sessions.auto_approve, sessions.accept_edits,
                workspaces.root AS workspace_root
         FROM sessions
         LEFT JOIN workspaces ON workspaces.id = sessions.workspace_id
@@ -326,6 +327,7 @@ export class DemesneStore {
         : null,
       ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
       ...(row.pinned_at ? { pinnedAt: row.pinned_at } : {}),
+      ...(row.back_at ? { backAt: row.back_at } : {}),
       ...(row.preferred_model ? { preferredModel: row.preferred_model } : {}),
       turns: turns.map(mapTurn),
     };
@@ -369,6 +371,15 @@ export class DemesneStore {
     return this.database.transaction(() => {
       this.getSessionOrThrow(id);
       this.database.query("UPDATE sessions SET pinned_at = ? WHERE id = ?").run(pinned ? new Date().toISOString() : null, id);
+      return this.getSessionOrThrow(id);
+    })();
+  }
+
+  /// Bring it back later: the chat leaves the list until `at`.
+  setSessionBackAt(id: string, at: string | null): Session {
+    return this.database.transaction(() => {
+      this.getSessionOrThrow(id);
+      this.database.query("UPDATE sessions SET back_at = ? WHERE id = ?").run(at, id);
       return this.getSessionOrThrow(id);
     })();
   }
@@ -1998,6 +2009,9 @@ export class DemesneStore {
     }
     if (!this.hasColumn("sessions", "pinned_at")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN pinned_at TEXT");
+    }
+    if (!this.hasColumn("sessions", "back_at")) {
+      this.database.run("ALTER TABLE sessions ADD COLUMN back_at TEXT");
     }
     if (!this.hasColumn("sessions", "preferred_model")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN preferred_model TEXT");

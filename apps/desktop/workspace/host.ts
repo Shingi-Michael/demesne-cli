@@ -59,6 +59,7 @@ import type { PointPick } from "./point.ts";
 import { WorkspaceSession } from "./session-model.ts";
 import { lastAsk, waitingAsk, type AwayAsk } from "./away.ts";
 import { glanceOf } from "./glance.ts";
+import { backState } from "./back-later.ts";
 import { DEFAULT_DRIVE_LIMITS } from "@demesne/protocol";
 import { SETTINGS_KEYS, type SettingsInfo } from "./settings-page.ts";
 
@@ -326,6 +327,7 @@ export class WorkspaceHost {
         ask: this.waitingAsks.get(session.id) ?? null,
         lastAsk: lastAsk(session.turns),
         ...(session.pinnedAt ? { pinned: true } : {}),
+        ...(session.backAt ? { backAt: session.backAt } : {}),
       })),
       runs: this.current?.runs() ?? [],
       cursor: this.current?.cursor ?? 0,
@@ -616,6 +618,8 @@ export class WorkspaceHost {
     this.publish();
     try {
       const state = await this.client.getSessionState(id);
+      // A chat that came back is done coming back once you open it.
+      if (backState(state.session.backAt) === "back") void this.client.updateSession(id, { backAt: null }).then(() => this.refreshSessions()).catch(() => {});
       const events = await replaySession(
         state,
         (sessionId, after, signal) =>
@@ -1706,6 +1710,13 @@ export class WorkspaceHost {
       this.commandCache = null;
       this.publish();
       return customizeView(root);
+    }
+    // Bring it back later: off the list until then; null brings it back now.
+    if (method === "bring-back") {
+      const at = args.at === null ? null : string(args.at, "at", 40);
+      await this.client.updateSession(string(args.id, "session", 200), { backAt: at });
+      await this.refreshSessions();
+      return;
     }
     if (method === "pin") {
       await this.client.updateSession(string(args.id, "session", 200), { pinned: args.pinned === true });

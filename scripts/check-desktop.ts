@@ -584,6 +584,25 @@ try {
   await page.keyboard.press("Control+Shift+Tab");
   await until(async () => (await current())?.includes(sessionId), "Ctrl+Shift+Tab opens the one before");
   await textIncludes(completed);
+  // Bring it back later: the bell beside Pin and Archive unfolds a few times;
+  // the chat leaves the list until then, and comes back under Back now.
+  const asideRow = page.locator(`#sidebar-projects .sidebar-item:not(:has([data-args*='${sessionId}']))`).first();
+  const asideId = JSON.parse(await asideRow.locator(".sidebar-session").getAttribute("data-args") ?? "{}").id as string;
+  await asideRow.hover();
+  await asideRow.locator(".sidebar-bell").click();
+  await page.locator(".sidebar-back-line .sidebar-back-opt", { hasText: "in an hour" }).waitFor();
+  await capture("02-bring-back");
+  await page.locator(".sidebar-back-line .sidebar-back-opt", { hasText: "in an hour" }).click();
+  await until(() => page.locator(`.sidebar-session[data-args*='${asideId}']`).count().then(count => count === 0), "the chat leaves the list until then");
+  assert.ok(Date.parse((await f.client.getSessionState(asideId)).session.backAt ?? "") > Date.now() + 3_500_000, "for an hour");
+  await page.evaluate((id) => (window as unknown as { demesne: { request: (method: string, args: unknown) => Promise<unknown> } }).demesne.request("bring-back", { id: id.aside, sessionId: id.current, at: new Date(Date.now() - 1000).toISOString() }), { aside: asideId, current: sessionId });
+  await until(() => page.locator(`#sidebar-back .sidebar-session[data-args*='${asideId}']`).count().then(count => count === 1), "once due it leads the list under Back now");
+  await capture("02-back-now");
+  await page.locator(`#sidebar-back .sidebar-session[data-args*='${asideId}']`).click();
+  await until(async () => !(await f.client.getSessionState(asideId)).session.backAt, "opening it ends its coming back");
+  await until(() => page.locator("#sidebar-back").isHidden(), "and Back now empties");
+  await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
+  await textIncludes(completed);
   // Each row deletes itself from the sidebar, without a menu or a dialog;
   // the list closes up and never shows more than six. ⌘Z brings it back
   // while it waits to be archived.
@@ -1400,7 +1419,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "the folded sidebar peeks out", "rest on a chat to see where it stands", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

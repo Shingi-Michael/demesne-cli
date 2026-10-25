@@ -388,14 +388,16 @@ test("the window picks up an away run Drive started and leaves each one to revie
     await eventually(() => host.breakage.state.away?.status === "finished", 15000);
     await eventually(() => host.breakage.state.fix?.status === "ready" && host.breakage.state.inbox.length === 2, 5000);
     expect(host.breakage.state.away?.items.map((item) => item.state)).toEqual(["ready", "ready", "ready"]);
-    // Newest on the card, the rest below it; each acts on its own branch.
-    const [b] = host.breakage.state.inbox;
-    expect(b!.title).toBe("Tidy B");
-    await host.handle("breakage-apply", { sessionId, id: b!.id });
+    // One on the card, the rest below it; each acts on its own branch. Which
+    // one the card keeps depends on what was running when the window looked.
+    const open = () => [host.breakage.state.fix, ...host.breakage.state.inbox].map((fix) => fix!);
+    const titled = (title: string) => open().find((fix) => fix.title === title)!;
+    expect(open().map((fix) => fix.title).sort()).toEqual(["Tidy A", "Tidy B", "Tidy C"]);
+    await host.handle("breakage-apply", { sessionId, id: titled("Tidy B").id });
     expect(readFileSync(join(f.workspace, "B.txt"), "utf8")).toBe("tidied\n");
     expect(existsSync(join(f.workspace, "A.txt"))).toBe(false);
-    expect(host.breakage.state.inbox.map((fix) => fix.title)).toEqual(["Tidy A"]);
-    await host.handle("breakage-discard", { sessionId, id: host.breakage.state.fix!.id });
+    expect(open().map((fix) => fix.title).sort()).toEqual(["Tidy A", "Tidy C"]);
+    await host.handle("breakage-discard", { sessionId, id: titled("Tidy C").id });
     expect(host.breakage.state.fix?.title).toBe("Tidy A");
     expect(host.breakage.state.inbox).toEqual([]);
     // The summary stays while any of its work waits for review.

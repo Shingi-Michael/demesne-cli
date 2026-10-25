@@ -521,6 +521,17 @@ try {
   assert(await page.locator("#rail-expand").isVisible(), "The folded sidebar is a rail");
   assert(!await page.locator("#sidebar-sessions").isVisible(), "The rail hides the list");
   await capture("02-rail");
+  // Resting on the rail's empty space peeks the whole sidebar out over the panel.
+  const rail = await page.locator(".sidebar-rail").boundingBox();
+  await page.mouse.move(rail!.x + rail!.width / 2, rail!.y + rail!.height - 120);
+  await page.mouse.move(rail!.x + rail!.width / 2, rail!.y + rail!.height - 110);
+  await until(() => page.locator("#desktop-shell.sidebar-peek").count().then(count => count === 1), "the folded sidebar peeks out");
+  await page.locator(".sidebar-session[aria-current='page']").waitFor();
+  assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "false", "a peek leaves the sidebar folded");
+  await capture("02-rail-peek");
+  await page.locator(".sidebar-session[aria-current='page']").click();
+  await until(() => page.locator("#desktop-shell.sidebar-peek").count().then(count => count === 0), "picking a chat puts the peek away");
+  assert(await page.locator("#rail-expand").isVisible(), "and the rail is back");
   await page.locator("#rail-expand").click();
   assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "true");
   await page.getByRole("button", { name: "New chat", exact: true }).click();
@@ -1376,7 +1387,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "the folded sidebar peeks out", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

@@ -128,7 +128,7 @@ export async function startDaemon(
       pid: owner,
       health: null,
       message: `Daemon pid ${owner} holds ${deps.dataDirectory} but is not healthy at ${deps.server}. `
-        + "Stop it with `demesne daemon stop` before starting another.",
+        + "Quit that process before starting another.",
     };
   }
 
@@ -152,8 +152,8 @@ export async function startDaemon(
       stdout: logFd,
       stderr: logFd,
       stdin: "ignore",
-      // Its own session: closing the terminal that ran `demesne daemon start`
-      // (or that auto-started it) must not take the daemon down with it.
+      // Its own session: closing the window that started it must not take
+      // the daemon down with it.
       detached: true,
     });
   } finally {
@@ -188,6 +188,40 @@ export async function startDaemon(
     health: null,
     message: `Daemon did not become healthy within ${Math.round(timeoutMs / 1000)}s. Check ${logPath}.`,
   };
+}
+
+export async function stopDaemon(
+  deps: DaemonControlDependencies,
+  options: { timeoutMs?: number } = {},
+): Promise<{ stopped: boolean; message: string }> {
+  const recorded = readPid(deps);
+  const health = await daemonHealth(deps);
+  if (!recorded && !health) return { stopped: false, message: "Daemon is not running." };
+
+  // The pid file can be missing or stale while a daemon still serves; the data
+  // directory lock records the process that actually owns it.
+  let pid = recorded;
+  if (health && (!pid || !deps.isProcessAlive(pid))) pid = lockOwnerDaemonPid(deps) ?? pid;
+
+  if (pid) {
+    try {
+      deps.kill(pid, "SIGTERM");
+    } catch {
+      // The process may already be gone; the health check decides the outcome.
+    }
+  }
+
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await deps.sleep(200);
+    const stillHealthy = await daemonHealth(deps);
+    if (!stillHealthy && (!pid || !deps.isProcessAlive(pid))) {
+      removePid(deps);
+      return { stopped: true, message: pid ? `Daemon stopped (pid ${pid}).` : "Daemon stopped." };
+    }
+  }
+  return { stopped: false, message: "Daemon did not stop in time. Check the daemon log." };
 }
 
 function pidPath(deps: DaemonControlDependencies): string {

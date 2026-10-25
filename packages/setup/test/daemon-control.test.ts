@@ -6,6 +6,7 @@ import {
   daemonHealth,
   resolveDaemonCommand,
   startDaemon,
+  stopDaemon,
   type DaemonControlDependencies,
   type DaemonHealth} from "../src/daemon-control.ts";
 
@@ -206,5 +207,62 @@ describe("resolveDaemonCommand", () => {
       { moduleDir: "/$bunfs/root", execPath: "/nowhere/demesne" },
     );
     expect(command).toEqual(["/opt/demesned"]);
+  });
+});
+
+describe("stopDaemon", () => {
+  test("falls back to the lock owner when the pid file is missing", async () => {
+    const directory = temporaryDirectory();
+    const state = createFakeDependencies(directory);
+    state.health = { status: "ok", provider: "p", model: "m" };
+    state.others.set(10492, "bun /src/demesne-cli/apps/daemon/src/main.ts");
+    writeLockOwner(directory, 10492);
+    const result = await stopDaemon(state.deps);
+    expect(result.stopped).toBe(true);
+    expect(state.killed).toEqual([10492]);
+    expect(result.message).toContain("10492");
+  });
+
+  test("falls back to the lock owner when the pid file is stale", async () => {
+    const directory = temporaryDirectory();
+    const state = createFakeDependencies(directory);
+    state.health = { status: "ok", provider: "p", model: "m" };
+    state.others.set(10492, "/usr/local/bin/demesned");
+    writeLockOwner(directory, 10492);
+    writeFileSync(join(directory, "daemon.pid"), "4242\n");
+    const result = await stopDaemon(state.deps);
+    expect(result.stopped).toBe(true);
+    expect(state.killed).toEqual([10492]);
+    expect(existsSync(join(directory, "daemon.pid"))).toBe(false);
+  });
+
+  test("does not signal a lock owner pid that is not a demesne daemon", async () => {
+    const directory = temporaryDirectory();
+    const state = createFakeDependencies(directory);
+    state.health = { status: "ok", provider: "p", model: "m" };
+    state.others.set(10492, "/Applications/Safari.app/Contents/MacOS/Safari");
+    writeLockOwner(directory, 10492);
+    const result = await stopDaemon(state.deps, { timeoutMs: 20 });
+    expect(result.stopped).toBe(false);
+    expect(state.killed).toEqual([]);
+  });
+
+  test("signals the recorded pid and clears the pid file", async () => {
+    const directory = temporaryDirectory();
+    const state = createFakeDependencies(directory);
+    state.alive = true;
+    state.health = { status: "ok", provider: "p", model: "m" };
+    writeFileSync(join(directory, "daemon.pid"), "777\n");
+    const result = await stopDaemon(state.deps);
+    expect(result.stopped).toBe(true);
+    expect(state.killed).toEqual([777]);
+    expect(existsSync(join(directory, "daemon.pid"))).toBe(false);
+  });
+
+  test("reports a daemon that is not running", async () => {
+    const state = createFakeDependencies(temporaryDirectory());
+    const result = await stopDaemon(state.deps);
+    expect(result.stopped).toBe(false);
+    expect(result.message).toContain("not running");
   });
 });

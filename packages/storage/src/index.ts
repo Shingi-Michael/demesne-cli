@@ -609,7 +609,7 @@ export class DemesneStore {
   }
 
   /// Sessions with a queued or running turn, oldest turn first. Used by the
-  /// daemon status route and the `demesne ps` dashboard.
+  /// daemon status route.
   listActiveTurns(): Array<{
     sessionId: string;
     title: string;

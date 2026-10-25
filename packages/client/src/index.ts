@@ -27,6 +27,8 @@ import {
   type TurnChangesResponse,
   type UndoSessionRequest,
   type RewindSessionRequest,
+  type ProofActionRequest,
+  type ProofClaim,
   type SteerTurnRequest,
   type RewindResponse,
   type UndoTurnResponse,
@@ -444,6 +446,11 @@ export class DemesneClient {
 
   async steer(sessionId: string, request: SteerTurnRequest): Promise<{ steerId: string; turnId: string }> {
     return this.request(`/v1/sessions/${sessionId}/steer`, { method: "POST", body: JSON.stringify(request) });
+  }
+
+  /// A proof mark's action: check a claim, drop its sentence, or correct it.
+  async proofAction(sessionId: string, turnId: string, claimId: string, request: ProofActionRequest): Promise<{ claim: ProofClaim }> {
+    return this.request(`/v1/sessions/${sessionId}/proofs/${encodeURIComponent(turnId)}/${encodeURIComponent(claimId)}`, { method: "POST", body: JSON.stringify(request) });
   }
 
   async redoRewind(sessionId: string): Promise<{ rewindId: string; files: string[] }> {

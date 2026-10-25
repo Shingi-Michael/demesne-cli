@@ -44,6 +44,8 @@ export type EventType =
   | "turn.completed"
   | "turn.reverted"
   | "turn.steered"
+  | "turn.proofs"
+  | "turn.proof"
   | "session.rewound"
   | "session.rewind_redone"
   | "turn.cancelled"
@@ -557,6 +559,32 @@ export interface RewindSessionRequest {
   toolCallId?: string;
 }
 
+/// Proof marks: a claim in an answer and whether a step in the same turn
+/// backs it. `proved` quotes the step's output (`quote`, really in it);
+/// `unchecked` means nothing in the turn looked; `checking` is a read-only
+/// check on its way (`step` names what it runs); `false` is what the check
+/// found instead (`why`, `quote`); `dropped` is struck from the answer.
+/// `words` carries the sentence rewritten to be true after Correct the sentence.
+export type ProofState = "proved" | "unchecked" | "checking" | "false" | "dropped";
+export interface ProofClaim {
+  id: string;
+  /// The claim's words, exactly as the answer has them.
+  text: string;
+  state: ProofState;
+  /// The step in this turn whose output backs it.
+  toolCallId?: string;
+  /// Lines from that output, or from the check that disproved it.
+  quote?: string;
+  /// What a check ran ("rg projectFor").
+  step?: string;
+  /// When not true: what is true instead.
+  why?: string;
+  words?: string;
+}
+export interface ProofActionRequest {
+  action: "check" | "drop" | "correct";
+}
+
 /// Steer: words for the running turn, read by the model before its next
 /// step without stopping it. The window picks the id so it can match the
 /// `turn.steered` event that says the words were delivered.
@@ -939,6 +967,7 @@ export * from "./next-prompt.ts";
 export * from "./heartbeat-mail.ts";
 export * from "./drive-report.ts";
 export * from "./agents-nearby.ts";
+export * from "./proofs.ts";
 
 /// Builds the persisted `[permissions] allow` entry for a pending approval.
 ///

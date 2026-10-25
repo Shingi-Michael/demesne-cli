@@ -2473,3 +2473,116 @@ button:disabled {
 .live-app.start .composer .send .send-stop {
   display: none;
 }
+
+/* Proof marks: a claim's words say whether a step in the turn backs them.
+   Green line = proved by a step, dotted = nothing checked, red wavy = the
+   check disagreed, struck = dropped. The proof unfolds under the paragraph. */
+.claim {
+  cursor: pointer;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 4px;
+  border-radius: 2px;
+}
+.claim.proved {
+  text-decoration: underline solid color-mix(in srgb, var(--citron) 55%, transparent);
+  text-decoration-thickness: 1px;
+}
+.claim.proved.on {
+  text-decoration-color: var(--citron);
+  text-decoration-thickness: 1.5px;
+}
+.claim.unchecked {
+  text-decoration: underline dotted var(--muted);
+  text-decoration-thickness: 1.5px;
+}
+.claim.unchecked.on {
+  text-decoration-color: var(--strong);
+}
+.claim.checking {
+  text-decoration: underline dotted var(--electric);
+  text-decoration-thickness: 1.5px;
+}
+.claim.false {
+  text-decoration: underline wavy var(--signal);
+  text-decoration-thickness: 1px;
+}
+.claim.dropped {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.claim:focus-visible {
+  outline: 1px solid var(--electric);
+  outline-offset: 2px;
+}
+.proof-fold {
+  margin: 2px 0 10px;
+  padding: 1px 0 1px 12px;
+  box-shadow: -1px 0 0 var(--rule);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--muted);
+}
+.proof-fold.ok { box-shadow: -1px 0 0 color-mix(in srgb, var(--citron) 60%, transparent); }
+.proof-fold.bad { box-shadow: -1px 0 0 var(--signal); }
+.proof-fold.live { box-shadow: -1px 0 0 var(--electric); }
+.proof-fold .pf-src b {
+  font-weight: 500;
+  color: var(--secondary);
+}
+.proof-fold .pf-src .danger { color: var(--signal); }
+.proof-fold .pf-quote {
+  margin: 5px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 11.5px/17px "JetBrains Mono", monospace;
+  color: var(--paper);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow: auto;
+}
+.proof-fold .pf-acts {
+  display: flex;
+  gap: 14px;
+  margin-top: 7px;
+  font-size: 12px;
+}
+.proof-fold .pf-acts button { color: var(--muted); }
+.proof-fold .pf-acts button:hover { color: var(--strong); }
+.proof-fold .pf-acts .pf-main {
+  color: var(--strong);
+  font-weight: 500;
+}
+.proof-fold .pf-run {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--secondary);
+}
+.proof-fold .pf-run code {
+  color: var(--muted);
+  font: 12px "JetBrains Mono", monospace;
+}
+.proof-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 0 32px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+}
+.proof-line button {
+  font-size: 12px;
+  color: var(--muted);
+}
+.proof-line .pl-ok { color: var(--citron); }
+.proof-line .pl-bad { color: var(--signal); }
+.proof-line .pl-live { color: var(--electric); }
+.proof-line .pl-open {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.proof-line .pl-open:hover { color: var(--strong); }
+.proof-line .pl-step { margin-left: auto; }

@@ -9,7 +9,7 @@ const info: SettingsInfo = {
   allow: [{ rule: "run_command:bun test", mine: true }, { rule: "edit_file:apps/desktop", mine: false }],
   trusted: ["/Users/mike/projects/demesne-cli"],
   subagent: { model: null, models: [{ id: "gpt-6.1-sol", provider: "ChatGPT" }] },
-  agent: { maxModelRounds: 64, maxToolCalls: 256 },
+  agent: { maxModelRounds: 64, maxToolCalls: 256, proofMarks: true },
   drive: { maxActiveMinutes: 240, maxTokens: 2_000_000, maxTasks: 16 },
   images: null,
   heartbeat: true,

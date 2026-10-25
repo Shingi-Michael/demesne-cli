@@ -58,6 +58,7 @@ import { pointSourceIn } from "./point-source.ts";
 import type { PointPick } from "./point.ts";
 import { WorkspaceSession } from "./session-model.ts";
 import { lastAsk, waitingAsk, type AwayAsk } from "./away.ts";
+import { glanceOf } from "./glance.ts";
 import { DEFAULT_DRIVE_LIMITS } from "@demesne/protocol";
 import { SETTINGS_KEYS, type SettingsInfo } from "./settings-page.ts";
 
@@ -1503,6 +1504,12 @@ export class WorkspaceHost {
     }
     if (method === "model-scores") return this.client.modelScoreboard({ days: 30 });
     if (method === "plan-limits") return (await this.client.planLimits()).limits;
+    // Rest on a chat: its card, read from that chat's own state.
+    if (method === "session-glance") {
+      const id = string(args.id, "id", 200);
+      const [state, changes] = await Promise.all([this.client.getSessionState(id), this.client.changes(id).then((response) => response.changes).catch(() => null)]);
+      return glanceOf(state, changes);
+    }
     if (method === "model") {
       const id = string(args.id, "model", 1000);
       const reasoning = args.reasoning === undefined ? undefined : string(args.reasoning, "reasoning", 16);

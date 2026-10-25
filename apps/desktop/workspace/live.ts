@@ -21,6 +21,7 @@ import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, pars
 import type { CustomizeView } from "./customize.ts";
 import { deedPage, editLine, findHits, isLive, numberOf, toCheck, type DeedFilter, type DeedUi } from "./deed-view.ts";
 import type { Deed, DeedAction, DeedPeek, PlanLimits, ProofClaim, Routine } from "@demesne/protocol";
+import { glanceHTML, type Glance } from "./glance.ts";
 import { PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, PLAN_LIMIT_SHOWN, planUsed, planWindows } from "@demesne/protocol";
 import { claimTitle, locate, lookedAt, proofLine } from "./proof-marks.ts";
 import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.ts";
@@ -543,13 +544,12 @@ function renderSidebar() {
   const row = (item: typeof sessions[number], right: string, nested: boolean) => {
     const id = item.id, title = titleOf(item), tone = tones.get(id) ?? "", selected = id === current?.id && !deedOpen && !pageOpen;
     const about = STATE_WORDS[tone] ?? "", branch = branches.get(id);
-    const tip = [title, about || fullTime(item.updatedAt), branch && `on ${branch}`].filter(Boolean).join(" · ");
     const project = projectFor(item);
     const here = project === projectWorkspace || project === null;
     const mark = tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
     const side = tone || (id === current?.id && !inSession()) ? "" : right;
     const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${branch ? ICON_BRANCH : ""}${side ? `<span class="sidebar-session-age">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}`)
-      .replace("<button ", `<button title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
+      .replace("<button ", `<button data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
     // Pin and Archive sit on the row itself: no menu, no dialog. The keyboard
     // archives with Delete on the row, so they stay out of the tab order.
     const pin = btn("pin-session", ICON_PIN, { id, pinned: !item.pinned }, `sidebar-pin${item.pinned ? " on" : ""}`).replace("<button ", `<button title="${item.pinned ? "Unpin" : "Pin"}" aria-label="${h(`${item.pinned ? "Unpin" : "Pin"} ${title}`)}" tabindex="-1" `);
@@ -751,6 +751,46 @@ function endRename(save: boolean) {
   const was = state?.sessions.find((item) => item.id === id)?.title;
   if (save && id && title && title !== was) void act(() => api("rename", { id, title }));
 }
+// Rest on a chat to see where it stands (pass 76 C): after a moment its card
+// sits beside the row, read from that chat's state. It goes when the pointer
+// leaves the row or a click lands.
+const glanceCache = new Map<string, { key: string; glance: Glance }>();
+let glanceTimer: ReturnType<typeof setTimeout> | undefined, glanceRow: HTMLElement | null = null;
+function hideGlance() {
+  clearTimeout(glanceTimer);
+  glanceRow = null;
+  document.getElementById("sidebar-glance")?.remove();
+}
+async function showGlance(row: HTMLElement) {
+  const id = JSON.parse(row.dataset.args ?? "{}").id as string | undefined;
+  if (!id) return;
+  const key = row.dataset.updated ?? "", cached = glanceCache.get(id);
+  let glance = cached?.key === key ? cached.glance : null;
+  if (!glance) {
+    try { glance = await api<Glance>("session-glance", { id }); } catch { return; }
+    glanceCache.set(id, { key, glance });
+  }
+  if (glanceRow !== row || !row.isConnected) return;
+  const card = document.getElementById("sidebar-glance") ?? Object.assign(document.createElement("div"), { id: "sidebar-glance", role: "tooltip" });
+  const title = row.querySelector(".sidebar-session-name")?.textContent ?? "";
+  card.innerHTML = glanceHTML(title, row.dataset.about ?? "", row.dataset.when ?? "", glance, (model) => modelWords({ id: model, displayName: models.find((item) => item.id === model)?.displayName }));
+  document.body.append(card);
+  const box = row.getBoundingClientRect(), side = document.getElementById("desktop-sidebar")?.getBoundingClientRect();
+  card.style.left = `${Math.round((side?.right ?? box.right) + 6)}px`;
+  card.style.top = `${Math.round(Math.max(8, Math.min(box.top - 6, innerHeight - card.offsetHeight - 8)))}px`;
+  row.setAttribute("aria-describedby", "sidebar-glance");
+}
+document.getElementById("desktop-sidebar")?.addEventListener("pointerover", (event) => {
+  const row = (event.target as Element).closest<HTMLElement>(".sidebar-session[data-updated]");
+  if (row === glanceRow) return;
+  hideGlance();
+  if (!row) return;
+  glanceRow = row;
+  glanceTimer = setTimeout(() => void showGlance(row), 450);
+});
+document.getElementById("desktop-sidebar")?.addEventListener("pointerleave", hideGlance);
+document.addEventListener("pointerdown", hideGlance, true);
+document.getElementById("sidebar-projects")?.addEventListener("scroll", hideGlance, { passive: true });
 document.getElementById("sidebar-projects")?.addEventListener("submit", (event) => { event.preventDefault(); endRename(true); });
 // A press anywhere else keeps the new title. Focus taken by the app itself
 // (the composer, as the chat opens) goes back to the field.

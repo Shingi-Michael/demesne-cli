@@ -4861,6 +4861,7 @@ function renderState(next: Snapshot) {
       document.documentElement.style.setProperty(`--${name}`, color);
     // The desktop restyles its own themes by name (desktop.css).
     document.documentElement.dataset.theme = next.theme;
+    if (window.demesne.mode === "desktop") void api("desktop-theme", { dark: !/light/.test(next.theme) }).catch(() => {});
     renderedPalette = next.palette;
   }
   // Drive working this session is a session, even before its first turn:

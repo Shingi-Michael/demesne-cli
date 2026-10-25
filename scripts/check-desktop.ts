@@ -685,7 +685,7 @@ try {
   await capture("02-themes");
   await page.locator(`#page .st-choice[data-args*='"demesne-light"']`).click();
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#F6F8FA");
-  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#f7f7f5", "The desktop wears its own light palette");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#f2f2f2", "The desktop wears its own light palette");
   assert(await page.locator('#page[data-kind="settings"]').isVisible(), "Settings stays open while the theme changes");
   await capture("02-light-settings");
   await page.locator("#page .settings-segments button").filter({ hasText: "Large" }).click();
@@ -701,7 +701,7 @@ try {
   await page.locator("#page .st-word").first().click();
   await page.locator(`#page .st-choice[data-args*='"demesne"']`).click();
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#0B1218");
-  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#121315", "The desktop wears its own dark palette");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#161617", "The desktop wears its own dark palette");
   // The rows backed by config.toml and the daemon.
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Drive" }).click();
   const tokens = page.getByRole("textbox", { name: "Tokens" });

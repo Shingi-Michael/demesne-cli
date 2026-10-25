@@ -93,7 +93,8 @@ To run it from source instead, use `bun run desktop`, or `bun run build:desktop`
 | --- | --- |
 | Send / new line | Enter / Shift+Enter |
 | Take the suggested prompt | Tab on an empty composer |
-| Settings | Tab (no suggestion) or Ctrl+K |
+| Settings | Tab (no suggestion) or ⌘, |
+| Search chats | ⌘K |
 | Drive | Alt+J |
 | This conversation’s menu | ⋯ in the top bar |
 | Back to live output | Ctrl+G |

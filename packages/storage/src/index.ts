@@ -30,7 +30,10 @@ import {
   type TurnStatus,
   type ToolFileChange,
   type SessionRewindState,
+  type ProofClaim,
+  applyProofEvents,
   derivePersistedRule,
+  openedPullRequest,
 } from "@demesne/protocol";
 import { QuestionRepository } from "./questions.ts";
 export { QuestionStateError } from "./questions.ts";
@@ -97,6 +100,9 @@ interface SessionRow {
   workspace_root: string | null;
   context_start_message_id: number | null;
   archived_at: string | null;
+  pinned_at: string | null;
+  back_at: string | null;
+  pr_url: string | null;
   preferred_model: string | null;
   auto_approve: number;
   accept_edits: number;
@@ -300,7 +306,7 @@ export class DemesneStore {
     const row = this.database
       .query(`
         SELECT sessions.id, sessions.title, sessions.created_at, sessions.updated_at,
-               sessions.workspace_id, sessions.archived_at, sessions.preferred_model, sessions.auto_approve, sessions.accept_edits,
+               sessions.workspace_id, sessions.archived_at, sessions.pinned_at, sessions.back_at, sessions.pr_url, sessions.preferred_model, sessions.auto_approve, sessions.accept_edits,
                workspaces.root AS workspace_root
         FROM sessions
         LEFT JOIN workspaces ON workspaces.id = sessions.workspace_id
@@ -322,15 +328,20 @@ export class DemesneStore {
         ? { id: row.workspace_id, root: row.workspace_root }
         : null,
       ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
+      ...(row.pinned_at ? { pinnedAt: row.pinned_at } : {}),
+      ...(row.back_at ? { backAt: row.back_at } : {}),
+      ...(row.pr_url ? { prUrl: row.pr_url } : {}),
       ...(row.preferred_model ? { preferredModel: row.preferred_model } : {}),
       turns: turns.map(mapTurn),
     };
   }
 
-  listSessions(limit = 100, options: { includeArchived?: boolean } = {}): Session[] {
+  listSessions(limit = 100, options: { includeArchived?: boolean; archivedOnly?: boolean } = {}): Session[] {
     const boundedLimit = Math.max(1, Math.min(limit, 100));
     const rows = this.database
-      .query(options.includeArchived
+      .query(options.archivedOnly
+        ? "SELECT id FROM sessions WHERE archived_at IS NOT NULL ORDER BY archived_at DESC, id LIMIT ?"
+        : options.includeArchived
         ? "SELECT id FROM sessions ORDER BY updated_at DESC, id LIMIT ?"
         : "SELECT id FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC, id LIMIT ?")
       .all(boundedLimit) as Array<{ id: string }>;
@@ -358,6 +369,33 @@ export class DemesneStore {
   /// Records the model a session was last switched to. The daemon does not
   /// auto-switch: the preference is a hint so resuming a session can tell the
   /// user which model it used without forcing an expensive model reload.
+  /// A pinned chat leads the sidebar, above its project.
+  setSessionPinned(id: string, pinned: boolean): Session {
+    return this.database.transaction(() => {
+      this.getSessionOrThrow(id);
+      this.database.query("UPDATE sessions SET pinned_at = ? WHERE id = ?").run(pinned ? new Date().toISOString() : null, id);
+      return this.getSessionOrThrow(id);
+    })();
+  }
+
+  /// Bring it back later: the chat leaves the list until `at`.
+  setSessionBackAt(id: string, at: string | null): Session {
+    return this.database.transaction(() => {
+      this.getSessionOrThrow(id);
+      this.database.query("UPDATE sessions SET back_at = ? WHERE id = ?").run(at, id);
+      return this.getSessionOrThrow(id);
+    })();
+  }
+
+  /// Its pull request on the row: set when a tool opens one, or by hand.
+  setSessionPrUrl(id: string, url: string | null): Session {
+    return this.database.transaction(() => {
+      this.getSessionOrThrow(id);
+      this.database.query("UPDATE sessions SET pr_url = ? WHERE id = ?").run(url, id);
+      return this.getSessionOrThrow(id);
+    })();
+  }
+
   setSessionPreferredModel(id: string, model: string | null): Session {
     return this.database.transaction(() => {
       this.getSessionOrThrow(id);
@@ -407,6 +445,21 @@ export class DemesneStore {
     return result;
   }
 
+  /// Gives a chat that has no project a folder: its messages stay and its
+  /// next turn gets the project's tools. The caller checks trust.
+  setSessionWorkspace(id: string, workspaceRoot: string): Session {
+    const now = new Date().toISOString();
+    return this.database.transaction(() => {
+      const session = this.getSessionOrThrow(id);
+      if (session.workspace) throw new InvalidStateError("This chat already belongs to a project");
+      const existing = this.database.query("SELECT id FROM workspaces WHERE root = ?").get(workspaceRoot) as { id: string } | null;
+      const workspaceId = existing?.id ?? crypto.randomUUID();
+      if (!existing) this.database.query("INSERT INTO workspaces (id, root, created_at) VALUES (?, ?, ?)").run(workspaceId, workspaceRoot, now);
+      this.database.query("UPDATE sessions SET workspace_id = ?, updated_at = ? WHERE id = ?").run(workspaceId, now, id);
+      return this.getSessionOrThrow(id);
+    })();
+  }
+
   /// Removes a session and everything recorded in it, for good. The caller
   /// makes sure no turn is running in it.
   deleteSession(id: string): void {
@@ -443,6 +496,20 @@ export class DemesneStore {
       const now = new Date().toISOString();
       this.database.query("UPDATE sessions SET archived_at = ? WHERE id = ?").run(now, id);
       const event = this.insertEvent("session.archived", id, null, {}, now);
+      return { session: this.getSessionOrThrow(id), event };
+    })();
+    this.eventSink?.(result.event);
+    return result;
+  }
+
+  /// Brings an archived chat back to the list.
+  restoreSession(id: string): { session: Session; event: EventEnvelope } {
+    const result = this.database.transaction(() => {
+      const session = this.getSessionOrThrow(id);
+      if (!session.archivedAt) throw new InvalidStateError("Session is not archived");
+      const now = new Date().toISOString();
+      this.database.query("UPDATE sessions SET archived_at = NULL WHERE id = ?").run(id);
+      const event = this.insertEvent("session.restored", id, null, {}, now);
       return { session: this.getSessionOrThrow(id), event };
     })();
     this.eventSink?.(result.event);
@@ -1459,35 +1526,6 @@ export class DemesneStore {
   }
 
   /// How often this project asked for approval this week and the week before.
-  /// Chats working in a project right now (plus any named sessions, such as
-  /// Drive's worktree chats): their running turn, whether they wait on you,
-  /// and their latest tool calls, newest first.
-  liveWork(workspaceRoot: string, extraSessionIds: string[] = []): {
-    sessionId: string; title: string; turnId: string; waiting: boolean;
-    calls: { name: string; argumentsJson: string; createdAt: string }[];
-  }[] {
-    const extra = extraSessionIds.filter((id) => /^[A-Za-z0-9_-]{1,64}$/.test(id)).slice(0, 20);
-    const rows = this.database.query(`
-      SELECT s.id AS sessionId, s.title AS title, t.id AS turnId
-      FROM sessions s
-      JOIN turns t ON t.session_id = s.id
-      LEFT JOIN workspaces w ON w.id = s.workspace_id
-      WHERE (w.root = ?${extra.length ? ` OR s.id IN (${extra.map(() => "?").join(",")})` : ""})
-        AND t.status IN ('running', 'queued')
-        AND t.id = (SELECT id FROM turns WHERE session_id = s.id ORDER BY created_at DESC LIMIT 1)
-      LIMIT 20
-    `).all(workspaceRoot, ...extra) as { sessionId: string; title: string; turnId: string }[];
-    return rows.map((row) => {
-      const calls = this.database.query(`
-        SELECT name, arguments_json AS argumentsJson, created_at AS createdAt, status, permission_status AS permissionStatus
-        FROM tool_calls WHERE turn_id = ? ORDER BY created_at DESC LIMIT 20
-      `).all(row.turnId) as { name: string; argumentsJson: string; createdAt: string; status: string; permissionStatus: string }[];
-      const waiting = calls.some((call) => call.status === "pending" && call.permissionStatus === "pending")
-        || this.userQuestions.list(row.sessionId).some((question) => question.turnId === row.turnId);
-      return { ...row, waiting, calls: calls.map(({ name, argumentsJson, createdAt }) => ({ name, argumentsJson, createdAt })) };
-    });
-  }
-
   permissionAsks(workspaceRoot: string): { thisWeek: number; lastWeek: number } {
     const week = 7 * 24 * 60 * 60_000, now = Date.now();
     const count = (from: number, to: number) => (this.database.query(`
@@ -1614,6 +1652,8 @@ export class DemesneStore {
         SET status = ?, result_text = ?, error_message = ?, completed_at = ?
         WHERE id = ?
       `).run(outcome, resultText, outcome === "failed" ? resultText : null, now, toolCallId);
+      const opened = outcome === "completed" ? openedPullRequest(call.name, call.arguments_json, resultText) : null;
+      if (opened) this.database.query("UPDATE sessions SET pr_url = ? WHERE id = ?").run(opened, turn.sessionId);
       const type = outcome === "completed"
         ? "tool.call_completed"
         : outcome === "denied"
@@ -1686,6 +1726,40 @@ export class DemesneStore {
     this.requireSession(sessionId);
     return (this.database.query("SELECT * FROM events WHERE session_id = ? AND (? IS NULL OR turn_id = ?) AND type IN ('tool.call_completed','turn.reverted','session.rewound','session.rewind_redone') ORDER BY id LIMIT 10001")
       .all(sessionId,turnId??null,turnId??null) as EventRow[]).map(mapEvent);
+  }
+
+  /// A turn's steps with their whole output, oldest first: what the proof
+  /// pass reads to pair the answer's claims with evidence.
+  turnToolCalls(turnId: string): Array<{ id: string; name: string; arguments: unknown; status: string; resultText: string }> {
+    const rows = this.database.query("SELECT id, name, arguments_json, status, result_text, error_message FROM tool_calls WHERE turn_id = ? ORDER BY created_at, rowid")
+      .all(turnId) as Pick<ToolCallRow, "id" | "name" | "arguments_json" | "status" | "result_text" | "error_message">[];
+    return rows.map((row) => {
+      let args: unknown = {};
+      try { args = JSON.parse(row.arguments_json); } catch { /* raw arguments stay opaque */ }
+      return { id: row.id, name: row.name, arguments: args, status: row.status, resultText: row.result_text ?? row.error_message ?? "" };
+    });
+  }
+
+  /// The proof marks of a turn as its events leave them.
+  turnProofs(turnId: string): ProofClaim[] {
+    const rows = this.database.query("SELECT * FROM events WHERE turn_id = ? AND type IN ('turn.proofs', 'turn.proof') ORDER BY id").all(turnId) as EventRow[];
+    return applyProofEvents(rows.map(mapEvent));
+  }
+
+  recordProofs(turnId: string, claims: ProofClaim[]): EventEnvelope {
+    const turn = this.getTurnOrThrow(turnId);
+    const event = this.insertEvent("turn.proofs", turn.sessionId, turnId, { claims }, new Date().toISOString());
+    this.eventSink?.(event);
+    return event;
+  }
+
+  /// One claim changes: a check starts, settles, the sentence is dropped or
+  /// corrected. A null field clears it.
+  updateProof(turnId: string, claimId: string, patch: { [K in keyof ProofClaim]?: ProofClaim[K] | null }): EventEnvelope {
+    const turn = this.getTurnOrThrow(turnId);
+    const event = this.insertEvent("turn.proof", turn.sessionId, turnId, { claimId, ...patch }, new Date().toISOString());
+    this.eventSink?.(event);
+    return event;
   }
 
   eventsAfter(sessionId: string, afterEventId: number, limit = 100): EventEnvelope[] {
@@ -1946,6 +2020,26 @@ export class DemesneStore {
     }
     if (!this.hasColumn("sessions", "archived_at")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN archived_at TEXT");
+    }
+    if (!this.hasColumn("sessions", "pinned_at")) {
+      this.database.run("ALTER TABLE sessions ADD COLUMN pinned_at TEXT");
+    }
+    if (!this.hasColumn("sessions", "back_at")) {
+      this.database.run("ALTER TABLE sessions ADD COLUMN back_at TEXT");
+    }
+    if (!this.hasColumn("sessions", "pr_url")) {
+      this.database.run("ALTER TABLE sessions ADD COLUMN pr_url TEXT");
+      // Chats that opened a pull request before rows kept them.
+      const opened = this.database.query(`
+        SELECT turns.session_id AS session_id, tool_calls.name AS name, tool_calls.arguments_json AS arguments_json, tool_calls.result_text AS result_text
+        FROM tool_calls JOIN turns ON turns.id = tool_calls.turn_id
+        WHERE tool_calls.status = 'completed' AND tool_calls.result_text LIKE '%github.com/%/pull/%'
+        ORDER BY tool_calls.created_at
+      `).all() as Array<{ session_id: string; name: string; arguments_json: string; result_text: string }>;
+      for (const call of opened) {
+        const url = openedPullRequest(call.name, call.arguments_json, call.result_text);
+        if (url) this.database.query("UPDATE sessions SET pr_url = ? WHERE id = ?").run(url, call.session_id);
+      }
     }
     if (!this.hasColumn("sessions", "preferred_model")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN preferred_model TEXT");

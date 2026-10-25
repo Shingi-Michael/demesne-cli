@@ -408,6 +408,22 @@ describe("DemesneStore", () => {
     store.close();
   });
 
+  test("pins a chat, lists the archived ones, and restores one", () => {
+    const store = new DemesneStore(":memory:");
+    const { session } = store.createSession("Keep me");
+    expect(store.setSessionPinned(session.id, true).pinnedAt).toBeTruthy();
+    expect(store.setSessionPinned(session.id, false).pinnedAt).toBeUndefined();
+    store.archiveSession(session.id);
+    expect(store.listSessions(100, { archivedOnly: true }).map((entry) => entry.id)).toEqual([session.id]);
+    const restored = store.restoreSession(session.id);
+    expect(restored.event.type).toBe("session.restored");
+    expect(restored.session.archivedAt).toBeUndefined();
+    expect(store.listSessions().map((entry) => entry.id)).toEqual([session.id]);
+    expect(store.listSessions(100, { archivedOnly: true })).toEqual([]);
+    expect(() => store.restoreSession(session.id)).toThrow("not archived");
+    store.close();
+  });
+
   test("stores plan-only turns and reports them on the turn", () => {
     const store = new DemesneStore(":memory:");
     const { session } = store.createSession("Plan mode");
@@ -559,6 +575,23 @@ describe("DemesneStore", () => {
 
     expect(statSync(directory).mode & 0o777).toBe(0o755);
     expect(statSync(join(directory, "demesne.sqlite")).mode & 0o777).toBe(0o600);
+    store.close();
+  });
+
+  test("a chat keeps the pull request a tool opened", () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-storage-test-"));
+    temporaryDirectories.push(directory);
+    const store = new DemesneStore(join(directory, "demesne.sqlite"));
+    const { session } = store.createSession("PR", directory);
+    const { turn } = store.createTurn(session.id, "Open a PR", "ask", false);
+    store.startTurn(turn.id);
+    const { providerCallId } = store.startProviderCall(turn.id, "provider", "model");
+    store.settleProviderCall(providerCallId, "completed");
+    const { toolCallId } = store.recordToolCall(turn.id, providerCallId, "provider-pr", "run_command", JSON.stringify({ argv: ["gh", "pr", "create", "--fill"] }));
+    store.startToolCall(toolCallId);
+    store.settleToolCall(toolCallId, "completed", "https://github.com/a/b/pull/12\n");
+    expect(store.getSession(session.id)?.prUrl).toBe("https://github.com/a/b/pull/12");
+    expect(store.setSessionPrUrl(session.id, null).prUrl).toBeUndefined();
     store.close();
   });
 

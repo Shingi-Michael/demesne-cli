@@ -149,7 +149,55 @@ interface Block {
   html: string;
   nodes: ChildNode[];
   end: Comment;
+  /// Runs of words still fading in: where each starts in the block's text,
+  /// when it started, and for how long.
+  fades: Fade[];
 }
+interface Fade { at: number; start: number; ms: number }
+
+/// Words arrive softly: each new run of streamed text fades in, over 120–400 ms
+/// matched to the stream's pace. A block is redrawn whole on every update, so
+/// runs still fading are wrapped again with a negative delay and carry on
+/// where they were instead of popping to full.
+function wrapFades(nodes: ChildNode[], fades: Fade[], now: number) {
+  if (!fades.length) return;
+  const texts: Text[] = [];
+  for (const node of nodes) {
+    if (node.nodeType === Node.TEXT_NODE) { texts.push(node as Text); continue; }
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) texts.push(text as Text);
+  }
+  let offset = 0;
+  for (const text of texts) {
+    const length = text.data.length, from = offset;
+    offset += length;
+    if (!length) continue;
+    // Cut this text node where fades begin, then wrap each piece that fades.
+    let piece = text, pieceAt = from;
+    for (let i = 0; i < fades.length; i++) {
+      const fade = fades[i]!, end = fades[i + 1]?.at ?? Infinity;
+      if (end <= pieceAt || fade.at >= pieceAt + piece.data.length) continue;
+      if (fade.at > pieceAt) { piece = piece.splitText(fade.at - pieceAt); pieceAt = fade.at; }
+      const rest = end < pieceAt + piece.data.length ? piece.splitText(end - pieceAt) : null;
+      if (piece.data.trim()) {
+        const span = document.createElement("span");
+        span.className = "md-in";
+        span.style.animationDuration = `${fade.ms}ms`;
+        span.style.animationDelay = `${-Math.round(now - fade.start)}ms`;
+        piece.replaceWith(span);
+        span.append(piece);
+      }
+      if (!rest) break;
+      pieceAt += piece.data.length; piece = rest;
+    }
+  }
+}
+const commonPrefix = (a: string, b: string) => {
+  let i = 0;
+  while (i < a.length && i < b.length && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  return i;
+};
 
 /** Lex the complete document to keep Markdown's context-sensitive semantics
  * (references, setext headings, loose lists, unfinished fences), but only parse,
@@ -160,11 +208,16 @@ export class MarkdownView {
   private raw: string | null = null;
   private links = "";
   private blocks: Block[] = [];
+  private lastUpdate = 0;
   constructor() {
     this.element.className = "markdown";
   }
-  update(raw: string): boolean {
+  /// `fade` while the answer streams: new words fade in (see wrapFades).
+  update(raw: string, fade = false): boolean {
     if (raw === this.raw) return false;
+    const now = performance.now(), gap = this.lastUpdate ? now - this.lastUpdate : 200;
+    this.lastUpdate = now;
+    const ms = Math.round(Math.min(400, Math.max(120, gap * 1.5)));
     const tokens = marked.lexer(raw, options);
     const links = JSON.stringify(tokens.links),
       contextChanged = links !== this.links;
@@ -186,13 +239,22 @@ export class MarkdownView {
       if (!block) {
         const end = document.createComment("markdown block");
         this.element.append(end);
-        block = { raw: "", type: "", html: "", nodes: [], end };
+        block = { raw: "", type: "", html: "", nodes: [], end, fades: [] };
         this.blocks.push(block);
       }
       if (block.html !== html) {
         const template = document.createElement("template");
         template.innerHTML = html;
         const nodes = [...template.content.childNodes];
+        // The last update of an answer still lets its words finish fading.
+        if (fade || block.fades.length) {
+          const before = block.nodes.map((node) => node.textContent ?? "").join(""),
+            after = nodes.map((node) => node.textContent ?? "").join(""),
+            kept = commonPrefix(before, after);
+          block.fades = block.fades.filter((run) => now - run.start < run.ms && run.at < kept);
+          if (fade && after.length > kept) block.fades.push({ at: kept, start: now, ms });
+          wrapFades(nodes, block.fades, now);
+        }
         for (const node of block.nodes) node.remove();
         block.end.before(template.content);
         block.nodes = nodes;

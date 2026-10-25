@@ -50,3 +50,22 @@ test("sessions in an untrusted folder are refused until the user trusts it", asy
     await app.close();
   }
 });
+
+test("Settings lists the trusted folders, without Drive's worktrees, and can take one back", async () => {
+  const root = scratch(), workspace = join(root, "project"), worktrees = join(root, ".demesne-worktrees");
+  mkdirSync(workspace);
+  const app = createDaemonApp({ databasePath: join(root, "data", "state.sqlite"), worktreeRoot: worktrees });
+  const trust = new WorkspaceTrust(join(root, "data", "trusted-workspaces.json"));
+  trust.trust(workspace);
+  trust.trust(join(worktrees, "fix-1"));
+  try {
+    const listed = await (await app.fetch(new Request("http://localhost/v1/trusted"))).json() as { trusted: string[] };
+    expect(listed.trusted).toEqual([workspace]);
+    const forget = await app.fetch(new Request("http://localhost/v1/trusted/forget", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ root: workspace }) }));
+    expect(((await forget.json()) as { trusted: string[] }).trusted).toEqual([]);
+    expect(trust.isTrusted(workspace)).toBe(false);
+    expect((await app.fetch(new Request("http://localhost/v1/trusted/forget", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ root: "relative" }) }))).status).toBe(400);
+  } finally {
+    await app.close();
+  }
+});

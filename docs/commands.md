@@ -39,7 +39,8 @@ There is no separate `/thinking` command. Settings and the model picker expose s
 | Input | Current behavior |
 | --- | --- |
 | Enter / Shift+Enter | Send / newline; Enter does not resubmit a running turn |
-| ⌘, (Ctrl+, elsewhere), Ctrl+K, or Tab on an empty composer | Settings |
+| ⌘, (Ctrl+, elsewhere), or Tab on an empty composer | Settings |
+| ⌘K (Ctrl+K elsewhere) | Search the sidebar's chats |
 | ⌘N | New chat |
 | Esc | Close the current popup first; deny a waiting approval; otherwise arm turn cancellation |
 | Esc twice within 1.5 seconds | Cancel an active turn when no popup consumes Escape |
@@ -47,8 +48,8 @@ There is no separate `/thinking` command. Settings and the model picker expose s
 | Ctrl+O (⌘O on macOS) | Open another project |
 | Ctrl+G | Follow live output |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous chat in the sidebar |
-| ↑ ↓ Home End, Delete | Move through the sidebar's chats, delete the focused one |
-| ⌘Z outside a text field | Bring back the chat you just deleted |
+| ↑ ↓ Home End, Delete | Move through the sidebar's chats, archive the focused one |
+| ⌘Z outside a text field | Bring back the chat you just archived |
 | ⌘= / ⌘- / ⌘0 | Zoom in, out, actual size |
 | Alt+J | Show or fold what Drive is doing, or its ideas |
 | ⋯ in the top bar | This conversation: rename, compact, new chat, settings |

@@ -2,6 +2,8 @@ export const PROTOCOL_VERSION = 1 as const;
 export * from "./drive.ts";
 export * from "./deed.ts";
 export * from "./panels.ts";
+export * from "./plan-limits.ts";
+import { isPullRequestUrl } from "./pull-requests.ts";
 
 export type EventType =
   | "command.changed"
@@ -10,6 +12,7 @@ export type EventType =
   | "session.renamed"
   | "session.permissions_changed"
   | "session.archived"
+  | "session.restored"
   | "session.compacted"
   | "turn.created"
   | "agent.started"
@@ -43,6 +46,8 @@ export type EventType =
   | "turn.completed"
   | "turn.reverted"
   | "turn.steered"
+  | "turn.proofs"
+  | "turn.proof"
   | "session.rewound"
   | "session.rewind_redone"
   | "turn.cancelled"
@@ -374,44 +379,13 @@ export interface PendingPermissionSnapshot {
 }
 
 /// How often this project asked, this week against the week before.
+/// The folders you trust (GET /v1/trusted), without Drive's own worktrees.
+export interface TrustedResponse {
+  trusted: string[];
+}
 export interface PermissionAsksResponse {
   thisWeek: number;
   lastWeek: number;
-}
-
-/// One parcel of the project map: a folder and the lines of text it holds.
-export interface WorkspaceDistrict {
-  /// Workspace-relative folder ("" for files at the top level). Null for the
-  /// parcel that gathers the smallest folders.
-  path: string | null;
-  lines: number;
-  files: number;
-  /// Newest commit touching it in the last 30 days, epoch ms.
-  changedAt: number | null;
-}
-
-/// Someone working in the project right now, for the map: a chat's running
-/// turn and the file it last touched.
-export interface WorkspaceMark {
-  sessionId: string;
-  title: string;
-  waiting: boolean;
-  /// Workspace-relative file it last read or edited, and the one before when
-  /// that was in another folder.
-  path: string | null;
-  tool: string | null;
-  at: string | null;
-  previousPath: string | null;
-}
-export interface WorkspaceLiveResponse {
-  marks: WorkspaceMark[];
-}
-
-/// The project map: its folders sized by lines.
-export interface WorkspaceMapResponse {
-  districts: WorkspaceDistrict[];
-  lines: number;
-  files: number;
 }
 
 export interface Session {
@@ -424,6 +398,13 @@ export interface Session {
   /// Set when the session has been archived; archived sessions are excluded
   /// from the default listing but remain readable and exportable.
   archivedAt?: string | null;
+  /// Set while the chat is pinned to the top of the sidebar.
+  pinnedAt?: string | null;
+  /// Bring it back later: off the list until then, at the top once it's due,
+  /// until you open it.
+  backAt?: string | null;
+  /// The pull request this chat opened, kept for its row.
+  prUrl?: string | null;
   /// Model this session was last switched to through the CLI. It is a hint for
   /// the user, not an automatic daemon-side switch.
   preferredModel?: string | null;
@@ -434,7 +415,38 @@ export interface Session {
   acceptEdits?: boolean;
 }
 
+/// A chat that starts on its own: one sentence, when and then what.
+export interface Routine {
+  id: string;
+  /// The sentence as written.
+  text: string;
+  /// What the chat is asked, its first message.
+  prompt: string;
+  /// Days of the week, 0 is Sunday, and the local time "HH:MM".
+  days: number[];
+  at: string;
+  /// The project the chat opens in; null for Just a chat.
+  workspace: string | null;
+  on: boolean;
+  createdAt: string;
+  resumedAt?: string;
+  runs: Array<{ at: string; sessionId: string }>;
+  /// "Weekdays · 8:30", and the next time it runs.
+  when?: string;
+  next?: string | null;
+}
+export interface RoutinesResponse { routines: Routine[] }
+
 export interface UpdateSessionRequest {
+  pinned?: boolean;
+  /// When the chat comes back to the top of the sidebar, or "merge" for
+  /// when its pull request merges; null clears it.
+  backAt?: string | null;
+  /// The chat's pull request; null forgets it.
+  prUrl?: string | null;
+  /// Moves a chat that has no project into this folder.
+  workspacePath?: string;
+  trustWorkspace?: boolean;
   autoApprove?: boolean;
   acceptEdits?: boolean;
   title?: string;
@@ -557,6 +569,32 @@ export interface UndoSessionRequest {
 export interface RewindSessionRequest {
   turnId: string;
   toolCallId?: string;
+}
+
+/// Proof marks: a claim in an answer and whether a step in the same turn
+/// backs it. `proved` quotes the step's output (`quote`, really in it);
+/// `unchecked` means nothing in the turn looked; `checking` is a read-only
+/// check on its way (`step` names what it runs); `false` is what the check
+/// found instead (`why`, `quote`); `dropped` is struck from the answer.
+/// `words` carries the sentence rewritten to be true after Correct the sentence.
+export type ProofState = "proved" | "unchecked" | "checking" | "false" | "dropped";
+export interface ProofClaim {
+  id: string;
+  /// The claim's words, exactly as the answer has them.
+  text: string;
+  state: ProofState;
+  /// The step in this turn whose output backs it.
+  toolCallId?: string;
+  /// Lines from that output, or from the check that disproved it.
+  quote?: string;
+  /// What a check ran ("rg projectFor").
+  step?: string;
+  /// When not true: what is true instead.
+  why?: string;
+  words?: string;
+}
+export interface ProofActionRequest {
+  action: "check" | "drop" | "correct";
 }
 
 /// Steer: words for the running turn, read by the model before its next
@@ -706,8 +744,31 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
     if (typeof value.acceptEdits !== "boolean") throw new ProtocolValidationError("acceptEdits must be a boolean");
     update.acceptEdits = value.acceptEdits;
   }
-  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined) {
-    throw new ProtocolValidationError("title, preferredModel, autoApprove or acceptEdits is required");
+  if (value.workspacePath !== undefined) {
+    if (typeof value.workspacePath !== "string" || !value.workspacePath || value.workspacePath.length > 4096 || value.workspacePath.includes("\0"))
+      throw new ProtocolValidationError("workspacePath must be a path");
+    update.workspacePath = value.workspacePath;
+  }
+  if (value.trustWorkspace !== undefined) {
+    if (typeof value.trustWorkspace !== "boolean") throw new ProtocolValidationError("trustWorkspace must be a boolean");
+    update.trustWorkspace = value.trustWorkspace;
+  }
+  if (value.pinned !== undefined) {
+    if (typeof value.pinned !== "boolean") throw new ProtocolValidationError("pinned must be a boolean");
+    update.pinned = value.pinned;
+  }
+  if (value.backAt !== undefined) {
+    if (value.backAt !== null && value.backAt !== "merge" && (typeof value.backAt !== "string" || value.backAt.length > 40 || !Number.isFinite(Date.parse(value.backAt))))
+      throw new ProtocolValidationError("backAt must be a time, \"merge\" or null");
+    update.backAt = value.backAt === null || value.backAt === "merge" ? value.backAt : new Date(value.backAt).toISOString();
+  }
+  if (value.prUrl !== undefined) {
+    if (value.prUrl !== null && (typeof value.prUrl !== "string" || value.prUrl.length > 300 || !isPullRequestUrl(value.prUrl)))
+      throw new ProtocolValidationError("prUrl must be a GitHub pull request link or null");
+    update.prUrl = value.prUrl;
+  }
+  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.workspacePath === undefined && update.pinned === undefined && update.backAt === undefined && update.prUrl === undefined) {
+    throw new ProtocolValidationError("title, preferredModel, autoApprove, acceptEdits, pinned, backAt, prUrl or workspacePath is required");
   }
   return update;
 }
@@ -928,6 +989,8 @@ export * from "./next-prompt.ts";
 export * from "./heartbeat-mail.ts";
 export * from "./drive-report.ts";
 export * from "./agents-nearby.ts";
+export * from "./proofs.ts";
+export * from "./pull-requests.ts";
 
 /// Builds the persisted `[permissions] allow` entry for a pending approval.
 ///

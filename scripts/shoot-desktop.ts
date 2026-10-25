@@ -86,22 +86,26 @@ const toggle = async (selector: string, name: string) => {
 const named = (scratch: string, published: string) => readme ? `demesne-${published}` : scratch;
 await shot(named("01-start", "start"));
 if (!readme) {
-  // Drive's ideas unfold under the composer (there is no Drive panel); run
-  // the top one in its worktree and the start screen says a branch waits.
-  await page.locator('#sidebar-drive').click(); await page.waitForTimeout(800);
-  await shot(named("01-start-ideas", "start-ideas"));
-  await page.locator('#hero .proposal-row button[data-action="next-run"]').first().click(); await page.waitForTimeout(400);
-  for (let i = 0; i < 60 && !(await page.locator('#hero button[data-action="review-open"]').count()); i++) {
-    const approve = page.locator(".approval-row button.allow").first();
-    if (await approve.count() && await approve.isVisible()) await approve.click();
-    await page.waitForTimeout(500);
-  }
-  await page.waitForTimeout(800);
-  await shot("01-start-review");
-  if (await page.locator('#hero button[data-action="review-open"]').count()) {
-    await page.locator('#hero button[data-action="review-open"]').click(); await page.waitForTimeout(800);
-    await shot("01-start-review-open");
-    await page.locator('#hero button[data-action="review-open"]').click();
+  // Drive's ideas unfold in place from its line (there is no Drive panel);
+  // run the top one in its worktree and Home says a branch waits.
+  const ideas = page.locator('[data-action="ideas-show"]:visible').first();
+  if (await ideas.count()) { await ideas.click(); await page.waitForTimeout(800); await shot("01-start-ideas"); }
+  const run = page.locator('[data-action="next-run"]:visible').first();
+  if (await run.count()) {
+    await run.click(); await page.waitForTimeout(400);
+    const review = page.locator('[data-action="review-open"]:visible');
+    for (let i = 0; i < 60 && !(await review.count()); i++) {
+      const approve = page.locator(".approval-row button.allow").first();
+      if (await approve.count() && await approve.isVisible()) await approve.click();
+      await page.waitForTimeout(500);
+    }
+    await page.waitForTimeout(800);
+    await shot("01-start-review");
+    if (await review.count()) {
+      await review.first().click(); await page.waitForTimeout(800);
+      await shot("01-start-review-open");
+      if (await review.count()) await review.first().click();
+    }
   }
 }
 await page.fill("textarea", prompt); await page.keyboard.press("Enter");
@@ -114,17 +118,15 @@ for (let i = 0; i < 40; i++) {
 await page.waitForTimeout(1500);
 if (readme) {
   // The finished turn, with Drive's next ideas unfolded above the composer.
-  await page.locator('#briefing button[data-action="ideas-show"]').click(); await page.waitForTimeout(800);
-  await shot("demesne-drive");
-  await page.locator('#briefing button[data-action="ideas-show"]').click(); await page.waitForTimeout(400);
+  await toggle('[data-action="ideas-show"]:visible', "demesne-drive");
 } else {
   await shot("02-turn");
   await page.locator("#sidebar-sessions .sidebar-item").first().hover(); await page.waitForTimeout(300);
   await shot("02-sidebar-delete");
   // The briefing line above the composer, each part opened; then the
   // sidebar folded to its rail, and the project switcher.
-  await toggle('#briefing button[data-action="review-open"]', "02-review-open");
-  await toggle('#briefing button[data-action="ideas-show"]', "02-ideas");
+  await toggle('#briefing [data-action="review-open"]:visible', "02-review-open");
+  await toggle('#briefing [data-action="ideas-show"]:visible', "02-ideas");
   await toggle('.turn-receipt button[data-action="toggle-steps"]', "02-steps");
   await page.locator("#desktop-toggle-sidebar").click(); await page.waitForTimeout(500);
   await shot("02-rail");

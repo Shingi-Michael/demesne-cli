@@ -6,16 +6,28 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
-import { LAND_H, LAND_W, mapCaption, markLayer, paintLand, parcelAt, parcelOf, placeMarks, placeNames, survey, type Land, type LandLife, type LiveMark } from "./estate.ts";
-import type { WorkspaceLiveResponse, WorkspaceMapResponse } from "@demesne/protocol";
+import { mountSakura, type Sakura } from "./sakura.ts";
+import { awaySentences, type AwayAsk, type AwayPart } from "./away.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
 import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
+import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
+import { scheduledPage } from "./scheduled-page.ts";
+import { customizePage, type CustomizeUi } from "./customize-page.ts";
+import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
+import type { CustomizeView } from "./customize.ts";
 import { deedPage, editLine, findHits, isLive, numberOf, toCheck, type DeedFilter, type DeedUi } from "./deed-view.ts";
-import type { Deed, DeedAction, DeedPeek } from "@demesne/protocol";
+import type { Deed, DeedAction, DeedPeek, PlanLimits, ProofClaim, Routine } from "@demesne/protocol";
+import { glanceHTML, type Glance } from "./glance.ts";
+import { backChoices, backState } from "./back-later.ts";
+import { agoWords, prHandable, prHandText, prStanding } from "./pr-row.ts";
+import { pullRequestNews, type SessionPullRequest } from "../../../packages/protocol/src/pull-requests.ts";
+import { PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, PLAN_LIMIT_SHOWN, planUsed, planWindows } from "@demesne/protocol";
+import { claimTitle, locate, lookedAt, proofLine } from "./proof-marks.ts";
+import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.ts";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval } from "./session-model.ts";
 import type {
@@ -29,7 +41,6 @@ import type {
 
 type Snapshot = ReturnType<WorkspaceHost["snapshot"]>;
 type OverlayName =
-  | "settings"
   | "models"
   | "themes"
   | "providers"
@@ -67,8 +78,15 @@ const h = (value: unknown) =>
   );
 const shortcut = (key: string) => /Mac/i.test(navigator.platform) ? key.replace(/^Ctrl\+/, "⌘") : key;
 const k = (key: string) => `<kbd>${h(shortcut(key))}</kbd>`;
+/// A model by its name, or its id in words when the provider gives no name:
+/// "qwen/qwen3.8-27b-instruct" reads "Qwen3.8 27B Instruct".
+const modelWords = (model: { id: string; displayName?: string | null }) => model.displayName?.trim() || model.id.split("/").at(-1)!.split(/[-_]/).filter(Boolean)
+  .map((word) => /^\d+(\.\d+)?[bkm]$/i.test(word) ? word.toUpperCase() : /^(gpt|glm|llm|vl|it)$/i.test(word) ? word.toUpperCase() : word.replace(/^./, (c) => c.toUpperCase())).join(" ");
 /// A session view, not the start screen: it has turns, or Drive is working
 /// it (Drive plans before its first turn).
+const projectLabel = (path: string) => path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path;
+/// A chat that isn't in a project: no files, commands, Drive or Deed.
+const isPlain = (snapshot: Snapshot | null = state) => Boolean(snapshot?.session && !snapshot.session.workspace);
 const inSession = (snapshot: Snapshot | null = state) =>
   Boolean(snapshot && (snapshot.runs.length || (snapshot.drive && snapshot.drive.homeSessionId === snapshot.session?.id)));
 /// The thinking level each /model row would switch to: picked with ←→,
@@ -194,7 +212,7 @@ let overlay: OverlayName | null = null,
   modelsLoading = false,
   /// The model picker opens on the current model once the list arrives.
   modelIndexPending = false,
-  /// The picker's "More models" column is open.
+  /// The picker's "More models" list is unfolded in its panel.
   modelsMore = false,
   modelsQuery = "",
   overlayRows: {
@@ -261,6 +279,10 @@ function toldNotes(drive: NonNullable<Snapshot["drive"]>) {
 const stepsOpen = new Set<string>();
 /// Steps whose diff or output is unfolded in place, keyed run:tool.
 const stepOpen = new Set<string>();
+/// Proof marks: the claim unfolded under its paragraph, per turn, and the
+/// claim ↑↓ is stepping through.
+const proofOpen = new Map<string, string>();
+let proofStep: { runId: string; index: number } | null = null;
 /// Live previews: the page a running dev server serves unfolds under the
 /// step that started it. Phone width and "show output" are per step.
 const previewPhone = new Set<string>(), previewOutput = new Set<string>(), previewSeen = new Set<string>();
@@ -369,7 +391,7 @@ const UNDO_MS = 5_000;
 const pendingDeletes = new Map<string, ReturnType<typeof setTimeout>>();
 /// The chat whose title is being renamed in place, in the sidebar.
 let renaming: string | null = null;
-/// Initially show six chats per project; Show more and search reveal the rest.
+/// Initially show six chats per group; Show more and search reveal the rest.
 const SIDEBAR_ROWS = 6;
 const expandedProjectChats = new Set<string>();
 const projectOrder = new SidebarProjectOrder(
@@ -377,177 +399,360 @@ const projectOrder = new SidebarProjectOrder(
   () => state ? [document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace, ...JSON.parse(document.getElementById("sidebar-sessions")?.dataset.projects ?? "[]")] : [],
   renderSidebar,
 );
-/// Projects are an accordion: one is open at a time. Until you pick one,
-/// the project you are working in is the open one; switching projects
-/// opens the new one. An empty string means every project is closed.
-let openProjectPath: string | undefined = (() => {
+/// How the list is laid out: by project, by day, or by what each chat
+/// needs; newest first or by name. Group and sort unfolds under a heading.
+type SidebarView = { group: "project" | "date" | "status"; sort: "recent" | "name" };
+const sidebarView: SidebarView = (() => {
   try {
-    const saved = JSON.parse(localStorage.getItem("demesne-project-open") ?? "null");
-    return typeof saved?.path === "string" ? saved.path : undefined;
-  } catch { return undefined; }
+    const saved = JSON.parse(localStorage.getItem("demesne-sidebar-view") ?? "null");
+    return { group: ["project", "date", "status"].includes(saved?.group) ? saved.group : "project", sort: saved?.sort === "name" ? "name" : "recent" };
+  } catch { return { group: "project", sort: "recent" }; }
 })();
+/// Groups folded or unfolded by hand: "p:" and a project's folder,
+/// "pinned", "plain", or a day or state ("d:Today", "s:Working"). Without
+/// one, the project you are in is open and other projects are folded.
+const foldedGroups: Record<string, boolean> = (() => {
+  try { return JSON.parse(localStorage.getItem("demesne-sidebar-folded") ?? "{}") ?? {}; } catch { return {}; }
+})();
+function saveSidebarLayout() {
+  try {
+    localStorage.setItem("demesne-sidebar-view", JSON.stringify(sidebarView));
+    localStorage.setItem("demesne-sidebar-folded", JSON.stringify(foldedGroups));
+  } catch { /* storage may be off */ }
+}
+/// Whether a group shows its chats. On Home or in a plain chat every project
+/// starts folded.
+function groupIsOpen(key: string) {
+  if (key in foldedGroups) return !foldedGroups[key];
+  const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace;
+  return !key.startsWith("p:") || (!isPlain() && key === `p:${here}`);
+}
+/// The heading whose Group and sort line is unfolded beneath it.
+let viewOpenAt = "";
+/// How many chats are archived, read when Group and sort unfolds.
+let archivedCount: number | null = null;
 let openProjectFor: string | undefined;
 /// Projects whose agents are unfolded under their line.
 const agentsShown = new Set<string>();
 /// An agent's mark: its client's initial on a tone of its own.
 const agentMark = (agent: NearbyAgent) => `<span class="agent-mark" data-provider="${h(agent.provider)}" aria-hidden="true">${h((agent.provider === "codex" ? "x" : agent.name[0] ?? "?"))}</span>`;
-/// The project just opened from its line unfolds once, not on every redraw.
-let unfoldingProject = "";
+/// The group just unfolded from its heading animates once, not on every redraw.
+let unfoldingGroup = "";
 /// Conversations deleted from the sidebar, hidden at once while the daemon
 /// archives them.
 const deletedSessions = new Set<string>();
 const ICON_BRANCH = '<svg class="ico sidebar-branch" viewBox="0 0 24 24" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>';
-const ICON_TRASH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg>';
-/// Project groups hold their chats; worktree chats remain with their parent.
+const ICON_ARCHIVE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg>';
+const ICON_BELL = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>';
+/// The row whose Bring it back words are unfolded under it.
+let backOpenFor: string | null = null;
+const ICON_PR = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M6 8v8"/><path d="M18 16V9a3 3 0 0 0-3-3h-3"/><path d="m14 4-2 2 2 2"/></svg>';
+/// Its pull request on the row: what gh last said about each chat's pull
+/// request, the row whose news is unfolded, and when you last looked at each
+/// (its activityAt then). A pull request you haven't looked at counts from
+/// when it opened.
+const pullRequests = new Map<string, SessionPullRequest>();
+let prOpenFor: string | null = null, prOpenSince = "", prKey = "";
+const PR_SEEN_KEY = "demesne-pr-seen";
+const prSeen: Record<string, string> = (() => {
+  try { return JSON.parse(localStorage.getItem(PR_SEEN_KEY) ?? "{}") ?? {}; } catch { return {}; }
+})();
+const prSeenAt = (id: string, pr: SessionPullRequest) => prSeen[id] ?? pr.createdAt;
+function markPrSeen(id: string, at: string) {
+  if (prSeen[id] === at) return;
+  prSeen[id] = at;
+  try { localStorage.setItem(PR_SEEN_KEY, JSON.stringify(prSeen)); } catch { /* storage may be off */ }
+}
+const prNew = (id: string, pr: SessionPullRequest) => pr.state === "open" && pr.activityAt > prSeenAt(id, pr);
+/// Whether a chat is away, back, or neither; "when its PR merges" asks gh.
+const backOf = (item: { id: string; backAt?: string }) => backState(item.backAt, Date.now(), pullRequests.get(item.id)?.state === "merged");
+/// Asks the daemon what gh says; `fresh` asks gh again now for that chat.
+async function refreshPullRequests(fresh?: string) {
+  const ids = (state?.sessions ?? []).filter((item) => item.prUrl).map((item) => item.id);
+  for (const id of [...pullRequests.keys()]) if (!ids.includes(id)) pullRequests.delete(id);
+  if (!ids.length) return;
+  let found: Record<string, SessionPullRequest>;
+  try { found = await api<Record<string, SessionPullRequest>>("session-prs", fresh ? { ids: [fresh], fresh: true } : { ids }); } catch { return; }
+  let changed = false;
+  for (const [id, pr] of Object.entries(found)) {
+    if (JSON.stringify(pullRequests.get(id)) !== JSON.stringify(pr)) changed = true;
+    pullRequests.set(id, pr);
+    // An unfolded row shows its news, so it counts as looked at.
+    if (prOpenFor === id) markPrSeen(id, pr.activityAt);
+  }
+  if (changed) { renderSidebar(); renderNotifications(); }
+}
+setInterval(() => { if (prKey) void refreshPullRequests(); }, 60_000);
+const ICON_PIN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>';
+/// A project's folder is its fold: shut while folded, open while its chats show.
+const ICON_FOLDER_SHUT = '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5a1 1 0 0 1 1-1h4.6l2 2.2h8.4a1 1 0 0 1 1 1v9.8a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></svg>';
+const ICON_FOLDER_OPEN = '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18.5V6.5a1 1 0 0 1 1-1h4.6l2 2.2h7.4a1 1 0 0 1 1 1V10"/><path d="M3.5 18.5 6 11.2a1 1 0 0 1 .95-.7H21a.8.8 0 0 1 .76 1.05L19.5 18.5z"/></svg>';
+const ICON_GROUP_ICONS: Record<string, string> = {
+  pinned: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>',
+  back: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
+  plain: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-8l-4 3v-3H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z"/></svg>',
+  d: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="1.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/></svg>',
+  s: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M12 8v4l2.5 1.5"/></svg>',
+};
+const ICON_PLUS_SMALL = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12"/><path d="M6 12h12"/></svg>';
+const ICON_SORT = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m13 16 4 4 4-4"/></svg>';
+const VIEW_WORDS = { project: "Project", date: "Date", status: "Status", recent: "Recent", name: "Name" } as const;
+/// The day a chat falls under when the list is grouped by date.
+function sidebarDay(date: string) {
+  const then = new Date(date), now = new Date();
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - new Date(then.getFullYear(), then.getMonth(), then.getDate()).getTime()) / 86_400_000);
+  return days <= 0 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? "This week" : days < 30 ? "This month" : "Earlier";
+}
+/// Pinned chats lead, then one group per project and Just a chat; worktree
+/// chats remain with their parent.
 function renderSidebar() {
   const list = document.getElementById("sidebar-sessions");
   if (!state || !list || projectOrder.dragging) return;
   // While a title is being renamed, the list holds still under the cursor.
-  if (renaming && list.querySelector(".sidebar-rename")) return;
+  if (renaming && list.parentElement?.querySelector(".sidebar-rename")) return;
   const query = (document.getElementById("sidebar-search") as HTMLInputElement | null)?.value.trim().toLowerCase() ?? "";
   // A chat Drive runs on its own branch (a worktree) joins the list with a
   // branch mark; its branch is in the tooltip.
   const branches = new Map([state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId)).map((job) => [job.sessionId!, job.branch] as const));
   const sessions = state.sessions.filter(item => !deletedSessions.has(item.id));
+  const prs = sessions.filter((item) => item.prUrl).map((item) => `${item.id}=${item.prUrl}`).join(",");
+  if (prs !== prKey) { prKey = prs; void refreshPullRequests(); }
   const projectWorkspace = list.dataset.workspace || state.workspace;
   const projectPaths = projectOrder.paths();
-  // Worktree chats stay with their parent project, alongside its review actions.
-  const projectFor = (item: typeof sessions[number]) => branches.has(item.id) || item.id === state!.session?.id ? projectWorkspace : item.workspace;
+  // Worktree chats stay with their parent project, alongside its review
+  // actions. A chat with no folder is under Just a chat (null).
+  const projectFor = (item: typeof sessions[number]) => !item.workspace ? null : branches.has(item.id) || item.id === state!.session?.id ? projectWorkspace : item.workspace;
+  const plainNow = isPlain();
   const review = reviewJobs(), pinned = pinnedMission(), run = worktreeRun(), word = driveWord();
   const ideas = state.driveNext.proposals.length;
   const waiting = state.approvals.length ? "approval" : state.questions.length ? "answer" : "";
-  if (openProjectFor !== undefined && openProjectFor !== projectWorkspace) {
-    openProjectPath = undefined;
-    try { localStorage.removeItem("demesne-project-open"); } catch {}
+  // Switching to a project unfolds it.
+  if (openProjectFor !== undefined && openProjectFor !== projectWorkspace && foldedGroups[`p:${projectWorkspace}`]) {
+    delete foldedGroups[`p:${projectWorkspace}`];
+    saveSidebarLayout();
   }
   openProjectFor = projectWorkspace;
-  const openPath = openProjectPath ?? projectWorkspace;
+  const isOpen = (key: string) => Boolean(query) || groupIsOpen(key);
   const agents = state.agents ?? [];
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, openPath, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, deedOpen, deedCount(), Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), deedOpen, pageOpen, deedCount(), plainNow, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
   // One cube on screen at most: it turns in the conversation, and a working
   // chat is a small breathing dot here.
   const dot = (tone: string) => `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`;
-  const focusedControl = document.activeElement instanceof HTMLButtonElement && list.contains(document.activeElement)
+  const nav = list.parentElement ?? list;
+  const focusedControl = document.activeElement instanceof HTMLButtonElement && nav.contains(document.activeElement)
     ? { action: document.activeElement.dataset.action, args: document.activeElement.dataset.args } : null;
   const focusedRow = document.activeElement?.closest(".sidebar-item")?.querySelector(".sidebar-session");
-  const focused = focusedRow ? [...list.querySelectorAll(".sidebar-session")].indexOf(focusedRow) : -1;
-  // One line per chat: a dot for its state, its title, its time. The dot is
-  // amber when the chat needs you, a spinner while it works, blue for a
-  // branch of Drive's that waits for review (those sit on the Branches row).
-  // The tooltip and the accessible name say in words what the dot shows.
-  const row = (tone: string, title: string, selected: boolean, age: string, id: string, updatedAt: string) => {
-    const about = STATE_WORDS[tone] ?? "", branch = branches.get(id);
-    const tip = [title, about || fullTime(updatedAt), branch && `on ${branch}`].filter(Boolean).join(" · ");
-    const mark = branch ? ICON_BRANCH : "";
-    const project = projectFor(sessions.find(item => item.id === id)!);
-    return btn(project === projectWorkspace ? "select-session" : "project-session", `${dot(tone)}<span class="sidebar-session-name">${h(title)}</span>${mark}${age ? `<span class="sidebar-session-age">${h(age)}</span>` : ""}`, { id, path: project }, `sidebar-session${selected ? " selected" : ""}`)
-      .replace("<button ", `<button title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${project === projectWorkspace ? ' aria-keyshortcuts="Delete"' : ""}${selected ? ' aria-current="page"' : ""} `);
+  const focused = focusedRow ? [...nav.querySelectorAll(".sidebar-session")].indexOf(focusedRow) : -1;
+  const titleOf = (item: typeof sessions[number]) => item.id === current?.id ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
+  // What a chat's dot says: amber when it needs you, a breathing dot while
+  // it works, a cross when it failed, blue for a reply you haven't seen.
+  const toneOf = (item: typeof sessions[number]) => {
+    const selected = item.id === current?.id;
+    const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
+    // A mission's chat keeps its mark while Drive plans between turns.
+    const driving = Boolean(pinned && pinned.homeSessionId === item.id && ["running", "waiting"].includes(pinned.status));
+    const working = selected ? (Boolean(state!.activeTurnId) || driving) && !waiting : !asks && (item.status === "running" || item.status === "queued" || driving);
+    // Looking at a chat marks it seen; one that has moved on since, while
+    // you were elsewhere, carries the blue dot until you open it.
+    if (selected || !(item.id in seenChats)) markSeen(item.id, item.updatedAt);
+    const fresh = !selected && item.status === "completed" && seenChats[item.id] !== item.updatedAt;
+    return asks ? "warn" : working ? "working" : item.status === "failed" ? "bad" : fresh ? "acc" : "";
   };
-  const groups: string[] = [];
-  for (const [index, path] of projectPaths.entries()) {
-    const name = path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path;
-    const projectMatches = Boolean(query) && path.toLowerCase().includes(query);
-    const projectSessions = sessions.filter(item => projectFor(item) === path);
-    const found = projectSessions.filter(item => projectMatches || item.title.toLowerCase().includes(query));
-    const nested = (item: typeof found[number]) => found.some(parent => parent.id === parentOf.get(item.id));
-    const matching = found.filter(item => !nested(item));
-    for (const child of found.filter(nested)) matching.splice(matching.findIndex(parent => parent.id === parentOf.get(child.id)) + 1, 0, child);
-    if (query && !projectMatches && !matching.length) continue;
-    const expanded = Boolean(query) || path === openPath;
-    const rows: string[] = [];
-    let shown = 0, more = 0;
-    // Search reveals every match; each project can also expand its full history.
-    const limit = query || expandedProjectChats.has(path) ? Infinity : SIDEBAR_ROWS;
-    for (const item of matching) {
-      if (shown >= limit) { if (item.turns) more++; continue; }
-      const selected = item.id === current?.id;
-      // Drive's own chats stay off the list: its work unfolds from its line in
-      // your chat and lands as a branch to review. One you open shows while open.
-      if (branches.has(item.id) && !selected) continue;
-      const title = selected ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
-      const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
-      // A mission's chat keeps its cube while Drive plans between turns.
-      const driving = Boolean(pinned && pinned.homeSessionId === item.id && ["running", "waiting"].includes(pinned.status));
-      const working = selected ? (Boolean(state.activeTurnId) || driving) && !waiting : !asks && (item.status === "running" || item.status === "queued" || driving);
-      // Looking at a chat marks it seen; one that has moved on since, while
-      // you were elsewhere, carries the blue dot until you open it.
-      if (selected || !(item.id in seenChats)) markSeen(item.id, item.updatedAt);
-      const fresh = !selected && item.status === "completed" && seenChats[item.id] !== item.updatedAt;
-      const tone = asks ? "warn" : working ? "working" : item.status === "failed" ? "bad" : fresh ? "acc" : "";
-      // An empty chat is the composer itself, and the New chat row above
-      // already names it; it joins the list once it has a turn.
-      if (title === "New chat" && !working && !waiting) continue;
-      // Each row carries its own delete, shown on hover: no menu, no dialog.
-      // The keyboard deletes with Delete on the row itself, so the trash
-      // stays out of the tab order.
-      const remove = working || path !== projectWorkspace ? "" : btn("delete-session", ICON_TRASH, { id: item.id }, "sidebar-delete").replace("<button ", `<button title="Delete" aria-label="Delete ${h(title)}" tabindex="-1" `);
-      if (renaming === item.id) {
-        rows.push(`<div class="sidebar-item${nested(item) ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(item.id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`);
-        shown++;
-        continue;
-      }
-      rows.push(`<div class="sidebar-item${nested(item) ? " kid" : ""}">${row(tone, title, selected && !deedOpen, tone || (selected && !inSession()) ? "" : shortAge(item.updatedAt), item.id, item.updatedAt)}${remove}</div>`);
-      shown++;
-    }
-    // The open project's Deed leads its chats, with how many sentences need you.
-    let deedLine = "";
-    if (path === projectWorkspace && !query) {
-      const count = deedCount();
-      deedLine = (`<div class="sidebar-deed-item">${btn("deed-open", `${ICON_DEED}<span class="sidebar-session-name">Deed</span>${count ? `<span class="sidebar-deed-check">${count} to check</span>` : ""}`, {}, `sidebar-deed${deedOpen ? " selected" : ""}`).replace("<button ", `<button title="What this project does, in plain sentences held true by its code"${deedOpen ? ' aria-current="page"' : ""} `)}</div>`);
-    }
-    if (more && !query) rows.push(btn("project-more", `Show ${more} more`, { path }, "sidebar-more"));
-    else if (!query && expandedProjectChats.has(path) && shown > SIDEBAR_ROWS) rows.push(btn("project-more", "Show fewer", { path }, "sidebar-more"));
-    const toggle = btn("project-toggle", '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>', { path }, "sidebar-project-toggle")
-      .replace("<button ", `<button aria-label="${h(`${expanded ? "Collapse" : "Expand"} ${name}`)}" aria-expanded="${expanded}" aria-controls="project-chats-${index}"${query ? " disabled" : ""} `);
-    const label = btn("project-open", `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v11H3zM3 7V4h7l2 3"/></svg><span>${h(name)}</span>`, { path }, "sidebar-project-name")
-      .replace("<button ", `<button draggable="true" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="${h(path)} · Drag to reorder (Alt+↑/↓)"${path === projectWorkspace ? ' aria-current="location"' : ""} `);
-    // Each project's line says its state on the right, so a closed project
-    // still shows what it needs: branches to review, a chat waiting on you,
-    // work in progress, or when it last moved.
-    const active = path === projectWorkspace;
-    const asking = projectSessions.some(item => item.id === current?.id ? Boolean(waiting) : item.waiting);
-    const busy = projectSessions.some(item => item.id === current?.id ? Boolean(state!.activeTurnId) : item.status === "running" || item.status === "queued");
-    const latest = projectSessions.reduce((max, item) => item.turns && item.updatedAt > max ? item.updatedAt : max, "");
-    const link = active && state.connection !== "online" ? state.connection === "connecting" ? "connecting…" : "offline" : "";
-    // Other agents at work here (Heartbeat): their marks lead the state, and
-    // clicking them unfolds who they are, with Message.
-    const here = agents.filter(agent => agent.project === projectSlug(path));
-    const showing = here.length > 0 && agentsShown.has(path);
-    const marks = here.length ? btn("agents-toggle", here.slice(0, 3).map(agentMark).join(""), { path }, "sidebar-agents")
-      .replace("<button ", `<button title="${h(here.map(agent => `${agent.name} ${agentPlace(agent)}`).join(" · "))}" aria-label="${h(`${here.length} ${here.length === 1 ? "agent" : "agents"} working in ${name}`)}" aria-expanded="${showing}" `) : "";
-    const status = link ? `<span class="sidebar-project-state">${link}</span>`
-      : active && review.length ? btn("review-open", `${ICON_BRANCH}${review.length}`, { show: true }, "sidebar-project-review").replace("<button ", `<button title="${review.length} ${review.length === 1 ? "branch" : "branches"} to review" `)
-      : asking ? `<span class="sidebar-project-state" title="A chat needs you">${dot("warn")}</span>`
-      // An open project's rows already show the work; a folded one says so.
-      : busy && !expanded ? `<span class="sidebar-project-state" title="Working">${dot("working")}</span>`
-      : !expanded && latest && !here.length ? `<span class="sidebar-project-state" title="${h(fullTime(latest))}">${h(shortAge(latest))}</span>` : "";
-    const agentRows = showing ? `<div class="sidebar-agent-rows">${here.map(agent => `<div class="sidebar-agent-row" title="${h(agent.address)}">${agentMark(agent)}<span>${h(agent.name)} · ${h(agentPlace(agent).replace(/^on /, ""))}</span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "sidebar-agent-message")}</div>`).join("")}</div>` : "";
-    if (active && review.length && !query) rows.push(btn("review-open", `Review ${review.length} ${review.length === 1 ? "branch" : "branches"} ›`, { show: true }, "sidebar-more sidebar-review"));
-    groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${toggle}${label}${marks}${status}</div>${agentRows}<div class="sidebar-project-chats${path === unfoldingProject && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${deedLine}${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
+  const tones = new Map(sessions.map((item) => [item.id, toneOf(item)] as const));
+  // Drive's own chats stay off the list: its work unfolds from its line in
+  // your chat and lands as a branch to review. One you open shows while open.
+  // An empty chat is the composer itself, and the New chat row above already
+  // names it; it joins the list once it has a turn.
+  const listed = sessions.filter((item) => (!branches.has(item.id) || item.id === current?.id) && (backOf(item) !== "away" || item.id === current?.id) && (titleOf(item) !== "New chat" || tones.get(item.id) === "working" || (item.id === current?.id && Boolean(waiting))));
+  const matches = (item: typeof sessions[number]) => !query || titleOf(item).toLowerCase().includes(query) || Boolean(item.workspace?.toLowerCase().includes(query));
+  const sorted = (items: typeof sessions) => sidebarView.sort === "name" ? [...items].sort((a, b) => titleOf(a).localeCompare(titleOf(b))) : items;
+  const whereWords = (item: typeof sessions[number]) => { const project = projectFor(item); return project ? projectLabel(project) : "Just a chat"; };
+  // One line per chat: a mark for its state, its title, and on the right its
+  // time (or its project, when the list is by date or state). Pointing at it
+  // shows Pin and Archive there instead. The tooltip and the accessible name
+  // say in words what the mark shows.
+  const row = (item: typeof sessions[number], right: string, nested: boolean) => {
+    const id = item.id, title = titleOf(item), tone = tones.get(id) ?? "", selected = id === current?.id && !deedOpen && !pageOpen;
+    const about = STATE_WORDS[tone] ?? "", branch = branches.get(id);
+    const project = projectFor(item);
+    const here = project === projectWorkspace || project === null;
+    const mark = tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
+    const pr = pullRequests.get(id);
+    const side = tone || pr || (id === current?.id && !inSession()) ? "" : right;
+    const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${branch ? ICON_BRANCH : ""}${side ? `<span class="sidebar-session-age">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}`)
+      .replace("<button ", `<button data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
+    // Pin and Archive sit on the row itself: no menu, no dialog. The keyboard
+    // archives with Delete on the row, so they stay out of the tab order.
+    const pin = btn("pin-session", ICON_PIN, { id, pinned: !item.pinned }, `sidebar-pin${item.pinned ? " on" : ""}`).replace("<button ", `<button title="${item.pinned ? "Unpin" : "Pin"}" aria-label="${h(`${item.pinned ? "Unpin" : "Pin"} ${title}`)}" tabindex="-1" `);
+    const archive = tone === "working" ? "" : btn("delete-session", ICON_ARCHIVE, { id }, "sidebar-delete").replace("<button ", `<button title="Archive" aria-label="Archive ${h(title)}" tabindex="-1" `);
+    // Bring it back later: the bell unfolds a few times under the row.
+    const bell = btn("back-open", ICON_BELL, { id }, `sidebar-bell${backOpenFor === id ? " on" : ""}`).replace("<button ", `<button title="Bring it back later" aria-label="${h(`Bring ${title} back later`)}" aria-expanded="${backOpenFor === id}" tabindex="-1" `);
+    const backLine = backOpenFor === id ? `<div class="sidebar-back-line" role="group" aria-label="Bring it back"><span class="sidebar-back-label">Bring it back</span>${backChoices(new Date(), pr?.state === "open" ? pr.number : undefined).map((choice) => btn("bring-back", h(choice.label), { id, at: choice.at }, "sidebar-back-opt")).join("")}</div>` : "";
+    const back = backOf(item) === "back";
+    // Its pull request sits where the time would: #N, a blue dot for news
+    // since you looked, purple once merged. The number unfolds the news.
+    const fresh = pr ? prNew(id, pr) : false;
+    const prWords = pr ? `#${pr.number} ${pr.state === "open" ? fresh ? "has news" : pr.draft ? "draft" : "open" : pr.state}` : "";
+    const chip = pr ? btn("pr-open", `${ICON_PR}<span>#${pr.number}</span>${fresh ? '<span class="sidebar-pr-dot" aria-hidden="true"></span>' : ""}`, { id }, `sidebar-pr ${pr.state}${fresh ? " new" : ""}${prOpenFor === id ? " on" : ""}`)
+      .replace("<button ", `<button title="${h(`${pr.title} · ${prWords}`)}" aria-label="${h(`Pull request ${prWords}`)}" aria-expanded="${prOpenFor === id}" tabindex="-1" `) : "";
+    const prLine = pr && prOpenFor === id ? (() => {
+      const github = btn("pr-github", "GitHub", { id }, "sidebar-back-opt");
+      if (pr.state === "merged") return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">Merged ${h(agoWords(pr.mergedAt ?? pr.activityAt))}</span>${tone === "working" ? "" : btn("delete-session", "Archive", { id }, "sidebar-back-opt key")}${github}</div>`;
+      if (pr.state === "closed") return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">Closed without merging</span>${github}</div>`;
+      const news = pullRequestNews(pr, prOpenSince);
+      const head = news.length ? `<b>${news.length} new on #${pr.number}</b>` : `<b>#${pr.number}</b> ${h(pr.title)}`;
+      const lines = (news.length ? news : prStanding(pr)).map((line) => `<span class="sidebar-pr-note">${h(line)}</span>`).join("");
+      const hand = prHandable(pr, prOpenSince) ? btn("pr-hand", "Hand it to the chat", { id }, "sidebar-back-opt key") : "";
+      return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">${head}</span>${lines}${hand}${github}</div>`;
+    })() : "";
+    if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
+    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${bell}${pin}${archive}${chip}</span></div>${backLine}${prLine}`;
+  };
+  // A group's rows, the first six unless searching or expanded.
+  const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false) => {
+    const limit = query || expandedProjectChats.has(key) ? Infinity : SIDEBAR_ROWS;
+    const rows = items.slice(0, limit).map((item) => row(item, right(item), nested(item)));
+    if (items.length > limit) rows.push(btn("project-more", `Show ${items.length - limit} more`, { key }, "sidebar-more"));
+    else if (!query && expandedProjectChats.has(key) && items.length > SIDEBAR_ROWS) rows.push(btn("project-more", "Show fewer", { key }, "sidebar-more"));
+    return rows;
+  };
+  // Group and sort, unfolded in place under the heading it was opened from.
+  const viewLine = (key: string) => {
+    if (viewOpenAt !== key) return "";
+    const choice = (word: keyof typeof VIEW_WORDS, args: Record<string, string>, on: boolean) =>
+      btn("sidebar-view", VIEW_WORDS[word], args, `sidebar-view-opt${on ? " on" : ""}`).replace("<button ", `<button aria-pressed="${on}" `);
+    const archived = btn("chats-page", `<span>Archived chats</span><span class="sidebar-view-count">${archivedCount === null ? "" : `${archivedCount} `}›</span>`, { tab: "archived" }, "sidebar-view-archived");
+    return `<div class="sidebar-view-line" role="group" aria-label="Group and sort"><div class="sidebar-view-row"><span class="sidebar-view-label">Group</span>${(["project", "date", "status"] as const).map((group) => choice(group, { group }, sidebarView.group === group)).join("")}</div><div class="sidebar-view-row"><span class="sidebar-view-label">Sort</span>${(["recent", "name"] as const).map((sort) => choice(sort, { sort }, sidebarView.sort === sort)).join("")}</div>${archived}</div>`;
+  };
+  // Every heading folds its group; pointing at it trades the count for
+  // Group and sort.
+  const viewButton = (key: string) => btn("sidebar-view-open", ICON_SORT, { key }, `sidebar-view-button${viewOpenAt === key ? " on" : ""}`)
+    .replace("<button ", `<button title="Group and sort" aria-label="Group and sort" aria-expanded="${viewOpenAt === key}" `);
+  const group = (key: string, label: string, rows: string[], count: number) => {
+    const open = isOpen(key);
+    const icon = ICON_GROUP_ICONS[key] ?? ICON_GROUP_ICONS[key.split(":")[0]!] ?? "";
+    const toggle = btn("group-toggle", `${icon}<span>${h(label)}</span>`, { key }, "sidebar-group-toggle").replace("<button ", `<button aria-expanded="${open}" `);
+    return `<section class="sidebar-group-block" data-group="${h(key)}"><div class="sidebar-group-row">${toggle}<span class="sidebar-group-count">${count || ""}</span>${viewButton(key)}</div>${viewLine(key)}<div class="sidebar-group-chats${key === unfoldingGroup && open ? " unfolding" : ""}"${open ? "" : " hidden"}>${rows.join("")}</div></section>`;
+  };
+  // The open project's Deed leads its chats, with how many sentences need you.
+  const deedLine = () => {
+    const count = deedCount();
+    return `<div class="sidebar-deed-item">${btn("deed-open", `${ICON_DEED}<span class="sidebar-session-name">Deed</span>${count ? `<span class="sidebar-deed-check">${count} to check</span>` : ""}`, {}, `sidebar-deed${deedOpen ? " selected" : ""}`).replace("<button ", `<button title="What this project does, in plain sentences held true by its code"${deedOpen ? ' aria-current="page"' : ""} `)}</div>`;
+  };
+  const reviewLine = () => review.length ? btn("review-open", `Review ${review.length} ${review.length === 1 ? "branch" : "branches"} ›`, { show: true }, "sidebar-more sidebar-review") : "";
+  // Chats you asked to bring back lead the list once they're due, until you
+  // open them; the time they came back sits on the right.
+  const backChats = listed.filter((item) => backOf(item) === "back" && item.id !== current?.id && matches(item));
+  const backList = document.getElementById("sidebar-back");
+  if (backList) {
+    backList.hidden = !backChats.length;
+    backList.innerHTML = backChats.length ? group("back", "Back now", groupRows("back", backChats, (item) => item.backAt === "merge" ? "merged" : new Date(item.backAt!).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })), 0) : "";
   }
-  list.innerHTML = groups.length ? groups.join("") : '<p class="sidebar-empty">No matching conversations or projects</p>';
-  unfoldingProject = "";
-  const editing = list.querySelector<HTMLInputElement>(".sidebar-rename input");
+  const isBack = (item: typeof sessions[number]) => backChats.includes(item);
+  // Pinned chats lead the list, whichever project they are in.
+  const pinnedChats = sorted(listed.filter((item) => item.pinned && !isBack(item) && matches(item)));
+  const pinnedList = document.getElementById("sidebar-pinned");
+  if (pinnedList) {
+    pinnedList.hidden = !pinnedChats.length;
+    pinnedList.innerHTML = pinnedChats.length ? group("pinned", "Pinned", groupRows("pinned", pinnedChats, (item) => shortAge(item.updatedAt)), 0) : "";
+  }
+  const rest = listed.filter((item) => !item.pinned && !isBack(item));
+  const groups: string[] = [];
+  let plainGroup = "";
+  if (sidebarView.group === "project") {
+    for (const [index, path] of projectPaths.entries()) {
+      const name = projectLabel(path);
+      const projectMatches = Boolean(query) && path.toLowerCase().includes(query);
+      const projectSessions = sessions.filter(item => projectFor(item) === path);
+      const found = rest.filter(item => projectFor(item) === path && (projectMatches || titleOf(item).toLowerCase().includes(query)));
+      const nested = (item: typeof found[number]) => found.some(parent => parent.id === parentOf.get(item.id));
+      const matching = sorted(found.filter(item => !nested(item)));
+      for (const child of found.filter(nested)) matching.splice(matching.findIndex(parent => parent.id === parentOf.get(child.id)) + 1, 0, child);
+      if (query && !projectMatches && !matching.length) continue;
+      const key = `p:${path}`, expanded = isOpen(key), active = path === projectWorkspace;
+      const rows = groupRows(key, matching, (item) => shortAge(item.updatedAt), nested);
+      if (active && !query) rows.push(reviewLine());
+      // The whole line is the fold, its folder shut or open with it; + starts
+      // a chat in the project.
+      const label = btn("project-toggle", `${expanded ? ICON_FOLDER_OPEN : ICON_FOLDER_SHUT}<span>${h(name)}</span>`, { path }, "sidebar-project-name")
+        .replace("<button ", `<button draggable="true" aria-expanded="${expanded}" aria-controls="project-chats-${index}" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="${h(path)} · Drag to reorder (Alt+↑/↓)"${active ? ' aria-current="location"' : ""}${query ? " aria-disabled=\"true\"" : ""} `);
+      const start = btn("project-new", ICON_PLUS_SMALL, { path }, "sidebar-project-new").replace("<button ", `<button title="${h(`New chat in ${name}`)}" aria-label="${h(`New chat in ${name}`)}" `);
+      // Each project's line says its state on the right, so a closed project
+      // still shows what it needs: branches to review, a chat waiting on you,
+      // work in progress, or how many chats it holds.
+      const asking = projectSessions.some(item => item.id === current?.id ? Boolean(waiting) : item.waiting);
+      const busy = projectSessions.some(item => item.id === current?.id ? Boolean(state!.activeTurnId) : item.status === "running" || item.status === "queued");
+      const link = active && state.connection !== "online" ? state.connection === "connecting" ? "connecting…" : "offline" : "";
+      // Other agents at work here (Heartbeat): their marks lead the state, and
+      // clicking them unfolds who they are, with Message.
+      const here = agents.filter(agent => agent.project === projectSlug(path));
+      const showing = here.length > 0 && agentsShown.has(path);
+      const marks = here.length ? btn("agents-toggle", here.slice(0, 3).map(agentMark).join(""), { path }, "sidebar-agents")
+        .replace("<button ", `<button title="${h(here.map(agent => `${agent.name} ${agentPlace(agent)}`).join(" · "))}" aria-label="${h(`${here.length} ${here.length === 1 ? "agent" : "agents"} working in ${name}`)}" aria-expanded="${showing}" `) : "";
+      const status = link ? `<span class="sidebar-project-state">${link}</span>`
+        : active && review.length ? btn("review-open", `${ICON_BRANCH}${review.length}`, { show: true }, "sidebar-project-review").replace("<button ", `<button title="${review.length} ${review.length === 1 ? "branch" : "branches"} to review" `)
+        : asking ? `<span class="sidebar-project-state" title="A chat needs you">${dot("warn")}</span>`
+        // An open project's rows already show the work; a folded one says so.
+        : busy && !expanded ? `<span class="sidebar-project-state" title="Working">${dot("working")}</span>`
+        // An open project names its branch; a folded one, how many chats it holds.
+        : expanded && active && state.session?.workspace?.gitBranch ? `<span class="sidebar-project-state sidebar-project-branch" title="On ${h(state.session.workspace.gitBranch)}">${ICON_BRANCH}<span>${h(state.session.workspace.gitBranch)}</span></span>`
+        : here.length || expanded ? "" : `<span class="sidebar-group-count">${found.length || ""}</span>`;
+      const agentRows = showing ? `<div class="sidebar-agent-rows">${here.map(agent => `<div class="sidebar-agent-row" title="${h(agent.address)}">${agentMark(agent)}<span>${h(agent.name)} · ${h(agentPlace(agent).replace(/^on /, ""))}</span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "sidebar-agent-message")}</div>`).join("")}</div>` : "";
+      groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${label}${marks}${status}${start}${viewButton(key)}</div>${viewLine(key)}${agentRows}<div class="sidebar-project-chats${key === unfoldingGroup && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${active && !query ? deedLine() : ""}${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
+    }
+    // Chats with no project follow, under Just a chat.
+    const plainChats = sorted(rest.filter((item) => !item.workspace && matches(item)));
+    if (plainChats.length) plainGroup = group("plain", "Just a chat", groupRows("plain", plainChats, (item) => shortAge(item.updatedAt)), plainChats.length);
+  } else {
+    // By date or by state, every chat in one list, each naming its project.
+    // The open project's Deed and branches to review lead it.
+    const lead = query || plainNow ? "" : deedLine() + reviewLine();
+    if (lead) groups.push(`<div class="sidebar-lead">${lead}</div>`);
+    const buckets = new Map<string, typeof sessions>();
+    const STATE_GROUPS: Record<string, string> = { warn: "Needs you", working: "Working", bad: "Failed", acc: "New replies", "": "Done" };
+    const order = sidebarView.group === "date" ? ["Today", "Yesterday", "This week", "This month", "Earlier"] : Object.values(STATE_GROUPS);
+    for (const label of order) buckets.set(label, []);
+    for (const item of sorted(rest.filter(matches))) buckets.get(sidebarView.group === "date" ? sidebarDay(item.updatedAt) : STATE_GROUPS[tones.get(item.id) ?? ""]!)!.push(item);
+    for (const [label, items] of buckets) {
+      if (!items.length) continue;
+      const key = `${sidebarView.group === "date" ? "d" : "s"}:${label}`;
+      groups.push(group(key, label, groupRows(key, items, whereWords), items.length));
+    }
+  }
+  list.innerHTML = groups.length || plainGroup || pinnedChats.length ? groups.join("") : `<p class="sidebar-empty">${query ? "No matching conversations or projects" : "No chats yet"}</p>`;
+  const chatList = document.getElementById("sidebar-chats");
+  if (chatList) {
+    chatList.hidden = !plainGroup;
+    chatList.innerHTML = plainGroup;
+  }
+  unfoldingGroup = "";
+  const editing = nav.querySelector<HTMLInputElement>(".sidebar-rename input");
   if (editing && document.activeElement !== editing) { editing.focus(); editing.select(); }
   // A redraw keeps keyboard focus where it was, or on the row that moved up.
   if (focusedControl && !editing) {
-    const sameControl = [...list.querySelectorAll<HTMLButtonElement>("button")].find(button =>
+    const sameControl = [...nav.querySelectorAll<HTMLButtonElement>("button")].find(button =>
       button.dataset.action === focusedControl.action && button.dataset.args === focusedControl.args && !button.closest("[hidden]"));
-    const buttons = [...list.querySelectorAll<HTMLElement>(".sidebar-session")].filter(button => !button.closest("[hidden]"));
+    const buttons = [...nav.querySelectorAll<HTMLElement>(".sidebar-session")].filter(button => !button.closest("[hidden]"));
     (sameControl ?? (focused >= 0 ? buttons[Math.min(focused, buttons.length - 1)] : null) ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
   }
   const title = document.getElementById("workspace-title");
-  if (title) { title.textContent = deedOpen ? "Deed" : inSession() ? current?.title ?? "Conversation" : "New chat"; title.title = title.textContent; }
+  if (title) { title.textContent = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen ? "All chats" : deedOpen ? "Deed" : inSession() ? current?.title ?? "Conversation" : "Home"; title.title = title.textContent; }
   // A mission's chat says where it came from, and goes back there.
   const crumb = document.getElementById("workspace-from"), from = current && inSession() ? parentOf.get(current.id) : undefined;
   if (crumb) {
-    crumb.hidden = !from || deedOpen;
+    crumb.hidden = !from || deedOpen || Boolean(pageOpen);
     crumb.innerHTML = from ? `from ${btn("select-session", h(chatTitle(from)), { id: from }, "workspace-from-link")}` : "";
+  }
+  // Where an open chat lives: Just a chat, or its project.
+  const where = document.getElementById("workspace-where");
+  if (where) {
+    where.hidden = deedOpen || Boolean(pageOpen) || !inSession() || Boolean(from);
+    where.textContent = plainNow ? "Just a chat" : projectLabel(projectWorkspace);
   }
   // The rail: a dot where something waits, a ring for Drive's progress.
   const badge = document.getElementById("rail-sessions-badge"), ring = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
@@ -566,8 +771,8 @@ function renderSidebar() {
 document.getElementById("sidebar-search")?.addEventListener("input", renderSidebar);
 // The list moves with the arrow keys, Home and End; Delete or Backspace
 // deletes the focused chat, and ⌘Z brings the last one back.
-document.getElementById("sidebar-sessions")?.addEventListener("keydown", (event) => {
-  const rows = [...document.querySelectorAll<HTMLElement>("#sidebar-sessions .sidebar-session")].filter(row => !row.closest("[hidden]"));
+document.getElementById("sidebar-projects")?.addEventListener("keydown", (event) => {
+  const rows = [...document.querySelectorAll<HTMLElement>("#sidebar-projects .sidebar-session")].filter(row => !row.closest("[hidden]"));
   const index = rows.indexOf(event.target as HTMLElement);
   if (index < 0 || event.metaKey || event.ctrlKey || event.altKey) return;
   const key = event.key;
@@ -586,7 +791,7 @@ document.getElementById("sidebar-sessions")?.addEventListener("keydown", (event)
 });
 /// The chat above or below the open one in the list, for Ctrl+Tab.
 function neighbourChat(step: number) {
-  const ids = [...document.querySelectorAll<HTMLElement>('#sidebar-sessions .sidebar-session[data-action="select-session"]')].filter(row => !row.closest("[hidden]")).map((row) => JSON.parse(row.dataset.args ?? "{}").id as string).filter(Boolean);
+  const ids = [...document.querySelectorAll<HTMLElement>('#sidebar-projects .sidebar-session[data-action="select-session"]')].filter(row => !row.closest("[hidden]")).map((row) => JSON.parse(row.dataset.args ?? "{}").id as string).filter(Boolean);
   if (!ids.length) return undefined;
   const at = ids.indexOf(state?.session?.id ?? "");
   return ids[at < 0 ? (step > 0 ? 0 : ids.length - 1) : (at + step + ids.length) % ids.length];
@@ -595,7 +800,7 @@ function neighbourChat(step: number) {
 // keeps it, Escape puts it back.
 // The first click opens the chat and redraws the row, so the second click
 // may not complete on the same element: the second press starts the rename.
-document.getElementById("sidebar-sessions")?.addEventListener("mousedown", (event) => {
+document.getElementById("sidebar-projects")?.addEventListener("mousedown", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLElement>(".sidebar-session");
   if (!button || button.dataset.action !== "select-session" || event.detail < 2 || event.button !== 0) return;
   event.preventDefault();
@@ -611,20 +816,60 @@ function endRename(save: boolean) {
   const was = state?.sessions.find((item) => item.id === id)?.title;
   if (save && id && title && title !== was) void act(() => api("rename", { id, title }));
 }
-document.getElementById("sidebar-sessions")?.addEventListener("submit", (event) => { event.preventDefault(); endRename(true); });
+// Rest on a chat to see where it stands (pass 76 C): after a moment its card
+// sits beside the row, read from that chat's state. It goes when the pointer
+// leaves the row or a click lands.
+const glanceCache = new Map<string, { key: string; glance: Glance }>();
+let glanceTimer: ReturnType<typeof setTimeout> | undefined, glanceRow: HTMLElement | null = null;
+function hideGlance() {
+  clearTimeout(glanceTimer);
+  glanceRow = null;
+  document.getElementById("sidebar-glance")?.remove();
+}
+async function showGlance(row: HTMLElement) {
+  const id = JSON.parse(row.dataset.args ?? "{}").id as string | undefined;
+  if (!id) return;
+  const key = row.dataset.updated ?? "", cached = glanceCache.get(id);
+  let glance = cached?.key === key ? cached.glance : null;
+  if (!glance) {
+    try { glance = await api<Glance>("session-glance", { id }); } catch { return; }
+    glanceCache.set(id, { key, glance });
+  }
+  if (glanceRow !== row || !row.isConnected) return;
+  const card = document.getElementById("sidebar-glance") ?? Object.assign(document.createElement("div"), { id: "sidebar-glance", role: "tooltip" });
+  const title = row.querySelector(".sidebar-session-name")?.textContent ?? "";
+  card.innerHTML = glanceHTML(title, row.dataset.about ?? "", row.dataset.when ?? "", glance, (model) => modelWords({ id: model, displayName: models.find((item) => item.id === model)?.displayName }));
+  document.body.append(card);
+  const box = row.getBoundingClientRect(), side = document.getElementById("desktop-sidebar")?.getBoundingClientRect();
+  card.style.left = `${Math.round((side?.right ?? box.right) + 6)}px`;
+  card.style.top = `${Math.round(Math.max(8, Math.min(box.top - 6, innerHeight - card.offsetHeight - 8)))}px`;
+  row.setAttribute("aria-describedby", "sidebar-glance");
+}
+document.getElementById("desktop-sidebar")?.addEventListener("pointerover", (event) => {
+  const row = (event.target as Element).closest<HTMLElement>(".sidebar-session[data-updated]");
+  if (row === glanceRow) return;
+  hideGlance();
+  if (!row) return;
+  glanceRow = row;
+  glanceTimer = setTimeout(() => void showGlance(row), 450);
+});
+document.getElementById("desktop-sidebar")?.addEventListener("pointerleave", hideGlance);
+document.addEventListener("pointerdown", hideGlance, true);
+document.getElementById("sidebar-projects")?.addEventListener("scroll", hideGlance, { passive: true });
+document.getElementById("sidebar-projects")?.addEventListener("submit", (event) => { event.preventDefault(); endRename(true); });
 // A press anywhere else keeps the new title. Focus taken by the app itself
 // (the composer, as the chat opens) goes back to the field.
 document.addEventListener("pointerdown", (event) => {
   if (renaming && !(event.target as HTMLElement).closest(".sidebar-rename")) endRename(true);
 }, true);
-document.getElementById("sidebar-sessions")?.addEventListener("focusout", (event) => {
+document.getElementById("sidebar-projects")?.addEventListener("focusout", (event) => {
   const form = (event.target as HTMLElement).closest(".sidebar-rename");
   if (!form || !renaming) return;
   const next = (event as FocusEvent).relatedTarget as HTMLElement | null;
   if (next?.matches("textarea")) setTimeout(() => { if (renaming && form.isConnected) form.querySelector("input")?.focus(); });
   else if (next) endRename(true);
 });
-document.getElementById("sidebar-sessions")?.addEventListener("keydown", (event) => {
+document.getElementById("sidebar-projects")?.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && (event.target as HTMLElement).closest(".sidebar-rename")) { event.preventDefault(); event.stopPropagation(); endRename(false); }
 }, true);
 /// Brings back the chat deleted last, while it still waits to be archived.
@@ -702,12 +947,14 @@ function card(name: string, title: string, summary: string, body: string) {
   return `<section class="card${folded ? " folded" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${!folded}"><span class="card-title">${title}</span>${ICON_CHEVRON}<span class="card-sum">${summary}</span></button>${folded ? "" : `<div class="card-body">${body}</div>`}</section>`;
 }
 function renderCards() {
-  const shown = Boolean(state) && cardsOn && inSession();
+  // A page in place of the chat (Settings, Customize…) hides the chat's cards.
+  const shown = Boolean(state) && cardsOn && inSession() && !pageOpen;
   el("app").classList.toggle("cards-on", shown);
   const aside = el("cards");
   aside.hidden = !shown;
   if (!shown) { cardsSignature = ""; return; }
-  const s = state!, root = s.workspace ?? "", branch = s.session?.workspace?.gitBranch;
+  // A plain chat has no folder: the card says Just a chat.
+  const s = state!, root = isPlain(s) ? "" : s.workspace ?? "", branch = s.session?.workspace?.gitBranch;
   const c = context(), plan = s.provider?.contextPlan, changes = workingChanges();
   const files = s.files.filter((file) => file.status);
   const here = root ? s.agents.filter((agent) => agent.project === projectSlug(root)) : [];
@@ -720,9 +967,9 @@ function renderCards() {
   const parent = root.slice(0, Math.max(0, root.length - name.length - 1)).replace(/^\/(Users|home)\/[^/]+/, "~");
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
   const out: string[] = [];
-  out.push(card("environment", "Environment", h(branch ? `${name} · ${branch}` : name),
+  out.push(card("environment", "Environment", root ? h(branch ? `${name} · ${branch}` : name) : "Just a chat",
     row(ICON_COMPUTER, "This computer") +
-    row(ICON_FOLDER, `${h(name)}${parent ? `<em> · ${h(parent)}</em>` : ""}`, "", root) +
+    (root ? row(ICON_FOLDER, `${h(name)}${parent ? `<em> · ${h(parent)}</em>` : ""}`, "", root) : "") +
     (branch ? row(ICON_BRANCH.replace("sidebar-branch", ""), h(branch)) : "") +
     // The pulse beats while Heartbeat is running.
     row(s.connectors.heartbeat ? ICON_PULSE.replace('class="ico"', 'class="ico beat"') : ICON_PULSE, "Heartbeat", s.connectors.heartbeat ? '<span class="card-on">On</span>' : "Off")));
@@ -777,9 +1024,49 @@ function renderCards() {
   }
   cardUnfolding = "";
 }
+/// The sidebar's foot: who you are and what pays for the models, the theme
+/// switch, and Settings.
+const ICON_SUN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>';
+const ICON_MOON = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+const isLightTheme = (name: string) => {
+  const option = state?.themeOptions.find((item) => item.name === name) as { appearance?: string } | undefined;
+  return option?.appearance ? option.appearance === "light" : /light|latte/.test(name);
+};
+function renderFoot() {
+  if (!state) return;
+  const you = state.you || "You", first = you.split(/\s+/)[0] || you;
+  const plan = state.chatgptAccount?.planEnabled ? "ChatGPT plan" : state.model.provider || "";
+  const light = isLightTheme(state.theme);
+  const html = [first, plan, light].join("\0");
+  const foot = document.querySelector<HTMLElement>(".sidebar-foot");
+  if (!foot || foot.dataset.html === html) return;
+  foot.dataset.html = html;
+  el("sidebar-avatar").textContent = first[0]?.toUpperCase() ?? "";
+  el("sidebar-you").textContent = first;
+  el("sidebar-you").title = you;
+  el("sidebar-plan").textContent = plan;
+  el("sidebar-plan").title = state.chatgptAccount?.email ?? plan;
+  const theme = el("sidebar-theme"), word = light ? "Dark theme" : "Light theme";
+  theme.innerHTML = light ? ICON_MOON : ICON_SUN;
+  theme.title = word;
+  theme.setAttribute("aria-label", word);
+}
+/// The sun and moon swap between your last light and dark themes.
+function flipTheme(): void {
+  if (!state) return;
+  const light = isLightTheme(state.theme), names = state.themes;
+  try { localStorage.setItem(light ? "demesne-theme-light" : "demesne-theme-dark", state.theme); } catch {}
+  let saved: string | null = null;
+  try { saved = localStorage.getItem(light ? "demesne-theme-dark" : "demesne-theme-light"); } catch {}
+  const next = saved && names.includes(saved) && isLightTheme(saved) !== light ? saved
+    : names.includes(light ? "demesne" : "demesne-light") ? (light ? "demesne" : "demesne-light")
+    : names.find((name) => isLightTheme(name) !== light);
+  if (next) void act(() => dispatch("settings-set", { method: "theme", args: { name: next } }));
+}
 function renderStatus() {
   if (!state) return;
   renderSidebar();
+  renderFoot();
   const c = context(),
     last = state.runs.at(-1),
     phase = state.approvals.length
@@ -819,10 +1106,15 @@ function renderStatus() {
     inSession(),
     driveWord(),
     cardsOn,
+    pageOpen,
   ]);
   renderCards();
-  if (signature === statusSignature) return;
-  statusSignature = signature;
+  const rim = rimState(phase);
+  applyRim(rim);
+  renderDrivePeek();
+  renderPlanLimit();
+  if (signature + JSON.stringify(rim) === statusSignature) return;
+  statusSignature = signature + JSON.stringify(rim);
   // A quiet footer: a spinner while working, a word only when the state
   // needs attention (failed, approval, offline…). "ready" says nothing.
   const working = Boolean(state.activeTurnId) && !["approval", "waiting", "failed"].includes(phase);
@@ -832,18 +1124,149 @@ function renderStatus() {
   el("status").hidden = inSession();
   // The context used, as a small ring; the numbers wait in its tooltip.
   const c2 = c.percentage == null ? "" : `<span class="ring" style="--usage:${Math.min(100, c.percentage)}%"></span>`;
-  el("composer-model").innerHTML = `${h(state.model.displayName ?? state.model.id) || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
+  el("composer-model").innerHTML = `${h(state.model.id ? modelWords({ id: state.model.id, displayName: state.model.displayName ?? models.find((model) => model.id === state!.model.id)?.displayName }) : "") || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
   el("composer-context").innerHTML = c2;
   el("composer-context").title = c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`;
   el("composer-context").hidden = !inSession() || !c2;
   renderContextCard();
   el("status").innerHTML =
-    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("overlay", `${k("Tab")} settings`, { name: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
+    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("page-open", `${k("Tab")} settings`, { page: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   // The top bar carries the session's branch and ⋯, which opens the
   // session's own view (rename, compact, history). The sidebar shows what
   // needs you; Drive lives in its footer.
   el("header").innerHTML =
-    `<div class="header-state">${branchChip()}</div>${inSession() ? `<button type="button" class="header-cards${cardsOn ? " on" : ""}" data-action="cards-toggle" aria-label="Cards" aria-pressed="${cardsOn}" title="${cardsOn ? "Hide" : "Show"} cards">${ICON_PANEL}</button>` : ""}${inSession() ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+    `<div class="header-state">${pageOpen ? "" : branchChip()}${rimWords(rim)}</div>${inSession() && !pageOpen ? `<button type="button" class="header-cards${cardsOn ? " on" : ""}" data-action="cards-toggle" aria-label="Cards" aria-pressed="${cardsOn}" title="${cardsOn ? "Hide" : "Show"} cards">${ICON_PANEL}</button>` : ""}${inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+}
+/// Your plan's limit (pass 75 D): nothing under half; past it a small ring
+/// and the fuller window's percentage sit beside the model word, amber from
+/// 75%. Pointing at it gives the resets, the week, and Drive's rule.
+let planLimits: PlanLimits[] = [], planLimitsAt = 0, planLimitsTurn: string | null = null, planLimitSignature = "";
+async function loadPlanLimits() {
+  planLimitsAt = Date.now();
+  try { planLimits = await api<PlanLimits[]>("plan-limits") ?? []; } catch { return; }
+  renderPlanLimit();
+}
+const resetWords = (at: string | null) => {
+  if (!at) return "";
+  const date = new Date(at), time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `, resets ${date.getTime() - Date.now() < 86_400_000 ? time : `${date.toLocaleDateString([], { weekday: "short" })} ${time}`}`;
+};
+function renderPlanLimit() {
+  const node = document.getElementById("composer-limit");
+  if (!node || !state) return;
+  const limits = planLimits.find((item) => item.provider === state!.model.provider);
+  const top = limits && planUsed(limits);
+  const used = top ? Math.round(top.window.usedPercent) : 0;
+  const signature = JSON.stringify([limits, used, Math.floor(Date.now() / 60_000)]);
+  if (signature === planLimitSignature) return;
+  planLimitSignature = signature;
+  node.hidden = !top || used < PLAN_LIMIT_SHOWN;
+  if (node.hidden || !limits || !top) { node.innerHTML = ""; node.removeAttribute("title"); return; }
+  node.classList.toggle("warn", used >= PLAN_LIMIT_AMBER);
+  node.innerHTML = `<span class="ring" style="--usage:${used}%"></span>${used}% of your ${h(top.name)} limit`;
+  const plan = limits.plan ? `${limits.provider} ${limits.plan[0]!.toUpperCase()}${limits.plan.slice(1)}` : `${limits.provider} plan`;
+  const windows = planWindows(limits).map(({ name, window }) => `${name === "weekly" ? "This week" : `${name[0]!.toUpperCase()}${name.slice(1)} window`} ${Math.round(window.usedPercent)}%${resetWords(window.resetsAt)}`);
+  node.title = [plan, ...windows, used >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`].join("\n");
+}
+// Each answer brings fresh numbers: look right after a turn ends, every 20
+// seconds while one works, and every minute otherwise.
+setInterval(() => {
+  if (!state || document.hidden) return;
+  const turn = state.activeTurnId ?? null, since = Date.now() - planLimitsAt;
+  if ((planLimitsTurn && !turn) || since > (turn ? 20_000 : 60_000)) void loadPlanLimits();
+  planLimitsTurn = turn;
+}, 2_000);
+/// The rim says the state (pass 74 B): the panel's hairline edge carries the
+/// open chat's state, readable from across the room. A blue light runs along
+/// it while a turn works, a still amber arc means it waits on you, and a red
+/// dash marks a failed check or turn until you next touch the window.
+type Rim = { kind: "work" | "wait" | "fail"; words: string } | null;
+let rimFailSeen = "", rimFailShown = "";
+function rimState(phase: string): Rim {
+  if (!state || !inSession() || pageOpen || deedOpen) return null;
+  if (phase === "approval") {
+    const tool = state.approvals[0];
+    return { kind: "wait", words: tool ? `Waiting on you · ${approvalWords(tool)}` : "Waiting on you" };
+  }
+  if (phase === "waiting") return { kind: "wait", words: "Waiting on your answer" };
+  if (phase === "running" || phase === "checking") {
+    const last = state.runs.at(-1), step = last ? tools(last).findLast((tool) => tool.state === "running") : undefined;
+    const doing: Record<string, string> = { Run: "Running", Read: "Reading", Write: "Writing", Edit: "Editing", Search: "Searching", List: "Listing", Agent: "Asking an agent" };
+    const target = step ? (step.name === "run_command" ? (step.detail ?? "").replace(/^\$\s*/, "").replace(/^\S*\//, "") : String(step.input.path ?? step.detail ?? "")) : "";
+    const words = step ? `${doing[verb(step)] ?? verb(step)}${target && verb(step) !== "Agent" ? ` ${target}` : ""}` : phase === "checking" ? "Checking" : "Working";
+    return { kind: "work", words: words.length > 48 ? `${words.slice(0, 47)}…` : words };
+  }
+  const last = state.runs.at(-1);
+  if (!last || active(last)) return null;
+  const check = tools(last).find((t) => t.phase === "verify" && t.name === "run_command" && t.input.background !== true && (t.state === "failed" || t.state === "denied"));
+  if (last.status !== "failed" && !check) return null;
+  rimFailShown = last.id;
+  if (rimFailSeen === last.id) return null;
+  return { kind: "fail", words: check ? "Check failed" : "Turn failed" };
+}
+/// A short name for what an approval asks: "run bun test?", "edit hello.ts?".
+function approvalWords(tool: WorkspaceApproval) {
+  const input = tool.input ?? {};
+  // The program by its name, not its path: "bun run check", as the row says.
+  const argv = Array.isArray(input.argv) ? input.argv.map(String).map((part, index) => index ? part : part.split(/[\\/]/).at(-1)!).join(" ") : typeof input.command === "string" ? input.command : "";
+  const path = typeof input.path === "string" ? input.path.split(/[\\/]/).at(-1) : "";
+  const words = tool.name === "run_command" && argv ? `run ${argv}` : path ? `${/write|create/.test(tool.name) ? "write" : "edit"} ${path}` : tool.name.replaceAll("_", " ");
+  return words ? `${words.length > 40 ? `${words.slice(0, 39)}…` : words}?` : "";
+}
+function rimWords(rim: Rim) {
+  if (!rim) return "";
+  // A dot, not the cube: the cube lives in the conversation, and only once.
+  return `<span class="header-live ${rim.kind}"><i aria-hidden="true"></i><span>${h(rim.words)}</span></span>`;
+}
+function applyRim(rim: Rim) {
+  const app = el("app");
+  for (const kind of ["work", "wait", "fail"]) app.classList.toggle(`rim-${kind}`, rim?.kind === kind);
+}
+// Looking at the window (a click or a key) settles a failure's red dash.
+for (const type of ["pointerdown", "keydown"] as const)
+  document.addEventListener(type, () => {
+    if (rimFailShown && rimFailSeen !== rimFailShown && el("app").classList.contains("rim-fail")) {
+      rimFailSeen = rimFailShown;
+      queueMicrotask(() => { statusSignature = ""; renderStatus(); });
+    }
+  }, true);
+/// Drive's panel waits behind yours (pass 74 D): while Drive works in its
+/// own worktree chat, that chat sits behind the open one with one edge
+/// showing, its title along it. Click the edge and the two swap. A finished
+/// branch turns the edge green until you open it; inside Drive's chat the
+/// edge is the chat it came from.
+const peekSeen = new Set<string>();
+type Peek = { sessionId: string; kind: "work" | "ready" | "back"; words: string };
+function drivePeek(): Peek | null {
+  if (!state || !inSession() || pageOpen || deedOpen) return null;
+  const current = state.session?.id;
+  const jobs = [state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId));
+  const name = (job: (typeof jobs)[number]) => (job.mission ? job.mission.split("\n")[0]!.replace(/^--(bounded|continuous)\s+/, "") : job.title) || "Drive's branch";
+  const mine = jobs.find((job) => job.sessionId === current);
+  if (mine) {
+    if (mine.status === "ready") peekSeen.add(mine.id);
+    return mine.from && state.sessions.some((item) => item.id === mine.from) ? { sessionId: mine.from, kind: "back", words: `Back to ${chatTitle(mine.from)}` } : null;
+  }
+  const running = jobs.find((job) => job.status === "starting" || job.status === "running");
+  if (running) return { sessionId: running.sessionId!, kind: "work", words: `Drive · ${name(running)}` };
+  const ready = jobs.find((job) => job.status === "ready" && !peekSeen.has(job.id));
+  return ready ? { sessionId: ready.sessionId!, kind: "ready", words: `Ready · ${name(ready)}` } : null;
+}
+let peekSignature = "";
+function renderDrivePeek() {
+  const peek = drivePeek(), node = document.getElementById("drive-peek");
+  if (!node) return;
+  const signature = JSON.stringify(peek);
+  if (signature === peekSignature) return;
+  peekSignature = signature;
+  node.hidden = !peek;
+  if (!peek) return;
+  node.className = peek.kind;
+  node.dataset.action = "select-session";
+  node.dataset.args = JSON.stringify({ id: peek.sessionId });
+  node.title = peek.kind === "back" ? peek.words : `${peek.words} · open Drive's chat`;
+  node.setAttribute("aria-label", node.title);
+  node.innerHTML = `<span class="dp-words"><i aria-hidden="true"></i><span>${h(peek.words)}</span></span>`;
 }
 function totals(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -868,7 +1291,7 @@ const counts = (value: { added: number; removed: number }) =>
   `<span class="counts"><span class="plus">+${value.added}</span><span class="minus">−${value.removed}</span></span>`;
 /// Drive's best idea, as the start screen's ghost text; Tab takes it.
 function driveSuggestion(): string | null {
-  return !inSession() && state ? state.driveNext.proposals[0]?.title ?? null : null;
+  return !inSession() && state && !isPlain() ? state.driveNext.proposals[0]?.title ?? null : null;
 }
 /// The next prompt the model suggested at the end of the last finished turn.
 function nextSuggestion(): string | null {
@@ -1051,6 +1474,95 @@ function subagentTrace(run: WorkspaceRun, tool: ToolEntry, key: string) {
     : `<p>${h(segment.text.trim())}</p>`).join("");
   return `<details class="thinking ${live ? "live" : ""}" data-detail="${key}:trace"${(live && !detailsClosed.has(`${key}:trace`)) || detailsOpen.has(`${key}:trace`) ? " open" : ""}><summary>◇ Sub-agent trace · ${steps} step${steps === 1 ? "" : "s"}</summary><div>${body}</div></details>`;
 }
+/// Proof marks. Each claim in an answer is wrapped in the rendered words:
+/// green line = a step proved it, dotted = nothing checked, red wavy = the
+/// check disagreed. The proof unfolds under the claim's paragraph.
+const proofClaims = (run: WorkspaceRun) => (run.proofs ?? []).filter((claim) => claim.state !== "dropped");
+/// The step that backs a claim: its words and number on the guide.
+function proofStepOf(run: WorkspaceRun, claim: ProofClaim) {
+  if (!claim.toolCallId) return null;
+  const list = tools(run), tool = list.find((item) => item.toolCallId === claim.toolCallId);
+  return tool ? { tool, number: list.indexOf(tool) + 1, words: stepWords(tool), duration: duration(tool.durationMs) } : null;
+}
+/// "Ran bun test", "Edited sidebar.ts": a step in plain words.
+function stepWords(tool: ToolEntry) {
+  const past: Record<string, string> = { Run: "Ran", Read: "Read", Write: "Wrote", Edit: "Edited", Search: "Searched", List: "Listed", Diff: "Diffed", Git: "Checked git", History: "Read history", Agent: "Asked an agent" };
+  const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
+  const target = tool.name === "run_command" ? base.replace(/^\S*\//, "") : String(tool.input.path ?? base);
+  return `${past[verb(tool)] ?? verb(tool)} ${target}`.slice(0, 80);
+}
+function proofLineHTML(run: WorkspaceRun) {
+  const line = run.proofs ? proofLine(run.proofs) : null;
+  if (!line) return "";
+  const stepping = proofStep?.runId === run.id ? proofStep : null;
+  const parts = [
+    line.proved ? btn("proof-walk", line.proved, { runId: run.id, state: "proved" }, "pl-ok") : "",
+    line.checking ? `<span class="pl-live">${line.checking}</span>` : "",
+    line.wrong ? btn("proof-walk", line.wrong, { runId: run.id, state: "false" }, "pl-bad") : "",
+    line.unchecked ? btn("proof-walk", line.unchecked, { runId: run.id, state: "unchecked" }, "pl-open") : "",
+  ].filter(Boolean).join('<span class="pl-dot">·</span>');
+  return `<div class="proof-line">${parts}${stepping ? `<span class="pl-step">${stepping.index + 1} of ${proofClaims(run).length} · ↑↓ · Esc</span>` : ""}</div>`;
+}
+/// What unfolds under a claim: the step and the lines that back it, the
+/// check on its way, what the check found instead, or Prove it.
+function proofFoldHTML(run: WorkspaceRun, claim: ProofClaim) {
+  const step = proofStepOf(run, claim), args = { runId: run.id, claimId: claim.id };
+  const quote = claim.quote ? `<pre class="pf-quote">${h(claim.quote.split("\n").slice(0, 8).join("\n"))}</pre>` : "";
+  if (claim.state === "proved")
+    return `<div class="proof-fold ok"><div class="pf-src">${step ? `<b>${h(step.words)}</b> · step ${step.number}${step.duration ? ` · ${step.duration}` : ""}` : `<b>Checked</b>${claim.step ? ` · ${h(claim.step)}` : ""}`}${claim.words ? ` · corrected` : ""}</div>${quote}${step ? `<div class="pf-acts">${btn("proof-step", "Open the step ›", { runId: run.id, toolCallId: claim.toolCallId })}</div>` : ""}</div>`;
+  if (claim.state === "checking")
+    return `<div class="proof-fold live"><div class="pf-run">${spinner()}<span>Checking</span>${claim.step ? `<code>${h(claim.step)}</code>` : ""}</div></div>`;
+  if (claim.state === "false")
+    return `<div class="proof-fold bad"><div class="pf-src"><span class="danger">Not true.</span> ${h(claim.why ?? "")}${claim.step ? ` <span class="muted">· ${h(claim.step)}</span>` : ""}</div>${quote}<div class="pf-acts">${btn("proof-fix", "Fix it ↵", args, "pf-main")}${claim.words ? btn("proof-correct", "Correct the sentence", args) : ""}${btn("proof-check", "Check again", args)}</div></div>`;
+  const looked = lookedAt(tools(run).filter((tool) => tool.state === "done" && tool.name !== "ask_user").map((tool) => ({ words: stepWords(tool) })));
+  return `<div class="proof-fold"><div class="pf-src">${claim.why ? h(claim.why) : "Nothing in this turn checked this."}${looked ? ` ${h(looked)}` : ""}</div><div class="pf-acts">${btn("proof-check", "Prove it ↵", args, "pf-main")}${btn("proof-drop", "Drop the sentence", args)}</div></div>`;
+}
+/// Wraps each claim's words in the rendered answer and unfolds the open one
+/// under its paragraph. Idempotent: earlier marks come off first.
+function decorateProofs(run: WorkspaceRun, root: HTMLElement) {
+  for (const fold of root.querySelectorAll(".proof-fold")) fold.remove();
+  for (const mark of root.querySelectorAll(".claim")) mark.replaceWith(...mark.childNodes);
+  root.normalize();
+  const claims = run.proofs ?? [];
+  if (!claims.length) return;
+  const open = proofOpen.get(run.id);
+  for (const claim of claims) {
+    const nodes: Text[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node as Text);
+    const found = locate(nodes.map((node) => node.data), claim.text);
+    if (!found) continue;
+    const step = proofStepOf(run, claim), spans: HTMLElement[] = [];
+    for (const part of found) {
+      const range = document.createRange();
+      range.setStart(nodes[part.segment]!, part.start);
+      range.setEnd(nodes[part.segment]!, part.end);
+      const span = document.createElement("span");
+      span.className = `claim ${claim.state}${open === claim.id ? " on" : ""}${claim.state === "checking" ? " shine" : ""}`;
+      span.dataset.claim = claim.id;
+      span.dataset.run = run.id;
+      span.title = claimTitle(claim, step);
+      span.tabIndex = 0;
+      span.setAttribute("role", "button");
+      range.surroundContents(span);
+      spans.push(span);
+    }
+    // Corrected: the true words stand where the claim was.
+    if (claim.state === "proved" && claim.words && claim.words !== claim.text) {
+      spans[0]!.textContent = claim.words;
+      for (const span of spans.slice(1)) span.textContent = "";
+    }
+    if (open !== claim.id) continue;
+    const template = document.createElement("template");
+    template.innerHTML = proofFoldHTML(run, claim);
+    const fold = template.content.firstElementChild!;
+    const item = spans[0]!.closest("li");
+    if (item && root.contains(item)) { item.append(fold); continue; }
+    let block: Element = spans[0]!;
+    while (block.parentElement && block.parentElement !== root) block = block.parentElement;
+    block.after(fold);
+  }
+}
 function runHTML(run: WorkspaceRun, index: number) {
   const rewound = rewoundBy(run);
   if (rewound) return rewindLine(rewound);
@@ -1125,6 +1637,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   // Words you sent that the model hasn't read yet wait at the end of the guide.
   if (live && run.id === state!.activeTurnId) for (const steer of state!.steers ?? []) steps += steerLine(steer.text, true);
   flush();
+  body += proofLineHTML(run);
   const receipt = run.receipt,
     checks = items.filter(
       (tool) =>
@@ -1370,7 +1883,7 @@ function patchStream(
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!;
     if (entry !== before.entries[i] && entry.type === "assistant")
-      saved.views.get(entry.id)!.update(splitNextPrompt(entry.raw).text);
+      saved.views.get(entry.id)!.update(splitNextPrompt(entry.raw).text, run.status === "running");
   }
   return true;
 }
@@ -1439,6 +1952,9 @@ function renderConversation() {
       reviewOpen.has(run.id) ? reviewVersion : 0,
       detailsOpen.has(`drive-asked:${run.id}`),
       state.rewinds.filter((rewind) => rewind.turnId === run.id || rewind.hiddenTurnIds.includes(run.id)),
+      run.proofs ?? null,
+      proofOpen.get(run.id) ?? "",
+      proofStep?.runId === run.id ? proofStep.index : -1,
     ]);
     let saved = runNodes.get(run.id);
     if (!saved) {
@@ -1469,10 +1985,11 @@ function renderConversation() {
         }
         view.element.dataset.answer = run.id;
         view.element.dataset.entry = String(id);
-        view.update(splitNextPrompt(entry.raw).text);
+        view.update(splitNextPrompt(entry.raw).text, run.status === "running");
         slot.replaceWith(view.element);
       }
       saved.node.replaceChildren(template.content);
+      for (const view of saved.views.values()) decorateProofs(run, view.element);
       const retained = new Set(
         [...saved.node.querySelectorAll<HTMLElement>("[data-entry]")].map(
           (node) => Number(node.dataset.entry),
@@ -1501,60 +2018,128 @@ function renderConversation() {
 const reviewJobs = () =>
   state ? [state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job) && (job!.status === "ready" || job!.status === "failed")) : [];
 let reviewShown = false;
+/// Home's cherry blossom lives behind the start screen only, and sleeps while
+/// a chat or the Deed is showing.
+let sakura: Sakura | null = null, sakuraTried = false, sakuraDark: boolean | null = null;
+const colorProbe = document.createElement("canvas").getContext("2d");
+function inkIsDark() {
+  if (!colorProbe) return true;
+  // the canvas normalises any CSS colour to #rrggbb
+  colorProbe.fillStyle = "#000"; colorProbe.fillStyle = getComputedStyle(document.body).getPropertyValue("--ink").trim() || "#000";
+  const hex = String(colorProbe.fillStyle), [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) || 0);
+  return .2126 * r! + .7152 * g! + .0722 * b! < 128;
+}
+function renderSakura(show: boolean) {
+  const host = document.getElementById("sakura");
+  if (!host) return;
+  if (show && !sakuraTried) {
+    sakuraTried = true;
+    try { sakura = mountSakura(host, inkIsDark()); } catch { sakura = null; }
+  }
+  host.hidden = !show || !sakura;
+  if (!sakura) return;
+  const dark = inkIsDark();
+  if (dark !== sakuraDark) { sakuraDark = dark; sakura.setDark(dark); }
+  if (show) sakura.resume(); else sakura.pause();
+}
+/// When the window was last in front of you, kept on this computer: Home
+/// says what happened since.
+const LEFT_KEY = "demesne-left-at";
+let leftAt: number | null = (() => { try { const at = Number(localStorage.getItem(LEFT_KEY)); return at > 0 ? at : null; } catch { return null; } })();
+const leaving = () => { leftAt = Date.now(); try { localStorage.setItem(LEFT_KEY, String(leftAt)); } catch { /* storage may be off */ } };
+window.addEventListener("blur", leaving);
+window.addEventListener("pagehide", leaving);
+document.addEventListener("visibilitychange", () => { if (document.hidden) leaving(); });
+/// The chat whose approval is unfolded under Home's paragraph.
+let awayAskShown: string | null = null;
+/// Routines, for what ran on a schedule while you were away.
+let homeRoutines: { at: number; routines: Routine[] } | null = null, homeRoutinesLoading = false;
+function loadHomeRoutines() {
+  if (homeRoutinesLoading || (homeRoutines && Date.now() - homeRoutines.at < 60_000)) return;
+  homeRoutinesLoading = true;
+  void api<Routine[]>("routines").then((routines) => { homeRoutines = { at: Date.now(), routines: Array.isArray(routines) ? routines : [] }; }, () => { homeRoutines = { at: Date.now(), routines: [] }; })
+    .finally(() => { homeRoutinesLoading = false; heroSignature = ""; renderHero(); });
+}
+const awayPart = (part: AwayPart) => typeof part === "string" ? h(part)
+  : "name" in part ? `<i>${h(part.name)}</i>`
+  : "code" in part ? `<code>${h(part.code)}</code>`
+  : btn(part.action, h(part.text), part.args ?? {}, `away-link${part.tone ? ` ${part.tone}` : ""}${part.open ? " on" : ""}`).replace("<button ", part.open === undefined ? "<button " : `<button aria-expanded="${part.open}" `);
+/// A chat's approval on Home: the same amber row the chat shows, answered
+/// here while the chat carries on.
+function awayApproval(sessionId: string, ask: Extract<AwayAsk, { kind: "permission" }>) {
+  const icon = ask.verb === "run" ? APPROVAL_ICONS.command : /edit|append/.test(ask.verb) ? APPROVAL_ICONS.edit : APPROVAL_ICONS.other;
+  const habit = Boolean(ask.rule) && ask.allowedBefore >= 3;
+  const always = ask.rule ? btn("away-permission", habit ? "Always here" : "Always", { session: sessionId, id: ask.id, decision: "allow_always" }, habit ? "allow" : "always").replace("<button ", `<button title="Saved to your config (${h(ask.rule)})" `) : "";
+  return `<div class="approval-row" role="group" aria-label="Approval">${icon}<span class="approval-verb">${h(ask.verb.replace(/^./, (c) => c.toUpperCase()))}</span>${ask.target ? `<code>${h(ask.target)}</code>` : ""}<span class="approval-space"></span>`
+    + (habit ? always + btn("away-permission", "Once", { session: sessionId, id: ask.id, decision: "allow_once" }, "always") : btn("away-permission", "Allow", { session: sessionId, id: ask.id, decision: "allow_once" }, "allow") + always)
+    + btn("away-permission", "Deny", { session: sessionId, id: ask.id, decision: "deny" }, "deny")
+    + btn("select-session", "Open chat ›", { id: sessionId }, "always")
+    + `</div>`;
+}
 function renderHero() {
   if (!state) return;
   const review = reviewJobs(),
     next = state.driveNext,
-    away = state.breakage.away,
-    driveBusy = Boolean(state.breakage.fix && (state.breakage.fix.status === "starting" || state.breakage.fix.status === "running")) || away?.status === "running",
     user = document.body.dataset.user ?? "",
     branch = state.session?.workspace?.gitBranch ?? "",
     hour = new Date().getHours(),
     running = worktreeRun().fix,
-    branchKeys = [...detailsOpen].filter((key) => key.startsWith("branch:")),
-    signature = JSON.stringify([state.workspace, review.map((job) => [job.id, job.status, job.title, job.diff, job.summary, job.checks]), running && [running.id, running.title, running.activity], state.breakage.busy, state.breakage.message, branchKeys, driveShown, away?.status, driveBusy, reviewShown, ideasShown, next.proposals, next.loading, next.signals.length, user, branch, hour, state.asks, state.allowRules, mapOpen(), mapData?.workspace, mapData?.at, mapLoading]);
+    plain = isPlain();
+  const here = plain ? [] : state.sessions.filter((session) => session.workspace === state!.workspace && session.id !== state!.session?.id);
+  if (!plain) loadHomeRoutines();
+  const waiting = here.filter((session) => session.waiting);
+  if (awayAskShown && !waiting.some((session) => session.id === awayAskShown && session.ask?.kind === "permission")) awayAskShown = null;
+  // Routines that ran here since you left; their chats are named once.
+  const ran = (homeRoutines?.routines ?? []).filter((routine) => routine.workspace === state!.workspace)
+    .flatMap((routine) => routine.runs.filter((run) => leftAt != null && Date.parse(run.at) > leftAt!).map((run) => ({ title: state!.sessions.find((session) => session.id === run.sessionId)?.title || routine.text, at: run.at, sessionId: run.sessionId })))
+    .filter((run) => !waiting.some((session) => session.id === run.sessionId))
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  const sentences = plain ? [] : awaySentences({
+    now: Date.now(),
+    leftAt,
+    branches: review.map((job) => ({ title: job.title, status: job.status === "failed" ? "failed" : "ready", finishedAt: job.finishedAt, failedCheck: job.checks?.find((check) => !check.passed)?.command, unchanged: job.unchanged })),
+    running: running ? { title: running.title, steps: running.activity?.steps ?? 0 } : null,
+    waiting: waiting.map((session) => ({ sessionId: session.id, title: chatTitle(session.id), ask: session.ask })),
+    busy: here.filter((session) => !session.waiting && (session.status === "running" || session.status === "queued") && !ran.some((run) => run.sessionId === session.id)).map((session) => ({ sessionId: session.id, title: chatTitle(session.id) })),
+    routines: ran,
+    deed: deedCount(),
+    ideas: next.proposals.length,
+    asks: state.asks,
+    shown: { branches: reviewShown, drive: driveShown, ideas: ideasShown, ask: awayAskShown },
+  });
+  // Back to the chat you were last in, with the last thing you asked there.
+  const last = [...here].filter((session) => session.turns > 0).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+  const asked = waiting.find((session) => session.id === awayAskShown)?.ask;
+  const signature = JSON.stringify([plain, state.workspace, sentences, review.map((job) => [job.id, job.status, job.diff, job.summary, job.checks]), running && [running.id, running.activity], state.breakage.busy, state.breakage.message, [...detailsOpen].filter((key) => key.startsWith("branch:")), next.proposals, next.loading, ideasShown && next.generatedAt && age(next.generatedAt), user, branch, hour, asked, last && [last.id, last.title, last.lastAsk, age(last.updatedAt)]]);
   if (signature === heroSignature) return;
   heroSignature = signature;
   const composer = el("composer-slot");
   composer.remove();
   const name = state.workspace.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || state.workspace;
-  // Drive's finished branches are one line; it unfolds a quiet row per
-  // branch right under it, and what the last Apply or PR did follows them.
-  const waiting = (review.length
-    ? `<p>${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review ${reviewShown ? "⌄" : "›"}`, {}, "link")}<span class="muted"> · ${away && away.status !== "running" ? "Drive ran them while you were away" : "each in its own worktree"}</span></p>${reviewShown ? `<div class="hero-branches">${branchRows(review)}</div>` : ""}`
-    : "") + branchNote();
-  // A greeting and the composer, nothing else: Drive's best idea is the
-  // composer's ghost text (Tab takes it); the rest of its ideas unfold from
-  // one quiet line under the composer.
   const day = new Date().toLocaleDateString(undefined, { weekday: "long" }),
     when = `${day} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`,
     where = branch ? `${h(name)} on ${h(branch)}` : h(name);
-  // It gets quieter the more you use it: one line keeps the score.
-  const asks = state.asks, learned = state.allowRules;
-  const quieter = asks && asks.lastWeek > 0
-    ? `<p class="hero-asks">Asked you ${asks.thisWeek === 1 ? "once" : `${asks.thisWeek} times`} this week, ${asks.thisWeek === asks.lastWeek ? "same as last week" : `${asks.thisWeek < asks.lastWeek ? "down" : "up"} from ${asks.lastWeek}`}${learned ? ` · ${learned} thing${learned === 1 ? "" : "s"} it no longer asks about` : ""}</p>`
+  // One paragraph: what happened while you were away, what needs you first.
+  // Each underlined phrase unfolds that thing right under it.
+  const paragraph = sentences.length ? `<p class="away">${sentences.map((sentence) => sentence.map(awayPart).join("")).join(" ")}</p>` : "";
+  const folds = [
+    reviewShown && review.length ? branchRows(review) : "",
+    asked?.kind === "permission" ? awayApproval(awayAskShown!, asked) : "",
+    driveShown && running ? branchRows([running]) : "",
+    ideasShown && next.proposals.length ? `${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p>` : "",
+  ].filter(Boolean);
+  const fold = (folds.length ? `<div class="away-fold">${folds.join("")}</div>` : "") + branchNote();
+  // While Drive works, its phrase carries a moving line.
+  const bar = running ? '<span class="away-bar" aria-hidden="true"></span>' : "";
+  const pick = last
+    ? btn("select-session", `<span class="pick-word">Pick up</span><b>${h(chatTitle(last.id))}</b>${last.lastAsk ? `<q>${h(last.lastAsk)}</q>` : ""}<span class="pick-age">${h(age(last.updatedAt))}</span><span class="pick-go" aria-hidden="true">›</span>`, { id: last.id }, "hero-pick")
     : "";
-  const ideas = next.proposals.length;
-  const drive = ideas || driveBusy
-    ? `<p class="hero-drive">${ICON_SPARK}<b>Drive</b>${driveBusy ? ` ${running ? btn("drive-show", `is working ${driveShown ? "⌄" : "›"}`, {}, "link") : "is working"}` : ` has ${ideas} idea${ideas === 1 ? "" : "s"}`}${ideas ? ` <span class="muted">·</span> ${btn("ideas-show", ideasShown ? "hide" : "show ›", {}, "link")}` : ""}</p>${ideas && ideasShown ? `<div class="hero-ideas">${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p></div>` : ""}${running && driveShown ? `<div class="hero-branches">${branchRows([running])}</div>` : ""}`
-    : "";
-  // The map is one button under the greeting; it unfolds the land in place.
-  const open = mapOpen(), surveyed = mapData && mapData.workspace === state.workspace ? mapData : null;
-  if (open && !mapLoading && (!surveyed || Date.now() - surveyed.at > 60_000)) void loadMap();
-  const caption = !open ? "" : surveyed?.map ? restingCaption(surveyed.map) : surveyed && !mapLoading ? "This project could not be surveyed" : "Surveying…";
-  const mapLine = `<p class="hero-map">${btn("map-toggle", `${ICON_MAP}Map`, {}, `map-btn${open ? " on" : ""}`).replace("<button ", `<button aria-pressed="${open}" title="${open ? "Fold the map (Esc)" : "Show the project as a map"}" `)}<span id="map-caption">${h(caption)}</span></p>`;
-  el("hero").classList.toggle("mapped", open);
-  el("hero").innerHTML =
-    `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${mapLine}${waiting}${quieter}</div>${open && surveyed?.map ? '<div id="hero-land"></div>' : ""}<div id="hero-composer"></div>${drive}`;
-  // The composer and the land are detached while the hero is rebuilt.
+  // Just a chat: the time of day and the greeting; the project's news comes
+  // back once a project is picked.
+  el("hero").innerHTML = plain
+    ? `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1></div><div id="hero-composer"></div>`
+    : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${paragraph}${bar}${fold}${pick}</div><div id="hero-composer"></div>`;
   el("hero-composer").append(composer);
-  if (open && surveyed?.map) {
-    el("hero-land").append(landEl);
-    // It unfolds when it appears, not each time the greeting is rebuilt.
-    if (!landShown) { landEl.classList.remove("unfolding"); void landEl.offsetWidth; landEl.classList.add("unfolding"); }
-    drawLand(surveyed.map);
-  }
-  landShown = Boolean(open && surveyed?.map);
 }
 /// The Deed: the open project's plain sentences, a page of its own opened
 /// from the sidebar. The composer adds a sentence; a sentence edits in place.
@@ -1596,8 +2181,325 @@ async function deedAct(request: DeedAction) {
   const workspace = state.workspace;
   keepDeed(workspace, await api<Deed | null>("deed-act", { workspace, request }));
 }
+/// A page in place of the conversation, opened from the sidebar: All chats
+/// (Active or Archived), Scheduled, Customize or Settings. "" when closed.
+type PageKind = ChatsTab | "scheduled" | "customize" | "settings";
+let pageOpen: "" | PageKind = "";
+let archivedChats: ChatsPageChat[] | null = null;
+let routinesHere: Routine[] | null = null;
+const routineUi = { error: "", draft: "" };
+let customizeData: CustomizeView | null = null;
+const customizeUi: CustomizeUi = { editing: null, error: "" };
+async function customizeCall(method: string, args: Record<string, unknown> = {}) {
+  try {
+    const result = await api<unknown>(method, args);
+    customizeUi.error = "";
+    return result;
+  } catch (error) {
+    customizeUi.error = error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error);
+    renderPage();
+    return undefined;
+  }
+}
+async function loadCustomize() {
+  const view = await customizeCall("customize") as CustomizeView | undefined;
+  if (view) customizeData = view;
+  renderPage();
+}
+/// Unfolds a file under its row, or folds it when it is already open.
+async function editCustomizable(path: string) {
+  if (customizeUi.editing?.path === path) { customizeUi.editing = null; return renderPage(); }
+  customizeUi.editing = { path, text: null };
+  renderPage();
+  const read = await customizeCall("customize-read", { path }) as { text: string } | undefined;
+  if (customizeUi.editing?.path !== path) return;
+  if (!read) { customizeUi.editing = null; return renderPage(); }
+  customizeUi.editing.text = read.text;
+  renderPage();
+  document.querySelector<HTMLTextAreaElement>("#page .cz-edit textarea")?.focus({ preventScroll: true });
+}
+/// Settings: the section shown, the search, the row whose words are unfolded,
+/// and what the host read from config.toml and the daemon.
+const settingsUi = { section: "general" as SettingsSection, query: "", fold: "", error: "" };
+let settingsInfo: SettingsInfo | null = null, usageScores: ModelScore[] | null = null,
+  /// The window's zoom, read from the desktop shell when Settings opens.
+  zoomLevel: number | null = null;
+/// Settings › General, kept on this device.
+let openOn: "home" | "last" = "home", keepAwake = true;
+try { if (localStorage.getItem("demesne-open-on") === "last") openOn = "last"; if (localStorage.getItem("demesne-awake") === "off") keepAwake = false; } catch {}
+/// Settings › Appearance › Glass and Ink, kept on this device.
+let glassLevel = GLASS_DEFAULT, inkName: Ink = "neutral";
+try {
+  const saved = Number(localStorage.getItem("demesne-glass"));
+  if (localStorage.getItem("demesne-glass") !== null && Number.isFinite(saved)) glassLevel = Math.min(100, Math.max(0, saved));
+  const ink = localStorage.getItem("demesne-ink");
+  if (isInk(ink)) inkName = ink;
+} catch {}
+function applyGlass() {
+  const { shell, panel } = glassAlphas(glassLevel), root = document.documentElement.style;
+  root.setProperty("--shell-a", String(shell)); root.setProperty("--panel-a", String(panel));
+}
+function applyInk() {
+  if (inkName === "neutral") delete document.documentElement.dataset.ink;
+  else document.documentElement.dataset.ink = inkName;
+}
+applyGlass(); applyInk();
+async function settingsCall(method: string, args: Record<string, unknown> = {}) {
+  try {
+    settingsInfo = await api<SettingsInfo>(method, args);
+    settingsUi.error = "";
+  } catch (error) {
+    settingsUi.error = error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error);
+  }
+  renderPage();
+}
+function loadSettings() {
+  void settingsCall("settings-info");
+  void loadArchived();
+  void api("providers-refresh").catch(() => {});
+  void api<ModelScoreboardResponse>("model-scores").then((result) => { usageScores = result.models; renderPage(); }, () => { usageScores = usageScores ?? []; renderPage(); });
+  if (window.demesne.mode === "desktop")
+    void api<{ zoom?: number }>("desktop-zoom").then((result) => { zoomLevel = typeof result?.zoom === "number" ? result.zoom : null; renderPage(); }, () => {});
+}
+function settingsView(): SettingsView {
+  const s = state!, session = s.session;
+  const here = document.getElementById("sidebar-sessions")?.dataset.workspace || s.workspace;
+  const mode = !session ? null : s.planOnly ? "plan" : session.autoApprove ? "auto" : session.acceptEdits ? "edits" : "ask";
+  return {
+    section: settingsUi.section, query: settingsUi.query, fold: settingsUi.fold, error: settingsUi.error,
+    mac: /Mac/i.test(navigator.platform), desktop: window.demesne.mode === "desktop", home: settingsInfo?.home ?? "",
+    info: settingsInfo,
+    general: { openOn, awake: keepAwake },
+    notify: notifyOn,
+    appearance: { theme: s.theme, themes: s.themes.map((name) => ({ name, label: s.themeOptions.find((item) => item.name === name)?.label ?? name })), canUndo: s.themeCanUndo, zoom: zoomLevel, glass: glassLevel, ink: inkName },
+    archived: archivedChats,
+    usage: usageScores,
+    modelWords,
+    permissions: { mode, asks: s.asks },
+    drive: { project: isPlain() ? "" : projectLabel(here), auto: isPlain() ? null : s.breakage.auto },
+    model: { words: modelWords(s.model), provider: s.model.provider ?? "", reasoning: s.reasoning ?? "", chatgpt: s.model.provider === "ChatGPT" ? s.chatgptAccount?.email ?? s.chatgptAccount?.label ?? "" : null },
+    providers: s.providers,
+    connectors: s.connectors,
+    agents: s.agents,
+    chats: { here: s.sessions.filter((item) => item.workspace === here && item.turns).length, all: s.sessions.filter((item) => item.turns).length },
+    online: s.connection === "online",
+  };
+}
+/// The sidebar holds Settings' list while it is open; the search keeps the
+/// keyboard and its caret across a redraw.
+let settingsNavHtml = "";
+function renderSettingsNav() {
+  const sidebar = document.getElementById("desktop-sidebar"), nav = document.getElementById("settings-nav");
+  if (!sidebar || !nav) return;
+  const open = pageOpen === "settings";
+  sidebar.classList.toggle("settings-open", open);
+  nav.hidden = !open;
+  if (!open) { settingsNavHtml = ""; return; }
+  const html = settingsNav({ section: settingsUi.section, query: settingsUi.query, archived: archivedChats, info: settingsInfo });
+  if (html === settingsNavHtml) return;
+  const search = document.activeElement?.id === "settings-search" ? (document.activeElement as HTMLInputElement) : null, at = search?.selectionStart ?? 0;
+  nav.innerHTML = settingsNavHtml = html;
+  if (search) { const again = el<HTMLInputElement>("settings-search"); again.focus({ preventScroll: true }); again.setSelectionRange(at, at); }
+}
+function settingsSection(id: SettingsSection) {
+  settingsUi.section = id;
+  settingsUi.query = settingsUi.fold = "";
+  const search = document.getElementById("settings-search") as HTMLInputElement | null;
+  if (search) search.value = "";
+  if (id === "usage" || id === "archived" || id === "permissions" || id === "data") loadSettings();
+  renderPage();
+  document.getElementById("page")?.scrollTo?.({ top: 0 });
+}
+/// A number typed in Settings, saved when you press Enter or leave the field.
+function saveSettingsNumber(input: HTMLInputElement) {
+  const value = parseNumber(input.value), was = Number(input.dataset.value);
+  if (value === was) { input.value = was.toLocaleString("en-US"); return; }
+  if (value === null || value <= 0) { input.value = was.toLocaleString("en-US"); settingsUi.error = "Type a whole number, like 400k or 2M."; renderPage(); return; }
+  void settingsCall("settings-config", { key: input.dataset.key, value });
+}
+/// Keeps the Mac awake while a turn or Drive runs, when Settings says so.
+let awakeAsked: boolean | null = null;
+function renderAwake() {
+  if (!state || window.demesne.mode !== "desktop") return;
+  const working = keepAwake && state.connection === "online" && (Boolean(state.activeTurnId)
+    || state.sessions.some((item) => item.status === "running" || item.status === "queued")
+    || ["running", "waiting"].includes(state.drive?.status ?? "") || reviewJobs().some((job) => job.status === "running"));
+  if (working === awakeAsked) return;
+  awakeAsked = working;
+  void api("desktop-awake", { on: working }).catch(() => {});
+}
+/// Open on Last chat: the chat you were in when the window last closed.
+let lastChatOpened = false;
+function renderLastChat() {
+  if (!state || state.connection !== "online") return;
+  const session = state.session;
+  if (!lastChatOpened) {
+    lastChatOpened = true;
+    let saved: { id?: string; path?: string } | null = null;
+    try { saved = JSON.parse(localStorage.getItem("demesne-last-chat") ?? "null"); } catch {}
+    if (openOn === "last" && saved?.id && saved.id !== session?.id && state.sessions.some((item) => item.id === saved!.id)) {
+      const here = !saved.path || saved.path === state.workspace;
+      void act(() => dispatch(here ? "select-session" : "project-session", here ? { id: saved!.id } : { id: saved!.id, path: saved!.path }));
+      return;
+    }
+  }
+  if (session && inSession()) try { localStorage.setItem("demesne-last-chat", JSON.stringify({ id: session.id, path: session.workspace?.root ?? null })); } catch {}
+}
+function openPage(kind: "" | PageKind) {
+  if (kind && deedOpen) openDeed(false);
+  const was = pageOpen;
+  pageOpen = kind;
+  sidebarSignature = heroSignature = "";
+  if (kind === "active" || kind === "archived") void loadArchived();
+  if (kind === "scheduled") { if (was !== "scheduled") routineUi.error = ""; void loadRoutines(); }
+  if (kind === "customize") { if (was !== "customize") Object.assign(customizeUi, { editing: null, error: "" }); void loadCustomize(); }
+  if (kind === "settings" && was !== "settings") { Object.assign(settingsUi, { query: "", fold: "", error: "" }); loadSettings(); }
+  if (state) renderState({ ...state });
+  if (kind === "active" || kind === "archived") document.querySelector<HTMLElement>("#page .cp-tab.on")?.focus({ preventScroll: true });
+  if (kind === "scheduled") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
+  if (kind === "settings" && was !== "settings") document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
+  if (!kind && was === "settings") document.querySelector<HTMLElement>(".sidebar-settings")?.focus({ preventScroll: true });
+}
+async function loadArchived() {
+  try {
+    const result = await api<{ sessions: Array<{ id: string; title: string; archivedAt: string; workspace?: string }> }>("archived-list");
+    archivedChats = result.sessions.map((chat) => ({ id: chat.id, title: chat.title, at: chat.archivedAt, workspace: chat.workspace ?? null }));
+  } catch { archivedChats = archivedChats ?? []; }
+  renderPage();
+}
+async function loadRoutines(method = "routines", args: Record<string, unknown> = {}) {
+  try {
+    routinesHere = await api<Routine[]>(method, args);
+    routineUi.error = "";
+    if (method === "routine-add") {
+      routineUi.draft = "";
+      const input = document.querySelector<HTMLInputElement>("#routine-new input");
+      if (input) input.value = "";
+    }
+  } catch (error) {
+    routinesHere = routinesHere ?? [];
+    routineUi.error = error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error);
+  }
+  renderPage();
+  if (method === "routine-add") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
+}
+function renderPage() {
+  renderSettingsNav();
+  const root = document.getElementById("page");
+  if (!root || !state || !pageOpen) return;
+  const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace;
+  let html = "";
+  if (pageOpen === "scheduled") {
+    // Typing in the new routine keeps the field as it is.
+    if (document.activeElement?.closest("#routine-new")) routineUi.draft = (document.activeElement as HTMLInputElement).value;
+    html = scheduledPage({ routines: routinesHere, auto: isPlain() ? null : state.breakage.auto, here: isPlain() ? "" : here, error: routineUi.error, draft: routineUi.draft });
+  } else if (pageOpen === "customize") {
+    // A file being edited keeps its words through a redraw.
+    const area = root.querySelector<HTMLTextAreaElement>(".cz-edit textarea");
+    if (area && customizeUi.editing?.text != null) customizeUi.editing.text = area.value;
+    html = customizePage(customizeData, customizeUi, state.connectors, /Mac/i.test(navigator.platform));
+  } else if (pageOpen === "settings") {
+    html = settingsPage(settingsView());
+  } else if (pageOpen === "active" || pageOpen === "archived") {
+    const active = state.sessions.filter((item) => item.turns && !deletedSessions.has(item.id)).map((item) => ({ id: item.id, title: item.title, at: item.updatedAt, workspace: item.workspace ?? null, here: item.workspace === here }));
+    html = chatsPageHtml(pageOpen, active, archivedChats);
+  }
+  root.dataset.kind = pageOpen;
+  if (root.dataset.html === html) return;
+  // Whatever field has the keyboard keeps it, with its caret, across the redraw.
+  const active = document.activeElement;
+  const field = (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && root.contains(active)
+    ? { form: active.closest("form")?.className ?? "", kind: (active.closest("form") as HTMLElement | null)?.dataset.kind ?? "", value: active.value, at: active.selectionStart ?? 0, scroll: active.scrollTop } : null;
+  root.innerHTML = html;
+  root.dataset.html = html;
+  if (field) {
+    const again = [...root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("form input, form textarea")].find((node) => node.closest("form")?.className === field.form && ((node.closest("form") as HTMLElement).dataset.kind ?? "") === field.kind);
+    if (again) { again.value = field.value; again.focus({ preventScroll: true }); again.setSelectionRange(field.at, field.at); again.scrollTop = field.scroll; }
+  }
+}
+// Glass follows the slider as it moves, and is kept when you let go.
+document.getElementById("page")?.addEventListener("input", (event) => {
+  const input = event.target as HTMLElement;
+  if (!(input instanceof HTMLInputElement) || !input.matches("[data-glass]")) return;
+  glassLevel = Math.min(100, Math.max(0, Number(input.value) || 0));
+  applyGlass();
+});
+document.getElementById("page")?.addEventListener("change", (event) => {
+  const input = event.target as HTMLElement;
+  if (input instanceof HTMLInputElement && input.matches("[data-glass]")) try { localStorage.setItem("demesne-glass", String(glassLevel)); } catch {}
+});
+// A number in Settings saves on Enter, or when you leave it.
+document.getElementById("page")?.addEventListener("focusout", (event) => {
+  const input = event.target as HTMLElement;
+  if (input instanceof HTMLInputElement && input.closest(".st-num")) saveSettingsNumber(input);
+});
+document.getElementById("settings-nav")?.addEventListener("input", (event) => {
+  const input = event.target as HTMLInputElement;
+  if (input.id !== "settings-search") return;
+  settingsUi.query = input.value;
+  settingsUi.fold = "";
+  renderPage();
+});
+// ⌘↵ saves the file being edited.
+document.getElementById("page")?.addEventListener("keydown", (event) => {
+  const area = event.target as HTMLElement;
+  if (event.key === "Enter" && area instanceof HTMLInputElement && area.closest(".st-num")) {
+    event.preventDefault();
+    area.blur();
+    return;
+  }
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && area.matches(".cz-edit textarea")) {
+    event.preventDefault();
+    area.closest("form")?.requestSubmit();
+  }
+});
+document.getElementById("page")?.addEventListener("submit", (event) => {
+  const form = event.target as HTMLFormElement;
+  if (form.classList.contains("cz-edit")) {
+    event.preventDefault();
+    const path = form.dataset.path ?? "", text = form.querySelector("textarea")?.value ?? "";
+    void customizeCall("customize-save", { path, text }).then((view) => {
+      if (!view) return;
+      customizeData = view as CustomizeView;
+      customizeUi.editing = null;
+      renderPage();
+    });
+    return;
+  }
+  if (form.classList.contains("cz-new")) {
+    event.preventDefault();
+    const name = form.querySelector("input")?.value.trim() ?? "";
+    if (!name) return;
+    void customizeCall("customize-new", { kind: form.dataset.kind, name }).then(async (made) => {
+      if (!made) return;
+      form.querySelector("input")!.value = "";
+      await loadCustomize();
+      await editCustomizable((made as { path: string }).path);
+    });
+    return;
+  }
+  // Settings › Connectors: a name and the command that starts the server.
+  if (form.id === "mcp-new") {
+    event.preventDefault();
+    const name = form.querySelector<HTMLInputElement>('[name="name"]')?.value.trim() ?? "", command = form.querySelector<HTMLInputElement>('[name="command"]')?.value.trim() ?? "";
+    if (name && command) void settingsCall("mcp-add", { name, command }).then(() => { if (!settingsUi.error) form.reset(); });
+    return;
+  }
+  if (form.classList.contains("st-text")) {
+    event.preventDefault();
+    const value = form.querySelector("input")?.value.trim() ?? "";
+    if (value) void settingsCall("settings-config", { key: form.dataset.key, value });
+    return;
+  }
+  if (form.id !== "routine-new") return;
+  event.preventDefault();
+  const text = form.querySelector("input")?.value.trim() ?? "";
+  routineUi.draft = text;
+  if (text) void loadRoutines("routine-add", { text });
+});
 function openDeed(open: boolean) {
   if (deedOpen === open) return;
+  if (open && pageOpen) openPage("");
   deedOpen = open;
   deedUi.focus = deedUi.editing = deedUi.live = deedUi.filter = deedUi.since = deedUi.peek = null;
   deedUi.find = "";
@@ -1820,148 +2722,6 @@ function focusDeed(id: string, click: boolean) {
   if (!deedUi.editing) document.querySelector<HTMLElement>(`#deed [data-deed="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
 }
 
-/// The project map. Whether it is open is remembered per project.
-const MAP_KEY = "demesne-map-open";
-const ICON_MAP = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5"/><path d="M15 6.5V20"/></svg>';
-const mapOpenFor = new Set<string>((() => { try { return JSON.parse(localStorage.getItem(MAP_KEY) ?? "[]") as string[]; } catch { return []; } })());
-let mapData: { workspace: string; map: WorkspaceMapResponse | null; at: number } | null = null,
-  mapLoading = false,
-  mapHover = -1,
-  landShown = false,
-  landCache: { key: string; land: Land } | null = null;
-const mapOpen = () => Boolean(state && mapOpenFor.has(state.workspace));
-const landEl = document.createElement("div");
-landEl.className = "land";
-landEl.innerHTML = `<canvas></canvas><svg viewBox="0 0 ${LAND_W} ${LAND_H}" aria-hidden="true"></svg>`;
-landEl.setAttribute("role", "img");
-function toggleMap() {
-  if (!state) return;
-  if (mapOpenFor.has(state.workspace)) mapOpenFor.delete(state.workspace);
-  else mapOpenFor.add(state.workspace);
-  try { localStorage.setItem(MAP_KEY, JSON.stringify([...mapOpenFor])); } catch { /* storage may be off */ }
-  mapHover = -1;
-  heroSignature = "";
-  renderHero();
-}
-async function loadMap() {
-  if (!state || mapLoading) return;
-  const workspace = state.workspace;
-  mapLoading = true;
-  let map: WorkspaceMapResponse | null = null;
-  try { map = await api<WorkspaceMapResponse | null>("workspace-map"); } catch { /* shown as not surveyed */ }
-  mapLoading = false;
-  mapData = { workspace, map: map && Array.isArray(map.districts) ? map : null, at: Date.now() };
-  heroSignature = "";
-  renderHero();
-}
-function drawLand(map: WorkspaceMapResponse) {
-  const key = JSON.stringify(map.districts.map((district) => [district.path, district.lines, district.changedAt]));
-  if (landCache?.key !== key) landCache = { key, land: survey(map.districts) };
-  const land = landCache.land;
-  if (mapHover >= land.parcels.length) mapHover = -1;
-  life = lifeOn(land);
-  paintLand(landEl.querySelector("canvas")!, land, mapHover, Date.now(), life.paint);
-  landEl.querySelector("svg")!.innerHTML = placeNames(land) + markLayer(land, life.placed);
-  landEl.setAttribute("aria-label", restingCaption(map));
-  const caption = document.getElementById("map-caption");
-  if (caption && mapHover < 0 && !markShown) caption.textContent = restingCaption(map);
-}
-let markShown = false;
-/// Who is working where right now, from the daemon, refreshed while the map is open.
-let liveData: { workspace: string; marks: WorkspaceLiveResponse["marks"]; at: number } | null = null,
-  life: { paint: LandLife; placed: ReturnType<typeof placeMarks>; caption: string | null } = { paint: {}, placed: [], caption: null };
-const shortTitle = (text: string) => (text.length > 26 ? `${text.slice(0, 25).trimEnd()}…` : text);
-function lifeOn(land: Land) {
-  if (!state) return { paint: {}, placed: [], caption: null };
-  const marks: LiveMark[] = [], live = new Set<number>(), failing = new Set<number>(), failingIn: string[] = [];
-  const driveIds = new Set([state.breakage.fix, ...state.breakage.inbox].map((fix) => fix?.sessionId).filter(Boolean));
-  const current = liveData && liveData.workspace === state.workspace ? liveData.marks : [];
-  for (const work of current) {
-    const parcel = work.path ? parcelOf(land, work.path) : -1;
-    const drive = driveIds.has(work.sessionId), label = `${drive ? "Drive · " : ""}${shortTitle(work.title || "New chat")}`;
-    const fresh = work.at ? Date.now() - Date.parse(work.at) < 60_000 : false;
-    const from = fresh && work.previousPath ? parcelOf(land, work.previousPath) : -1;
-    const doing = work.waiting ? "waiting for you" : !work.path ? "thinking" : `${/edit|write|move/.test(work.tool ?? "") ? "editing" : /read|view/.test(work.tool ?? "") ? "reading" : "working in"} ${work.path.split("/").at(-1)}`;
-    if (!work.waiting && parcel >= 0) live.add(parcel);
-    if (parcel < 0) continue;
-    marks.push({ key: work.sessionId, label, tone: work.waiting ? "wait" : "work", parcel, from: from >= 0 && from !== parcel ? from : undefined, sessionId: work.sessionId,
-      detail: `${label} · ${doing}${work.at ? ` · ${age(work.at)}` : ""} · click to open its chat` });
-  }
-  // A failing check marks the folder its output names.
-  const checks = [...state.breakage.signals, ...state.driveNext.signals].filter((signal, index, all) => signal.source === "checks" && all.findIndex((other) => other.id === signal.id) === index);
-  for (const signal of checks) {
-    const text = `${signal.title}\n${signal.detail}`;
-    let parcel = -1, depth = -1;
-    land.parcels.forEach((item, index) => { const folder = item.district.path; if (folder && folder.length > depth && text.includes(`${folder}/`)) { parcel = index; depth = folder.length; } });
-    if (parcel < 0 || failing.has(parcel)) continue;
-    failing.add(parcel);
-    failingIn.push(land.parcels[parcel]!.district.path!.split("/").at(-1)!);
-    const count = text.match(/(\d+)\s+(?:tests?\s+)?fail/i)?.[1];
-    marks.push({ key: signal.id, label: count ? `${count} failing` : "failing", tone: "fail", parcel, detail: signal.title });
-  }
-  const here = state.agents.filter((agent) => agent.project === projectSlug(state!.workspace));
-  const working = current.length + here.length, waiting = current.filter((work) => work.waiting).length;
-  const parts = [working ? `${working} at work` : "", waiting ? `${waiting} waiting for you` : "",
-    failingIn.length ? `${failingIn.length === 1 ? "1 check" : `${failingIn.length} checks`} failing in ${failingIn.join(", ")}` : "",
-    here.length ? `${here.map((agent) => agent.name).join(", ")} here too` : ""].filter(Boolean);
-  return { paint: { live, failing }, placed: placeMarks(land, marks), caption: parts.length ? parts.join(" · ") : null };
-}
-function restingCaption(map: WorkspaceMapResponse) {
-  return life.caption ?? mapCaption(map.districts, null);
-}
-async function tickLive() {
-  if (!state || inSession() || !mapOpen() || document.hidden || !mapData?.map || mapData.workspace !== state.workspace) return;
-  const workspace = state.workspace;
-  let result: WorkspaceLiveResponse | null = null;
-  try { result = await api<WorkspaceLiveResponse | null>("workspace-live"); } catch { return; }
-  if (!result || !state || state.workspace !== workspace) return;
-  const before = JSON.stringify(liveData?.marks ?? []);
-  liveData = { workspace, marks: result.marks, at: Date.now() };
-  if (before !== JSON.stringify(result.marks) && landEl.isConnected && mapData?.map) {
-    drawLand(mapData.map);
-  }
-}
-setInterval(() => void tickLive(), 3000);
-function landPoint(event: MouseEvent) {
-  const box = landEl.getBoundingClientRect();
-  return landCache ? parcelAt(landCache.land, ((event.clientX - box.left) / box.width) * LAND_W, ((event.clientY - box.top) / box.height) * LAND_H) : -1;
-}
-function hoverLand(index: number, mark: LiveMark | null = null) {
-  if (!landCache || !mapData?.map) return;
-  const caption = document.getElementById("map-caption");
-  if (mark) {
-    markShown = true;
-    if (caption) caption.textContent = mark.detail;
-    landEl.style.cursor = mark.sessionId ? "pointer" : "";
-    return;
-  }
-  if (index === mapHover && !markShown) return;
-  markShown = false;
-  mapHover = index;
-  const district = landCache.land.parcels[index]?.district ?? null;
-  paintLand(landEl.querySelector("canvas")!, landCache.land, mapHover, Date.now(), life.paint);
-  landEl.style.cursor = district?.path ? "pointer" : "";
-  if (caption) caption.textContent = district ? mapCaption(mapData.map.districts, district) : restingCaption(mapData.map);
-}
-const markUnder = (event: Event) => {
-  const group = (event.target as Element).closest?.<SVGGElement>(".mk-g");
-  return group ? life.placed[Number(group.dataset.mark)]?.mark ?? null : null;
-};
-landEl.addEventListener("mousemove", (event) => {
-  hoverLand(landPoint(event), markUnder(event));
-});
-landEl.addEventListener("mouseleave", () => hoverLand(-1));
-/// Clicking a parcel points the composer at it: an @folder/ chip.
-landEl.addEventListener("click", (event) => {
-  if (markUnder(event)) return;
-  const path = landCache?.land.parcels[landPoint(event)]?.district.path;
-  if (!path) return;
-  const token = `@${path}/`;
-  if (!editor.value.split(/\s/).includes(token)) editor.value = `${token} ${editor.value.trimStart()}`;
-  editor.focus();
-  editor.setSelectionRange(editor.value.length, editor.value.length);
-  changedDraft();
-});
 /// Drive's proposals as rows: kind, title and estimate, with Run and Plan. The
 /// reason and the evidence it rests on show on hover. The start screen shows three; a session's briefing
 /// line unfolds them in place.
@@ -2063,6 +2823,81 @@ async function cycleMode(step = 1) {
   if (state?.session) await api("permission-mode", { mode: next });
   else await api("mode", { planOnly: next === "plan" });
 }
+/// Home's where word unfolds its choices under the composer; a plain chat's
+/// "Move to a project" unfolds the projects under its line.
+let whereOpen: "home" | "move" | null = null;
+function whereProjects(): string[] {
+  if (!state) return [];
+  const recent = JSON.parse(document.getElementById("sidebar-sessions")?.dataset.projects ?? "[]") as string[];
+  return [...new Set([document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace, ...recent])].filter(Boolean).slice(0, 6);
+}
+function whereRow(mode: "home" | "move") {
+  const plain = isPlain(), here = state?.workspace;
+  const choice = (label: string, args: Record<string, unknown>, on = false) =>
+    btn("where-pick", label, { ...args, mode }, `where-opt${on ? " on" : ""}`).replace("<button ", `<button aria-pressed="${on}" `);
+  return [
+    mode === "home" ? choice("Just a chat", { plain: true }, plain) : "",
+    ...whereProjects().map((path) => choice(h(projectLabel(path)), { path }, mode === "home" && !plain && path === here).replace("<button ", `<button title="${h(path)}" `)),
+    choice(`Open a folder <kbd>${/Mac/i.test(navigator.platform) ? "⌘O" : "Ctrl+O"}</kbd>`, { folder: true }),
+  ].join("");
+}
+function renderWhere() {
+  const row = el("where-row");
+  row.hidden = whereOpen !== "home";
+  const html = whereOpen === "home" ? whereRow("home") : "";
+  if (row.dataset.html !== html) { row.innerHTML = html; row.dataset.html = html; }
+}
+function toggleWhere(mode: "home" | "move" | null) {
+  whereOpen = mode;
+  composerSignature = "";
+  renderComposer();
+  renderPlainLine();
+  // The choice already made takes focus, so ←→ and Enter pick at once.
+  const host = mode === "home" ? el("where-row") : mode === "move" ? el("plain-line") : null;
+  if (host) (host.querySelector<HTMLElement>(".where-opt.on") ?? host.querySelector<HTMLElement>(".where-opt"))?.focus({ preventScroll: true });
+  else editor.focus({ preventScroll: true });
+}
+async function pickWhere(args: Record<string, any>) {
+  if (!state) return;
+  const mode = args.mode === "move" ? "move" : "home", draft = editor.value;
+  whereOpen = null;
+  composerSignature = "";
+  renderComposer();
+  renderPlainLine();
+  let path: string | null = typeof args.path === "string" ? args.path : null;
+  if (mode === "move") {
+    if (args.folder) path = await api<string | null>("desktop-pick-folder");
+    if (!path) return;
+    const moved = await api<{ here: boolean; sessionId: string }>("move-session", { path });
+    if (!moved.here) document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path, sessionId: moved.sessionId } }));
+    return;
+  }
+  const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace;
+  if (args.plain) { if (!isPlain()) await api("new-session", { plain: true, reuse: true, draft }); }
+  else if (args.folder) document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { fresh: true, draft } }));
+  else if (path === here) { if (isPlain()) await api("new-session", { reuse: true, draft }); }
+  else if (path) document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path, fresh: true, draft } }));
+  editor.focus({ preventScroll: true });
+}
+// Esc folds the where choices, from a choice or from the composer, before
+// anything else Esc does.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !whereOpen || event.isComposing) return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target?.closest(".where-opt") && target !== editor) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  toggleWhere(null);
+}, true);
+/// A plain chat ends with one quiet line: what it can't do, and the way on.
+function renderPlainLine() {
+  const node = el("plain-line");
+  const show = Boolean(state) && isPlain() && inSession() && !deedOpen && !state!.activeTurnId;
+  if (!show && whereOpen === "move") whereOpen = null;
+  node.hidden = !show;
+  const html = show ? `<p class="plain-note">Just a chat: it can’t see or change files. ${btn("where-move", `Move to a project ${whereOpen === "move" ? "⌄" : "›"}`, {}, "link").replace("<button ", `<button aria-expanded="${whereOpen === "move"}" `)}</p>${whereOpen === "move" ? `<div class="where-row" role="group" aria-label="Move this chat to">${whereRow("move")}</div>` : ""}` : "";
+  if (node.dataset.html !== html) { node.innerHTML = html; node.dataset.html = html; }
+}
 function renderComposer() {
   if (!state) return;
   const width = editor.clientWidth;
@@ -2083,6 +2918,9 @@ function renderComposer() {
     state.planOnly,
     answeringQuestion,
     driveSuggestion(),
+    isPlain(),
+    whereOpen,
+    state.workspace,
     diffNotes.size,
     pointed.map((point) => point.id).join(),
     state.attachments.map((image) => image.id).join(),
@@ -2108,6 +2946,16 @@ function renderComposer() {
   for (const option of chip.querySelectorAll<HTMLElement>(".mode-opt")) option.classList.toggle("on", option.dataset.mode === mode);
   chip.setAttribute("aria-label", `Mode: ${MODES[mode]}`);
   chip.title = `${MODE_HELP[mode]}. Click or ⇧⇥ for the next mode.`;
+  // On Home one word says where the chat will live, and unfolds the choices.
+  const whereWord = el("composer-where"), home = !inSession() && !deedOpen && !question;
+  if (!home && whereOpen === "home") whereOpen = null;
+  whereWord.hidden = !home;
+  whereWord.innerHTML = `${isPlain() ? "Just a chat" : `in ${h(projectLabel(state.workspace))}`}<span class="where-caret" aria-hidden="true">⌄</span>`;
+  whereWord.classList.toggle("open", whereOpen === "home");
+  whereWord.setAttribute("aria-expanded", String(whereOpen === "home"));
+  whereWord.title = "Where this chat lives (⌥P)";
+  el("hint-mention").hidden = isPlain();
+  renderWhere();
   form.classList.toggle("mode-plan", mode === "plan");
   form.classList.toggle("queued", queued);
   form.classList.toggle("restored", state.restored && !question);
@@ -2128,7 +2976,7 @@ function renderComposer() {
     ? state.activeTurnId
       ? "Steer it while it works…"
       : suggestion ? `${suggestion}   ⇥ Tab` : "Continue the conversation…"
-    : driveSuggestion() ? `Drive suggests: ${driveSuggestion()}   ⇥ Tab` : "Describe a change, paste an error, or drop a file…";
+    : driveSuggestion() ? `Drive suggests: ${driveSuggestion()}   ⇥ Tab` : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
   editor.disabled =
     state.connection !== "online" ||
     state.busy ||
@@ -2471,7 +3319,7 @@ function renderBriefing() {
       // On by default: the line says what Drive will do before it does it.
       if (auto) {
         const limits = `Up to ${auto.perDay} runs a day in this project, one at a time. Each run is in its own worktree; it never pushes or opens a PR. ${auto.usedToday} of ${auto.perDay} used today.`;
-        const when = auto.usedToday >= auto.perDay ? "done for today" : `starts the first after ${auto.quietMinutes} quiet minutes`;
+        const when = auto.planPaused ? `waits while your plan is at ${auto.planPaused}%` : auto.usedToday >= auto.perDay ? "done for today" : `starts the first after ${auto.quietMinutes} quiet minutes`;
         parts.push(`<span class="bf-about" title="${h(limits)}">${when}</span>`, btn("drive-auto", "Turn off", { on: false }, "link"));
       }
     }
@@ -2494,8 +3342,10 @@ function renderBriefing() {
   const done = el("branch-done"), outcome = inSession() ? branchNote() : "";
   done.innerHTML = outcome;
   done.hidden = !outcome;
-  node.hidden = !inSession() || !parts.length;
-  if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").classList.remove("open"); return; }
+  // A chat with no project has no Drive.
+  node.hidden = !inSession() || !parts.length || isPlain();
+  // The folded reply empties too, so no stale control (a Pause after Stop) waits in it.
+  if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").innerHTML = ""; el("drive-reply").classList.remove("open"); return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
   // The first part's mark sits in the conversation's mark column, like an answer's d.
   const lead = /^<span class="bf-(?:spin|dot)[^>]*><\/span>/.exec(parts[0]!)?.[0] ?? "";
@@ -2733,15 +3583,6 @@ async function openOverlay(name: OverlayName, query = "") {
     return;
   }
   if (name === "cleanup") void act(() => api("cleanup-scan"));
-  if (name === "settings") {
-    void act(() => api("providers-refresh"));
-    if (window.demesne.mode === "desktop")
-      void api<{ zoom?: number }>("desktop-zoom").then((result) => {
-        zoomLevel = typeof result?.zoom === "number" ? result.zoom : null;
-        overlaySignature = "";
-        renderOverlay();
-      }, () => {});
-  }
   if (name === "models") {
     modelLevels.clear();
     modelIndexPending = true;
@@ -2793,196 +3634,92 @@ function placeOverlay() {
   box.style.bottom = `${main.bottom - anchor.top + 8}px`;
   box.style.maxHeight = `${Math.max(160, anchor.top - main.top - 20)}px`;
 }
+/// A thinking level in full: "Extra high", not "xhigh".
+const LEVEL_WORDS: Record<string, string> = { xhigh: "Extra high", none: "None", off: "Off" };
+const levelWord = (level: string) => LEVEL_WORDS[level] ?? level[0]!.toUpperCase() + level.slice(1);
+/// A model's name with the search's matches in bold.
+const marked = (text: string, query: string) => {
+  const lower = text.toLowerCase(), q = query.toLowerCase();
+  let out = "", from = 0;
+  for (let at = lower.indexOf(q); q && at >= 0; at = lower.indexOf(q, from)) {
+    out += `${h(text.slice(from, at))}<b>${h(text.slice(at, at + q.length))}</b>`;
+    from = at + q.length;
+  }
+  return out + h(text.slice(from));
+};
+/// The model picker is one panel anchored to the model word: search on top,
+/// your models, then how hard the highlighted one thinks, as a track with a
+/// stop per level. More models unfolds in the same panel.
 function renderModelPopover(hidden: number) {
-  const open = modelsMore || Boolean(overlayQuery);
   let lastGroup = "";
+  const counts = new Map<string, number>();
+  for (const model of models) counts.set(model.provider, (counts.get(model.provider) ?? 0) + 1);
   const item = (row: (typeof overlayRows)[number], index: number) => {
     const current = row.action === "model" && row.data.id === state!.model.id;
-    const mark = current ? '<span class="mp-tick" aria-label="current">✓</span>' : row.kind === "short" ? `<span class="mp-key">${index + 1}</span>` : row.kind === "more" ? '<span class="mp-key">›</span>' : "";
-    const label = row.kind === "rest" && row.group !== lastGroup ? `<div class="mp-group">${h(row.group ?? "")}</div>` : "";
+    const right = current ? '<span class="mp-tick" aria-label="current">✓</span>'
+      : row.kind === "short" ? `<span class="mp-key">${index + 1}</span>`
+      : row.kind === "more" ? `<span class="mp-key">${h(row.value)} ${modelsMore ? "‹" : "›"}</span>`
+      : row.value ? `<span class="mp-key">${h(row.value)}</span>` : "";
+    let label = "";
+    if (row.kind === "rest" && row.group !== lastGroup) {
+      const all = counts.get(row.group ?? "") ?? 0, shown = overlayRows.filter((other) => other.kind === "rest" && other.group === row.group && other.action === "model").length;
+      const count = overlayQuery ? `${shown} of ${all}` : row.action === "focus-filter" ? String(all) : `${shown} more`;
+      label = `<div class="mp-group"><span>${h(row.group ?? "")}</span><span>${count}</span></div>`;
+    }
     if (row.kind === "rest") lastGroup = row.group ?? "";
-    const title = [row.value, row.description].filter(Boolean).join(" · ");
-    return label + btn("choose-row", `<span class="name">${h(row.label)}</span>${mark}`, { index }, `mp-row${index === overlayIndex ? " selected" : ""}${row.kind === "more" && open ? " open" : ""}`)
-      .replace("<button ", `<button ${row.kind === "more" ? 'data-more="1" ' : ""}${title ? `title="${h(title)}" ` : ""}`);
+    const title = [row.data.id !== row.label ? row.data.id : "", row.description].filter(Boolean).join(" · ");
+    const name = overlayQuery && row.action === "model" ? marked(row.label, overlayQuery) : h(row.label);
+    return label + btn("choose-row", `<span class="name">${name}</span>${right}`, { index }, `mp-row${index === overlayIndex ? " selected" : ""}${row.kind === "more" || row.action === "focus-filter" ? " dim" : ""}`)
+      .replace("<button ", `<button data-index="${index}" ${title ? `title="${h(String(title))}" ` : ""}`);
   };
   const rows = overlayRows.map((row, index) => [row, index] as const);
   const highlighted = overlayRows[overlayIndex],
     model = models.find((item) => item.id === (highlighted?.action === "model" ? highlighted.data.id : state!.model.id)),
     levels = model?.reasoningLevels ?? [],
-    level = model ? modelLevel(model) : undefined;
-  const thinking = model && levels.length
-    ? `<div class="mp-thinking"><span>Thinking</span>${levels.map((item) => btn("model", h(item[0]!.toUpperCase() + item.slice(1)), { id: model.id, reasoning: item }, item === level ? "on" : "")).join("")}</div>`
-    : "";
+    level = model ? modelLevel(model) : undefined,
+    at = level ? levels.indexOf(level) : -1;
+  // One stop per level; the line stays (flat, None) for a model without
+  // thinking, so the panel keeps its height as you move down the list.
+  const stops = levels.map((item, index) => btn("model", '<i aria-hidden="true"></i>', { id: model!.id, reasoning: item }, `mp-stop${index < at ? " on" : index === at ? " at" : ""}`)
+    .replace("<button ", `<button title="${h(levelWord(item))}" aria-label="${h(`Thinking ${levelWord(item)}`)}" aria-pressed="${index === at}" `)).join("");
+  // Stop i sits at the middle of its share of the track; the fill runs from
+  // the first stop to the chosen one.
+  const fill = at > 0 ? `<span class="mp-fill" style="width:calc(${at} * 100% / ${levels.length})"></span>` : "";
+  const thinking = `<div class="mp-thinking" title="←→ change it"><span class="mp-thinking-label">Thinking</span><span class="mp-track${levels.length ? "" : " none"}" style="--stops:${Math.max(1, levels.length)}" role="group" aria-label="Thinking">${fill}${stops}</span><span class="mp-level${levels.length ? "" : " off"}">${levels.length && level ? h(levelWord(level)) : "None"}</span></div>`;
   const short = rows.filter(([row]) => row.kind === "short").map(([row, index]) => item(row, index)).join("");
-  const more = rows.filter(([row]) => row.kind === "more").map(([row, index]) => item(row, index)).join("");
   const rest = rows.filter(([row]) => row.kind === "rest").map(([row, index]) => item(row, index)).join("");
-  // The search box lives in the "More models" column; while that is shut it
-  // stays focused but out of sight, so typing opens the column with matches.
+  const more = rows.filter(([row]) => row.kind === "more").map(([row, index]) => item(row, index)).join("");
+  const empty = modelsLoading && !models.length ? "Loading models…" : overlayQuery ? "No matches." : "No models.";
+  const list = (overlayQuery ? rest : short + (rest ? `<div class="mp-sep"></div>${rest}` : "")) || `<div class="mp-empty">${empty}</div>`;
   el("overlay").innerHTML =
-    `<div class="mp-more${open ? "" : " shut"}"><input id="chooser-filter" placeholder="Search models…" aria-label="Filter models" value="${h(overlayQuery)}" autocomplete="off"><div class="mp-list">${rest || `<div class="mp-empty">${modelsLoading && !models.length ? "Loading models…" : "No matches."}</div>`}${hidden ? `<div class="mp-empty">${hidden} more · keep typing</div>` : ""}</div></div>` +
-    `<div class="mp-main">${short || `<div class="mp-empty">${modelsLoading ? "Loading models…" : "No models."}</div>`}${thinking ? `<div class="mp-sep"></div>${thinking}` : ""}${more ? `<div class="mp-sep"></div>${more}` : ""}</div>`;
+    `<div class="mp"><label class="mp-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="chooser-filter" placeholder="Search ${models.length || ""} models" aria-label="Filter models" value="${h(overlayQuery)}" autocomplete="off" spellcheck="false"></label>` +
+    `<div class="mp-list">${list}${hidden ? `<div class="mp-empty">${hidden} more · keep typing</div>` : ""}</div>` +
+    `<div class="mp-sep"></div>${thinking}${more ? `<div class="mp-sep"></div>${more}` : ""}` +
+    (overlayQuery ? `<div class="mp-hint">${k("↵")} switch ${k("↑↓")} choose ${k("Esc")} close</div>` : "") + `</div>`;
   el("overlay").querySelector(".mp-row.selected")?.scrollIntoView({ block: "nearest" });
 }
-/// Settings is one sheet: sections down the left, under a search that finds
-/// any setting, and the chosen section's rows on the right. Each row says
-/// what it changes and carries its own control, so nothing opens a menu.
-type SettingsRow = { title: string; description: string; control: string; keywords?: string };
-const SETTINGS_SECTIONS: { id: string; label: string; icon: string }[] = [
-  { id: "general", label: "General", icon: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>' },
-  { id: "appearance", label: "Appearance", icon: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18Z" fill="currentColor"/>' },
-  { id: "models", label: "Models", icon: '<rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>' },
-  { id: "providers", label: "Providers", icon: '<path d="M12 22v-5"/><path d="M9 8V2M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8Z"/>' },
-  { id: "conversations", label: "Conversations", icon: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/>' },
-];
-let settingsSection = "general",
-  /// The window's zoom, read from the desktop shell when Settings opens.
-  zoomLevel: number | null = null;
-const TEXT_SIZES: [string, number][] = [["Small", 0.9], ["Default", 1], ["Large", 1.1]];
-function settingsToggle(on: boolean, action: string, data: Record<string, unknown>, label: string) {
-  return `<button type="button" class="settings-toggle${on ? " on" : ""}" role="switch" aria-checked="${on}" aria-label="${h(label)}" data-action="${action}" data-args="${h(JSON.stringify(data))}"><i></i></button>`;
+/// Mac banners, each kind with its own switch in Settings › Notifications:
+/// a chat waits on you, stops with an error, Drive has a branch ready, a chat
+/// finishes. Nothing shows for the chat you are looking at, and the first
+/// look after opening only takes stock.
+let notifyOn: Record<NotifyKind, boolean> = notifyKinds(null, null);
+try { notifyOn = notifyKinds(localStorage.getItem("demesne-notify-kinds"), localStorage.getItem("demesne-notify")); } catch {}
+function setNotifyKind(kind: NotifyKind, on: boolean) {
+  notifyOn = { ...notifyOn, [kind]: on };
+  try { localStorage.setItem("demesne-notify-kinds", JSON.stringify(notifyOn)); } catch {}
 }
-function settingsSegments(options: [string, boolean, string, Record<string, unknown>][], label: string) {
-  return `<div class="settings-segments" role="group" aria-label="${h(label)}">${options.map(([text, on, action, data]) => `<button type="button" class="${on ? "on" : ""}" aria-pressed="${on}" data-action="${action}" data-args="${h(JSON.stringify(data))}">${h(text)}</button>`).join("")}</div>`;
-}
-function settingsRows(section: string): SettingsRow[] {
-  const s = state!;
-  if (section === "general")
-    return [
-      {
-        title: "Mode",
-        description: "Plan reads and proposes without changing files. Build may edit. Applies to this conversation.",
-        control: settingsSegments([["Build", !s.planOnly, "settings-set", { method: "mode", args: { planOnly: false } }], ["Plan", s.planOnly, "settings-set", { method: "mode", args: { planOnly: true } }]], "Mode"),
-        keywords: "plan build read only edits",
-      },
-      ...(s.session
-        ? [{
-            title: "Auto-approve",
-            description: "Skip permission prompts for edits, commands, deletions and publishing in this conversation. Plan stays read only.",
-            control: settingsToggle(!!s.session.autoApprove, "settings-set", { method: "auto-approve", args: { autoApprove: !s.session.autoApprove } }, "Auto-approve"),
-            keywords: "approvals permissions ask before edits",
-          }]
-        : []),
-      ...(window.demesne.mode === "desktop"
-        ? [{
-            title: "Notify me",
-            description: "Mac banners when a chat waits on you, stops with an error, or Drive has a branch ready. Always also tells you when a chat finishes.",
-            control: settingsSegments(NOTIFY_MODES.map(([mode, label]) => [label, notifyMode === mode, "notify-mode", { mode }] as [string, boolean, string, Record<string, unknown>]), "Notify me"),
-            keywords: "notifications banners alerts dock",
-          }]
-        : []),
-    ];
-  if (section === "appearance") {
-    const groups: [string, typeof s.themeOptions][] = [["Your themes", []], ["Dark", []], ["Light", []]];
-    for (const name of s.themes) {
-      const option = s.themeOptions.find((item) => item.name === name) ?? { name, label: name };
-      const group = name.startsWith("custom-") ? 0 : /light|latte/.test(name) ? 2 : 1;
-      groups[group]![1].push(option as (typeof s.themeOptions)[number]);
-    }
-    const select = `<div class="settings-select"><select id="settings-theme" aria-label="Theme">${groups.filter(([, items]) => items.length).map(([label, items]) => `<optgroup label="${h(label)}">${items.map((item) => `<option value="${h(item.name)}"${item.name === s.theme ? " selected" : ""}>${h(item.label ?? item.name)}</option>`).join("")}</optgroup>`).join("")}</select></div>`;
-    return [
-      {
-        title: "Theme",
-        description: "The palette for the whole app, saved on this device.",
-        control: (s.themeCanUndo ? btn("settings-set", "Undo", { method: "theme-undo", args: {} }, "settings-link") : "") + select,
-        keywords: "colour color dark light palette",
-      },
-      {
-        title: "Make a theme",
-        description: "Answer a few questions and Demesne builds a palette from your answers.",
-        control: btn("settings-command", "Start", { text: "/themefy " }, "settings-button"),
-        keywords: "themefy custom palette",
-      },
-      ...(window.demesne.mode === "desktop"
-        ? [{
-            title: "Text size",
-            description: "The size of everything in the window. ⌘+ and ⌘− step through more sizes.",
-            control: settingsSegments(TEXT_SIZES.map(([label, zoom]) => [label, zoomLevel === zoom, "settings-set", { method: "desktop-zoom", args: { zoom } }] as [string, boolean, string, Record<string, unknown>]), "Text size"),
-            keywords: "zoom font scale",
-          }]
-        : []),
-    ];
-  }
-  if (section === "models")
-    return [
-      {
-        title: "Model",
-        description: `${s.model.displayName ?? s.model.id}${s.model.provider ? ` from ${s.model.provider}` : ""}${s.reasoning ? `, ${s.reasoning} thinking` : ""}. This conversation uses it.`,
-        control: btn("overlay", "Change", { name: "models" }, "settings-button"),
-        keywords: "reasoning thinking effort",
-      },
-      ...(s.model.provider === "ChatGPT"
-        ? [{
-            title: "ChatGPT plan",
-            description: `Usage counts against ${s.chatgptAccount?.email ?? s.chatgptAccount?.label ?? "your"} plan.`,
-            control: btn("open-link", "Manage ↗", { url: "https://chatgpt.com/settings/usage" }, "settings-button"),
-            keywords: "usage billing account",
-          }]
-        : []),
-    ];
-  if (section === "providers")
-    return [
-      ...s.providers.items.map((item) => {
-        const signing = s.providers.signingIn === item.key;
-        const action = signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "";
-        return {
-          title: item.label,
-          description: signing ? "Waiting for your browser…" : `${item.active ? "In use. " : ""}${item.detail}`,
-          control: action ? btn(action, signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : "Sign in", { key: item.key }, "settings-button") : "",
-          keywords: "sign in account api key local",
-        };
-      }),
-      {
-        title: "Provider setup",
-        description: s.providers.message ?? "Add a local model server, an API key, or an account.",
-        control: btn("setup", "Open", {}, "settings-button"),
-        keywords: "add provider configure",
-      },
-    ];
-  const others = s.sessions.filter((item) => item.id !== s.session?.id).length;
-  return [
-    {
-      title: "All conversations",
-      description: `${s.sessions.length} in this project${others ? `, ${others} besides this one` : ""}.`,
-      control: btn("overlay", "Show", { name: "sessions" }, "settings-button"),
-      keywords: "sessions history chats",
-    },
-    {
-      title: "Clean up",
-      description: "Delete empty, quick and old conversations. You choose which before anything is deleted.",
-      control: btn("overlay", "Review", { name: "cleanup" }, "settings-button"),
-      keywords: "delete archive sessions",
-    },
-  ];
-}
-function renderSettings() {
-  const query = overlayQuery.trim().toLowerCase();
-  const rowHtml = (row: SettingsRow) => `<div class="settings-row"><div><b>${h(row.title)}</b><p>${h(row.description)}</p></div>${row.control ? `<div class="settings-control">${row.control}</div>` : ""}</div>`;
-  const sections = query
-    ? SETTINGS_SECTIONS.map((section) => ({ section, rows: settingsRows(section.id).filter((row) => `${section.label} ${row.title} ${row.description} ${row.keywords ?? ""}`.toLowerCase().includes(query)) })).filter((item) => item.rows.length)
-    : [{ section: SETTINGS_SECTIONS.find((item) => item.id === settingsSection) ?? SETTINGS_SECTIONS[0]!, rows: settingsRows(settingsSection) }];
-  const nav = SETTINGS_SECTIONS.map((section) => `<button type="button" class="settings-nav-item${!query && section.id === settingsSection ? " on" : ""}" data-action="settings-section" data-args="${h(JSON.stringify({ id: section.id }))}"${!query && section.id === settingsSection ? ' aria-current="page"' : ""}><svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${section.icon}</svg>${h(section.label)}</button>`).join("");
-  const body = sections.length ? sections.map(({ section, rows }) => `<section><h2>${h(section.label)}</h2>${rows.map(rowHtml).join("")}</section>`).join("") : `<p class="settings-empty">No setting matches “${h(overlayQuery)}”.</p>`;
-  el("overlay").innerHTML =
-    `<nav class="settings-nav" aria-label="Settings sections"><div class="settings-search"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="chooser-filter" placeholder="Search" aria-label="Search settings" value="${h(overlayQuery)}" autocomplete="off"></div><div class="settings-group">Settings</div>${nav}</nav><div class="settings-body">${btn("close-overlay", "×", {}, "dialog-close").replace("<button ", '<button aria-label="Close dialog" ')}${body}</div>`;
-}
-/// Mac banners. "needs" (the default) speaks only when a chat waits on you,
-/// stops with an error, or Drive has a branch ready; "always" also says when
-/// a chat finishes; "never" stays quiet. Nothing shows for the chat you are
-/// looking at, and the first look after opening only takes stock.
-type NotifyMode = "needs" | "always" | "never";
-const NOTIFY_MODES: [NotifyMode, string][] = [["needs", "When it needs you"], ["always", "Always"], ["never", "Never"]];
-let notifyMode: NotifyMode = "needs";
-try { const saved = localStorage.getItem("demesne-notify"); if (saved === "always" || saved === "never") notifyMode = saved; } catch {}
 let notified: Set<string> | null = null;
 const notifyFrom = Date.now() - 5_000;
-function setNotifyMode(mode: NotifyMode) {
-  notifyMode = mode;
-  try { localStorage.setItem("demesne-notify", mode); } catch {}
-}
+// A chat set to come back returns on the minute, with or without other news.
+setInterval(() => {
+  if (!state?.sessions.some((item) => backOf(item) === "away" || (backOf(item) === "back" && !notified?.has(`${item.id}:back:${item.backAt}`)))) return;
+  renderSidebar();
+  renderNotifications();
+}, 15_000);
 function renderNotifications() {
   if (!state || window.demesne.mode !== "desktop" || state.connection !== "online") return;
   const current = state.session, looking = document.hasFocus();
-  const alerts = new Map<string, { title: string; body: string; sessionId?: string; path?: string }>();
+  const alerts = new Map<string, { title: string; body: string; kind: NotifyKind; sessionId?: string; path?: string }>();
   for (const item of state.sessions) {
     // Whatever happened before the app opened is old news.
     if (Date.parse(item.updatedAt) < notifyFrom) continue;
@@ -2993,16 +3730,18 @@ function renderNotifications() {
       const approval = mine ? state.approvals[0] : undefined, input = (approval?.input ?? {}) as Record<string, unknown>;
       const asked = approval?.overlap ? `${approval.overlap.agents[0]?.name ?? "Another agent"} changed ${approval.overlap.path.split("/").pop()}` : approval?.name === "run_command" ? `Wants to run: ${Array.isArray(input.argv) ? input.argv.join(" ") : String(input.command ?? "")}` : approval ? `Wants to ${approval.name.replace(/_/g, " ")}${input.path ? ` ${String(input.path).split("/").pop()}` : ""}` : "";
       const body = asked || (mine && state.questions.length ? "Has a question for you" : "Is waiting for you");
-      alerts.set(`${item.id}:wait:${item.updatedAt}`, { title, body, ...where });
-    } else if (item.status === "failed") alerts.set(`${item.id}:failed:${item.updatedAt}`, { title, body: "Stopped with an error", ...where });
-    else if (item.status === "completed" && notifyMode === "always") alerts.set(`${item.id}:done:${item.updatedAt}`, { title, body: "Finished", ...where });
+      alerts.set(`${item.id}:wait:${item.updatedAt}`, { title, body, kind: "wait", ...where });
+    } else if (item.status === "failed") alerts.set(`${item.id}:failed:${item.updatedAt}`, { title, body: "Stopped with an error", kind: "error", ...where });
+    else if (item.status === "completed") alerts.set(`${item.id}:done:${item.updatedAt}`, { title, body: "Finished", kind: "done", ...where });
   }
-  for (const job of reviewJobs()) if (job.status === "ready") alerts.set(`drive:${job.id}`, { title: "Drive", body: `${job.title} is ready to review${job.diff ? ` · +${job.diff.additions} −${job.diff.deletions}` : ""}`, ...(job.sessionId ? { sessionId: job.sessionId } : {}) });
+  // A chat you asked to bring back, once it's due (and it fell due while open).
+  for (const item of state.sessions) if (backOf(item) === "back" && Date.parse(item.backAt === "merge" ? pullRequests.get(item.id)?.mergedAt ?? "" : item.backAt!) >= notifyFrom)
+    alerts.set(`${item.id}:back:${item.backAt}`, { title: item.title, body: "Back, as you asked", kind: "wait", sessionId: item.id, path: item.workspace });
+  for (const job of reviewJobs()) if (job.status === "ready") alerts.set(`drive:${job.id}`, { title: "Drive", body: `${job.title} is ready to review${job.diff ? ` · +${job.diff.additions} −${job.diff.deletions}` : ""}`, kind: "drive", ...(job.sessionId ? { sessionId: job.sessionId } : {}) });
   const fresh = notified ? [...alerts].filter(([key]) => !notified!.has(key)) : [];
   notified = new Set([...(notified ?? []), ...alerts.keys()]);
-  if (notifyMode === "never") return;
-  for (const [, alert] of fresh) {
-    if (looking && alert.sessionId === current?.id) continue;
+  for (const [, { kind, ...alert }] of fresh) {
+    if (!notifyOn[kind] || (looking && alert.sessionId === current?.id)) continue;
     void api("desktop-notify", alert).catch(() => {});
   }
 }
@@ -3014,12 +3753,21 @@ document.addEventListener("demesne:open-chat", (event) => {
   const here = !path || path === (document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace);
   void act(() => dispatch(here ? "select-session" : "project-session", here ? { id: sessionId } : { id: sessionId, path }));
 });
-async function driveAction(method: string, args: Record<string, unknown> = {}) {
-  if (driveActionPending) return;
+let driveActionDone: Promise<unknown> = Promise.resolve();
+async function driveAction(method: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  // Pause, resume and stop wait for the one on its way instead of being
+  // dropped: Stop clicked while Resume is still answering still stops.
+  if (driveActionPending) {
+    if (method !== "drive-control") return;
+    await driveActionDone.catch(() => {});
+    return driveAction(method, args);
+  }
   driveActionPending = method;
   renderBriefing();
+  const run = api(method, args);
+  driveActionDone = run;
   try {
-    return await api(method, args);
+    return await run;
   } catch (error) {
     notice(error instanceof Error ? error.message : String(error));
     throw error;
@@ -3054,13 +3802,10 @@ function renderOverlay() {
     state.cleanup,
     state.themeOptions,
     state.themeCanUndo,
-    settingsSection,
-    zoomLevel,
     modelsMore,
   ]);
   if (signature === overlaySignature) return;
   overlaySignature = signature;
-  if (overlay === "settings") return renderSettings();
   overlayRows = [];
   let title = "",
     subtitle = "",
@@ -3075,9 +3820,9 @@ function renderOverlay() {
     const rowOf = (model: ModelDescriptor, kind: "short" | "rest") => {
       const level = modelLevel(model), score = scoreOf(model);
       return {
-        label: model.displayName ?? model.id,
-        value: [model.contextWindow ? `${tokensShort(model.contextWindow)} context` : "", model.maxOutputTokens ? `${tokensShort(model.maxOutputTokens)} out` : ""].filter(Boolean).join(" · "),
-        group: model.provider.toUpperCase(),
+        label: modelWords(model),
+        value: model.contextWindow ? tokensShort(model.contextWindow) : "",
+        group: model.provider,
         action: "model",
         data: { id: model.id, ...(level ? { reasoning: level } : {}) },
         kind,
@@ -3085,34 +3830,36 @@ function renderOverlay() {
       };
     };
     // The models you use most (the one in use always among them) make the
-    // short list; the rest wait under "More models", by provider.
+    // short list; the rest unfold under "More models", by provider. A search
+    // looks through every provider at once, in place of the list.
     const inUse = models.find((model) => model.id === state!.model.id);
-    const mine = (model: ModelDescriptor) => Number(model.provider === state!.model.provider);
+    const sizes = new Map<string, number>();
+    for (const model of models) sizes.set(model.provider, (sizes.get(model.provider) ?? 0) + 1);
+    // Ties go to the provider in use, unless it is a large catalog: picking
+    // one OpenRouter model shouldn't fill the list with strangers.
+    const mine = (model: ModelDescriptor) => Number(model.provider === state!.model.provider && (sizes.get(model.provider) ?? 0) <= LARGE_CATALOG);
     let short = [...models].sort((a, b) => turns(b) - turns(a) || mine(b) - mine(a)).slice(0, SHORT_MODELS);
     if (inUse && !short.includes(inUse)) short = [inUse, ...short.slice(0, SHORT_MODELS - 1)];
-    overlayRows = short.map((model) => rowOf(model, "short"));
-    if (models.length > short.length) overlayRows.push({ label: "More models", value: "", action: "more-models", data: {}, kind: "more" });
-    if (modelsMore || overlayQuery) {
-      const query = overlayQuery.toLowerCase();
+    const query = overlayQuery.toLowerCase();
+    if (!query) overlayRows = short.map((model) => rowOf(model, "short"));
+    if (query || modelsMore) {
       const rest = (query ? [...models] : models.filter((model) => !short.includes(model)))
         .sort((a, b) => a.provider.localeCompare(b.provider) || turns(b) - turns(a))
         .map((model) => rowOf(model, "rest"))
         .filter((row) => !query || `${row.label} ${row.group} ${row.data.id}`.toLowerCase().includes(query));
-      // A large catalog (OpenRouter's hundreds) collapses to one row until
+      // A large catalog (OpenRouter's hundreds) stays behind one row until
       // a search looks through it.
-      const sizes = new Map<string, number>();
-      for (const model of models) sizes.set(model.provider, (sizes.get(model.provider) ?? 0) + 1);
-      const large = [...sizes].filter(([, size]) => size > LARGE_CATALOG).map(([provider]) => provider.toUpperCase());
+      const large = [...sizes].filter(([, size]) => size > LARGE_CATALOG).map(([provider]) => provider);
       overlayRows.push(...(query ? rest : rest.filter((row) => !large.includes(row.group))));
       if (!query)
         for (const group of large)
-          overlayRows.push({ label: `All ${sizes.get(models.find((model) => model.provider.toUpperCase() === group)!.provider)} models`, value: "type to search", group, action: "focus-filter", data: {}, kind: "rest" });
+          overlayRows.push({ label: `Search all ${sizes.get(group)}`, value: "", group, action: "focus-filter", data: {}, kind: "rest" });
     }
+    if (!query && models.length > short.length) overlayRows.push({ label: modelsMore ? "Fewer models" : "More models", value: String(models.length - short.length), action: "more-models", data: {}, kind: "more" });
     // A new search highlights its first match.
     if (overlayQuery !== modelsQuery) {
       modelsQuery = overlayQuery;
-      const first = overlayRows.findIndex((row) => row.kind === "rest");
-      if (overlayQuery && first >= 0) overlayIndex = first;
+      if (overlayQuery) overlayIndex = 0;
     }
     if (modelIndexPending && !overlayQuery) {
       // Opens on the model you are using, so ←→ changes its thinking.
@@ -3208,7 +3955,7 @@ function renderOverlay() {
       { label: "Rename", value: "", action: "overlay", data: { name: "rename" } },
       { label: "Compact", value: `${c.estimated ? "~" : ""}${num(c.used)} of ${c.capacity ? tokensShort(c.capacity) : "—"} context used${c.percentage == null ? "" : ` · ${c.percentage}%`}`, action: "compact", data: {}, hint: state.activeTurnId ? "after this turn" : "" },
       { label: "New chat", value: "", action: "new-session", data: {}, hint: "⌘N" },
-      { label: "Settings", value: "", action: "overlay", data: { name: "settings" }, hint: "⌘," },
+      { label: "Settings", value: "", action: "page-open", data: { page: "settings" }, hint: "⌘," },
     ];
   } else if (overlay === "rename") {
     el("overlay").innerHTML =
@@ -3604,7 +4351,7 @@ async function submitText(value = editor.value, wait = false) {
     }
     if (id === "context" || id === "status") {
       const c = context();
-      notice(`${c.estimated ? "~" : ""}${num(c.used)} of ${c.capacity ? tokensShort(c.capacity) : "—"} context used${c.percentage == null ? "" : ` · ${c.percentage}%`} · ${state!.model.displayName ?? state!.model.id}`);
+      notice(`${c.estimated ? "~" : ""}${num(c.used)} of ${c.capacity ? tokensShort(c.capacity) : "—"} context used${c.percentage == null ? "" : ` · ${c.percentage}%`} · ${modelWords(state!.model)}`);
       clear();
       return;
     }
@@ -3672,6 +4419,76 @@ function followLatest() {
   const stage = el("stage");
   stage.scrollTop = stage.scrollHeight;
 }
+/// Proof marks' actions: a claim opens or closes its proof, the count line
+/// walks the claims, Prove it / Drop / Correct go to the daemon, Fix it
+/// sends one message, Open the step unfolds it on the guide.
+async function proofAction(action: string, args: Record<string, any>) {
+  const runId = String(args.runId ?? ""), run = state?.runs.find((item) => item.id === runId);
+  if (!run) return;
+  const claimId = String(args.claimId ?? ""), claim = run.proofs?.find((item) => item.id === claimId);
+  if (action === "proof-open") {
+    if (proofOpen.get(runId) === claimId) { proofOpen.delete(runId); if (proofStep?.runId === runId) proofStep = null; }
+    else { proofOpen.set(runId, claimId); if (proofStep?.runId === runId) proofStep.index = Math.max(0, proofClaims(run).findIndex((item) => item.id === claimId)); }
+    follow = false;
+    renderConversation();
+    return;
+  }
+  if (action === "proof-walk") {
+    const live = proofClaims(run);
+    if (!live.length) return;
+    const index = Math.max(0, live.findIndex((item) => item.state === args.state));
+    proofStep = { runId, index };
+    proofOpen.set(runId, live[index]!.id);
+    follow = false;
+    renderConversation();
+    return;
+  }
+  if (action === "proof-step") {
+    const tool = tools(run).find((item) => item.toolCallId === args.toolCallId);
+    stepsOpen.add(runId);
+    if (tool && foldable(tool)) stepOpen.add(`${runId}:${tool.id}`);
+    follow = false;
+    renderConversation();
+    if (tool) document.querySelector(`#turn-${CSS.escape(runId)} .tool-row[data-args*='"id":${tool.id}}']`)?.scrollIntoView({ block: "center" });
+    return;
+  }
+  if (!claim) return;
+  if (action === "proof-fix") {
+    proofOpen.delete(runId);
+    proofStep = null;
+    await submitText(`You said "${claim.text}", but that isn't true${claim.why ? `: ${claim.why}` : ""}. Fix it.`);
+    return;
+  }
+  const kind = action === "proof-drop" ? "drop" : action === "proof-correct" ? "correct" : "check";
+  if (kind !== "check") { proofOpen.delete(runId); proofStep = null; }
+  await act(() => api("proof", { turnId: runId, claimId, action: kind }));
+}
+/// ↑↓ while walking claims, Esc off them, Enter takes the open proof's main
+/// action (Prove it, Fix it). True when the key was used.
+function proofKey(event: KeyboardEvent, key: string, field: boolean): boolean {
+  if (!state || event.ctrlKey || event.metaKey || event.altKey) return false;
+  const free = !field || (event.target === editor && !editor.value.trim());
+  if (proofStep && free && (key === "arrowdown" || key === "arrowup")) {
+    const run = state.runs.find((item) => item.id === proofStep!.runId), live = run ? proofClaims(run) : [];
+    if (!live.length) { proofStep = null; return false; }
+    proofStep.index = (proofStep.index + (key === "arrowdown" ? 1 : -1) + live.length) % live.length;
+    proofOpen.set(proofStep.runId, live[proofStep.index]!.id);
+    follow = false;
+    renderConversation();
+    return true;
+  }
+  if (key === "escape" && free && (proofStep || proofOpen.size)) {
+    proofStep = null;
+    proofOpen.clear();
+    renderConversation();
+    return true;
+  }
+  if (key === "enter" && !event.shiftKey && free && !state.approvals.length && !pendingQuestion()) {
+    const main = document.querySelector<HTMLButtonElement>(".proof-fold .pf-main");
+    if (main) { main.click(); return true; }
+  }
+  return false;
+}
 async function dispatch(
   action: string,
   args: Record<string, any>,
@@ -3679,7 +4496,48 @@ async function dispatch(
 ) {
   if (action === "deed-open") return openDeed(true);
   // Going to a chat leaves the Deed.
-  if (deedOpen && ["select-session", "new-session", "project-open", "project-session", "review-open", "drive-open"].includes(action)) openDeed(false);
+  if (deedOpen && ["select-session", "new-session", "project-new", "project-session", "review-open", "drive-open"].includes(action)) openDeed(false);
+  if (pageOpen && ["select-session", "new-session", "project-new", "project-session", "review-open", "drive-open"].includes(action)) openPage("");
+  if (action === "chats-page") return openPage(args.tab === "archived" ? "archived" : "active");
+  if (action === "page-open") {
+    const page = String(args.page ?? "");
+    return openPage(!page || pageOpen === page ? "" : (["customize", "settings", "active", "archived"].includes(page) ? page : "scheduled") as PageKind);
+  }
+  if (action === "settings-section") return isSettingsSection(args.id) ? settingsSection(args.id) : undefined;
+  if (action === "settings-fold") { settingsUi.fold = settingsUi.fold === args.fold ? "" : String(args.fold); return renderPage(); }
+  if (action === "settings-local") {
+    if (args.key === "openOn") { openOn = args.value === "last" ? "last" : "home"; try { localStorage.setItem("demesne-open-on", openOn); } catch {} }
+    if (args.key === "ink" && isInk(args.value)) { inkName = args.value; try { localStorage.setItem("demesne-ink", inkName); } catch {} applyInk(); }
+    if (args.key === "awake") { keepAwake = args.value === true; try { localStorage.setItem("demesne-awake", keepAwake ? "on" : "off"); } catch {} renderAwake(); }
+    return renderPage();
+  }
+  if (action === "notify-kind") { setNotifyKind(args.kind as NotifyKind, args.on === true); return renderPage(); }
+  // A setting changes in place; the page stays to show it took.
+  if (action === "settings-set") {
+    const result = await api<{ zoom?: number } | null>(String(args.method), args.args ?? {});
+    if (args.method === "desktop-zoom" && typeof result?.zoom === "number") zoomLevel = result.zoom;
+    if (args.method === "theme") settingsUi.fold = "";
+    return renderPage();
+  }
+  if (action === "settings-command") { openPage(""); return setDraft(String(args.text)); }
+  if (action === "subagent-model") { settingsUi.fold = ""; return settingsCall("subagent-model", { model: args.model ?? null }); }
+  if (["settings-config", "allow-rule-remove", "trusted-forget", "mcp-remove"].includes(action)) return settingsCall(action, args);
+  if (action === "restart-daemon") {
+    settingsUi.error = "";
+    notice("Restarting the daemon…");
+    return settingsCall("restart-daemon");
+  }
+  if (action === "routine-set" || action === "routine-remove") return loadRoutines(action, args);
+  if (action === "cz-edit") return editCustomizable(String(args.path));
+  if (action === "cz-cancel") { customizeUi.editing = null; return renderPage(); }
+  if (action === "cz-run") { openPage(""); return setDraft(`/${String(args.name)} `); }
+  if (action === "chats-restore") {
+    await api("restore", { id: String(args.id) });
+    deletedSessions.delete(String(args.id));
+    archivedChats = archivedChats?.filter((chat) => chat.id !== args.id) ?? null;
+    renderPage();
+    return;
+  }
   if (action.startsWith("deed-")) {
     const id = String(args.id ?? "");
     if (action === "deed-write") return deedAct({ action: "write" });
@@ -3696,20 +4554,102 @@ async function dispatch(
     const verb = ({ "deed-fix": "fix", "deed-words": "words", "deed-check": "check", "deed-seen": "seen", "deed-remove": "remove" } as const)[action as "deed-fix"];
     if (verb) return deedAct({ action: verb, id });
   }
-  if (action === "project-toggle" || action === "project-more") {
-    const path = String(args.path);
-    if (action === "project-toggle") {
-      const open = openProjectPath ?? (document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace);
-      openProjectPath = open === path ? "" : path;
-      unfoldingProject = openProjectPath;
-      try { localStorage.setItem("demesne-project-open", JSON.stringify({ path: openProjectPath })); } catch {}
-    } else if (expandedProjectChats.has(path)) expandedProjectChats.delete(path);
-    else expandedProjectChats.add(path);
+  if (action === "project-toggle" || action === "group-toggle" || action === "project-more") {
+    const key = action === "project-toggle" ? `p:${String(args.path)}` : String(args.key);
+    // While searching every project shows its matches; folding waits.
+    if (action === "project-toggle" && (document.getElementById("sidebar-search") as HTMLInputElement | null)?.value.trim()) return;
+    if (action === "project-more") {
+      if (expandedProjectChats.has(key)) expandedProjectChats.delete(key); else expandedProjectChats.add(key);
+    } else {
+      foldedGroups[key] = groupIsOpen(key);
+      if (!foldedGroups[key]) unfoldingGroup = key;
+      saveSidebarLayout();
+    }
     renderSidebar();
     // Rendering replaces the control: keep keyboard focus on its replacement.
-    document.querySelectorAll<HTMLButtonElement>(`#sidebar-sessions [data-action="${action}"]`).forEach(button => {
-      if (JSON.parse(button.dataset.args ?? "{}").path === path) button.focus({ preventScroll: true });
+    document.querySelectorAll<HTMLButtonElement>(`#sidebar-projects [data-action="${action}"]`).forEach(button => {
+      if (button.dataset.args === JSON.stringify(args)) button.focus({ preventScroll: true });
     });
+    return;
+  }
+  // Group and sort unfolds under the heading it was opened from; a choice
+  // rearranges the list at once and the line stays until you fold it.
+  if (action === "sidebar-view-open") {
+    viewOpenAt = viewOpenAt === String(args.key) ? "" : String(args.key);
+    renderSidebar();
+    if (viewOpenAt) void api<{ sessions: unknown[] }>("archived-list").then((result) => { archivedCount = result.sessions.length; renderSidebar(); }, () => {});
+    return;
+  }
+  // + on a project's line: a new chat there, switching to it if need be.
+  if (action === "project-new") {
+    const path = String(args.path), here = document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace;
+    if (path === here) await api("new-session", { reuse: true });
+    else document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path, fresh: true, draft: "" } }));
+    editor.focus({ preventScroll: true });
+    return;
+  }
+  if (action === "sidebar-view") {
+    const regroup = (args.group === "project" || args.group === "date" || args.group === "status") && args.group !== sidebarView.group;
+    if (regroup) sidebarView.group = args.group;
+    if (args.sort === "recent" || args.sort === "name") sidebarView.sort = args.sort;
+    saveSidebarLayout();
+    if (regroup) {
+      // The line moves to the first heading of the new layout.
+      viewOpenAt = "";
+      renderSidebar();
+      viewOpenAt = JSON.parse(document.querySelector<HTMLElement>("#sidebar-projects [data-action='sidebar-view-open']")?.dataset.args ?? "{}").key ?? "";
+    }
+    renderSidebar();
+    document.querySelector<HTMLElement>(`#sidebar-projects .sidebar-view-opt[data-args='${JSON.stringify(args)}']`)?.focus({ preventScroll: true });
+    return;
+  }
+  if (action === "theme-flip") { flipTheme(); return; }
+  if (action === "pr-open") {
+    const id = String(args.id), pr = pullRequests.get(id);
+    prOpenFor = prOpenFor === id ? null : id;
+    if (prOpenFor && pr) {
+      prOpenSince = prSeenAt(id, pr);
+      markPrSeen(id, pr.activityAt);
+      void refreshPullRequests(id);
+    }
+    renderSidebar();
+    // Enter takes the first word: hand the news to the chat, or archive it.
+    document.querySelector<HTMLButtonElement>(".sidebar-pr-line .key")?.focus({ preventScroll: true });
+    return;
+  }
+  if (action === "pr-github") {
+    const pr = pullRequests.get(String(args.id));
+    if (pr) await api("open-link", { url: pr.url });
+    return;
+  }
+  if (action === "pr-hand") {
+    const id = String(args.id), pr = pullRequests.get(id);
+    if (!pr) return;
+    const text = prHandText(pr, prOpenSince);
+    prOpenFor = null;
+    if (state?.session?.id !== id) {
+      const path = state?.sessions.find((item) => item.id === id)?.workspace;
+      if (path && path !== (el("sidebar-sessions").dataset.workspace || state?.workspace)) document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path, sessionId: id } }));
+      else await api("select-session", { id });
+      for (let tries = 0; tries < 80 && state?.session?.id !== id; tries++) await new Promise((done) => setTimeout(done, 50));
+      if (state?.session?.id !== id) return;
+    }
+    renderSidebar();
+    setDraft(text);
+    return;
+  }
+  if (action === "back-open") {
+    backOpenFor = backOpenFor === String(args.id) ? null : String(args.id);
+    renderSidebar();
+    return;
+  }
+  if (action === "bring-back") {
+    backOpenFor = null;
+    await api("bring-back", { id: String(args.id), at: args.at === null ? null : String(args.at) });
+    return;
+  }
+  if (action === "pin-session") {
+    await api("pin", { id: String(args.id), pinned: args.pinned === true });
     return;
   }
   if (action === "agents-toggle") {
@@ -3723,7 +4663,7 @@ async function dispatch(
   }
   // The chat sends it over Heartbeat; you write what to say.
   if (action === "agent-message") return setDraft(`Message ${String(args.name)} at ${String(args.address)}: `);
-  if (action === "project-open" || action === "project-session") {
+  if (action === "project-session") {
     document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path: args.path, ...(action === "project-session" ? { sessionId: args.id } : {}) } }));
     return;
   }
@@ -3777,7 +4717,11 @@ async function dispatch(
   if (action === "question-control") return questionAction(args.action);
   if (action === "question-pick") return answerQuestion(String(args.text ?? ""), "suggestion");
   if (action === "question-skip") return answerQuestion(null, "skipped");
-  if (action === "new-session") return api("new-session", {});
+  // A new chat starts on Home as Just a chat; the where word moves it.
+  if (action === "new-session") return api("new-session", { plain: true, reuse: true });
+  if (action === "where-toggle") return toggleWhere(whereOpen === "home" ? null : "home");
+  if (action === "where-pick") return pickWhere(args);
+  if (action === "where-move") return toggleWhere(whereOpen === "move" ? null : "move");
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "drive-auto", "drive-control"].includes(action)) return driveAction(action, args);
   if (action.startsWith("breakage-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
@@ -3809,6 +4753,20 @@ async function dispatch(
     else renderHero();
     return;
   }
+  // Home: a chat's phrase unfolds what it waits on; the row answers it there.
+  if (action === "away-ask") {
+    awayAskShown = awayAskShown === args.id ? null : String(args.id ?? "");
+    heroSignature = "";
+    renderHero();
+    return;
+  }
+  if (action === "away-permission") {
+    awayAskShown = null;
+    await act(() => api("away-permission", args));
+    heroSignature = "";
+    renderHero();
+    return;
+  }
   if (action === "branch-more") {
     const key = String(args.key ?? "");
     if (detailsOpen.has(key)) detailsOpen.delete(key); else detailsOpen.add(key);
@@ -3821,6 +4779,7 @@ async function dispatch(
     await act(() => api(action, args));
     return;
   }
+  if (action.startsWith("proof-")) return proofAction(action, args);
   if (action === "drive-asked") {
     const key = String(args.key ?? "");
     if (detailsOpen.has(key)) detailsOpen.delete(key); else detailsOpen.add(key);
@@ -3850,7 +4809,6 @@ async function dispatch(
     if (tellOpen) el("drive-reply").querySelector<HTMLInputElement>("#drive-tell-form input")?.focus({ preventScroll: true });
     return;
   }
-  if (action === "map-toggle") return toggleMap();
   if (action === "drive-show" || action === "ideas-show" || action === "broke-show") {
     if (action === "drive-show") driveShown = !driveShown;
     else if (action === "broke-show") brokeShown = !brokeShown;
@@ -3992,28 +4950,6 @@ async function dispatch(
     editor.focus();
     return;
   }
-  if (action === "settings-section") {
-    settingsSection = String(args.id);
-    overlayQuery = "";
-    return renderOverlay();
-  }
-  // A setting changes in place; the sheet stays open to show it took.
-  if (action === "notify-mode") {
-    setNotifyMode(args.mode as NotifyMode);
-    overlaySignature = "";
-    return renderOverlay();
-  }
-  if (action === "settings-set") {
-    const result = await api<{ zoom?: number } | null>(String(args.method), args.args ?? {});
-    if (args.method === "desktop-zoom" && typeof result?.zoom === "number") zoomLevel = result.zoom;
-    overlaySignature = "";
-    return renderOverlay();
-  }
-  if (action === "settings-command") {
-    overlay = null;
-    renderOverlay();
-    return setDraft(String(args.text));
-  }
   if (action === "choose-row") {
     const row = overlayRows[args.index];
     if (row?.action === "focus-filter") {
@@ -4022,7 +4958,8 @@ async function dispatch(
     }
     if (row?.action === "more-models") {
       modelsMore = !modelsMore || Boolean(args.open);
-      if (modelsMore && args.step) overlayIndex = Math.min(overlayRows.length, args.index + 1);
+      // Unfolding from the keyboard steps onto the first of the rest.
+      if (modelsMore && args.step) overlayIndex = SHORT_MODELS;
       renderOverlay();
       el("overlay").querySelector<HTMLInputElement>("input")?.focus();
       return;
@@ -4100,10 +5037,7 @@ async function dispatch(
     renderComposer();
     return api("clear-queue");
   }
-  if (action === "setup" && overlay === "settings") {
-    overlay = null;
-    renderOverlay();
-  }
+  if (action === "setup" && pageOpen === "settings") openPage("");
   if (action === "setup" || action === "setup-action") return api(action, args);
   if (action === "open-link") return api("open-link", { url: args.url });
   // Width and reload act on the frame in place, so the page keeps its state.
@@ -4228,23 +5162,36 @@ function renderState(next: Snapshot) {
       document.documentElement.style.setProperty(`--${name}`, color);
     // The desktop restyles its own themes by name (desktop.css).
     document.documentElement.dataset.theme = next.theme;
+    if (window.demesne.mode === "desktop") void api("desktop-theme", { dark: !/light/.test(next.theme) }).catch(() => {});
     renderedPalette = next.palette;
   }
   // Drive working this session is a session, even before its first turn:
   // its mission is the conversation's turn.
-  const start = !inSession(next) && !deedOpen;
+  const start = !inSession(next) && !deedOpen && !pageOpen;
   el("app").classList.toggle("start", start);
   el("app").classList.toggle("deeding", deedOpen);
+  el("app").classList.toggle("paging", Boolean(pageOpen));
   el("hero").hidden = !start;
-  el("conversation").hidden = start || deedOpen;
+  el("conversation").hidden = start || deedOpen || Boolean(pageOpen);
   el("deed").hidden = !deedOpen;
+  el("page").hidden = !pageOpen;
+  document.querySelectorAll<HTMLElement>('.sidebar-nav [data-action="page-open"]').forEach((button) => {
+    const on = JSON.parse(button.dataset.args ?? "{}").page === pageOpen;
+    button.classList.toggle("on", on);
+    if (on) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
+  });
+  renderPage();
+  renderAwake();
+  renderLastChat();
   if (start) renderHero();
   else if (wasStart || el("composer-slot").parentElement !== el("input-area")) el("input-area").append(el("composer-slot"));
+  renderSakura(start);
   renderDeed();
   renderStatus();
   renderConversation();
   renderDriveTurn();
   renderComposer();
+  renderPlainLine();
   renderApproval();
   renderQuestion();
   renderBriefing();
@@ -4289,6 +5236,12 @@ document.addEventListener("click", (event) => {
       detailsClosed.delete(id);
       detailsOpen.add(id);
     }
+  }
+  const claim = (event.target as Element).closest<HTMLElement>(".claim[data-claim]");
+  if (claim) {
+    event.preventDefault();
+    void act(() => proofAction("proof-open", { runId: claim.dataset.run, claimId: claim.dataset.claim }));
+    return;
   }
   const target = (event.target as Element).closest<HTMLElement>(
     "[data-action]",
@@ -4344,15 +5297,14 @@ document.addEventListener("input", (event) => {
   }
   if (input.closest("#setup")) setupInput(input);
 });
-// Hovering "More models" opens its column, as a submenu would.
+// Pointing at a model in the picker highlights it, so Thinking is for the
+// row you are on.
 document.addEventListener("mouseover", (event) => {
-  if (overlay !== "models" || modelsMore || !(event.target as Element).closest?.("[data-more]")) return;
-  modelsMore = true;
+  if (overlay !== "models") return;
+  const index = Number((event.target as Element).closest?.<HTMLElement>("#overlay .mp-row")?.dataset.index ?? NaN);
+  if (Number.isNaN(index) || index === overlayIndex) return;
+  overlayIndex = index;
   renderOverlay();
-});
-document.addEventListener("change", (event) => {
-  const target = event.target as HTMLSelectElement;
-  if (target.id === "settings-theme") void act(() => dispatch("settings-set", { method: "theme", args: { name: target.value } }));
 });
 document.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -4411,8 +5363,79 @@ el("stage").addEventListener("scroll", () => {
   else if (stage.scrollTop < lastStageTop - 2) follow = false;
   lastStageTop = stage.scrollTop;
 });
+// The edge is a timeline: the scrollbar is gone, and pointing at the
+// panel's right edge shows the chat's shape on a hairline. Marks are measured
+// from the rendered turns; the line repaints when they move or the chat
+// scrolls, and only while it shows.
+let timeline: Mark[] = [], timelineFrame = 0, timelineHot: Mark | null = null;
+function timelineFacts(stage: HTMLElement): TurnFacts[] {
+  const base = stage.getBoundingClientRect().top - stage.scrollTop;
+  const top = (node: Element | null) => node ? Math.round(node.getBoundingClientRect().top - base) : null;
+  return (state?.runs ?? []).flatMap((run) => {
+    const node = document.getElementById(`turn-${run.id}`);
+    if (!node || !node.isConnected) return [];
+    const items = tools(run);
+    const edited = [...new Set(items.filter((t) => t.phase === "change" && t.state === "done").flatMap((t) => t.changes?.map((c) => c.path) ?? [String(t.input.path ?? t.detail ?? "")]).filter(Boolean))];
+    const check = items.find((t) => t.phase === "verify" && t.name === "run_command" && t.input.background !== true && (t.state === "failed" || t.state === "denied"));
+    const failed = check ? { name: String(check.detail ?? check.name).replace(/^\$\s*/, ""), at: clock(run.createdAt).slice(0, 5) }
+      : run.status === "failed" ? { name: "the turn failed", at: clock(run.createdAt).slice(0, 5) } : null;
+    return [{
+      ask: run.content, time: clock(run.createdAt).slice(0, 5),
+      askTop: top(node.querySelector(".request")), answerTop: top(node.querySelector(".answer")),
+      stepsTop: top(node.querySelector(".steps, .step-trail")), receiptTop: top(node.querySelector(".turn-receipt")),
+      edited, failed,
+    }];
+  });
+}
+function paintTimeline() {
+  timelineFrame = 0;
+  const line = el("timeline"), stage = el("stage"), conversation = el("conversation");
+  const long = Boolean(state) && !conversation.hidden && stage.scrollHeight > stage.clientHeight + 40;
+  line.hidden = !long;
+  if (!long) { timeline = []; return; }
+  line.style.top = `${stage.offsetTop + 14}px`;
+  line.style.height = `${Math.max(0, stage.clientHeight - 28)}px`;
+  const view = line.querySelector<HTMLElement>(".tl-view")!;
+  view.style.top = `${(stage.scrollTop / stage.scrollHeight) * 100}%`;
+  view.style.height = `${(stage.clientHeight / stage.scrollHeight) * 100}%`;
+  if (!line.classList.contains("on")) return;
+  timeline = timelineMarks(timelineFacts(stage), stage.scrollHeight);
+  line.querySelector(".tl-marks")!.innerHTML = timeline.map((mark) =>
+    `<i class="tl-m ${mark.kind}${mark === timelineHot || (timelineHot && mark.top === timelineHot.top && mark.kind === timelineHot.kind) ? " hot" : ""}" style="top:${(mark.at * 100).toFixed(2)}%"></i>`).join("");
+}
+const repaintTimeline = () => { if (!timelineFrame) timelineFrame = requestAnimationFrame(paintTimeline); };
+function timelineAt(event: PointerEvent | MouseEvent): Mark | null {
+  const line = el("timeline"), box = line.getBoundingClientRect();
+  if (!box.height) return null;
+  return markNear(timeline, (event.clientY - box.top) / box.height, 10 / box.height);
+}
+function showTimelineLabel(mark: Mark | null) {
+  timelineHot = mark;
+  const line = el("timeline"), label = line.querySelector<HTMLElement>(".tl-label")!;
+  label.hidden = !mark;
+  if (mark) {
+    label.innerHTML = `${h(mark.label)}${mark.meta ? ` <span>· ${h(mark.meta)}</span>` : ""}`;
+    label.style.top = `${(mark.at * 100).toFixed(2)}%`;
+  }
+  for (const node of line.querySelectorAll<HTMLElement>(".tl-m")) node.classList.remove("hot");
+  if (mark) line.querySelectorAll<HTMLElement>(".tl-m")[timeline.indexOf(mark)]?.classList.add("hot");
+}
+el("timeline").addEventListener("pointerenter", () => { el("timeline").classList.add("on"); paintTimeline(); });
+el("timeline").addEventListener("pointerleave", () => { el("timeline").classList.remove("on"); showTimelineLabel(null); });
+el("timeline").addEventListener("pointermove", (event) => { const mark = timelineAt(event); if (mark !== timelineHot) showTimelineLabel(mark); });
+el("timeline").addEventListener("click", (event) => {
+  const stage = el("stage"), line = el("timeline"), box = line.getBoundingClientRect();
+  const mark = timelineAt(event);
+  // A mark goes to its place; anywhere else on the line goes to that point.
+  const top = mark ? mark.top - 18 : ((event.clientY - box.top) / box.height) * stage.scrollHeight - stage.clientHeight / 2;
+  follow = false;
+  stage.scrollTo({ top: Math.max(0, top), behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+});
+el("stage").addEventListener("scroll", repaintTimeline, { passive: true });
+new ResizeObserver(repaintTimeline).observe(el("conversation"));
+new ResizeObserver(repaintTimeline).observe(el("stage"));
 document.addEventListener("demesne:open-settings", () => {
-  if (state && !state.setup) void act(() => openOverlay("settings"));
+  if (state && !state.setup) openPage("settings");
 });
 // Images reach the composer by +, paste or a drop anywhere in the window.
 el<HTMLInputElement>("attach-input").addEventListener("change", (event) => {
@@ -4462,9 +5485,10 @@ document.addEventListener("keydown", (event) => {
     ctrl = event.ctrlKey || event.metaKey;
   // Native details and buttons keep Enter and Space.
   if (!ctrl && !event.altKey && (key === "enter" || key === " ") && event.target instanceof Element) {
-    const control = event.target.closest<HTMLElement>(".approval-row button, .thinking-toggle");
+    const control = event.target.closest<HTMLElement>(".approval-row button, .thinking-toggle, .claim[data-claim]");
     if (control) { event.preventDefault(); control.click(); return; }
   }
+  if (!state.setup && !pageOpen && !deedOpen && !overlay && proofKey(event, key, field)) { event.preventDefault(); return; }
   const run = (task: () => Promise<unknown> | void) => {
     event.preventDefault();
     void act(async () => task());
@@ -4474,16 +5498,29 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   // Esc on the Deed lets go of the sentence you're on.
+  if (key === "escape" && !ctrl && pageOpen === "settings" && (settingsUi.query || settingsUi.fold) && (!field || (event.target as HTMLElement).id === "settings-search")) {
+    event.preventDefault();
+    if (settingsUi.query) settingsSection(settingsUi.section);
+    else { settingsUi.fold = ""; renderPage(); }
+    return;
+  }
+  if (key === "escape" && !ctrl && pageOpen && (!field || (event.target as HTMLElement).id === "settings-search")) {
+    event.preventDefault();
+    openPage("");
+    return;
+  }
+  // ↑↓ step through Settings' sections while no field has the keyboard.
+  if (pageOpen === "settings" && !field && !ctrl && !event.altKey && (key === "arrowdown" || key === "arrowup")) {
+    event.preventDefault();
+    const at = SETTINGS_ORDER.indexOf(settingsUi.section);
+    settingsSection(SETTINGS_ORDER[(at + (key === "arrowdown" ? 1 : -1) + SETTINGS_ORDER.length) % SETTINGS_ORDER.length]!);
+    document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
+    return;
+  }
   if (key === "escape" && !ctrl && deedOpen && deedUi.focus && (!field || (event.target === editor && !editor.value))) {
     event.preventDefault();
     deedUi.focus = null;
     renderDeed();
-    return;
-  }
-  // Esc folds the map while nothing is typed.
-  if (key === "escape" && !ctrl && !inSession() && mapOpen() && (!field || (event.target === editor && !editor.value)) && el("completion").hidden) {
-    event.preventDefault();
-    toggleMap();
     return;
   }
   // 1, 2, 3… pick the model's suggested answers while nothing is typed.
@@ -4530,8 +5567,13 @@ document.addEventListener("keydown", (event) => {
     });
     return;
   }
+  // ⌘K is Search in the sidebar: the list narrows as you type.
   if (ctrl && key === "k") {
-    run(() => openOverlay("settings"));
+    event.preventDefault();
+    const search = document.getElementById("sidebar-search") as HTMLInputElement | null;
+    if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("rail-expand")?.click();
+    search?.focus();
+    search?.select();
     return;
   }
   // Ctrl+Tab and Ctrl+Shift+Tab step through the chats in the sidebar.
@@ -4554,6 +5596,20 @@ document.addEventListener("keydown", (event) => {
     run(() => dispatch("drive-open", { toggle: true }));
     return;
   }
+  // ⌥P unfolds Home's where word; in its row ←→ move, Esc folds.
+  if (event.altKey && !ctrl && event.code === "KeyP" && !inSession() && !deedOpen) {
+    event.preventDefault();
+    toggleWhere(whereOpen === "home" ? null : "home");
+    return;
+  }
+  const option = event.target instanceof Element ? event.target.closest<HTMLElement>(".where-opt") : null;
+  if (option && (key === "arrowleft" || key === "arrowright")) {
+    event.preventDefault();
+    const options = [...option.parentElement!.querySelectorAll<HTMLElement>(".where-opt")], at = options.indexOf(option);
+    options[(at + (key === "arrowleft" ? -1 : 1) + options.length) % options.length]?.focus({ preventScroll: true });
+    return;
+  }
+
   if (state.approvals.length && !field && !ctrl && !event.altKey) {
     const choice = {
       y: "allow_once",
@@ -4599,10 +5655,19 @@ document.addEventListener("keydown", (event) => {
         return;
       }
     }
-    // ↑↓ step through Settings' sections while its search is empty.
-    if (overlay === "settings" && (key === "arrowdown" || key === "arrowup") && !overlayQuery && !(event.target instanceof HTMLSelectElement)) {
-      const at = SETTINGS_SECTIONS.findIndex((section) => section.id === settingsSection);
-      run(() => dispatch("settings-section", { id: SETTINGS_SECTIONS[(at + (key === "arrowdown" ? 1 : -1) + SETTINGS_SECTIONS.length) % SETTINGS_SECTIONS.length]!.id }));
+    // While searching models, ↑↓ and Enter work on the matches, not the
+    // short list above them.
+    if (overlay === "models" && overlayQuery && (key === "arrowdown" || key === "arrowup" || key === "enter")) {
+      const matches = overlayRows.flatMap((row, index) => row.kind === "rest" && row.action === "model" ? [index] : []);
+      event.preventDefault();
+      if (!matches.length) return;
+      if (key === "enter") {
+        run(() => dispatch("choose-row", { index: matches.includes(overlayIndex) ? overlayIndex : matches[0]! }));
+        return;
+      }
+      const at = matches.indexOf(overlayIndex);
+      overlayIndex = matches[at < 0 ? 0 : (at + (key === "arrowdown" ? 1 : -1) + matches.length) % matches.length]!;
+      renderOverlay();
       return;
     }
     if (key === "arrowdown" || key === "arrowup") {
@@ -4669,7 +5734,7 @@ document.addEventListener("keydown", (event) => {
     // The model's suggested next prompt, or Drive's idea on the start
     // screen, when one shows; else Settings.
     const suggestion = deedOpen ? null : nextSuggestion() ?? driveSuggestion();
-    run(() => (suggestion ? setDraft(suggestion) : openOverlay("settings")));
+    run(() => (suggestion ? setDraft(suggestion) : openPage("settings")));
     return;
   }
   if (key === "enter" && event.target instanceof HTMLInputElement) {

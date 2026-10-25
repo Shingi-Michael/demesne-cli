@@ -25,8 +25,11 @@ import {
   type SubmitTurnRequest,
   type SubmitTurnResponse,
   type TurnChangesResponse,
+  type SessionPullRequestsResponse,
   type UndoSessionRequest,
   type RewindSessionRequest,
+  type ProofActionRequest,
+  type ProofClaim,
   type SteerTurnRequest,
   type RewindResponse,
   type UndoTurnResponse,
@@ -128,6 +131,20 @@ export class DemesneClient {
   async permissionAsks(workspace: string): Promise<import("@demesne/protocol").PermissionAsksResponse> {
     return this.request(`/v1/permissions/asks?workspace=${encodeURIComponent(workspace)}`);
   }
+  /// The model sub-agents run on (null: the chat's own), and the ones they may.
+  async subagentModel(): Promise<{ model: string | null; models: { id: string; provider: string }[] }> {
+    return this.request("/v1/subagent-model");
+  }
+  async setSubagentModel(model: string | null): Promise<{ model: string | null; models: { id: string; provider: string }[]; saved: boolean }> {
+    return this.request("/v1/subagent-model", { method: "POST", body: JSON.stringify({ model }) });
+  }
+  /// The folders you trust, and taking one back.
+  async trusted(): Promise<import("@demesne/protocol").TrustedResponse> {
+    return this.request("/v1/trusted");
+  }
+  async forgetTrusted(root: string): Promise<import("@demesne/protocol").TrustedResponse> {
+    return this.request("/v1/trusted/forget", { method: "POST", body: JSON.stringify({ root }) });
+  }
   /// The project's Deed: its sentences and the state of each.
   async deed(workspace: string): Promise<import("@demesne/protocol").DeedResponse> {
     return this.request(`/v1/deed?workspace=${encodeURIComponent(workspace)}`);
@@ -138,12 +155,29 @@ export class DemesneClient {
   async deedAct(request: import("@demesne/protocol").DeedRequest): Promise<import("@demesne/protocol").DeedResponse> {
     return this.request("/v1/deed", { method: "POST", body: JSON.stringify(request) });
   }
+  /// Your plan's usage windows, for the word under the composer.
+  async planLimits(): Promise<import("@demesne/protocol").PlanLimitsResponse> {
+    return this.request("/v1/limits");
+  }
   /// Drive on by default: whether it starts on its own in this project.
   async driveAuto(workspace: string): Promise<import("@demesne/protocol").DriveAutoResponse> {
     return this.request(`/v1/drive/auto?workspace=${encodeURIComponent(workspace)}`);
   }
   async setDriveAuto(workspace: string, on: boolean): Promise<import("@demesne/protocol").DriveAutoResponse> {
     return this.request("/v1/drive/auto", { method: "POST", body: JSON.stringify({ workspace, on }) });
+  }
+  /// Routines: chats that start on their own at their time.
+  async routines(): Promise<import("@demesne/protocol").RoutinesResponse> {
+    return this.request("/v1/routines");
+  }
+  async addRoutine(text: string, workspace: string | null): Promise<import("@demesne/protocol").RoutinesResponse> {
+    return this.request("/v1/routines", { method: "POST", body: JSON.stringify({ text, workspace }) });
+  }
+  async setRoutine(id: string, on: boolean): Promise<import("@demesne/protocol").RoutinesResponse> {
+    return this.request(`/v1/routines/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ on }) });
+  }
+  async removeRoutine(id: string): Promise<import("@demesne/protocol").RoutinesResponse> {
+    return this.request(`/v1/routines/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
   /// Starts nothing more; a run already working finishes.
   async stopDriveAway(workspace: string): Promise<import("@demesne/protocol").DriveAwayResponse> {
@@ -331,15 +365,13 @@ export class DemesneClient {
   async archiveSession(sessionId: string): Promise<ArchiveSessionResponse> {
     return this.request<ArchiveSessionResponse>(`/v1/sessions/${sessionId}`, { method: "DELETE" });
   }
+  async listArchivedSessions(): Promise<Session[]> {
+    return (await this.request<{ sessions: Session[] }>("/v1/sessions?archived=1")).sessions;
+  }
+  async restoreSession(sessionId: string): Promise<ArchiveSessionResponse> {
+    return this.request<ArchiveSessionResponse>(`/v1/sessions/${sessionId}/restore`, { method: "POST" });
+  }
 
-  /// The project map: folders sized by lines.
-  async workspaceMap(sessionId: string): Promise<import("@demesne/protocol").WorkspaceMapResponse> {
-    return this.request(`/v1/sessions/${sessionId}/map`);
-  }
-  /// Who is working in the project right now; `also` adds sessions by id (Drive's worktree chats).
-  async workspaceLive(sessionId: string, also: string[] = []): Promise<import("@demesne/protocol").WorkspaceLiveResponse> {
-    return this.request(`/v1/sessions/${sessionId}/map/live${also.length ? `?also=${encodeURIComponent(also.join(","))}` : ""}`);
-  }
   async listWorkspaceFiles(sessionId: string): Promise<string[]> {
     return (await this.request<{ files: string[] }>(`/v1/sessions/${sessionId}/files`)).files;
   }
@@ -421,8 +453,18 @@ export class DemesneClient {
     return this.request(`/v1/sessions/${sessionId}/steer`, { method: "POST", body: JSON.stringify(request) });
   }
 
+  /// A proof mark's action: check a claim, drop its sentence, or correct it.
+  async proofAction(sessionId: string, turnId: string, claimId: string, request: ProofActionRequest): Promise<{ claim: ProofClaim }> {
+    return this.request(`/v1/sessions/${sessionId}/proofs/${encodeURIComponent(turnId)}/${encodeURIComponent(claimId)}`, { method: "POST", body: JSON.stringify(request) });
+  }
+
   async redoRewind(sessionId: string): Promise<{ rewindId: string; files: string[] }> {
     return this.request(`/v1/sessions/${sessionId}/rewind/redo`, { method: "POST", body: "{}" });
+  }
+
+  /// The pull requests these chats opened, as gh last saw them.
+  async sessionPullRequests(sessionIds: string[], fresh = false): Promise<SessionPullRequestsResponse> {
+    return this.request<SessionPullRequestsResponse>(`/v1/sessions/prs?ids=${sessionIds.map(encodeURIComponent).join(",")}${fresh ? "&fresh=1" : ""}`);
   }
 
   async changes(sessionId: string, turnId?: string): Promise<TurnChangesResponse> {

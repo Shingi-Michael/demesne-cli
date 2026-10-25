@@ -11,8 +11,10 @@ import type {
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
+import { execFileSync } from "node:child_process";
+import { homedir, userInfo } from "node:os";
 import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted } from "@demesne/client";
-import { updateUserConfig } from "@demesne/config";
+import { DEFAULT_AGENT_LIMITS, loadConfig, parseConfigFile, updateUserConfig } from "@demesne/config";
 import {
   themeByName,
   themeNames,
@@ -35,6 +37,7 @@ import { loadCliSettings, type CliSettings } from "@demesne/setup/cli-config.ts"
 import {
   createDaemonControlDependencies,
   startDaemon,
+  stopDaemon,
 } from "@demesne/setup/daemon-control.ts";
 import { replaySession } from "@demesne/workbench/history.ts";
 import { expandMentions } from "./prompt-editor.ts";
@@ -48,10 +51,16 @@ import { BreakageWatch } from "./breakage.ts";
 import { missionReceipt } from "@demesne/drive/drive-receipt.ts";
 import { expandCustomCommand, loadCustomCommands, mergeSlashCommands, type CustomCommand } from "./custom-commands.ts";
 import { loadWorkflows, workflowCommand } from "@demesne/drive/workflows.ts";
+import { customizeView, newCustomizable, readCustomizable, writeCustomizable } from "./customize.ts";
 import { WorkspaceSetup } from "./setup-controller.ts";
 import { pointSourceIn } from "./point-source.ts";
 import type { PointPick } from "./point.ts";
 import { WorkspaceSession } from "./session-model.ts";
+import { lastAsk, waitingAsk, type AwayAsk } from "./away.ts";
+import { glanceOf } from "./glance.ts";
+import { backState } from "./back-later.ts";
+import { DEFAULT_DRIVE_LIMITS } from "@demesne/protocol";
+import { SETTINGS_KEYS, type SettingsInfo } from "./settings-page.ts";
 
 export interface WorkspaceHostOptions {
   workspace?: string;
@@ -62,6 +71,9 @@ export interface WorkspaceHostOptions {
   providerAccounts?: Pick<ProviderAccounts, "signingIn" | "list" | "signIn" | "signOut" | "cancel">;
   /// Runs Drive in this host (the desktop window and headless missions).
   drive?: boolean;
+  /// Opens on Home: an empty chat, with no project ("plain") or in this
+  /// one, using again one left empty, rather than the last chat.
+  home?: "plain" | "project";
   /// Desktop hosts use trusted native IPC instead of command-line OS utilities.
   copy?: (text: string) => Promise<void>;
   open?: (path: string) => Promise<void>;
@@ -123,6 +135,17 @@ const AGENTS_POLL_MS = 15_000;
 
 /** All privileged operations stay here. The web renderer gets snapshots and a
  * fixed set of actions, never a daemon token, shell, arbitrary URL, or filesystem API. */
+/// Who is at the keyboard, for the sidebar's foot: the account's full name
+/// on macOS, otherwise the login name.
+const YOU = (() => {
+  try {
+    if (process.platform === "darwin") {
+      const full = execFileSync("id", ["-F"], { encoding: "utf8", timeout: 1_000 }).trim();
+      if (full) return full;
+    }
+  } catch { /* fall back to the login name */ }
+  try { return userInfo().username; } catch { return ""; }
+})();
 export class WorkspaceHost {
   settings: CliSettings;
   setup: WorkspaceSetup | null = null;
@@ -299,12 +322,19 @@ export class WorkspaceHost {
         status: session.turns.at(-1)?.status,
         workspace: session.workspace?.root,
         waiting: this.waitingSessions.has(session.id),
+        // Home answers what a chat waits on, and picks up the last thing you asked.
+        ask: this.waitingAsks.get(session.id) ?? null,
+        lastAsk: lastAsk(session.turns),
+        ...(session.pinnedAt ? { pinned: true } : {}),
+        ...(session.backAt ? { backAt: session.backAt } : {}),
+        ...(session.prUrl ? { prUrl: session.prUrl } : {}),
       })),
       runs: this.current?.runs() ?? [],
       cursor: this.current?.cursor ?? 0,
       model: this.model,
       reasoning: this.reasoning,
       chatgptAccount: this.model.provider === "ChatGPT" ? this.chatgptAccount : null,
+      you: YOU,
       provider: this.current?.provider ?? null,
       checkpoint: this.current?.state.checkpoint ?? null,
       rewinds: this.current?.rewinds ?? [],
@@ -394,9 +424,10 @@ export class WorkspaceHost {
       this.sessions = await this.client.listSessions();
       this.connection = "online";
       if (this.selectedSession) await this.select(this.selectedSession);
+      else if (this.options.home === "plain") await this.newSession(undefined, { plain: true, reuse: true });
       else {
         try {
-          await this.newSession();
+          await this.newSession(undefined, { reuse: this.options.home === "project" });
         } catch (error) {
           if (isWorkspaceUntrusted(error)) return;
           throw error;
@@ -423,7 +454,7 @@ export class WorkspaceHost {
       this.publish();
     }
   }
-  async startDaemon() {
+  private daemonControl() {
     const host = new URL(this.client.server).hostname;
     if (!["127.0.0.1", "localhost", "[::1]", "::1"].includes(host))
       throw new Error("Start the remote daemon on its host.");
@@ -431,13 +462,14 @@ export class WorkspaceHost {
     const bundled = join(dirname(process.execPath), "../demesned");
     if (!env.DEMESNE_DAEMON_BIN && existsSync(bundled))
       env.DEMESNE_DAEMON_BIN = bundled;
-    const result = await startDaemon(
-      createDaemonControlDependencies(
-        this.client.server,
-        this.settings.dataDirectory,
-        env,
-      ),
+    return createDaemonControlDependencies(
+      this.client.server,
+      this.settings.dataDirectory,
+      env,
     );
+  }
+  async startDaemon() {
+    const result = await startDaemon(this.daemonControl());
     if (!result.health) throw new Error(result.message);
     this.client = new DemesneClient({
       server: this.client.server,
@@ -445,13 +477,23 @@ export class WorkspaceHost {
     });
     await this.connect();
   }
-  async newSession(title?: string) {
+  /// A plain chat has no project: no files, commands, Drive or Deed. With
+  /// `reuse`, an empty chat already there is opened rather than piling up.
+  async newSession(title?: string, options: { plain?: boolean; reuse?: boolean } = {}) {
+    if (options.reuse && !title) {
+      const empty = this.sessions.filter((session) => (options.plain ? !session.workspace : session.workspace?.root === this.workspace) && !session.turns.length)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      if (empty) {
+        await this.select(empty.id);
+        return empty.id;
+      }
+    }
     let result;
     try {
       result = await this.client.createSession({
-        workspacePath: this.workspace,
+        ...(options.plain ? {} : { workspacePath: this.workspace }),
         title: title ?? `Session ${new Date().toLocaleTimeString()}`,
-        ...(this.trustWorkspace ? { trustWorkspace: true } : {}),
+        ...(this.trustWorkspace && !options.plain ? { trustWorkspace: true } : {}),
       });
     } catch (error) {
       // Every caller (startup, New session, the desktop's project switch)
@@ -576,6 +618,8 @@ export class WorkspaceHost {
     this.publish();
     try {
       const state = await this.client.getSessionState(id);
+      // A chat that came back is done coming back once you open it.
+      if (backState(state.session.backAt, Date.now(), this.mergedPullRequests.has(id)) === "back") void this.client.updateSession(id, { backAt: null }).then(() => this.refreshSessions()).catch(() => {});
       const events = await replaySession(
         state,
         (sessionId, after, signal) =>
@@ -780,9 +824,63 @@ export class WorkspaceHost {
       this.agentsTimer.unref?.();
     }
   }
+  /// Always: the rule goes into your config and is allowed from now on.
+  private saveAllowRule(rule: string | null | undefined) {
+    if (!rule) throw new Error("This operation cannot create a persistent rule.");
+    const allow = this.settings.loaded.config.permissions.allow;
+    if (!allow.includes(rule)) {
+      updateUserConfig(this.settings.configPath, { permissions: { allow: [...allow, rule] } });
+      allow.push(rule);
+    }
+  }
+  /// Settings the daemon reads only when it starts, changed since it did.
+  private restartFor = new Set<string>();
+  /// Reads config.toml again after Settings wrote it; where the daemon and
+  /// its data live stays as it was.
+  private reloadSettings() {
+    this.settings = { ...this.settings, loaded: loadConfig({ workspaceRoot: this.workspace }) };
+  }
+  /// The document in your own config.toml, not the project's.
+  private userConfig(): Record<string, unknown> {
+    try { return existsSync(this.settings.configPath) ? parseConfigFile(this.settings.configPath) : {}; }
+    catch { return {}; }
+  }
+  private userAllowRules(): string[] {
+    const permissions = this.userConfig().permissions;
+    return isRecord(permissions) && Array.isArray(permissions.allow) ? permissions.allow.filter((rule): rule is string => typeof rule === "string") : [];
+  }
+  /// Everything Settings shows that lives in config.toml or the daemon.
+  private async settingsInfo(): Promise<SettingsInfo> {
+    const config = this.settings.loaded.config, mine = new Set(this.userAllowRules());
+    const user = this.userConfig(), userMcp = isRecord(user.mcp) && isRecord(user.mcp.servers) ? user.mcp.servers : {};
+    const [trusted, subagent] = await Promise.all([
+      this.client.trusted().then((result) => result.trusted).catch(() => null),
+      this.client.subagentModel().catch(() => null),
+    ]);
+    const limits = config.drive ?? {};
+    return {
+      home: homedir(),
+      configPath: this.settings.configPath,
+      dataDirectory: this.settings.dataDirectory,
+      server: this.client.server,
+      allow: config.permissions.allow.map((rule) => ({ rule, mine: mine.has(rule) })),
+      trusted,
+      subagent: subagent ? { model: subagent.model, models: subagent.models } : { model: config.agent?.subagentModel ?? null, models: [] },
+      agent: { maxModelRounds: config.agent?.maxModelRounds ?? DEFAULT_AGENT_LIMITS.maxModelRounds, maxToolCalls: config.agent?.maxToolCalls ?? DEFAULT_AGENT_LIMITS.maxToolCalls, proofMarks: config.agent?.proofMarks !== false },
+      drive: { maxActiveMinutes: limits.maxActiveMinutes ?? DEFAULT_DRIVE_LIMITS.maxActiveMinutes, maxTokens: limits.maxTokens ?? DEFAULT_DRIVE_LIMITS.maxTokens, maxTasks: limits.maxTasks ?? DEFAULT_DRIVE_LIMITS.maxTasks },
+      images: config.images?.url ? { model: config.images.model ?? null } : null,
+      heartbeat: config.heartbeat?.enabled !== false,
+      mcp: Object.entries(config.mcp.servers).map(([name, server]) => ({ name, command: [server.command, ...(server.args ?? [])].join(" "), mine: name in userMcp })),
+      restart: [...this.restartFor],
+    };
+  }
   /// Chats in the background that wait on an approval or an answer: the
   /// sidebar marks them amber, as it does the open one.
   waitingSessions = new Set<string>();
+  /// Chats whose pull request has merged, for "when its PR merges".
+  private readonly mergedPullRequests = new Set<string>();
+  /// What each of them waits on, for Home.
+  waitingAsks = new Map<string, AwayAsk>();
   private backgroundTimer: ReturnType<typeof setTimeout> | null = null;
   /// While another chat of this project is still working, look in on it now
   /// and then, so the sidebar shows when it asks for you or settles.
@@ -790,14 +888,17 @@ export class WorkspaceHost {
     // This project's chats, and the ones Drive runs on their own branch.
     const branched = new Set([this.breakage.state.fix, ...this.breakage.state.inbox].map((job) => job?.sessionId).filter(Boolean));
     const busy = this.sessions.filter((session) => session.id !== this.current?.session.id && (session.workspace?.root === this.workspace || branched.has(session.id)) && ["running", "queued"].includes(session.turns.at(-1)?.status ?? ""));
-    const waiting = new Set<string>();
+    const waiting = new Set<string>(), asks = new Map<string, AwayAsk>();
     await Promise.all(busy.map(async (session) => {
       try {
         const state = await this.client.getSessionState(session.id);
         if (state.pendingPermissions.length || state.pendingQuestions?.length) waiting.add(session.id);
+        const ask = waitingAsk(state.pendingPermissions, state.pendingQuestions);
+        if (ask) asks.set(session.id, ask);
       } catch {}
     }));
     this.waitingSessions = waiting;
+    this.waitingAsks = asks;
     if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
     this.backgroundTimer = busy.length && !this.disposed ? setTimeout(() => { this.backgroundTimer = null; void this.refreshSessions(); }, BACKGROUND_POLL_MS) : null;
   }
@@ -805,7 +906,8 @@ export class WorkspaceHost {
   async refreshFiles() {
     if (this.loadingFiles) return this.loadingFiles;
     const id = this.current?.session.id;
-    if (!id) return;
+    // A chat with no project has no files or commands to list.
+    if (!id || !this.current?.session.workspace) return;
     this.loadingFiles = this.client
       .listWorkspaceFileInfo(id)
       .then((files) => {
@@ -1023,7 +1125,7 @@ export class WorkspaceHost {
   async refreshProcesses() {
     if (this.polling) return this.polling;
     const id = this.current?.session.id;
-    if (!id) return;
+    if (!id || !this.current?.session.workspace) return;
     const output = this.watchedCommand;
     this.polling = this.client
       .commands(id, output)
@@ -1218,12 +1320,35 @@ export class WorkspaceHost {
     if (method === "trust-workspace") {
       this.trustWorkspace = true;
       await this.connect();
+      // Trust was asked for a chat in this project, not the plain one open.
+      if (this.connection === "online" && !this.current?.session.workspace) await this.newSession();
       return this.snapshot();
     }
-    if (method === "new-session")
-      return this.newSession(
+    if (method === "new-session") {
+      // Picking where a chat lives on Home takes what you typed with it.
+      const carried = typeof args.draft === "string" ? args.draft : undefined;
+      if (carried !== undefined && this.current) { this.draft = ""; this.drafts.delete(this.current.session.id); }
+      const id = await this.newSession(
         typeof args.title === "string" ? args.title : undefined,
+        { plain: args.plain === true, reuse: args.reuse === true },
       );
+      if (carried !== undefined) this.carryDraft(carried);
+      return id;
+    }
+    if (method === "move-session") {
+      // A plain chat gains a folder and keeps its messages.
+      const path = string(args.path, "project path", 4096), current = this.current;
+      if (!current || current.session.workspace) throw new Error("Only a chat that isn't in a project can move");
+      try { await this.client.updateSession(current.session.id, { workspacePath: path }); }
+      catch (error) {
+        if (isWorkspaceUntrusted(error)) throw new Error(`Open ${path} as a project and trust it before moving a chat there.`);
+        throw error;
+      }
+      this.sessions = await this.client.listSessions();
+      const here = this.sessions.find((session) => session.id === current.session.id)?.workspace?.root === this.workspace;
+      if (here) await this.select(current.session.id);
+      return { here, sessionId: current.session.id };
+    }
     if (method === "select-session") {
       await this.select(string(args.id, "session id", 200));
       return this.snapshot();
@@ -1383,17 +1508,22 @@ export class WorkspaceHost {
       if (method === "deed") return (await this.client.deed(root)).deed;
       return (await this.client.deedAct({ ...(args.request as import("@demesne/protocol").DeedAction), workspace: root })).deed;
     }
-    if (method === "workspace-map") {
-      if (!this.current) return null;
-      return this.client.workspaceMap(this.current.session.id);
-    }
-    if (method === "workspace-live") {
-      if (!this.current) return null;
-      const breakage = this.breakage.state;
-      const drive = [breakage.fix, ...breakage.inbox].filter((fix) => fix && (fix.status === "starting" || fix.status === "running")).map((fix) => fix!.sessionId).filter((id): id is string => Boolean(id));
-      return this.client.workspaceLive(this.current.session.id, drive);
-    }
     if (method === "model-scores") return this.client.modelScoreboard({ days: 30 });
+    if (method === "plan-limits") return (await this.client.planLimits()).limits;
+    // Rest on a chat: its card, read from that chat's own state.
+    // Its pull request on the row: what gh last said about the chats' PRs.
+    if (method === "session-prs") {
+      const ids = Array.isArray(args.ids) ? args.ids.filter((id): id is string => typeof id === "string" && id.length <= 200).slice(0, 100) : [];
+      if (!ids.length) return {};
+      const { pullRequests } = await this.client.sessionPullRequests(ids, args.fresh === true);
+      for (const [id, pr] of Object.entries(pullRequests)) pr.state === "merged" ? this.mergedPullRequests.add(id) : this.mergedPullRequests.delete(id);
+      return pullRequests;
+    }
+    if (method === "session-glance") {
+      const id = string(args.id, "id", 200);
+      const [state, changes] = await Promise.all([this.client.getSessionState(id), this.client.changes(id).then((response) => response.changes).catch(() => null)]);
+      return glanceOf(state, changes);
+    }
     if (method === "model") {
       const id = string(args.id, "model", 1000);
       const reasoning = args.reasoning === undefined ? undefined : string(args.reasoning, "reasoning", 16);
@@ -1497,17 +1627,7 @@ export class WorkspaceHost {
         throw new Error("Invalid permission decision");
       if (decision === "allow_session" && approval.name === "run_command")
         throw new Error("Host commands require individual approval.");
-      if (decision === "allow_always") {
-        if (!approval.rule)
-          throw new Error("This operation cannot create a persistent rule.");
-        const allow = this.settings.loaded.config.permissions.allow;
-        if (!allow.includes(approval.rule)) {
-          updateUserConfig(this.settings.configPath, {
-            permissions: { allow: [...allow, approval.rule] },
-          });
-          allow.push(approval.rule);
-        }
-      }
+      if (decision === "allow_always") this.saveAllowRule(approval.rule);
       try {
         await this.client.resolvePermission(id, decision);
       } catch (error) {
@@ -1519,6 +1639,24 @@ export class WorkspaceHost {
       }
       this.current!.approvals.delete(id);
       this.publish();
+      return;
+    }
+    // Home answers a chat in the background without opening it.
+    if (method === "away-permission") {
+      const sessionId = string(args.session, "session", 200), id = string(args.id, "permission id", 200),
+        decision = string(args.decision, "decision", 50) as PermissionDecision,
+        ask = this.waitingAsks.get(sessionId);
+      if (ask?.kind !== "permission" || ask.id !== id) throw new Error("This permission is no longer pending.");
+      if (!["allow_once", "allow_always", "deny"].includes(decision)) throw new Error("Invalid permission decision");
+      if (decision === "allow_always") this.saveAllowRule(ask.rule);
+      try {
+        await this.client.resolvePermission(id, decision);
+      } finally {
+        this.waitingAsks.delete(sessionId);
+        this.waitingSessions.delete(sessionId);
+        this.publish();
+        void this.refreshSessions();
+      }
       return;
     }
     if (method === "question-action") {
@@ -1558,6 +1696,49 @@ export class WorkspaceHost {
       const id = args.id === undefined ? this.current!.session.id : string(args.id, "session", 200);
       await this.client.updateSession(id, { title });
       if (id === this.current?.session.id) this.current.session.title = title;
+      await this.refreshSessions();
+      return;
+    }
+    // Scheduled: routines, each one sentence; a new one belongs to this
+    // window's project, or to no project in a plain chat.
+    if (method === "routines") return (await this.client.routines()).routines;
+    if (method === "routine-add") {
+      const plain = Boolean(this.current && !this.current.session.workspace);
+      return (await this.client.addRoutine(string(args.text, "routine", 2000), plain ? null : this.current?.session.workspace?.root ?? this.workspace)).routines;
+    }
+    if (method === "routine-set") return (await this.client.setRoutine(string(args.id, "routine", 200), args.on === true)).routines;
+    if (method === "routine-remove") return (await this.client.removeRoutine(string(args.id, "routine", 200))).routines;
+    // Customize: this project's instructions, commands and workflows, read
+    // and written in place; a plain chat has only yours.
+    if (method === "customize" || method === "customize-read" || method === "customize-save" || method === "customize-new") {
+      const root = this.current && !this.current.session.workspace ? null : this.current?.session.workspace?.root ?? this.workspace;
+      if (method === "customize") return customizeView(root);
+      if (method === "customize-read") return { text: readCustomizable(string(args.path, "path", 4096), root) };
+      if (method === "customize-new") return { path: newCustomizable(args.kind === "workflow" ? "workflow" : "command", string(args.name, "name", 80), root) };
+      if (typeof args.text !== "string") throw new Error("Expected the file's text");
+      writeCustomizable(string(args.path, "path", 4096), args.text, root);
+      this.commandCache = null;
+      this.publish();
+      return customizeView(root);
+    }
+    // Bring it back later: off the list until then; null brings it back now.
+    if (method === "bring-back") {
+      const at = args.at === null ? null : string(args.at, "at", 40);
+      await this.client.updateSession(string(args.id, "session", 200), { backAt: at });
+      await this.refreshSessions();
+      return;
+    }
+    if (method === "pin") {
+      await this.client.updateSession(string(args.id, "session", 200), { pinned: args.pinned === true });
+      await this.refreshSessions();
+      return;
+    }
+    // All chats: the archived ones, newest first, and Restore.
+    if (method === "archived-list") {
+      return { sessions: (await this.client.listArchivedSessions()).map((session) => ({ id: session.id, title: session.title, archivedAt: session.archivedAt ?? session.updatedAt, updatedAt: session.updatedAt, turns: session.turns.length, workspace: session.workspace?.root })) };
+    }
+    if (method === "restore") {
+      await this.client.restoreSession(string(args.id, "session", 200));
       await this.refreshSessions();
       return;
     }
@@ -1613,6 +1794,11 @@ export class WorkspaceHost {
       this.publish();
       return result;
     }
+    // A proof mark: Prove it, Drop the sentence, Correct the sentence.
+    if (method === "proof") {
+      const action = args.action === "drop" ? "drop" : args.action === "correct" ? "correct" : "check";
+      return this.client.proofAction(this.current!.session.id, string(args.turnId, "turn", 200), string(args.claimId, "claim", 64), { action });
+    }
     if (method === "export") {
       const format = args.format === "json" ? "json" : "md",
         content = await this.client.exportSession(
@@ -1624,6 +1810,66 @@ export class WorkspaceHost {
       const path = join(directory, `${this.current!.session.id}.${format}`);
       writeFileSync(path, content, { mode: 0o600 });
       return { path };
+    }
+    if (method === "settings-info") return this.settingsInfo();
+    // One setting from Settings, written to your config.toml.
+    if (method === "settings-config") {
+      const key = string(args.key, "setting", 80), spec = SETTINGS_KEYS[key];
+      if (!spec) throw new Error("Unknown setting");
+      const value = args.value;
+      if (value === null ? !spec.clear : spec.kind === "bool" ? typeof value !== "boolean"
+        : spec.kind === "int" ? !(typeof value === "number" && Number.isInteger(value) && value > 0 && value <= spec.max!)
+        : !(typeof value === "string" && value.trim() && value.length <= 200)) throw new Error(spec.kind === "int" ? `Type a whole number from 1 to ${spec.max!.toLocaleString("en-US")}.` : "Invalid value");
+      const [section, field] = key.split(".") as [string, string];
+      updateUserConfig(this.settings.configPath, { [section]: { [field]: typeof value === "string" ? value.trim() : value } });
+      this.reloadSettings();
+      if (spec.restart) this.restartFor.add(key);
+      return this.settingsInfo();
+    }
+    if (method === "subagent-model") {
+      const model = args.model === null ? null : string(args.model, "model", 200);
+      await this.client.setSubagentModel(model);
+      this.reloadSettings();
+      return this.settingsInfo();
+    }
+    // Ask again: a rule it learned from your yeses goes back to asking.
+    if (method === "allow-rule-remove") {
+      const rule = string(args.rule, "rule", 2000);
+      const mine = this.userAllowRules();
+      if (!mine.includes(rule)) throw new Error("This rule is in the project's config; remove it there.");
+      updateUserConfig(this.settings.configPath, { permissions: { allow: mine.filter((item) => item !== rule) } });
+      this.reloadSettings();
+      return this.settingsInfo();
+    }
+    if (method === "trusted-forget") {
+      await this.client.forgetTrusted(string(args.root, "folder", 4096));
+      return this.settingsInfo();
+    }
+    // A connector: an MCP server the daemon starts, written as a command line.
+    if (method === "mcp-add" || method === "mcp-remove") {
+      const name = string(args.name, "name", 64).trim();
+      if (!/^[a-z0-9][a-z0-9-]*$/i.test(name)) throw new Error("A name is letters, digits and dashes, like github.");
+      if (method === "mcp-add") {
+        const words = string(args.command, "command", 2000).trim().split(/\s+/).filter(Boolean);
+        if (!words.length) throw new Error("Type the command that starts the server.");
+        updateUserConfig(this.settings.configPath, { mcp: { servers: { [name]: { command: words[0], ...(words.length > 1 ? { args: words.slice(1) } : {}) } } } });
+      } else updateUserConfig(this.settings.configPath, { mcp: { servers: { [name]: null } } });
+      this.reloadSettings();
+      this.restartFor.add(`mcp.${name}`);
+      return this.settingsInfo();
+    }
+    // Stops and starts the daemon so it reads config.toml again. Never while
+    // a turn or Drive is working: restarting would cut it off.
+    if (method === "restart-daemon") {
+      const busy = this.sessions.some((session) => ["running", "queued"].includes(session.turns.at(-1)?.status ?? ""))
+        || (this.driveState && ["running", "waiting", "blocked"].includes(this.driveState.status));
+      if (busy) throw new Error("Something is working. Restart the daemon when it is done.");
+      const control = this.daemonControl();
+      const stopped = await stopDaemon(control);
+      if (!stopped.stopped && stopped.message !== "Daemon is not running.") throw new Error(stopped.message);
+      await this.startDaemon();
+      this.restartFor.clear();
+      return this.settingsInfo();
     }
     if (method === "open-link") {
       const url = new URL(string(args.url, "link", 8000));
@@ -1666,6 +1912,14 @@ export class WorkspaceHost {
     if ((await child.exited) !== 0) throw new Error("Could not open the item");
   }
   /// A project switch must not discard any draft held by this UI.
+  /// Puts text into the open chat's composer, as if typed there.
+  carryDraft(text: string) {
+    if (!text.trim()) return;
+    this.draft = text;
+    this.draftVersion++;
+    this.restored = false;
+    this.publish();
+  }
   get hasUnsentDrafts() {
     return Boolean(this.draft.trim() || this.queue.trim()) ||
       [...this.drafts].some(([id, text]) => id !== this.current?.session.id && text.trim() && this.sessions.some(session => session.id === id));

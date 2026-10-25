@@ -10,6 +10,8 @@ import {
   type QuestionState,
   type TurnAttachment,
   type NearbyAgent,
+  type ProofClaim,
+  applyProofEvents,
 } from "@demesne/protocol";
 import {
   restoreSessionEntries,
@@ -57,6 +59,8 @@ export interface WorkspaceRun {
   attachments?: TurnAttachment[];
   entries: WorkbenchEntry[];
   receipt?: ResponseReceipt;
+  /// Proof marks: the answer's claims and what backs each.
+  proofs?: ProofClaim[];
 }
 export interface WorkspaceChange {
   path: string;
@@ -326,6 +330,8 @@ export class WorkspaceSession {
           entries,
           receipt: close?.type === "notice" ? close.receipt : undefined,
         };
+        const proofs = applyProofEvents(this.journals.get(turn.id) ?? []);
+        if (proofs.length) run.proofs = proofs;
         this.cache.set(turn.id, run);
       }
       return run;

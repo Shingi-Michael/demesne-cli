@@ -67,6 +67,9 @@ export interface AgentConfig {
   /// Model ID that sub-agents run on, from any configured provider. Unset:
   /// sub-agents use the same model as the turn that started them.
   subagentModel?: string;
+  /// Proof marks: after an answer, one model call pairs its claims with the
+  /// turn's tool output. Off saves that call. Default on.
+  proofMarks?: boolean;
 }
 export interface DriveConfig {
   maxActiveMinutes?: number; maxCycles?: number; maxTasks?: number; maxWorkerRequests?: number; maxTokens?: number; maxStalledCycles?: number;
@@ -352,11 +355,12 @@ function applyDocument(
 
   if (document.agent !== undefined) {
     const agent = objectValue(document.agent, "agent");
-    assertKnownKeys(agent, ["max_model_rounds", "max_tool_calls", "subagent_model"], `${path}.agent`);
+    assertKnownKeys(agent, ["max_model_rounds", "max_tool_calls", "subagent_model", "proof_marks"], `${path}.agent`);
     const target = config.agent ??= {};
     assignInto(target, "maxModelRounds", agent.max_model_rounds, source, sources, "agent.maxModelRounds", optionalPositiveInteger);
     assignInto(target, "maxToolCalls", agent.max_tool_calls, source, sources, "agent.maxToolCalls", optionalPositiveInteger);
     assignInto(target, "subagentModel", agent.subagent_model, source, sources, "agent.subagentModel", optionalString);
+    assignInto(target, "proofMarks", agent.proof_marks, source, sources, "agent.proofMarks", optionalBoolean);
   }
 
   if (document.drive !== undefined) {
@@ -469,6 +473,7 @@ export const ENV_VARIABLE_NAMES: Record<string, string> = {
   "agent.maxModelRounds": "DEMESNE_MAX_MODEL_ROUNDS",
   "agent.maxToolCalls": "DEMESNE_MAX_TOOL_CALLS",
   "agent.subagentModel": "DEMESNE_SUBAGENT_MODEL",
+  "agent.proofMarks": "DEMESNE_PROOF_MARKS",
   "images.url": "DEMESNE_IMAGE_URL",
   "images.model": "DEMESNE_IMAGE_MODEL",
   "images.apiKey": "DEMESNE_IMAGE_API_KEY",
@@ -488,8 +493,9 @@ function applyEnvironment(
   setFromEnv(config, "dataDir", env.DEMESNE_DATA_DIR, "dataDir", sources, optionalString);
   setFromEnv(config, "theme", env.DEMESNE_THEME, "theme", sources, optionalString);
   setFromEnv(config, "inferenceSlots", env.DEMESNE_INFERENCE_SLOTS, "inferenceSlots", sources, optionalPositiveInteger);
-  if (env.DEMESNE_MAX_MODEL_ROUNDS || env.DEMESNE_MAX_TOOL_CALLS || env.DEMESNE_SUBAGENT_MODEL) {
+  if (env.DEMESNE_MAX_MODEL_ROUNDS || env.DEMESNE_MAX_TOOL_CALLS || env.DEMESNE_SUBAGENT_MODEL || env.DEMESNE_PROOF_MARKS) {
     const agent = config.agent ??= {};
+    setFromEnv(agent, "proofMarks", env.DEMESNE_PROOF_MARKS, "agent.proofMarks", sources, optionalBoolean);
     setFromEnv(agent, "subagentModel", env.DEMESNE_SUBAGENT_MODEL, "agent.subagentModel", sources, optionalString);
     setFromEnv(agent, "maxModelRounds", env.DEMESNE_MAX_MODEL_ROUNDS, "agent.maxModelRounds", sources, optionalPositiveInteger);
     setFromEnv(agent, "maxToolCalls", env.DEMESNE_MAX_TOOL_CALLS, "agent.maxToolCalls", sources, optionalPositiveInteger);
@@ -610,6 +616,7 @@ export function renderUserConfig(settings: {
     if (settings.agent.maxModelRounds !== undefined) lines.push(`max_model_rounds = ${settings.agent.maxModelRounds}`);
     if (settings.agent.maxToolCalls !== undefined) lines.push(`max_tool_calls = ${settings.agent.maxToolCalls}`);
     if (settings.agent.subagentModel !== undefined) lines.push(`subagent_model = ${tomlString(settings.agent.subagentModel)}`);
+    if (settings.agent.proofMarks !== undefined) lines.push(`proof_marks = ${settings.agent.proofMarks}`);
     lines.push("");
   }
 

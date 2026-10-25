@@ -241,6 +241,8 @@ async function twoProviders(agent: AgentConfig, parent: (messages: ProviderMessa
     id,
     async listModels() { return [{ id: model, provider: id, contextWindow: 262144 }]; },
     async *stream(request) {
+      // The proof pass after the answer is not one of the calls under test.
+      if (request.tools?.some((tool) => tool.name === "proof_marks")) { yield { type: "tool_call_delta", index: 0, idDelta: "marks", nameDelta: "proof_marks", argumentsDelta: '{"claims":[]}' }; yield { type: "finish", reason: "tool_calls" }; return; }
       const sub = isSubagent(request.messages);
       calls.push({ provider: id, model: request.model, subagent: sub, tools: (request.tools ?? []).map((tool) => tool.name) });
       if (!sub) { parentTools = request.tools ?? []; yield* parent(request.messages); return; }

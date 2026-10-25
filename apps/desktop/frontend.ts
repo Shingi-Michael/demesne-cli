@@ -34,7 +34,8 @@ const request = <T>(method: string, args: Record<string, unknown> = {}) =>
   invoke<T>("desktop_request", { method, args });
 const listeners: (() => void)[] = [];
 const mac = /Mac/i.test(navigator.platform);
-const openShortcut = mac ? "⌘O" : "Ctrl+O";
+// The Mac window has no title bar and is translucent under the shell.
+if (mac) document.documentElement.classList.add("glass", "mac-chrome");
 let workspace: string | null = null, mounted = false, busy = true, fatal = false;
 let recentProjects: string[] = [];
 const bridge = createDesktopBridge(invoke, showError);
@@ -48,7 +49,7 @@ const errorMessage = (error: unknown): string => {
 function setBusy(value: boolean, message?: string) {
   busy = value;
   shell.setAttribute("aria-busy", String(value));
-  for (const id of ["desktop-choose-project", "desktop-error-choose", "desktop-retry", "sidebar-open-project"])
+  for (const id of ["desktop-choose-project", "desktop-error-choose", "desktop-retry"])
     el<HTMLButtonElement>(id).disabled = value;
   for (const button of projectsList.querySelectorAll<HTMLButtonElement>("button")) button.disabled = value;
   for (const button of el("desktop-recent-list").querySelectorAll<HTMLButtonElement>("button")) button.disabled = value;
@@ -144,11 +145,12 @@ async function applyBootstrap(result: DesktopBootstrap) {
   }
   setBusy(false, "");
 }
-async function openProject(path?: string, sessionId?: string) {
+/// `fresh` opens a new chat there carrying `draft`: Home's where word.
+async function openProject(path?: string, sessionId?: string, fresh?: { draft: string }) {
   if (busy) return;
   setBusy(true, "Opening project…");
   try {
-    const result = await request<DesktopBootstrap>(path ? "desktop-open-project" : "desktop-select-project", path ? { path, ...(sessionId ? { sessionId } : {}) } : {});
+    const result = await request<DesktopBootstrap>(path ? "desktop-open-project" : "desktop-select-project", { ...(path ? { path, ...(sessionId ? { sessionId } : {}) } : {}), ...(fresh ? { fresh: true, draft: fresh.draft } : {}) });
     // A successful recovery gets a fresh webview, including UI listeners.
     if (fatal && result.workspace && result.snapshot) { window.location.reload(); return; }
     await applyBootstrap(result);
@@ -158,11 +160,11 @@ async function openProject(path?: string, sessionId?: string) {
     setBusy(false);
   }
 }
-for (const id of ["desktop-choose-project", "desktop-error-choose", "sidebar-open-project"])
+for (const id of ["desktop-choose-project", "desktop-error-choose"])
   el(id).addEventListener("click", () => { void openProject(); });
 document.addEventListener("demesne:open-project", (event) => {
-  const { path, sessionId } = (event as CustomEvent<{ path: string; sessionId?: string }>).detail;
-  void openProject(path, sessionId);
+  const { path, sessionId, fresh, draft } = (event as CustomEvent<{ path?: string; sessionId?: string; fresh?: boolean; draft?: string }>).detail;
+  void openProject(path, sessionId, fresh ? { draft: draft ?? "" } : undefined);
 });
 el("desktop-retry").addEventListener("click", () => window.location.reload());
 document.addEventListener("keydown", (event) => {
@@ -192,8 +194,9 @@ async function start() {
     listeners.push(...await Promise.all([
       native.event.listen<StateUpdate>("demesne:update", (event) => bridge.update(event.payload)),
       native.event.listen<unknown>("demesne:desktop-error", (event) => showError(event.payload)),
-      native.event.listen<{ action: "open-project" | "settings" | "open-chat"; sessionId?: string; path?: string }>("demesne:desktop-action", (event) => {
-        if (event.payload.action === "open-project") void openProject();
+      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen"; sessionId?: string; path?: string; on?: boolean }>("demesne:desktop-action", (event) => {
+        if (event.payload.action === "fullscreen") document.documentElement.classList.toggle("fullscreen", event.payload.on === true);
+        else if (event.payload.action === "open-project") void openProject();
         else if (event.payload.action === "open-chat" && mounted && !fatal)
           document.dispatchEvent(new CustomEvent("demesne:open-chat", { detail: { sessionId: event.payload.sessionId, path: event.payload.path } }));
         else if (event.payload.action === "settings" && mounted && !fatal && !busy)
@@ -209,8 +212,15 @@ setBusy(true);
 void start();
 
 const sidebarToggle = el<HTMLButtonElement>("desktop-toggle-sidebar");
+// The folded sidebar peeks out (pass 76 B): rest on the rail's empty space
+// and the whole sidebar slides out over the panel. Picking a chat, Esc, or
+// moving away (after a short grace, so crossing to it never drops it) puts
+// it back; the rail's own buttons stay buttons.
+const sidebar = el("desktop-sidebar");
+let peekTimer: ReturnType<typeof setTimeout> | undefined;
 /// Folded, the sidebar is a 60px rail: the mark, +, and dots for what waits.
 function setSidebarCollapsed(collapsed: boolean) {
+  setPeek(false);
   shell.classList.toggle("sidebar-collapsed", collapsed);
   sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
   try { localStorage.setItem("demesne-sidebar-collapsed", String(collapsed)); } catch {}
@@ -218,6 +228,26 @@ function setSidebarCollapsed(collapsed: boolean) {
 try { setSidebarCollapsed(localStorage.getItem("demesne-sidebar-collapsed") === "true"); } catch {}
 sidebarToggle.addEventListener("click", () => setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")));
 for (const id of ["rail-expand", "rail-sessions"]) el(id).addEventListener("click", () => setSidebarCollapsed(false));
+function setPeek(on: boolean) {
+  clearTimeout(peekTimer);
+  peekTimer = undefined;
+  shell.classList.toggle("sidebar-peek", on && shell.classList.contains("sidebar-collapsed"));
+}
+const peeking = () => shell.classList.contains("sidebar-peek");
+sidebar.addEventListener("pointermove", (event) => {
+  if (!shell.classList.contains("sidebar-collapsed")) return;
+  if (peeking()) { clearTimeout(peekTimer); peekTimer = undefined; return; }
+  if ((event.target as Element).closest("button")) { clearTimeout(peekTimer); peekTimer = undefined; return; }
+  peekTimer ??= setTimeout(() => setPeek(true), 250);
+});
+sidebar.addEventListener("pointerleave", () => {
+  clearTimeout(peekTimer);
+  peekTimer = peeking() ? setTimeout(() => setPeek(false), 180) : undefined;
+});
+sidebar.addEventListener("click", (event) => {
+  if (peeking() && (event.target as Element).closest(".sidebar-session, [data-action='new-session'], [data-action='page-open']")) setTimeout(() => setPeek(false), 0);
+});
+document.addEventListener("keydown", (event) => { if (event.key === "Escape" && peeking()) setPeek(false); });
 // Search is always there; Escape clears it and gives the list back.
 searchField.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
@@ -235,5 +265,5 @@ document.addEventListener("demesne:needs-you", (event) => {
   void request("desktop-badge", { count }).catch(() => {});
 });
 el("sidebar-new-key").textContent = mac ? "⌘N" : "Ctrl+N";
-el("sidebar-settings-key").textContent = mac ? "⌘," : "Ctrl+,";
-el("sidebar-open-project").title = `Open a folder (${openShortcut})`;
+el("sidebar-search-key").textContent = mac ? "⌘K" : "Ctrl+K";
+document.querySelector(".sidebar-settings")?.setAttribute("title", `Settings (${mac ? "⌘," : "Ctrl+,"})`);

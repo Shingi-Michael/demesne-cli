@@ -24,7 +24,7 @@ interface CollectOptions {
 }
 
 /// Runs a command with a deadline; null when it fails or is unavailable.
-async function run(argv: string[], cwd: string): Promise<string | null> {
+export async function run(argv: string[], cwd: string): Promise<string | null> {
   let child: ReturnType<typeof Bun.spawn> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {

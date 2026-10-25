@@ -2,9 +2,9 @@
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import sharp from "sharp";
 import { fixture } from "../apps/desktop/workspace/test/fixture.ts";
 
@@ -46,6 +46,17 @@ const heartbeatDaemon = Bun.listen({ unix: heartbeatSocket, socket: { data(socke
   if (request.command === "listen") { socket.write(`${JSON.stringify({ status: "ok", agent_id: request.as })}\n`); return; }
   reply({ status: "error", error: "unknown_command" });
 } } });
+// A stand-in gh for the pull request on a row: `gh pr view` prints what the
+// check last wrote; everything else fails, as if gh had no GitHub here.
+const ghBin = mkdtempSync(join(tmpdir(), "gh-")), ghPr = join(ghBin, "pr.json");
+writeFileSync(join(ghBin, "gh"), `#!/bin/sh\nif [ "$1" = pr ] && [ "$2" = view ]; then cat "${ghPr}"; exit 0; fi\nexit 1\n`, { mode: 0o755 });
+process.env.PATH = `${ghBin}:${process.env.PATH}`;
+const ghPullRequest = (state: "OPEN" | "MERGED") => writeFileSync(ghPr, JSON.stringify({
+  number: 287, title: "Peek the folded sidebar", url: "https://github.com/demesne/fieldnote/pull/287", state, isDraft: false,
+  createdAt: new Date(Date.now() - 3_600_000).toISOString(), mergedAt: state === "MERGED" ? new Date(Date.now() - 60_000).toISOString() : null, closedAt: null,
+  reviews: [{ author: { login: "mike" }, state: "COMMENTED", body: "The peek opens too soon.", submittedAt: new Date(Date.now() - 600_000).toISOString() }],
+  comments: [], statusCheckRollup: [{ __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: "SUCCESS", completedAt: new Date(Date.now() - 3_000_000).toISOString() }],
+}));
 let previewRound = 0;
 let askRound = 0, missionRound = 0;
 let brokeRound = 0;
@@ -58,10 +69,13 @@ const thoughtGate = new Promise<void>(resolve => { nextThought = resolve; });
 const thoughtFinish = new Promise<void>(resolve => { finishThought = resolve; });
 let round = 0, release: (() => void) | undefined;
 let failSuggestions = false, offerIdeas = false;
+// The plan's usage windows the stand-in provider reports.
+let smokeLimits: import("@demesne/protocol").PlanLimits[] = [];
 const gate = new Promise<void>(done => { release = done; });
 const f = await fixture({
   providerId: "test", modelId: "desktop-test", contextCapacity: 262144, maxOutputTokens: 1024,
-  async listModels() { smokeProcessor = this; return [{ id: "desktop-test", provider: "test", contextWindow: 262144 }, { id: "desktop-small", provider: "test", contextWindow: 32768 }, { id: "desktop-fast", provider: "test", contextWindow: 131072 }, { id: "desktop-wide", provider: "test", contextWindow: 1048576 }, { id: "far-away-large", provider: "other", contextWindow: 200000 }, { id: "far-away-mini", provider: "other", contextWindow: 128000 }]; },
+  planLimits: () => smokeLimits,
+  async listModels() { smokeProcessor = this; return [{ id: "desktop-test", provider: "test", contextWindow: 262144, reasoningLevels: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultReasoningLevel: "low" }, { id: "desktop-small", provider: "test", contextWindow: 32768 }, { id: "desktop-fast", provider: "test", contextWindow: 131072 }, { id: "desktop-wide", provider: "test", contextWindow: 1048576 }, { id: "far-away-large", provider: "other", contextWindow: 200000 }, { id: "far-away-mini", provider: "other", contextWindow: 128000 }]; },
   async *stream(messages, _tools, signal) {
     const user = messages.findLast(message => message.role === "user")?.content;
     // The Deed: its writing chat, a chat making a sentence true, and a check.
@@ -77,6 +91,22 @@ const f = await fixture({
         : deedTool === "deed_settle" ? { made: true, anchors: [{ path: "quiet.ts", line: 2 }] }
         : { holds: false, why: "It waits 15 minutes now.", words: "Drive starts after 15 quiet minutes.", lines: [{ path: "quiet.ts", line: 1 }] };
       yield { type: "tool_call_delta", index: 0, idDelta: `${deedTool}-1`, nameDelta: deedTool, argumentsDelta: JSON.stringify(input) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
+    // Proof marks: the pass pairs the smoke answer's claims with its steps; a
+    // check reads hello.ts and quotes it.
+    if (_tools.some(tool => tool.name === "proof_marks")) {
+      const claims = typeof user === "string" && user.includes(completed)
+        ? [{ text: "Check passed", step: 2, quote: "DESKTOP_CHECK_PASSED" }, { text: completed.replace(/\.$/, "") }]
+        : [];
+      yield { type: "tool_call_delta", index: 0, idDelta: "proof-marks", nameDelta: "proof_marks", argumentsDelta: JSON.stringify({ claims }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
+    if (_tools.some(tool => tool.name === "proof_verdict")) {
+      if (messages.some(message => message.role === "tool")) yield { type: "tool_call_delta", index: 0, idDelta: "proof-verdict", nameDelta: "proof_verdict", argumentsDelta: JSON.stringify({ holds: true, quote: "greeting = 'after'" }) };
+      else yield { type: "tool_call_delta", index: 0, idDelta: "proof-read", nameDelta: "read_file", argumentsDelta: JSON.stringify({ path: "hello.ts" }) };
       yield { type: "finish", reason: "tool_calls" };
       return;
     }
@@ -235,11 +265,6 @@ writeFileSync(join(f.workspace, "hello.ts"), "export const greeting = 'before';\
 writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ scripts: { check: "bun check.ts" } }));
 writeFileSync(join(f.workspace, "site.html"), '<h1>Fieldnote preview</h1>\n<button id="save">Save</button>\n');
 writeFileSync(join(f.workspace, "serve.ts"), "const server = Bun.serve({ port: 0, fetch: () => new Response('<h1>Fieldnote preview</h1><button id=\"save\">Save</button>', { headers: { 'content-type': 'text/html' } }) });\nconsole.log(`  \\u001b[32mLocal:\\u001b[39m http://localhost:${server.port}/`);\n");
-// Folders for the project map.
-for (const [folder, files] of [["src", 6], ["docs", 2], ["lib", 3]] as const) {
-  mkdirSync(join(f.workspace, folder), { recursive: true });
-  for (let index = 0; index < files; index++) writeFileSync(join(f.workspace, folder, `part${index}.ts`), "export const line = 1;\n".repeat(40 + index * 10));
-}
 writeFileSync(join(f.workspace, "check.ts"), "import {readFileSync} from 'node:fs';if(!readFileSync('hello.ts','utf8').includes(\"'after'\"))throw new Error('Wrong file');console.log('DESKTOP_CHECK_PASSED');\n");
 const git = (...values: string[]) => execFileSync("git", ["-C", f.workspace, ...values], { stdio: "pipe" });
 git("init", "-q"); git("add", ".");
@@ -300,8 +325,9 @@ async function open(workspace = false, welcome = false) {
     }, f.workspace);
     await page.getByRole("button", { name: "Open a project", exact: false }).click();
   }
-  await until(() => evaluate<boolean>("const editor=document.querySelector('textarea');return !!editor && editor.getBoundingClientRect().width>0 && document.body.innerText.includes('desktop-test');"), "connected desktop project", 30_000);
+  await until(() => evaluate<boolean>("const editor=document.querySelector('textarea');return !!editor && editor.getBoundingClientRect().width>0 && document.body.innerText.includes('Desktop Test');"), "connected desktop project", 30_000);
   assert.equal(await evaluate("return document.getElementById('sidebar-sessions')?.dataset.workspace;"), f.workspace);
+  assert((await page.locator("#composer-model").innerText()).startsWith("Desktop Test"), "a model with no name reads in words, not its raw id");
   assert.equal(await page.evaluate(() => typeof (window as any).require), "undefined", "No Node in the renderer");
   assert.equal(await page.evaluate(() => typeof (window as any).process), "undefined", "No process or environment in the renderer");
   const isolation = await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.getLastWebPreferences());
@@ -314,6 +340,13 @@ async function open(workspace = false, welcome = false) {
   assert.equal(zoom, 1.1, "Native zoom menu is connected");
   await desktop.evaluate(({ Menu }) => Menu.getApplicationMenu()!.items.find(item => item.label === "View")!.submenu!.items.find(item => item.label === "Actual Size")!.click());
 }
+/// After a launch: Home as Just a chat, then the chat from its project's line.
+async function reopenChat(id: string) {
+  await until(async () => (await page.locator("#composer-where").textContent())?.startsWith("Just a chat") ?? false, "launch lands on Home as Just a chat");
+  const row = page.locator(`.sidebar-session[data-args*='${id}']`);
+  if (!(await row.isVisible())) await click("project-toggle", { path: f.workspace });
+  await row.click();
+}
 async function close() {
   if (!desktop) return;
   const closing = desktop; desktop = undefined;
@@ -324,23 +357,9 @@ let sessionId = "";
 try {
   await open(false, true);
   await capture("01-start");
-  // The greeting stays; Map under it unfolds the project as land.
-  await page.locator(".hero-map .map-btn").click();
-  const srcName = page.locator(".land svg text.pn", { hasText: "src" });
-  await until(() => srcName.isVisible(), "the map unfolds with its place names", 20_000);
-  assert(await page.locator(".intro h1").isVisible(), "the greeting stays above the map");
-  const srcBox = (await srcName.boundingBox())!;
-  await page.mouse.move(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2 + 6);
-  await until(() => page.locator("#map-caption").innerText().then(text => text.startsWith("src ·") && text.includes("click to work here")), "hovering a parcel names it on the line");
-  await capture("01-map");
-  await page.mouse.click(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2 + 6);
-  await until(() => page.locator("textarea").inputValue().then(value => value.startsWith("@src/ ")), "clicking a parcel points the composer at it");
-  await until(() => page.locator("#mention-chips .chip", { hasText: "src/" }).isVisible(), "the folder shows as a chip");
-  await capture("01-map-pointed");
-  await page.locator("textarea").fill("");
-  await page.locator("textarea").press("Escape");
-  await until(() => page.locator(".land").count().then(count => count === 0), "Esc folds the map");
-  assert.equal(await page.locator(".hero-map .map-btn").getAttribute("aria-pressed"), "false");
+  // Home: the greeting, then one paragraph of what happened (nothing yet), no map.
+  await until(() => page.locator(".intro p.away").innerText().then(text => text.length > 0), "Home says what happened while you were away");
+  assert.equal(await page.locator(".hero-map, .land").count(), 0, "the map is gone");
   await type(thinkingPrompt);
   const trace = page.locator(".thinking-main .thinking-content").last();
   const thinkingToggle = page.locator(".thinking-main .thinking-toggle").last();
@@ -359,6 +378,8 @@ try {
   assert.equal(await page.locator("#sidebar-sessions .cube-mark").count(), 0, "one cube on screen: the sidebar shows a dot");
   assert(await page.locator("#sidebar-sessions .sidebar-session-mark.working").count() > 0, "the working chat breathes a dot in the sidebar");
   assert.equal(await thinkingToggle.locator(".shine").innerText(), "Thinking");
+  await until(() => page.locator("#app").getAttribute("class").then(value => value?.includes("rim-work") ?? false), "a working turn runs a light along the panel's rim");
+  assert.equal(await page.locator("#desktop-toolbar .header-live.work").innerText(), "Working", "the title line says it works");
   await capture("01-thinking-cube");
   await thinkingToggle.click();
   await trace.waitFor({ state: "hidden" });
@@ -386,26 +407,38 @@ try {
   await until(() => desktop.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body.startsWith("Wants to edit"))), "a waiting approval sends a Mac banner");
   await page.evaluate(() => { delete (document as any).hasFocus; });
   await capture("02-file-approval");
-  // A chat waiting on you stands on the map in amber, in the folder of the
-  // file it wants to edit; clicking its mark goes back to it.
+  // New chat lands on Home as Just a chat; the where word under the
+  // composer unfolds its choices in place and puts it in the project.
   await click("new-session");
-  await until(() => page.locator(".hero-map .map-btn").isVisible(), "a new chat shows the start screen");
-  await page.locator(".hero-map .map-btn").click();
-  const waitingMark = page.locator(".land .mk-g.wait");
-  await until(() => waitingMark.isVisible(), "the waiting chat stands on the map", 20_000);
-  await until(() => page.locator("#map-caption").innerText().then(text => text.includes("1 waiting for you")), "the line beside Map counts it");
-  await waitingMark.locator(".mk-hit").hover();
-  await until(() => page.locator("#map-caption").innerText().then(text => text.includes("waiting for you") && text.includes("click to open its chat")), "hovering the mark names it");
-  await capture("02-map-live");
-  await waitingMark.locator(".mk-hit").click();
-  await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Edit"]), "clicking the mark opens its chat");
-  await click("permission", { decision: "allow_once" });
+  await until(async () => (await page.locator("#composer-where").textContent())?.startsWith("Just a chat") ?? false, "a new chat is Just a chat");
+  assert.equal(await page.locator(".intro p.away").count(), 0, "Just a chat has no project news");
+  await click("where-toggle");
+  await capture("02b-where");
+  await click("where-pick", { path: f.workspace });
+  await until(() => page.locator(".intro p.away").isVisible(), "a new chat in the project shows the start screen");
+  assert((await page.locator("#composer-where").textContent())?.startsWith("in "), "the where word names the project");
+  // Home says which chat waits on you and on what; its phrase unfolds the
+  // approval right there, and Allow answers it without opening the chat.
+  const waitingPhrase = page.locator(".intro p.away .away-link.warn");
+  await until(() => page.locator(".intro p.away").innerText().then(text => text.includes("is waiting on your yes to edit hello.ts")), "Home names the chat waiting on you", 20_000);
+  await waitingPhrase.click();
+  const homeApproval = page.locator(".away-fold .approval-row");
+  await until(() => homeApproval.isVisible(), "the phrase unfolds the approval in place");
+  assert((await homeApproval.innerText()).includes("hello.ts"), "the row names the file");
+  await capture("02-home-away");
+  // Pick up goes back to the last chat, with the last thing you asked there.
+  assert((await page.locator(".hero-pick").innerText()).includes("Pick up"), "Pick up names the last chat");
+  await homeApproval.locator('[data-action="away-permission"]', { hasText: "Allow" }).click();
+  await until(() => homeApproval.count().then(count => count === 0), "Allow folds the row");
+  await page.locator(".hero-pick").click();
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Run"]), "command approval visible");
   assert.equal(await page.locator("#approval .approval-row code").innerText(), "bun run check", "the row names the command by its program");
   assert((await page.locator("#approval .approval-row code").getAttribute("title"))!.includes("not sandboxed"), "where it runs is on hover");
   assert.equal(await page.locator("#approval .approval-show, #approval .approval-fold").count(), 0, "a command has nothing to unfold");
   await until(() => page.locator(".tool-row.waiting .target").innerText().then(text => text === "bun run check"), "the waiting step names the command");
   assert.equal(await page.evaluate(() => { const row = document.querySelector("#approval .approval-row")!; return row.scrollWidth <= row.clientWidth; }), true, "the row fits its width");
+  await until(() => page.locator("#app").getAttribute("class").then(value => value?.includes("rim-wait") ?? false), "waiting on you holds an amber arc on the rim");
+  assert.equal(await page.locator("#desktop-toolbar .header-live.wait").innerText(), "Waiting on you · run bun run check?", "the title line says what it waits for");
   await capture("02-command-approval");
   await click("permission", { decision: "allow_once" });
   await textIncludes(completed);
@@ -418,27 +451,78 @@ try {
   const commands = await f.client.commands(sessionId);
   assert(commands.commands.some(command => command.status === "completed" && command.exitCode === 0 && command.stdout.includes("DESKTOP_CHECK_PASSED")), "Approved command output was recorded");
   assert(await evaluate<boolean>("return !!document.querySelector('.katex') && !!document.querySelector('pre code');"), "Markdown, code and math rendered in Chromium");
+  // Proof marks: the claim its check backs carries a green line; its proof
+  // unfolds under the paragraph with the step's own lines, and Open the
+  // step unfolds that step on the guide. The claim nothing checked is
+  // dotted; Prove it reads the file and the line turns green.
+  const turnId = completedSession.turns.at(-1)!.id;
+  const proved = page.locator(`#turn-${turnId} .claim.proved`);
+  await until(() => proved.count().then(count => count === 1), "a claim a step proved gets its green line", 20_000);
+  assert.equal(await proved.innerText(), "Check passed");
+  assert((await proved.getAttribute("title"))!.startsWith("Ran bun run check · step 2"), "hovering a mark names its step");
+  const proofLine = page.locator(`#turn-${turnId} .proof-line`);
+  assert((await proofLine.innerText()).includes("1 proved") && (await proofLine.innerText()).includes("1 not checked"), "one count line under the answer");
+  await proved.click();
+  const proof = page.locator(`#turn-${turnId} .proof-fold.ok`);
+  await until(() => proof.isVisible(), "the proof unfolds under the paragraph");
+  assert((await proof.innerText()).includes("DESKTOP_CHECK_PASSED"), "the proof quotes the step's output");
+  assert.equal(await page.locator(`#turn-${turnId} .markdown > .proof-fold`).count(), 0, "the proof sits in the list item, not after the list");
+  await capture("02c-proof");
+  await proof.locator('[data-action="proof-step"]').click();
+  await until(() => page.locator(`#turn-${turnId} .tool-row.open`).count().then(count => count === 1), "Open the step unfolds it on the guide");
+  const unchecked = page.locator(`#turn-${turnId} .claim.unchecked`);
+  assert.equal(await unchecked.innerText(), completed.replace(/\.$/, ""));
+  await unchecked.click();
+  const unproven = page.locator(`#turn-${turnId} .proof-fold:not(.ok)`);
+  await until(() => unproven.innerText().then(text => text.includes("Nothing in this turn checked this.") && text.includes("This turn only edited hello.ts and ran bun run check.")), "an unchecked claim says what the turn did look at");
+  await page.locator("textarea").press("Enter");
+  await until(() => page.locator(`#turn-${turnId} .claim.proved`).count().then(count => count === 2), "Enter proves it: the check reads the file and the dotted line turns green", 20_000);
+  assert((await proofLine.innerText()).includes("All 2 proved"), "the count says all proved");
+  assert((await page.locator(`#turn-${turnId} .proof-fold.ok`).last().innerText()).includes("greeting = 'after'"), "the check's proof quotes what it read");
+  await page.keyboard.press("Escape");
+  await until(() => page.locator(`#turn-${turnId} .proof-fold`).count().then(count => count === 0), "Esc folds the proof");
+  // The edge is a timeline: a long chat shows its shape on the panel's right edge.
+  await page.evaluate(() => { document.getElementById("conversation")!.style.paddingBottom = "1600px"; });
+  await until(() => page.locator("#timeline").isVisible(), "a long chat has a timeline edge");
+  await page.locator("#timeline").hover();
+  await until(() => page.locator("#timeline .tl-m.you").count().then(count => count >= 2), "the timeline marks each message you sent");
+  assert(await page.locator("#timeline .tl-m.answer").count() >= 1, "answers are rings on the timeline");
+  assert(await page.locator("#timeline .tl-m.edit").count() >= 1, "the turn that edited hello.ts is a green tick");
+  const youMark = await page.locator("#timeline .tl-m.you").last().boundingBox();
+  await page.mouse.move(youMark!.x + youMark!.width / 2, youMark!.y + youMark!.height / 2);
+  await until(() => page.locator("#timeline .tl-label").innerText().then(text => text.includes("Desktop smoke: update hello.ts")), "pointing at a mark names it");
+  await capture("02d-timeline");
+  await page.evaluate(() => { document.getElementById("stage")!.scrollTop = document.getElementById("stage")!.scrollHeight; });
+  await page.mouse.click(youMark!.x + youMark!.width / 2, youMark!.y + youMark!.height / 2);
+  await until(() => page.evaluate((id) => { const ask = document.querySelector(`#turn-${id} .request`)!.getBoundingClientRect(), stage = document.getElementById("stage")!.getBoundingClientRect(); return ask.top >= stage.top - 2 && ask.top < stage.top + 120; }, turnId), "clicking a mark goes to that message");
+  await page.mouse.move(400, 300);
+  await page.evaluate(() => { document.getElementById("conversation")!.style.paddingBottom = ""; });
   await until(() => page.locator(".sidebar-session[aria-current='page']").innerText().then(text => text.includes("Desktop smoke")), "sidebar tracks the current conversation title");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).fill("no-such-conversation");
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).fill("no-such-conversation");
   await textIncludes("No matching conversations");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
-  assert.equal(await page.getByRole("searchbox", { name: "Find a conversation or project" }).inputValue(), "", "Escape clears the search");
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).press("Escape");
+  assert.equal(await page.getByRole("searchbox", { name: "Search chats and projects" }).inputValue(), "", "Escape clears the search");
   await until(() => page.locator(".sidebar-session[aria-current='page']").isVisible(), "the list is back after search");
   assert(await page.locator("#sidebar-drive, #drive-page").count() === 0, "Drive has no sidebar row and no page");
   // Projects stay visible, and each project owns a collapsible list of chats.
   assert.equal(await page.locator("#desktop-project-button, #sidebar-open-folder, #sidebar-branches").count(), 0, "The sidebar names the project once, in its group");
   assert((await page.locator(".sidebar-project.active .sidebar-project-name").getAttribute("title"))?.startsWith(f.workspace), "The project's line carries its folder");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).focus();
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).focus();
   await until(() => page.locator("#sidebar-projects").isVisible(), "projects are visible");
-  assert((await page.locator("#sidebar-open-project").getAttribute("title"))?.startsWith("Open a folder"), "Projects' + opens another folder");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
+  // ⌘K is Search: the row itself becomes the field.
+  await page.locator("textarea").focus();
+  await page.keyboard.press("Control+k");
+  await until(() => evaluate<boolean>("return document.activeElement?.id === 'sidebar-search';"), "Ctrl+K puts you in Search");
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).press("Escape");
   assert(await page.locator("#sidebar-projects").isVisible(), "projects stay visible after search");
-  const projectToggle = page.locator(".sidebar-project.active .sidebar-project-toggle");
+  // The project's whole line is its fold, its folder shut or open with it.
+  const projectToggle = page.locator(".sidebar-project.active .sidebar-project-name");
+  assert.equal(await page.locator(".sidebar-project-toggle").count(), 0, "no separate chevron: the line folds");
   await projectToggle.click();
   assert.equal(await projectToggle.getAttribute("aria-expanded"), "false");
   assert(!await page.locator(".sidebar-session[aria-current='page']").isVisible(), "collapsing a project hides its chats");
   await page.reload();
-  await until(() => page.locator(".sidebar-project.active .sidebar-project-toggle").getAttribute("aria-expanded").then(value => value === "false"), "project collapse persists across reload");
+  await until(() => page.locator(".sidebar-project.active .sidebar-project-name").getAttribute("aria-expanded").then(value => value === "false"), "project collapse persists across reload");
   await projectToggle.click();
   assert(await page.locator(".sidebar-session[aria-current='page']").isVisible(), "expanding restores its chats");
   // A settled chat carries no mark; double-clicking its title renames it in place.
@@ -448,17 +532,51 @@ try {
   assert(await page.locator("#rail-expand").isVisible(), "The folded sidebar is a rail");
   assert(!await page.locator("#sidebar-sessions").isVisible(), "The rail hides the list");
   await capture("02-rail");
+  // Resting on the rail's empty space peeks the whole sidebar out over the panel.
+  const rail = await page.locator(".sidebar-rail").boundingBox();
+  await page.mouse.move(rail!.x + rail!.width / 2, rail!.y + rail!.height - 120);
+  await page.mouse.move(rail!.x + rail!.width / 2, rail!.y + rail!.height - 110);
+  await until(() => page.locator("#desktop-shell.sidebar-peek").count().then(count => count === 1), "the folded sidebar peeks out");
+  await page.locator(".sidebar-session[aria-current='page']").waitFor();
+  assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "false", "a peek leaves the sidebar folded");
+  await capture("02-rail-peek");
+  await page.locator(".sidebar-session[aria-current='page']").click();
+  await until(() => page.locator("#desktop-shell.sidebar-peek").count().then(count => count === 0), "picking a chat puts the peek away");
+  assert(await page.locator("#rail-expand").isVisible(), "and the rail is back");
   await page.locator("#rail-expand").click();
+  // Rest on a chat: after a moment its card says where it stands.
+  await page.locator(".sidebar-session[aria-current='page']").hover();
+  const glance = page.locator("#sidebar-glance");
+  await glance.waitFor();
+  const glanceText = await glance.innerText();
+  assert.match(glanceText, /Branch\s+master/, `the card names the branch: ${glanceText}`);
+  assert.match(glanceText, /Last turn\s+\+1 −1 · 1 file/, `and what the last turn changed: ${glanceText}`);
+  assert.match(glanceText, /Model\s+Desktop Test · \d+% context/, `and the model and its context: ${glanceText}`);
+  assert.match(glanceText, /Last: “/, `and its last line: ${glanceText}`);
+  assert.equal(await page.locator(".sidebar-session[aria-current='page']").getAttribute("title"), null, "the card replaces the native tooltip");
+  await capture("02-glance");
+  await page.mouse.move(600, 400);
+  await until(() => glance.count().then(count => count === 0), "the card goes when the pointer leaves");
   assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "true");
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.getByRole("heading", { name: /^What are we building/ }).waitFor();
-  await until(() => page.locator("#workspace-title").innerText().then(text => text === "New chat"), "the top bar names the new chat");
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === "Home"), "the top bar says Home for a new chat");
   // The empty chat is the composer, not a row: New chat above already names
   // it, so Chats only lists conversations that have a turn.
-  assert.equal(await page.locator("#sidebar-sessions .sidebar-session", { hasText: "New chat" }).count(), 0, "An empty chat is not listed under Chats");
+  assert.equal(await page.locator("#sidebar-projects .sidebar-session", { hasText: "New chat" }).count(), 0, "An empty chat is not listed under Chats");
   await type(aside);
   await textIncludes(asideDone);
-  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === 2), "the second conversation joins the list once it has a turn");
+  await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === 2), "the second conversation joins the list once it has a turn");
+  // It is Just a chat: listed under Just a chat below the projects, and it
+  // ends with one quiet line that can move it into a project.
+  await until(() => page.locator("#sidebar-chats .sidebar-item").count().then(count => count === 1), "a plain chat is listed under Just a chat");
+  await until(() => page.locator("#plain-line .plain-note").isVisible(), "a plain chat ends with Move to a project");
+  assert.equal(await page.locator("#workspace-where").innerText(), "Just a chat");
+  await click("where-move");
+  await until(() => page.locator("#plain-line .where-opt").first().isVisible(), "Move to a project unfolds the projects");
+  await capture("02-plain-chat");
+  await page.keyboard.press("Escape");
+  await until(() => page.locator("#plain-line .where-opt").count().then(count => count === 0), "Esc folds the projects");
   await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
   await page.locator(`.sidebar-session[data-args*='${sessionId}'] .sidebar-session-name`).dblclick();
@@ -477,81 +595,279 @@ try {
   await page.keyboard.press("Control+Shift+Tab");
   await until(async () => (await current())?.includes(sessionId), "Ctrl+Shift+Tab opens the one before");
   await textIncludes(completed);
+  // Bring it back later: the bell beside Pin and Archive unfolds a few times;
+  // the chat leaves the list until then, and comes back under Back now.
+  const asideRow = page.locator(`#sidebar-projects .sidebar-item:not(:has([data-args*='${sessionId}']))`).first();
+  const asideId = JSON.parse(await asideRow.locator(".sidebar-session").getAttribute("data-args") ?? "{}").id as string;
+  await asideRow.hover();
+  await asideRow.locator(".sidebar-bell").click();
+  await page.locator(".sidebar-back-line .sidebar-back-opt", { hasText: "in an hour" }).waitFor();
+  await capture("02-bring-back");
+  await page.locator(".sidebar-back-line .sidebar-back-opt", { hasText: "in an hour" }).click();
+  await until(() => page.locator(`.sidebar-session[data-args*='${asideId}']`).count().then(count => count === 0), "the chat leaves the list until then");
+  assert.ok(Date.parse((await f.client.getSessionState(asideId)).session.backAt ?? "") > Date.now() + 3_500_000, "for an hour");
+  await page.evaluate((id) => (window as unknown as { demesne: { request: (method: string, args: unknown) => Promise<unknown> } }).demesne.request("bring-back", { id: id.aside, sessionId: id.current, at: new Date(Date.now() - 1000).toISOString() }), { aside: asideId, current: sessionId });
+  await until(() => page.locator(`#sidebar-back .sidebar-session[data-args*='${asideId}']`).count().then(count => count === 1), "once due it leads the list under Back now");
+  await capture("02-back-now");
+  await page.locator(`#sidebar-back .sidebar-session[data-args*='${asideId}']`).click();
+  await until(async () => !(await f.client.getSessionState(asideId)).session.backAt, "opening it ends its coming back");
+  await until(() => page.locator("#sidebar-back").isHidden(), "and Back now empties");
+  await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
+  await textIncludes(completed);
+  // Its pull request on the row: #287 where the time was, a blue dot for the
+  // review since; the number unfolds it, Hand it to the chat puts it in the
+  // composer, and merged turns it purple with Archive.
+  ghPullRequest("OPEN");
+  await f.client.updateSession(asideId, { prUrl: "https://github.com/demesne/fieldnote/pull/287" });
+  await page.locator(`.sidebar-session[data-args*='${asideId}']`).click();
+  await textIncludes(asideDone);
+  await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
+  await textIncludes(completed);
+  const prRow = page.locator(`.sidebar-item:has(.sidebar-session[data-args*='${asideId}'])`).first();
+  await prRow.locator(".sidebar-pr.new", { hasText: "#287" }).waitFor();
+  await page.mouse.move(600, 400);
+  await capture("02-pr-row");
+  await prRow.locator(".sidebar-pr").click();
+  await page.locator(".sidebar-pr-line", { hasText: "2 new on #287" }).waitFor();
+  assert.ok(await page.locator(".sidebar-pr-line", { hasText: "mike: The peek opens too soon." }).isVisible(), "the review's words unfold");
+  assert.equal(await prRow.locator(".sidebar-pr-dot").count(), 0, "looking at it clears the dot");
+  await capture("02-pr-news");
+  await page.keyboard.press("Enter");
+  await until(async () => (await current())?.includes(asideId), "Hand it to the chat opens the chat");
+  await until(() => page.locator("textarea").inputValue().then(value => value.startsWith("Pull request #287") && value.includes("The peek opens too soon.")), "the news waits in the composer");
+  await page.locator("textarea").fill("");
+  await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
+  await textIncludes(completed);
+  ghPullRequest("MERGED");
+  await prRow.locator(".sidebar-pr").click();
+  await page.locator(".sidebar-pr-line", { hasText: "Merged" }).locator(".sidebar-back-opt", { hasText: "Archive" }).waitFor();
+  await prRow.locator(".sidebar-pr.merged").waitFor();
+  await capture("02-pr-merged");
+  await prRow.locator(".sidebar-pr").click();
+  await until(() => page.locator(".sidebar-pr-line").count().then(count => count === 0), "the number folds it again");
   // Each row deletes itself from the sidebar, without a menu or a dialog;
   // the list closes up and never shows more than six. ⌘Z brings it back
   // while it waits to be archived.
-  const before = await page.locator("#sidebar-sessions .sidebar-item").count();
+  const before = await page.locator("#sidebar-projects .sidebar-item").count();
   // Empty chats (the map step opened one) are kept by the daemon but not listed.
   const kept = (await f.client.listSessions()).length;
-  const other = page.locator(`#sidebar-sessions .sidebar-item:not(:has([data-args*='${sessionId}']))`).first();
+  const other = page.locator(`#sidebar-projects .sidebar-item:not(:has([data-args*='${sessionId}']))`).first();
   const otherArgs = await other.locator(".sidebar-session").getAttribute("data-args");
   await other.hover();
   await other.locator(".sidebar-delete").click();
   assert.equal(await page.locator("#overlay:not([hidden])").count(), 0, "Deleting opens no menu or dialog");
-  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before - 1), "the deleted conversation leaves the list");
+  await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === before - 1), "the deleted conversation leaves the list");
   await page.locator("body").focus();
   await page.keyboard.press("Control+z");
-  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before), "undo brings the conversation back");
+  await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === before), "undo brings the conversation back");
   assert.equal((await f.client.listSessions()).length, kept, "An undone delete never reaches the daemon");
   // The keyboard reaches the same delete: Delete on the focused row.
-  const row = page.locator(`#sidebar-sessions .sidebar-session[data-args='${otherArgs}']`);
+  const row = page.locator(`#sidebar-projects .sidebar-session[data-args='${otherArgs}']`);
   await row.focus();
-  // The trash eases in, so give its transition a moment.
-  await until(() => row.locator("xpath=..").locator(".sidebar-delete").evaluate(button => getComputedStyle(button).opacity === "1").then(shown => shown || Promise.reject(new Error("trash hidden"))), "The trash shows when the keyboard is on the row");
+  // Pin and Archive ease in, so give their transition a moment.
+  await until(() => row.locator("xpath=..").locator(".sidebar-row-actions").evaluate(actions => getComputedStyle(actions).opacity === "1").then(shown => shown || Promise.reject(new Error("actions hidden"))), "Pin and Archive show when the keyboard is on the row");
   await page.keyboard.press("Delete");
-  await until(() => page.locator("#sidebar-sessions .sidebar-item").count().then(count => count === before - 1), "Delete on a row removes it");
+  await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === before - 1), "Delete on a row removes it");
   await until(async () => (await f.client.listSessions()).length === kept - 1, "the daemon archived it");
-  assert(await page.locator("#sidebar-sessions .sidebar-item").count() <= 6, "The sidebar lists at most six conversations");
+  assert(await page.locator("#sidebar-projects .sidebar-item").count() <= 6, "The sidebar lists at most six conversations");
   await capture("02-completed");
-  // Settings is one sheet: sections on the left, each row with its own control.
+  // Group and sort unfolds under a heading; Archived opens All chats, where
+  // Restore brings the chat back.
+  const archivedId = JSON.parse(otherArgs ?? "{}").id as string;
+  await page.locator(".sidebar-project.active .sidebar-project-header").hover();
+  await page.locator(".sidebar-project.active .sidebar-view-button").click();
+  await until(() => page.locator(".sidebar-view-line").isVisible(), "Group and sort unfolds under the heading");
+  await until(() => page.locator(".sidebar-view-count").innerText().then(text => /^\d+ ›$/.test(text)), "Archived chats says how many");
+  assert.equal(await page.locator("#overlay:not([hidden])").count(), 0, "Group and sort is no menu");
+  await capture("02-group-sort");
+  await page.locator(".sidebar-view-opt", { hasText: "Date" }).click();
+  await until(() => page.locator('.sidebar-group-block[data-group="d:Today"] .sidebar-session').first().isVisible(), "by date, today's chats sit under Today");
+  assert(await page.locator('.sidebar-group-block[data-group="d:Today"] .sidebar-session-age', { hasText: basename(f.workspace) }).count() > 0, "by date, each row names where it lives");
+  await capture("02-by-date");
+  await page.locator(".sidebar-view-opt", { hasText: "Project" }).click();
+  await until(() => page.locator(".sidebar-project.active .sidebar-view-line").isVisible(), "back by project, the line stays under the first heading");
+  await page.locator(".sidebar-view-archived").click();
+  await until(() => page.locator("#page .cp-row").first().isVisible(), "Archived opens All chats");
+  assert.equal(await page.locator("#workspace-title").innerText(), "All chats");
+  assert(!await page.locator("#input-area").isVisible(), "All chats has no composer");
+  await capture("02-all-chats");
+  await page.locator(`#page .cp-restore[data-args*='${archivedId}']`).click();
+  await until(async () => (await f.client.listSessions()).length === kept, "Restore brings the chat back to the daemon's list");
+  await until(() => page.locator(`#sidebar-projects .sidebar-session[data-args*='${archivedId}']`).isVisible(), "the restored chat is back in the sidebar");
+  await page.locator("body").focus();
+  await page.keyboard.press("Escape");
+  await until(() => page.locator("#page").isHidden(), "Esc leaves All chats");
+  await page.locator(".sidebar-project.active .sidebar-view-button").click();
+  // A pinned chat leads the list, above its project.
+  const pinRow = page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-item:has(.sidebar-session[data-args*='${archivedId}'])`);
+  await pinRow.hover();
+  await pinRow.locator(".sidebar-pin").click();
+  await until(() => page.locator(`#sidebar-pinned .sidebar-session[data-args*='${archivedId}']`).isVisible(), "Pin moves the chat to Pinned");
+  assert(await f.client.getSessionState(archivedId).then(state => Boolean(state.session.pinnedAt)), "the daemon keeps the pin");
+  await capture("02-pinned");
+  const pinnedRow = page.locator(`#sidebar-pinned .sidebar-item:has(.sidebar-session[data-args*='${archivedId}'])`);
+  await pinnedRow.hover();
+  await pinnedRow.locator(".sidebar-pin").click();
+  await until(() => page.locator("#sidebar-pinned").isHidden(), "Unpin puts it back with its project");
+  // The foot: who you are, the theme switch, Settings.
+  assert((await page.locator("#sidebar-you").innerText()).length > 0, "the foot names you");
+  const themeBefore = await evaluate<string>("return document.documentElement.dataset.theme;");
+  await page.locator("#sidebar-theme").click();
+  await until(() => evaluate<string>("return document.documentElement.dataset.theme;").then(theme => theme !== themeBefore), "the sun switches the theme");
+  await capture("02-light");
+  await page.locator("#sidebar-theme").click();
+  await until(() => evaluate<string>("return document.documentElement.dataset.theme;").then(theme => theme === themeBefore), "the moon switches it back");
+  // Scheduled: a routine is one sentence, when and then what.
+  await page.locator('.sidebar-nav [data-action="page-open"]', { hasText: "Scheduled" }).click();
+  await until(() => page.locator('#page[data-kind="scheduled"] #routine-new input').isVisible(), "Scheduled opens in place of the chat");
+  assert.equal(await page.locator("#workspace-title").innerText(), "Scheduled");
+  await page.locator("#routine-new input").fill("list the PRs");
+  await page.locator("#routine-new input").press("Enter");
+  await until(() => page.locator("#page .sp-error").isVisible(), "a routine without a time says how to write one");
+  await page.locator("#routine-new input").fill("Every weekday at 8:30, summarize what changed overnight");
+  await page.locator("#routine-new input").press("Enter");
+  await until(() => page.locator("#page .sp-row", { hasText: "Summarize what changed overnight" }).isVisible(), "the new routine joins the list");
+  assert((await page.locator("#page .sp-row", { hasText: "Summarize what changed overnight" }).innerText()).includes("Weekdays · 8:30"), "the routine says when it runs");
+  assert.equal((await f.client.routines()).routines.length, 1, "the daemon keeps the routine");
+  await capture("02-scheduled");
+  const routineRow = page.locator("#page .sp-row", { hasText: "Summarize what changed overnight" });
+  await routineRow.locator(".sp-switch").click();
+  await until(() => routineRow.locator(".sp-switch").innerText().then(text => text === "Off"), "a routine switches off on its row");
+  await routineRow.hover();
+  await routineRow.locator(".sp-remove").click();
+  await until(async () => (await f.client.routines()).routines.length === 0, "Delete removes the routine");
+  await page.locator('.sidebar-nav [data-action="page-open"]', { hasText: "Scheduled" }).click();
+  await until(() => page.locator("#page").isHidden(), "Scheduled folds away from its row");
+  // Customize: the project's instructions, commands and workflows, edited in place.
+  await page.locator('.sidebar-nav [data-action="page-open"]', { hasText: "Customize" }).click();
+  await until(() => page.locator('#page[data-kind="customize"] .cz-row').first().isVisible(), "Customize opens in place of the chat");
+  const instructionsPath = join(f.workspace, "DEMESNE.md");
+  const hadInstructions = existsSync(instructionsPath) ? readFileSync(instructionsPath, "utf8") : null;
+  await page.locator(`#page .cz-edit-button[data-args*='DEMESNE.md'], #page .cz-edit-button[data-args*='AGENTS.md']`).first().click();
+  await until(() => page.locator("#page .cz-edit textarea").isVisible(), "Edit unfolds the instructions under their row");
+  const instructionsFile = await page.locator("#page .cz-edit").getAttribute("data-path");
+  const instructionsBefore = await page.locator("#page .cz-edit textarea").inputValue();
+  await page.locator("#page .cz-edit textarea").fill(`${instructionsBefore}\nKeep replies short.\n`);
+  await page.locator("#page .cz-edit textarea").press("Control+Enter");
+  await until(() => page.locator("#page .cz-edit").count().then(count => count === 0), "Ctrl+Enter saves and folds the file");
+  assert(readFileSync(instructionsFile!, "utf8").includes("Keep replies short."), "the instructions file is written in place");
+  await page.locator('#page .cz-new[data-kind="command"] input').fill("ship-it");
+  await page.locator('#page .cz-new[data-kind="command"] input').press("Enter");
+  await until(() => page.locator("#page .cz-edit textarea").isVisible(), "a new command opens for its words");
+  await capture("02-customize");
+  await page.locator("#page .cz-save").click();
+  await until(() => page.locator("#page .cz-row", { hasText: "/ship-it" }).isVisible(), "the new command is listed");
+  await page.locator("#page .cz-row", { hasText: "/ship-it" }).locator('[data-action="cz-run"]').click();
+  await until(() => page.locator("textarea").first().inputValue().then(value => value.startsWith("/ship-it")), "Run puts the command in the composer");
+  assert(await page.locator("#page").isHidden(), "Run leaves Customize");
+  await page.locator("textarea").first().fill("");
+  rmSync(join(f.workspace, ".demesne", "commands", "ship-it.md"));
+  if (hadInstructions === null) rmSync(instructionsFile!); else writeFileSync(instructionsFile!, hadInstructions);
+  // Settings is a page: the sidebar becomes its list, each row has its own control.
   await page.locator(".sidebar-settings").click();
-  await page.locator('#overlay[data-screen="settings"] .settings-nav-item.on').filter({ hasText: "General" }).waitFor();
+  await page.locator('#page[data-kind="settings"]').waitFor();
+  await page.locator("#settings-nav .st-nav.on").filter({ hasText: "General" }).waitFor();
+  assert(await page.locator("#sidebar-projects").isHidden(), "the sidebar holds Settings' list instead of the chats");
+  assert.equal(await page.locator("#workspace-title").innerText(), "Settings", "the title bar says Settings");
+  assert.equal(await page.locator("#settings-nav .st-nav").count(), 13, "thirteen sections");
   await capture("02-settings");
-  assert(await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".settings-row > div:first-child")].every(text => text.getBoundingClientRect().width >= 200)), "every settings row keeps its text readable");
-  await page.locator("#overlay .settings-segments button").filter({ hasText: "Always" }).click();
-  await until(() => page.evaluate("localStorage.getItem('demesne-notify')").then(value => value === "always"), "Notify me remembers Always");
-  await page.locator("#overlay .settings-segments button").filter({ hasText: "When it needs you" }).click();
-  await until(() => page.evaluate("localStorage.getItem('demesne-notify')").then(value => value === "needs"), "Notify me goes back to When it needs you");
-  await page.getByRole("textbox", { name: "Search settings" }).fill("palette");
-  await until(() => page.locator("#overlay .settings-row b").allInnerTexts().then(titles => titles.includes("Theme") && !titles.includes("Mode")), "Settings search finds the theme row");
-  await page.getByRole("textbox", { name: "Search settings" }).fill("");
-  await page.locator("#overlay .settings-nav-item").filter({ hasText: "Appearance" }).click();
-  await page.locator("#settings-theme").waitFor();
+  assert(await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("#page .st-tx")].every(text => text.getBoundingClientRect().width >= 200)), "every settings row keeps its text readable");
+  await page.locator("#page .st-row").filter({ hasText: "Open on" }).getByRole("button", { name: "Last chat" }).click();
+  await until(() => page.evaluate("localStorage.getItem('demesne-open-on')").then(value => value === "last"), "Open on remembers Last chat");
+  await page.locator("#page .st-row").filter({ hasText: "Open on" }).getByRole("button", { name: "Home" }).click();
+  await until(() => page.evaluate("localStorage.getItem('demesne-open-on')").then(value => value === "home"), "Open on goes back to Home");
+  await page.keyboard.press("ArrowDown");
+  await page.locator("#settings-nav .st-nav.on").filter({ hasText: "Notifications" }).waitFor();
+  await page.getByRole("switch", { name: "A chat finishes" }).click();
+  await until(() => page.evaluate("JSON.parse(localStorage.getItem('demesne-notify-kinds') || '{}').done").then(value => value === true), "A chat finishes turns on");
+  await page.getByRole("switch", { name: "A chat finishes" }).click();
+  await until(() => page.evaluate("JSON.parse(localStorage.getItem('demesne-notify-kinds') || '{}').done").then(value => value === false), "and off again");
+  await page.getByRole("searchbox", { name: "Search settings" }).fill("palette");
+  await until(() => page.locator("#page .st-tx b").allInnerTexts().then(titles => titles.includes("Theme") && !titles.includes("Open on")), "Settings search finds the theme row");
+  assert.equal(await page.locator("#page .st-tx mark").first().innerText(), "palette", "the searched word is marked");
+  await page.keyboard.press("Escape");
+  await until(() => page.getByRole("searchbox", { name: "Search settings" }).inputValue().then(value => value === ""), "Esc clears the search");
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Appearance" }).click();
+  await page.locator("#page .st-word").first().click();
+  await page.locator("#page .st-choice").first().waitFor();
   await capture("02-themes");
-  await page.locator("#settings-theme").selectOption("demesne-light");
+  await page.locator(`#page .st-choice[data-args*='"demesne-light"']`).click();
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#F6F8FA");
-  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#f7f7f5", "The desktop wears its own light palette");
-  assert(await page.locator('#overlay[data-screen="settings"]').isVisible(), "Settings stays open while the theme changes");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "rgb(242 242 242)", "The desktop wears its own light palette");
+  assert(await page.locator('#page[data-kind="settings"]').isVisible(), "Settings stays open while the theme changes");
   await capture("02-light-settings");
-  await page.locator("#overlay .settings-segments button").filter({ hasText: "Large" }).click();
-  await until(() => page.locator("#overlay .settings-segments button.on").filter({ hasText: "Large" }).count().then(count => count === 1), "Text size goes to Large");
-  await page.locator("#overlay .settings-segments button").filter({ hasText: "Default" }).click();
-  await until(() => page.locator("#overlay .settings-segments button.on").filter({ hasText: "Default" }).count().then(count => count === 1), "Text size back to Default");
-  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await page.locator("#page .settings-segments button").filter({ hasText: "Large" }).click();
+  await until(() => page.locator("#page .settings-segments button.on").filter({ hasText: "Large" }).count().then(count => count === 1), "Text size goes to Large");
+  await page.locator("#page .settings-segments button").filter({ hasText: "Default" }).click();
+  await until(() => page.locator("#page .settings-segments button.on").filter({ hasText: "Default" }).count().then(count => count === 1), "Text size back to Default");
+  await page.locator("#settings-nav .st-back").click();
+  await until(() => page.locator("#page").isHidden(), "Back to chats closes Settings");
+  assert(await page.locator("#sidebar-projects").isVisible(), "and the chats come back to the sidebar");
   await capture("02-light-conversation");
   await page.locator(".sidebar-settings").click();
-  await page.locator("#overlay .settings-nav-item").filter({ hasText: "Appearance" }).click();
-  await page.locator("#settings-theme").selectOption("demesne");
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Appearance" }).click();
+  await page.locator("#page .st-word").first().click();
+  await page.locator(`#page .st-choice[data-args*='"demesne"']`).click();
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#0B1218");
-  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "#121315", "The desktop wears its own dark palette");
-  await page.locator("#overlay .settings-nav-item").filter({ hasText: "Providers" }).click();
-  await page.locator("#overlay .settings-row").filter({ hasText: "Provider setup" }).waitFor();
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "rgb(22 22 23)", "The desktop wears its own dark palette");
+  const accent = () => page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--acc").trim());
+  const neutralAccent = await accent();
+  await page.locator("#page .st-inks button[aria-label='Warm']").click();
+  await until(() => page.evaluate(() => document.documentElement.dataset.ink === "warm"), "the Warm ink is worn");
+  assert.notEqual(await accent(), neutralAccent, "the accent follows the ink");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "rgb(30 24 19)", "the warm ink tints the panel");
+  await capture("02-ink-warm");
+  await page.locator("#page .st-inks button[aria-label='Neutral']").click();
+  await until(() => page.evaluate(() => document.documentElement.dataset.ink === undefined), "back to the Neutral ink");
+  // The rows backed by config.toml and the daemon.
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Drive" }).click();
+  const tokens = page.getByRole("textbox", { name: "Tokens" });
+  await tokens.waitFor();
+  await tokens.fill("400k");
+  await tokens.press("Enter");
+  await until(() => tokens.inputValue().then(value => value === "400,000"), "a typed Drive limit is saved");
+  assert.match(readFileSync(join(f.home, ".demesne/config.toml"), "utf8"), /max_tokens = 400000/, "Drive's token limit lands in config.toml");
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Permissions" }).click();
+  await until(() => page.locator("#page .st-row", { hasText: "Its chats read its files" }).count().then(count => count >= 1), "the trusted folders are listed");
+  await capture("02-permissions");
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Keyboard shortcuts" }).click();
+  assert(await page.locator("#page .st-keys").count() > 10, "the shortcuts are listed");
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Providers" }).click();
+  await page.locator("#page .st-row").filter({ hasText: "Provider setup" }).waitFor();
   await capture("02-providers");
-  await page.locator("#overlay .settings-row").filter({ hasText: "Provider setup" }).getByRole("button", { name: "Open" }).click();
+  await page.locator("#page .st-row").filter({ hasText: "Provider setup" }).getByRole("button", { name: "Open" }).click();
   await page.locator("#setup:not([hidden])").waitFor();
   await capture("02-setup");
   await page.keyboard.press("Escape");
   await page.locator("#setup").waitFor({ state: "hidden" });
-  if (await page.locator("#overlay").isVisible()) await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  if (await page.locator("#page").isVisible()) await page.keyboard.press("Escape");
   // The picker lists four models, numbered, with the rest one step away.
   await page.locator("#composer-model").click();
-  await page.locator("#overlay .mp-main .mp-row").first().waitFor();
-  assert(await page.locator("#overlay .mp-main .mp-key", { hasText: /^[2-4]$/ }).count() === 3, "the short list numbers the other three models");
-  assert(await page.locator("#overlay .mp-more.shut").count() === 1, "More models starts shut");
+  await page.locator("#overlay .mp-row").first().waitFor();
+  assert(await page.locator("#overlay .mp-key", { hasText: /^[2-4]$/ }).count() === 3, "the short list numbers the other three models");
+  assert(await page.getByRole("textbox", { name: "Filter models" }).isVisible(), "the search sits on top, in sight");
+  assert.equal(await evaluate<string>("return document.activeElement?.id;"), "chooser-filter", "the search has the keyboard");
+  assert.equal(await page.locator("#overlay .mp").count(), 1, "the picker is one panel");
+  // Thinking is a track with a stop per level, inside the panel.
+  const panel = (await page.locator("#overlay .mp").boundingBox())!;
+  const stops = page.locator("#overlay .mp-stop");
+  assert.equal(await stops.count(), 6, "a stop for each of the model's six levels");
+  for (const stop of await stops.all()) { const r = (await stop.boundingBox())!; assert(r.x >= panel.x && r.x + r.width <= panel.x + panel.width, "every thinking stop sits inside the panel"); }
+  assert.equal(await page.locator("#overlay .mp-level").innerText(), "Low");
   await capture("02-models");
-  await page.locator("#overlay [data-more]").hover();
-  await until(() => page.locator("#overlay .mp-more:not(.shut) .mp-row").count().then(count => count === 2), "More models opens beside the list");
+  // Pointing at a model without thinking: the line says None, the panel keeps its height.
+  const panelHeight = () => evaluate<number>("return document.querySelector('#overlay .mp')?.offsetHeight ?? 0;");
+  const height = await panelHeight();
+  await page.locator("#overlay .mp-row", { hasText: "Desktop Small" }).hover();
+  await until(() => page.locator("#overlay .mp-level").innerText().then(text => text === "None"), "Thinking follows the row you point at");
+  assert.equal(await panelHeight(), height, "the panel keeps its height");
+  await page.locator("#overlay .mp-row", { hasText: "More models" }).click();
+  await until(() => page.locator("#overlay .mp-row", { hasText: "Far Away Large" }).isVisible(), "More models unfolds in the same panel");
+  assert.equal(await page.locator("#overlay .mp-group", { hasText: "other" }).count(), 1, "the rest come by provider");
   await capture("02-models-more");
+  await page.getByRole("textbox", { name: "Filter models" }).fill("far");
+  await until(() => page.locator("#overlay .mp-row").count().then(count => count === 2), "a search lists only its matches");
+  assert.equal(await page.locator("#overlay .mp-row b").first().innerText(), "Far", "the match is marked");
   await page.keyboard.press("Escape");
 
 
@@ -696,7 +1012,9 @@ try {
   await page.locator("#overlay").waitFor({ state: "hidden" });
   await close();
   assert.equal((await f.client.health()).model, "desktop-test", "Closing the app leaves the daemon alive");
-  await open(); // No workspace/session args: private preferences must restore both.
+  await open(); // No workspace/session args: private preferences restore the project.
+  // Launch lands on Home; the chat is one click away in the sidebar.
+  await reopenChat(sessionId);
   await page.getByRole("button", { name: "Expand full history", exact: true }).waitFor();
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Reopening starts with compacted history collapsed");
   await page.getByRole("button", { name: "Expand full history", exact: true }).click();
@@ -705,14 +1023,33 @@ try {
   const preferences = JSON.parse(readFileSync(join(f.home, ".demesne/desktop-ui.json"), "utf8"));
   assert.equal(preferences.lastWorkspace, f.workspace);
   await capture("05-restored");
+  assert(await page.locator("#composer-limit").isHidden(), "no plan word while the plan says nothing");
   await type(followUp);
   await textIncludes("The daemon is still working.");
+  // Words arrive softly: the streaming answer's new words fade in, then settle at full.
+  const fading = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("#conversation .markdown .md-in")].map((span) => span.textContent ?? "").join(""));
+  assert.ok(fading.includes("daemon is still working"), `streamed words fade in: ${fading}`);
+  await page.waitForTimeout(500);
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("#conversation .markdown .md-in")!).opacity), "1", "faded words settle at full");
   await until(async () => (await f.client.getSessionState(sessionId)).session.turns.at(-1)?.status === "running", "daemon turn running");
   await close();
   release!();
   await until(async () => (await f.client.getSessionState(sessionId)).session.turns.at(-1)?.status === "completed", "daemon completes after window closes");
+  smokeLimits = [{ provider: "test", plan: "plus", at: new Date().toISOString(),
+    primary: { usedPercent: 78, windowMinutes: 300, resetsAt: new Date(Date.now() + 3_600_000).toISOString() },
+    secondary: { usedPercent: 41, windowMinutes: 10080, resetsAt: null } }];
   await open();
+  await reopenChat(sessionId);
   await textIncludes(afterClose);
+  // Your plan's limit: past half, the fuller window sits beside the model word, amber from 75%.
+  const limitWord = page.locator("#composer-limit");
+  await limitWord.waitFor();
+  assert.equal((await limitWord.textContent())?.trim(), "78% of your 5-hour limit", "the plan's fuller window shows under the composer");
+  assert.match(await limitWord.getAttribute("class") ?? "", /\bwarn\b/, "amber from 75%");
+  const limitTip = await limitWord.getAttribute("title") ?? "";
+  assert.match(limitTip, /^test Plus\n5-hour window 78%, resets .+\nThis week 41%\nDrive pauses its own runs at 90%$/, `the tooltip gives resets, the week and Drive's rule: ${limitTip}`);
+  assert.equal((await f.client.planLimits()).limits[0]?.primary?.usedPercent, 78, "the daemon serves the provider's numbers");
+  await capture("06-plan-limit");
   await capture("06-work-survived-close");
   // Project groups expose their own chats and open the selected chat across
   // workspace boundaries, rather than restoring a different conversation.
@@ -722,7 +1059,8 @@ try {
   await desktop!.evaluate(({ dialog }, workspace) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
   }, secondProject);
-  await page.locator("#sidebar-open-project").click();
+  await page.locator("textarea").focus();
+  await page.keyboard.press("Control+o");
   await until(() => page.locator("#sidebar-sessions").getAttribute("data-workspace").then(path => path === secondProject), "sidebar opens another project");
   // Opening it switches chats; typing before the switch lands loses the text.
   await until(() => evaluate<boolean>("return window.demesneInspect?.().host.session !== arguments[0];", [sessionId]), "the window is on the new project's chat");
@@ -733,14 +1071,16 @@ try {
   await until(() => page.locator("#sidebar-sessions").getAttribute("data-workspace").then(path => path === f.workspace), "chat selection switches to its project");
   await until(() => page.locator(".sidebar-session[aria-current='page']").getAttribute("data-args").then(args => Boolean(args?.includes(sessionId))), "cross-project selection opens the exact chat");
   const secondary = page.locator(`.sidebar-project[data-project="${secondProject}"]`);
-  await secondary.locator(".sidebar-project-toggle").click();
+  await secondary.locator(".sidebar-project-name").click();
   assert(await secondary.locator(".sidebar-session").isVisible(), "other projects expand without switching workspace");
-  assert.equal(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).getAttribute("aria-expanded"), "false", "opening one project closes the other");
-  assert(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-state, .sidebar-project[data-project="${f.workspace}"] .sidebar-agents`).first().isVisible(), "a closed project shows its state on its line");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).fill("second project");
+  assert.equal(await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-name`).getAttribute("aria-expanded"), "true", "each project folds on its own");
+  await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-name`).click();
+  assert(await page.locator(`.sidebar-project[data-project="${f.workspace}"] :is(.sidebar-project-state, .sidebar-agents, .sidebar-group-count)`).first().isVisible(), "a folded project shows its state on its line");
+  await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-name`).click();
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).fill("second project");
   assert.equal(await page.locator(".sidebar-project").count(), 1, "search keeps only projects with matching chats");
   assert(await secondary.locator(".sidebar-session").isVisible(), "search exposes matching chats in another project");
-  await page.getByRole("searchbox", { name: "Find a conversation or project" }).press("Escape");
+  await page.getByRole("searchbox", { name: "Search chats and projects" }).press("Escape");
   const projectOrder = () => page.locator(".sidebar-project").evaluateAll(groups => groups.map(group => (group as HTMLElement).dataset.project));
   const primary = page.locator(`.sidebar-project[data-project="${f.workspace}"]`);
   await secondary.locator(".sidebar-project-name").dragTo(primary.locator(".sidebar-project-header"), { targetPosition: { x: 80, y: 2 } });
@@ -754,9 +1094,11 @@ try {
   assert.deepEqual(await projectOrder(), [f.workspace, secondProject], "keyboard moves a project down");
   await page.keyboard.press("Alt+ArrowUp");
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "keyboard moves a project up");
-  await secondary.locator(".sidebar-project-name").click();
+  // + on a project's line starts a chat there, switching projects.
+  await secondary.locator(".sidebar-project-header").hover();
+  await secondary.locator(".sidebar-project-new").click();
   await until(() => page.locator(".sidebar-project.active").getAttribute("data-project").then(path => path === secondProject), "opening the reordered project");
-  await primary.locator(".sidebar-project-name").click();
+  await primary.locator(`.sidebar-session[data-args*="${sessionId}"]`).click();
   await until(() => page.locator(".sidebar-project.active").getAttribute("data-project").then(path => path === f.workspace), "switching back to the second project in manual order");
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "switching projects preserves manual ordering");
   await page.locator("textarea").focus();
@@ -787,13 +1129,21 @@ try {
   await until(() => page.locator("#drive-reply .dt-sent").isVisible(), "the note says it was sent");
   await until(() => page.locator("#drive-reply .drive-told li").innerText().then(text => text.includes("Keep the tests green") && text.includes(`From ${home}`)), "the mission card shows your note");
   await capture("08-drive-tell");
+  // Drive's chat waits behind yours: one edge of its panel, its title down it.
+  await until(() => page.locator("#drive-peek.work").isVisible(), "Drive's panel waits behind yours while it works");
+  assert((await page.locator("#drive-peek").getAttribute("aria-label"))!.includes("Verify the Drive controls"), "the edge names the mission");
   // Its own chat says where it came from and shows the note; the link goes back.
   await page.locator('#drive-reply [data-action="select-session"]', { hasText: "Watch" }).click();
   await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "the mission's chat names the chat it came from");
   await until(() => page.locator("#drive-turn .drive-told li").innerText().then(text => text.includes("Keep the tests green")), "the mission's chat shows your note");
   assert.equal(await page.locator("#drive-turn .drive-heading").count(), 0, "the mission turn has no boxed details");
   assert.equal(await page.locator("#drive-turn").evaluate(node => getComputedStyle(node).borderTopWidth + getComputedStyle(node).backgroundColor), "0pxrgba(0, 0, 0, 0)", "the mission turn sits unboxed in the chat");
+  await until(() => page.locator("#drive-peek.back").getAttribute("aria-label").then(text => text === `Back to ${home}`), "inside Drive's chat the edge is the chat it came from");
   await capture("08-drive-chat");
+  await page.locator("#drive-peek").click();
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "clicking the edge swaps the two back");
+  await page.locator("#drive-peek.work").click();
+  await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "and the edge swaps them again");
   await page.locator("#workspace-from button").click();
   await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "from takes you back");
   assert(await page.locator("#workspace-from").isHidden(), "your own chat has no from");
@@ -1006,7 +1356,7 @@ try {
   writeFileSync(join(f.workspace, "bun.lock"), "");
   const deedRow = page.locator(".sidebar-deed");
   // It sits at the top of the project's chats, so unfold the project first.
-  if (!await deedRow.isVisible()) await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-toggle`).click();
+  if (!await deedRow.isVisible()) await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-name`).click();
   await until(() => deedRow.isVisible(), "the open project leads with its Deed");
   await deedRow.click();
   await until(() => page.locator("#deed").isVisible(), "the Deed opens in place of the chat");
@@ -1111,7 +1461,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "it learns your yes", "the project map", "who is working where on the map", "pointing at the live page", "the Deed"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

@@ -165,7 +165,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .sidebar-rail { display: none; }
 #desktop-shell.sidebar-collapsed { grid-template-columns: 60px minmax(0, 1fr); }
 #desktop-shell.sidebar-collapsed #desktop-sidebar { padding: 14px 10px 12px; align-items: center; }
-#desktop-shell.sidebar-collapsed #desktop-sidebar > :not(.sidebar-rail) { display: none; }
+#desktop-shell.sidebar-collapsed:not(.sidebar-peek) #desktop-sidebar > :not(.sidebar-rail) { display: none; }
 #desktop-shell.sidebar-collapsed .sidebar-rail { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 6px; width: 40px; }
 #rail-expand { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 8px; border-radius: 8px; }
 #rail-expand .project-mark { width: 32px; height: 32px; font-size: 14px; line-height: 32px; }
@@ -1146,7 +1146,7 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
    with no fills; choices unfold under their row, numbers are typed. */
 #desktop-sidebar.settings-open > :is(.sidebar-nav, #sidebar-projects, #sidebar-order-status) { display: none; }
 #settings-nav { display: flex; flex: 1; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding-bottom: 12px; }
-#settings-nav[hidden], #desktop-shell.sidebar-collapsed #settings-nav { display: none; }
+#settings-nav[hidden], #desktop-shell.sidebar-collapsed:not(.sidebar-peek) #settings-nav { display: none; }
 .st-back { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; margin-bottom: 4px; border-radius: var(--r); color: var(--t3); font-size: 12.5px; text-align: left; }
 .st-back:hover { color: var(--t1); background: var(--surface2); }
 .st-back .ico { width: 14px; height: 14px; }
@@ -1370,3 +1370,13 @@ html.mac-chrome.fullscreen #desktop-shell:has(#desktop-sidebar[hidden]) #desktop
 .desktop #composer .composer-bar #composer-limit .ring::after { width: 8px; height: 8px; }
 .desktop #composer .composer-bar #composer-limit.warn { color: var(--warn); }
 .desktop #composer .composer-bar #composer-limit.warn .ring { background: conic-gradient(var(--warn) 0 var(--usage, 0%), var(--surface3) 0); }
+
+/* The folded sidebar peeks out (pass 76 B): resting on the rail slides the
+   whole sidebar out over the panel, a solid sheet like the popovers. */
+#desktop-shell { position: relative; }
+#desktop-shell.sidebar-collapsed.sidebar-peek #desktop-sidebar { position: absolute; left: 0; top: 0; bottom: 0; z-index: 90; width: 256px; align-items: stretch; padding-left: 12px; padding-right: 12px; padding-bottom: 10px; background: var(--panel, var(--side)); box-shadow: 1px 0 0 var(--hair), 14px 0 44px rgb(0 0 0 / 0.3); }
+#desktop-shell.sidebar-collapsed.sidebar-peek .sidebar-rail { display: none; }
+@media (prefers-reduced-motion: no-preference) {
+  #desktop-shell.sidebar-peek #desktop-sidebar { animation: sidebar-peek 180ms var(--ease) both; }
+}
+@keyframes sidebar-peek { from { opacity: 0; transform: translateX(-14px); } }

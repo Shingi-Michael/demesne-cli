@@ -214,8 +214,15 @@ setBusy(true);
 void start();
 
 const sidebarToggle = el<HTMLButtonElement>("desktop-toggle-sidebar");
+// The folded sidebar peeks out (pass 76 B): rest on the rail's empty space
+// and the whole sidebar slides out over the panel. Picking a chat, Esc, or
+// moving away (after a short grace, so crossing to it never drops it) puts
+// it back; the rail's own buttons stay buttons.
+const sidebar = el("desktop-sidebar");
+let peekTimer: ReturnType<typeof setTimeout> | undefined;
 /// Folded, the sidebar is a 60px rail: the mark, +, and dots for what waits.
 function setSidebarCollapsed(collapsed: boolean) {
+  setPeek(false);
   shell.classList.toggle("sidebar-collapsed", collapsed);
   sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
   try { localStorage.setItem("demesne-sidebar-collapsed", String(collapsed)); } catch {}
@@ -223,6 +230,26 @@ function setSidebarCollapsed(collapsed: boolean) {
 try { setSidebarCollapsed(localStorage.getItem("demesne-sidebar-collapsed") === "true"); } catch {}
 sidebarToggle.addEventListener("click", () => setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")));
 for (const id of ["rail-expand", "rail-sessions"]) el(id).addEventListener("click", () => setSidebarCollapsed(false));
+function setPeek(on: boolean) {
+  clearTimeout(peekTimer);
+  peekTimer = undefined;
+  shell.classList.toggle("sidebar-peek", on && shell.classList.contains("sidebar-collapsed"));
+}
+const peeking = () => shell.classList.contains("sidebar-peek");
+sidebar.addEventListener("pointermove", (event) => {
+  if (!shell.classList.contains("sidebar-collapsed")) return;
+  if (peeking()) { clearTimeout(peekTimer); peekTimer = undefined; return; }
+  if ((event.target as Element).closest("button")) { clearTimeout(peekTimer); peekTimer = undefined; return; }
+  peekTimer ??= setTimeout(() => setPeek(true), 250);
+});
+sidebar.addEventListener("pointerleave", () => {
+  clearTimeout(peekTimer);
+  peekTimer = peeking() ? setTimeout(() => setPeek(false), 180) : undefined;
+});
+sidebar.addEventListener("click", (event) => {
+  if (peeking() && (event.target as Element).closest(".sidebar-session, [data-action='new-session'], [data-action='page-open']")) setTimeout(() => setPeek(false), 0);
+});
+document.addEventListener("keydown", (event) => { if (event.key === "Escape" && peeking()) setPeek(false); });
 // Search is always there; Escape clears it and gives the list back.
 searchField.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;

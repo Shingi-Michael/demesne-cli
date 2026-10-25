@@ -1755,7 +1755,7 @@ function patchStream(
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!;
     if (entry !== before.entries[i] && entry.type === "assistant")
-      saved.views.get(entry.id)!.update(splitNextPrompt(entry.raw).text);
+      saved.views.get(entry.id)!.update(splitNextPrompt(entry.raw).text, run.status === "running");
   }
   return true;
 }
@@ -1857,7 +1857,7 @@ function renderConversation() {
         }
         view.element.dataset.answer = run.id;
         view.element.dataset.entry = String(id);
-        view.update(splitNextPrompt(entry.raw).text);
+        view.update(splitNextPrompt(entry.raw).text, run.status === "running");
         slot.replaceWith(view.element);
       }
       saved.node.replaceChildren(template.content);

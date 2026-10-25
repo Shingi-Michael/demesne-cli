@@ -364,6 +364,8 @@ try {
   assert.equal(await page.locator("#sidebar-sessions .cube-mark").count(), 0, "one cube on screen: the sidebar shows a dot");
   assert(await page.locator("#sidebar-sessions .sidebar-session-mark.working").count() > 0, "the working chat breathes a dot in the sidebar");
   assert.equal(await thinkingToggle.locator(".shine").innerText(), "Thinking");
+  await until(() => page.locator("#app").getAttribute("class").then(value => value?.includes("rim-work") ?? false), "a working turn runs a light along the panel's rim");
+  assert.equal(await page.locator("#desktop-toolbar .header-live.work").innerText(), "Working", "the title line says it works");
   await capture("01-thinking-cube");
   await thinkingToggle.click();
   await trace.waitFor({ state: "hidden" });
@@ -421,6 +423,8 @@ try {
   assert.equal(await page.locator("#approval .approval-show, #approval .approval-fold").count(), 0, "a command has nothing to unfold");
   await until(() => page.locator(".tool-row.waiting .target").innerText().then(text => text === "bun run check"), "the waiting step names the command");
   assert.equal(await page.evaluate(() => { const row = document.querySelector("#approval .approval-row")!; return row.scrollWidth <= row.clientWidth; }), true, "the row fits its width");
+  await until(() => page.locator("#app").getAttribute("class").then(value => value?.includes("rim-wait") ?? false), "waiting on you holds an amber arc on the rim");
+  assert.equal(await page.locator("#desktop-toolbar .header-live.wait").innerText(), "Waiting on you · run bun run check?", "the title line says what it waits for");
   await capture("02-command-approval");
   await click("permission", { decision: "allow_once" });
   await textIncludes(completed);
@@ -463,6 +467,22 @@ try {
   assert((await page.locator(`#turn-${turnId} .proof-fold.ok`).last().innerText()).includes("greeting = 'after'"), "the check's proof quotes what it read");
   await page.keyboard.press("Escape");
   await until(() => page.locator(`#turn-${turnId} .proof-fold`).count().then(count => count === 0), "Esc folds the proof");
+  // The edge is a timeline: a long chat shows its shape on the panel's right edge.
+  await page.evaluate(() => { document.getElementById("conversation")!.style.paddingBottom = "1600px"; });
+  await until(() => page.locator("#timeline").isVisible(), "a long chat has a timeline edge");
+  await page.locator("#timeline").hover();
+  await until(() => page.locator("#timeline .tl-m.you").count().then(count => count >= 2), "the timeline marks each message you sent");
+  assert(await page.locator("#timeline .tl-m.answer").count() >= 1, "answers are rings on the timeline");
+  assert(await page.locator("#timeline .tl-m.edit").count() >= 1, "the turn that edited hello.ts is a green tick");
+  const youMark = await page.locator("#timeline .tl-m.you").last().boundingBox();
+  await page.mouse.move(youMark!.x + youMark!.width / 2, youMark!.y + youMark!.height / 2);
+  await until(() => page.locator("#timeline .tl-label").innerText().then(text => text.includes("Desktop smoke: update hello.ts")), "pointing at a mark names it");
+  await capture("02d-timeline");
+  await page.evaluate(() => { document.getElementById("stage")!.scrollTop = document.getElementById("stage")!.scrollHeight; });
+  await page.mouse.click(youMark!.x + youMark!.width / 2, youMark!.y + youMark!.height / 2);
+  await until(() => page.evaluate((id) => { const ask = document.querySelector(`#turn-${id} .request`)!.getBoundingClientRect(), stage = document.getElementById("stage")!.getBoundingClientRect(); return ask.top >= stage.top - 2 && ask.top < stage.top + 120; }, turnId), "clicking a mark goes to that message");
+  await page.mouse.move(400, 300);
+  await page.evaluate(() => { document.getElementById("conversation")!.style.paddingBottom = ""; });
   await until(() => page.locator(".sidebar-session[aria-current='page']").innerText().then(text => text.includes("Desktop smoke")), "sidebar tracks the current conversation title");
   await page.getByRole("searchbox", { name: "Search chats and projects" }).fill("no-such-conversation");
   await textIncludes("No matching conversations");
@@ -994,13 +1014,21 @@ try {
   await until(() => page.locator("#drive-reply .dt-sent").isVisible(), "the note says it was sent");
   await until(() => page.locator("#drive-reply .drive-told li").innerText().then(text => text.includes("Keep the tests green") && text.includes(`From ${home}`)), "the mission card shows your note");
   await capture("08-drive-tell");
+  // Drive's chat waits behind yours: one edge of its panel, its title down it.
+  await until(() => page.locator("#drive-peek.work").isVisible(), "Drive's panel waits behind yours while it works");
+  assert((await page.locator("#drive-peek").getAttribute("aria-label"))!.includes("Verify the Drive controls"), "the edge names the mission");
   // Its own chat says where it came from and shows the note; the link goes back.
   await page.locator('#drive-reply [data-action="select-session"]', { hasText: "Watch" }).click();
   await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "the mission's chat names the chat it came from");
   await until(() => page.locator("#drive-turn .drive-told li").innerText().then(text => text.includes("Keep the tests green")), "the mission's chat shows your note");
   assert.equal(await page.locator("#drive-turn .drive-heading").count(), 0, "the mission turn has no boxed details");
   assert.equal(await page.locator("#drive-turn").evaluate(node => getComputedStyle(node).borderTopWidth + getComputedStyle(node).backgroundColor), "0pxrgba(0, 0, 0, 0)", "the mission turn sits unboxed in the chat");
+  await until(() => page.locator("#drive-peek.back").getAttribute("aria-label").then(text => text === `Back to ${home}`), "inside Drive's chat the edge is the chat it came from");
   await capture("08-drive-chat");
+  await page.locator("#drive-peek").click();
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "clicking the edge swaps the two back");
+  await page.locator("#drive-peek.work").click();
+  await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "and the edge swaps them again");
   await page.locator("#workspace-from button").click();
   await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "from takes you back");
   assert(await page.locator("#workspace-from").isHidden(), "your own chat has no from");

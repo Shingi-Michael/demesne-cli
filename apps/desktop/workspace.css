@@ -1271,3 +1271,57 @@ html.mac-chrome #desktop-toolbar :is(button, a, input, [role="button"], .chip, .
 html.mac-chrome #desktop-shell:has(#desktop-sidebar[hidden]) #desktop-toolbar { padding-left: 84px; }
 html.mac-chrome.fullscreen #desktop-sidebar { padding-top: 14px; }
 html.mac-chrome.fullscreen #desktop-shell:has(#desktop-sidebar[hidden]) #desktop-toolbar { padding-left: 16px; }
+
+/* The edge is a timeline (pass 74 A): where the scrollbar was, pointing at
+   the panel's right edge shows the chat's shape. Filled dot = you, ring = an
+   answer, green tick = a turn that edited files, red = a check that failed;
+   the brighter stretch is what is on screen. */
+#timeline { position: absolute; right: 2px; z-index: 6; width: 26px; opacity: 0; cursor: pointer; transition: opacity 180ms var(--ease, ease); }
+#timeline.on { opacity: 1; }
+#timeline .tl-line { position: absolute; right: 12px; top: 0; bottom: 0; width: 1px; background: var(--hair2); }
+#timeline .tl-view { position: absolute; left: -1px; width: 3px; min-height: 8px; border-radius: 2px; background: var(--t3); }
+#timeline .tl-marks { position: absolute; inset: 0; pointer-events: none; }
+#timeline .tl-m { position: absolute; right: 9px; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: var(--panel, var(--ink)); box-shadow: inset 0 0 0 1.5px var(--t3); transition: box-shadow 140ms var(--ease, ease), background-color 140ms var(--ease, ease); }
+#timeline .tl-m.you { background: var(--t2); box-shadow: none; }
+#timeline .tl-m.edit { right: 8px; width: 9px; height: 1.5px; margin-top: -0.75px; border-radius: 1px; background: var(--ok); box-shadow: none; }
+#timeline .tl-m.fail { right: 7px; width: 11px; height: 2px; margin-top: -1px; border-radius: 1px; background: var(--bad); box-shadow: none; }
+#timeline .tl-m.hot { box-shadow: inset 0 0 0 1.5px var(--t1); }
+#timeline .tl-m.you.hot { background: var(--t1); }
+#timeline .tl-m.edit.hot, #timeline .tl-m.fail.hot { transform: scaleX(1.4); transform-origin: right; }
+#timeline .tl-label { position: absolute; right: 28px; transform: translateY(-50%); max-width: 440px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 7px; border-radius: 8px; background: var(--panel, var(--ink)); box-shadow: 0 0 0 1px var(--hair); color: var(--t2); font-size: 11.5px; line-height: 17px; pointer-events: none; }
+#timeline .tl-label span { color: var(--t4); }
+@media (prefers-reduced-motion: reduce) { #timeline, #timeline .tl-m { transition: none; } }
+
+/* The rim says the state (pass 74 B): the panel's edge carries the chat's
+   state. Work: a blue light runs along it. Wait: a still amber arc on top.
+   A failed check or turn: a short red dash until you touch the window. */
+@property --rim-a { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+#desktop-shell > .live-app::after { content: ""; position: absolute; inset: 0; z-index: 30; border-radius: inherit; padding: 1.5px; pointer-events: none; opacity: 0; transition: opacity 220ms var(--ease, ease);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+#desktop-shell > .live-app.rim-work::after { opacity: 1; background: conic-gradient(from var(--rim-a), transparent 0deg, color-mix(in srgb, var(--acc) 25%, transparent) 22deg, var(--acc) 40deg, color-mix(in srgb, var(--acc) 25%, transparent) 58deg, transparent 80deg, transparent 360deg); }
+#desktop-shell > .live-app.rim-wait::after { opacity: 1; background: conic-gradient(from -50deg, color-mix(in srgb, var(--warn) 90%, transparent) 0deg, var(--warn) 50deg, color-mix(in srgb, var(--warn) 90%, transparent) 100deg, color-mix(in srgb, var(--warn) 22%, transparent) 130deg, color-mix(in srgb, var(--warn) 22%, transparent) 330deg, color-mix(in srgb, var(--warn) 90%, transparent) 360deg); }
+#desktop-shell > .live-app.rim-fail::after { opacity: 1; background: conic-gradient(from -9deg, var(--bad) 0deg, var(--bad) 18deg, transparent 19deg, transparent 360deg); }
+@media (prefers-reduced-motion: no-preference) { #desktop-shell > .live-app.rim-work::after { animation: rim-run 3.2s linear infinite; } }
+@media (prefers-reduced-motion: reduce) { #desktop-shell > .live-app.rim-work::after { --rim-a: 300deg; } }
+@keyframes rim-run { to { --rim-a: 360deg; } }
+#desktop-toolbar .header-live { display: inline-flex; align-items: center; gap: 7px; min-width: 0; margin-left: 4px; font: 12px Inter, system-ui, sans-serif; color: var(--t3); white-space: nowrap; overflow: hidden; }
+#desktop-toolbar .header-live span { overflow: hidden; text-overflow: ellipsis; }
+#desktop-toolbar .header-live i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
+#desktop-toolbar .header-live.wait { color: var(--warn); } #desktop-toolbar .header-live.wait i { background: var(--warn); }
+#desktop-toolbar .header-live.fail { color: var(--bad); } #desktop-toolbar .header-live.fail i { background: var(--bad); }
+@media (prefers-reduced-motion: no-preference) { #desktop-toolbar .header-live.work i { animation: live-breathe 1.6s ease-in-out infinite; } }
+@keyframes live-breathe { 50% { opacity: 0.35; } }
+
+/* Drive's panel behind yours (pass 74 D): one edge of a second panel shows
+   at the right of the open one, its title running down it. */
+#drive-peek { grid-column: 2; grid-row: 2; justify-self: end; position: relative; z-index: 0; width: 46px; margin: 8px 10px 18px 0; padding: 0; border: 0; border-radius: 12px; background: color-mix(in srgb, var(--panel, var(--ink)) 82%, var(--t1) 3%); box-shadow: 0 0 0 1px var(--panel-edge, var(--hair)); color: var(--t3); cursor: pointer; overflow: hidden; transition: box-shadow 160ms var(--ease, ease), color 160ms var(--ease, ease); }
+#drive-peek:hover { color: var(--t1); box-shadow: 0 0 0 1px var(--hair2); }
+#drive-peek.ready { color: var(--ok); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ok) 55%, transparent); }
+#drive-peek .dp-words { position: absolute; right: 6px; top: 16px; display: flex; align-items: center; gap: 9px; max-height: calc(100% - 32px); writing-mode: vertical-rl; font-size: 11.5px; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; }
+#drive-peek .dp-words span { overflow: hidden; text-overflow: ellipsis; }
+#drive-peek .dp-words i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
+#drive-peek.ready .dp-words i { background: var(--ok); }
+#drive-peek.back .dp-words i { width: 0; height: 0; border-radius: 0; border: 4px solid transparent; border-right: 5px solid currentColor; border-left: 0; background: none; transform: rotate(90deg); }
+@media (prefers-reduced-motion: no-preference) { #drive-peek.work .dp-words i { animation: live-breathe 1.6s ease-in-out infinite; } }
+#desktop-shell > .live-app { position: relative; z-index: 1; }
+#desktop-shell:has(#drive-peek:not([hidden])) > .live-app { margin-right: 40px; }

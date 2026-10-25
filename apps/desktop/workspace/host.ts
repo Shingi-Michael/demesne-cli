@@ -2,7 +2,6 @@ import { ChatGPTAuth, type ChatGPTAccount } from "@demesne/chatgpt-auth";
 import { configuredChatGPTAccount } from "@demesne/setup/chatgpt-auth.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import type {
-  CommandsResponse,
   CommandRecord,
   ReviewScope,
   TurnAttachment,

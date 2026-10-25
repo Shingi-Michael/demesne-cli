@@ -9,69 +9,6 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: macos-14
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: bun-darwin-arm64
-            artifact: demesne-darwin-arm64
-            smoke: true
-          - target: bun-darwin-x64
-            artifact: demesne-darwin-x64
-            smoke: false
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-      # See ci.yml: the agent benchmark fixtures run `bun test` through
-      # run_command, whose fixed PATH does not include ~/.bun/bin.
-      - run: sudo mkdir -p /usr/local/bin && sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
-      # The tools tests exercise search_files with and without ripgrep.
-      - run: command -v rg || brew install ripgrep
-      # Both Mac architectures' sharp binaries, so the x64 daemon can carry its own.
-      - run: bun install --frozen-lockfile --os=darwin --cpu='*'
-      - run: bun run typecheck
-      - run: bun test
-
-      - name: Build binaries
-        run: |
-          mkdir -p release
-          bun build apps/cli/src/main.ts --compile --target=${{ matrix.target }} --outfile release/demesne
-          # The daemon loads sharp from node_modules beside its real path.
-          bun run scripts/build-daemon.ts --target=${{ matrix.target }}
-          cp dist/demesned release/demesned
-          cp -R dist/node_modules release/node_modules
-          test -f release/node_modules/sharp/dist/index.cjs
-
-      # The arm64 runner can execute the arm64 artifact natively. The x64
-      # artifact is only syntax-checked here; signing and a native smoke test
-      # belong to the notarization step once release credentials exist.
-      # The daemon check boots it through a symlink, as install.sh lays it out.
-      - name: Smoke test native artifact
-        if: matrix.smoke
-        run: |
-          ./release/demesne --version
-          mkdir -p "$RUNNER_TEMP/bin" && ln -sf "$PWD/release/demesned" "$RUNNER_TEMP/bin/demesned"
-          bun scripts/check-desktop-backend.ts "$RUNNER_TEMP/bin/demesned" --beside
-
-      - name: Package and checksum
-        run: |
-          cd release
-          tar -czf "../${{ matrix.artifact }}.tar.gz" demesne demesned node_modules
-          cd ..
-          shasum -a 256 "${{ matrix.artifact }}.tar.gz" > "${{ matrix.artifact }}.tar.gz.sha256"
-          cat "${{ matrix.artifact }}.tar.gz.sha256"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: |
-            ${{ matrix.artifact }}.tar.gz
-            ${{ matrix.artifact }}.tar.gz.sha256
-
   # The desktop app, so installing demesne needs neither Bun nor Rust. Each
   # bundle carries its own daemon, desktop host and native image runtime.
   desktop:
@@ -141,7 +78,7 @@ jobs:
             ${{ matrix.artifact }}.sha256
 
   release:
-    needs: [build, desktop]
+    needs: [desktop]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -154,8 +91,5 @@ jobs:
           files: artifacts/*
           generate_release_notes: true
 
-  # TODO before public distribution:
-  # - Import a Developer ID certificate, then sign and notarize the archives
-  #   and Demesne.app.
-  # - Staple the notarization ticket and publish the stapled archives.
-  # - Add an x86_64 native smoke test on an Intel runner or under Rosetta.
+  # TODO before public distribution: import a Developer ID certificate, sign
+  # and notarize Demesne.app, and publish the stapled archive.

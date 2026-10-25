@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { test } from "bun:test";
 import { WorkspaceHost } from "../host.ts";
 import { fixture, eventually } from "./fixture.ts";
 

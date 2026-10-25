@@ -2,58 +2,6 @@
 
 [Documentation index](README.md) · [Configuration](configuration.md) · [Desktop app](desktop.md)
 
-## Executable commands
-
-Run `demesne --help` for the installed build's grammar. [Source](../apps/cli/src/main.ts).
-
-| Command | Purpose |
-| --- | --- |
-| `demesne` | Open the desktop window on the current folder from an interactive terminal |
-| `demesne chat "message"` | Open the window and submit the opening message; headless without a TTY |
-| `demesne --session ID` | Resume a session in the window |
-| `demesne --workspace PATH --model ID` | Open a workspace and select a configured model |
-| `demesne --setup` | Open setup in the window |
-| `demesne setup` | Terminal provider/model/review wizard |
-| `demesne auth login chatgpt` | Continue with ChatGPT |
-| `demesne auth login chatgpt --model gpt-6.1-sol` | Connect directly to Sol; verify account access when it is absent from the catalog |
-| `demesne auth accounts\|status\|use\|logout chatgpt` | Manage ChatGPT registrations |
-| `demesne auth login openrouter` | Connect OpenRouter |
-| `demesne daemon start\|stop\|status\|logs` | Manage the daemon |
-| `demesne doctor [--json]` | Inspect configuration and connectivity |
-| `demesne ps [--watch] [--json]` | Active turns, queues, and provider slot capacities |
-| `demesne models` | List provider model IDs |
-| `demesne models scoreboard [--days N] [--here]` | How each model has done on your own recorded work: turns finished, tool calls without errors, speed, checks, Drive runs kept |
-| `demesne session list` | List sessions |
-| `demesne session create [--workspace PATH] [title]` | Create a workspace-bound session (asks to trust a new folder) |
-| `demesne session auto-approve SESSION_ID on\|off\|status` | Enable, disable or inspect automatic approval for that session |
-| `demesne session show ID` | Print a session as JSON |
-| `demesne drive [--pr N] [--here] MISSION` | Run a Drive mission with no window, print its receipt, and post it to PR N; exits 0 only when every task is verified. See [Drive in CI](agent-drive.md#drive-in-ci) |
-| `demesne compact ID [instructions]` | Summarize older context |
-| `demesne cancel TURN_ID` | Cancel a turn |
-| `demesne events SESSION_ID [--after EVENT_ID]` | Stream journal events |
-| `demesne --version` | Show version; interactive use also checks for updates (`--no-check` disables it) |
-
-`--server URL` selects the daemon. The window opens on the current folder unless `--workspace` names another. To find the app, `demesne` checks `DEMESNE_DESKTOP_BIN`, then `Demesne.app` in `/Applications` or `~/Applications` on macOS, then `demesne-desktop` on PATH, then a build in this checkout under `apps/desktop/release`. From a checkout with Electron installed it falls back to `bun run desktop`. If none of these is found, it says to build with `bun run build:desktop` or use `demesne prompt`. See the [desktop guide](desktop.md).
-
-ChatGPT uses the public Responses API directly. [Authentication](authentication.md#continue-with-chatgpt) explains account selection, Sol verification and plan usage.
-
-## Headless output
-
-```sh
-demesne prompt --output text "Explain the source layout"
-demesne prompt --output json --plan "Plan a parser change"
-echo "Summarize this failure" | demesne prompt --output stream-json
-demesne prompt --session SESSION_ID "Continue the investigation"
-```
-
-`--output` accepts `text`, `json`, or `stream-json`. JSON contains the final status, response, usage, changes, validation results, and timing. Stream JSON emits events followed by a final result. Exit codes are 0 for completion, 1 for failure/interruption, and 130 for cancellation.
-
-A new session in a folder you haven't trusted yet asks "Do you trust the files in this folder?" on a terminal. Without one, the command fails; pass `--trust-workspace` to confirm trust for a scripted run. See [workspace trust](../SECURITY.md#workspace-trust).
-
-`--permission ask|deny` chooses the turn's permission mode. Without an interactive approval channel, requested approvals are denied rather than left waiting. Saved grants and workspace permissions remain subject to daemon policy; `ask` is not unattended blanket authorization.
-
-**Settings › Approvals › Auto-approve all** enables automatic approval for the current session. The approval card offers the same option. Edits, commands, deletions and publishing run without asking, including any action already waiting for approval. The setting persists for that session across reopening and daemon restarts; new sessions start with **Ask first**. Turn it off to resume approval prompts for later actions. Plan mode still exposes inspection tools only. The desktop composer's mode word sets the same policy, and adds **Accept edits**, which lets file edits, new files and moves through while deletes and commands still ask.
-
 ## Slash commands
 
 These commands are handled by the interface host. The canonical grammar is in [the brand package](../packages/brand/src/index.ts), with dispatch in [host.ts](../apps/desktop/workspace/host.ts).

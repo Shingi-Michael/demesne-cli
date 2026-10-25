@@ -181,7 +181,7 @@ function createProcessor(signedIn: Set<string>): ProviderTurnProcessor | MultiPr
 /// Re-reads the user config and auth after signing in or out, and swaps the
 /// providers in place: no daemon restart.
 async function reloadProviders(processor: ProviderTurnProcessor | MultiProviderProcessor | undefined) {
-  if (!(processor instanceof MultiProviderProcessor)) throw new Error("Configure a provider with demesne setup first.");
+  if (!(processor instanceof MultiProviderProcessor)) throw new Error("Configure a provider in Demesne's setup first.");
   const { config: fresh } = loadConfig({ includeProject: false });
   const { configs, processors } = buildProviders(fresh, await signedInAccounts());
   if (processors.some((item) => !item)) throw new Error("Each configured provider requires a default model");
@@ -210,7 +210,7 @@ function createSingleProcessor(settings: ProviderConfig): ProviderTurnProcessor 
   if (configuredContextCapacity && maxOutputTokens && maxOutputTokens >= configuredContextCapacity) {
     throw new Error("provider.max_output_tokens must be smaller than provider.context_window");
   }
-  if (settings.auth === "chatgpt" && !settings.authProfile) throw new Error("ChatGPT requires an auth_profile. Run demesne auth login chatgpt.");
+  if (settings.auth === "chatgpt" && !settings.authProfile) throw new Error("ChatGPT requires an auth_profile. Sign in under Settings › Providers.");
   const auth = settings.auth === "chatgpt" ? new ChatGPTAuth(dataDirectory) : undefined;
   const provider = auth ? new ChatGPTProvider({ accountId: settings.authProfile!, accessToken: signal => auth.accessToken(settings.authProfile!, signal), contextWindow: configuredContextCapacity, configuredModel: model }) : new OpenAICompatibleProvider({
     baseUrl,

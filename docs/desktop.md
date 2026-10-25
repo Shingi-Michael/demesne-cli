@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Implementation](../apps/desktop/README.md) · [Configuration](configuration.md) · [Security](../SECURITY.md)
 
-Demesne uses Electron and bundled Chromium on macOS, Linux and Windows. Its HTML/CSS/TypeScript interface covers conversations, diffs, checks, authentication, subagents and Drive. The existing Bun daemon owns coding turns and session data; `demesne prompt` remains available for headless use.
+Demesne uses Electron and bundled Chromium on macOS, Linux and Windows. Its HTML/CSS/TypeScript interface covers conversations, diffs, checks, authentication, subagents and Drive. The Bun daemon owns coding turns and session data.
 
 ## Prerequisites
 
@@ -17,13 +17,7 @@ bun install --frozen-lockfile
 bun run desktop
 ```
 
-Use **Open project** to select a folder. Workspace trust, provider setup, authentication and configuration work as on the command line. Your sessions and private `desktop-ui.json` preferences remain in the same daemon data directory.
-
-## Open from the terminal
-
-Run `demesne` in a project directory. `demesne chat "fix the failing test"` opens the app and sends the initial message. `--model`, `--session`, `--workspace` and `--setup` pass through to the host.
-
-The launcher checks `DEMESNE_DESKTOP_BIN`, installed application locations, `demesne-desktop` on PATH, and Electron bundles in `apps/desktop/release`. A source checkout with Electron dependencies installed falls back to `bun run desktop`. Without a terminal, `demesne chat` uses headless output.
+Use **Open project** to select a folder. Your sessions and private `desktop-ui.json` preferences remain in the same daemon data directory.
 
 ## Build an app
 

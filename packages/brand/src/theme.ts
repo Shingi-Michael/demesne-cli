@@ -302,11 +302,7 @@ export const THEMES: Record<string, Theme> = {
 };
 
 export const DEFAULT_DARK_THEME = "demesne";
-export const DEFAULT_LIGHT_THEME = "demesne-light";
-
-/// Back-compat aliases: the Demesne themes are what the interface shipped with.
-export const terminalPalette = THEMES[DEFAULT_DARK_THEME]!.colors;
-export const lightTerminalPalette = THEMES[DEFAULT_LIGHT_THEME]!.colors;
+const DEFAULT_LIGHT_THEME = "demesne-light";
 
 export function themeNames(): string[] {
   return Object.keys(THEMES);
@@ -316,15 +312,10 @@ export function isThemeName(value: string | undefined): boolean {
   return value !== undefined && Object.hasOwn(THEMES, value);
 }
 
-/// The theme's human label, for a picker.
-export function themeLabel(name: string): string {
-  return THEMES[name]?.label ?? name;
-}
-
 /// Reads the terminal background from `COLORFGBG`, which reports
 /// `foreground;background` as ANSI indexes. Anything 7 or brighter is a light
 /// background.
-export function detectAppearance(colorForegroundBackground: string | undefined): TerminalTheme {
+function detectAppearance(colorForegroundBackground: string | undefined): TerminalTheme {
   const background = Number(colorForegroundBackground?.split(";").at(-1));
   return Number.isFinite(background) && background >= 7 ? "light" : "dark";
 }

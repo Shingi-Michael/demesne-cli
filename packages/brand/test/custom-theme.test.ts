@@ -1,5 +1,7 @@
 import {expect,test} from "bun:test";
-import {contrast,createCustomTheme,palette} from "../src/index.ts";
+import {createCustomTheme, THEMES} from "../src/index.ts";
+import {contrast} from "../src/custom-theme.ts";
+const palette = THEMES.demesne!.colors;
 
 import {warmOlive} from "./theme-fixture.ts";
 
@@ -12,10 +14,4 @@ test.each(["dark","light"] as const)("custom %s palettes adjust every text role 
     for(const bg of ["ink","surface","raised","thinkingSurface","errorSurface","accentSurface","tileSelection","diffAddedSurface","diffRemovedSurface"] as const)
       expect(contrast(c[text],c[bg]),`${text} on ${bg}`).toBeGreaterThanOrEqual(4.5);
   expect(c.secondary).not.toBe(input.colors.secondary);expect(c.ink).toBe(input.colors.background);expect(c.electric).not.toBe(c.signal);
-});
-test("model CSS and invalid surfaces cannot enter a palette",()=>{
-  expect(()=>createCustomTheme({...warmOlive,css:"body {}"},"custom-test")).toThrow("unsupported");
-  expect(()=>createCustomTheme({...warmOlive,colors:{...warmOlive.colors,accent:"url(javascript:alert(1))"}},"custom-test")).toThrow("hex");
-  expect(()=>createCustomTheme({...warmOlive,colors:{...warmOlive.colors,raised:"#EEEEEE"}},"custom-test")).toThrow("darker");
-  expect(()=>createCustomTheme({...warmOlive,label:"Bad\u001b[31m"},"custom-test")).toThrow();
 });

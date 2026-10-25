@@ -4,15 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   daemonHealth,
-  daemonStatus,
-  ensureDaemon,
-  readDaemonLog,
   resolveDaemonCommand,
   startDaemon,
-  stopDaemon,
   type DaemonControlDependencies,
-  type DaemonHealth,
-} from "../src/daemon-control.ts";
+  type DaemonHealth} from "../src/daemon-control.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -112,17 +107,6 @@ describe("daemonHealth", () => {
   });
 });
 
-describe("daemonStatus", () => {
-  test("reports the pid file alongside health", async () => {
-    const directory = temporaryDirectory();
-    const state = createFakeDependencies(directory);
-    writeFileSync(join(directory, "daemon.pid"), "1234\n");
-    const status = await daemonStatus(state.deps);
-    expect(status.running).toBe(false);
-    expect(status.pid).toBe(1234);
-  });
-});
-
 describe("startDaemon", () => {
   test("returns immediately when the daemon is already running", async () => {
     const state = createFakeDependencies(temporaryDirectory());
@@ -199,110 +183,6 @@ describe("startDaemon", () => {
     expect(result.message).toContain("pid 10492");
     expect(state.spawned).toEqual([]);
     expect(readFileSync(join(directory, "daemon.pid"), "utf8").trim()).toBe("10492");
-  });
-});
-
-describe("stopDaemon", () => {
-  test("falls back to the lock owner when the pid file is missing", async () => {
-    const directory = temporaryDirectory();
-    const state = createFakeDependencies(directory);
-    state.health = { status: "ok", provider: "p", model: "m" };
-    state.others.set(10492, "bun /src/demesne-cli/apps/daemon/src/main.ts");
-    writeLockOwner(directory, 10492);
-    const result = await stopDaemon(state.deps);
-    expect(result.stopped).toBe(true);
-    expect(state.killed).toEqual([10492]);
-    expect(result.message).toContain("10492");
-  });
-
-  test("falls back to the lock owner when the pid file is stale", async () => {
-    const directory = temporaryDirectory();
-    const state = createFakeDependencies(directory);
-    state.health = { status: "ok", provider: "p", model: "m" };
-    state.others.set(10492, "/usr/local/bin/demesned");
-    writeLockOwner(directory, 10492);
-    writeFileSync(join(directory, "daemon.pid"), "4242\n");
-    const result = await stopDaemon(state.deps);
-    expect(result.stopped).toBe(true);
-    expect(state.killed).toEqual([10492]);
-    expect(existsSync(join(directory, "daemon.pid"))).toBe(false);
-  });
-
-  test("does not signal a lock owner pid that is not a demesne daemon", async () => {
-    const directory = temporaryDirectory();
-    const state = createFakeDependencies(directory);
-    state.health = { status: "ok", provider: "p", model: "m" };
-    state.others.set(10492, "/Applications/Safari.app/Contents/MacOS/Safari");
-    writeLockOwner(directory, 10492);
-    const result = await stopDaemon(state.deps, { timeoutMs: 20 });
-    expect(result.stopped).toBe(false);
-    expect(state.killed).toEqual([]);
-  });
-
-  test("signals the recorded pid and clears the pid file", async () => {
-    const directory = temporaryDirectory();
-    const state = createFakeDependencies(directory);
-    state.alive = true;
-    state.health = { status: "ok", provider: "p", model: "m" };
-    writeFileSync(join(directory, "daemon.pid"), "777\n");
-    const result = await stopDaemon(state.deps);
-    expect(result.stopped).toBe(true);
-    expect(state.killed).toEqual([777]);
-    expect(existsSync(join(directory, "daemon.pid"))).toBe(false);
-  });
-
-  test("reports a daemon that is not running", async () => {
-    const state = createFakeDependencies(temporaryDirectory());
-    const result = await stopDaemon(state.deps);
-    expect(result.stopped).toBe(false);
-    expect(result.message).toContain("not running");
-  });
-});
-
-describe("ensureDaemon", () => {
-  test("does nothing when the daemon is healthy", async () => {
-    const state = createFakeDependencies(temporaryDirectory());
-    state.health = { status: "ok", provider: "p", model: "m" };
-    const result = await ensureDaemon(state.deps, "prompt", async () => false);
-    expect(result).toEqual({ started: false, remember: false });
-  });
-
-  test("never policy explains how to start the daemon", async () => {
-    const state = createFakeDependencies(temporaryDirectory());
-    await expect(ensureDaemon(state.deps, "never", async () => true))
-      .rejects.toThrow(/daemon start/);
-  });
-
-  test("prompt policy starts only after acceptance and asks to remember", async () => {
-    const state = createFakeDependencies(temporaryDirectory());
-    state.pendingHealth = { status: "ok", provider: "p", model: "m" };
-    const declined = ensureDaemon(state.deps, "prompt", async () => false);
-    await expect(declined).rejects.toThrow(/not running/);
-    expect(state.spawned).toEqual([]);
-
-    const result = await ensureDaemon(state.deps, "prompt", async () => true);
-    expect(result).toEqual({ started: true, remember: true });
-    expect(state.spawned).toHaveLength(1);
-  });
-
-  test("always policy starts without prompting", async () => {
-    const state = createFakeDependencies(temporaryDirectory());
-    state.pendingHealth = { status: "ok", provider: "p", model: "m" };
-    const result = await ensureDaemon(state.deps, "always", async () => {
-      throw new Error("should not prompt");
-    });
-    expect(result).toEqual({ started: true, remember: false });
-  });
-});
-
-describe("readDaemonLog", () => {
-  test("returns the tail of the log and tolerates a missing file", () => {
-    const directory = temporaryDirectory();
-    const state = createFakeDependencies(directory);
-    expect(readDaemonLog(state.deps)).toBe("");
-    writeFileSync(join(directory, "daemon.log"), Array.from({ length: 50 }, (_, index) => `line ${index}`).join("\n"));
-    const tail = readDaemonLog(state.deps, 3);
-    expect(tail.split("\n")).toEqual(["line 47", "line 48", "line 49"]);
   });
 });
 

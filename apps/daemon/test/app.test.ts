@@ -22,7 +22,6 @@ import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
 import { ProviderTurnProcessor } from "../src/provider-processor.ts";
 import { ANSWER_FORMAT_GUIDANCE } from "../src/engine.ts";
-import { isolatedCliEnv } from "../../cli/test/isolated-env.ts";
 
 const temporaryDirectories: string[] = [];
 const servers: Bun.Server<unknown>[] = [];
@@ -35,69 +34,6 @@ afterEach(async () => {
 });
 
 describe("Demesne daemon", () => {
-  test("streams a prompt through the command-line client", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
-    temporaryDirectories.push(directory);
-    const running = startApp(join(directory, "demesne.sqlite"));
-    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
-    const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "Exercise the full path"],
-      { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
-    );
-
-    const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ]);
-
-    expect(exitCode).toBe(0);
-    expect(stderr).toMatch(/^Session [0-9a-f-]+\n$/);
-    expect(stdout).toBe("Request accepted: Exercise the full path\n");
-  });
-
-  test("cancels a command-line turn on SIGINT", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
-    temporaryDirectories.push(directory);
-    let markStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      markStarted = resolve;
-    });
-    const processor: TurnProcessor = {
-      providerId: "test-provider",
-      modelId: "slow-model",
-      async listModels() {
-        return [{ id: this.modelId, provider: this.providerId }];
-      },
-      async *stream(_messages, _tools, signal) {
-        markStarted();
-        await new Promise<void>((_resolve, reject) => {
-          if (signal.aborted) reject(signal.reason);
-          else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-        });
-      },
-    };
-    const running = startApp(join(directory, "demesne.sqlite"), processor);
-    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
-    const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "Wait for interrupt"],
-      { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
-    );
-
-    await started;
-    await Bun.sleep(25);
-    child.kill("SIGINT");
-    const exitCode = await Promise.race([
-      child.exited,
-      Bun.sleep(2_000).then(() => null),
-    ]);
-    if (exitCode === null) child.kill("SIGKILL");
-    await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
-
-    expect(exitCode).toBe(130);
-    const snapshot = await jsonRequest<{ sessions: Session[] }>(running.url, "/v1/sessions");
-    expect(snapshot.sessions[0]?.turns[0]?.status).toBe("cancelled");
-  });
 
   test("passes an explicit thinking selection to the turn processor", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
@@ -2072,106 +2008,6 @@ process.stdin.on("data", (chunk) => {
     expect(toolResult).toBe("echo: hi");
   });
 
-  test("emits a machine-readable result for scripted prompts", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
-    temporaryDirectories.push(directory);
-    const processor: TurnProcessor = {
-      providerId: "json-provider",
-      modelId: "json-model",
-      async listModels() {
-        return [{ id: this.modelId, provider: this.providerId }];
-      },
-      async *stream() {
-        yield { type: "text_delta" as const, delta: "done" };
-        yield { type: "usage" as const, usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 } };
-      },
-    };
-    const running = startApp(join(directory, "demesne.sqlite"), processor);
-    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
-    const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "--output", "json", "Say done"],
-      { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
-    );
-    const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ]);
-
-    expect(exitCode).toBe(0);
-    const result = JSON.parse(stdout) as Record<string, unknown>;
-    expect(result.status).toBe("completed");
-    expect(result.response).toBe("done");
-    expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 2, totalTokens: 7 });
-    expect(result.sessionId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(stderr).not.toContain("Session ");
-  });
-
-  test("a headless prompt in an untrusted folder fails and names the trust flag", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
-    temporaryDirectories.push(directory);
-    const workspace = mkdtempSync(join(tmpdir(), "demesne-untrusted-"));
-    temporaryDirectories.push(workspace);
-    const running = startApp(join(directory, "demesne.sqlite"));
-    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
-    const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "prompt", "Say done"],
-      { cwd: workspace, env: isolatedCliEnv({ HOME: directory }), stdin: "ignore", stdout: "pipe", stderr: "pipe" },
-    );
-    const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain(`${realpathSync(workspace)} is not a trusted workspace`);
-    expect(stderr).toContain("--trust-workspace");
-  });
-
-  test("streams event JSON lines and a final result", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
-    temporaryDirectories.push(directory);
-    const processor: TurnProcessor = {
-      providerId: "stream-provider",
-      modelId: "stream-model",
-      async listModels() {
-        return [{ id: this.modelId, provider: this.providerId }];
-      },
-      async *stream() {
-        yield { type: "text_delta" as const, delta: "streamed" };
-      },
-    };
-    const running = startApp(join(directory, "demesne.sqlite"), processor);
-    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
-    const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "--output", "stream-json", "Go"],
-      { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
-    );
-    const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
-    await new Response(child.stderr).text();
-
-    expect(exitCode).toBe(0);
-    const lines = stdout.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(lines.at(-1)).toMatchObject({ type: "result", status: "completed", response: "streamed" });
-    expect(lines.some((entry) => entry.type === "model.request_started")).toBe(true);
-    expect(lines.some((entry) => entry.type === "message.delta")).toBe(true);
-  });
-
-  test("reads the prompt from stdin when no text argument is given", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
-    temporaryDirectories.push(directory);
-    const running = startApp(join(directory, "demesne.sqlite"));
-    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
-    const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "--output", "json"],
-      { env: isolatedCliEnv({ HOME: directory }), stdin: "pipe", stdout: "pipe", stderr: "pipe" },
-    );
-    child.stdin.write("Piped prompt");
-    child.stdin.end();
-    const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
-    await new Response(child.stderr).text();
-
-    expect(exitCode).toBe(0);
-    const result = JSON.parse(stdout) as Record<string, unknown>;
-    expect(result.response).toBe("Request accepted: Piped prompt");
-  });
-
   test("event stream replays backlog and delivers a concurrent live event exactly once, in order", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);
@@ -2244,34 +2080,6 @@ process.stdin.on("data", (chunk) => {
     // replay and the hub path.
     expect(events.map((event) => event.eventId)).toEqual([2, 3, 4, 5]);
     expect(events.filter((event) => event.type === "session.renamed")).toHaveLength(4);
-  });
-
-  test("exits non-zero and reports failures in JSON mode", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
-    temporaryDirectories.push(directory);
-    const processor: TurnProcessor = {
-      providerId: "fail-provider",
-      modelId: "fail-model",
-      async listModels() {
-        return [{ id: this.modelId, provider: this.providerId }];
-      },
-      async *stream() {
-        throw new ProviderError("model exploded");
-      },
-    };
-    const running = startApp(join(directory, "demesne.sqlite"), processor);
-    const cliPath = join(import.meta.dir, "../../cli/src/main.ts");
-    const child = Bun.spawn(
-      [process.execPath, cliPath, "--server", running.url.href, "--trust-workspace", "prompt", "--output", "json", "Fail"],
-      { env: isolatedCliEnv({ HOME: directory }), stdout: "pipe", stderr: "pipe" },
-    );
-    const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
-    await new Response(child.stderr).text();
-
-    expect(exitCode).toBe(1);
-    const result = JSON.parse(stdout) as Record<string, unknown>;
-    expect(result.status).toBe("failed");
-    expect(String(result.error)).toContain("model exploded");
   });
 });
 

@@ -1,13 +1,10 @@
 /** Verify shipped native codecs and daemon boot without touching a user's service. */
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 const daemon = resolve(process.argv[2] ?? `apps/desktop/build/backend/demesned${process.platform === "win32" ? ".exe" : ""}`);
-// `--beside` checks a CLI install: no runtime override, so the daemon must find
-// node_modules next to its real path, even when launched through a symlink.
-const beside = process.argv[3] === "--beside";
-const runtime = beside ? dirname(realpathSync(daemon)) : resolve(process.argv[3] ?? dirname(daemon));
+const runtime = resolve(process.argv[3] ?? dirname(daemon));
 assert(existsSync(daemon)); assert(existsSync(join(runtime, "node_modules/sharp/dist/index.cjs")));
 const directory = mkdtempSync(join(tmpdir(), "demesne-desktop-backend-"));
 const config = join(directory, "config.toml");
@@ -16,7 +13,7 @@ const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new
 const port = reservation.port; await reservation.stop(true);
 const child = Bun.spawn([daemon], { env: {
   PATH: process.env.PATH, HOME: directory, DEMESNE_CONFIG_FILE: config, DEMESNE_DATA_DIR: join(directory,"data"),
-  ...(beside ? {} : { DEMESNE_NATIVE_RUNTIME_DIR: runtime }), DEMESNE_HOST: "127.0.0.1", DEMESNE_PORT: String(port),
+  DEMESNE_NATIVE_RUNTIME_DIR: runtime, DEMESNE_HOST: "127.0.0.1", DEMESNE_PORT: String(port),
 }, stdout:"pipe",stderr:"pipe" });
 let output="";const readers=[child.stdout,child.stderr].map(async stream=>{for await(const bytes of stream)output=(output+new TextDecoder().decode(bytes)).slice(-8000)});
 try {
@@ -25,5 +22,5 @@ try {
   assert(healthy,`Packaged daemon did not start: ${output}`);
   const token=readFileSync(join(directory,"data/daemon.token"),"utf8").trim();
   const status=await fetch(`http://127.0.0.1:${port}/v1/status`,{headers:{authorization:`Bearer ${token}`}});assert.equal(status.status,200);
-  console.log(`Packaged ${beside ? "CLI" : "desktop"} daemon and relocated native image runtime verified.`);
+  console.log("Packaged desktop daemon and relocated native image runtime verified.");
 }finally{child.kill("SIGTERM");await child.exited;await Promise.allSettled(readers);rmSync(directory,{recursive:true,force:true})}

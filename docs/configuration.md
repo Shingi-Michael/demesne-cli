@@ -8,7 +8,7 @@ The [config loader](../packages/config/src/index.ts) merges defaults, user TOML,
 
 | Consumer | Configuration it uses |
 | --- | --- |
-| CLI/desktop host | User + project + environment; explicit `--server` wins for the client |
+| Desktop host | User + project + environment |
 | Production daemon | User + environment (`includeProject: false`) |
 | Drive controller | Client-loaded `[drive]` limits when starting a new mission |
 | Workspace instructions | `DEMESNE.md` or `AGENTS.md`, read for the coding turn |
@@ -19,7 +19,7 @@ The user file is `~/.demesne/config.toml`, or `DEMESNE_CONFIG_FILE`. The project
 
 ## Minimal local provider
 
-Replace the URL/model with values from your server and `demesne models`.
+Replace the URL/model with values from your server; **Settings › Models** lists what the daemon discovered.
 
 ```toml
 theme = "auto"
@@ -77,7 +77,7 @@ HTTP is accepted on loopback. Other endpoints require HTTPS unless the exact Tai
 
 ## ChatGPT provider
 
-[Sign in first](authentication.md#continue-with-chatgpt). `demesne auth login chatgpt --model gpt-6.1-sol` writes an account-bound provider entry while preserving existing local providers. A typical entry has this shape; use the issued account ID from login rather than inventing one:
+[Sign in first](authentication.md#continue-with-chatgpt) under **Settings › Providers**. Signing in writes an account-bound provider entry while preserving existing local providers. A typical entry has this shape; use the issued account ID from login rather than inventing one:
 
 ```toml
 [additional_providers.chatgpt]
@@ -90,9 +90,9 @@ context_window = 1050000
 max_output_tokens = 16384
 ```
 
-The signed-in account must have model access. An explicit Sol selection verifies a completed response when the account's catalog omits Sol; merely opening the picker does not send that request. Other model choices come from the account's catalog. Tokens are loaded from Demesne's private ChatGPT registration, not from `api_key`. The adapter uses fixed official destinations even if `url` is changed.
+The signed-in account must have model access. Model choices come from the account's catalog. Tokens are loaded from Demesne's private ChatGPT registration, not from `api_key`. The adapter uses fixed official destinations even if `url` is changed.
 
-Login uses the catalog's context capacity or Sol's documented capacity after successful verification; other models without capacity metadata use a conservative 32,768-token planning budget. The output reserve is one quarter of that budget, capped at 16,384. `--context-window TOKENS` on `demesne auth login chatgpt` changes the local planning budget. `max_output_tokens` is omitted from plan-usage requests, so this field is a context reserve, not a server output cap. Supported reasoning choices come from model metadata, with documented defaults for a verified Sol entry.
+Login uses the catalog's context capacity or Sol's documented capacity; other models without capacity metadata use a conservative 32,768-token planning budget. The output reserve is one quarter of that budget, capped at 16,384. `max_output_tokens` is omitted from plan-usage requests, so this field is a context reserve, not a server output cap. Supported reasoning choices come from model metadata, with documented defaults for a verified Sol entry.
 
 Older `auth = "codex"` sections are retired during configuration loading. See [upgrade guidance](authentication.md#upgrading-from-the-retired-codex-provider) for provider recovery and credential ownership.
 
@@ -123,11 +123,11 @@ subagent_model = "qwen3.8-27b"
 
 Additional providers require model, context and output settings, plus a URL for HTTP providers. Model IDs must be unambiguous across providers. `/model` changes the main selection; `/subagent` changes and saves the subagent default independently.
 
-The example grants Qwen three slots and leaves the hosted provider at one. It does not reconfigure the server: the server must actually support three simultaneous requests and 32K per slot. Runtime profiles that require one slot reject an incompatible override. `demesne ps --json` reports `providerInferenceSlots`; `inferenceSlots` describes the currently selected provider. See [the concurrency guide](subagents.md#three-slot-qwen-example).
+The example grants Qwen three slots and leaves the hosted provider at one. It does not reconfigure the server: the server must actually support three simultaneous requests and 32K per slot. Runtime profiles that require one slot reject an incompatible override. The daemon's `GET /v1/status` reports `providerInferenceSlots`; `inferenceSlots` describes the currently selected provider. See [the concurrency guide](subagents.md#three-slot-qwen-example).
 
 ### Model scoreboard
 
-Benchmarks say little about how a model does on your projects, so demesne keeps score from your own work. The model picker shows a line under each model you've used in the last 30 days, and `demesne models scoreboard` prints the same as a table (`--here` for the current project only, `--days N` for another window):
+Benchmarks say little about how a model does on your projects, so demesne keeps score from your own work. The model picker shows a line under each model you've used in the last 30 days:
 
 - **Turns and finished:** the turns it answered, and the share that completed rather than failed or were interrupted. Turns you stopped count in neither.
 - **Tool calls ok:** its tool calls that didn't end in an error.
@@ -190,16 +190,7 @@ The exported [environment map](../packages/config/src/index.ts) is authoritative
 | Agent | `DEMESNE_MAX_MODEL_ROUNDS`, `DEMESNE_MAX_TOOL_CALLS`, `DEMESNE_SUBAGENT_MODEL` |
 | Images | `DEMESNE_IMAGE_URL`, `DEMESNE_IMAGE_MODEL`, `DEMESNE_IMAGE_API_KEY`, `DEMESNE_IMAGE_REQUEST_TIMEOUT_MS` |
 | OpenRouter login | `OPENROUTER_API_KEY` |
-| Desktop launch | `DEMESNE_DESKTOP_BIN` (the desktop app `demesne` opens; see [troubleshooting](troubleshooting.md#the-desktop-window-doesnt-open)) |
-
-`DEMESNE_NO_INTRO` and `DEMESNE_NO_HYPERLINKS` are also read by the config loader. `NO_COLOR` and `DEMESNE_REDUCED_MOTION` affect the plain terminal output utilities; they are not general CSS feature switches.
 
 ## Apply changes
 
-```sh
-demesne ps --json
-demesne daemon stop
-demesne daemon start
-```
-
-Stop only when active work can be interrupted. Provider config edits require daemon restart; `/model`, reasoning selection, and `/subagent` have runtime routes. Reopen the desktop window after replacing its build. [Troubleshooting](troubleshooting.md#rebuilds-and-running-processes) explains binary resolution and background-service caveats.
+Provider config edits require a daemon restart: when no work is running, stop the `demesned` process and the app starts it again. `/model`, reasoning selection, and `/subagent` have runtime routes. Reopen the desktop window after replacing its build. [Troubleshooting](troubleshooting.md#rebuilds-and-running-processes) explains binary resolution and background-service caveats.

@@ -32,7 +32,7 @@ function pokes(model: string): string[] {
 }
 
 /// Long enough to read a phrase before it changes.
-export const SUBAGENT_PHRASE_MS = 4000;
+const SUBAGENT_PHRASE_MS = 4000;
 
 /// The phrase a card shows at `now`. Every card follows one shuffled order on
 /// one clock, offset by its `slot` (its place among the turn's sub-agents),

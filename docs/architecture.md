@@ -11,7 +11,6 @@ flowchart LR
     Main <-->|private process pipes| Host[Bun desktop host]
     Main --> Native[Project picker, clipboard and external opening]
     Host <-->|authenticated HTTP and SSE| Daemon[Local daemon]
-    CLI[Headless CLI] <-->|HTTP and SSE| Daemon
     Daemon --> Store[(SQLite and artifact files)]
     Daemon --> Slots[Provider-specific schedulers]
     Slots --> Models[Local or hosted model providers]
@@ -19,7 +18,7 @@ flowchart LR
     Daemon --> MCP[Configured MCP processes]
 ```
 
-The [CLI entry point](../apps/cli/src/main.ts) opens the desktop window from an interactive terminal through the [desktop launcher](../apps/cli/src/desktop-launcher.ts) and exposes headless commands. The [workspace host](../apps/desktop/workspace/host.ts) owns the authenticated client, local UI state, config writes, and browser opening; the [desktop host](../apps/desktop/host.ts) runs it beside the window. The web page has no Node API, daemon token, or unrestricted network access.
+The [workspace host](../apps/desktop/workspace/host.ts) owns the authenticated client, local UI state, config writes, and browser opening; the [desktop host](../apps/desktop/host.ts) runs it beside the window. The web page has no Node API, daemon token, or unrestricted network access.
 
 The [daemon](../apps/daemon/src/app.ts) owns turns and background commands. Closing the UI does not stop daemon-owned coding work. Drive's orchestration loop is client-owned; its journal is saved, and a running mission carries on in a background host when the window closes ([below](#desktop-process-boundary)). The [store](../packages/storage/src/index.ts) marks interrupted daemon work on restart instead of replaying side effects.
 

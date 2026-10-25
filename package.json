@@ -5,7 +5,6 @@
   "packageManager": "bun@1.4.0",
   "type": "module",
   "bin": {
-    "demesne": "apps/cli/src/main.ts",
     "demesned": "apps/daemon/src/main.ts"
   },
   "workspaces": [
@@ -14,11 +13,9 @@
   ],
   "scripts": {
     "daemon": "bun run apps/daemon/src/main.ts",
-    "demesne": "bun run apps/cli/src/main.ts",
-    "build": "bun run build:cli && bun run build:daemon",
-    "build:cli": "bun build apps/cli/src/main.ts --compile --outfile dist/demesne && rm -f .*.bun-build",
+    "build": "bun run build:daemon",
     "build:daemon": "bun run scripts/build-daemon.ts",
-    "clean": "rm -rf dist && rm -f .*.bun-build",
+    "clean": "rm -rf dist apps/desktop/release && rm -f .*.bun-build",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "fake:provider": "bun run scripts/fake-provider.ts",

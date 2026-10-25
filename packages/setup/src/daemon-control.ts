@@ -1,8 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { AutoStartPolicy } from "@demesne/config";
 
-/// Daemon lifecycle management for the CLI: health probes, starting a detached
+/// Daemon lifecycle management for the desktop host: health probes, starting a detached
 /// daemon, stopping it, tailing its log, and applying the configured
 /// auto-start policy. All process and network effects are injectable so the
 /// state machine can be tested without spawning anything.
@@ -14,7 +13,7 @@ export interface DaemonHealth {
   version?: string;
 }
 
-export interface SpawnedDaemon {
+interface SpawnedDaemon {
   pid: number;
   unref(): void;
 }
@@ -80,11 +79,11 @@ export function resolveDaemonCommand(
   const installed = env.PATH ? Bun.which("demesned", { PATH: env.PATH }) : null;
   if (installed) return [installed];
   // In a source checkout the TypeScript source is authoritative: a stale
-  // dist/demesned would silently run an older daemon than the CLI.
+  // dist/demesned would silently run an older daemon than the host.
   const source = join(moduleDir, "../../daemon/src/main.ts");
   if (existsSync(source)) return [execPath, source];
-  // A compiled CLI's moduleDir is Bun's virtual /$bunfs/root, so look beside
-  // the real executable, where release archives and `bun run build` put it.
+  // A compiled host's moduleDir is Bun's virtual /$bunfs/root, so look beside
+  // the real executable, where the app bundle puts it.
   const beside = join(dirname(execPath), "demesned");
   if (existsSync(beside)) return [beside];
   const sibling = join(moduleDir, "demesned");
@@ -111,16 +110,6 @@ export async function daemonHealth(deps: DaemonControlDependencies): Promise<Dae
   } catch {
     return null;
   }
-}
-
-export async function daemonStatus(deps: DaemonControlDependencies): Promise<{
-  running: boolean;
-  health: DaemonHealth | null;
-  pid: number | null;
-}> {
-  const health = await daemonHealth(deps);
-  const pid = readPid(deps) ?? (health ? lockOwnerDaemonPid(deps) : null);
-  return { running: health !== null, health, pid };
 }
 
 export async function startDaemon(
@@ -199,78 +188,6 @@ export async function startDaemon(
     health: null,
     message: `Daemon did not become healthy within ${Math.round(timeoutMs / 1000)}s. Check ${logPath}.`,
   };
-}
-
-export async function stopDaemon(
-  deps: DaemonControlDependencies,
-  options: { timeoutMs?: number } = {},
-): Promise<{ stopped: boolean; message: string }> {
-  const recorded = readPid(deps);
-  const health = await daemonHealth(deps);
-  if (!recorded && !health) return { stopped: false, message: "Daemon is not running." };
-
-  // The pid file can be missing or stale while a daemon still serves; the data
-  // directory lock records the process that actually owns it.
-  let pid = recorded;
-  if (health && (!pid || !deps.isProcessAlive(pid))) pid = lockOwnerDaemonPid(deps) ?? pid;
-
-  if (pid) {
-    try {
-      deps.kill(pid, "SIGTERM");
-    } catch {
-      // The process may already be gone; the health check decides the outcome.
-    }
-  }
-
-  const timeoutMs = options.timeoutMs ?? 5_000;
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await deps.sleep(200);
-    const stillHealthy = await daemonHealth(deps);
-    if (!stillHealthy && (!pid || !deps.isProcessAlive(pid))) {
-      removePid(deps);
-      return { stopped: true, message: pid ? `Daemon stopped (pid ${pid}).` : "Daemon stopped." };
-    }
-  }
-  return { stopped: false, message: "Daemon did not stop in time. Check the daemon log." };
-}
-
-/// Applies the configured auto-start policy. Returns whether the caller should
-/// remember an accepted prompt as `[daemon] auto_start = "always"`.
-export async function ensureDaemon(
-  deps: DaemonControlDependencies,
-  policy: AutoStartPolicy,
-  prompt: (question: string) => Promise<boolean>,
-): Promise<{ started: boolean; remember: boolean }> {
-  if (await daemonHealth(deps)) return { started: false, remember: false };
-
-  if (policy === "never") throw daemonNotRunningError(deps);
-
-  if (policy === "prompt") {
-    const accepted = await prompt(`Demesne daemon is not running at ${deps.server}. Start it now? [Y/n] `);
-    if (!accepted) throw daemonNotRunningError(deps);
-    const result = await startDaemon(deps);
-    if (!result.started && !result.health) throw new Error(result.message);
-    return { started: true, remember: true };
-  }
-
-  const result = await startDaemon(deps);
-  if (!result.started && !result.health) throw new Error(result.message);
-  return { started: true, remember: false };
-}
-
-export function readDaemonLog(deps: DaemonControlDependencies, maxLines = 40): string {
-  const path = join(deps.dataDirectory, "daemon.log");
-  if (!existsSync(path)) return "";
-  const lines = readFileSync(path, "utf8").split("\n");
-  return lines.slice(Math.max(0, lines.length - maxLines)).join("\n").trimEnd();
-}
-
-function daemonNotRunningError(deps: DaemonControlDependencies): Error {
-  return new Error(
-    `Demesne daemon is not running at ${deps.server}. `
-      + 'Start it with "demesne daemon start" or set [daemon] auto_start = "always".',
-  );
 }
 
 function pidPath(deps: DaemonControlDependencies): string {

@@ -1362,3 +1362,11 @@ html.mac-chrome.fullscreen #desktop-shell:has(#desktop-sidebar[hidden]) #desktop
 .st-inks { display: inline-flex; gap: 8px; }
 .st-inks button { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: var(--swatch); box-shadow: inset 0 0 0 1px rgb(127 127 127 / 0.3); cursor: pointer; transition: box-shadow 140ms var(--ease, ease); }
 .st-inks button.on { box-shadow: 0 0 0 2px var(--panel, var(--ink)), 0 0 0 3.5px var(--t1); }
+
+/* Your plan's limit (pass 75 D): one quiet word beside the model, amber from 75%. */
+.desktop #composer .composer-bar #composer-limit { cursor: default; gap: 6px; font-variant-numeric: tabular-nums; }
+.desktop #composer .composer-bar #composer-limit:hover { background: none; color: var(--t2); }
+.desktop #composer .composer-bar #composer-limit .ring { width: 12px; height: 12px; }
+.desktop #composer .composer-bar #composer-limit .ring::after { width: 8px; height: 8px; }
+.desktop #composer .composer-bar #composer-limit.warn { color: var(--warn); }
+.desktop #composer .composer-bar #composer-limit.warn .ring { background: conic-gradient(var(--warn) 0 var(--usage, 0%), var(--surface3) 0); }

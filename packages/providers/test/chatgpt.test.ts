@@ -239,3 +239,18 @@ test("completed items retain output-index order even if completion events are in
   expect(result.find(e => e.type === "response_state")?.state.output).toEqual([reasoning, tool, second]);
   expect(result.flatMap(e => e.type === "tool_call_delta" && e.idDelta ? [e.idDelta] : [])).toEqual([tool.call_id, second.call_id]);
 });
+
+test("keeps the plan's usage windows from each response", async () => {
+  let headers: Record<string, string> = { "x-codex-primary-used-percent": "64", "x-codex-primary-window-minutes": "300", "x-codex-secondary-used-percent": "20", "x-codex-secondary-window-minutes": "10080" };
+  const p = new ChatGPTProvider({ accountId: "a", accessToken: async () => "access", fetch: (async () => {
+    const response = responseStream();
+    return new Response(response.body, { headers: { "Content-Type": "text/event-stream", ...headers } });
+  }) as unknown as typeof fetch });
+  expect(p.planLimits()).toBeNull();
+  await collect(p);
+  expect(p.planLimits()).toMatchObject({ provider: "ChatGPT", primary: { usedPercent: 64, windowMinutes: 300 }, secondary: { usedPercent: 20 } });
+  // A response that doesn't say keeps the last numbers.
+  headers = {};
+  await collect(p);
+  expect(p.planLimits()?.primary?.usedPercent).toBe(64);
+});

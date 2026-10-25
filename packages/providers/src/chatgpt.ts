@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isRecord, type ModelDescriptor } from "@demesne/protocol";
+import { isRecord, planLimitsFromEvent, planLimitsFromHeaders, type ModelDescriptor, type PlanLimits } from "@demesne/protocol";
 import { ProviderError, readEventData, readLimitedText, thinkingOffLevel, type ProviderAdapter, type ProviderMessage, type ProviderRequest, type ProviderStreamEvent } from "./index.ts";
 
 const API = "https://api.openai.com/v1";
@@ -27,6 +27,8 @@ export class ChatGPTProvider implements ProviderAdapter {
   /// Each listed model's thinking levels, for its default when none is chosen.
   private readonly levels = new Map<string, string[]>();
   private verifiedSol = false;
+  /// The plan's 5-hour and weekly windows, from the last response that said.
+  private limits: PlanLimits | null = null;
   constructor(private readonly options: {
     accountId: string;
     accessToken: (signal?: AbortSignal) => Promise<string>;
@@ -36,6 +38,7 @@ export class ChatGPTProvider implements ProviderAdapter {
     configuredModel?: string;
     fetch?: typeof fetch;
   }) { this.fetcher = options.fetch ?? fetch; }
+  planLimits(): PlanLimits | null { return this.limits; }
   async listModels(signal?: AbortSignal): Promise<ModelDescriptor[]> {
     const response = await this.request("models", { signal });
     if (!response.ok) throw await httpError(response);
@@ -115,6 +118,7 @@ export class ChatGPTProvider implements ProviderAdapter {
       try { event = JSON.parse(data); } catch { throw new ProviderError("ChatGPT stream contained invalid JSON."); }
       if (!isRecord(event)) throw new ProviderError("ChatGPT stream contained an invalid event.");
       if (event.type === "error") throw responseError(event);
+      if (event.type === "codex.rate_limits") { this.limits = planLimitsFromEvent(this.id, event) ?? this.limits; continue; }
       if (event.type === "response.failed" || event.type === "response.incomplete") {
         const result = isRecord(event.response) ? event.response : {};
         if (isRecord(result.error)) throw responseError(result.error);
@@ -202,7 +206,10 @@ export class ChatGPTProvider implements ProviderAdapter {
   }
   private async request(path: "models" | "responses", init: RequestInit): Promise<Response> {
     const token = await this.options.accessToken(init.signal ?? undefined);
-    return this.fetcher(`${API}/${path}`, { ...init, headers: { ...init.headers, Authorization: `Bearer ${token}` }, redirect: "manual" });
+    const response = await this.fetcher(`${API}/${path}`, { ...init, headers: { ...init.headers, Authorization: `Bearer ${token}` }, redirect: "manual" });
+    // Every answer, a refusal at the limit included, says how full the plan is.
+    this.limits = planLimitsFromHeaders(this.id, response.headers) ?? this.limits;
+    return response;
   }
 }
 const messages: Record<string, string> = {

@@ -88,3 +88,16 @@ test("a daemon that just started waits out its own quiet minutes first", () => {
   now += 2 * 60_000;
   expect(auto.tick()).toEqual(["/w"]);
 });
+
+test("near the end of your plan's window Drive starts nothing of its own", () => {
+  let used: number | null = 92;
+  const { auto, started } = setup({ planUsed: () => used });
+  expect(auto.tick()).toEqual([]);
+  expect(started).toHaveLength(0);
+  expect(auto.state("/w").planPaused).toBe(92);
+  used = 89.6;
+  expect(auto.state("/w").planPaused).toBeUndefined();
+  expect(auto.tick()).toEqual(["/w"]);
+  used = null;
+  expect(auto.state("/w").planPaused).toBeUndefined();
+});

@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { DriveAuto, DriveAwayRequest, DriveProposal, DriveSignal } from "@demesne/protocol";
+import { PLAN_LIMIT_DRIVE_PAUSE, type DriveAuto, type DriveAwayRequest, type DriveProposal, type DriveSignal } from "@demesne/protocol";
 
 /// Drive on by default. Once a project has had no turn for a while, Drive
 /// runs its top Next idea in its own worktree, as an away run you never had
@@ -29,6 +29,8 @@ export interface DriveAutoHost {
   /// The cached Next queue, best first.
   ideas(workspace: string): { generatedAt: string; proposals: DriveProposal[]; signals: DriveSignal[] } | null;
   start(request: DriveAwayRequest & { auto: true }): void;
+  /// How full the plan Drive would run on is (its fuller window), when it says.
+  planUsed?(): number | null;
 }
 
 interface Run { workspace: string; at: string; idea: string }
@@ -48,7 +50,14 @@ export class DriveAutoRuns {
   }
 
   state(workspace: string): DriveAuto {
-    return { workspace, on: !this.saved.off.includes(workspace), quietMinutes: AUTO_QUIET_MINUTES, perDay: AUTO_RUNS_PER_DAY, usedToday: this.today(workspace).length };
+    const paused = this.planPaused();
+    return { workspace, on: !this.saved.off.includes(workspace), quietMinutes: AUTO_QUIET_MINUTES, perDay: AUTO_RUNS_PER_DAY, usedToday: this.today(workspace).length, ...(paused === null ? {} : { planPaused: paused }) };
+  }
+
+  /// Near the end of your plan's window Drive leaves the rest to you.
+  private planPaused(): number | null {
+    const used = this.host.planUsed?.() ?? null;
+    return used !== null && used >= PLAN_LIMIT_DRIVE_PAUSE ? Math.round(used) : null;
   }
 
   set(workspace: string, on: boolean): DriveAuto {
@@ -75,7 +84,7 @@ export class DriveAutoRuns {
   /// The idea to run now, or null when this project should be left alone.
   private due(workspace: string): DriveAwayRequest["items"][number] | null {
     if (this.saved.off.includes(workspace) || !this.host.trusted(workspace) || this.host.busy(workspace)) return null;
-    if (this.today(workspace).length >= AUTO_RUNS_PER_DAY) return null;
+    if (this.today(workspace).length >= AUTO_RUNS_PER_DAY || this.planPaused() !== null) return null;
     const last = this.host.lastActivity(workspace);
     if (last === null || this.now() - last > AUTO_RECENT_HOURS * 3_600_000) return null;
     if (this.now() - Math.max(last, this.startedAt) < AUTO_QUIET_MINUTES * 60_000) return null;

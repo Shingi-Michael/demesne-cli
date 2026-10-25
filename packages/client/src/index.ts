@@ -154,6 +154,10 @@ export class DemesneClient {
   async deedAct(request: import("@demesne/protocol").DeedRequest): Promise<import("@demesne/protocol").DeedResponse> {
     return this.request("/v1/deed", { method: "POST", body: JSON.stringify(request) });
   }
+  /// Your plan's usage windows, for the word under the composer.
+  async planLimits(): Promise<import("@demesne/protocol").PlanLimitsResponse> {
+    return this.request("/v1/limits");
+  }
   /// Drive on by default: whether it starts on its own in this project.
   async driveAuto(workspace: string): Promise<import("@demesne/protocol").DriveAutoResponse> {
     return this.request(`/v1/drive/auto?workspace=${encodeURIComponent(workspace)}`);

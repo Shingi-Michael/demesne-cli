@@ -1,4 +1,4 @@
-import type { ModelDescriptor, RuntimeProfileStatus } from "@demesne/protocol";
+import type { ModelDescriptor, PlanLimits, RuntimeProfileStatus } from "@demesne/protocol";
 import type { ProviderMessage, ProviderStreamEvent, ProviderToolDefinition } from "@demesne/providers";
 
 export interface TurnInference {
@@ -44,6 +44,8 @@ export interface TurnProcessor {
   setModel?(modelId: string, reasoning?: string): void;
   /// Every model this processor can route a call to, with its provider.
   availableModels?(): { id: string; provider: string }[];
+  /// Each subscription provider's usage windows, as last reported.
+  planLimits?(): PlanLimits[];
   runtimeStatus?(): RuntimeProfileStatus;
   listModels(signal?: AbortSignal): Promise<ModelDescriptor[]>;
   stream(

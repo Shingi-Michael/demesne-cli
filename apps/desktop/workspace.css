@@ -156,7 +156,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
    archives too. */
 .sidebar-item:hover .sidebar-row-actions, .sidebar-row-actions:focus-within, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-row-actions { opacity: 1; pointer-events: auto; }
 .sidebar-item:hover .sidebar-session-age, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-session-age { visibility: hidden; }
-.sidebar-item:hover .sidebar-session-name, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-session-name { padding-right: 40px; }
+.sidebar-item:hover .sidebar-session-name, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-session-name { padding-right: 64px; }
 @media (prefers-reduced-motion: reduce) {
   .sidebar-row-actions { transition: none; }
 }
@@ -1394,3 +1394,15 @@ html.mac-chrome.fullscreen #desktop-shell:has(#desktop-sidebar[hidden]) #desktop
 #sidebar-glance dd { margin: 0; min-width: 0; color: var(--t2); overflow-wrap: anywhere; }
 #sidebar-glance .gl-add { color: var(--ok); } #sidebar-glance .gl-del { color: var(--bad); }
 #sidebar-glance .gl-last { margin-top: 9px; padding-top: 8px; box-shadow: 0 -1px 0 var(--hair); color: var(--t3); }
+
+/* Bring it back later (pass 76 E): a bell beside Pin and Archive unfolds a
+   few times under the row, as words; a chat that's due leads the list under
+   Back now, in amber, until you open it. */
+.sidebar-row-actions .sidebar-bell.on { color: var(--warn); }
+.sidebar-back-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0 0 4px 12px; padding: 3px 8px 6px 12px; box-shadow: -1px 0 0 var(--hair2); font-size: 12px; line-height: 18px; }
+.sidebar-back-label { flex-basis: 100%; color: var(--t3); }
+.sidebar-back-line .sidebar-back-opt { padding: 0; border: 0; background: none; color: var(--t2); font: inherit; cursor: pointer; }
+.sidebar-back-line .sidebar-back-opt:hover, .sidebar-back-line .sidebar-back-opt:focus-visible { color: var(--t1); }
+.sidebar-item.back .sidebar-session { background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.sidebar-item.back .sidebar-session-age { color: var(--warn); }
+#sidebar-back .sidebar-group-icon { color: var(--warn); }

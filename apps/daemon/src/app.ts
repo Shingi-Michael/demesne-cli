@@ -1087,6 +1087,7 @@ export function createDaemonApp(options: {
           session = store.setSessionPreferredModel(path[2]!, body.preferredModel);
         }
         if (body.pinned !== undefined) session = store.setSessionPinned(path[2]!, body.pinned);
+        if (body.backAt !== undefined) session = store.setSessionBackAt(path[2]!, body.backAt);
         if (body.autoApprove !== undefined) {
           const updated = store.setSessionAutoApprove(path[2]!, body.autoApprove);
           session = updated.session;

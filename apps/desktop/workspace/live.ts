@@ -22,6 +22,7 @@ import type { CustomizeView } from "./customize.ts";
 import { deedPage, editLine, findHits, isLive, numberOf, toCheck, type DeedFilter, type DeedUi } from "./deed-view.ts";
 import type { Deed, DeedAction, DeedPeek, PlanLimits, ProofClaim, Routine } from "@demesne/protocol";
 import { glanceHTML, type Glance } from "./glance.ts";
+import { backChoices, backState } from "./back-later.ts";
 import { PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, PLAN_LIMIT_SHOWN, planUsed, planWindows } from "@demesne/protocol";
 import { claimTitle, locate, lookedAt, proofLine } from "./proof-marks.ts";
 import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.ts";
@@ -451,12 +452,16 @@ let unfoldingGroup = "";
 const deletedSessions = new Set<string>();
 const ICON_BRANCH = '<svg class="ico sidebar-branch" viewBox="0 0 24 24" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>';
 const ICON_ARCHIVE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg>';
+const ICON_BELL = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>';
+/// The row whose Bring it back words are unfolded under it.
+let backOpenFor: string | null = null;
 const ICON_PIN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>';
 /// A project's folder is its fold: shut while folded, open while its chats show.
 const ICON_FOLDER_SHUT = '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5a1 1 0 0 1 1-1h4.6l2 2.2h8.4a1 1 0 0 1 1 1v9.8a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></svg>';
 const ICON_FOLDER_OPEN = '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18.5V6.5a1 1 0 0 1 1-1h4.6l2 2.2h7.4a1 1 0 0 1 1 1V10"/><path d="M3.5 18.5 6 11.2a1 1 0 0 1 .95-.7H21a.8.8 0 0 1 .76 1.05L19.5 18.5z"/></svg>';
 const ICON_GROUP_ICONS: Record<string, string> = {
   pinned: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>',
+  back: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
   plain: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-8l-4 3v-3H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z"/></svg>',
   d: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="1.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/></svg>',
   s: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M12 8v4l2.5 1.5"/></svg>',
@@ -501,7 +506,7 @@ function renderSidebar() {
   const agents = state.agents ?? [];
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, deedOpen, pageOpen, deedCount(), plainNow, Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, deedOpen, pageOpen, deedCount(), plainNow, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -533,7 +538,7 @@ function renderSidebar() {
   // your chat and lands as a branch to review. One you open shows while open.
   // An empty chat is the composer itself, and the New chat row above already
   // names it; it joins the list once it has a turn.
-  const listed = sessions.filter((item) => (!branches.has(item.id) || item.id === current?.id) && (titleOf(item) !== "New chat" || tones.get(item.id) === "working" || (item.id === current?.id && Boolean(waiting))));
+  const listed = sessions.filter((item) => (!branches.has(item.id) || item.id === current?.id) && (backState(item.backAt) !== "away" || item.id === current?.id) && (titleOf(item) !== "New chat" || tones.get(item.id) === "working" || (item.id === current?.id && Boolean(waiting))));
   const matches = (item: typeof sessions[number]) => !query || titleOf(item).toLowerCase().includes(query) || Boolean(item.workspace?.toLowerCase().includes(query));
   const sorted = (items: typeof sessions) => sidebarView.sort === "name" ? [...items].sort((a, b) => titleOf(a).localeCompare(titleOf(b))) : items;
   const whereWords = (item: typeof sessions[number]) => { const project = projectFor(item); return project ? projectLabel(project) : "Just a chat"; };
@@ -554,8 +559,12 @@ function renderSidebar() {
     // archives with Delete on the row, so they stay out of the tab order.
     const pin = btn("pin-session", ICON_PIN, { id, pinned: !item.pinned }, `sidebar-pin${item.pinned ? " on" : ""}`).replace("<button ", `<button title="${item.pinned ? "Unpin" : "Pin"}" aria-label="${h(`${item.pinned ? "Unpin" : "Pin"} ${title}`)}" tabindex="-1" `);
     const archive = tone === "working" ? "" : btn("delete-session", ICON_ARCHIVE, { id }, "sidebar-delete").replace("<button ", `<button title="Archive" aria-label="Archive ${h(title)}" tabindex="-1" `);
+    // Bring it back later: the bell unfolds a few times under the row.
+    const bell = btn("back-open", ICON_BELL, { id }, `sidebar-bell${backOpenFor === id ? " on" : ""}`).replace("<button ", `<button title="Bring it back later" aria-label="${h(`Bring ${title} back later`)}" aria-expanded="${backOpenFor === id}" tabindex="-1" `);
+    const backLine = backOpenFor === id ? `<div class="sidebar-back-line" role="group" aria-label="Bring it back"><span class="sidebar-back-label">Bring it back</span>${backChoices().map((choice) => btn("bring-back", h(choice.label), { id, at: choice.at }, "sidebar-back-opt")).join("")}</div>` : "";
+    const back = backState(item.backAt) === "back";
     if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
-    return `<div class="sidebar-item${nested ? " kid" : ""}">${open}<span class="sidebar-row-actions">${pin}${archive}</span></div>`;
+    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}">${open}<span class="sidebar-row-actions">${bell}${pin}${archive}</span></div>${backLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
   const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false) => {
@@ -589,14 +598,23 @@ function renderSidebar() {
     return `<div class="sidebar-deed-item">${btn("deed-open", `${ICON_DEED}<span class="sidebar-session-name">Deed</span>${count ? `<span class="sidebar-deed-check">${count} to check</span>` : ""}`, {}, `sidebar-deed${deedOpen ? " selected" : ""}`).replace("<button ", `<button title="What this project does, in plain sentences held true by its code"${deedOpen ? ' aria-current="page"' : ""} `)}</div>`;
   };
   const reviewLine = () => review.length ? btn("review-open", `Review ${review.length} ${review.length === 1 ? "branch" : "branches"} ›`, { show: true }, "sidebar-more sidebar-review") : "";
+  // Chats you asked to bring back lead the list once they're due, until you
+  // open them; the time they came back sits on the right.
+  const backChats = listed.filter((item) => backState(item.backAt) === "back" && item.id !== current?.id && matches(item));
+  const backList = document.getElementById("sidebar-back");
+  if (backList) {
+    backList.hidden = !backChats.length;
+    backList.innerHTML = backChats.length ? group("back", "Back now", groupRows("back", backChats, (item) => new Date(item.backAt!).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })), 0) : "";
+  }
+  const isBack = (item: typeof sessions[number]) => backChats.includes(item);
   // Pinned chats lead the list, whichever project they are in.
-  const pinnedChats = sorted(listed.filter((item) => item.pinned && matches(item)));
+  const pinnedChats = sorted(listed.filter((item) => item.pinned && !isBack(item) && matches(item)));
   const pinnedList = document.getElementById("sidebar-pinned");
   if (pinnedList) {
     pinnedList.hidden = !pinnedChats.length;
     pinnedList.innerHTML = pinnedChats.length ? group("pinned", "Pinned", groupRows("pinned", pinnedChats, (item) => shortAge(item.updatedAt)), 0) : "";
   }
-  const rest = listed.filter((item) => !item.pinned);
+  const rest = listed.filter((item) => !item.pinned && !isBack(item));
   const groups: string[] = [];
   let plainGroup = "";
   if (sidebarView.group === "project") {
@@ -3663,6 +3681,12 @@ function setNotifyKind(kind: NotifyKind, on: boolean) {
 }
 let notified: Set<string> | null = null;
 const notifyFrom = Date.now() - 5_000;
+// A chat set to come back returns on the minute, with or without other news.
+setInterval(() => {
+  if (!state?.sessions.some((item) => backState(item.backAt) === "away" || (backState(item.backAt) === "back" && !notified?.has(`${item.id}:back:${item.backAt}`)))) return;
+  renderSidebar();
+  renderNotifications();
+}, 15_000);
 function renderNotifications() {
   if (!state || window.demesne.mode !== "desktop" || state.connection !== "online") return;
   const current = state.session, looking = document.hasFocus();
@@ -3681,6 +3705,9 @@ function renderNotifications() {
     } else if (item.status === "failed") alerts.set(`${item.id}:failed:${item.updatedAt}`, { title, body: "Stopped with an error", kind: "error", ...where });
     else if (item.status === "completed") alerts.set(`${item.id}:done:${item.updatedAt}`, { title, body: "Finished", kind: "done", ...where });
   }
+  // A chat you asked to bring back, once it's due (and it fell due while open).
+  for (const item of state.sessions) if (backState(item.backAt) === "back" && Date.parse(item.backAt!) >= notifyFrom)
+    alerts.set(`${item.id}:back:${item.backAt}`, { title: item.title, body: "Back, as you asked", kind: "wait", sessionId: item.id, path: item.workspace });
   for (const job of reviewJobs()) if (job.status === "ready") alerts.set(`drive:${job.id}`, { title: "Drive", body: `${job.title} is ready to review${job.diff ? ` · +${job.diff.additions} −${job.diff.deletions}` : ""}`, kind: "drive", ...(job.sessionId ? { sessionId: job.sessionId } : {}) });
   const fresh = notified ? [...alerts].filter(([key]) => !notified!.has(key)) : [];
   notified = new Set([...(notified ?? []), ...alerts.keys()]);
@@ -4548,6 +4575,16 @@ async function dispatch(
     return;
   }
   if (action === "theme-flip") { flipTheme(); return; }
+  if (action === "back-open") {
+    backOpenFor = backOpenFor === String(args.id) ? null : String(args.id);
+    renderSidebar();
+    return;
+  }
+  if (action === "bring-back") {
+    backOpenFor = null;
+    await api("bring-back", { id: String(args.id), at: args.at === null ? null : String(args.at) });
+    return;
+  }
   if (action === "pin-session") {
     await api("pin", { id: String(args.id), pinned: args.pinned === true });
     return;

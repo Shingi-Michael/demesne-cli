@@ -533,6 +533,19 @@ try {
   await until(() => page.locator("#desktop-shell.sidebar-peek").count().then(count => count === 0), "picking a chat puts the peek away");
   assert(await page.locator("#rail-expand").isVisible(), "and the rail is back");
   await page.locator("#rail-expand").click();
+  // Rest on a chat: after a moment its card says where it stands.
+  await page.locator(".sidebar-session[aria-current='page']").hover();
+  const glance = page.locator("#sidebar-glance");
+  await glance.waitFor();
+  const glanceText = await glance.innerText();
+  assert.match(glanceText, /Branch\s+master/, `the card names the branch: ${glanceText}`);
+  assert.match(glanceText, /Last turn\s+\+1 −1 · 1 file/, `and what the last turn changed: ${glanceText}`);
+  assert.match(glanceText, /Model\s+Desktop Test · \d+% context/, `and the model and its context: ${glanceText}`);
+  assert.match(glanceText, /Last: “/, `and its last line: ${glanceText}`);
+  assert.equal(await page.locator(".sidebar-session[aria-current='page']").getAttribute("title"), null, "the card replaces the native tooltip");
+  await capture("02-glance");
+  await page.mouse.move(600, 400);
+  await until(() => glance.count().then(count => count === 0), "the card goes when the pointer leaves");
   assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "true");
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.getByRole("heading", { name: /^What are we building/ }).waitFor();
@@ -1387,7 +1400,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "the folded sidebar peeks out", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "the folded sidebar peeks out", "rest on a chat to see where it stands", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

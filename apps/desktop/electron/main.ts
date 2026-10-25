@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerSaveBlocker, protocol, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -55,7 +55,13 @@ void app.whenReady().then(async () => {
   // size, so a level inherited from the previous shell is dropped once.
   try { const saved = JSON.parse(readFileSync(zoomPath, "utf8")); if (saved.version === ZOOM_VERSION && ZOOM_LEVELS.includes(saved.zoom)) zoom = saved.zoom; } catch {}
   window = new BrowserWindow({
-    width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#15171b",
+    width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#161617",
+    // The Mac: no title bar, the traffic lights on the sidebar's glass, and
+    // the window translucent under the shell (the page paints the tint).
+    ...(process.platform === "darwin" ? {
+      titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 17 },
+      vibrancy: "sidebar" as const, visualEffectState: "active" as const, backgroundColor: "#00000000",
+    } : {}),
     webPreferences: { preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true },
   });
   const contents = window.webContents, session = contents.session;
@@ -70,6 +76,8 @@ void app.whenReady().then(async () => {
   contents.on("will-navigate", event => { if (!allowAppReload(event.url, true)) event.preventDefault(); });
   contents.on("will-frame-navigate", event => { if (!allowAppReload(event.url, event.isMainFrame) && (event.isMainFrame || !previewURL(event.url))) event.preventDefault(); });
   contents.on("will-attach-webview", event => event.preventDefault());
+  window.on("enter-full-screen", () => emit("demesne:desktop-action", { action: "fullscreen", on: true }));
+  window.on("leave-full-screen", () => emit("demesne:desktop-action", { action: "fullscreen", on: false }));
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
@@ -112,6 +120,11 @@ void app.whenReady().then(async () => {
       if (on && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start("prevent-app-suspension");
       if (!on && awakeBlocker !== null) { powerSaveBlocker.stop(awakeBlocker); awakeBlocker = null; }
       return { on: awakeBlocker !== null };
+    }
+    // The glass follows the app's theme, not the system's.
+    if (method === "desktop-theme") {
+      nativeTheme.themeSource = (args as Record<string, unknown>).dark === false ? "light" : "dark";
+      return null;
     }
     // Settings' text size: an exact level, or none to read the current one.
     if (method === "desktop-zoom") {

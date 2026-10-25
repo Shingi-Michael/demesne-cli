@@ -34,6 +34,8 @@ const request = <T>(method: string, args: Record<string, unknown> = {}) =>
   invoke<T>("desktop_request", { method, args });
 const listeners: (() => void)[] = [];
 const mac = /Mac/i.test(navigator.platform);
+// The Mac window has no title bar and is translucent under the shell.
+if (mac) document.documentElement.classList.add("glass", "mac-chrome");
 let workspace: string | null = null, mounted = false, busy = true, fatal = false;
 let recentProjects: string[] = [];
 const bridge = createDesktopBridge(invoke, showError);
@@ -194,8 +196,9 @@ async function start() {
     listeners.push(...await Promise.all([
       native.event.listen<StateUpdate>("demesne:update", (event) => bridge.update(event.payload)),
       native.event.listen<unknown>("demesne:desktop-error", (event) => showError(event.payload)),
-      native.event.listen<{ action: "open-project" | "settings" | "open-chat"; sessionId?: string; path?: string }>("demesne:desktop-action", (event) => {
-        if (event.payload.action === "open-project") void openProject();
+      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen"; sessionId?: string; path?: string; on?: boolean }>("demesne:desktop-action", (event) => {
+        if (event.payload.action === "fullscreen") document.documentElement.classList.toggle("fullscreen", event.payload.on === true);
+        else if (event.payload.action === "open-project") void openProject();
         else if (event.payload.action === "open-chat" && mounted && !fatal)
           document.dispatchEvent(new CustomEvent("demesne:open-chat", { detail: { sessionId: event.payload.sessionId, path: event.payload.path } }));
         else if (event.payload.action === "settings" && mounted && !fatal && !busy)

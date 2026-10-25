@@ -162,7 +162,7 @@
 #banner button {
   margin: 4px 0 0 8px;
   border: 1px solid var(--rule);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 2px 10px;
   color: var(--electric);
 }
@@ -183,7 +183,7 @@
 #rail button {
   width: 32px;
   height: 32px;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--muted);
   font-size: 18px;
   position: relative;
@@ -490,7 +490,7 @@
 }
 .markdown pre {
   border: 1px solid var(--rule);
-  border-radius: 6px;
+  border-radius: 8px;
   background: #091016;
   overflow: auto;
   color: var(--paper);
@@ -580,7 +580,7 @@
 }
 .live-app:not(.start) .composer {
   padding: 10px 12px;
-  border-radius: 6px;
+  border-radius: 8px;
   gap: 6px;
   background: var(--ink);
 }
@@ -659,7 +659,7 @@
 .approval-actions button {
   font-size: 13px;
   border: 1px solid var(--rule);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 6px 12px 6px 8px;
   display: flex;
   align-items: center;
@@ -747,7 +747,7 @@
   width: 100%;
   background: var(--ink);
   border: 1px solid var(--composerRestoredBorder);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 6px 12px;
   font:
     13px/20px JetBrains Mono,
@@ -1057,7 +1057,7 @@ button:disabled {
 }
 .setup-list {
   border: 1px solid var(--borderBright);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
 }
 .setup-option {
@@ -1137,7 +1137,7 @@ button:disabled {
   margin-top: 8px;
   height: 44px;
   border: 1px solid var(--electric);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 10px 14px;
   width: 100%;
   color: var(--paper);
@@ -1190,7 +1190,7 @@ button:disabled {
 }
 .auth-card {
   border: 1px solid var(--thinking);
-  border-radius: 6px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--thinking) 6%, var(--surface));
   padding: 14px;
 }
@@ -1225,7 +1225,7 @@ button:disabled {
   flex-wrap: wrap;
   gap: 10px 16px;
   border: 1px solid var(--citron);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 12px 14px;
   font-size: 12px;
 }
@@ -1505,7 +1505,7 @@ button:disabled {
 .proposal-list {
   border: 1px solid var(--rule);
   background: var(--surface);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -1692,7 +1692,7 @@ button:disabled {
   margin-top: 14px;
   padding: 7px 12px;
   border: 1px dashed var(--borderBright);
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 12.5px;
 }
 .next-label {
@@ -1856,7 +1856,7 @@ button:disabled {
   line-height: 18px;
   padding: 4px 9px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   background: none;
   color: var(--paper);
   white-space: nowrap;
@@ -2174,7 +2174,7 @@ button:disabled {
   margin: 0;
   padding: 0 8px 0 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 12.5px;
   line-height: 18px;
   color: var(--secondary);
@@ -2320,7 +2320,7 @@ button:disabled {
   width: 20px;
   height: 20px;
   margin-top: 3px;
-  border-radius: 7px;
+  border-radius: 8px;
   background: linear-gradient(145deg, #3a5f94, #20344f);
   color: #dce9ff;
   font: 600 11px/22px "JetBrains Mono", monospace;

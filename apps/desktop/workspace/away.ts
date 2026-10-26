@@ -80,8 +80,6 @@ export interface AwayInput {
   busy: { sessionId: string; title: string }[];
   /// Routines that ran since you left.
   routines: { title: string; at: string; sessionId: string }[];
-  /// Deed sentences to check.
-  deed: number;
   /// Drive's ideas, when nothing else fills the paragraph.
   ideas: number;
   /// How often it asked you, this week and last.
@@ -146,7 +144,6 @@ export function awaySentences(input: AwayInput): AwayPart[][] {
   // Ran on a schedule.
   for (const routine of input.routines.slice(0, 1))
     sentences.push(["Your ", { text: routine.title, action: "select-session", args: { id: routine.sessionId } }, ` ran ${sinceWords(Date.parse(routine.at), input.now)}.`]);
-  if (input.deed) sentences.push(["The ", { text: "Deed", action: "deed-open" }, ` has ${count(input.deed, "sentence")} to check.`]);
   const urgent = sentences.length;
   // Nothing waits on you, said when work is going on.
   if (!input.waiting.length && (input.running || input.busy.length)) sentences.push(["Nothing waits on you."]);

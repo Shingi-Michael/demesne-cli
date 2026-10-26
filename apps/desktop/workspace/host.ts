@@ -477,7 +477,7 @@ export class WorkspaceHost {
     });
     await this.connect();
   }
-  /// A plain chat has no project: no files, commands, Drive or Deed. With
+  /// A plain chat has no project: no files, commands or Drive. With
   /// `reuse`, an empty chat already there is opened rather than piling up.
   async newSession(title?: string, options: { plain?: boolean; reuse?: boolean } = {}) {
     if (options.reuse && !title) {
@@ -1496,17 +1496,6 @@ export class WorkspaceHost {
     if (method === "point-source") {
       const root = this.current?.session.workspace?.root ?? this.workspace;
       return root ? pointSourceIn(root, args.pick as PointPick) : null;
-    }
-    // The Deed: the open project's sentences, and what to do with one.
-    if (method === "deed-peek") {
-      const root = typeof args.workspace === "string" ? args.workspace : this.current?.session.workspace?.root ?? this.workspace;
-      return root ? (await this.client.deedPeek(root, String(args.id))).peek : null;
-    }
-    if (method === "deed" || method === "deed-act") {
-      const root = typeof args.workspace === "string" ? args.workspace : this.current?.session.workspace?.root ?? this.workspace;
-      if (!root) return null;
-      if (method === "deed") return (await this.client.deed(root)).deed;
-      return (await this.client.deedAct({ ...(args.request as import("@demesne/protocol").DeedAction), workspace: root })).deed;
     }
     if (method === "model-scores") return this.client.modelScoreboard({ days: 30 });
     if (method === "plan-limits") return (await this.client.planLimits()).limits;

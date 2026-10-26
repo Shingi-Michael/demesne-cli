@@ -145,16 +145,6 @@ export class DemesneClient {
   async forgetTrusted(root: string): Promise<import("@demesne/protocol").TrustedResponse> {
     return this.request("/v1/trusted/forget", { method: "POST", body: JSON.stringify({ root }) });
   }
-  /// The project's Deed: its sentences and the state of each.
-  async deed(workspace: string): Promise<import("@demesne/protocol").DeedResponse> {
-    return this.request(`/v1/deed?workspace=${encodeURIComponent(workspace)}`);
-  }
-  async deedPeek(workspace: string, id: string): Promise<import("@demesne/protocol").DeedPeekResponse> {
-    return this.request(`/v1/deed/peek?workspace=${encodeURIComponent(workspace)}&id=${encodeURIComponent(id)}`);
-  }
-  async deedAct(request: import("@demesne/protocol").DeedRequest): Promise<import("@demesne/protocol").DeedResponse> {
-    return this.request("/v1/deed", { method: "POST", body: JSON.stringify(request) });
-  }
   /// Your plan's usage windows, for the word under the composer.
   async planLimits(): Promise<import("@demesne/protocol").PlanLimitsResponse> {
     return this.request("/v1/limits");

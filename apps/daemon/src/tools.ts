@@ -45,9 +45,6 @@ export interface AgentTool {
   permission(input: unknown): ToolPermission | null;
   execute(input: unknown, context: ToolContext): Promise<string>;
   executeWithArtifacts?(input: unknown, context: ToolContext): Promise<string | StructuredToolResult>;
-  /// A tool only some chats see (the one writing the Deed, say). Without
-  /// this, every chat sees it.
-  available?(sessionId: string): boolean;
 }
 
 /// Local-first error taxonomy: stable bracketed codes with a recovery hint,
@@ -72,16 +69,8 @@ export class ToolRegistry {
 
   definitions(): ProviderToolDefinition[] {
     return [...this.tools.values()]
-      .filter((tool) => !tool.available)
       .map((tool) => tool.definition)
       .sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  /// The tools only this chat sees.
-  sessionDefinitions(sessionId: string): ProviderToolDefinition[] {
-    return [...this.tools.values()]
-      .filter((tool) => tool.available?.(sessionId))
-      .map((tool) => tool.definition);
   }
 
   get(name: string): AgentTool | undefined {

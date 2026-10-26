@@ -88,9 +88,9 @@ export function mountSakura(host: HTMLElement, dark: boolean): Sakura | null {
   // The far bough comes in from the right, soft and hazed; the near one from
   // the left. Each is a spring: the near one quicker, so they never move in step.
   const bough = (src: string, side: Layer["side"], height: number, lift: number, inset: number, anchor: [number, number], haze: number, spawns: number[][], i: number): Layer =>
-    ({ src, side, height, lift, inset, anchor, haze, spawns, rect: [0, 0, 1, 1], aspect: 1, ang: 0, vel: 0, freq: haze ? .23 : .34, damp: haze ? .9 : 1.1, gain: haze ? .6 : 1, ph: i * 2.1 });
+    ({ src, side, height, lift, inset, anchor, haze, spawns, rect: [0, 0, 1, 1], aspect: 1, ang: 0, vel: 0, freq: haze ? .26 : .34, damp: haze ? .9 : 1.1, gain: haze ? 1.35 : 1, ph: i * 2.1 });
   const layers = [
-    bough("assets/sakura/far.webp", "right", 1.0, .04, 0, [1, .2], .42, spawnPoints.far, 0),
+    bough("assets/sakura/far.webp", "right", 1.0, .04, 0, [1, .2], .2, spawnPoints.far, 0),
     bough("assets/sakura/near.webp", "left", 1.3, .16, .04, [0, .78], 0, spawnPoints.near, 1),
   ];
   let W = 0, H = 0, PH = 0, dpr = 1, darkness = dark ? 1 : 0, wantDark = darkness;

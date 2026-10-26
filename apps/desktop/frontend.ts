@@ -264,6 +264,7 @@ document.addEventListener("demesne:needs-you", (event) => {
   badge = count;
   void request("desktop-badge", { count }).catch(() => {});
 });
-el("sidebar-new-key").textContent = mac ? "⌘N" : "Ctrl+N";
-el("sidebar-search-key").textContent = mac ? "⌘K" : "Ctrl+K";
+// The shortcuts live in tooltips, not on the rows.
+document.querySelector("#desktop-sidebar .sidebar-nav [data-action='new-session']")?.setAttribute("title", `New chat (${mac ? "⌘N" : "Ctrl+N"})`);
+el("sidebar-search").setAttribute("title", `Search (${mac ? "⌘K" : "Ctrl+K"})`);
 document.querySelector(".sidebar-settings")?.setAttribute("title", `Settings (${mac ? "⌘," : "Ctrl+,"})`);

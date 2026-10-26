@@ -15,7 +15,6 @@ body.desktop kbd { font-family: "JetBrains Mono", monospace; }
 .sidebar-nav button:hover { background: var(--surface2); color: var(--t1); }
 .sidebar-nav button.on { background: var(--surface2); color: var(--t1); }
 .sidebar-nav button .ico, .sidebar-search .ico { color: var(--t3); }
-#desktop-sidebar .sidebar-nav kbd { margin-left: auto; border: 0; background: none; padding: 0; color: var(--t4); }
 .sidebar-foot { display: flex; align-items: center; gap: 9px; height: 40px; margin: auto -12px -10px; padding: 0 12px 0 22px; box-shadow: 0 -1px 0 var(--hair); color: var(--t2); }
 .sidebar-avatar { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--tone2); color: var(--t1); font-size: 10px; font-weight: 600; }
 .sidebar-you { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }

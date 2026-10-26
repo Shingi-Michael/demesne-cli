@@ -78,22 +78,6 @@ const f = await fixture({
   async listModels() { smokeProcessor = this; return [{ id: "desktop-test", provider: "test", contextWindow: 262144, reasoningLevels: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultReasoningLevel: "low" }, { id: "desktop-small", provider: "test", contextWindow: 32768 }, { id: "desktop-fast", provider: "test", contextWindow: 131072 }, { id: "desktop-wide", provider: "test", contextWindow: 1048576 }, { id: "far-away-large", provider: "other", contextWindow: 200000 }, { id: "far-away-mini", provider: "other", contextWindow: 128000 }]; },
   async *stream(messages, _tools, signal) {
     const user = messages.findLast(message => message.role === "user")?.content;
-    // The Deed: its writing chat, a chat making a sentence true, and a check.
-    const deedTool = ["deed_write", "deed_settle", "deed_verdict"].find(name => _tools.some(tool => tool.name === name));
-    if (deedTool) {
-      if (deedTool !== "deed_verdict" && messages.some(message => message.role === "tool")) {
-        yield { type: "text_delta", delta: deedTool === "deed_write" ? "Wrote the Deed." : "It's true now." };
-        yield { type: "finish", reason: "stop" };
-        return;
-      }
-      const input = deedTool === "deed_write"
-        ? { sections: [{ name: "Quiet", sentences: [{ text: "Drive starts after 20 quiet minutes.", anchors: [{ path: "quiet.ts", line: 1 }], values: [{ text: "20", path: "quiet.ts", line: 1, literal: "20" }], tests: ["quiet.test.ts"] }, { text: "Drive runs at most three ideas a day.", anchors: [{ path: "quiet.ts", line: 2 }] }] }] }
-        : deedTool === "deed_settle" ? { made: true, anchors: [{ path: "quiet.ts", line: 2 }] }
-        : { holds: false, why: "It waits 15 minutes now.", words: "Drive starts after 15 quiet minutes.", lines: [{ path: "quiet.ts", line: 1 }] };
-      yield { type: "tool_call_delta", index: 0, idDelta: `${deedTool}-1`, nameDelta: deedTool, argumentsDelta: JSON.stringify(input) };
-      yield { type: "finish", reason: "tool_calls" };
-      return;
-    }
     // Proof marks: the pass pairs the smoke answer's claims with its steps; a
     // check reads hello.ts and quotes it.
     if (_tools.some(tool => tool.name === "proof_marks")) {
@@ -1348,110 +1332,6 @@ try {
   await textIncludes("Version checked.");
   await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the fifth runs without asking");
   assert.equal(await page.locator("#approval .approval-row").count(), 0, "it no longer asks");
-  // The Deed: written from the code, a code change catches the sentence it
-  // breaks, the words follow, an edit makes the code follow, a wish waits.
-  writeFileSync(join(f.workspace, "quiet.ts"), "export const QUIET_MINUTES = 20;\nexport const PER_DAY = 3;\n");
-  // Its test, run with bun (a bun.lock says so).
-  writeFileSync(join(f.workspace, "quiet.test.ts"), 'import { expect, test } from "bun:test";\nimport { QUIET_MINUTES } from "./quiet.ts";\ntest("waits under half an hour", () => expect(QUIET_MINUTES).toBeLessThan(30));\n');
-  writeFileSync(join(f.workspace, "bun.lock"), "");
-  const deedRow = page.locator(".sidebar-deed");
-  // It sits at the top of the project's chats, so unfold the project first.
-  if (!await deedRow.isVisible()) await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-project-name`).click();
-  await until(() => deedRow.isVisible(), "the open project leads with its Deed");
-  await deedRow.click();
-  await until(() => page.locator("#deed").isVisible(), "the Deed opens in place of the chat");
-  assert.equal(await page.locator("#workspace-title").innerText(), "Deed");
-  await page.locator("#deed button", { hasText: "Write the deed" }).click();
-  const quietLine = page.locator("#deed .dz-s", { hasText: "quiet minutes" });
-  await until(() => quietLine.isVisible(), "the Deed is written from the code", 30_000);
-  assert.equal(await page.locator("#deed h3").first().innerText(), "QUIET");
-  assert.equal(await page.locator("#deed .dz-s").count(), 2);
-  await capture("17-deed");
-  // A live number: drag or ↑↓ it, Enter changes its line, its test proves it.
-  const twenty = quietLine.locator(".lv.num");
-  await until(() => twenty.isVisible(), "the number in the sentence is live");
-  await twenty.click();
-  await until(() => page.locator("#deed .lv.scrub").isVisible(), "clicking it holds it to drag");
-  await page.keyboard.press("Shift+ArrowUp");
-  await until(() => page.locator("#deed-live-line").innerText().then(text => text.includes("Make it so")), "the line under it says Enter makes it so");
-  assert((await page.locator("#deed .dz-code .ad").innerText()).includes("QUIET_MINUTES = 30"), "it shows the line of code");
-  await page.keyboard.press("Enter");
-  await until(() => page.locator("#deed .dz-under.drifted", { hasText: "so it went back" }).isVisible(), "a failing test puts the number back", 60_000);
-  assert(readFileSync(join(f.workspace, "quiet.ts"), "utf8").includes("QUIET_MINUTES = 20;"), "the code went back");
-  await capture("17-deed-not-proved");
-  await quietLine.locator(".lv.num").click();
-  await page.keyboard.press("Shift+ArrowDown");
-  assert.equal((await page.locator("#deed .lv.scrub").innerText()).replace(/\s/g, ""), "‹10›");
-  await capture("17-deed-live");
-  await page.keyboard.press("Enter");
-  await until(() => page.locator("#deed .dz-under.made", { hasText: "Proved" }).isVisible(), "its test proves the new number", 60_000);
-  assert(readFileSync(join(f.workspace, "quiet.ts"), "utf8").includes("QUIET_MINUTES = 10;"), "the line changed");
-  assert((await quietLine.innerText()).includes("after 10 quiet minutes"), "the sentence says the new number");
-  await capture("17-deed-proved");
-  await page.locator("#deed button", { hasText: "Undo" }).click();
-  await until(() => quietLine.innerText().then(text => text.includes("after 20 quiet minutes")), "Undo puts the words back");
-  assert(readFileSync(join(f.workspace, "quiet.ts"), "utf8").includes("QUIET_MINUTES = 20;"), "and the code");
-  // Prove it, in the title bar, runs every sentence's tests.
-  await page.locator("#deed .ct.act", { hasText: "Prove it" }).click();
-  await until(() => page.locator("#deed .d4-counts .ct.ok").innerText().then(text => text.includes("1 proved")), "Prove it proves the sentence", 60_000);
-  await capture("17-deed-counts");
-  // The composer finds as you type; Space opens the code under a sentence.
-  await page.locator("textarea").fill("quiet");
-  await until(() => page.locator("#deed .d3-line").innerText().then(text => text.includes("1 sentence says")), "typing finds the sentences that say it");
-  assert.equal(await page.locator("#deed .dz-s.dim").count(), 1, "the others fade");
-  assert.equal(await page.locator("#deed .dz-s mark").first().innerText(), "quiet");
-  await capture("17-deed-find");
-  await page.locator("textarea").fill("");
-  await until(() => page.locator("#deed .dz-s.dim").count().then(count => count === 0), "clearing it shows the page again");
-  await quietLine.focus();
-  await page.keyboard.press("Space");
-  await until(() => page.locator("#deed .peek").isVisible(), "Space unfolds the code under the sentence");
-  assert((await page.locator("#deed .peek").innerText()).includes("QUIET_MINUTES"), "it shows the line");
-  await capture("17-deed-code");
-  await page.keyboard.press("Space");
-  await until(() => page.locator("#deed .peek").count().then(count => count === 0), "Space folds it away");
-  // A sentence nothing tests: Drive's chat can't write one here, and it says so.
-  const untested = page.locator("#deed .dz-s", { hasText: "three ideas" });
-  await untested.click();
-  await page.locator("#deed button", { hasText: "Have Drive prove it" }).click();
-  await until(() => page.locator("#deed .dz-under", { hasText: "No test yet." }).isVisible(), "a chat that writes no test says so", 30_000);
-  await capture("17-deed-untested");
-  writeFileSync(join(f.workspace, "quiet.ts"), "export const QUIET_MINUTES = 15;\nexport const PER_DAY = 3;\n");
-  await until(() => page.locator("#deed .dz-s.st-false").isVisible(), "a code change breaks its sentence", 20_000);
-  await until(() => page.locator(".sidebar-deed-check").innerText().then(text => text === "1 to check"), "the sidebar counts it");
-  assert((await page.locator("#deed .dz-under.drifted").innerText()).includes("It waits 15 minutes now."), "it says why");
-  await capture("17-deed-drift");
-  // A count is a filter: only what needs you, until Esc.
-  assert.equal(await page.locator("#deed .dz-s").count(), 2);
-  await page.locator("#deed .ct.am").click();
-  await until(() => page.locator("#deed .dz-s").count().then(count => count === 1), "to check keeps only the sentence that needs you");
-  assert((await page.locator("#deed h3").innerText()).includes("1 of 2"), "the heading says how many remain");
-  await page.keyboard.press("Escape");
-  await until(() => page.locator("#deed .dz-s").count().then(count => count === 2), "Esc shows the whole page");
-  await page.locator("#deed button", { hasText: "Fix the words" }).click();
-  await until(() => page.locator("#deed .dz-s.st-true", { hasText: "after 15 quiet minutes" }).isVisible(), "Fix the words takes the true words");
-  await until(() => page.locator(".sidebar-deed-check").count().then(count => count === 0), "nothing left to check");
-  const perDay = page.locator("#deed .dz-s", { hasText: "three ideas" });
-  await perDay.click();
-  await perDay.click();
-  const edit = page.locator("#deed .dz-edit");
-  await until(() => edit.isVisible(), "a second click edits the words in place");
-  await edit.fill("Drive runs at most five ideas a day.");
-  await until(() => page.locator("#deed-edit-line").innerText().then(text => text.includes("Make it so")), "the line under it says Enter makes it so");
-  assert.equal(await page.locator("#deed-edit-line ins").innerText(), "five");
-  await capture("17-deed-edit");
-  await edit.press("Enter");
-  await until(() => page.locator("#deed .dz-s.st-true.fresh", { hasText: "five ideas" }).isVisible(), "the chat makes it true", 30_000);
-  assert((await page.locator("#deed .dz-under.made").innerText()).includes("Made true"));
-  await page.locator("textarea").fill("Drive pauses while you type.");
-  await page.locator("textarea").press("Enter");
-  await until(() => page.locator("#deed .dz-s.st-wish", { hasText: "pauses while you type" }).isVisible(), "a new sentence waits pale");
-  assert(await page.locator("#deed button", { hasText: "Leave it as a wish" }).isVisible(), "it offers Build it or a wish");
-  await capture("17-deed-wish");
-  assert((await page.locator("#deed .wk.on").innerText()).startsWith("Today"), "the week starts on today");
-  assert(await page.locator("#deed .wk b").count() >= 1, "today has a dot: the Deed changed");
-  assert((await page.locator("#deed .wk.on").getAttribute("title"))?.includes("reworded"), "the day says what changed");
-  await page.locator("#deed button", { hasText: "Leave it as a wish" }).click();
   // Switching models resizes the context at once, before the new model's
   // first request.
   const sizeBefore = await page.locator("#composer-context").getAttribute("title");
@@ -1461,7 +1341,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "the Deed"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

@@ -38,10 +38,6 @@ import {
   type RewindSessionRequest,
   type SteerTurnRequest,
   type PermissionAsksResponse,
-  type DeedAction,
-  type DeedRequest,
-  type DeedPeekResponse,
-  type DeedResponse,
   type RewindResponse,
   type UndoTurnResponse,
   type UpdateSessionResponse,
@@ -71,9 +67,7 @@ import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
 import { Routines } from "./routines.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
-import { DeedBook, judgeSentence } from "./deed.ts";
 import { checkClaim, proofPass } from "./proofs.ts";
-import { runTests } from "./deed-proof.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
@@ -197,15 +191,6 @@ export function createDaemonApp(options: {
         } catch (error) { console.warn(`Couldn't report the Drive mission: ${error instanceof Error ? error.message : error}`); }
       };
       deliver();
-    },
-    // A branch is ready once the Deed's sentences on its files hold there.
-    prove: async (fix, paths) => {
-      const results: { command: string; passed: boolean }[] = [];
-      for (const sentence of deedBook.touching(fix.workspace, paths)) {
-        const result = await runTests(fix.path, sentence.tests!, driveLifecycle.signal);
-        results.push({ command: `Deed: ${sentence.text}`, passed: result.ok });
-      }
-      return results;
     },
     turn: (turnId) => store.getTurn(turnId),
     cancel: (turnId) => {
@@ -399,24 +384,6 @@ export function createDaemonApp(options: {
     ideas: (root) => inDriveWorktree(root) || !workspaceTrust.isTrusted(root) ? null : chatIdeas(root),
     run: (root, proposal, signals) => driveFixes.start(root, signals, proposal),
   }));
-  // The Deed: each project's plain sentences, kept true both ways.
-  const deedBook = new DeedBook(join(dirname(options.databasePath), "deeds"), {
-    startSession: (title, workspace) => store.createSession(title, canonicalWorkspace(workspace)).session.id,
-    startTurn: (sessionId, prompt, mode) => {
-      const { turn } = store.createTurn(sessionId, prompt, mode, false, false);
-      return queueTurn(turn, snapshotTurnInference(processor, false));
-    },
-    archive: (sessionId) => { try { store.archiveSession(sessionId); } catch { /* already gone */ } },
-    judge: async (workspace, sentence) => {
-      const inference = snapshotTurnInference(processor, false);
-      const slots = scheduler.for(inference.providerId);
-      const lease = await slots.acquire(`deed-check:${randomUUID()}`, driveLifecycle.signal, {});
-      try { return await judgeSentence(workspace, sentence, inference, driveLifecycle.signal); }
-      finally { lease.release(); }
-    },
-    test: (workspace, files, signal) => runTests(workspace, files, AbortSignal.any([signal, driveLifecycle.signal])),
-  });
-  for (const tool of deedBook.tools()) tools.register(tool);
   const activeDriveDecisions = new Set<Promise<unknown>>();
   const requestDrainWaiters = new Set<() => void>();
   let activeRequests = 0;
@@ -729,10 +696,8 @@ export function createDaemonApp(options: {
         if (pending) return json(await pending);
         const run = (async () => {
           const collected = await collectSignals(store.database, body.workspace);
-          // Sentences written in the Deed but not built are work the person asked for.
-          const wishes = deedBook.wishSignals(body.workspace);
-          const signals = [...collected.signals, ...wishes];
-          const fingerprint = createHash("sha256").update(collected.fingerprint + JSON.stringify(wishes.map((wish) => wish.id)) + contextKey).digest("hex").slice(0, 16);
+          const signals = collected.signals;
+          const fingerprint = createHash("sha256").update(collected.fingerprint + contextKey).digest("hex").slice(0, 16);
           const cached = driveNextCache.read(body.workspace);
           const fresh = cached && cached.fingerprint === fingerprint && Date.now() - Date.parse(cached.generatedAt) < 12 * 3_600_000;
           const calibration = calibrationLog.calibration(body.workspace);
@@ -787,26 +752,6 @@ export function createDaemonApp(options: {
         if (!workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
         try { return json({ away: driveFixes.startAway(body) } satisfies DriveAwayResponse, 201); }
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start", 409); }
-      }
-      // How often this project asked this week, for the start screen's line.
-      if (request.method === "GET" && url.pathname === "/v1/deed") {
-        const workspace = url.searchParams.get("workspace") ?? "";
-        if (!isAbsolute(workspace)) return apiError("invalid_request", "Expected a workspace", 400);
-        return json({ deed: deedBook.state(workspace) } satisfies DeedResponse);
-      }
-      if (request.method === "GET" && url.pathname === "/v1/deed/peek") {
-        const workspace = url.searchParams.get("workspace") ?? "";
-        if (!isAbsolute(workspace)) return apiError("invalid_request", "Expected a workspace", 400);
-        return json({ peek: deedBook.peek(workspace, url.searchParams.get("id") ?? "") } satisfies DeedPeekResponse);
-      }
-      if (request.method === "POST" && url.pathname === "/v1/deed") {
-        const body = await readJson(request) as DeedRequest;
-        if (typeof body?.workspace !== "string" || typeof body.action !== "string") return apiError("invalid_request", "Expected a workspace and an action", 400);
-        // Its chats read the code and change it: only in a folder you trust.
-        if (!isAbsolute(body.workspace) || !workspaceTrust.isTrusted(body.workspace)) return apiError("workspace_untrusted", `Do you trust the files in ${body.workspace}?`, 403);
-        const { workspace, ...action } = body;
-        try { return json({ deed: deedBook.act(workspace, action as DeedAction) } satisfies DeedResponse); }
-        catch (error) { return apiError("conflict", error instanceof Error ? error.message : String(error), 409); }
       }
       // The folders you trust, for Settings; Drive's own worktrees stay out of it.
       if (request.method === "GET" && url.pathname === "/v1/trusted") {

@@ -67,7 +67,7 @@ export interface DriveMemoryEntry { id: string; kind: "preference" | "decision" 
 
 /// A fact about the workspace that Drive's Next queue is built from. Proposals
 /// must cite signals by id.
-export interface DriveSignal { id: string; source: "checks" | "git" | "github" | "sessions" | "telemetry" | "code" | "deed"; title: string; detail: string; urgent?: boolean }
+export interface DriveSignal { id: string; source: "checks" | "git" | "github" | "sessions" | "telemetry" | "code"; title: string; detail: string; urgent?: boolean }
 /// One ranked item in the Next queue.
 export interface DriveProposal {
   id: string; kind: "fix" | "investigate" | "tidy";

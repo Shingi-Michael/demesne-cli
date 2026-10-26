@@ -5,11 +5,12 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { DemesneStore } from "@demesne/storage";
 import type { ImageArtifact } from "@demesne/protocol";
+import { isCompiledPath } from "./compiled-path.ts";
 // Native image codecs are shipped beside the compiled daemon. Loading through
 // its real executable directory avoids resolving native addons inside Bun's VFS.
-const nativeRequire = createRequire(import.meta.path.startsWith("/$bunfs/")
+const nativeRequire = createRequire(isCompiledPath(import.meta.path)
   ? join(process.env.DEMESNE_NATIVE_RUNTIME_DIR ?? dirname(process.execPath), "native.cjs") : import.meta.url);
-const sharp: typeof import("sharp").default = nativeRequire(import.meta.path.startsWith("/$bunfs/")
+const sharp: typeof import("sharp").default = nativeRequire(isCompiledPath(import.meta.path)
   ? join(process.env.DEMESNE_NATIVE_RUNTIME_DIR ?? dirname(process.execPath), "node_modules/sharp/dist/index.cjs") : "sharp");
 
 export interface ImageOutput { data: Uint8Array; mimeType: string; filename?: string; modelId?: string; revisionOf?: string; viewport?:ImageArtifact["viewport"] }

@@ -18,8 +18,8 @@ export type Sakura = { pause(): void; resume(): void; setDark(dark: boolean): vo
 const VS = `attribute vec2 p; uniform vec4 rect; varying vec2 v;
 void main(){ v = rect.xy + p*rect.zw; gl_Position = vec4(v.x*2.-1., 1.-v.y*2., 0., 1.); }`;
 const FS = `precision highp float;
-varying vec2 v; uniform sampler2D img; uniform vec4 rect; uniform float aspect, ang, lift, dark, haze;
-uniform vec2 anchor; uniform vec3 sky;
+varying vec2 v; uniform sampler2D img; uniform vec4 rect; uniform float aspect, ang, lift, dark, haze, flip;
+uniform vec2 anchor; uniform vec3 sky; uniform float reachFrom;
 float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float n(vec2 p){ vec2 i = floor(p), f = fract(p), u = f*f*(3.-2.*f);
   return mix(mix(h(i), h(i+vec2(1,0)), u.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), u.x), u.y); }
@@ -29,11 +29,15 @@ void main(){
   float c = cos(ang), s = sin(ang);
   q = vec2(c*q.x + s*q.y, -s*q.x + c*q.y);
   vec2 src = anchor + q / vec2(aspect, 1.) + vec2(0., lift);
-  vec4 col = texture2D(img, clamp(src, .001, .999));
-  col *= smoothstep(0., .01, src.x) * smoothstep(1., .99, src.x) * smoothstep(0., .005, src.y) * smoothstep(1., .99, src.y);
+  vec4 col = texture2D(img, clamp(vec2(src.x, mix(src.y, 1. - src.y, flip)), .001, .999));
+  // the photo's own edges dissolve unevenly, so no bough ends on a straight cut
+  float ragged = (n(src * vec2(5., 9.)) - .5) * .2;
+  float inner = anchor.x < .5 ? 1. - src.x : src.x;
+  col *= smoothstep(0., .01, min(src.x, 1. - src.x)) * smoothstep(0., .005, src.y)
+    * smoothstep(0., .22, 1. - src.y + ragged) * smoothstep(0., .22, inner + ragged);
   // the end away from where the bough enters thins out, never a cut edge
   float reach = anchor.x < .5 ? src.x : 1. - src.x;
-  col *= 1. - smoothstep(.62 + n(src * 6.) * .14, .97, reach);
+  col *= 1. - smoothstep(reachFrom + n(src * 6.) * .14, .97 + reachFrom * .05, reach);
   vec3 rgb = col.rgb / max(col.a, .001);
   // pale sakura photographed against blue read grey: give them back their pink
   float bloom = smoothstep(.38, .82, dot(rgb, vec3(.333)));
@@ -42,7 +46,8 @@ void main(){
   // by night the bark sinks and the blossoms keep a moonlit glow
   rgb = mix(rgb, rgb * mix(vec3(.42, .36, .42), vec3(.92, .82, .88), bloom), dark);
   rgb = mix(rgb, sky, haze);
-  float a = col.a * (1. - smoothstep(.45, .98, v.y / .5)) * (1. - haze * .3);
+  // a ragged lower edge, never a level line above the greeting
+  float a = col.a * (1. - smoothstep(.85, 1.1, v.y / .5 + (n(v * vec2(7., 3.)) - .5) * .25)) * (1. - haze * .3);
   gl_FragColor = vec4(rgb * a, a);
 }`;
 const TINTS = [["#e59ab2", "#f7cdd9", "#fff4f7"], ["#dc86a2", "#f3bccc", "#fde8ee"], ["#e9aec1", "#fadbe4", "#ffffff"]];
@@ -85,13 +90,14 @@ export function mountSakura(host: HTMLElement, dark: boolean): Sakura | null {
   const u = (name: string) => { if (!uniforms.has(name)) uniforms.set(name, gl.getUniformLocation(prog, name)); return uniforms.get(name)!; };
   gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
-  // The far bough comes in from the right, soft and hazed; the near one from
-  // the left. Each is a spring: the near one quicker, so they never move in step.
+  // The far bough comes in from the right, soft and hazed; the near one hangs
+  // from the top-left corner (its photo turned over, so the thick limb is in
+  // view instead of below the fade). Each is a spring: the near one quicker, so they never move in step.
   const bough = (src: string, side: Layer["side"], height: number, lift: number, inset: number, anchor: [number, number], haze: number, spawns: number[][], i: number): Layer =>
     ({ src, side, height, lift, inset, anchor, haze, spawns, rect: [0, 0, 1, 1], aspect: 1, ang: 0, vel: 0, freq: haze ? .26 : .34, damp: haze ? .9 : 1.1, gain: haze ? 1.35 : 1, ph: i * 2.1 });
   const layers = [
-    bough("assets/sakura/far.webp", "right", 1.0, .04, 0, [1, .2], .2, spawnPoints.far, 0),
-    bough("assets/sakura/near.webp", "left", 1.3, .16, .04, [0, .78], 0, spawnPoints.near, 1),
+    bough("assets/sakura/far.webp", "right", 1.15, .02, 0, [1, .2], .1, spawnPoints.far, 0),
+    bough("assets/sakura/near.webp", "left", 1.1, .06, .03, [0, .22], 0, spawnPoints.near, 1),
   ];
   let W = 0, H = 0, PH = 0, dpr = 1, darkness = dark ? 1 : 0, wantDark = darkness;
   function place() {
@@ -139,7 +145,7 @@ export function mountSakura(host: HTMLElement, dark: boolean): Sakura | null {
       const l = Math.random() < .8 ? layers[1]! : layers[0]!;
       if (!l.img) return;
       const [su = 0, sv = 0] = l.spawns[(Math.random() * l.spawns.length) | 0] ?? [];
-      x = (l.rect[0] + su * l.rect[2]) * W; y = (l.rect[1] + sv * l.rect[3]) * PH;
+      x = (l.rect[0] + su * l.rect[2]) * W; y = (l.rect[1] + (l.side === "left" ? 1 - sv : sv) * l.rect[3]) * PH;
       if (x < -20 || x > W + 20 || y < -10 || y > H * .95) return;
     }
     petals.push({ x, y, z: .55 + Math.random() ** 1.7 * 1.5, vx: 0, vy: 0, rx: Math.random() * 6.28, ry: Math.random() * 6.28, rz: Math.random() * 6.28,
@@ -148,7 +154,7 @@ export function mountSakura(host: HTMLElement, dark: boolean): Sakura | null {
 
   function resize() {
     const r = host.getBoundingClientRect(); dpr = Math.min(devicePixelRatio || 1, 2);
-    W = r.width; PH = r.height; H = PH * .5;
+    W = r.width; PH = r.height; H = PH * .55;
     glc.width = pc.width = Math.round(W * dpr); glc.height = pc.height = Math.round(PH * dpr);
     place();
     if (!running) draw(last);
@@ -171,6 +177,7 @@ export function mountSakura(host: HTMLElement, dark: boolean): Sakura | null {
       gl!.activeTexture(gl!.TEXTURE0); gl!.bindTexture(gl!.TEXTURE_2D, l.tx);
       gl!.uniform4f(u("rect"), ...l.rect); gl!.uniform1f(u("aspect"), l.aspect);
       gl!.uniform2f(u("anchor"), ...l.anchor); gl!.uniform1f(u("haze"), l.haze);
+      gl!.uniform1f(u("flip"), l.side === "left" ? 1 : 0); gl!.uniform1f(u("reachFrom"), l.side === "left" ? .72 : .8);
       gl!.uniform1f(u("ang"), l.ang); gl!.uniform1f(u("lift"), -Math.abs(l.ang) * .15);
       gl!.drawArrays(gl!.TRIANGLE_STRIP, 0, 4);
     }

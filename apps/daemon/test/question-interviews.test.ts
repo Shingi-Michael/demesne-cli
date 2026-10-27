@@ -126,7 +126,7 @@ test("preference interviews need no project and expose no filesystem tools",asyn
   await f.client.submitTurn(session.id,{content:"Interview about preferences",permissionMode:"ask"});
   const state=await until(()=>f.client.getSessionState(session.id),s=>Boolean(s.pendingQuestions?.length));
   expect(state.session.workspace).toBeNull();expect(state.pendingQuestions![0]!.mode).toBe("interview");
-  expect(f.offered[0]).toEqual(["ask_user", "foundry_read", "foundry_save"]);
+  expect(f.offered[0]).toEqual(["ask_user", "foundry_edit", "foundry_read", "foundry_save"]);
   await f.client.questionAction(state.pendingQuestions![0]!.id,{action:"cancel",revision:state.pendingQuestions![0]!.revision});
 });
 

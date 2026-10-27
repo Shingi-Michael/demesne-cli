@@ -204,6 +204,7 @@ const verb = (tool: ToolEntry) =>
     session_tools: "Tool",
     subagent: "Agent",
     foundry_save: "Made",
+    foundry_edit: "Changed",
     foundry_read: "Looked in Foundry",
   })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
 /// The heartbeat tool's actions, as the step rows name them.
@@ -1321,6 +1322,7 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
     return first ? `${h(first)}${asked.length > 1 ? `<span class="muted"> · ${asked.length - 1} more</span>` : ""}` : "";
   }
   if (tool.name === "foundry_save") return h(String(tool.input.title || (tool.input.id ? "a new version" : "an artifact")));
+  if (tool.name === "foundry_edit") { const n = Array.isArray(tool.input.edits) ? tool.input.edits.length : 0; return h(String(tool.input.title || (n ? `${n} edit${n === 1 ? "" : "s"}` : "an artifact"))); }
   if (tool.name === "foundry_read") return "";
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   // A command by its program's name: the full path is on hover.
@@ -1407,7 +1409,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     ? btn("rewind", `${ICON_UNDO}Rewind to here`, { turnId: run.id, toolCallId: tool.toolCallId }, "step-rewind").replace("<button ", '<button title="Put the files and the chat back to just after this step" ')
     : "";
   // Something made in Foundry opens from its step.
-  const made = tool.name === "foundry_save" && tool.state === "done"
+  const made = (tool.name === "foundry_save" || tool.name === "foundry_edit") && tool.state === "done"
     ? btn("foundry-open-step", "Open in Foundry ›", { id: tool.input.id ?? null, title: tool.input.title ?? null, message: tool.message ?? null }, "fd-step-open")
     : "";
   return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + (open && canFold ? stepFold(run, tool) : "");
@@ -2391,7 +2393,7 @@ function openPage(kind: "" | PageKind) {
 }
 /// Foundry saves seen in this window's chats: a new one refreshes the page.
 function foundrySaveCount() {
-  return (state?.runs ?? []).reduce((count, run) => count + tools(run).filter((tool) => tool.name === "foundry_save" && tool.state === "done").length, 0);
+  return (state?.runs ?? []).reduce((count, run) => count + tools(run).filter((tool) => (tool.name === "foundry_save" || tool.name === "foundry_edit") && tool.state === "done").length, 0);
 }
 async function loadFoundry() {
   try {

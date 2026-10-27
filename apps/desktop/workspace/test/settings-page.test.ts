@@ -17,7 +17,7 @@ const info: SettingsInfo = {
   restart: [],
 };
 const view = (patch: Partial<SettingsView> = {}): SettingsView => ({
-  section: "general", query: "", mac: true, desktop: true, home: info.home, info, error: "", fold: "",
+  section: "general", query: "", mac: true, glass: true, desktop: true, home: info.home, info, error: "", fold: "",
   general: { openOn: "home", awake: true },
   notify: { wait: true, error: true, drive: true, done: false },
   appearance: { theme: "demesne", themes: [{ name: "demesne", label: "Demesne" }, { name: "demesne-light", label: "Demesne Light" }], canUndo: false, zoom: 1, glass: 25, ink: "neutral" },
@@ -100,10 +100,11 @@ test("glass runs from clear to solid, and the default is the built look", () => 
   expect(glassAlphas(140)).toEqual(glassAlphas(100));
 });
 
-test("Glass shows on the Mac, Ink only for Demesne's own themes", () => {
+test("Glass shows where the window is glass (the Mac, Hyprland), Ink only for Demesne's own themes", () => {
   const page = settingsPage(view({ section: "appearance", appearance: { ...view().appearance, glass: 40, ink: "warm" } }));
   expect(page).toContain('value="40" data-glass');
   expect(page).toMatch(/class="on"[^>]*title="Warm"/);
-  expect(settingsPage(view({ section: "appearance", mac: false }))).not.toContain("data-glass");
+  expect(settingsPage(view({ section: "appearance", mac: false, glass: false }))).not.toContain("data-glass");
+  expect(settingsPage(view({ section: "appearance", mac: false, glass: true }))).toContain("data-glass");
   expect(settingsPage(view({ section: "appearance", appearance: { ...view().appearance, theme: "custom-sunset" } }))).not.toContain("st-inks");
 });

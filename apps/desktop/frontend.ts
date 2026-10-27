@@ -8,6 +8,7 @@ interface DesktopBootstrap {
   snapshot: WorkspaceSnapshot | null;
 }
 interface DesktopNative {
+  glass?: boolean;
   core: { invoke: DesktopInvoke };
   event: {
     listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void>;
@@ -34,8 +35,10 @@ const request = <T>(method: string, args: Record<string, unknown> = {}) =>
   invoke<T>("desktop_request", { method, args });
 const listeners: (() => void)[] = [];
 const mac = /Mac/i.test(navigator.platform);
-// The Mac window has no title bar and is translucent under the shell.
-if (mac) document.documentElement.classList.add("glass", "mac-chrome");
+// The Mac window has no title bar. The window is translucent under the shell
+// wherever the desktop blurs what shows through (the Mac, Hyprland).
+if (mac) document.documentElement.classList.add("mac-chrome");
+if (native?.glass) document.documentElement.classList.add("glass");
 let workspace: string | null = null, mounted = false, busy = true, fatal = false;
 let recentProjects: string[] = [];
 const bridge = createDesktopBridge(invoke, showError);

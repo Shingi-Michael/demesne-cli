@@ -129,6 +129,8 @@ export interface SettingsView {
   section: SettingsSection;
   query: string;
   mac: boolean;
+  /** The window is glass (the desktop blurs behind it). */
+  glass: boolean;
   desktop: boolean;
   home: string;
   info: SettingsInfo | null;
@@ -215,7 +217,7 @@ function pages(view: SettingsView): Page[] {
       { title: "Theme", line: "The palette for the whole app", control: (view.appearance.canUndo ? link("settings-set", "Undo", { method: "theme-undo", args: {} }) : "") + word("theme", themeLabel, view.fold === "theme"), keywords: "colour color dark light palette theme",
         fold: view.fold === "theme" ? themeGroups.filter(([, items]) => items.length).map(([heading, items]) => choices(`${heading} themes`, items.map((item) => [item.label, item.name === view.appearance.theme, "settings-set", { method: "theme", args: { name: item.name } }]), heading)).join("") : "" },
       { title: "Make a theme", line: "Answer a few questions and Demesne builds a palette from your answers", control: link("settings-command", "Start", { text: "/themefy " }), keywords: "themefy custom palette" },
-      ...(view.desktop && view.mac ? [{ title: "Glass", line: "How much of the desktop shows through the window", control: `<label class="st-range">Clear<input type="range" min="0" max="100" step="1" value="${view.appearance.glass}" data-glass aria-label="Glass">Solid</label>`, keywords: "glass transparent translucent blur vibrancy opacity" }] : []),
+      ...(view.desktop && view.glass ? [{ title: "Glass", line: "How much of the desktop shows through the window", control: `<label class="st-range">Clear<input type="range" min="0" max="100" step="1" value="${view.appearance.glass}" data-glass aria-label="Glass">Solid</label>`, keywords: "glass transparent translucent blur vibrancy opacity" }] : []),
       ...(/^demesne(-light)?$/.test(view.appearance.theme) ? [{ title: "Ink", line: "The colour every grey is made from, and the accent with it", control: `<span class="st-inks" role="group" aria-label="Ink">${INKS.map(([id, label, swatch]) => `<button type="button" class="${view.appearance.ink === id ? "on" : ""}" style="--swatch:${swatch}" title="${label}" aria-label="${label}" aria-pressed="${view.appearance.ink === id}" data-action="settings-local" data-args="${h(JSON.stringify({ key: "ink", value: id }))}"></button>`).join("")}</span>`, keywords: "ink tint hue colour color accent warm cool" }] : []),
       ...(view.desktop ? [{ title: "Text size", line: "The size of everything in the window", control: segments(([["Small", 0.9], ["Default", 1], ["Large", 1.1]] as [string, number][]).map(([label, zoom]) => [label, view.appearance.zoom === zoom, "settings-set", { method: "desktop-zoom", args: { zoom } }]), "Text size"), keywords: "zoom font scale" }] : []),
     ] },

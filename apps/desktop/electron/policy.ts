@@ -1,5 +1,17 @@
 import { isAbsolute, resolve, sep } from "node:path";
 export const APP_URL = "demesne://app/index.html";
+/** Whether the desktop blurs what shows through a see-through window, so the
+ *  shell can be glass: the Mac does (vibrancy), and so does Hyprland, which
+ *  blurs behind any window with clear pixels. KDE and GNOME don't blur a window
+ *  that hasn't asked them to, so there it stays solid. DEMESNE_GLASS=1 or 0
+ *  says so on any other Linux desktop that blurs (SwayFX, Wayfire, a KWin
+ *  script) or doesn't. */
+export function desktopBlurs(platform: string, env: Record<string, string | undefined>) {
+  if (platform === "darwin") return true;
+  if (platform !== "linux") return false;
+  if (env.DEMESNE_GLASS === "1" || env.DEMESNE_GLASS === "0") return env.DEMESNE_GLASS === "1";
+  return (Boolean(env.HYPRLAND_INSTANCE_SIGNATURE) || /hyprland/i.test(env.XDG_CURRENT_DESKTOP ?? ""));
+}
 /** Project changes reload the shell; other destinations and frames stay blocked. */
 export const allowAppReload = (url: string, isMainFrame: boolean) => isMainFrame && url === APP_URL;
 /** A chat's live preview may load only pages served on this machine. */

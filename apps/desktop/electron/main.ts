@@ -4,7 +4,7 @@ import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { APP_URL, allowAppReload, assetPath, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
@@ -54,6 +54,7 @@ void app.whenReady().then(async () => {
   // Only a zoom chosen in this app counts: the redesign is drawn at its own
   // size, so a level inherited from the previous shell is dropped once.
   try { const saved = JSON.parse(readFileSync(zoomPath, "utf8")); if (saved.version === ZOOM_VERSION && ZOOM_LEVELS.includes(saved.zoom)) zoom = saved.zoom; } catch {}
+  const glass = desktopBlurs(process.platform, process.env);
   window = new BrowserWindow({
     width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#161617",
     // The Mac: no title bar, the traffic lights on the sidebar's glass, and
@@ -65,7 +66,10 @@ void app.whenReady().then(async () => {
       // wallpaper behind the window, so the glass would go flat there.
       simpleFullscreen: true,
     } : {}),
-    webPreferences: { preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true },
+    // Linux, where the desktop blurs behind clear pixels (Hyprland): the
+    // window is see-through and the compositor makes it glass.
+    ...(process.platform === "linux" && glass ? { transparent: true, backgroundColor: "#00000000" } : {}),
+    webPreferences: { additionalArguments: glass ? ["--demesne-glass"] : [], preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true },
   });
   const contents = window.webContents, session = contents.session;
   session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));

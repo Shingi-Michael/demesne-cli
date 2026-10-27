@@ -4,7 +4,10 @@ export const THEME_INPUT_COLORS = ["background", "surface", "raised", "text", "s
   "syntaxKeyword", "syntaxString", "syntaxNumber", "syntaxComment", "syntaxType", "syntaxFunction"] as const;
 type ThemeInputColor = typeof THEME_INPUT_COLORS[number];
 export interface ThemeInput { label: string; appearance: "dark" | "light"; colors: Record<ThemeInputColor, string> }
-export interface ThemeLibrary { selected: Theme; themes: Theme[]; canUndo: boolean; persisted: boolean }
+export interface ThemeLibrary {
+  selected: Theme; themes: Theme[]; canUndo: boolean; persisted: boolean;
+  systemSource?: { enabled: boolean; path: string; error?: string };
+}
 const hex = /^#[0-9a-f]{6}$/i;
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const mix = (a: string, b: string, weight: number) => "#" + [1,3,5].map(i => Math.round(parseInt(a.slice(i,i+2),16)*(1-weight)+parseInt(b.slice(i,i+2),16)*weight).toString(16).padStart(2,"0")).join("");
@@ -28,10 +31,14 @@ function parseThemeInput(value: unknown): ThemeInput {
 }
 /** Only tokens enter the renderer. Readability adjustments retain hue where possible;
  * no model CSS, JavaScript, paths, fonts or layout instructions are accepted. */
-export function createCustomTheme(value: unknown, name: string): Theme {
+export function createCustomTheme(value: unknown, name: string, source: "generated" | "installed" = "generated"): Theme {
   const input=parseThemeInput(value), c=input.colors, dark=input.appearance === "dark";
   for(const role of ["background","surface","raised"] as const) {
-    const light=luminance(c[role]);if(dark?light>0.12:light<0.6)throw new Error(`${role} must be ${dark?"darker":"lighter"} for ${input.appearance} mode`);
+    const light=luminance(c[role]);
+    // Installed palettes may have stronger surface contrast than Themefy's
+    // design constraints. Their foregrounds still pass the same readability check.
+    const invalid=source==="installed" ? role==="background" && (dark?light>0.5:light<0.5) : (dark?light>0.12:light<0.6);
+    if(invalid)throw new Error(`${role} must be ${dark?"darker":"lighter"} for ${input.appearance} mode`);
   }
   const surfaces=[c.background,c.surface,c.raised];
   const accent=readable(c.accent,surfaces,input.appearance), warning=readable(c.warning,surfaces,input.appearance);

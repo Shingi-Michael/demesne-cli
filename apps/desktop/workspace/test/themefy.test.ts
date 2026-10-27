@@ -50,3 +50,29 @@ test("cancelled Themefy leaves palette untouched; unoffered execution tools are 
     expect(host.snapshot().theme).toBe("demesne");expect(await Bun.file(f.workspace+"/README.md").text()).toBe("# Isolated UI fixture\n");expect(round).toBe(2);
   }finally{host.dispose();await f.close();}
 });
+
+test("System source Settings preserve the displayed theme and switch external colors off cleanly",async()=>{
+  const f=await fixture({providerId:"fixture",modelId:"fixture",async listModels(){return[];},async *stream(){yield{type:"finish" as const,reason:"stop" as const};}});
+  const host=new WorkspaceHost({workspace:f.workspace,settings:f.settings,client:f.client,changed:()=>{}});
+  host.theme="nord"; // Initial client override, not yet saved in the daemon.
+  try {
+    await host.connect();
+    expect(host.snapshot().theme).toBe("nord");
+    const path=f.workspace+"/system-palette.json";
+    await Bun.write(path,JSON.stringify(warmOlive));
+    await host.handle("theme-system-source",{sessionId:host.current!.session.id,enabled:false,path});
+    expect(host.snapshot().theme).toBe("nord");
+    expect(host.snapshot().systemThemeSource?.enabled).toBe(false);
+    await host.handle("theme",{sessionId:host.current!.session.id,name:"system"});
+    expect(host.snapshot().themeOptions.find(t=>t.name==="system")?.systemFallback).toBe(true);
+    await host.handle("theme-system-source",{sessionId:host.current!.session.id,enabled:true,path});
+    expect(host.snapshot().theme).toBe("system");
+    expect(host.snapshot().palette.ink).toBe(warmOlive.colors.background);
+    await host.handle("theme-system-source",{sessionId:host.current!.session.id,enabled:false,path});
+    expect(host.snapshot().theme).toBe("system");
+    expect(host.snapshot().themeOptions.find(t=>t.name==="system")?.systemFallback).toBe(true);
+    expect(host.snapshot().systemThemeSource?.path).toBe(path);
+    expect(JSON.parse(await Bun.file(path).text())).toEqual(warmOlive);
+    await expect(f.client.request("/v1/themes",{method:"POST",body:JSON.stringify({action:"system-source",enabled:true,path:"relative.json"})})).rejects.toMatchObject({status:400});
+  }finally{host.dispose();await f.close();}
+});

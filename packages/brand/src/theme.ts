@@ -92,6 +92,8 @@ export interface Theme {
   /// The terminal background the theme is built for.
   appearance: TerminalTheme;
   colors: Record<PaletteColor, string>;
+  /** System entry without a generated system.json: follow desktop light/dark. */
+  systemFallback?: boolean;
 }
 
 /// The redesign's calmer dark palette (Figma "demesne UI redesign").
@@ -289,6 +291,7 @@ const githubLight: CoreColors = {
 };
 
 export const THEMES: Record<string, Theme> = {
+  system: { name: "system", label: "System", appearance: "dark", colors: demesne, systemFallback: true },
   demesne: { name: "demesne", label: "Demesne", appearance: "dark", colors: demesne },
   "demesne-light": { name: "demesne-light", label: "Demesne Light", appearance: "light", colors: demesneLight },
   dracula: { name: "dracula", label: "Dracula", appearance: "dark", colors: complete(dracula) },

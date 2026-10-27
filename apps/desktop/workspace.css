@@ -1122,6 +1122,19 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
    the text colour at an opacity, so rules, tints and hovers all follow it.
    On the Mac the shell is translucent over the window's vibrancy; elsewhere
    it is the same colour, solid. No scrollbars; radii 8 and 12. */
+/* Glass is a material over every palette, not a Demesne-only color theme.
+   Resolve opaque bases on the body before panel-local --ink overrides. */
+body.desktop {
+  --shell: var(--surface); --panel: var(--ink);
+  --shell-glass: color-mix(in srgb, var(--shell) calc(var(--shell-a, 0.325) * 100%), transparent);
+  --panel-glass: color-mix(in srgb, var(--panel) calc(var(--panel-a, 0.5) * 100%), transparent);
+  --panel-edge: color-mix(in srgb, var(--strong) 4.5%, transparent);
+}
+html[data-appearance="light"] body.desktop {
+  --hair: rgba(0, 0, 0, 0.08); --hair2: rgba(0, 0, 0, 0.14);
+  --tone: rgba(0, 0, 0, 0.04); --tone2: rgba(0, 0, 0, 0.07);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.1); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.18);
+}
 html[data-theme="demesne"] body.desktop {
   /* The ink in three channels: the text, the shell and the panel. Settings ›
      Appearance › Ink swaps them; Glass sets how much of the blur shows. */
@@ -1186,7 +1199,13 @@ body.desktop *, .desktop .live-app:not(.start) .stage { scrollbar-width: none; }
 body.desktop ::-webkit-scrollbar { display: none; width: 0; height: 0; }
 body.desktop :is(pre, .diff, .rv-diff, .step-fold, .pv-view) { scrollbar-width: thin; scrollbar-color: var(--hair2) transparent; }
 /* The composer is a tint inside the panel, not a box on a shadow. */
-.desktop #composer .composer-box { border: 0; border-radius: 12px; background: var(--tone); box-shadow: 0 0 0 1px var(--hair); }
+.desktop #composer .composer-box { border: 0; border-radius: var(--composer-radius, 12px); background: var(--tone); box-shadow: 0 0 0 1px var(--hair); }
+/* Match Home's glass and controls to the textbox's painted outer edge.
+   Its existing ring extends 1px beyond its layout box on each side. Keep the
+   textbox at its original width and widen the borderless lower surface to it. */
+.desktop .live-app.start #composer { --composer-radius: 12px; width: calc(100% + 2px); margin-inline: -1px; border-radius: var(--composer-radius); }
+.desktop .live-app.start #composer .composer-box { margin-inline: 1px; }
+.desktop .live-app.start #composer .composer-bar { box-sizing: border-box; width: 100%; min-width: 0; align-self: stretch; border-radius: 0 0 var(--composer-radius) var(--composer-radius); }
 .desktop #composer .composer-box:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair2)); }
 .desktop #composer.queued .composer-box { box-shadow: 0 0 0 1px var(--composerQueuedBorder); }
 .desktop #composer.restored .composer-box { box-shadow: 0 0 0 1px var(--composerRestoredBorder); }
@@ -1341,6 +1360,10 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .sidebar-pr-line .sidebar-back-opt.key { color: var(--t1); }
 .sidebar-pr-line .sidebar-back-opt.key::after { content: " ↵"; color: var(--t4, var(--t3)); }
 
+/* The System palette path stays editable without widening the settings panel. */
+#system-theme-source { display: flex; align-items: center; gap: 8px; }
+#system-theme-source input { flex: 1; min-width: 0; width: 100%; }
+#system-theme-source button { flex: none; }
 /* Demesne rebuilds its own look (pass 80): the line after a turn that changed the window, and the top bar's words while you look at it. */
 .desktop .look-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 6px 0 4px 4px; padding-left: 14px; box-shadow: -1px 0 0 var(--hair); font-size: 12.5px; line-height: 19px; color: var(--t3); }
 .desktop .look-line .ico { flex: none; width: 14px; height: 14px; }

@@ -607,6 +607,31 @@ try {
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.getByRole("heading", { name: /^What are we building/ }).waitFor();
   await until(() => page.locator("#workspace-title").innerText().then(text => text === "Home"), "the top bar says Home for a new chat");
+  const homeControls = await page.locator("#composer").evaluate(form => {
+    const box = form.querySelector<HTMLElement>(".composer-box")!;
+    const bar = form.querySelector<HTMLElement>(".composer-bar")!;
+    const boxRect = box.getBoundingClientRect(), barRect = bar.getBoundingClientRect();
+    const boxStyle = getComputedStyle(box), barStyle = getComputedStyle(bar);
+    return {
+      // The textbox's existing 1px outset ring is outside its DOM rectangle.
+      leftDelta: Math.abs(boxRect.left - 1 - barRect.left),
+      rightDelta: Math.abs(boxRect.right + 1 - barRect.right),
+      boxRadius: boxStyle.borderBottomLeftRadius,
+      leftRadius: barStyle.borderBottomLeftRadius,
+      rightRadius: barStyle.borderBottomRightRadius,
+      edge: barStyle.boxShadow,
+      borderWidth: barStyle.borderBottomWidth,
+      formRadius: getComputedStyle(form).borderBottomLeftRadius,
+    };
+  });
+  assert(homeControls.leftDelta < 1 && homeControls.rightDelta < 1, "Home controls align with both painted textbox edges, including its ring");
+  assert.notEqual(homeControls.boxRadius, "0px", "the textbox has rounded corners");
+  assert.equal(homeControls.leftRadius, homeControls.boxRadius, "Home controls match the textbox's lower-left radius");
+  assert.equal(homeControls.rightRadius, homeControls.boxRadius, "Home controls match the textbox's lower-right radius");
+  assert.equal(homeControls.formRadius, homeControls.boxRadius, "the Home glass background is rounded too");
+  assert.equal(homeControls.edge, "none", "Home controls do not add a border ring");
+  assert.equal(homeControls.borderWidth, "0px", "Home controls stay borderless");
+  await capture("02-home-composer");
   // The empty chat is the composer, not a row: New chat above already names
   // it, so Chats only lists conversations that have a turn.
   assert.equal(await page.locator("#sidebar-projects .sidebar-session", { hasText: "New chat" }).count(), 0, "An empty chat is not listed under Chats");

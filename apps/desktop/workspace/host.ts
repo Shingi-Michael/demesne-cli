@@ -357,6 +357,7 @@ export class WorkspaceHost {
       themes: this.themeLibrary?.themes.map(t=>t.name) ?? themeNames(),
       themeOptions: this.themeLibrary?.themes ?? [],
       themeCanUndo: this.themeLibrary?.canUndo ?? false,
+      systemThemeSource: this.themeLibrary?.systemSource ?? null,
       commands: this.slashCommands(),
       workspace: this.current?.session.workspace?.root ?? this.workspace,
       drive: this.driveState,
@@ -392,13 +393,24 @@ export class WorkspaceHost {
         if (!this.disposed) this.options.changed(this.snapshot());
       }, 25);
   }
+  private themeRefreshTimer: ReturnType<typeof setInterval> | undefined;
+  private themeRefreshBusy = false;
+  private themeRevision = 0;
   private setThemes(library:ThemeLibrary) {
+    if (this.disposed) return;
+    this.themeRevision++;
     // Preserve an initial --theme / terminal appearance override until the
     // user actually saves a selection in the daemon's shared library.
-    this.themeLibrary=library.persisted?library:{...library,selected:themeByName(this.theme)};
+    const next=library.persisted?library:{...library,selected:library.themes.find(t=>t.name===this.theme) ?? themeByName(this.theme)};
+    if (JSON.stringify(next)===JSON.stringify(this.themeLibrary)) return;
+    this.themeLibrary=next;
     this.theme=this.themeLibrary.selected.name;this.publish();
   }
-  private async refreshThemes() {this.setThemes(await this.client.themes());}
+  private async refreshThemes() {
+    const revision=this.themeRevision;
+    const library=await this.client.themes();
+    if (revision===this.themeRevision) this.setThemes(library);
+  }
   async connect() {
     this.connection = "connecting";
     this.error = null;
@@ -407,6 +419,14 @@ export class WorkspaceHost {
       const health = await this.client.health();
       // Older daemons may not yet have theme persistence. Built-ins still work.
       try { await this.refreshThemes(); } catch {}
+      if (!this.themeRefreshTimer) {
+        this.themeRefreshTimer=setInterval(() => {
+          if (this.disposed || this.themeRefreshBusy) return;
+          this.themeRefreshBusy=true;
+          void this.refreshThemes().catch(() => {}).finally(() => { this.themeRefreshBusy=false; });
+        }, 2000);
+        this.themeRefreshTimer.unref?.();
+      }
       const contextWindow = health.contextCapacity ?? [this.settings.loaded.config.provider, ...Object.values(this.settings.loaded.config.additionalProviders ?? {})]
         .find(p => p.model === health.model)?.contextWindow;
       this.reasoning = health.reasoning;
@@ -1547,6 +1567,14 @@ export class WorkspaceHost {
       const result=await this.client.themefy(this.current!.session.id,typeof args.preferences === "string"?args.preferences:"");
       this.current!.ensureTurn(result.turn);this.publish();return;
     }
+    if (method === "theme-system-source") {
+      if(typeof args.enabled!=="boolean")throw new Error("Expected an external palette switch value");
+      const path=string(args.path,"system palette path",4096);
+      // Save the theme already displayed before source settings make this a
+      // persisted library; otherwise the daemon's initial default could replace it.
+      if(this.themeLibrary && !this.themeLibrary.persisted)this.setThemes(await this.client.selectTheme(this.theme));
+      this.setThemes(await this.client.configureSystemTheme(args.enabled,path));return;
+    }
     if (method === "theme-undo") {
       this.setThemes(await this.client.undoTheme());return;
     }
@@ -1937,6 +1965,7 @@ export class WorkspaceHost {
       [...this.drafts].some(([id, text]) => id !== this.current?.session.id && text.trim() && this.sessions.some(session => session.id === id));
   }
   dispose() {
+    if (this.themeRefreshTimer) clearInterval(this.themeRefreshTimer);
     this.providerSignInGeneration++;
     this.providerAccounts?.cancel();
     if (this.panelWatchTimer) clearInterval(this.panelWatchTimer);

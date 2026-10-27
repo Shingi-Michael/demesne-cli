@@ -127,3 +127,22 @@ test("Glass shows where the window is glass (the Mac, Hyprland), Ink only for De
   expect(settingsPage(view({ section: "appearance", mac: false, glass: true }))).toContain("data-glass");
   expect(settingsPage(view({ section: "appearance", appearance: { ...view().appearance, theme: "custom-sunset" } }))).not.toContain("st-inks");
 });
+
+test("Appearance offers an opt-in external System palette and a separate saved path",()=>{
+  const html=settingsPage(view({section:"appearance",appearance:{...view().appearance,systemSource:{enabled:false,path:"/home/me/.local/state/kuru/theme/demesne.json"}}}));
+  expect(html).toContain("Use an external System palette");
+  expect(html).toContain('role="switch" aria-checked="false"');
+  expect(html).toContain('data-action="system-theme-toggle"');
+  expect(html).toContain('id="system-theme-source"');
+  expect(html).toContain('value="/home/me/.local/state/kuru/theme/demesne.json"');
+  expect(html).toContain("Save path");
+  expect(html).toContain("does not enable it");
+});
+test("System palette errors and paths are safely escaped in Settings",()=>{
+  const html=settingsPage(view({section:"appearance",appearance:{...view().appearance,systemSource:{enabled:true,path:'/tmp/"<palette>.json',error:"<script>bad</script>"}}}));
+  expect(html).toContain('role="switch" aria-checked="true"');
+  expect(html).toContain("Could not reload");
+  expect(html).toContain("&lt;script&gt;");
+  expect(html).not.toContain("<script>");
+  expect(html).toContain("&quot;&lt;palette&gt;");
+});

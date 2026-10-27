@@ -23,7 +23,7 @@ import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.
 import { ProviderTurnProcessor } from "../src/provider-processor.ts";
 import { agentSystemPrompt, ANSWER_FORMAT_GUIDANCE } from "../src/engine.ts";
 import { planRawContextRequest } from "../src/context-planner.ts";
-import { foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
+import { foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 
 const temporaryDirectories: string[] = [];
 const servers: Bun.Server<unknown>[] = [];
@@ -34,7 +34,7 @@ const apps: DaemonApp[] = [];
 function plainChatToolOverhead(): number {
   const store = new DemesneStore(":memory:");
   try {
-    const definitions = [foundryReadTool(store).definition, foundrySaveTool(store).definition];
+    const definitions = [foundryReadTool(store).definition, foundrySaveTool(store).definition, foundryEditTool(store).definition];
     const estimate = (tools: typeof definitions) => planRawContextRequest({
       messages: [{ role: "system", content: agentSystemPrompt({ definitions: tools }) }], tools, historicalTurns: [],
     }).plan.estimatedInputTokens;

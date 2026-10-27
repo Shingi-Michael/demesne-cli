@@ -4,7 +4,7 @@ import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
 import type { ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize } from "./artifacts.ts";
-import { foundryReadTool, foundrySaveTool } from "./foundry.ts";
+import { foundryEditTool, foundryReadTool, foundrySaveTool } from "./foundry.ts";
 import {
   encodeServerSentEvent,
   isRecord,
@@ -286,6 +286,7 @@ export function createDaemonApp(options: {
   if (options.images?.url && options.images.model) tools.register(imageGenerationTool(options.images, store));
   tools.register(foundrySaveTool(store));
   tools.register(foundryReadTool(store));
+  tools.register(foundryEditTool(store));
   const mcp = new McpManager({
     servers: options.mcpServers ?? {},
     log: (message) => console.warn(message),

@@ -292,13 +292,17 @@ export class DemesneStore {
   }
 
   /// Foundry: saves a new artifact, or a new version of one, in one step.
-  saveFoundryArtifact(input: { id?: string; title?: string; kind?: FoundryKind; workspace?: string | null; sessionId?: string | null; turnId?: string | null; note?: string; source: string }): FoundryArtifactDetail {
+  /// `baseVersion` is the version the writer last read: when the artifact has
+  /// moved past it (someone else saved, or Edit source was used) the save is
+  /// refused instead of silently clobbering that work, as an artifact publish is.
+  saveFoundryArtifact(input: { id?: string; title?: string; kind?: FoundryKind; workspace?: string | null; sessionId?: string | null; turnId?: string | null; note?: string; source: string; baseVersion?: number }): FoundryArtifactDetail {
     if (Buffer.byteLength(input.source) > FOUNDRY_MAX_SOURCE_BYTES) throw new InvalidStateError("Foundry source is larger than 512 KB");
     const now = new Date().toISOString();
     const id = this.database.transaction(() => {
       if (input.id) {
         const row = this.database.query("SELECT version FROM foundry_artifacts WHERE id = ?").get(input.id) as { version: number } | null;
         if (!row) throw new NotFoundError("Foundry artifact not found");
+        if (input.baseVersion !== undefined && input.baseVersion !== row.version) throw new InvalidStateError(`Foundry artifact is at version ${row.version}, not ${input.baseVersion}`);
         const version = row.version + 1;
         this.database.query("UPDATE foundry_artifacts SET version = ?, updated_at = ?, title = COALESCE(?, title) WHERE id = ?").run(version, now, input.title?.trim() || null, input.id);
         this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source) VALUES (?,?,?,?,?,?,?)")
@@ -1845,7 +1849,7 @@ export class DemesneStore {
     const rows = this.database
       .query("SELECT * FROM events WHERE session_id = ? AND id > ? ORDER BY id LIMIT ?")
       .all(sessionId, afterEventId, boundedLimit) as EventRow[];
-    return rows.map(mapEvent);
+    return rows.map(row => this.projectArtifactEvent(row));
   }
 
   /// Bounded bulk reads for saved history, pinned to a snapshot cursor even
@@ -1854,7 +1858,18 @@ export class DemesneStore {
     this.requireSession(sessionId);
     const rows = this.database.query("SELECT * FROM events WHERE session_id = ? AND id > ? AND id <= ? ORDER BY id LIMIT ?")
       .all(sessionId, afterEventId, throughEventId, Math.max(1, Math.min(limit, 20_000))) as EventRow[];
-    return rows.map(mapEvent);
+    return rows.map(row => this.projectArtifactEvent(row));
+  }
+
+  // Older Foundry saves kept their result in tool_calls but omitted the
+  // artifact identity from the event. Enrich replay without rewriting history.
+  private projectArtifactEvent(row: EventRow): EventEnvelope {
+    const event = mapEvent(row);
+    if (event.type !== "tool.call_completed" || event.payload.name !== "foundry_save" || typeof event.payload.message === "string") return event;
+    const saved = this.database.query("SELECT result_text FROM tool_calls WHERE id = ? AND turn_id = ? AND name = 'foundry_save' AND status = 'completed'")
+      .get(String(event.payload.toolCallId ?? ""), event.turnId ?? "") as { result_text: string | null } | null;
+    if (saved?.result_text) Object.assign(event.payload, toolResultMetadata("foundry_save", saved.result_text));
+    return event;
   }
 
   private requireSession(id: string): void {
@@ -2500,6 +2515,11 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
   }
   if (typeof result !== "object" || result === null || Array.isArray(result)) return {};
   const value = result as Record<string, unknown>;
+  if ((name === "foundry_save" || name === "foundry_edit") && typeof value.id === "string" && /^[\w-]{1,200}$/.test(value.id)
+    && typeof value.title === "string" && FOUNDRY_KINDS.includes(value.kind as FoundryKind)
+    && typeof value.version === "number" && Number.isSafeInteger(value.version) && value.version > 0) {
+    return { message: JSON.stringify({ id: value.id, title: value.title.slice(0, 200), kind: value.kind, version: value.version }) };
+  }
   if (name === "edit_file" || name === "write_file") {
     return {
       ...(typeof value.path === "string" ? { path: value.path } : {}),

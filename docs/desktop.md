@@ -41,6 +41,18 @@ The last project and session are restored on launch. Missing or archived session
 
 See the [implementation guide](../apps/desktop/README.md#verification). Electron lifecycle checks exercise the real Chromium renderer with a disposable workspace and deterministic model, including approvals, edits, persisted sessions and background work. No personal credentials or production test endpoint are used. Tests currently run on macOS and Linux; Windows packaging and backend checks do not establish full UI compatibility. Virtual displays do not establish performance on every physical GPU.
 
+## Foundry in a conversation
+
+Ask for a mockup, interactive page, graphic or document in any chat, or use `/foundry` followed by what you want to make. This works in a project and in **Just a chat**. The model saves the artifact and its preview appears directly below the reply; the Foundry sidebar page keeps the same work in a gallery.
+
+HTML mockups run inside the conversation with working buttons and inputs. Preview state survives streaming replies, completion, opening the step trace and later messages. **Code** shows the source, **Phone** narrows the viewport, and **Revise** prepares a follow-up naming the artifact. Ask for a change to save another version in the same chat. SVG graphics and Markdown documents also appear inline.
+
+Revisions work like edits to a file: the model reads the artifact, then changes just the parts you asked about with `foundry_edit` (exact find and replace, each match required to be unique) and only rewrites the whole source when most of it changes. Every change names the version it was read from, so if the artifact moved on in the meantime (you used **Edit source**, or another chat saved) the change is refused and the model reads the latest version first instead of overwriting it.
+
+Previews run in sandboxed frames. A page may load pinned libraries from cdnjs, jsdelivr and unpkg (an exact version such as `react@18.3.1`) and Google Fonts; every other request is blocked, so images are inline SVG or data URIs and nothing can phone home. The tools carry a short design brief (colours as custom properties with a dark-mode set, hairlines and tones instead of outlines, works at phone width, no stock AI looks, Demesne's own tokens when you ask for Demesne's UI) so artifacts read as one hand.
+
+After building the app, run `bun scripts/check-foundry-chat.ts` to verify in-chat creation, interaction, revisions and history replay in real Electron. Pass a packaged executable as the first argument to check an installed build.
+
 ## Compacted conversation
 
 After successful compaction, the conversation shows the saved summary in place of older turns. The retained recent turns and subsequent messages stay visible. Use **Expand full history** on the summary card to restore the complete chronological conversation, then **Collapse older conversation** to return to the summary. Expansion stays in effect during streaming updates; reopening a session or creating a new checkpoint starts collapsed. This changes only the view; the complete transcript remains saved. Failed or cancelled compaction does not create a new collapsed section.

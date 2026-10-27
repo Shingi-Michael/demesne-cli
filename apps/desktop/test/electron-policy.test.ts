@@ -60,6 +60,10 @@ test("Foundry frames accept only artifact URLs and block the network", () => {
   expect(foundryURL("https://artifact/abc")).toBe(false);
   expect(FOUNDRY_CSP).toContain("default-src 'none'");
   expect(FOUNDRY_CSP).not.toContain("connect-src");
+  expect(FOUNDRY_CSP).toMatch(/script-src 'unsafe-inline' https:\/\/cdnjs\.cloudflare\.com https:\/\/cdn\.jsdelivr\.net https:\/\/unpkg\.com;/);
+  expect(FOUNDRY_CSP).toContain("style-src 'unsafe-inline' https://fonts.googleapis.com;");
+  expect(FOUNDRY_CSP).toContain("font-src data: https://fonts.gstatic.com;");
+  expect(FOUNDRY_CSP).toContain("form-action 'none'");
   // SVG renders as an image, so a script inside it never runs.
   const page = foundryDocument("svg", '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', "Logo");
   expect(page).toContain("data:image/svg+xml;base64,");

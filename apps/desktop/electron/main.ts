@@ -131,7 +131,8 @@ void app.whenReady().then(async () => {
     catch { return new Response("Not found", { status: 404 }); }
   });
   // Foundry: an artifact renders in its own frame, served here with a policy
-  // that blocks the network; the frame is sandboxed without the app's origin.
+  // that allows only pinned libraries and fonts from a short list of hosts;
+  // the frame is sandboxed without the app's origin.
   await session.protocol.handle("foundry", async request => {
     if (!foundryURL(request.url)) return new Response("Not found", { status: 404 });
     try {

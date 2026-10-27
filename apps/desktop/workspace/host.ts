@@ -1341,7 +1341,7 @@ export class WorkspaceHost {
     // kept for callers that take over explicitly; typing no longer sends it).
     // Clicking, navigating, opening panels and reading leave it running.
     // A mission in the background keeps going while you talk in your own chat.
-    if (method === "manual" || (["submit", "plan-submit", "themefy"].includes(method) && (!this.driveSession || this.inDriveHome))) {
+    if (method === "manual" || (["submit", "plan-submit", "themefy", "foundry-create", "foundry-make"].includes(method) && (!this.driveSession || this.inDriveHome))) {
       this.onManual?.();
       this.drive?.agent.intervene();
     }
@@ -1749,6 +1749,11 @@ export class WorkspaceHost {
     if (method === "foundry-rename") return this.client.foundryRename(string(args.id, "artifact", 200), string(args.title, "title", 200));
     if (method === "foundry-delete") return this.client.foundryDelete(string(args.id, "artifact", 200));
     if (method === "foundry-save") return this.client.foundrySave({ id: string(args.id, "artifact", 200), source: string(args.source, "source", 520_000), note: "Edited by you" });
+    if (method === "foundry-create") {
+      const text = string(args.text, "request", 4000).trim();
+      if (!text) throw new Error("Describe what to make");
+      return this.submit(`Foundry: ${text}`);
+    }
     // Make something: a new chat in this window's place, asked to use Foundry.
     if (method === "foundry-make") {
       const text = string(args.text, "request", 4000).trim();

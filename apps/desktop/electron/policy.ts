@@ -25,8 +25,14 @@ export function previewURL(value: string) {
 export function foundryURL(value: string) {
   try { const url = new URL(value); return url.protocol === "foundry:" && url.hostname === "artifact" && /^\/[\w-]{1,200}$/.test(url.pathname) && !url.username && !url.password && !url.port; } catch { return false; }
 }
-/** What an artifact frame may do: run its own inline code and nothing else. */
-export const FOUNDRY_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:";
+/** Where an artifact may load libraries and fonts from: the same short list
+ * Claude's artifacts allow, so a chart, React or a real typeface works. */
+export const FOUNDRY_SCRIPT_HOSTS = ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net", "https://unpkg.com"] as const;
+export const FOUNDRY_FONT_HOSTS = { styles: "https://fonts.googleapis.com", files: "https://fonts.gstatic.com" } as const;
+/** What an artifact frame may do: run its own inline code, load pinned
+ * libraries from the hosts above and Google Fonts, and nothing else: no
+ * fetch, no forms, no other origins. */
+export const FOUNDRY_CSP = `default-src 'none'; script-src 'unsafe-inline' ${FOUNDRY_SCRIPT_HOSTS.join(" ")}; style-src 'unsafe-inline' ${FOUNDRY_FONT_HOSTS.styles}; img-src data: blob:; font-src data: ${FOUNDRY_FONT_HOSTS.files}; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:`;
 /** The page an artifact frame shows: HTML as written, SVG as an image (so it runs no script). */
 export function foundryDocument(kind: string, source: string, title: string) {
   const esc = (text: string) => text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);

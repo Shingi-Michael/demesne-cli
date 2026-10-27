@@ -1,19 +1,21 @@
 import { ChatGPTAuth } from "@demesne/chatgpt-auth";
+import { CodexAuth } from "@demesne/codex-auth";
 import { loadConfig, updateUserConfig, type ProviderConfig } from "@demesne/config";
 import { configureChatGPT, connectChatGPT } from "@demesne/setup/chatgpt-auth.ts";
+import { CODEX_ACCOUNT_LABEL, configureCodex, connectCodex, type CodexAccountAuth } from "@demesne/setup/codex-auth.ts";
 import { beginOpenRouterLogin, configureOpenRouter, DEFAULT_OPENROUTER_MODEL, OPENROUTER_URL } from "@demesne/setup/openrouter-auth.ts";
 
 /// Settings › Providers: each provider with its sign-in state, and signing in
-/// or out of the ones that have accounts (ChatGPT, OpenRouter). Signing out
+/// or out of the ones that have accounts (Codex, ChatGPT, OpenRouter). Signing out
 /// keeps the provider's configuration, so signing back in is one step; the
 /// daemon then reloads its providers without a restart.
 
 export interface ProviderEntry {
-  /// "provider" for the primary, an additional_providers key, or "new:chatgpt"
-  /// / "new:openrouter" for a provider not configured yet.
+  /// "provider" for the primary, an additional_providers key, or "new:codex"
+  /// / "new:chatgpt" / "new:openrouter" for a provider not configured yet.
   key: string;
   label: string;
-  kind: "chatgpt" | "openrouter" | "local" | "api-key";
+  kind: "codex" | "chatgpt" | "openrouter" | "local" | "api-key";
   status: "signed-in" | "signed-out" | "local" | "key";
   detail: string;
   /// The provider serving the selected model.
@@ -32,10 +34,12 @@ export class ProviderAccounts {
   /// The key being signed in, while its browser flow is open.
   signingIn: string | null = null;
   private abort: AbortController | null = null;
-  constructor(private readonly options: { configPath: string; dataDirectory: string; accountDataDirectory?: string; open: (url: string) => Promise<void>; fetch?: typeof fetch }) {}
+  constructor(private readonly options: { configPath: string; dataDirectory: string; accountDataDirectory?: string; open: (url: string) => Promise<void>; fetch?: typeof fetch; codexAuth?: () => CodexAccountAuth }) {}
 
   private config() { return loadConfig({ userConfigPath: this.options.configPath, includeProject: false, env: {} }).config; }
   private auth() { return new ChatGPTAuth(this.options.accountDataDirectory ?? this.options.dataDirectory, { fetch: this.options.fetch }); }
+  /// Codex's sign-in lives in the machine's data directory, next to ChatGPT's.
+  private codexAuth() { return this.options.codexAuth?.() ?? new CodexAuth(this.options.accountDataDirectory ?? this.options.dataDirectory, { fetch: this.options.fetch }); }
   private configured() {
     const config = this.config();
     return [["provider", config.provider] as const, ...Object.entries(config.additionalProviders ?? {})]
@@ -45,7 +49,14 @@ export class ProviderAccounts {
   async list(activeProvider: string): Promise<ProviderEntry[]> {
     const accounts = await this.auth().accounts().catch(() => []);
     const configured = this.configured();
+    const codex = await this.codexAuth().status().catch(() => ({ signedIn: false } as Awaited<ReturnType<CodexAccountAuth["status"]>>));
     const entries: ProviderEntry[] = configured.map(([key, settings]) => {
+      if (settings.auth === "codex") {
+        const active = activeProvider === "Codex";
+        return codex.signedIn
+          ? { key, label: CODEX_ACCOUNT_LABEL, kind: "codex", status: "signed-in", detail: `Signed in${codex.email ? ` as ${codex.email}` : ""}${codex.planType ? ` · ${codex.planType}` : ""} · uses your Codex plan`, active }
+          : { key, label: CODEX_ACCOUNT_LABEL, kind: "codex", status: "signed-out", detail: "Signed out · uses your Codex plan", active };
+      }
       const label = settings.auth === "chatgpt" ? "ChatGPT" : settings.id ?? (isOpenRouter(settings) ? "OpenRouter" : "OpenAI-compatible");
       const active = label === activeProvider;
       if (settings.auth === "chatgpt") {
@@ -60,8 +71,10 @@ export class ProviderAccounts {
       if (isLocal(settings)) return { key, label, kind: "local", status: "local", detail: `Local · ${settings.model} · no sign-in needed`, active };
       return { key, label, kind: "api-key", status: "key", detail: settings.apiKey ? "API key in config" : "No sign-in", active };
     });
+    if (!entries.some((entry) => entry.kind === "codex"))
+      entries.push({ key: "new:codex", label: CODEX_ACCOUNT_LABEL, kind: "codex", status: "signed-out", detail: "Not set up · uses your Codex plan", active: false });
     if (!entries.some((entry) => entry.kind === "chatgpt"))
-      entries.push({ key: "new:chatgpt", label: "ChatGPT", kind: "chatgpt", status: "signed-out", detail: "Not set up · ChatGPT plan sharing", active: false });
+      entries.push({ key: "new:chatgpt", label: "ChatGPT", kind: "chatgpt", status: "signed-out", detail: "Not set up · metered as credits", active: false });
     if (!entries.some((entry) => entry.kind === "openrouter"))
       entries.push({ key: "new:openrouter", label: "OpenRouter", kind: "openrouter", status: "signed-out", detail: "Not set up · hosted models", active: false });
     return entries;
@@ -70,6 +83,7 @@ export class ProviderAccounts {
   async signOut(key: string): Promise<{ label: string; revoked?: boolean }> {
     const settings = this.configured().find(([name]) => name === key)?.[1];
     if (!settings) throw new Error("That provider isn't configured.");
+    if (settings.auth === "codex") { await this.codexAuth().logout(); return { label: "Codex" }; }
     if (settings.auth === "chatgpt") {
       if (!settings.authProfile) throw new Error("This ChatGPT provider has no account.");
       const { revoked } = await this.auth().logout(settings.authProfile);
@@ -92,6 +106,13 @@ export class ProviderAccounts {
     this.signingIn = key;
     try {
       const settings = this.configured().find(([name]) => name === key)?.[1];
+      if (key === "new:codex" || settings?.auth === "codex") {
+        const { models } = await connectCodex({ auth: this.codexAuth(), signal: abort.signal, fetch: this.options.fetch, reauthorize: !!settings, onLogin: url => this.options.open(url) });
+        abort.signal.throwIfAborted();
+        const model = settings?.model && models.some(item => item.id === settings.model) ? settings.model : undefined;
+        configureCodex({ configPath: this.options.configPath, models, model, contextWindow: settings?.contextWindow, key: settings ? key : undefined });
+        return { label: "Codex" };
+      }
       const chatgpt = key === "new:chatgpt" || settings?.auth === "chatgpt";
       if (chatgpt) {
         const auth = this.auth();

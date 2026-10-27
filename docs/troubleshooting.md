@@ -27,7 +27,9 @@ The Responses adapter retains completed output items from streaming events when 
 
 ## Retired provider after an upgrade
 
-The old Codex runtime provider is no longer offered. Its configuration sections are ignored, and a retired primary is replaced by the first remaining additional provider or an empty setup state. [Upgrade guidance](authentication.md#upgrading-from-the-retired-codex-provider) explains the config backup and separate ChatGPT registration. Choose `gpt-6.1-sol` under **ChatGPT**, without the old `codex/` prefix. Historical session labels are retained.
+## Codex bills credits, or says the plan's limit is reached
+
+Turns are billed to the Codex plan only through the **Codex** provider (`auth = "codex"`, models `codex/…`). The **ChatGPT** provider is metered as credits on the same account, so a turn that spent credits ran on ChatGPT: make Codex primary under Settings › Providers, or set `[provider]` to `auth = "codex"`, and sign out of ChatGPT if nothing else should reach it. "Usage limit reached" means the plan's 5-hour or weekly window is full; Demesne waits for you rather than switching billing. "This ChatGPT plan does not include Codex" means the signed-in account has no Codex plan. A sign-in that fails with "port 1455 is in use" has another app's listener on that port (the Codex app, for instance); quit it and try again.
 
 If the picker stays stale after signing in, reopen it and check **Settings › Models** to distinguish daemon discovery from UI state. An older daemon may require restarting after active work finishes. Build mode offers edit tools under Demesne's approval policy; Plan mode remains read only. Switching provider does not change filesystem permissions.
 

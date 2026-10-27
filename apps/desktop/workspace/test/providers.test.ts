@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { ProviderAccounts } from "../providers.ts";
 import { loadConfig, updateUserConfig } from "@demesne/config";
 import { fakeChatGPT } from "../../../../packages/chatgpt-auth/test/fixture.ts";
+import { ACCOUNT_ID as CODEX_ACCOUNT_ID, fakeCodexIssuer } from "../../../../packages/codex-auth/test/fixture.ts";
+import { CodexAuth } from "@demesne/codex-auth";
 import { eventually } from "./fixture.ts";
 
 const roots: string[] = [];
@@ -23,6 +25,7 @@ test("lists providers with their sign-in state and signs out of OpenRouter by re
   expect(before.map((item) => [item.key, item.kind, item.status, item.active])).toEqual([
     ["provider", "local", "local", true],
     ["openrouter", "openrouter", "signed-in", false],
+    ["new:codex", "codex", "signed-out", false],
     ["new:chatgpt", "chatgpt", "signed-out", false],
   ]);
   expect(await accounts.signOut("openrouter")).toEqual({ label: "OpenRouter" });
@@ -106,4 +109,44 @@ test("a cancelled ChatGPT flow finishing later cannot clear a newer browser sign
   expect(accounts.signingIn).toBeNull();
   expect(fake.requests).toHaveLength(0);
   expect(readFileSync(configPath, "utf8")).toBe(original);
+});
+
+test("Codex signs in through its own issuer, becomes the primary when there is none, and signs out locally", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "codex-providers-"))); roots.push(root);
+  const configPath = join(root, "config.toml"), issuer = fakeCodexIssuer();
+  const accountDataDirectory = join(root, "machine-data"), dataDirectory = join(root, "project-data");
+  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).startsWith("https://chatgpt.com/backend-api/codex/models")) {
+      expect(new Headers(init?.headers).get("chatgpt-account-id")).toBe(CODEX_ACCOUNT_ID);
+      return Response.json({ models: [{ slug: "gpt-6.1-sol", display_name: "GPT-6.1 Sol", visibility: "list", context_window: 272_000, default_reasoning_level: "medium", supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "high" }] }] });
+    }
+    return issuer.fetch(url, init);
+  }) as typeof fetch;
+  const codexAuth = new CodexAuth(accountDataDirectory, { fetch: fetcher, callbackPort: 15100 + Math.floor(Math.random() * 400) });
+  const accounts = new ProviderAccounts({ configPath, dataDirectory, accountDataDirectory, fetch: fetcher, codexAuth: () => codexAuth, open: async url => { expect((await issuer.callback(url)).status).toBe(200); } });
+  expect((await accounts.list("")).find(entry => entry.kind === "codex")).toMatchObject({ key: "new:codex", status: "signed-out", detail: "Not set up · uses your Codex plan" });
+  expect(await accounts.signIn("new:codex")).toEqual({ label: "Codex" });
+  expect(existsSync(join(accountDataDirectory, "auth/codex.json"))).toBe(true);
+  expect(existsSync(join(dataDirectory, "auth"))).toBe(false);
+  const config = loadConfig({ userConfigPath: configPath, includeProject: false, env: {} }).config;
+  expect(config.provider).toMatchObject({ id: "Codex", auth: "codex", model: "codex/gpt-6.1-sol", contextWindow: 272_000 });
+  expect((await accounts.list("Codex")).find(entry => entry.kind === "codex")).toMatchObject({ key: "provider", status: "signed-in", active: true, detail: "Signed in as person@example.test · pro · uses your Codex plan" });
+  expect(readFileSync(configPath, "utf8")).not.toMatch(/refresh-secret|eyJ/);
+  expect(await accounts.signOut("provider")).toEqual({ label: "Codex" });
+  expect((await accounts.list("Codex")).find(entry => entry.kind === "codex")).toMatchObject({ key: "provider", status: "signed-out", detail: "Signed out · uses your Codex plan" });
+  expect(loadConfig({ userConfigPath: configPath, includeProject: false, env: {} }).config.provider.model).toBe("codex/gpt-6.1-sol");
+});
+
+test("cancelling Codex browser sign-in leaves the configuration untouched", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "codex-cancel-"))); roots.push(root);
+  const configPath = join(root, "config.toml"), issuer = fakeCodexIssuer();
+  updateUserConfig(configPath, { provider: { id: "Local", url: "http://127.0.0.1:1234/v1", model: "local-model", context_window: 32768, max_output_tokens: 8192 } });
+  const original = readFileSync(configPath, "utf8");
+  const codexAuth = new CodexAuth(root, { fetch: issuer.fetch, callbackPort: 15500 + Math.floor(Math.random() * 400) });
+  const accounts = new ProviderAccounts({ configPath, dataDirectory: root, fetch: issuer.fetch, codexAuth: () => codexAuth, open: async () => { accounts.cancel(); } });
+  await expect(accounts.signIn("new:codex")).rejects.toThrow(/cancel/);
+  expect(issuer.exchanges).toHaveLength(0);
+  expect(accounts.signingIn).toBeNull();
+  expect(readFileSync(configPath, "utf8")).toBe(original);
+  expect((await codexAuth.status()).signedIn).toBe(false);
 });

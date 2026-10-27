@@ -9,7 +9,7 @@ These guides describe the current implementation. They were last audited on **20
 | [Getting started](../README.md) | Build, connect a provider, launch, approvals, recovery |
 | [Commands and keyboard](commands.md) | Slash commands, shortcuts, custom commands and workflows |
 | [Configuration](configuration.md) | File precedence, providers, limits, environment variables |
-| [Authentication](authentication.md) | ChatGPT accounts, OpenRouter, API keys, credential ownership |
+| [Authentication](authentication.md) | Codex plan, ChatGPT accounts, OpenRouter, API keys, credential ownership |
 | [Desktop app](desktop.md) | The Electron window: layout, development, bundles, lifecycle |
 | [Subagents and concurrency](subagents.md) | Routing, read-only tools, provider slots, Qwen sizing |
 | [Agent Drive](agent-drive.md) | NEXT, missions, project memory, check-ins, loop protection |

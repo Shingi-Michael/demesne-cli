@@ -1,0 +1,24 @@
+# Demesne config for the always-on assistant. install.ps1 copies this to
+# %USERPROFILE%\.demesne\config.toml (backing up any existing file) only
+# when you pass -Config.
+
+theme = "auto"
+inference_slots = 1
+
+[daemon]
+# The scheduled task starts the daemon; the window must not start a second one.
+auto_start = "never"
+host = "127.0.0.1"
+port = 7337
+
+[provider]
+id = "local"
+url = "http://127.0.0.1:8081/v1"
+model = "qwen3.8-27b"
+# The same 128K cap as --ctx-size in llama-server.args. It includes the output
+# reserve, so a prompt can reach at most 131072 - 16384 = 114688 tokens:
+# well under the ~130K point where Qwen3.8-27B stops generating.
+context_window = 131072
+max_output_tokens = 16384
+# The default effort can spend tens of thousands of thinking tokens a turn.
+reasoning_effort = "low"

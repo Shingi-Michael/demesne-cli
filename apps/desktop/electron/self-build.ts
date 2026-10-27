@@ -109,12 +109,14 @@ export class SelfBuild {
     if (!isDemesneProject(project)) throw new Error("This project isn't Demesne");
     if (this.running) return this.state;
     this.set({ kind: "building", project });
+    this.options.log(`Try it here: building the page from ${project}`);
     const dir = join(this.looks, String(Date.now()));
     try {
       mkdirSync(dir, { recursive: true });
       await this.script("ui", project, ["scripts/prepare-ui.ts", "--out", join(dir, "ui")], UI_TIMEOUT);
     } catch (error) {
       rmSync(dir, { recursive: true, force: true });
+      this.options.log(`The page didn't build: ${(error as Error).message}`);
       this.set({ kind: "broken", project, why: (error as Error).message });
       return this.state;
     }
@@ -132,7 +134,7 @@ export class SelfBuild {
     if (!this.loading) return;
     clearTimeout(this.loading); this.loading = null;
     const project = "project" in this.state ? this.state.project : "";
-    if (this.state.kind === "building") this.set({ kind: "trial", project, keep: this.canKeep() });
+    if (this.state.kind === "building") { this.options.log("The trial look is on"); this.set({ kind: "trial", project, keep: this.canKeep() }); }
   }
   /// The page failed to load, or reported an error while starting.
   failed(message: string) {
@@ -157,6 +159,7 @@ export class SelfBuild {
   /** Go back: the installed look, now. */
   back() {
     const trial = this.uiRoot;
+    this.options.log(trial ? "Go back: the installed look" : "Go back: nothing to go back from");
     this.uiRoot = null;
     if (this.loading) { clearTimeout(this.loading); this.loading = null; }
     if (trial) rmSync(join(trial, ".."), { recursive: true, force: true });
@@ -175,6 +178,7 @@ export class SelfBuild {
     if (this.running) return this.state;
     if (!this.canKeep()) { this.set({ kind: "failed", project, why: "Keep installs over the Mac app. You're running Demesne from source, so build and open it from there." }); return this.state; }
     this.set({ kind: "keeping", project });
+    this.options.log(`Keep: building the app from ${project}`);
     try {
       await this.script("app", project, ["scripts/build-desktop.ts"], APP_TIMEOUT);
       const built = builtApp(project, this.options.platform, this.options.arch)!;
@@ -187,8 +191,10 @@ export class SelfBuild {
         copy.once("exit", (code: number | null) => { if (code === 0) resolve(); else reject(new Error(`Staging the app failed (${code})`)); });
       });
       this.staged = staged;
+      this.options.log(`Kept: the app is staged at ${staged}`);
       this.set({ kind: "kept", project });
     } catch (error) {
+      this.options.log(`The app didn't build: ${(error as Error).message}`);
       this.set({ kind: "failed", project, why: (error as Error).message });
     }
     return this.state;

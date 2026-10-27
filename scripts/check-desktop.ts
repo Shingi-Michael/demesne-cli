@@ -957,6 +957,12 @@ try {
   await until(() => page.locator("#cards [data-card=context]").innerText().then(text => text.includes(`${percentage}%`) && text.includes("Chat") && text.includes("Tools")), "the Context card shows the reduced context");
   await until(() => page.locator("#cards [data-card=changes]").innerText().then(text => text.includes("+1") && text.includes("−1") && text.includes("Commit & PR")), "the Changes card lists what changed");
   await until(() => page.locator("#cards [data-card=environment]").innerText().then(text => text.includes("This computer") && text.includes("Heartbeat")), "the Environment card names where the chat works");
+  const cardInsets = await page.locator("#cards").evaluate((cards) => {
+    const panel = cards.getBoundingClientRect();
+    const environment = cards.querySelector("[data-card=environment]")!.getBoundingClientRect();
+    return { top: environment.top - panel.top, right: panel.right - environment.right };
+  });
+  assert.equal(cardInsets.top, cardInsets.right, "the cards have matching top and right insets");
   assert(!(await page.locator("#composer-context").isVisible()), "the composer ring stands aside while the cards show");
   await capture("04-cards");
   // Cards that did not change are left in place: folding one repaints no other.

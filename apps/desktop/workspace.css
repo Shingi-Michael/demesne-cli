@@ -720,7 +720,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
    only where there is room. */
 #cards { display: none; }
 @media (min-width: 1100px) {
-  .desktop .live-app.cards-on #cards:not([hidden]) { display: flex; flex-direction: column; gap: 8px; flex: none; width: 288px; padding: 4px 14px 14px 0; overflow-y: auto; scrollbar-width: none; }
+  .desktop .live-app.cards-on #cards:not([hidden]) { display: flex; flex-direction: column; gap: 8px; flex: none; width: 288px; padding: 14px 14px 14px 0; overflow-y: auto; scrollbar-width: none; }
   .desktop .live-app.cards-on #composer-context, #desktop-shell:has(.live-app.cards-on) #desktop-toolbar .chip { display: none; }
 }
 #desktop-toolbar .header-cards { margin-left: auto; display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--r-sm); color: var(--t3); }

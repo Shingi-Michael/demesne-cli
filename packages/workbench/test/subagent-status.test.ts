@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { subagentStatus } from "../src/subagent-phrases.ts";
+import { subagentStatus } from "../src/subagent-status.ts";
 
 test("status-only progress lines are told apart from real steps", () => {
   expect(subagentStatus("starting")).toEqual({});

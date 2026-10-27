@@ -1,24 +1,24 @@
 import type { ToolPhaseName } from "@demesne/brand";
 
-import { subagentStatus } from "./subagent-phrases.ts";
+import { subagentStatus } from "./subagent-status.ts";
 
-export interface TraceSegment { kind: "thinking" | "step"; text: string }
+export interface TraceSegment { kind: "step"; text: string }
 const TRACE_LIMIT = 64 * 1024;
 
-/// Folds one `tool.call_progress` payload into a tool's trace: consecutive
-/// thinking slices join one block; a step line follows it. Live updates and
-/// history replay share this, so a reopened session shows the same trace.
-export function applyToolProgress(tool: { trace?: TraceSegment[] }, payload: Record<string, unknown>): void {
+/// Folds one `tool.call_progress` payload into a sub-agent's steps: a step
+/// line as the sub-agent starts it, and at the end what it found. Status
+/// lines (starting, writing report) and any thinking an old event carries
+/// are dropped. Live updates and history replay share this, so a reopened
+/// session shows the same steps.
+export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: string; subagentModel?: string }, payload: Record<string, unknown>): void {
+  if (typeof payload.report === "string" && payload.report) tool.report = payload.report;
+  if (typeof payload.text !== "string" || !payload.text) return;
+  const status = subagentStatus(payload.text);
+  if (status) { if (status.model) tool.subagentModel = status.model; return; }
   const trace = tool.trace ??= [];
   const size = trace.reduce((sum, segment) => sum + segment.text.length, 0);
   if (size >= TRACE_LIMIT) return;
-  const room = (text: string) => text.slice(0, TRACE_LIMIT - size);
-  if (typeof payload.thinking === "string" && payload.thinking) {
-    const last = trace.at(-1);
-    if (last?.kind === "thinking") last.text += room(payload.thinking); else trace.push({ kind: "thinking", text: room(payload.thinking) });
-  }
-  if (typeof payload.text === "string" && payload.text && !subagentStatus(payload.text))
-    trace.push({ kind: "step", text: room(payload.text) });
+  trace.push({ kind: "step", text: payload.text.slice(0, TRACE_LIMIT - size) });
 }
 
 export type ToolState = "running" | "done" | "failed" | "denied" | "stopped";
@@ -34,9 +34,11 @@ export interface ToolEntry {
   waiting?: boolean; phase: ToolPhaseName;
   draftId?: string; draftArguments?: string; drafting?: boolean;
   changes?: import("@demesne/protocol").ToolFileChange[];
-  /// A sub-agent's thinking and steps, in order, for its card.
+  /// A sub-agent's steps, in order, for the guide that unfolds under its row.
   trace?: TraceSegment[];
-  /// The model a sub-agent reported running on (it picks the card's pokes).
+  /// What a sub-agent found: its report, for the end of that guide.
+  report?: string;
+  /// The model a sub-agent reported running on, when not the chat's own.
   subagentModel?: string;
 }
 /// `quiet`: a line on the step guide (a provider switch), not a band.

@@ -75,7 +75,8 @@ export async function runSubagent(options: {
   scheduler: InferenceScheduler;
   signal: AbortSignal;
   /// A step (`text`) or a slice of the sub-agent's thinking, for its card's trace.
-  progress: (update: { text?: string; thinking?: string }) => void;
+  /// A step line as it starts, and once at the end what the sub-agent found.
+  progress: (update: { text?: string; report?: string }) => void;
   limits?: ProviderStreamLimits;
   /// Stable for this run, so its rounds can reuse the provider's prompt cache.
   cacheKey?: string;
@@ -106,9 +107,6 @@ async function runSubagentInference(options: Parameters<typeof runSubagent>[0]):
     const lease = await options.scheduler.acquire(options.turnId, signal);
     const calls = new Map<number, ProviderToolCall>();
     let text = "", hasReasoning = false, finishReason: string | undefined, outputTokens: number | null = null;
-    // Thinking reaches the card in slices, not per token, to keep the event log small.
-    let thinking = "", thinkingAt = Date.now();
-    const flushThinking = () => { if (thinking) options.progress({ thinking }); thinking = ""; thinkingAt = Date.now(); };
     let responses: import("@demesne/protocol").ResponsesState | undefined;
     const controller = new AbortController();
     const forward = () => controller.abort(signal.reason);
@@ -118,13 +116,12 @@ async function runSubagentInference(options: Parameters<typeof runSubagent>[0]):
       for await (const event of withProviderDeadlines(inference.stream(planned, tools, controller.signal, { cacheKey: options.cacheKey }), controller, streamLimits.firstEventTimeoutMs, streamLimits.requestTimeoutMs)) {
         if (++events > streamLimits.eventLimit) throw new Error("Sub-agent stream exceeded the event limit");
         if (event.type === "text_delta") text += event.delta;
+        // A sub-agent runs with thinking off; whatever a model reasons anyway
+        // stays with it (nothing reaches the window) and only counts toward the limit.
         else if (event.type === "reasoning_delta") {
           hasReasoning ||= event.delta.length > 0;
-          if (inference.thinkingEnabled === false) continue;
           reasoning += event.delta.length;
           if (reasoning > streamLimits.turnCharacterLimit) throw new Error("Sub-agent reasoning exceeded the turn limit");
-          thinking += event.delta;
-          if (thinking.length >= 2000 || Date.now() - thinkingAt >= 250) flushThinking();
         }
         else if (event.type === "finish") finishReason = event.reason;
         else if (event.type === "usage") outputTokens = event.usage.outputTokens;
@@ -139,7 +136,6 @@ async function runSubagentInference(options: Parameters<typeof runSubagent>[0]):
         }
         if (text.length > streamLimits.turnCharacterLimit) throw new Error("Sub-agent output exceeded the turn limit");
       }
-      flushThinking();
       assertModelResponseComplete({ finishReason, outputTokens, maxOutputTokens: inference.maxOutputTokens, provider: inference.providerId,
         text, hasReasoning, hasToolCalls: calls.size > 0 });
     } finally {
@@ -148,8 +144,12 @@ async function runSubagentInference(options: Parameters<typeof runSubagent>[0]):
       lease.release();
     }
 
-    if (!calls.size) return report(text, used, inference.modelId);
-    if (finalizing) return report(text || "The sub-agent ran out of budget before writing a report.", used, inference.modelId);
+    if (!calls.size || finalizing) {
+      const body = text || (finalizing ? "The sub-agent ran out of budget before writing a report." : "");
+      const found = report(body, used, inference.modelId);
+      options.progress({ report: body.trim().slice(0, SUBAGENT_LIMITS.reportBytes) || "The sub-agent finished without a report." });
+      return found;
+    }
     const ordered = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
     if (ordered.some((call) => !call.id || !call.name)) throw new Error("Sub-agent returned an incomplete tool call");
     messages.push({ role: "assistant", content: text || null, toolCalls: ordered, ...(responses ? { responses } : {}) });

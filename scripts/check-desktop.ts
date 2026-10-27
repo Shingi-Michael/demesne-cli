@@ -22,6 +22,10 @@ const lookPrompt = "Desktop smoke: round the composer more", lookDone = "The com
 const breakPrompt = "Desktop smoke: break the stylesheet", breakDone = "The stylesheet is broken on purpose.";
 const lookRounds: Record<string, number> = {};
 const asideDone = "A second conversation is here.";
+// A sub-agent's turn: the chat asks an agent, the agent reads one file and
+// reasons (which must stay with it), then the chat answers.
+const agentPrompt = "Desktop smoke: ask an agent where the greeting lives", agentTask = "Find the greeting", agentAsk = "Where is the greeting defined?";
+const agentDone = "The agent found it.", agentFound = "hello.ts holds the greeting.", agentThought = "A private thought the window must never show.";
 const completed = "Verified the desktop change.";
 const afterClose = "Daemon work completed after the window closed.";
 const thinkingPrompt = "Desktop smoke: readable thinking";
@@ -228,6 +232,20 @@ const f = await fixture({
     if (user === aside) {
       yield { type: "text_delta", delta: asideDone };
       yield { type: "finish", reason: "stop" };
+      return;
+    }
+    if (user === agentPrompt) {
+      // Earlier turns in this chat have tool results too: only this turn's count.
+      if (messages.slice(messages.findLastIndex(message => message.role === "user")).some(message => message.role === "tool")) { yield { type: "text_delta", delta: agentDone }; yield { type: "finish", reason: "stop" }; return; }
+      yield { type: "tool_call_delta", index: 0, idDelta: "ask-agent", nameDelta: "subagent", argumentsDelta: JSON.stringify({ description: agentTask, prompt: agentAsk }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
+    if (user === agentAsk) {
+      yield { type: "reasoning_delta", delta: agentThought };
+      if (messages.some(message => message.role === "tool")) { yield { type: "text_delta", delta: agentFound }; yield { type: "finish", reason: "stop" }; return; }
+      yield { type: "tool_call_delta", index: 0, idDelta: "agent-read", nameDelta: "read_file", argumentsDelta: JSON.stringify({ path: "hello.ts" }) };
+      yield { type: "finish", reason: "tool_calls" };
       return;
     }
     if (user === lookPrompt || user === breakPrompt) {
@@ -989,6 +1007,23 @@ try {
   await page.locator(`#turn-${editTurn} .rw-redo`).click();
   await until(() => page.locator(`#turn-${editTurn} .request`).count().then(count => count === 1), "Redo brings the turn back");
   assert.equal(readFileSync(join(f.workspace, "hello.ts"), "utf8"), "export const greeting = 'after';\n", "Redo puts the edit back");
+  // An agent is one step on the guide, like a read: its task, "✓ 1 step" on
+  // the right, and its own guide unfolding under it with what it found. No
+  // trace box, and nothing the agent thought.
+  await type(agentPrompt);
+  await textIncludes(agentDone);
+  await page.locator(".receipt-steps", { hasText: "1 step" }).last().click();
+  const agentStep = page.locator(".steps .tool-row", { hasText: agentTask }).last();
+  await until(() => agentStep.locator(".meta").innerText().then(text => /✓ 1 step · /.test(text)), "the agent's row ends in its step count and time");
+  assert.equal(await page.locator(".steps details.thinking").count(), 0, "no trace box under the agent");
+  assert.equal(await page.locator(".steps .agent-steps").count(), 0, "the agent's guide waits folded");
+  await agentStep.click();
+  await until(() => page.locator(".steps .agent-steps .tool-row.quiet .target").last().innerText().then(text => text === "hello.ts"), "the agent's own read unfolds as a quiet line");
+  assert((await page.locator(".steps .agent-found").last().innerText()).includes(`Found · ${agentFound}`), "the guide ends in what the agent found");
+  assert(!(await page.locator("#stage").innerText()).includes(agentThought), "the agent's thinking never reaches the window");
+  await capture("02-agent-step");
+  await agentStep.click();
+  await until(() => page.locator(".steps .agent-steps").count().then(count => count === 0), "a second click folds the agent's guide");
   // The mode word under the composer: ⇧⇥ steps Ask → Accept edits → Plan → Auto → Ask.
   await page.locator("textarea").focus();
   for (const [word, policy] of [["Accept edits", { acceptEdits: true, autoApprove: false }], ["Plan", { acceptEdits: false, autoApprove: false }],

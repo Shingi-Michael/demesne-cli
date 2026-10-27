@@ -2250,6 +2250,43 @@ button:disabled {
   padding: 0 8px 0 0;
   min-height: 24px;
 }
+/* A sub-agent's guide, one level in: the same quiet lines, no box. */
+.steps .agent-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 23px;
+  margin: 0 0 4px;
+}
+.steps .agent-steps .tool-row.quiet {
+  cursor: default;
+  min-height: 22px;
+}
+.steps .agent-steps .tool-row.quiet:hover {
+  color: var(--secondary);
+}
+.steps .agent-steps .tool-row.agent-on .verb {
+  color: var(--muted);
+  font-weight: 400;
+}
+.steps .agent-found {
+  margin: 3px 0 6px 23px;
+  padding-left: 10px;
+  border-left: 1px solid var(--rule);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--secondary);
+  white-space: normal;
+  max-width: 64ch;
+}
+.steps .agent-found b {
+  font-weight: 500;
+  color: var(--muted);
+}
+.steps .agent-found .agent-more {
+  margin-left: 6px;
+  color: var(--muted);
+}
 .step-fold {
   margin: 2px 0 6px 23px;
   border-radius: 8px;

@@ -607,17 +607,21 @@ export class AgentEngine {
     // The model the agent named (the user asked for it), else the default
     // from /subagent or `[agent] subagent_model`, else the turn's own.
     const model = requested ?? this.options.subagentModel;
+    // Sub-agents run with thinking off, whatever the chat chose: their work
+    // shows as steps, never as a trace.
     let delegate = inference;
     if (model && model !== inference.modelId) {
       try {
         if (!this.options.inferenceFor) throw new Error("this daemon cannot route to another model");
-        delegate = this.options.inferenceFor(model, inference.thinkingEnabled);
+        delegate = this.options.inferenceFor(model, false);
       } catch (error) {
         const result = `Error: sub-agent model ${model} is unavailable (${error instanceof Error ? error.message : "unknown error"}). Choose another with /subagent.`;
         this.store.settleToolCall(toolCallId, "failed", result);
         return result;
       }
     }
+    if (delegate === inference && inference.thinkingEnabled !== false && this.options.inferenceFor)
+      try { delegate = this.options.inferenceFor(inference.modelId, false); } catch { /* the turn's own call, thinking and all, still answers */ }
     const label = delegate.modelId === inference.modelId ? "" : `${delegate.modelId} · `;
     this.store.startToolCall(toolCallId);
     try {

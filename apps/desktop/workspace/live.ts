@@ -14,6 +14,7 @@ import { awaySentences, lastPrompt, type AwayAsk, type AwayPart } from "./away.t
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
+import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
@@ -1322,8 +1323,9 @@ const spinner = () => `<span class="cube-mark" aria-hidden="true">${cubeSvg(cube
 /// restarting it (3s each way).
 const shine = (text: string) => `<span class="shine" style="animation-delay:-${Date.now() % 6000}ms">${h(text)}</span>`;
 /// A step's target in mono: a path, a command by its program's name, a
-/// question's first words, a sub-agent's task.
-function toolTarget(tool: ToolEntry) {
+/// question's first words, a sub-agent's task, with a saying that cycles
+/// the whole time the sub-agent works (changed in place by a timer).
+function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === "ask_user") {
     const asked = Array.isArray(tool.input.questions) ? tool.input.questions as { question?: unknown }[] : [];
     const first = typeof asked[0]?.question === "string" ? asked[0].question : "";
@@ -1332,9 +1334,13 @@ function toolTarget(tool: ToolEntry) {
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   // A command by its program's name: the full path is on hover.
   if (tool.name === "run_command") return h(base.replace(/^\S*\//, ""));
-  // A sub-agent's task still being written by the model: not running yet.
-  if (tool.name === "subagent" && tool.drafting) return `${h(base || "…")}<span class="muted"> · writing</span>`;
-  return h(base);
+  if (tool.name !== "subagent" || tool.state !== "running") return h(base);
+  // Still being written by the model: not running yet.
+  if (tool.drafting) return `${h(base || "…")}<span class="muted"> · writing</span>`;
+  const slot = run.entries.filter((entry) => entry.type === "tool" && entry.name === "subagent").indexOf(tool);
+  const model = tool.subagentModel ?? state!.model.id;
+  const phrase = matchMedia("(prefers-reduced-motion: reduce)").matches ? "working" : subagentPhrase(slot, Date.now(), model);
+  return `${h(base)}<span class="muted"> · </span><span class="phrase" data-subagent-phrase data-slot="${slot}" data-model="${h(model)}">${h(phrase)}</span>`;
 }
 /// "3 steps": how far a sub-agent has got, on the right of its row.
 function subagentSteps(tool: ToolEntry) {
@@ -1401,7 +1407,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     canFold ? "step" : "tool",
     // A running step keeps its own icon and only its words shine: the cube
     // means thinking or working overall, not one tool.
-    `${stepIcon(tool)}<span class="verb">${now && !served ? shine(verb(tool)) : served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    `${stepIcon(tool)}<span class="verb">${now && !served ? shine(verb(tool)) : served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -5836,6 +5842,14 @@ const drawCubes = (now: number) => {
   for (const mark of marks) { mark.innerHTML = frame; mark.dataset.at = String(cube.beatAt); }
 };
 requestAnimationFrame(drawCubes);
+// A working sub-agent's saying changes in place, without repainting the guide.
+setInterval(() => {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  for (const span of document.querySelectorAll<HTMLElement>("[data-subagent-phrase]")) {
+    const next = subagentPhrase(Number(span.dataset.slot), Date.now(), span.dataset.model ?? "");
+    if (span.textContent !== next) span.textContent = next;
+  }
+}, 300);
 setInterval(() => {
   if (state?.activeTurnId) renderStatus();
   renderDriveTurn();

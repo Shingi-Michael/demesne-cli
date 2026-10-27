@@ -11,6 +11,7 @@
 #   --source           build from source (needs git, Bun 1.4 and Node.js 22+)
 #   --no-restart       do not restart a running daemon on upgrade
 #   --uninstall        remove the app, its launcher and icon (keeps ~/.demesne)
+#   --insecure-skip-checksum  explicitly skip verification for trusted legacy releases
 #
 # Environment: DEMESNE_VERSION, DEMESNE_FROM_SOURCE=1, DEMESNE_NO_RESTART=1,
 # DEMESNE_HOME (Linux install root, default ~/.local/share/demesne), DEMESNE_REPO,
@@ -27,7 +28,25 @@ REPO="${DEMESNE_REPO:-shingi-michael/demesne-cli}"
 VERSION="${DEMESNE_VERSION:-latest}"
 FROM_SOURCE="${DEMESNE_FROM_SOURCE:-0}"
 NO_RESTART="${DEMESNE_NO_RESTART:-0}"
+SKIP_CHECKSUM=0
 ACTION=install
+
+usage() {
+  cat <<'EOF'
+Installs or updates the Demesne desktop app for the current user.
+
+Usage: sh install.sh [options]
+       curl -fsSL https://raw.githubusercontent.com/shingi-michael/demesne-cli/main/install.sh | sh -s -- [options]
+
+  --version vX.Y.Z          install that release instead of the latest
+  --source                  build from source (git, Bun 1.4, Node.js 22+)
+  --no-restart               do not restart a running daemon on upgrade
+  --restart                  restart a running daemon on upgrade (default)
+  --insecure-skip-checksum   explicitly install without checksum verification
+  --uninstall                remove the app, launcher and icon; keep ~/.demesne
+  -h, --help                 show this help
+EOF
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -37,7 +56,8 @@ while [ $# -gt 0 ]; do
     --no-restart) NO_RESTART=1; shift ;;
     --restart) NO_RESTART=0; shift ;;
     --uninstall) ACTION=uninstall; shift ;;
-    -h|--help) sed -n '2,22p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --insecure-skip-checksum) SKIP_CHECKSUM=1; shift ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "install.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -84,13 +104,15 @@ sha256() {
 # Returns 1 when the release does not carry that asset.
 download() {
   fetch "$(release_url "$1")" "$TMP/$1" 2>/dev/null || return 1
-  if fetch "$(release_url "$1.sha256")" "$TMP/$1.sha256" 2>/dev/null; then
-    want=$(cut -d' ' -f1 <"$TMP/$1.sha256")
-    got=$(sha256 "$TMP/$1")
-    [ "$want" = "$got" ] || die "checksum mismatch for $1"
-  else
-    say "no checksum published for $1; skipping verification"
+  if [ "$SKIP_CHECKSUM" = 1 ]; then
+    say "WARNING: checksum verification explicitly disabled for $1"
+    return 0
   fi
+  fetch "$(release_url "$1.sha256")" "$TMP/$1.sha256" \
+    || die "could not fetch checksum for $1; refusing unverified install (only for trusted legacy releases, use --insecure-skip-checksum)"
+  want=$(cut -d' ' -f1 <"$TMP/$1.sha256")
+  got=$(sha256 "$TMP/$1")
+  [ "$want" = "$got" ] || die "checksum mismatch for $1"
 }
 
 # Builds the desktop app from source into $TMP/src and prints the bundle path.
@@ -240,17 +262,51 @@ restart_daemon() {
     mkdir -p "$HOME/.demesne"
     chmod 700 "$HOME/.demesne" 2>/dev/null || true
     say "starting updated daemon..."
+    log_file="$HOME/.demesne/daemon.log"
+    touch "$log_file"
+    log_start=$(( $(wc -c <"$log_file") + 1 ))
     if has nohup; then
       nohup "$daemon_bin" </dev/null >>"$HOME/.demesne/daemon.log" 2>&1 &
     else
       "$daemon_bin" </dev/null >>"$HOME/.demesne/daemon.log" 2>&1 &
     fi
     new_pid=$!
-    echo "$new_pid" >"$pid_file"
-    chmod 600 "$pid_file" 2>/dev/null || true
-    say "restarted daemon (pid $new_pid)"
+    # Read only this startup's output, not a stale listening line. The logged
+    # URL respects configured ports and IPv6 without parsing the user's TOML.
+    i=0
+    while [ "$i" -lt 10 ] && kill -0 "$new_pid" 2>/dev/null; do
+      daemon_url=$(tail -c +"$log_start" "$log_file" | sed -n 's/^demesned [^ ]* listening on \(http:\/\/[^ ]*\).*$/\1/p' | tail -n 1)
+      if [ -n "$daemon_url" ] && daemon_healthy "${daemon_url%/}/healthz" && kill -0 "$new_pid" 2>/dev/null; then
+        echo "$new_pid" >"$pid_file"
+        chmod 600 "$pid_file" 2>/dev/null || true
+        say "restarted daemon (pid $new_pid)"
+        return 0
+      fi
+      sleep 1
+      i=$((i + 1))
+    done
+    kill "$new_pid" 2>/dev/null || true
+    # Do not wait indefinitely for a daemon that ignores SIGTERM.
+    i=0
+    while kill -0 "$new_pid" 2>/dev/null && [ "$i" -lt 15 ]; do
+      sleep 0.2
+      i=$((i + 1))
+    done
+    kill -KILL "$new_pid" 2>/dev/null || true
+    wait "$new_pid" 2>/dev/null || true
+    rm -f "$pid_file"
+    tail -n 20 "$log_file" >&2
+    die "updated daemon failed to become healthy; see $log_file"
   else
     say "daemon binary not found at $daemon_bin; launch Demesne desktop to start it"
+  fi
+}
+
+daemon_healthy() {
+  if has curl; then
+    curl -fsS --noproxy '*' --max-time 1 "$1" >/dev/null 2>&1
+  else
+    wget -q --no-proxy -T 1 -t 1 -O /dev/null "$1" >/dev/null 2>&1
   fi
 }
 
@@ -264,7 +320,14 @@ find_running_desktop_pid() {
     fi
   fi
   if has pgrep; then
-    pgrep -u "$USER" -f "demesne-desktop" 2>/dev/null | head -n 1 || true
+    # Match the full executable, not Linux's truncated comm name (which can
+    # also match demesne-desktop-host), nor arbitrary command-line substrings.
+    case "$(uname -s)" in
+      Darwin) desktop_exe="$MAC_APP/Contents/MacOS/Demesne" ;;
+      *) desktop_exe="$APP_HOME/demesne-desktop" ;;
+    esac
+    desktop_pattern=$(printf '%s' "$desktop_exe" | sed 's/[][\\.^$*+?(){}|]/\\&/g')
+    pgrep -u "$(id -u)" -f "^$desktop_pattern( |$)" 2>/dev/null | head -n 1 || true
   fi
 }
 

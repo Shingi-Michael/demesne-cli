@@ -805,7 +805,7 @@ try {
   await until(() => page.evaluate("localStorage.getItem('demesne-open-on')").then(value => value === "home"), "Open on goes back to Home");
   await page.keyboard.press("ArrowDown");
   await page.locator("#settings-nav .st-nav.on").filter({ hasText: "Notifications" }).waitFor();
-  // Every kind is on by default since #302, A chat finishes included.
+  // Every kind starts on (#302), so the first click turns this one off.
   await page.getByRole("switch", { name: "A chat finishes" }).click();
   await until(() => page.evaluate("JSON.parse(localStorage.getItem('demesne-notify-kinds') || '{}').done").then(value => value === false), "A chat finishes turns off");
   await page.getByRole("switch", { name: "A chat finishes" }).click();
@@ -1218,24 +1218,24 @@ try {
   await until(() => page.locator("#drive-reply .dt-sent").isVisible(), "the note says it was sent");
   await until(() => page.locator("#drive-reply .drive-told li").innerText().then(text => text.includes("Keep the tests green") && text.includes(`From ${home}`)), "the mission card shows your note");
   await capture("08-drive-tell");
-  // Drive's chat waits behind yours: one edge of its panel, its title down it.
-  await until(() => page.locator("#drive-peek.work").isVisible(), "Drive's panel waits behind yours while it works");
-  assert((await page.locator("#drive-peek").getAttribute("aria-label"))!.includes("Verify the Drive controls"), "the edge names the mission");
+  // Drive's word sits at the right end of the title bar while it works elsewhere.
+  await until(() => page.locator("#desktop-toolbar .header-drive.work").isVisible(), "the title bar says Drive is working elsewhere");
+  assert((await page.locator(".header-drive").getAttribute("aria-label"))!.includes("Verify the Drive controls"), "the title bar names the mission");
   // Its own chat says where it came from and shows the note; the link goes back.
   await page.locator('#drive-reply [data-action="select-session"]', { hasText: "Watch" }).click();
   await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "the mission's chat names the chat it came from");
   await until(() => page.locator("#drive-turn .drive-told li").innerText().then(text => text.includes("Keep the tests green")), "the mission's chat shows your note");
   assert.equal(await page.locator("#drive-turn .drive-heading").count(), 0, "the mission turn has no boxed details");
   assert.equal(await page.locator("#drive-turn").evaluate(node => getComputedStyle(node).borderTopWidth + getComputedStyle(node).backgroundColor), "0pxrgba(0, 0, 0, 0)", "the mission turn sits unboxed in the chat");
-  await until(() => page.locator("#drive-peek.back").getAttribute("aria-label").then(text => text === `Back to ${home}`), "inside Drive's chat the edge is the chat it came from");
+  assert.equal(await page.locator(".header-drive").count(), 0, "inside Drive's chat the title bar carries no Drive word; from is the way back");
   await capture("08-drive-chat");
-  await page.locator("#drive-peek").click();
-  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "clicking the edge swaps the two back");
-  await page.locator("#drive-peek.work").click();
-  await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "and the edge swaps them again");
   await page.locator("#workspace-from button").click();
   await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "from takes you back");
   assert(await page.locator("#workspace-from").isHidden(), "your own chat has no from");
+  await page.locator(".header-drive.work").click();
+  await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "Drive's word opens its chat");
+  await page.locator("#workspace-from button").click();
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "and from brings you back again");
   await line.locator(".bf-word").click();
   await control("pause").click();
   await control("resume").waitFor();

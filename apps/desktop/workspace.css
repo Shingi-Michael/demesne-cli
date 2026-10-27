@@ -1144,7 +1144,6 @@ html.glass #desktop-shell { background: var(--shell-glass, var(--ink)); }
 /* On the glass the panel lets a little of the blur through too; popovers
    and menus stay solid. */
 html.glass #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { --ink: var(--panel-glass, var(--panel)); background: var(--panel-glass, var(--panel)); }
-html.glass #drive-peek { background: var(--panel-glass, var(--panel)); }
 html.glass body.desktop { --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.09); }
 html.glass[data-theme="demesne-light"] body.desktop { --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.03); }
 #desktop-sidebar, #desktop-toolbar { background: transparent; border: 0; box-shadow: none; }
@@ -1222,19 +1221,18 @@ html.mac-chrome.fullscreen #desktop-shell:has(#desktop-sidebar[hidden]) #desktop
 @media (prefers-reduced-motion: no-preference) { #desktop-toolbar .header-live.work i { animation: live-breathe 1.6s ease-in-out infinite; } }
 @keyframes live-breathe { 50% { opacity: 0.35; } }
 
-/* Drive's panel behind yours (pass 74 D): one edge of a second panel shows
-   at the right of the open one, its title running down it. */
-#drive-peek { grid-column: 2; grid-row: 2; justify-self: end; position: relative; z-index: 0; width: 46px; margin: 8px 10px 18px 0; padding: 0; border: 0; border-radius: 12px; background: color-mix(in srgb, var(--panel, var(--ink)) 82%, var(--t1) 3%); box-shadow: 0 0 0 1px var(--panel-edge, var(--hair)); color: var(--t3); cursor: pointer; overflow: hidden; transition: box-shadow 160ms var(--ease, ease), color 160ms var(--ease, ease); }
-#drive-peek:hover { color: var(--t1); box-shadow: 0 0 0 1px var(--hair2); }
-#drive-peek.ready { color: var(--ok); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ok) 55%, transparent); }
-#drive-peek .dp-words { position: absolute; right: 6px; top: 16px; display: flex; align-items: center; gap: 9px; max-height: calc(100% - 32px); writing-mode: vertical-rl; font-size: 11.5px; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; }
-#drive-peek .dp-words span { overflow: hidden; text-overflow: ellipsis; }
-#drive-peek .dp-words i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
-#drive-peek.ready .dp-words i { background: var(--ok); }
-#drive-peek.back .dp-words i { width: 0; height: 0; border-radius: 0; border: 4px solid transparent; border-right: 5px solid currentColor; border-left: 0; background: none; transform: rotate(90deg); }
-@media (prefers-reduced-motion: no-preference) { #drive-peek.work .dp-words i { animation: live-breathe 1.6s ease-in-out infinite; } }
-#desktop-shell > .live-app { position: relative; z-index: 1; }
-#desktop-shell:has(#drive-peek:not([hidden])) > .live-app { margin-right: 40px; }
+/* Drive's word in the title bar (pass 79 A): a breathing dot and the mission
+   while Drive makes a branch elsewhere, green once it is ready; click opens
+   Drive's chat. The chat keeps its full width. */
+#desktop-toolbar .header-drive { flex: none; display: inline-flex; align-items: center; gap: 7px; max-width: 40%; margin: 0 2px 0 auto; padding: 4px 9px; border: 0; border-radius: var(--r-sm); background: none; font: 12px Inter, system-ui, sans-serif; color: var(--t3); white-space: nowrap; cursor: pointer; transition: background 160ms var(--ease, ease), color 160ms var(--ease, ease); }
+#desktop-toolbar .header-drive span { overflow: hidden; text-overflow: ellipsis; }
+#desktop-toolbar .header-drive i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
+#desktop-toolbar .header-drive:hover { background: var(--tone2); color: var(--t1); }
+#desktop-toolbar .header-drive.ready { color: var(--ok); }
+#desktop-toolbar .header-drive.ready i { background: var(--ok); }
+#desktop-toolbar .header-drive.ready:hover { background: color-mix(in srgb, var(--ok) 12%, transparent); }
+#desktop-toolbar .header-drive + .header-cards, #desktop-toolbar .header-drive + .header-more { margin-left: 2px; }
+@media (prefers-reduced-motion: no-preference) { #desktop-toolbar .header-drive.work i { animation: live-breathe 1.6s ease-in-out infinite; } }
 
 /* Words arrive softly: each new run of a streaming answer fades in. */
 @keyframes md-in { from { opacity: 0; } }

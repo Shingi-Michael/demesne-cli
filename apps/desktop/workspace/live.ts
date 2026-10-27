@@ -1120,12 +1120,11 @@ function renderStatus() {
     pageOpen,
   ]);
   renderCards();
-  const rim = rimState(phase);
+  const rim = rimState(phase), peek = drivePeek();
   applyRim(rim);
-  renderDrivePeek();
   renderPlanLimit();
-  if (signature + JSON.stringify(rim) === statusSignature) return;
-  statusSignature = signature + JSON.stringify(rim);
+  if (signature + JSON.stringify([rim, peek]) === statusSignature) return;
+  statusSignature = signature + JSON.stringify([rim, peek]);
   // A quiet footer: a spinner while working, a word only when the state
   // needs attention (failed, approval, offline…). "ready" says nothing.
   const working = Boolean(state.activeTurnId) && !["approval", "waiting", "failed"].includes(phase);
@@ -1146,7 +1145,7 @@ function renderStatus() {
   // session's own view (rename, compact, history). The sidebar shows what
   // needs you; Drive lives in its footer.
   el("header").innerHTML =
-    `<div class="header-state">${pageOpen ? "" : branchChip()}${rimWords(rim)}</div>${inSession() && !pageOpen ? `<button type="button" class="header-cards${cardsOn ? " on" : ""}" data-action="cards-toggle" aria-label="Cards" aria-pressed="${cardsOn}" title="${cardsOn ? "Hide" : "Show"} cards">${ICON_PANEL}</button>` : ""}${inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+    `<div class="header-state">${pageOpen ? "" : branchChip()}${rimWords(rim)}</div>${driveWords(peek)}${inSession() && !pageOpen ? `<button type="button" class="header-cards${cardsOn ? " on" : ""}" data-action="cards-toggle" aria-label="Cards" aria-pressed="${cardsOn}" title="${cardsOn ? "Hide" : "Show"} cards">${ICON_PANEL}</button>` : ""}${inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
 }
 /// Your plan's limit (pass 75 D): nothing under half; past it a small ring
 /// and the fuller window's percentage sit beside the model word, amber from
@@ -1247,7 +1246,11 @@ for (const type of ["pointerdown", "keydown"] as const)
 /// branch turns the edge green until you open it; inside Drive's chat the
 /// edge is the chat it came from.
 const peekSeen = new Set<string>();
-type Peek = { sessionId: string; kind: "work" | "ready" | "back"; words: string };
+/// Drive's word at the right end of the title bar (pass 79 A): a breathing
+/// dot and the mission while a branch is being made elsewhere, green "Ready"
+/// once it is, until you open it. Inside the mission's own chat the title
+/// bar already says where it came from, so it carries nothing there.
+type Peek = { sessionId: string; kind: "work" | "ready"; words: string };
 function drivePeek(): Peek | null {
   if (!state || !inSession() || pageOpen) return null;
   const current = state.session?.id;
@@ -1256,28 +1259,17 @@ function drivePeek(): Peek | null {
   const mine = jobs.find((job) => job.sessionId === current);
   if (mine) {
     if (mine.status === "ready") peekSeen.add(mine.id);
-    return mine.from && state.sessions.some((item) => item.id === mine.from) ? { sessionId: mine.from, kind: "back", words: `Back to ${chatTitle(mine.from)}` } : null;
+    return null;
   }
   const running = jobs.find((job) => job.status === "starting" || job.status === "running");
   if (running) return { sessionId: running.sessionId!, kind: "work", words: `Drive · ${name(running)}` };
   const ready = jobs.find((job) => job.status === "ready" && !peekSeen.has(job.id));
   return ready ? { sessionId: ready.sessionId!, kind: "ready", words: `Ready · ${name(ready)}` } : null;
 }
-let peekSignature = "";
-function renderDrivePeek() {
-  const peek = drivePeek(), node = document.getElementById("drive-peek");
-  if (!node) return;
-  const signature = JSON.stringify(peek);
-  if (signature === peekSignature) return;
-  peekSignature = signature;
-  node.hidden = !peek;
-  if (!peek) return;
-  node.className = peek.kind;
-  node.dataset.action = "select-session";
-  node.dataset.args = JSON.stringify({ id: peek.sessionId });
-  node.title = peek.kind === "back" ? peek.words : `${peek.words} · open Drive's chat`;
-  node.setAttribute("aria-label", node.title);
-  node.innerHTML = `<span class="dp-words"><i aria-hidden="true"></i><span>${h(peek.words)}</span></span>`;
+function driveWords(peek: Peek | null) {
+  if (!peek) return "";
+  const title = `${peek.words} · open Drive's chat`;
+  return `<button type="button" class="header-drive ${peek.kind}" data-action="select-session" data-args="${h(JSON.stringify({ id: peek.sessionId }))}" title="${h(title)}" aria-label="${h(title)}"><i aria-hidden="true"></i><span>${h(peek.words)}</span></button>`;
 }
 function totals(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;

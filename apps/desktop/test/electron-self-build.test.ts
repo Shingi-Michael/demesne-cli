@@ -2,19 +2,23 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { builtApp, findBun, installedBundle, isDemesneProject, swapScript } from "../electron/self-build.ts";
+import { builtApp, demesneProject, findBun, installedBundle, isDemesneProject, swapScript } from "../electron/self-build.ts";
 
 test("only Demesne itself, with the script that builds its page, counts", () => {
   const root = mkdtempSync(join(tmpdir(), "demesne-self-"));
   expect(isDemesneProject(root)).toBe(false);
   writeFileSync(join(root, "package.json"), JSON.stringify({ name: "demesne-cli" }));
+  // Demesne by name, but a checkout from before the page builder: the line can say so.
   expect(isDemesneProject(root)).toBe(false);
+  expect(demesneProject(root)).toBe("behind");
   mkdirSync(join(root, "scripts"));
   writeFileSync(join(root, "scripts/prepare-ui.ts"), "");
   expect(isDemesneProject(root)).toBe(true);
+  expect(demesneProject(root)).toBe("yes");
   writeFileSync(join(root, "package.json"), JSON.stringify({ name: "something-else" }));
   expect(isDemesneProject(root)).toBe(false);
-  expect(isDemesneProject(join(root, "missing"))).toBe(false);
+  expect(demesneProject(root)).toBe("no");
+  expect(demesneProject(join(root, "missing"))).toBe("no");
 });
 
 test("Bun is found on the PATH, where its installer puts it, or where DEMESNE_BUN says", () => {

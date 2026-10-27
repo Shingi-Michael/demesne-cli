@@ -5,6 +5,11 @@ on:
     branches: ["main"]
   push:
     branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -18,8 +23,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # run_command gives agent commands a fixed PATH of system directories.
+      # setup-bun installs to ~/.bun/bin, so expose bun where an install lives;
+      # the agent benchmark fixtures run `bun test` through that tool.
+      - name: Expose bun in /usr/local/bin
+        run: sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
+      # search_files has a ripgrep path and a fallback; the tools tests cover both.
+      - name: Install ripgrep
+        run: command -v rg || (sudo apt-get update -q && sudo apt-get install -y -q ripgrep)
       - run: bun install --frozen-lockfile
       - name: Typecheck
         run: bun run typecheck
       - name: Unit Tests
-        run: bun test
+        run: HOME=$(mktemp -d) bun test

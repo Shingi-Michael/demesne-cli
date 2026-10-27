@@ -15,7 +15,7 @@ export function foundrySaveTool(store: DemesneStore): AgentTool {
   return {
     definition: {
       name: "foundry_save",
-      description: "Save a design, prototype, graphic or document to Foundry, where the person sees it rendered and can revise or export it. "
+      description: "Create a design, prototype, graphic or document with an interactive preview directly in the chat, and save it to Foundry. "
         + "Use for anything the person wants made as an artifact (a landing page, UI mockup, logo, icon, diagram, chart, one-pager). "
         + "Omit id to create a new artifact; pass the id of an existing one to save a new version of it (send the complete source each time). "
         + GUIDE + " Returns the artifact id and version.",
@@ -46,7 +46,7 @@ export function foundrySaveTool(store: DemesneStore): AgentTool {
         source: input.source, note: typeof input.note === "string" ? input.note.slice(0, 300) : "",
         sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       return JSON.stringify({ id: saved.id, title: saved.title, kind: saved.kind, version: saved.version,
-        message: `Saved to Foundry as version ${saved.version}. The person can open it from Foundry in the sidebar.` });
+        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.` });
     },
   };
 }

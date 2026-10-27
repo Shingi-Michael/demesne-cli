@@ -21,6 +21,7 @@ import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointe
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
+import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
@@ -258,6 +259,8 @@ const expanded = new Set<string>(),
     {
       signature: string;
       node: HTMLElement;
+      content: HTMLElement;
+      artifacts: FoundryChatArtifacts;
       run?: WorkspaceRun;
       views: Map<number, MarkdownView>;
     }
@@ -1997,8 +2000,24 @@ function renderConversation() {
       const node = document.createElement("article");
       node.className = "turn";
       node.id = `turn-${run.id}`;
+      const content = document.createElement("div");
+      content.className = "turn-content";
+      const artifacts = new FoundryChatArtifacts({
+        read: (artifact) => api<FoundryArtifactDetail>("foundry-get", { id: artifact.id, version: artifact.version }),
+        markdown,
+        open: (artifact) => openFoundry(artifact.id, artifact.version),
+        revise: async (artifact) => {
+          await api("foundry-revise", { id: artifact.id, title: artifact.title });
+          editor.focus({ preventScroll: true });
+        },
+        export: async (artifact) => {
+          const result = await api<{ path: string } | null>("desktop-foundry-export", { id: artifact.id, version: artifact.version });
+          if (result?.path) notice(`Exported to ${result.path}`);
+        },
+      });
+      node.append(content, artifacts.element);
       root.append(node);
-      saved = { node, signature: "", views: new Map() };
+      saved = { node, content, artifacts, signature: "", views: new Map() };
       runNodes.set(run.id, saved);
     }
     // Expanding inserts earlier turns before the retained turns already mounted.
@@ -2024,7 +2043,7 @@ function renderConversation() {
         view.update(splitNextPrompt(entry.raw).text, run.status === "running");
         slot.replaceWith(view.element);
       }
-      saved.node.replaceChildren(template.content);
+      saved.content.replaceChildren(template.content);
       for (const view of saved.views.values()) decorateProofs(run, view.element);
       const retained = new Set(
         [...saved.node.querySelectorAll<HTMLElement>("[data-entry]")].map(
@@ -2034,12 +2053,16 @@ function renderConversation() {
       for (const id of saved.views.keys())
         if (!retained.has(id)) saved.views.delete(id);
     }
+    const rewind = rewindIn(run);
+    const at = rewind && run.entries.findIndex((entry) => entry.type === "tool" && entry.toolCallId === rewind.toolCallId);
+    saved.artifacts.update(rewoundBy(run) ? [] : typeof at === "number" && at >= 0 ? run.entries.slice(0, at + 1) : run.entries);
     saved.signature = signature;
     saved.run = run;
     changed = true;
   }
   for (const [id, saved] of runNodes)
     if (!ids.has(id)) {
+      saved.artifacts.dispose();
       saved.node.remove();
       runNodes.delete(id);
       changed = true;
@@ -4162,6 +4185,20 @@ async function submitText(value = editor.value, wait = false) {
       clear();
       return;
     }
+    if (id === "foundry") {
+      if (!argument) {
+        editor.value = "/foundry ";
+        renderComposer();
+        notice("Describe the mockup you want after /foundry.");
+        editor.focus();
+        return;
+      }
+      openPage("");
+      followLatest();
+      await api("foundry-create", { text: argument });
+      clear();
+      return;
+    }
     if (id === "sessions" || id === "resume") {
       if (id === "resume" && argument) {
         const matches = state.sessions.filter(
@@ -5095,7 +5132,7 @@ function renderState(next: Snapshot) {
     expanded.clear();
     expandedCompactions.clear();
     compactionCard?.remove(); compactionCard = null; compactionCardSignature = "";
-    runNodes.forEach((item) => item.node.remove());
+    runNodes.forEach((item) => { item.artifacts.dispose(); item.node.remove(); });
     runNodes.clear();
     heroSignature = overlaySignature = sidebarSignature = "";
   }

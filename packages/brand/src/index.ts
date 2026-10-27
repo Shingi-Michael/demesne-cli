@@ -26,7 +26,7 @@ export function themeByName(theme: string | Theme | undefined): Theme {
 }
 
 export type SlashCommandId =
-  | "new" | "sessions" | "resume" | "rename" | "delete" | "cleanup" | "model" | "subagent" | "export" | "plan"
+  | "new" | "sessions" | "resume" | "rename" | "delete" | "cleanup" | "foundry" | "model" | "subagent" | "export" | "plan"
   | "status" | "context" | "diff" | "undo" | "compact" | "drive" | "clear" | "help" | "theme" | "themefy" | "providers" | "exit"
   | `custom:${string}` | `workflow:${string}`;
 export type SlashCommandArgument = "none" | "optional" | "required";
@@ -65,6 +65,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: "export", name: "/export", aliases: [], argument: "optional", argumentLabel: "md|json", description: "Export the transcript", section: "chat" },
   { id: "delete", name: "/delete", aliases: ["/archive"], argument: "none", description: "Archive this chat", section: "chat" },
   { id: "cleanup", name: "/cleanup", aliases: [], argument: "none", description: "Delete empty, quick and old chats", section: "chat" },
+  { id: "foundry", name: "/foundry", aliases: [], argument: "required", argumentLabel: "what to make", description: "Make an interactive mockup in this chat", section: "chat" },
   { id: "diff", name: "/diff", aliases: [], argument: "none", description: "Review its changes", section: "turn" },
   { id: "undo", name: "/undo", aliases: [], argument: "optional", argumentLabel: "path", description: "Revert its changes", section: "turn" },
   { id: "compact", name: "/compact", aliases: [], argument: "optional", argumentLabel: "instructions", description: "Summarize older context, keeping recent turns", section: "turn" },

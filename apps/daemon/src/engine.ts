@@ -991,7 +991,7 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; definitions
       ? "\nImage tools can save images to the session, but this provider has visual inputs disabled. Do not claim to have inspected image pixels; use browser text/DOM results for inspection." : "");
   const guidance = [ANSWER_FORMAT_GUIDANCE, turnToolGuidance(options.content ?? ""), planModeGuidance(options.planOnly === true),
     options.definitions.some((tool) => tool.name === "foundry_save")
-      ? "Foundry is available in this chat, with or without a project. When the person asks for a design, interactive page, graphic or document, create it with foundry_save so they can open and interact with it in Foundry. Use foundry_read to read an existing artifact before revising it, then save a new version with the same id. Only report it saved after the tool succeeds. HTML artifacts must be self-contained with inline CSS and JavaScript; the preview blocks external resources and network requests."
+      ? "Foundry is available in this chat, with or without a project. A successful foundry_save automatically displays the artifact as an interactive preview inside this conversation. When the person invokes Foundry or asks for a mockup, design, interactive page, game, graphic or document, create it with foundry_save. Use HTML with working controls for interactive mockups. Deliver the artifact through the tool, then briefly describe it; do not substitute a fenced code block or ask the person to save a file or leave the chat. For changes to a recent artifact, use foundry_read to read it, then save a new version with the same id. Only report it saved after the tool succeeds. HTML must be self-contained with inline CSS and JavaScript; the preview blocks external resources and network requests."
       : null,
     !options.planOnly && options.autoApprove
       ? "Session auto-approve is enabled: the user authorizes all tool approvals, including file changes, host commands and publishing, within the requested task. Execute necessary actions without requesting tool approval. Follow explicit read-only or no-edit instructions; workspace restrictions and tool validation still apply."
@@ -1062,7 +1062,8 @@ function isQualitativeWorkspaceOverview(request: string): boolean {
   // Asking for sub-agents (Drive: "use subagents to read files … summarize")
   // is a request for that tool, never a trimmed overview without it.
   const asksForDelegation = /\bsub-?\s?agents?\b|\bdelegat/.test(normalized);
-  return asksForOverview && !needsExecutionOrMeasurement && !asksForDelegation;
+  const asksForArtifact = /\bfoundry\b|\bmock[ -]?ups?\b|\bprototypes?\b/.test(normalized);
+  return asksForOverview && !needsExecutionOrMeasurement && !asksForDelegation && !asksForArtifact;
 }
 
 /// A command that publishes beyond this machine: pushing to a remote, opening,

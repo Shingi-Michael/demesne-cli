@@ -933,6 +933,17 @@ try {
   await until(() => page.locator("#overlay .mp-row").count().then(count => count === 2), "a search lists only its matches");
   assert.equal(await page.locator("#overlay .mp-row b").first().innerText(), "Far", "the match is marked");
   await page.keyboard.press("Escape");
+  await page.locator("textarea").fill("/");
+  await page.locator("#completion .cm-row").first().waitFor();
+  assert.equal(await page.locator("#completion .cm-row .cm-name").first().innerText(), "new", "commands are listed without the slash");
+  assert.equal(await page.locator("#completion .cm-row .cm-ico").count(), await page.locator("#completion .cm-row").count(), "every command has an icon");
+  assert.equal(await page.locator("#completion .menu-footer").count(), 0, "no footer of key hints");
+  await capture("02-commands");
+  await page.locator("textarea").fill("/comp");
+  await until(() => page.locator("#completion .cm-row").count().then(count => count === 1), "typing narrows the list");
+  await page.keyboard.press("Tab");
+  await until(() => page.locator("textarea").inputValue().then(text => text.startsWith("/compact")), "choosing a row writes the command with its slash");
+  await page.locator("textarea").fill("");
 
 
   // The receipt opens the turn's steps; the edit's row unfolds its diff in place.

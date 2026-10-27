@@ -1,5 +1,6 @@
 import { matchedRanges, matchesWords } from "./model-search.ts";
 import { modelCardHTML } from "./model-card.ts";
+import { commandIcon, groupWords, plainName } from "./command-menu.ts";
 import { compactedConversation } from "./compacted-conversation.ts";
 import { SidebarProjectOrder } from "./sidebar-project-order.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
@@ -242,6 +243,7 @@ let completionItems: {
     group: string;
     value: string;
     kind: "command" | "mention";
+    icon?: string;
   }[] = [],
   completionIndex = 0,
   completionDismissed = false;
@@ -3930,15 +3932,17 @@ function renderCompletion() {
         group: "FILES",
         value: file.path,
         kind: "mention",
+        icon: "file",
       }));
   } else if (command) {
     const row = (item: Snapshot["commands"][number], group = item.section.toUpperCase()) => ({
-      label: item.name,
+      label: plainName(item.name),
       description: item.description,
       hint: item.detail ?? item.aliases.join(" "),
       group,
       value: item.name,
       kind: "command" as const,
+      icon: item.id,
     });
     const all = state.commands.filter((item) =>
       [item.name, ...item.aliases].some((name) => name.startsWith(value)),
@@ -3961,42 +3965,34 @@ function renderCompletion() {
   el("completion").hidden = !completionItems.length;
   if (!completionItems.length) return;
   completionIndex = Math.min(completionIndex, completionItems.length - 1);
+  // One quiet panel (pass 83 A): an icon, the plain name with what you've
+  // typed in bold, a faint argument, and the description. No footer.
   let group = "";
-  const needle = mention?.[1] ?? "",
+  const needle = mention?.[1] ?? (command ? value.slice(1) : ""),
     highlight = (label: string) => {
       const index = label.toLowerCase().indexOf(needle.toLowerCase());
       return needle && index >= 0
-        ? h(label.slice(0, index)) +
-            `<span class="match">${h(label.slice(index, index + needle.length))}</span>` +
-            h(label.slice(index + needle.length))
+        ? h(label.slice(0, index)) + `<b>${h(label.slice(index, index + needle.length))}</b>` + h(label.slice(index + needle.length))
         : h(label);
     };
   const rows = completionItems
     .map((item, index) => {
-      const heading =
-        group !== item.group
-          ? `<div class="section-label">${item.group}<span>${mention ? `${completionItems.length} match${completionItems.length === 1 ? "" : "es"} “${h(needle)}”` : completionMore ? "" : completionItems.filter((row) => row.group === item.group).length}</span></div>`
-          : "";
+      const heading = group !== item.group ? `<div class="cm-group">${h(groupWords(item.group))}</div>` : "";
       group = item.group;
-      const definition = state!.commands.find(
-        (command) => command.name === item.value,
-      );
-      const argument =
-        definition?.argument !== "none" && definition?.argumentLabel
-          ? `<span class="args"> ${definition.argument === "required" ? "&lt;" : "["}${h(definition.argumentLabel)}${definition.argument === "required" ? "&gt;" : "]"}</span>`
-          : "";
+      const definition = item.kind === "command" ? state!.commands.find((command) => command.name === item.value) : undefined;
+      const argument = definition && definition.argument !== "none" && definition.argumentLabel ? `<span class="cm-arg">${h(definition.argumentLabel)}</span>` : "";
       return (
         heading +
         btn(
           "completion",
-          `<span class="name">${highlight(item.label)}${argument}</span><span class="value">${h(item.description)}</span><span class="hint">${h(item.hint)} ${index === completionIndex ? k(mention ? "Tab" : "↵") : ""}</span>`,
+          `${commandIcon(item.icon ?? "")}<span class="cm-name">${highlight(item.label)}</span>${argument}<span class="cm-desc">${h(item.description)}</span>`,
           { index },
-          `menu-row ${index === completionIndex ? "selected" : ""}`)
+          `cm-row${index === completionIndex ? " selected" : ""}`)
       );
     })
     .join("");
-  el("completion").innerHTML =
-    `<div class="menu-list">${rows}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} ${mention ? "insert" : "run"} ${!mention ? `${k("Tab")} complete` : ""} ${k("Esc")} close <span class="right">${mention ? "files with spaces are skipped" : completionMore ? `${btn("completion-more", `${completionMore} more ›`, {}, "completion-more")}<span class="muted"> · type to filter</span>` : h(state!.commands.find((command) => command.name === completionItems[completionIndex]?.value)?.preview ?? `${completionItems.length} commands`)}</span></div>`;
+  const more = !mention && completionMore ? btn("completion-more", `<span>${completionMore} more</span><span>›</span>`, {}, "cm-more") : "";
+  el("completion").innerHTML = `<div class="cm-list">${rows}</div>${more}`;
   el("completion")
     .querySelector(".selected")
     ?.scrollIntoView({ block: "nearest" });

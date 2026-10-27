@@ -74,7 +74,7 @@ export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = 
 export const SETTINGS_ORDER = SETTINGS_GROUPS.flatMap(([, items]) => items.map(([id]) => id));
 export const isSettingsSection = (value: unknown): value is SettingsSection => SETTINGS_ORDER.includes(value as SettingsSection);
 
-/// The kinds of Mac banner, each with its own switch.
+/// Native desktop notifications, each kind with its own switch.
 export type NotifyKind = "wait" | "error" | "drive" | "done";
 export const NOTIFY_KINDS: [NotifyKind, string, string][] = [
   ["wait", "A chat waits on you", "An approval or a question"],
@@ -85,7 +85,7 @@ export const NOTIFY_KINDS: [NotifyKind, string, string][] = [
 /// Reads the saved switches; the older single choice (When it needs you,
 /// Always, Never) carries over.
 export function notifyKinds(saved: string | null, old: string | null): Record<NotifyKind, boolean> {
-  const needs = { wait: true, error: true, drive: true, done: false };
+  const needs = { wait: true, error: true, drive: true, done: true };
   try {
     const parsed = saved ? JSON.parse(saved) as Record<string, unknown> : null;
     if (parsed && typeof parsed === "object") return Object.fromEntries(NOTIFY_KINDS.map(([kind]) => [kind, typeof parsed[kind] === "boolean" ? parsed[kind] : needs[kind]])) as Record<NotifyKind, boolean>;
@@ -208,7 +208,7 @@ function pages(view: SettingsView): Page[] {
       { title: "Closing the window", line: "The daemon keeps running, so Drive, routines and mail carry on", keywords: "quit close background daemon" },
     ] },
   ] });
-  out.push({ id: "notifications", title: "Notifications", sub: view.desktop ? "Mac banners, each kind with its own switch. None shows for the chat you are looking at." : "Banners come from the desktop app.", groups: [
+  out.push({ id: "notifications", title: "Notifications", sub: view.desktop ? "System notifications on Linux, macOS and Windows while the app is out of focus. Each kind has its own switch." : "Banners come from the desktop app.", groups: [
     { name: "Tell me when", rows: NOTIFY_KINDS.map(([kind, title, line]) => ({ title, line, control: view.desktop ? toggle(view.notify[kind], "notify-kind", { kind, on: !view.notify[kind] }, title) : "", keywords: "notifications banners alerts notify" })) },
   ] });
   const themeLabel = view.appearance.themes.find((item) => item.name === view.appearance.theme)?.label ?? view.appearance.theme;

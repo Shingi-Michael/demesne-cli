@@ -3423,9 +3423,9 @@ function renderModelPopover(hidden: number) {
     (overlayQuery ? `<div class="mp-hint">${k("↵")} switch ${k("↑↓")} choose ${k("Esc")} close</div>` : "") + `</div>`;
   el("overlay").querySelector(".mp-row.selected")?.scrollIntoView({ block: "nearest" });
 }
-/// Mac banners, each kind with its own switch in Settings › Notifications:
+/// Native notifications, each kind with its own switch in Settings › Notifications:
 /// a chat waits on you, stops with an error, Drive has a branch ready, a chat
-/// finishes. Nothing shows for the chat you are looking at, and the first
+/// finishes. Nothing shows while the app is focused, and the first
 /// look after opening only takes stock.
 let notifyOn: Record<NotifyKind, boolean> = notifyKinds(null, null);
 try { notifyOn = notifyKinds(localStorage.getItem("demesne-notify-kinds"), localStorage.getItem("demesne-notify")); } catch {}
@@ -3466,7 +3466,7 @@ function renderNotifications() {
   const fresh = notified ? [...alerts].filter(([key]) => !notified!.has(key)) : [];
   notified = new Set([...(notified ?? []), ...alerts.keys()]);
   for (const [, { kind, ...alert }] of fresh) {
-    if (!notifyOn[kind] || (looking && alert.sessionId === current?.id)) continue;
+    if (!notifyOn[kind] || looking) continue;
     void api("desktop-notify", alert).catch(() => {});
   }
 }
@@ -3474,7 +3474,7 @@ function renderNotifications() {
 document.addEventListener("demesne:open-chat", (event) => {
   const { sessionId, path } = (event as CustomEvent<{ sessionId?: string; path?: string }>).detail ?? {};
   if (!sessionId || !state) return;
-  if (sessionId === state.session?.id) return;
+  if (sessionId === state.session?.id && inSession()) return;
   const here = !path || path === (document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace);
   void act(() => dispatch(here ? "select-session" : "project-session", here ? { id: sessionId } : { id: sessionId, path }));
 });

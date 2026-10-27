@@ -32,11 +32,24 @@ const view = (patch: Partial<SettingsView> = {}): SettingsView => ({
 });
 
 test("notifications carry over the old single choice", () => {
-  expect(notifyKinds(null, null)).toEqual({ wait: true, error: true, drive: true, done: false });
+  expect(notifyKinds(null, null)).toEqual({ wait: true, error: true, drive: true, done: true });
+  expect(notifyKinds('{"done":false}', null)).toEqual({ wait: true, error: true, drive: true, done: false });
+  expect(notifyKinds('{"wait":false}', null)).toEqual({ wait: false, error: true, drive: true, done: true });
   expect(notifyKinds(null, "always")).toEqual({ wait: true, error: true, drive: true, done: true });
   expect(notifyKinds(null, "never")).toEqual({ wait: false, error: false, drive: false, done: false });
   expect(notifyKinds('{"done":true,"drive":false}', "never")).toEqual({ wait: true, error: true, drive: false, done: true });
   expect(notifyKinds("not json", null).wait).toBe(true);
+});
+
+test("notification settings describe native delivery on every desktop platform", () => {
+  for (const mac of [true, false]) {
+    const html = settingsPage(view({ section: "notifications", mac }));
+    expect(html).toContain("Linux, macOS and Windows");
+    expect(html).toContain("out of focus");
+    expect(html).toContain("A chat waits on you");
+    expect(html).toContain("A chat finishes");
+    expect(html).not.toContain("Mac banners");
+  }
 });
 
 test("learned rules read as words", () => {

@@ -8,11 +8,15 @@ import { APP_URL, allowAppReload, assetPath, desktopBlurs, localAppURL, nextZoom
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
+// Match the installed Windows shortcut identity so native toasts can appear.
+if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
 const userData = app.commandLine.getSwitchValue("user-data-dir");
 if (userData && isAbsolute(userData)) app.setPath("userData", userData);
 let window: BrowserWindow | undefined, backend: Backend | undefined, quitting = false, exited = false;
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
+// Keep native notifications alive until the OS closes them or they are clicked.
+const notifications = new Set<Notification>();
 const args = process.argv.slice(1).filter(arg => /^--(workspace|server|session|model|prompt)=/.test(arg) || arg === "--setup");
 function log(message: string) {
   try { const dir = app.getPath("logs"); mkdirSync(dir, { recursive: true }); appendFileSync(join(dir, "desktop.log"), `${new Date().toISOString()} ${message}\n`); } catch {}
@@ -69,7 +73,7 @@ void app.whenReady().then(async () => {
     // Linux, where the desktop blurs behind clear pixels (Hyprland): the
     // window is see-through and the compositor makes it glass.
     ...(process.platform === "linux" && glass ? { transparent: true, backgroundColor: "#00000000" } : {}),
-    webPreferences: { additionalArguments: glass ? ["--demesne-glass"] : [], preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true },
+    webPreferences: { additionalArguments: glass ? ["--demesne-glass"] : [], preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true, backgroundThrottling: false },
   });
   const contents = window.webContents, session = contents.session;
   session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -104,12 +108,18 @@ void app.whenReady().then(async () => {
       app.setBadgeCount(Number.isInteger(count) && count > 0 && count < 1000 ? count : 0);
       return null;
     }
-    // A Mac banner for a chat that needs you; clicking it opens that chat.
+    // Native notifications on Linux, macOS and Windows; clicking opens the chat.
     if (method === "desktop-notify") {
       const { title, body, sessionId, path } = args as Record<string, unknown>;
-      if (!Notification.isSupported() || typeof title !== "string" || typeof body !== "string") return null;
+      if (typeof title !== "string" || typeof body !== "string") return null;
+      if (!Notification.isSupported()) { log("Native notifications are unavailable on this desktop"); return null; }
       const banner = new Notification({ title: title.slice(0, 120), body: body.slice(0, 240) });
+      notifications.add(banner);
+      banner.once("close", () => notifications.delete(banner));
+      banner.once("failed", (_event, error) => { notifications.delete(banner); log(`Notification failed: ${error}`); });
       banner.on("click", () => {
+        notifications.delete(banner);
+        if (window?.isMinimized()) window.restore();
         window?.show();
         window?.focus();
         emit("demesne:desktop-action", { action: "open-chat", sessionId: typeof sessionId === "string" ? sessionId : undefined, path: typeof path === "string" ? path : undefined });

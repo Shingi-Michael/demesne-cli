@@ -388,12 +388,12 @@ try {
   await thinkingToggle.click();
   await trace.waitFor({ state: "visible" });
   await click("toggle-steps");
-  // Mac banners: record them in the main process, and look away from the window.
+  // Native notifications: record them in the main process, and look away from the window.
   await desktop.evaluate(({ Notification }) => { (globalThis as any).banners = []; Notification.isSupported = () => true; Notification.prototype.show = function () { (globalThis as any).banners.push({ title: this.title, body: this.body }); }; });
   await page.evaluate(() => { document.hasFocus = () => false; });
   await type(prompt);
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Edit"]), "file approval visible");
-  await until(() => desktop.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body.startsWith("Wants to edit"))), "a waiting approval sends a Mac banner");
+  await until(() => desktop.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body.startsWith("Wants to edit"))), "an unfocused waiting approval sends a native notification");
   await page.evaluate(() => { delete (document as any).hasFocus; });
   await capture("02-file-approval");
   // New chat lands on Home as Just a chat; the where word under the
@@ -429,8 +429,12 @@ try {
   await until(() => page.locator("#app").getAttribute("class").then(value => value?.includes("rim-wait") ?? false), "waiting on you holds an amber arc on the rim");
   assert.equal(await page.locator("#desktop-toolbar .header-live.wait").innerText(), "Waiting on you · run bun run check?", "the title line says what it waits for");
   await capture("02-command-approval");
+  await desktop!.evaluate(() => { (globalThis as any).banners = []; });
+  await page.evaluate(() => { document.hasFocus = () => false; });
   await click("permission", { decision: "allow_once" });
   await textIncludes(completed);
+  await until(() => desktop!.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body === "Finished")), "completion notifies by default while unfocused");
+  await page.evaluate(() => { delete (document as any).hasFocus; });
   assert.equal(readFileSync(join(f.workspace, "hello.ts"), "utf8"), "export const greeting = 'after';\n");
   const sessions = await f.client.listSessions();
   const completedSession = sessions.find(item => item.turns.some(turn => turn.content === prompt));
@@ -1296,9 +1300,18 @@ try {
   assert.equal(readFileSync(join(f.workspace, "notes.ts"), "utf8"), "export const note = 'theirs';\n", "Enter asks first and leaves the other agent's change");
   // The model's question is its next line in the conversation, with its
   // suggestions as answers to pick; no step row and no "interview".
+  await desktop!.evaluate(({ Notification }) => {
+    (globalThis as any).banners = [];
+    Notification.isSupported = () => true;
+    Notification.prototype.show = function () { (globalThis as any).banners.push({ title: this.title, body: this.body }); };
+  });
+  await page.evaluate(() => { document.hasFocus = () => false; });
   await type(askPrompt);
   const ask = page.locator("#stage .ask-q");
   await until(() => ask.isVisible(), "the question shows in the conversation", 20_000);
+  await until(() => desktop!.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body === "Has a question for you")), "a question notifies while unfocused");
+  await desktop!.evaluate(() => { (globalThis as any).banners = []; });
+  await page.evaluate(() => { document.hasFocus = () => true; });
   assert.equal(await page.locator(".tool-row", { hasText: "ask_user" }).count(), 0, "no step row names the tool");
   assert(!(await page.locator("#stage").innerText()).toLowerCase().includes("interview"), "nothing says interview");
   assert.equal(await ask.locator(".ask-choice").count(), 3, "the suggestions are answers to pick");
@@ -1309,6 +1322,10 @@ try {
   assert(!(await page.locator("#briefing").innerText()).includes("Discarded"), "Drive's line only says what Drive is doing");
   await page.locator("textarea").press("1");
   await textIncludes("Scoping the test job then.");
+  await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the focused answer has completed");
+  await page.waitForTimeout(300);
+  assert.equal(await desktop!.evaluate(() => (globalThis as any).banners.length), 0, "focused completion does not notify");
+  await page.evaluate(() => { delete (document as any).hasFocus; });
   // Enter while it works steers it: the words wait faintly at the end of the
   // guide, then sit where the model read them, in the same turn.
   await type(steerPrompt);

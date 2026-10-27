@@ -58,7 +58,8 @@ The [engine](../apps/daemon/src/engine.ts) executes tools only after validating 
 | Adapter | Transport | Credential source |
 | --- | --- | --- |
 | [OpenAI-compatible](../packages/providers/src/index.ts) | `/v1/models`, streamed Chat Completions | Optional provider API key |
-| [ChatGPT](../packages/providers/src/chatgpt.ts) | Public `/v1/models` catalog and streamed `/v1/responses` | [Demesne's OAuth store](../packages/chatgpt-auth/src/index.ts) |
+| [ChatGPT](../packages/providers/src/chatgpt.ts) | Public `/v1/models` catalog and streamed `/v1/responses` (credits) | [Demesne's OAuth store](../packages/chatgpt-auth/src/index.ts) |
+| [Codex](../packages/providers/src/chatgpt.ts) | Codex backend `models` catalog and streamed `responses` (the Codex plan); same adapter, Codex route | [Codex sign-in](../packages/codex-auth/src/index.ts) |
 
 The Responses adapter retains completed output items, including encrypted reasoning, for stateless continuation. An empty terminal `response.output` does not discard previously completed stream items. Incomplete/conflicting calls remain errors. A provider change does not send another provider's opaque continuation state to it.
 
@@ -66,7 +67,7 @@ A [multi-provider processor](../apps/daemon/src/multi-provider-processor.ts) rou
 
 ### Direct ChatGPT tool flow
 
-The [ChatGPT adapter](../packages/providers/src/chatgpt.ts) sends model-visible history and Demesne's function definitions directly to the public Responses API. It uses the selected account's OAuth token, `store: false` and streamed events. Demesne assembles context, validates response completion and executes tools through its existing workspace and approval policy. No external coding-agent process owns the conversation or executes native tools.
+The [Responses adapter](../packages/providers/src/chatgpt.ts) sends model-visible history and Demesne's function definitions directly to the Responses API: the public route for ChatGPT, Codex's backend for Codex (system text goes as `instructions`, tools are plain functions, and the account header names the billed plan). It uses the selected account's OAuth token, `store: false` and streamed events. Demesne assembles context, validates response completion and executes tools through its existing workspace and approval policy. No external coding-agent process owns the conversation or executes native tools.
 
 ```mermaid
 sequenceDiagram
@@ -127,6 +128,7 @@ The default data directory is `~/.demesne`, overridden by `data_dir` or `DEMESNE
 | Immutable image originals and previews | `artifacts/` beside the database |
 | Daemon token, PID, log and lock | Data directory |
 | ChatGPT tokens and issued registrations | `auth/chatgpt.json` |
+| Codex tokens | `auth/codex.json` |
 | Drive journals, project memory and dismissals | `drive/` |
 | Daemon proposal cache | `drive-next/` |
 | Desktop project/session preferences | `desktop-ui.json` |

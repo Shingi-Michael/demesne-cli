@@ -10,6 +10,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Added
 
+- Codex provider: sign in to your Codex plan under Settings › Providers and Demesne talks to Codex's backend directly, with Codex's own OAuth (`localhost:1455`, PKCE) and no Codex app or CLI. Models are `codex/<slug>` from the plan's live catalog, usage counts against the plan's 5-hour and weekly windows rather than credits, and the plan's state shows in the model picker. A sign-in left by the earlier managed Codex home carries over once. The ChatGPT provider stays as the credit-metered route.
 - Workflows: a markdown file in `.demesne/workflows/` (or `~/.demesne/workflows/`) lists steps, and `/<name> <goal>` runs them in order as one Drive mission in its own worktree. A step's `check:` command is run by Drive itself and must pass (or fail, with `expect: fail`) before the next step starts. The live block shows each step's check, and the receipt counts steps.
 
 - Releases include the desktop app: `demesne-desktop-darwin-arm64.zip` for Apple silicon Macs and `demesne-desktop-linux-amd64.deb` for Ubuntu 22.04/24.04, so installing demesne no longer needs Bun or Rust.

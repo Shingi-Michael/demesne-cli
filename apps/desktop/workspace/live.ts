@@ -1030,7 +1030,7 @@ const isLightTheme = (name: string) => {
 function renderFoot() {
   if (!state) return;
   const you = state.you || "You", first = you.split(/\s+/)[0] || you;
-  const plan = state.chatgptAccount?.planEnabled ? "ChatGPT plan" : state.model.provider || "";
+  const plan = state.model.provider === "Codex" ? "Codex plan" : state.chatgptAccount?.planEnabled ? "ChatGPT plan" : state.model.provider || "";
   const light = isLightTheme(state.theme);
   const html = [first, plan, light].join("\0");
   const foot = document.querySelector<HTMLElement>(".sidebar-foot");
@@ -3597,7 +3597,7 @@ function renderOverlay() {
     subtitle = state.providers.loading ? "checking…" : `using ${state.model.provider}`;
     noun = "providers";
     filter = false;
-    footerNote = state.providers.message ?? "Enter signs in or out · ChatGPT uses your plan, OpenRouter uses hosted models";
+    footerNote = state.providers.message ?? "Enter signs in or out · Codex uses your Codex plan, ChatGPT is metered as credits, OpenRouter uses hosted models";
     overlayRows = state.providers.items.map((item) => {
       const signing = state!.providers.signingIn === item.key;
       return {

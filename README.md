@@ -25,7 +25,7 @@ bun install --frozen-lockfile
 bun run desktop
 ```
 
-Choose a project, connect a model and open **Drive**. You need [Bun 1.4](https://bun.sh), plus [Node.js](docs/desktop.md#prerequisites) to build the window from source, or [download the app](#install) instead. The model can run on your machine, come from your ChatGPT plan, or be an OpenRouter account.
+Choose a project, connect a model and open **Drive**. You need [Bun 1.4](https://bun.sh), plus [Node.js](docs/desktop.md#prerequisites) to build the window from source, or [download the app](#install) instead. The model can run on your machine, come from your Codex plan, or be an OpenRouter account.
 
 ## How Drive works
 
@@ -52,7 +52,7 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 
 <table>
 <tr>
-<td width="50%" valign="top"><b>Models</b><br>Use a local server, your ChatGPT plan or OpenRouter. ChatGPT connects directly to OpenAI's Responses API, including GPT-6.1 Sol for eligible accounts. You can sign in and out under <b>Settings › Providers</b> without restarting. The model picker keeps score from your own work (turns finished, tool errors, speed, checks passing), so you can see whether a local model is good enough for a project. <a href="docs/authentication.md">Providers and model access</a></td>
+<td width="50%" valign="top"><b>Models</b><br>Use a local server, your Codex plan, ChatGPT credits or OpenRouter. Codex talks to Codex's own backend with its own sign-in, so turns count against your plan like the Codex app's do, GPT-6.1 Sol included; no Codex app or CLI is needed. You can sign in and out under <b>Settings › Providers</b> without restarting. The model picker keeps score from your own work (turns finished, tool errors, speed, checks passing), so you can see whether a local model is good enough for a project. <a href="docs/authentication.md">Providers and model access</a></td>
 <td width="50%" valign="top"><b>Sessions</b><br>A local daemon runs every turn, so closing the window doesn't stop the work. A running Drive mission keeps going in the background too. Open it again and carry on. <code>/compact</code> shortens a long session.</td>
 </tr>
 <tr>

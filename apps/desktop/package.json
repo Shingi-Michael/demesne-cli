@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@demesne/codex-auth": "workspace:*",
     "@demesne/brand": "workspace:*",
     "@demesne/chatgpt-auth": "workspace:*",
     "@demesne/client": "workspace:*",

@@ -58,9 +58,9 @@ The same fields are supported under `[provider]` and `[additional_providers.NAME
 | `id`, `url`, `model` | Provider identity, base URL, default model ID |
 | `allowed_models` | Optional model allowlist; include the default model |
 | `api_key` | Bearer key for OpenAI-compatible endpoints |
-| `auth`, `auth_profile` | `api-key` or `chatgpt`; `auth_profile` belongs only to ChatGPT registration |
+| `auth`, `auth_profile` | `api-key`, `chatgpt` or `codex`; `auth_profile` belongs only to ChatGPT registration, and a Codex entry carries no `url`, `api_key` or `auth_profile` |
 | `context_window` | Usable context **per request/slot**, including reserved output |
-| `max_output_tokens` | Chat Completions output cap and planning reserve; local reserve on the ChatGPT route |
+| `max_output_tokens` | Chat Completions output cap and planning reserve; local reserve on the ChatGPT and Codex routes |
 | `inference_slots` | Provider-specific concurrency; otherwise inherits the top-level value |
 | `vision` | Opt-in image hydration for the daemon's configured vision path |
 | `reasoning_effort` | Config default: `none`, `low`, `medium`, `high`, or `max`; actual support depends on the provider |
@@ -73,7 +73,22 @@ The same fields are supported under `[provider]` and `[additional_providers.NAME
 
 The default stream first-event deadline is at least 180 seconds, with profile-specific floors. The default overall deadline scales with the output allowance; it is at least 15 minutes. See [provider limits](../apps/daemon/src/provider-limits.ts). These deadlines are not reasoning budgets.
 
-HTTP is accepted on loopback. Other endpoints require HTTPS unless the exact Tailscale URL is explicitly allowed. ChatGPT credentials always go to the fixed official API/auth destinations; a custom `url` cannot redirect those tokens.
+HTTP is accepted on loopback. Other endpoints require HTTPS unless the exact Tailscale URL is explicitly allowed. ChatGPT and Codex credentials always go to the fixed official API/auth destinations; a custom `url` cannot redirect those tokens.
+
+## Codex provider
+
+[Sign in first](authentication.md#codex-your-codex-plan) under **Settings › Providers**. The entry names only the plan route; its models are `codex/<slug>` from the live catalog:
+
+```toml
+[provider]
+id = "Codex"
+auth = "codex"
+model = "codex/gpt-6.1-sol"
+context_window = 272000
+max_output_tokens = 16384
+```
+
+Tokens come from `<data_dir>/auth/codex.json`, never from the config. A `url`, `api_key` or `auth_profile` on a Codex entry is a configuration error, and so is a model without the `codex/` prefix.
 
 ## ChatGPT provider
 

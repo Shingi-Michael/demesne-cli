@@ -18,6 +18,7 @@
       "dependencies": {
         "@demesne/brand": "workspace:*",
         "@demesne/chatgpt-auth": "workspace:*",
+        "@demesne/codex-auth": "workspace:*",
         "@demesne/config": "workspace:*",
         "@demesne/drive": "workspace:*",
         "@demesne/protocol": "workspace:*",
@@ -33,6 +34,7 @@
         "@demesne/brand": "workspace:*",
         "@demesne/chatgpt-auth": "workspace:*",
         "@demesne/client": "workspace:*",
+        "@demesne/codex-auth": "workspace:*",
         "@demesne/config": "workspace:*",
         "@demesne/drive": "workspace:*",
         "@demesne/protocol": "workspace:*",
@@ -66,6 +68,15 @@
         "@demesne/protocol": "workspace:*",
       },
     },
+    "packages/codex-auth": {
+      "name": "@demesne/codex-auth",
+      "dependencies": {
+        "proper-lockfile": "^4.1.2",
+      },
+      "devDependencies": {
+        "@types/proper-lockfile": "^4.1.4",
+      },
+    },
     "packages/config": {
       "name": "@demesne/config",
     },
@@ -90,6 +101,7 @@
       "dependencies": {
         "@demesne/brand": "workspace:*",
         "@demesne/chatgpt-auth": "workspace:*",
+        "@demesne/codex-auth": "workspace:*",
         "@demesne/config": "workspace:*",
         "@demesne/protocol": "workspace:*",
         "@demesne/providers": "workspace:*",
@@ -117,6 +129,8 @@
     "@demesne/chatgpt-auth": ["@demesne/chatgpt-auth@workspace:packages/chatgpt-auth"],
 
     "@demesne/client": ["@demesne/client@workspace:packages/client"],
+
+    "@demesne/codex-auth": ["@demesne/codex-auth@workspace:packages/codex-auth"],
 
     "@demesne/config": ["@demesne/config@workspace:packages/config"],
 

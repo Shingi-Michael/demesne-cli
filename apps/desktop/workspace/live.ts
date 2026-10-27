@@ -7,7 +7,7 @@ import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { mountSakura, type Sakura } from "./sakura.ts";
-import { awaySentences, type AwayAsk, type AwayPart } from "./away.ts";
+import { awaySentences, lastPrompt, type AwayAsk, type AwayPart } from "./away.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
@@ -5405,6 +5405,13 @@ document.addEventListener("keydown", (event) => {
       );
       return;
     }
+  }
+  // Recall without sending or replacing a draft; completion menus above keep ↑.
+  if (event.target === editor && key === "arrowup" && !ctrl && !event.altKey && !event.shiftKey
+    && !pageOpen && !editor.value && !pendingQuestion() && !state.approvals.length) {
+    const prompt = lastPrompt(state.runs);
+    if (prompt) { event.preventDefault(); setDraft(prompt); }
+    return;
   }
   if (key === "tab" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && event.target === editor) {
     run(() => cycleMode());

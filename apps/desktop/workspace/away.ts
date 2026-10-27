@@ -34,16 +34,19 @@ export function waitingAsk(pending: PendingPermissionSnapshot[], questions: Ques
   return text ? { kind: "question", text: clip(text, 120) } : null;
 }
 
-/// The last thing you typed in a chat: not Drive's words, mail, a report or
-/// a compaction. First line only.
-export function lastAsk(turns: Pick<Turn, "content" | "fromDrive" | "kind">[]): string {
+/// The last prompt you sent, in full; never recall background-agent or system turns.
+export function lastPrompt(turns: readonly { content: string; fromDrive?: boolean; kind?: string }[]): string {
   for (let index = turns.length - 1; index >= 0; index--) {
     const turn = turns[index]!;
     if (turn.fromDrive || turn.kind || isMailTurn(turn.content) || isDriveReport(turn.content)) continue;
-    const line = turn.content.trim().split("\n")[0]!.trim();
-    if (line) return clip(line, 140);
+    if (turn.content.trim()) return turn.content;
   }
   return "";
+}
+
+/// Home's short preview of the last prompt: first line only.
+export function lastAsk(turns: Pick<Turn, "content" | "fromDrive" | "kind">[]): string {
+  return clip(lastPrompt(turns).trim().split("\n")[0]!.trim(), 140);
 }
 
 const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1).trimEnd()}…` : text);

@@ -1,3 +1,4 @@
+import { matchedRanges, matchesWords } from "./model-search.ts";
 import { compactedConversation } from "./compacted-conversation.ts";
 import { SidebarProjectOrder } from "./sidebar-project-order.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
@@ -3463,12 +3464,8 @@ const LEVEL_WORDS: Record<string, string> = { xhigh: "Extra high", none: "None",
 const levelWord = (level: string) => LEVEL_WORDS[level] ?? level[0]!.toUpperCase() + level.slice(1);
 /// A model's name with the search's matches in bold.
 const marked = (text: string, query: string) => {
-  const lower = text.toLowerCase(), q = query.toLowerCase();
   let out = "", from = 0;
-  for (let at = lower.indexOf(q); q && at >= 0; at = lower.indexOf(q, from)) {
-    out += `${h(text.slice(from, at))}<b>${h(text.slice(at, at + q.length))}</b>`;
-    from = at + q.length;
-  }
+  for (const [at, to] of matchedRanges(text, query)) { out += `${h(text.slice(from, at))}<b>${h(text.slice(at, to))}</b>`; from = to; }
   return out + h(text.slice(from));
 };
 /// The model picker is one panel anchored to the model word: search on top,
@@ -3670,7 +3667,7 @@ function renderOverlay() {
       const rest = (query ? [...models] : models.filter((model) => !short.includes(model)))
         .sort((a, b) => a.provider.localeCompare(b.provider) || turns(b) - turns(a))
         .map((model) => rowOf(model, "rest"))
-        .filter((row) => !query || `${row.label} ${row.group} ${row.data.id}`.toLowerCase().includes(query));
+        .filter((row) => !query || matchesWords(`${row.label} ${row.group} ${row.data.id}`, query));
       // A large catalog (OpenRouter's hundreds) stays behind one row until
       // a search looks through it.
       const large = [...sizes].filter(([, size]) => size > LARGE_CATALOG).map(([provider]) => provider);

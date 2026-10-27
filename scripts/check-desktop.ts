@@ -778,10 +778,11 @@ try {
   await until(() => page.evaluate("localStorage.getItem('demesne-open-on')").then(value => value === "home"), "Open on goes back to Home");
   await page.keyboard.press("ArrowDown");
   await page.locator("#settings-nav .st-nav.on").filter({ hasText: "Notifications" }).waitFor();
+  // Every kind starts on (#302), so the first click turns this one off.
   await page.getByRole("switch", { name: "A chat finishes" }).click();
-  await until(() => page.evaluate("JSON.parse(localStorage.getItem('demesne-notify-kinds') || '{}').done").then(value => value === true), "A chat finishes turns on");
+  await until(() => page.evaluate("JSON.parse(localStorage.getItem('demesne-notify-kinds') || '{}').done").then(value => value === false), "A chat finishes turns off");
   await page.getByRole("switch", { name: "A chat finishes" }).click();
-  await until(() => page.evaluate("JSON.parse(localStorage.getItem('demesne-notify-kinds') || '{}').done").then(value => value === false), "and off again");
+  await until(() => page.evaluate("JSON.parse(localStorage.getItem('demesne-notify-kinds') || '{}').done").then(value => value === true), "and on again");
   await page.getByRole("searchbox", { name: "Search settings" }).fill("palette");
   await until(() => page.locator("#page .st-tx b").allInnerTexts().then(titles => titles.includes("Theme") && !titles.includes("Open on")), "Settings search finds the theme row");
   assert.equal(await page.locator("#page .st-tx mark").first().innerText(), "palette", "the searched word is marked");

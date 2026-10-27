@@ -370,6 +370,21 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .mp-row .name b { font-weight: 600; }
 .desktop .mp-row.dim { color: var(--t3); }
 .desktop .mp-row.selected { background: var(--tone2); color: var(--t1); }
+/* Pass 83 A: the menu / and @ open is one quiet panel like the model picker. */
+.desktop #completion { right: auto; width: min(380px, 100%); max-height: min(360px, 46vh); padding: 6px; border-radius: 12px; }
+.desktop #completion .cm-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.desktop #completion .cm-list::-webkit-scrollbar { display: none; }
+.desktop .cm-group { padding: 8px 9px 3px; color: var(--t4); font-size: 11.5px; }
+.desktop .cm-group:first-child { padding-top: 3px; }
+.desktop .cm-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 30px; padding: 0 9px; border-radius: var(--r-sm); color: var(--t1); font-size: 13px; text-align: left; white-space: nowrap; flex: none; }
+.desktop .cm-row.selected, .desktop .cm-row:hover { background: var(--tone2); }
+.desktop .cm-ico { flex: none; width: 15px; height: 15px; fill: none; stroke: var(--t3); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.desktop .cm-row.selected .cm-ico { stroke: var(--t1); }
+.desktop .cm-name b { font-weight: 600; }
+.desktop .cm-arg { color: var(--t4); }
+.desktop .cm-desc { flex: 1; min-width: 0; margin-left: auto; padding-left: 12px; overflow: hidden; text-overflow: ellipsis; text-align: right; color: var(--t3); }
+.desktop .cm-more { display: flex; justify-content: space-between; align-items: center; flex: none; width: 100%; height: 30px; margin-top: 4px; padding: 0 9px; border-top: 1px solid var(--hair); color: var(--t3); font-size: 12.5px; }
+.desktop .cm-more:hover { color: var(--t1); }
 /* Pass 82 A: resting on a model opens a small card beside the picker. */
 .model-card { position: fixed; z-index: 60; width: 220px; padding: 12px 13px 11px; border-radius: var(--r-lg); background: var(--surface, #1c1d21); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); color: var(--t3); font-size: 12.5px; line-height: 18px; pointer-events: none; opacity: 0; transform: translateX(-4px); visibility: hidden; }
 .model-card.show { opacity: 1; transform: none; visibility: visible; }

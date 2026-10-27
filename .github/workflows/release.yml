@@ -2,17 +2,70 @@ name: Release
 
 on:
   push:
+    branches: ["main"]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: false
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - none
+      version:
+        description: "Explicit version (overrides bump, e.g. 0.2.0)"
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  version:
+    name: Determine Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.step_version.outputs.version }}
+      tag: ${{ steps.step_version.outputs.tag }}
+      should_release: ${{ steps.step_version.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - id: step_version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF_NAME}"
+            ver="${tag#v}"
+            echo "version=$ver" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            args=("--github")
+            if [ -n "${{ github.event.inputs.version }}" ]; then
+              args+=("--set=${{ github.event.inputs.version }}")
+            elif [ "${{ github.event.inputs.bump }}" != "none" ]; then
+              args+=("--bump=${{ github.event.inputs.bump }}")
+            fi
+            bun run scripts/version.ts "${args[@]}"
+          else
+            bun run scripts/version.ts --github
+          fi
+
   # The desktop app, so installing demesne needs neither Bun nor Rust. Each
   # bundle carries its own daemon, desktop host and native image runtime.
   desktop:
     name: Desktop / ${{ matrix.artifact }}
+    needs: [version]
+    if: needs.version.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -35,14 +88,12 @@ jobs:
           bun-version: 1.4.0
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
       - run: bun install --frozen-lockfile
       - name: Build app bundle
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            export DEMESNE_BUILD_VERSION="${GITHUB_REF_NAME#v}"
-          fi
+          export DEMESNE_BUILD_VERSION="${{ needs.version.outputs.version }}"
           bun run build:desktop
 
       # Check each bundle carries its backend, since copying only the
@@ -82,26 +133,43 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: artifacts-${{ matrix.os }}
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.artifact }}.sha256
-            demesne-desktop-linux-x64.tar.gz
-            demesne-desktop-linux-x64.tar.gz.sha256
+            demesne-desktop-linux-x64.tar.gz*
+          if-no-files-found: ignore
 
   release:
-    needs: [desktop]
+    needs: [version, desktop]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.version.outputs.should_release == 'true'
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+      - name: Tag commit on origin if missing
+        shell: bash
+        run: |
+          tag="${{ needs.version.outputs.tag }}"
+          if ! git rev-parse "$tag" >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$tag" "${{ github.sha }}"
+            git push origin "$tag" || true
+          fi
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: artifacts/*
           generate_release_notes: true
+          make_latest: true
 
   # TODO before public distribution: import a Developer ID certificate, sign
   # and notarize Demesne.app, and publish the stapled archive.

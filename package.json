@@ -21,7 +21,8 @@
     "fake:provider": "bun run scripts/fake-provider.ts",
     "desktop": "bun scripts/run-desktop.ts",
     "build:desktop": "bun scripts/build-desktop.ts",
-    "desktop:check": "bun scripts/check-desktop.ts"
+    "desktop:check": "bun scripts/check-desktop.ts",
+    "version:bump": "bun run scripts/version.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

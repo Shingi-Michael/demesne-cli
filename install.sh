@@ -254,6 +254,29 @@ restart_daemon() {
   fi
 }
 
+find_running_desktop_pid() {
+  pid_file="$HOME/.demesne/desktop.pid"
+  if [ -f "$pid_file" ]; then
+    pid=$(cat "$pid_file" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      echo "$pid"
+      return 0
+    fi
+  fi
+  if has pgrep; then
+    pgrep -u "$USER" -f "demesne-desktop" 2>/dev/null | head -n 1 || true
+  fi
+}
+
+notify_desktop() {
+  touch "$HOME/.demesne/desktop.reload" 2>/dev/null || true
+  desktop_pid=$(find_running_desktop_pid)
+  if [ -n "$desktop_pid" ]; then
+    say "hot-reloaded desktop UI (pid $desktop_pid)"
+    kill -USR1 "$desktop_pid" 2>/dev/null || true
+  fi
+}
+
 handle_daemon() {
   # On upgrade, restart any running daemon so it runs the new version.
   if [ "$IS_UPGRADE" = 1 ] && [ -n "$DAEMON_PID" ]; then
@@ -262,6 +285,9 @@ handle_daemon() {
     else
       restart_daemon "$DAEMON_PID"
     fi
+  fi
+  if [ "$IS_UPGRADE" = 1 ]; then
+    notify_desktop
   fi
 }
 

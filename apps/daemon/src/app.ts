@@ -4,6 +4,7 @@ import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
 import type { ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize } from "./artifacts.ts";
+import { foundryReadTool, foundrySaveTool } from "./foundry.ts";
 import {
   encodeServerSentEvent,
   isRecord,
@@ -266,6 +267,8 @@ export function createDaemonApp(options: {
     if (process.platform === "darwin") tools.register(captureWindowTool());
   }
   if (options.images?.url && options.images.model) tools.register(imageGenerationTool(options.images, store));
+  tools.register(foundrySaveTool(store));
+  tools.register(foundryReadTool(store));
   const mcp = new McpManager({
     servers: options.mcpServers ?? {},
     log: (message) => console.warn(message),
@@ -1081,6 +1084,34 @@ export function createDaemonApp(options: {
         return new Response(formatSessionMarkdown(exported), {
           headers: { "Content-Type": "text/markdown; charset=utf-8" },
         });
+      }
+
+      // Foundry: artifacts the agent made, with every version kept.
+      if (path[0] === "v1" && path[1] === "foundry") {
+        if (request.method === "GET" && path.length === 2) return json({ artifacts: store.listFoundryArtifacts() });
+        const id = path[2];
+        if (request.method === "POST" && path.length === 2) {
+          const body = await readJson(request);
+          if (!isRecord(body) || typeof body.source !== "string") return apiError("invalid_request", "Foundry needs a source", 400);
+          try {
+            return json(store.saveFoundryArtifact({ id: typeof body.id === "string" ? body.id : undefined, title: typeof body.title === "string" ? body.title : undefined,
+              kind: typeof body.kind === "string" ? body.kind as never : undefined, workspace: typeof body.workspace === "string" ? body.workspace : null,
+              note: typeof body.note === "string" ? body.note.slice(0, 300) : "Edited by you", source: body.source }), 201);
+          } catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
+        }
+        if (id && path.length === 3 && request.method === "GET") {
+          const version = url.searchParams.get("version");
+          const found = store.getFoundryArtifact(id, version ? Number(version) : undefined);
+          return found ? json(found) : apiError("not_found", "Foundry artifact not found", 404);
+        }
+        if (id && path.length === 3 && request.method === "PATCH") {
+          const body = await readJson(request);
+          if (!isRecord(body) || typeof body.title !== "string") return apiError("invalid_request", "Enter a title", 400);
+          try { return json(store.renameFoundryArtifact(id, body.title)); }
+          catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : String(error), 400); }
+        }
+        if (id && path.length === 3 && request.method === "DELETE") return store.deleteFoundryArtifact(id) ? json({ deleted: true }) : apiError("not_found", "Foundry artifact not found", 404);
+        return apiError("not_found", "Unknown Foundry request", 404);
       }
 
       if(request.method==="POST"&&path.length===5&&path[0]==="v1"&&path[1]==="sessions"&&path[3]==="artifacts"&&path[4]==="import"){

@@ -15,6 +15,7 @@ import type { QuestionBroker } from "./questions.ts";
 import type { ThemeStore } from "./themes.ts";
 import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
+import { FOUNDRY_TOOL_NAMES } from "./foundry.ts";
 import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
 import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinitionFor, type SubagentModel } from "./subagent.ts";
@@ -197,7 +198,8 @@ export class AgentEngine {
         subagentDefinitionFor(this.options.subagentModels?.() ?? [], this.options.subagentModel ?? inference.modelId),
         ...(this.options.sessionTools ? [sessionToolsDefinition] : [])], turn.content), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
-      : canAsk ? this.tools.definitions().filter(definition=>definition.name === "ask_user") : [];
+      : planModeDefinitions(this.tools.definitions().filter(definition =>
+        FOUNDRY_TOOL_NAMES.has(definition.name) || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
     const checkpoint = themefy ? null : this.store.getSessionCheckpoint(session.id);
     const checkpointMessages: ProviderMessage[] = checkpoint ? [{ role: "assistant", content: checkpoint.summary }] : [];
     let totalToolCalls = 0;
@@ -707,12 +709,12 @@ export class AgentEngine {
       const result="Error: Themefy can only ask questions and apply palettes";
       this.store.settleToolCall(toolCallId,"denied",result);return result;
     }
-    if (!workspaceRoot && call.name !== "ask_user" && !(themefy && call.name === "apply_theme")) {
+    if (!workspaceRoot && call.name !== "ask_user" && !FOUNDRY_TOOL_NAMES.has(call.name) && !(themefy && call.name === "apply_theme")) {
       const result = "Error: this session is not bound to a workspace";
       this.store.settleToolCall(toolCallId, "failed", result);
       return result;
     }
-    workspaceRoot ??= ""; // Questions themselves require no filesystem access.
+    workspaceRoot ??= ""; // Questions and Foundry require no filesystem access.
     let input: unknown;
     try {
       input = JSON.parse(call.arguments);
@@ -988,6 +990,9 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; definitions
     : options.definitions.some((tool) => tool.name === "view_image")
       ? "\nImage tools can save images to the session, but this provider has visual inputs disabled. Do not claim to have inspected image pixels; use browser text/DOM results for inspection." : "");
   const guidance = [ANSWER_FORMAT_GUIDANCE, turnToolGuidance(options.content ?? ""), planModeGuidance(options.planOnly === true),
+    options.definitions.some((tool) => tool.name === "foundry_save")
+      ? "Foundry is available in this chat, with or without a project. When the person asks for a design, interactive page, graphic or document, create it with foundry_save so they can open and interact with it in Foundry. Use foundry_read to read an existing artifact before revising it, then save a new version with the same id. Only report it saved after the tool succeeds. HTML artifacts must be self-contained with inline CSS and JavaScript; the preview blocks external resources and network requests."
+      : null,
     !options.planOnly && options.autoApprove
       ? "Session auto-approve is enabled: the user authorizes all tool approvals, including file changes, host commands and publishing, within the requested task. Execute necessary actions without requesting tool approval. Follow explicit read-only or no-edit instructions; workspace restrictions and tool validation still apply."
       : !options.planOnly && options.acceptEdits
@@ -1010,6 +1015,7 @@ const qualitativeInspectionTools = new Set(["list_files", "read_file", "read_fil
 /// Tools a plan-mode turn may use. The engine also enforces this at execution
 /// time, so a hallucinated write tool call is denied rather than executed.
 export const PLAN_MODE_TOOL_NAMES = new Set([
+  "foundry_read",
   "list_files",
   "read_file",
   "read_files",

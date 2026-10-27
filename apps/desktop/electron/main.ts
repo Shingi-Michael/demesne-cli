@@ -1,13 +1,14 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { demesneProject, SelfBuild } from "./self-build.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
-protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true } }]);
 app.setName("Demesne");
 // Match the installed Windows shortcut identity so native toasts can appear.
 if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
@@ -100,9 +101,19 @@ void app.whenReady().then(async () => {
     try { return net.fetch(pathToFileURL(assetPath(look?.uiRoot ?? join(base, "ui"), request.url)).href); }
     catch { return new Response("Not found", { status: 404 }); }
   });
+  // Foundry: an artifact renders in its own frame, served here with a policy
+  // that blocks the network; the frame is sandboxed without the app's origin.
+  await session.protocol.handle("foundry", async request => {
+    if (!foundryURL(request.url)) return new Response("Not found", { status: 404 });
+    try {
+      const url = new URL(request.url), version = Number(url.searchParams.get("v"));
+      const found = await backend!.request("foundry-get", { id: decodeURIComponent(url.pathname.slice(1)), ...(Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as { kind: string; source: string; title: string };
+      return new Response(foundryDocument(found.kind, found.source, found.title), { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
+    } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }
+  });
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
   contents.on("will-navigate", event => { if (!allowAppReload(event.url, true)) event.preventDefault(); });
-  contents.on("will-frame-navigate", event => { if (!allowAppReload(event.url, event.isMainFrame) && (event.isMainFrame || !previewURL(event.url))) event.preventDefault(); });
+  contents.on("will-frame-navigate", event => { if (!allowAppReload(event.url, event.isMainFrame) && (event.isMainFrame || !(previewURL(event.url) || foundryURL(event.url)))) event.preventDefault(); });
   contents.on("will-attach-webview", event => event.preventDefault());
   // Simple full screen sends no full-screen events, so the page hears of it
   // through the resize that comes with it.
@@ -192,6 +203,17 @@ void app.whenReady().then(async () => {
     if (method === "desktop-select-project") {
       const selected = await dialog.showOpenDialog(window!, { title: "Open a Demesne project", properties: ["openDirectory"] });
       return selected.canceled ? backend!.request("desktop-bootstrap") : backend!.request("desktop-open-project", { ...args as Record<string, unknown>, path: selected.filePaths[0] });
+    }
+    // Foundry › Export: the artifact's source, saved where you choose.
+    if (method === "desktop-foundry-export") {
+      const { id, version } = args as Record<string, unknown>;
+      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" ? { version } : {}) }) as { kind: string; source: string; title: string };
+      const extension = ({ html: "html", svg: "svg", markdown: "md" } as Record<string, string>)[found.kind] ?? "txt";
+      const name = `${found.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "").trim().slice(0, 80) || "artifact"}.${extension}`;
+      const selected = await dialog.showSaveDialog(window!, { title: "Export from Foundry", defaultPath: join(app.getPath("downloads"), name) });
+      if (selected.canceled || !selected.filePath) return null;
+      await writeFile(selected.filePath, found.source, "utf8");
+      return { path: selected.filePath };
     }
     // A folder for a chat to move into: the path, or null when cancelled.
     if (method === "desktop-pick-folder") {

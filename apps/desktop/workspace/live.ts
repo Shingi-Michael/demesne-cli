@@ -2980,8 +2980,12 @@ function branchNote() {
 }
 function renderQuestion() {
   if (!state) return;
+  // The signature is what the tile draws. Typing an answer sends drafts
+  // to the daemon, which come back on the question in its stored shape;
+  // neither the draft nor the shape may redraw the tile, since a redraw
+  // replays its entrance and flickers under every keystroke.
   const question = state.questions[0],
-    signature = JSON.stringify(question);
+    signature = JSON.stringify(question ? [question.id, question.status, question.questions, question.answers] : null);
   if (signature === questionSignature) return;
   questionSignature = signature;
   const index=question?.answers?.length ?? 0, answered=question && index>=question.questions.length,
@@ -5543,7 +5547,7 @@ document.addEventListener("keydown", (event) => {
 });
 window.demesneInspect = () => ({
   // What the host last published: the session, its turn, queue and draft.
-  host: { session: state?.session?.id, active: state?.activeTurnId, busy: state?.busy, queue: state?.queue, draft: state?.draft, restored: state?.restored, connection: state?.connection, notice: el("notice").hidden ? "" : el("notice").textContent, requests: recentRequests.map((entry) => `${entry.method} ${entry.outcome}`) },
+  host: { session: state?.session?.id, active: state?.activeTurnId, busy: state?.busy, queue: state?.queue, draft: state?.draft, questionDraft: state?.questions[0]?.draft, restored: state?.restored, connection: state?.connection, notice: el("notice").hidden ? "" : el("notice").textContent, requests: recentRequests.map((entry) => `${entry.method} ${entry.outcome}`) },
   // Whether the conversation follows new text, and where it is scrolled.
   stage: { follow, top: Math.round(el("stage").scrollTop), bottom: Math.round(el("stage").scrollHeight - el("stage").clientHeight) },
   selection: getSelection()?.toString() ?? "",

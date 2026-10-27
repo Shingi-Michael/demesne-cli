@@ -1388,6 +1388,14 @@ try {
   await capture("13-question");
   assert(await page.evaluate(() => { const stage = document.getElementById("stage")!; return stage.scrollWidth <= stage.clientWidth && stage.scrollLeft === 0; }), "the question never pushes the chat sideways");
   assert(!(await page.locator("#briefing").innerText()).includes("Discarded"), "Drive's line only says what Drive is doing");
+  // Typing an answer sends drafts to the daemon; the tile holds still under them.
+  await page.evaluate(() => document.querySelector("#stage .ask-q")!.setAttribute("data-held", "1"));
+  await page.locator("textarea").pressSequentially("war", { delay: 40 });
+  await until(() => evaluate<string>("return window.demesneInspect?.().host.questionDraft;").then(draft => draft === "war"), "the draft reaches the daemon");
+  await page.waitForTimeout(200);
+  assert.equal(await ask.getAttribute("data-held"), "1", "typing an answer never redraws the question");
+  await page.locator("textarea").fill("");
+  await until(() => evaluate<string>("return window.demesneInspect?.().host.questionDraft;").then(draft => draft === ""), "clearing the answer clears the draft");
   await page.locator("textarea").press("1");
   await textIncludes("Scoping the test job then.");
   await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the focused answer has completed");

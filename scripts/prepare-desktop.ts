@@ -9,8 +9,7 @@ async function run(args: string[]) {
   if (await child.exited !== 0) throw new Error(`Desktop preparation failed: ${args.slice(1, 3).join(" ")}`);
 }
 rmSync(build, { recursive: true, force: true }); mkdirSync(application, { recursive: true }); mkdirSync(backend, { recursive: true });
-// The window's page, which the app can also rebuild on its own from the
-// open project (Try it here).
+// The window's page.
 await prepareUi(out);
 for (const entry of ["electron/main.ts", "electron/preload.ts"]) {
   const bundle = await Bun.build({ entrypoints: [join(desktop, entry)], outdir: application, target: "node", format: "cjs", external: ["electron"], minify: true, naming: "[name].cjs" });

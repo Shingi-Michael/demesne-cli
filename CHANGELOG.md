@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Removed
 
+- Self-build (Try it here, Your look · Keep · Go back): the window no longer rebuilds its own page from the open project or swaps the installed app, and chats in the Demesne checkout are no longer told to leave building and launching to the app. An agent in that project builds and relaunches Demesne like any other command.
 - The terminal app: the `demesne` command (terminal chat, `setup`, `doctor`, `auth`, `prompt`, `drive`, `daemon`), `install.sh` and the CLI release tarballs. Demesne is now only the desktop app, which carries its own daemon. Sign-in and setup live in the app under Settings › Providers.
 
 ### Added

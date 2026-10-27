@@ -292,9 +292,9 @@ async function capture(name: string) {
   assert(statistics.channels.slice(0, 3).some(channel => channel.stdev > 5), "Nonblank Chromium rendering");
   writeFileSync(join(output, `${name}.png`), bytes);
 }
-async function open(workspace = false, welcome = false) {
+async function open(workspace = false, welcome = false, extraEnv: Record<string, string> = {}) {
   desktop = await electron.launch({ ...(packagedExecutable ? { executablePath: resolve(packagedExecutable) } : {}), args: [...(packagedExecutable ? [] : [application]), `--user-data-dir=${join(f.root, "electron")}`, ...(workspace ? [`--workspace=${f.workspace}`] : []), `--server=${f.server.url}`], env: {
-    ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache"),
+    ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache"), ...extraEnv,
   }, timeout: 30_000 });
   desktop.process().stderr?.on("data", bytes => { log = (log + String(bytes)).slice(-64 * 1024); });
   page = await desktop.firstWindow();
@@ -772,6 +772,7 @@ try {
   await page.keyboard.press("Escape");
   await until(() => page.getByRole("searchbox", { name: "Search settings" }).inputValue().then(value => value === ""), "Esc clears the search");
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Appearance" }).click();
+  assert.equal(await page.locator("#page [data-glass]").count(), 0, "no Glass slider where the desktop doesn't blur behind the window");
   await page.locator("#page .st-word").first().click();
   await page.locator("#page .st-choice").first().waitFor();
   await capture("02-themes");
@@ -996,7 +997,19 @@ try {
   await page.locator("#overlay").waitFor({ state: "hidden" });
   await close();
   assert.equal((await f.client.health()).model, "desktop-test", "Closing the app leaves the daemon alive");
-  await open(); // No workspace/session args: private preferences restore the project.
+  // No workspace/session args: private preferences restore the project. This
+  // launch is on Hyprland, which blurs behind clear pixels: the window is glass.
+  await open(false, false, { HYPRLAND_INSTANCE_SIGNATURE: "smoke" });
+  assert(await page.evaluate(() => document.documentElement.classList.contains("glass")), "on Hyprland the shell is glass");
+  assert(!await page.evaluate(() => document.documentElement.classList.contains("mac-chrome")), "with the desktop's own window chrome");
+  // (Xvfb has no compositor, so the window itself can't be checked for clear pixels here.)
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgba(0, 0, 0, 0)", "the page leaves clear pixels for Hyprland to blur");
+  await page.locator(".sidebar-settings").click();
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Appearance" }).click();
+  await page.locator("#page [data-glass]").waitFor();
+  await capture("05-hyprland-glass");
+  await page.locator("#settings-nav .st-back").click();
+  await until(() => page.locator("#page").isHidden(), "Back to chats closes Settings");
   // Launch lands on Home; the chat is one click away in the sidebar.
   await reopenChat(sessionId);
   await page.getByRole("button", { name: "Expand full history", exact: true }).waitFor();
@@ -1341,7 +1354,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

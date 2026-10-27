@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
 
 test("project switching may reload only the exact main application document", () => {
   expect(allowAppReload(APP_URL, true)).toBe(true);
@@ -38,4 +38,16 @@ test("zoom preserves the desktop's fixed levels", () => {
 test("the live preview frame loads only pages served on this machine", () => {
   for (const url of ["http://localhost:5173/", "http://127.0.0.1:8000/docs", "http://[::1]:4321/", "https://localhost:3000/"]) expect(previewURL(url)).toBe(true);
   for (const url of ["https://example.com/", "http://localhost.evil.com/", "http://user:pw@localhost:3000/", "file:///etc/passwd", "javascript:alert(1)", "demesne://app/index.html"]) expect(previewURL(url)).toBe(false);
+});
+
+test("glass where the desktop blurs behind the window: the Mac and Hyprland", () => {
+  expect(desktopBlurs("darwin", {})).toBe(true);
+  expect(desktopBlurs("darwin", { DEMESNE_GLASS: "0" })).toBe(true);
+  expect(desktopBlurs("linux", { HYPRLAND_INSTANCE_SIGNATURE: "abc_123" })).toBe(true);
+  expect(desktopBlurs("linux", { XDG_CURRENT_DESKTOP: "Hyprland" })).toBe(true);
+  expect(desktopBlurs("linux", { XDG_CURRENT_DESKTOP: "KDE" })).toBe(false);
+  expect(desktopBlurs("linux", { XDG_CURRENT_DESKTOP: "ubuntu:GNOME" })).toBe(false);
+  expect(desktopBlurs("linux", { XDG_CURRENT_DESKTOP: "sway", DEMESNE_GLASS: "1" })).toBe(true);
+  expect(desktopBlurs("linux", { HYPRLAND_INSTANCE_SIGNATURE: "abc_123", DEMESNE_GLASS: "0" })).toBe(false);
+  expect(desktopBlurs("win32", { DEMESNE_GLASS: "1" })).toBe(false);
 });

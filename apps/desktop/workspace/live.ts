@@ -2221,7 +2221,7 @@ function settingsView(): SettingsView {
   const mode = !session ? null : s.planOnly ? "plan" : session.autoApprove ? "auto" : session.acceptEdits ? "edits" : "ask";
   return {
     section: settingsUi.section, query: settingsUi.query, fold: settingsUi.fold, error: settingsUi.error,
-    mac: /Mac/i.test(navigator.platform), desktop: window.demesne.mode === "desktop", home: settingsInfo?.home ?? "",
+    mac: /Mac/i.test(navigator.platform), glass: document.documentElement.classList.contains("glass"), desktop: window.demesne.mode === "desktop", home: settingsInfo?.home ?? "",
     info: settingsInfo,
     general: { openOn, awake: keepAwake },
     notify: notifyOn,

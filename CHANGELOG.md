@@ -10,6 +10,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Added
 
+- Drive's word in the title bar: while Drive makes a branch elsewhere the chat's title bar ends in a breathing dot and the mission, green "Ready · mission" once the branch is ready; click opens Drive's chat. The strip that sat on the panel's right edge is gone, so the chat keeps its full width.
 - Codex provider: sign in to your Codex plan under Settings › Providers and Demesne talks to Codex's backend directly, with Codex's own OAuth (`localhost:1455`, PKCE) and no Codex app or CLI. Models are `codex/<slug>` from the plan's live catalog, usage counts against the plan's 5-hour and weekly windows rather than credits, and the plan's state shows in the model picker. A sign-in left by the earlier managed Codex home carries over once. The ChatGPT provider stays as the credit-metered route.
 - Workflows: a markdown file in `.demesne/workflows/` (or `~/.demesne/workflows/`) lists steps, and `/<name> <goal>` runs them in order as one Drive mission in its own worktree. A step's `check:` command is run by Drive itself and must pass (or fail, with `expect: fail`) before the next step starts. The live block shows each step's check, and the receipt counts steps.
 

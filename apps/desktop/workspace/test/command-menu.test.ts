@@ -13,3 +13,15 @@ test("every command has an icon, and unknown ones get a generic one", () => {
   expect(commandIcon("something-new")).toBe(commandIcon("another"));
   expect(commandIcon("compact")).not.toBe(commandIcon("undo"));
 });
+
+test("the six groups have headings and a fixed order", async () => {
+  const { sectionRank, sectionTitle } = await import("../command-menu");
+  const { SLASH_COMMANDS } = await import("@demesne/brand");
+  expect(sectionTitle("turn")).toBe("The last turn");
+  expect(sectionTitle("app")).toBe("Demesne");
+  expect(sectionRank("chat")).toBeLessThan(sectionRank("app"));
+  // Built-in commands are already in group order, one run per group.
+  const ranks = SLASH_COMMANDS.map((command) => sectionRank(command.section));
+  expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+  expect(SLASH_COMMANDS.find((command) => command.id === "compact")?.section).toBe("turn");
+});

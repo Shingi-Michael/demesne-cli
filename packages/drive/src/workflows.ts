@@ -110,7 +110,7 @@ export function workflowCommand(workflow: Workflow): SlashCommand {
     description: workflow.description || workflow.steps.map((step) => step.title).join(" › "),
     detail: `workflow · ${workflow.steps.length} step${workflow.steps.length === 1 ? "" : "s"}`,
     preview: `${workflow.steps.map((step) => step.title).join(" › ")} · runs in its own worktree`,
-    section: "control",
+    section: "work",
   };
 }
 

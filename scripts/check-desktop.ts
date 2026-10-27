@@ -938,6 +938,8 @@ try {
   assert.equal(await page.locator("#completion .cm-row .cm-name").first().innerText(), "new", "commands are listed without the slash");
   assert.equal(await page.locator("#completion .cm-row .cm-ico").count(), await page.locator("#completion .cm-row").count(), "every command has an icon");
   assert.equal(await page.locator("#completion .menu-footer").count(), 0, "no footer of key hints");
+  const groups = await page.locator("#completion .cm-group").allInnerTexts();
+  assert.deepEqual(groups.slice(0, 6), ["Chat", "The last turn", "Get work done", "Model", "Look", "Demesne"], `commands sit in six groups by what they act on: ${groups.join(", ")}`);
   await capture("02-commands");
   await page.locator("textarea").fill("/comp");
   await until(() => page.locator("#completion .cm-row").count().then(count => count === 1), "typing narrows the list");

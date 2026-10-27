@@ -4,13 +4,13 @@ import { frameURL, KIND_WORD } from "./foundry-page.ts";
 
 export interface ChatArtifact { id: string; title: string; kind: FoundryKind; version: number }
 
-/** Successful saves are the durable link between a conversation and its previews.
+/** Successful saves and edits are the durable link between a conversation and its previews.
  * Keep the last save of each artifact in a turn; failed or unfinished saves
  * must never appear to be completed work. */
 export function chatArtifacts(entries: readonly Pick<ToolEntry, "name" | "state" | "message">[]): ChatArtifact[] {
   const saved = new Map<string, ChatArtifact>();
   for (const entry of entries) {
-    if (entry.name !== "foundry_save" || entry.state !== "done" || !entry.message) continue;
+    if ((entry.name !== "foundry_save" && entry.name !== "foundry_edit") || entry.state !== "done" || !entry.message) continue;
     try {
       const value = JSON.parse(entry.message);
       if (!value || typeof value.id !== "string" || !/^[\w-]{1,200}$/.test(value.id)

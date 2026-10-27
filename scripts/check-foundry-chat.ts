@@ -35,13 +35,21 @@ const f = await fixture({
       yield call("foundry_read", { id: previous.id });
       yield { type: "finish", reason: "tool_calls" }; return;
     }
-    if (!current.length || (blue && current.length === 1)) {
+    if (blue && current.length === 1) {
+      // A small change goes through foundry_edit against the version just read.
+      assert(tools.some(tool => tool.name === "foundry_edit"));
+      const read = JSON.parse(current[0]!.content ?? "{}") as { version: number };
+      yield call("foundry_edit", { id: previous.id, base_version: read.version, note: "Blue",
+        edits: [{ find: "#f4f1eb", replace: "#eaf2ff" }, { find: "#285b48", replace: "#3158ba" }] });
+      yield { type: "finish", reason: "tool_calls" }; return;
+    }
+    if (!current.length) {
       assert(tools.some(tool => tool.name === "foundry_save"));
       const graphic = /graphic/i.test(request), document = /document/i.test(request);
-      yield call("foundry_save", { ...(blue ? { id: previous.id } : {}), title: graphic ? "A simple badge" : document ? "Project brief" : "Idea garden",
+      yield call("foundry_save", { title: graphic ? "A simple badge" : document ? "Project brief" : "Idea garden",
         kind: graphic ? "svg" : document ? "markdown" : "html",
         source: graphic ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#285b48"/></svg>'
-          : document ? "# Project brief\n\nA document created in chat.\n\n<script>window.injected=true</script>" : mockup(blue) });
+          : document ? "# Project brief\n\nA document created in chat.\n\n<script>window.injected=true</script>" : mockup() });
       yield { type: "finish", reason: "tool_calls" }; return;
     }
     yield { type: "text_delta", delta: "Here is your mockup. " };
@@ -103,10 +111,12 @@ try {
   await cards.nth(1).frameLocator("iframe").getByRole("heading", { name: "A little room to grow" }).waitFor();
   await eventually(async () => (await f.client.foundryGet(artifact.id)).version === 2);
   assert.equal(await cards.nth(1).getAttribute("data-artifact-id"), artifact.id);
+  assert.match((await f.client.foundryGet(artifact.id)).source, /#3158ba/);
+  assert.equal((await f.client.foundryGet(artifact.id)).versions[0]!.note, "Blue");
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
   await cards.nth(1).getByRole("button", { name: "Revise", exact: true }).click();
   await eventually(async () => (await editor.inputValue()).includes(artifact.id));
-  console.log("PASS: natural follow-up revises the artifact in the same chat; the earlier preview keeps its state.");
+  console.log("PASS: natural follow-up edits the artifact in place (foundry_edit) in the same chat; the earlier preview keeps its state.");
 
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await editor.fill("Make an SVG badge graphic"); await editor.press("Enter");

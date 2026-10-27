@@ -13,6 +13,13 @@ test("inline previews use successful saved artifacts, including old chat history
   expect(chatArtifacts([{ name: "foundry_read", state: "done", message: JSON.stringify(artifact) }])).toEqual([]);
 });
 
+test("an edit is a save too: its new version replaces the preview", () => {
+  const edit = { name: "foundry_edit", state: "done" as const, message: JSON.stringify({ ...artifact, version: 2 }) };
+  expect(chatArtifacts([save(artifact), edit])).toEqual([{ ...artifact, version: 2 }]);
+  expect(chatArtifacts([edit])).toEqual([{ ...artifact, version: 2 }]);
+  expect(chatArtifacts([{ ...edit, state: "failed" }])).toEqual([]);
+});
+
 test("multiple saves in a turn show the final version of each artifact", () => {
   expect(chatArtifacts([save(artifact), save({ ...artifact, id: "logo", kind: "svg" }), save({ ...artifact, version: 2 })])).toEqual([
     { ...artifact, version: 2 }, { ...artifact, id: "logo", kind: "svg" },

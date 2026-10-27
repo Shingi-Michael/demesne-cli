@@ -6,7 +6,7 @@ import { DemesneClient } from "../../../packages/client/src/index.ts";
 import type { PermissionMode, SessionStateResponse } from "@demesne/protocol";
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
-import { foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
+import { applyFoundryEdits, DESIGN_BRIEF, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 import { selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 
 const context = { workspaceRoot: "/tmp", signal: new AbortController().signal };
@@ -80,6 +80,7 @@ for (const permissionMode of ["ask", "allow", "deny"] as PermissionMode[]) {
     await completed(client, session.id);
     expect(offered[0]).toContain("foundry_save");
     expect(offered[0]).toContain("foundry_read");
+    expect(offered[0]).toContain("foundry_edit");
     expect(offered[0]).not.toContain("write_file");
     expect(offered[0]).not.toContain("run_command");
     expect(offered[0]).not.toContain("subagent");
@@ -133,6 +134,7 @@ test("plan mode can read Foundry but rejects artifact changes without a project"
   await completed(client, session.id);
   expect(offered[0]).toContain("foundry_read");
   expect(offered[0]).not.toContain("foundry_save");
+  expect(offered[0]).not.toContain("foundry_edit");
   expect(denial).toContain("not available in plan mode");
   expect((await client.foundryGet(artifact.id)).version).toBe(1);
 });
@@ -192,4 +194,48 @@ test("artifact identity reaches live events and old replay without rewriting the
     const raw = store.database.query("SELECT payload FROM events WHERE id = ?").get(event.eventId) as { payload: string };
     expect(JSON.parse(raw.payload).message).toBeUndefined();
   } finally { store.close(); }
+});
+
+test("the tools carry the design brief and the library rules", () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const text = JSON.stringify(foundrySaveTool(store).definition);
+    expect(text).toContain("cdnjs.cloudflare.com");
+    expect(text).toContain("prefers-color-scheme: dark");
+    expect(JSON.stringify(foundryEditTool(store).definition)).toContain("base_version");
+    expect(DESIGN_BRIEF).toContain("phone width");
+    expect(JSON.stringify(foundryReadTool(store).definition)).toContain("base_version");
+  } finally { store.close(); }
+});
+
+test("foundry_edit applies exact edits to the version it read and refuses a stale base", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const save = foundrySaveTool(store), edit = foundryEditTool(store);
+    const created = JSON.parse(await save.execute({ title: "Garden", kind: "html", source: "<h1>Garden</h1><p>one</p><p>one</p>" }, context));
+    const edited = JSON.parse(await edit.execute({ id: created.id, base_version: 1, note: "Title",
+      edits: [{ find: "<h1>Garden</h1>", replace: "<h1>Tiny garden</h1>" }, { find: "one", replace: "two", all: true }] }, context));
+    expect(edited).toMatchObject({ id: created.id, version: 2, edits: 2 });
+    expect(store.getFoundryArtifact(created.id)!.source).toBe("<h1>Tiny garden</h1><p>two</p><p>two</p>");
+    expect(store.getFoundryArtifact(created.id)!.versions[0]!.note).toBe("Title");
+    // Edit source (or another chat) moved the artifact on: version 1 is stale.
+    await expect(edit.execute({ id: created.id, base_version: 1, edits: [{ find: "two", replace: "three", all: true }] }, context)).rejects.toThrow("[conflict] Foundry artifact is at version 2, not 1");
+    await expect(save.execute({ id: created.id, base_version: 1, source: "<h1>Lost</h1>" }, context)).rejects.toThrow("[conflict]");
+    expect(store.getFoundryArtifact(created.id)!.version).toBe(2);
+    // A whole-source save with the right base still works, and one without a base keeps working.
+    expect(JSON.parse(await save.execute({ id: created.id, base_version: 2, source: "<h1>Three</h1>" }, context)).version).toBe(3);
+    expect(JSON.parse(await save.execute({ id: created.id, source: "<h1>Four</h1>" }, context)).version).toBe(4);
+    // Misses and ambiguity are refused before anything is saved.
+    await expect(edit.execute({ id: created.id, base_version: 4, edits: [{ find: "missing", replace: "x" }] }, context)).rejects.toThrow("[no_match] Edit 1");
+    const saved = JSON.parse(await save.execute({ id: created.id, base_version: 4, source: "a a" }, context));
+    await expect(edit.execute({ id: created.id, base_version: saved.version, edits: [{ find: "a", replace: "b" }] }, context)).rejects.toThrow("[ambiguous] Edit 1: find text occurs 2 times");
+    await expect(edit.execute({ id: created.id, edits: [{ find: "a", replace: "b" }] }, context)).rejects.toThrow("base_version");
+    await expect(edit.execute({ id: "missing", base_version: 1, edits: [{ find: "a", replace: "b" }] }, context)).rejects.toThrow("[not_found]");
+    expect(store.getFoundryArtifact(created.id)!.version).toBe(saved.version);
+  } finally { store.close(); }
+});
+
+test("applyFoundryEdits treats the replacement as plain text", () => {
+  expect(applyFoundryEdits("price $1", [{ find: "$1", replace: "$&$1" }])).toBe("price $&$1");
+  expect(applyFoundryEdits("x.y", [{ find: ".", replace: "-", all: true }])).toBe("x-y");
 });

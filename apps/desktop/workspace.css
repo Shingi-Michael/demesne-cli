@@ -1095,6 +1095,19 @@ html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { backgroun
    the text colour at an opacity, so rules, tints and hovers all follow it.
    On the Mac the shell is translucent over the window's vibrancy; elsewhere
    it is the same colour, solid. No scrollbars; radii 8 and 12. */
+/* Glass is a material over every palette, not a Demesne-only color theme.
+   Resolve opaque bases on the body before panel-local --ink overrides. */
+body.desktop {
+  --shell: var(--surface); --panel: var(--ink);
+  --shell-glass: color-mix(in srgb, var(--shell) calc(var(--shell-a, 0.325) * 100%), transparent);
+  --panel-glass: color-mix(in srgb, var(--panel) calc(var(--panel-a, 0.5) * 100%), transparent);
+  --panel-edge: color-mix(in srgb, var(--strong) 4.5%, transparent);
+}
+html[data-appearance="light"] body.desktop {
+  --hair: rgba(0, 0, 0, 0.08); --hair2: rgba(0, 0, 0, 0.14);
+  --tone: rgba(0, 0, 0, 0.04); --tone2: rgba(0, 0, 0, 0.07);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.1); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.18);
+}
 html[data-theme="demesne"] body.desktop {
   /* The ink in three channels: the text, the shell and the panel. Settings ›
      Appearance › Ink swaps them; Glass sets how much of the blur shows. */
@@ -1321,3 +1334,8 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .sidebar-pr-line .sidebar-back-opt:hover, .sidebar-pr-line .sidebar-back-opt:focus-visible { color: var(--t1); }
 .sidebar-pr-line .sidebar-back-opt.key { color: var(--t1); }
 .sidebar-pr-line .sidebar-back-opt.key::after { content: " ↵"; color: var(--t4, var(--t3)); }
+
+/* The System palette path stays editable without widening the settings panel. */
+#system-theme-source { display: flex; align-items: center; gap: 8px; }
+#system-theme-source input { flex: 1; min-width: 0; width: 100%; }
+#system-theme-source button { flex: none; }

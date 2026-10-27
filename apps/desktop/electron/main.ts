@@ -76,6 +76,9 @@ void app.whenReady().then(async () => {
     webPreferences: { additionalArguments: glass ? ["--demesne-glass"] : [], preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true, backgroundThrottling: false },
   });
   const contents = window.webContents, session = contents.session;
+  nativeTheme.on("updated", () => {
+    if(nativeTheme.themeSource==="system")emit("demesne:desktop-action",{action:"appearance",dark:nativeTheme.shouldUseDarkColors});
+  });
   session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.setPermissionCheckHandler(() => false);
   session.on("will-download", event => event.preventDefault());
@@ -144,10 +147,11 @@ void app.whenReady().then(async () => {
       if (!on && awakeBlocker !== null) { powerSaveBlocker.stop(awakeBlocker); awakeBlocker = null; }
       return { on: awakeBlocker !== null };
     }
-    // The glass follows the app's theme, not the system's.
+    // Native chrome follows explicit palettes; System resolves the OS only
+    // after removing any previous app override.
     if (method === "desktop-theme") {
-      nativeTheme.themeSource = (args as Record<string, unknown>).dark === false ? "light" : "dark";
-      return null;
+      nativeTheme.themeSource = (args as Record<string, unknown>).system === true ? "system" : (args as Record<string, unknown>).dark === false ? "light" : "dark";
+      return {dark:nativeTheme.shouldUseDarkColors};
     }
     // Settings' text size: an exact level, or none to read the current one.
     if (method === "desktop-zoom") {

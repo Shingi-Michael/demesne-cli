@@ -1,3 +1,4 @@
+import { THEMES } from "../../../packages/brand/src/theme.ts";
 import { compactedConversation } from "./compacted-conversation.ts";
 import { SidebarProjectOrder } from "./sidebar-project-order.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
@@ -1024,7 +1025,8 @@ function renderCards() {
 const ICON_SUN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>';
 const ICON_MOON = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
 const isLightTheme = (name: string) => {
-  const option = state?.themeOptions.find((item) => item.name === name) as { appearance?: string } | undefined;
+  const option = state?.themeOptions.find((item) => item.name === name);
+  if (name==="system" && option?.systemFallback) return !systemDark();
   return option?.appearance ? option.appearance === "light" : /light|latte/.test(name);
 };
 function renderFoot() {
@@ -2207,6 +2209,13 @@ async function settingsCall(method: string, args: Record<string, unknown> = {}) 
   }
   renderPage();
 }
+async function saveSystemThemeSource(enabled: boolean, path: string) {
+  try {
+    await api("theme-system-source",{enabled,path});
+    settingsUi.error="";
+  }catch(error) { settingsUi.error=error instanceof Error?error.message:String(error); }
+  renderPage();
+}
 function loadSettings() {
   void settingsCall("settings-info");
   void loadArchived();
@@ -2225,7 +2234,7 @@ function settingsView(): SettingsView {
     info: settingsInfo,
     general: { openOn, awake: keepAwake },
     notify: notifyOn,
-    appearance: { theme: s.theme, themes: s.themes.map((name) => ({ name, label: s.themeOptions.find((item) => item.name === name)?.label ?? name })), canUndo: s.themeCanUndo, zoom: zoomLevel, glass: glassLevel, ink: inkName },
+    appearance: { theme: s.theme, themes: s.themes.map((name) => ({ name, label: s.themeOptions.find((item) => item.name === name)?.label ?? name })), canUndo: s.themeCanUndo, systemSource: s.systemThemeSource, zoom: zoomLevel, glass: glassLevel, ink: inkName },
     archived: archivedChats,
     usage: usageScores,
     modelWords,
@@ -2436,6 +2445,12 @@ document.getElementById("page")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const name = form.querySelector<HTMLInputElement>('[name="name"]')?.value.trim() ?? "", command = form.querySelector<HTMLInputElement>('[name="command"]')?.value.trim() ?? "";
     if (name && command) void settingsCall("mcp-add", { name, command }).then(() => { if (!settingsUi.error) form.reset(); });
+    return;
+  }
+  if (form.id==="system-theme-source") {
+    event.preventDefault();
+    const path=form.querySelector<HTMLInputElement>('[name="path"]')?.value.trim() ?? "";
+    void saveSystemThemeSource(state?.systemThemeSource?.enabled ?? false,path);
     return;
   }
   if (form.classList.contains("st-text")) {
@@ -4225,6 +4240,12 @@ async function dispatch(
   }
   if (action === "settings-section") return isSettingsSection(args.id) ? settingsSection(args.id) : undefined;
   if (action === "settings-fold") { settingsUi.fold = settingsUi.fold === args.fold ? "" : String(args.fold); return renderPage(); }
+  if (action === "system-theme-toggle") {
+    const source=state?.systemThemeSource;
+    if(!source)return;
+    const path=args.enabled===true ? document.querySelector<HTMLInputElement>('#system-theme-source [name="path"]')?.value.trim() ?? source.path : source.path;
+    return saveSystemThemeSource(args.enabled===true,path);
+  }
   if (action === "settings-local") {
     if (args.key === "openOn") { openOn = args.value === "last" ? "last" : "home"; try { localStorage.setItem("demesne-open-on", openOn); } catch {} }
     if (args.key === "ink" && isInk(args.value)) { inkName = args.value; try { localStorage.setItem("demesne-ink", inkName); } catch {} applyInk(); }
@@ -4815,6 +4836,32 @@ async function unfoldTurn(run: WorkspaceRun, phase: "change" | "verify" | "all",
   document.getElementById(`turn-${run.id}`)?.scrollIntoView({ block: "start" });
 }
 
+const systemAppearance = window.matchMedia("(prefers-color-scheme: dark)");
+const systemDark=()=>window.demesne.mode==="desktop" ? window.demesneSystemDark ?? systemAppearance.matches : systemAppearance.matches;
+let nativeThemeMode="";
+function applyPalette(next: Snapshot) {
+  const option=next.themeOptions.find(t=>t.name===next.theme);
+  const fallback=next.theme==="system" && option?.systemFallback;
+  const resolved=fallback ? THEMES[systemDark()?"demesne":"demesne-light"]! : option;
+  const colors=fallback ? resolved!.colors : next.palette;
+  const dark=resolved ? resolved.appearance!=="light" : !/light/.test(next.theme);
+  const mode=fallback?"system":dark?"dark":"light";
+  if(window.demesne.mode==="desktop" && mode!==nativeThemeMode) {
+    nativeThemeMode=mode;
+    void api<{dark:boolean} | null>("desktop-theme",{dark,system:Boolean(fallback)}).then(result=>{
+      if(mode!==nativeThemeMode || !fallback || typeof result?.dark!=="boolean")return;
+      window.demesneSystemDark=result.dark;
+      if(state){applyPalette(state);renderFoot();}
+    }).catch(()=>{if(nativeThemeMode===mode)nativeThemeMode="";});
+  }
+  if (renderedPalette===colors) return;
+  for (const [name,color] of Object.entries(colors)) document.documentElement.style.setProperty(`--${name}`,color);
+  document.documentElement.dataset.theme=fallback ? resolved!.name : next.theme;
+  document.documentElement.dataset.appearance=dark?"dark":"light";
+  renderedPalette=colors;
+}
+systemAppearance.addEventListener("change",()=>{if(window.demesne.mode!=="desktop" && state?.theme==="system"){applyPalette(state);renderFoot();}});
+document.addEventListener("demesne:system-appearance",()=>{if(state?.theme==="system"){applyPalette(state);renderFoot();}});
 let renderedPalette: Snapshot["palette"] | null = null,
   bannerSignature = "";
 function renderState(next: Snapshot) {
@@ -4861,14 +4908,7 @@ function renderState(next: Snapshot) {
     editor.value = next.draft;
   }
   composerSession=next.session?.id ?? null;
-  if (renderedPalette !== next.palette) {
-    for (const [name, color] of Object.entries(next.palette))
-      document.documentElement.style.setProperty(`--${name}`, color);
-    // The desktop restyles its own themes by name (desktop.css).
-    document.documentElement.dataset.theme = next.theme;
-    if (window.demesne.mode === "desktop") void api("desktop-theme", { dark: !/light/.test(next.theme) }).catch(() => {});
-    renderedPalette = next.palette;
-  }
+  applyPalette(next);
   // Drive working this session is a session, even before its first turn:
   // its mission is the conversation's turn.
   const start = !inSession(next) && !pageOpen;

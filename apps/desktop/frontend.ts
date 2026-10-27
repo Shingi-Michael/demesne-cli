@@ -15,7 +15,7 @@ interface DesktopNative {
   };
 }
 declare global {
-  interface Window { demesneDesktop?: DesktopNative }
+  interface Window { demesneDesktop?: DesktopNative; demesneSystemDark?: boolean }
 }
 const el = <T extends HTMLElement = HTMLElement>(id: string) => {
   const element = document.getElementById(id);
@@ -187,18 +187,20 @@ window.addEventListener("beforeunload", () => {
   bridge.dispose();
 });
 const appearance = matchMedia("(prefers-color-scheme: dark)");
-function updateAppearance() {
-  return request("desktop-appearance", { dark: appearance.matches });
+function updateAppearance(dark=appearance.matches) {
+  window.demesneSystemDark=dark;
+  document.dispatchEvent(new CustomEvent("demesne:system-appearance",{detail:{dark}}));
+  return request("desktop-appearance", { dark });
 }
-appearance.addEventListener("change", () => { void updateAppearance().catch(showActionError); });
 async function start() {
   try {
     if (!native) throw new Error("Open Demesne with its desktop launcher. This page requires the native application bridge.");
     listeners.push(...await Promise.all([
       native.event.listen<StateUpdate>("demesne:update", (event) => bridge.update(event.payload)),
       native.event.listen<unknown>("demesne:desktop-error", (event) => showError(event.payload)),
-      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen"; sessionId?: string; path?: string; on?: boolean }>("demesne:desktop-action", (event) => {
-        if (event.payload.action === "fullscreen") document.documentElement.classList.toggle("fullscreen", event.payload.on === true);
+      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen" | "appearance"; sessionId?: string; path?: string; on?: boolean; dark?: boolean }>("demesne:desktop-action", (event) => {
+        if(event.payload.action==="appearance")void updateAppearance(event.payload.dark===true).catch(showActionError);
+        else if (event.payload.action === "fullscreen") document.documentElement.classList.toggle("fullscreen", event.payload.on === true);
         else if (event.payload.action === "open-project") void openProject();
         else if (event.payload.action === "open-chat" && mounted && !fatal)
           document.dispatchEvent(new CustomEvent("demesne:open-chat", { detail: { sessionId: event.payload.sessionId, path: event.payload.path } }));
@@ -206,7 +208,8 @@ async function start() {
           document.dispatchEvent(new Event("demesne:open-settings"));
       }),
     ]));
-    await updateAppearance();
+    const initial=await request<{dark:boolean} | null>("desktop-theme",{system:true});
+    await updateAppearance(initial?.dark ?? appearance.matches);
     if (fatal) return;
     await applyBootstrap(await request<DesktopBootstrap>("desktop-bootstrap"));
   } catch (error) { showError(error); }

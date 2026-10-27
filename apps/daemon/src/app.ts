@@ -1241,7 +1241,12 @@ export function createDaemonApp(options: {
           if(!isRecord(body))throw new ProtocolValidationError("Expected a theme selection");
           if(body.action === "undo")return json(themes.undo());
           if(body.action === "select" && typeof body.name === "string")return json(themes.select(body.name));
-          throw new ProtocolValidationError("Expected select or undo theme action");
+          if(body.action === "system-source") {
+            if(typeof body.enabled!=="boolean" || typeof body.path!=="string")throw new ProtocolValidationError("Expected system palette enabled and path");
+            try { return json(themes.configureSystem(body.enabled,body.path)); }
+            catch(error) { return apiError("invalid_request",error instanceof Error?error.message:String(error),400); }
+          }
+          throw new ProtocolValidationError("Expected select, undo or system-source theme action");
         }
       }
       if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "themefy") {

@@ -274,6 +274,7 @@ export class DemesneClient {
   }
   async themes():Promise<ThemeLibrary> {return this.request("/v1/themes");}
   async selectTheme(name:string):Promise<ThemeLibrary> {return this.request("/v1/themes",{method:"POST",body:JSON.stringify({action:"select",name})});}
+  async configureSystemTheme(enabled:boolean,path:string):Promise<ThemeLibrary> {return this.request("/v1/themes",{method:"POST",body:JSON.stringify({action:"system-source",enabled,path})});}
   async undoTheme():Promise<ThemeLibrary> {return this.request("/v1/themes",{method:"POST",body:JSON.stringify({action:"undo"})});}
   async themefy(sessionId:string,preferences=""):Promise<SubmitTurnResponse> {return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/themefy`,{method:"POST",body:JSON.stringify({preferences})});}
 

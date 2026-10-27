@@ -139,7 +139,7 @@ export interface SettingsView {
   fold: string;
   general: { openOn: "home" | "last"; awake: boolean };
   notify: Record<NotifyKind, boolean>;
-  appearance: { theme: string; themes: { name: string; label: string }[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink };
+  appearance: { theme: string; themes: { name: string; label: string }[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; systemSource?: {enabled:boolean;path:string;error?:string} | null };
   archived: ChatsPageChat[] | null;
   usage: ModelScore[] | null;
   modelWords: (model: { id: string; displayName?: string }) => string;
@@ -211,6 +211,7 @@ function pages(view: SettingsView): Page[] {
   out.push({ id: "notifications", title: "Notifications", sub: view.desktop ? "System notifications on Linux, macOS and Windows while the app is out of focus. Each kind has its own switch." : "Banners come from the desktop app.", groups: [
     { name: "Tell me when", rows: NOTIFY_KINDS.map(([kind, title, line]) => ({ title, line, control: view.desktop ? toggle(view.notify[kind], "notify-kind", { kind, on: !view.notify[kind] }, title) : "", keywords: "notifications banners alerts notify" })) },
   ] });
+  const systemSource=view.appearance.systemSource;
   const themeLabel = view.appearance.themes.find((item) => item.name === view.appearance.theme)?.label ?? view.appearance.theme;
   const themeGroups: [string, { name: string; label: string }[]][] = [["Yours", []], ["Dark", []], ["Light", []]];
   for (const item of view.appearance.themes) themeGroups[item.name.startsWith("custom-") ? 0 : /light|latte/.test(item.name) ? 2 : 1]![1].push(item);
@@ -218,6 +219,10 @@ function pages(view: SettingsView): Page[] {
     { name: "Look", rows: [
       { title: "Theme", line: "The palette for the whole app", control: (view.appearance.canUndo ? link("settings-set", "Undo", { method: "theme-undo", args: {} }) : "") + word("theme", themeLabel, view.fold === "theme"), keywords: "colour color dark light palette theme",
         fold: view.fold === "theme" ? themeGroups.filter(([, items]) => items.length).map(([heading, items]) => choices(`${heading} themes`, items.map((item) => [item.label, item.name === view.appearance.theme, "settings-set", { method: "theme", args: { name: item.name } }]), heading)).join("") : "" },
+      ...(systemSource ? [
+        { title: "Use an external System palette", line: "Off uses Demesne’s own colors and follows system light/dark. On reads the palette file below when System is selected.", control: toggle(systemSource.enabled,"system-theme-toggle",{enabled:!systemSource.enabled},"Use an external System palette"), keywords: "system theme palette external kuru switch" },
+        { title: "System palette file", line: systemSource.error ? `Could not reload: ${systemSource.error}. Keeping the last valid palette, or Demesne’s default.` : "A JSON file or symlink on the daemon’s computer. Saving a path does not enable it or change the selected theme.", fold: `<form id="system-theme-source" class="st-text" data-kind="system-theme"><input name="path" value="${h(systemSource.path)}" aria-label="System palette file" maxlength="4096" autocomplete="off" spellcheck="false"><button type="submit" class="st-link">Save path</button></form>`, keywords: "system theme file path symlink kuru external json" },
+      ] : []),
       { title: "Make a theme", line: "Answer a few questions and Demesne builds a palette from your answers", control: link("settings-command", "Start", { text: "/themefy " }), keywords: "themefy custom palette" },
       ...(view.desktop && view.glass ? [{ title: "Glass", line: "How much of the desktop shows through the window", control: `<label class="st-range">Clear<input type="range" min="0" max="100" step="1" value="${view.appearance.glass}" data-glass aria-label="Glass">Solid</label>`, keywords: "glass transparent translucent blur vibrancy opacity" }] : []),
       ...(/^demesne(-light)?$/.test(view.appearance.theme) ? [{ title: "Ink", line: "The colour every grey is made from, and the accent with it", control: `<span class="st-inks" role="group" aria-label="Ink">${INKS.map(([id, label, swatch]) => `<button type="button" class="${view.appearance.ink === id ? "on" : ""}" style="--swatch:${swatch}" title="${label}" aria-label="${label}" aria-pressed="${view.appearance.ink === id}" data-action="settings-local" data-args="${h(JSON.stringify({ key: "ink", value: id }))}"></button>`).join("")}</span>`, keywords: "ink tint hue colour color accent warm cool" }] : []),

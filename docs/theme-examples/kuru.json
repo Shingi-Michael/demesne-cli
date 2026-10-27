@@ -1,0 +1,20 @@
+{
+  "label": "Kuru: monokai-soda",
+  "appearance": "dark",
+  "colors": {
+    "background": "#222222",
+    "surface": "#1c1c1c",
+    "raised": "#333333",
+    "text": "#f8f8f2",
+    "secondary": "#cfcfc2",
+    "accent": "#f92672",
+    "accentBright": "#f96b9c",
+    "warning": "#fd971f",
+    "syntaxKeyword": "#f92672",
+    "syntaxString": "#e6db74",
+    "syntaxNumber": "#ae81ff",
+    "syntaxComment": "#75715e",
+    "syntaxType": "#66d9ef",
+    "syntaxFunction": "#a6e22e"
+  }
+}

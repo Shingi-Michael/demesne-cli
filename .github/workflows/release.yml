@@ -110,7 +110,15 @@ jobs:
         run: |
           cp apps/desktop/release/*.deb "${{ matrix.artifact }}"
           contents=$(dpkg-deb -c "${{ matrix.artifact }}")
-          for file in usr/bin/demesne-desktop resources/backend/demesne-desktop-host resources/backend/demesned resources/backend/node_modules/sharp/; do grep -q "$file" <<<"$contents"; done
+          for file in opt/Demesne/demesne-desktop resources/backend/demesne-desktop-host resources/backend/demesned resources/backend/node_modules/sharp/; do
+            if ! grep -q "$file" <<<"$contents"; then
+              echo "Missing expected file in deb: $file"
+              echo "deb contents:"
+              echo "$contents"
+              exit 1
+            fi
+          done
+          sudo apt-get update -q || true
           sudo apt-get install -y "./${{ matrix.artifact }}"
           command -v demesne-desktop
           # The portable bundle install.sh unpacks on any x86_64 glibc distro.
@@ -118,7 +126,14 @@ jobs:
           cp apps/desktop/build/icon.png portable/demesne/icon.png
           tar -czf demesne-desktop-linux-x64.tar.gz -C portable demesne
           contents=$(tar -tzf demesne-desktop-linux-x64.tar.gz)
-          for file in demesne/demesne-desktop demesne/icon.png demesne/resources/backend/demesne-desktop-host demesne/resources/backend/demesned demesne/resources/backend/node_modules/sharp/; do grep -q "^$file" <<<"$contents"; done
+          for file in demesne/demesne-desktop demesne/icon.png demesne/resources/backend/demesne-desktop-host demesne/resources/backend/demesned demesne/resources/backend/node_modules/sharp/; do
+            if ! grep -q "^$file" <<<"$contents"; then
+              echo "Missing expected file in tar.gz: $file"
+              echo "tar.gz contents:"
+              echo "$contents"
+              exit 1
+            fi
+          done
       - name: Package Windows app
         if: runner.os == 'Windows'
         shell: bash

@@ -1067,6 +1067,7 @@ try {
   // project's page, the top bar offers Go back (Keep needs an installed Mac
   // app), and the chat comes back after the reload. A change that doesn't
   // build goes back by itself and says why.
+  await until(() => page.locator("#workspace-title").innerText().then(text => text.startsWith("Desktop smoke")), "the chat is open again before the look prompt");
   await type(lookPrompt);
   await click("permission", { decision: "allow_once" });
   await textIncludes(lookDone);

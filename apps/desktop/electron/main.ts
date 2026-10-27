@@ -25,6 +25,10 @@ function log(message: string) {
 function emit(channel: string, value: unknown) { if (window && !window.isDestroyed()) window.webContents.send(channel, value); }
 /// Restart after Keep: the swap opens the new app.
 let restarting = false;
+/// The chat the window was in when Try it here or Go back reloaded it, kept
+/// here rather than in the page (a reload, or two, may empty its storage):
+/// armed on every reload, handed to the window once with the look's state.
+let lastChat: { id: string; path: string } | null = null, reopen: { id: string; path: string; at: number } | null = null;
 async function quit() {
   if (quitting) return;
   quitting = true;
@@ -85,7 +89,7 @@ void app.whenReady().then(async () => {
   // folder instead of the app's page.
   look = new SelfBuild({
     userData: app.getPath("userData"), env: process.env, platform: process.platform, arch: process.arch, exePath: app.getPath("exe"), packaged: app.isPackaged,
-    reload: () => contents.reload(), emit: state => emit("demesne:desktop-action", { action: "look", look: state }), log,
+    reload: () => { reopen = lastChat && { ...lastChat, at: Date.now() }; contents.reload(); }, emit: state => emit("demesne:desktop-action", { action: "look", look: state }), log,
   });
   contents.on("did-fail-load", (_event, code, description) => look?.failed(`The page failed to load (${description || code})`));
   contents.on("console-message", event => { if (event.level === "error") look?.failed(event.message); });
@@ -117,9 +121,14 @@ void app.whenReady().then(async () => {
     // Demesne rebuilds its own look: try the open project's page in this
     // window, go back, keep it as the installed app, or restart into it.
     if (method === "desktop-look") {
-      const { action, project } = args as Record<string, unknown>;
+      const { action, project, sessionId } = args as Record<string, unknown>;
       const root = typeof project === "string" ? project : "";
-      if (action === "state") return { demesne: root === "" ? "no" : demesneProject(root), look: look!.state };
+      if (action === "state") {
+        const back = reopen && Date.now() - reopen.at < 180_000 ? { id: reopen.id, path: reopen.path } : null;
+        reopen = null;
+        return { demesne: root === "" ? "no" : demesneProject(root), look: look!.state, reopen: back };
+      }
+      if ((action === "try" || action === "back") && typeof sessionId === "string" && sessionId) lastChat = { id: sessionId, path: root };
       if (action === "try") return look!.try(root);
       if (action === "keep") return look!.keep(root);
       if (action === "back") return look!.back();

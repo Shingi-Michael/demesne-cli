@@ -4,6 +4,7 @@ import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
+import { isDemesneProject, SelfBuild } from "./self-build.ts";
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -12,7 +13,7 @@ app.setName("Demesne");
 if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
 const userData = app.commandLine.getSwitchValue("user-data-dir");
 if (userData && isAbsolute(userData)) app.setPath("userData", userData);
-let window: BrowserWindow | undefined, backend: Backend | undefined, quitting = false, exited = false;
+let window: BrowserWindow | undefined, backend: Backend | undefined, look: SelfBuild | undefined, quitting = false, exited = false;
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
 // Keep native notifications alive until the OS closes them or they are clicked.
@@ -22,11 +23,15 @@ function log(message: string) {
   try { const dir = app.getPath("logs"); mkdirSync(dir, { recursive: true }); appendFileSync(join(dir, "desktop.log"), `${new Date().toISOString()} ${message}\n`); } catch {}
 }
 function emit(channel: string, value: unknown) { if (window && !window.isDestroyed()) window.webContents.send(channel, value); }
+/// Restart after Keep: the swap opens the new app.
+let restarting = false;
 async function quit() {
   if (quitting) return;
   quitting = true;
   log("exit requested");
   await backend?.close();
+  // A kept build takes the installed app's place once this process is gone.
+  if (look?.swapOnExit(restarting)) log("a kept build replaces the app"); else look?.cleanup();
   exited = true;
   app.quit();
 }
@@ -76,11 +81,19 @@ void app.whenReady().then(async () => {
     webPreferences: { additionalArguments: glass ? ["--demesne-glass"] : [], preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true, backgroundThrottling: false },
   });
   const contents = window.webContents, session = contents.session;
+  // Demesne rebuilds its own look: a trial look is served from its own
+  // folder instead of the app's page.
+  look = new SelfBuild({
+    userData: app.getPath("userData"), env: process.env, platform: process.platform, arch: process.arch, exePath: app.getPath("exe"), packaged: app.isPackaged,
+    reload: () => contents.reload(), emit: state => emit("demesne:desktop-action", { action: "look", look: state }), log,
+  });
+  contents.on("did-fail-load", (_event, code, description) => look?.failed(`The page failed to load (${description || code})`));
+  contents.on("console-message", event => { if (event.level === "error") look?.failed(event.message); });
   session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.setPermissionCheckHandler(() => false);
   session.on("will-download", event => event.preventDefault());
   await session.protocol.handle("demesne", request => {
-    try { return net.fetch(pathToFileURL(assetPath(join(base, "ui"), request.url)).href); }
+    try { return net.fetch(pathToFileURL(assetPath(look?.uiRoot ?? join(base, "ui"), request.url)).href); }
     catch { return new Response("Not found", { status: 404 }); }
   });
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -100,7 +113,19 @@ void app.whenReady().then(async () => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
     validateRequest(method, args);
     if (quitting) throw new Error("The desktop app is closing");
-    if (method === "desktop-ready") { window?.show(); window?.focus(); return null; }
+    if (method === "desktop-ready") { window?.show(); window?.focus(); look?.loaded(); return null; }
+    // Demesne rebuilds its own look: try the open project's page in this
+    // window, go back, keep it as the installed app, or restart into it.
+    if (method === "desktop-look") {
+      const { action, project } = args as Record<string, unknown>;
+      const root = typeof project === "string" ? project : "";
+      if (action === "state") return { demesne: root !== "" && isDemesneProject(root), look: look!.state };
+      if (action === "try") return look!.try(root);
+      if (action === "keep") return look!.keep(root);
+      if (action === "back") return look!.back();
+      if (action === "restart") { restarting = true; void quit(); return null; }
+      throw new Error("Unknown look action");
+    }
     if (method === "quit" || method === "desktop-quit") { void quit(); return null; }
     // The Dock icon counts the chats that need you (macOS and Linux docks).
     if (method === "desktop-badge") {

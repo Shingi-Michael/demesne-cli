@@ -17,6 +17,7 @@ import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointe
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
+import { lookChange, lookWords, type LookState } from "./self-build.ts";
 import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
 import type { PlanLimits, ProofClaim, Routine } from "@demesne/protocol";
@@ -202,6 +203,10 @@ const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", 
 const tools = (run: WorkspaceRun) =>
   run.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
 let state: Snapshot | null = null;
+/// Demesne rebuilds its own look (pass 80): what the window shows, and which
+/// project roots are Demesne itself (asked once each).
+let look: LookState = { kind: "installed" }, lookAsked = false;
+const demesneProjects = new Map<string, boolean>();
 let overlay: OverlayName | null = null,
   overlayQuery = "",
   overlayIndex = 0,
@@ -535,7 +540,7 @@ function renderSidebar() {
   const agents = state.agents ?? [];
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, look, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -748,6 +753,17 @@ function renderSidebar() {
   if (where) {
     where.hidden = Boolean(pageOpen) || !inSession() || Boolean(from);
     where.textContent = plainNow ? "Just a chat" : projectLabel(projectWorkspace);
+  }
+  // While you look at the project's own look: Keep or Go back, then Restart.
+  const lookWord = document.getElementById("workspace-look");
+  if (lookWord) {
+    const on = ["trial", "keeping", "kept", "failed"].includes(look.kind) && !pageOpen;
+    lookWord.hidden = !on;
+    lookWord.innerHTML = !on ? ""
+      : look.kind === "trial" ? `<i class="look-dot"></i>Your look${look.keep ? ` ${btn("look-keep", "Keep", {}, "look-word strong")}<span class="look-sep">·</span>` : " "}${btn("look-back", "Go back", {}, "look-word")}`
+      : look.kind === "keeping" ? `<i class="look-dot"></i>Building Demesne.app <span class="look-prog"><b></b></span>`
+      : look.kind === "kept" ? `<i class="look-dot ok"></i>Opens next time ${btn("look-restart", "Restart", {}, "look-word strong")}`
+      : `<i class="look-dot bad"></i>The build failed ${btn("look-back", "Dismiss", {}, "look-word")}`;
   }
   // The rail: a dot where something waits, a ring for Drive's progress.
   const badge = document.getElementById("rail-sessions-badge"), ring = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
@@ -1649,7 +1665,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     stopped = checks.some((tool) => tool.state === "stopped");
   // One receipt line: what changed, the checks, the steps behind it, the
   // time, and the model only when it isn't the one in the composer.
-  let footer = "";
+  let footer = "", lookLine = "";
   if (cut) footer = rewindLine(cut);
   else if (!active(run)) {
     const closed = run.entries.findLast(
@@ -1687,6 +1703,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     // A turn that only answered needs no receipt: its time is on the ask.
     const bare = run.status === "completed" && !files && !checks.length && !steps && !thought && !(receipt?.mode === "Plan" || run.planOnly) && !model && !mailReply(run);
     footer = bare ? "" : `<div class="turn-receipt">${parts.map((part) => `<span>${part}</span>`).join("")}${actions ? `<span class="receipt-actions">${actions}</span>` : ""}</div>`;
+    lookLine = lookLineHTML(run);
   }
   const latestTool = items.findLast(
       (tool) => tool.state === "running" || tool.waiting,
@@ -1717,7 +1734,7 @@ function runHTML(run: WorkspaceRun, index: number) {
       : `<span class="att-name" title="${h(`${image.width}×${image.height}`)}">${h(image.filename)}</span>`).join("")}</div>` : "";
   const request = mailRequest(run) ?? driveReport(run) ?? driveAsked(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
   const review = reviewOpen.has(run.id) && !live ? reviewHTML(run.id) : "";
-  return `${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}${activity}</div>${queued}`;
+  return `${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}${lookLine}${activity}</div>${queued}`;
 }
 /// The turn's changed files under its receipt: a header line per file, its
 /// changes with a little context, and the notes left on its lines.
@@ -1785,6 +1802,75 @@ function saveNote(keep = true) {
   renderConversation();
   renderComposer();
 }
+/// Demesne rebuilds its own look (pass 80): the files a finished turn changed.
+function changedPaths(run: WorkspaceRun): string[] {
+  const changed = tools(run).filter((t) => t.phase === "change" && t.state === "done");
+  return [...new Set(changed.flatMap((t) => t.changes?.map((c) => c.path) ?? [String(t.input.path ?? t.detail ?? "")]))];
+}
+/// The last finished turn that changed the window or the engine, when the
+/// open project is Demesne itself: its receipt carries the look line.
+let lookTurn: { id: string; change: "window" | "engine" | "both" } | null = null;
+function lookTurnFor(runs: WorkspaceRun[]) {
+  if (window.demesne.mode !== "desktop" || !state?.workspace || demesneProjects.get(state.workspace) !== true) return null;
+  for (let i = runs.length - 1; i >= 0; i--) {
+    const run = runs[i]!;
+    if (run.status !== "completed" || rewoundBy(run)) continue;
+    const change = lookChange(changedPaths(run), state.workspace);
+    if (change) return { id: run.id, change };
+  }
+  return null;
+}
+const ICON_EYE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const ICON_ENGINE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>';
+/// The look line under the turn's receipt: Try it here, then where the
+/// trial stands. Keep and Go back live in the top bar.
+function lookLineHTML(run: WorkspaceRun): string {
+  if (!lookTurn || lookTurn.id !== run.id) return "";
+  const change = lookTurn.change, icon = change === "window" ? ICON_EYE : ICON_ENGINE;
+  const whyOpen = detailsOpen.has("look-why"), why = "why" in look && whyOpen ? `<pre class="look-why">${h(look.why)}</pre>` : "";
+  const seeWhy = "why" in look ? btn("look-why", whyOpen ? "Hide" : "See why", {}, "link") : "";
+  let body: string, tone = "";
+  switch (look.kind) {
+    case "installed":
+      body = change === "window" ? `This changes how Demesne looks ${btn("look-try", "Try it here", {}, "link")}`
+        : change === "both" ? `This changes the window and the engine ${btn("look-try", "Try the window’s part here", {}, "link")}<span class="look-note">· Keep builds it all in</span>`
+        : `This changes the engine, which only a new build runs ${btn("look-keep", "Keep", {}, "link")}`;
+      break;
+    case "building": case "keeping": body = `${lookWords(look)} <span class="look-prog"><b></b></span>`; break;
+    case "trial": case "kept": body = lookWords(look); tone = "ok"; break;
+    case "broken": body = `${lookWords(look)} ${seeWhy} ${btn("look-try", "Try again", {}, "link")}`; tone = "bad"; break;
+    case "failed": body = `${lookWords(look)} ${seeWhy}`; tone = "bad"; break;
+  }
+  return `<div class="look-line ${tone}">${icon}<span class="look-text">${body}</span></div>${why}`;
+}
+/// Try it here, Keep, Go back and Restart go to the main process. A reload
+/// follows Try it and Go back, and the chat you're in comes back after it.
+async function lookAction(action: "try" | "keep" | "back" | "restart") {
+  if (!state || window.demesne.mode !== "desktop") return;
+  if (action === "try" || action === "back") try { if (state.session && inSession()) sessionStorage.setItem("demesne-reopen", JSON.stringify({ id: state.session.id, path: state.session.workspace?.root ?? null })); } catch {}
+  try {
+    const next = await api<LookState | null>("desktop-look", { action, project: state.workspace ?? "" });
+    if (next) { look = next; renderConversation(); renderSidebar(); }
+  } catch (error) { notice(error instanceof Error ? error.message : String(error)); }
+}
+/// Whether the open project is Demesne itself, and what the window shows.
+async function refreshLook() {
+  if (window.demesne.mode !== "desktop" || !state) return;
+  const project = state.workspace ?? "";
+  if (lookAsked && (!project || demesneProjects.has(project))) return;
+  lookAsked = true;
+  if (project) demesneProjects.set(project, false);
+  try {
+    const result = await api<{ demesne: boolean; look: LookState }>("desktop-look", { action: "state", project });
+    if (project) demesneProjects.set(project, result.demesne);
+    look = result.look;
+    renderConversation(); renderSidebar();
+  } catch {}
+}
+document.addEventListener("demesne:look", (event) => {
+  look = (event as CustomEvent<LookState>).detail;
+  renderConversation(); renderSidebar();
+});
 const ICON_MAIL = '<svg class="ico mail-mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
 /// Mail from another agent sits where a typed ask sits, since it is one, but
 /// its bubble takes the accent surface and opens with who sent it and what
@@ -1890,6 +1976,7 @@ function revealCompactedTurn(id: string) {
 }
 function renderConversation() {
   if (!state) return;
+  lookTurn = lookTurnFor(state.runs);
   // A server that starts during the newest turn unfolds its page once.
   const newest = state.runs.at(-1);
   for (const entry of newest?.entries ?? []) {
@@ -1950,6 +2037,8 @@ function renderConversation() {
       run.proofs ?? null,
       proofOpen.get(run.id) ?? "",
       proofStep?.runId === run.id ? proofStep.index : -1,
+      // The look line follows what the window shows.
+      lookTurn?.id === run.id ? [lookTurn.change, look.kind, "why" in look ? look.why : "", detailsOpen.has("look-why")] : null,
     ]);
     let saved = runNodes.get(run.id);
     if (!saved) {
@@ -2287,8 +2376,18 @@ let lastChatOpened = false;
 function renderLastChat() {
   if (!state || state.connection !== "online") return;
   const session = state.session;
+  void refreshLook();
   if (!lastChatOpened) {
     lastChatOpened = true;
+    // After the window reloaded into a look (Try it here, Go back), the
+    // chat you were in comes back first.
+    let reopen: { id?: string; path?: string | null } | null = null;
+    try { reopen = JSON.parse(sessionStorage.getItem("demesne-reopen") ?? "null"); sessionStorage.removeItem("demesne-reopen"); } catch {}
+    if (reopen?.id && reopen.id !== session?.id && state.sessions.some((item) => item.id === reopen!.id)) {
+      const here = !reopen.path || reopen.path === state.workspace;
+      void act(() => dispatch(here ? "select-session" : "project-session", here ? { id: reopen!.id } : { id: reopen!.id, path: reopen!.path }));
+      return;
+    }
     let saved: { id?: string; path?: string } | null = null;
     try { saved = JSON.parse(localStorage.getItem("demesne-last-chat") ?? "null"); } catch {}
     if (openOn === "last" && saved?.id && saved.id !== session?.id && state.sessions.some((item) => item.id === saved!.id)) {
@@ -4589,6 +4688,11 @@ async function dispatch(
     return;
   }
   if (action === "review-turn") return toggleReview(String(args.id));
+  if (action === "look-try" || action === "look-keep" || action === "look-back" || action === "look-restart") return lookAction(action.slice(5) as "try" | "keep" | "back" | "restart");
+  if (action === "look-why") {
+    detailsOpen.has("look-why") ? detailsOpen.delete("look-why") : detailsOpen.add("look-why");
+    return renderConversation();
+  }
   if (action === "note-line") return editNote(String(args.id), String(args.path), args.side === "old" ? "old" : "new", Number(args.line));
   if (action === "notes-clear") {
     diffNotes.clear();

@@ -5145,7 +5145,7 @@ document.addEventListener("input", (event) => {
   if (input.closest("#setup")) setupInput(input);
 });
 /// Dragging the thinking groove: the fill follows the pointer, and letting
-/// go settles on the nearest level and picks the model at that level. The
+/// go settles on the nearest level, with the picker still open. The
 /// groove is found again on every move, since the picker may redraw.
 let thinkingDrag: { pointer: number; model: string; levels: string[] } | null = null;
 const grooveOf = () => el("overlay").querySelector<HTMLElement>(".mp-thinking[data-levels]");
@@ -5185,8 +5185,13 @@ const settleGroove = (event: PointerEvent) => {
   thinkingDrag = null;
   groove?.classList.remove("drag");
   if (!groove || event.type === "pointercancel") { renderOverlay(); return; }
-  const { index } = grooveAt(groove, event.clientX, drag.levels.length);
-  void act(() => dispatch("model", { id: drag.model, reasoning: drag.levels[index] }));
+  // The picker stays open: the level is kept for that model, and for the
+  // model in use it applies at once.
+  const { index } = grooveAt(groove, event.clientX, drag.levels.length), reasoning = drag.levels[index]!;
+  modelLevels.set(drag.model, reasoning);
+  overlaySignature = "";
+  renderOverlay();
+  if (drag.model === state?.model.id) void act(() => api("model", { id: drag.model, reasoning }));
 };
 document.addEventListener("pointerup", settleGroove);
 document.addEventListener("pointercancel", settleGroove);

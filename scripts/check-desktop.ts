@@ -894,12 +894,20 @@ try {
   assert.equal(await page.locator("#overlay .mp-level").innerText(), "Extra high", "the word follows the fill to the nearest level");
   await page.mouse.move(g.x + g.width - 2, g.y + g.height / 2, { steps: 4 });
   assert.equal(await page.locator("#overlay .mp-level").innerText(), "Ultra", "the far end is the top level");
-  // (Letting go picks the model at that level; this processor can't switch,
-  // so the drag is let go after the picker closes.)
-  await page.keyboard.press("Escape");
+  // Letting go keeps the picker open, and the model in use takes the level.
+  smokeProcessor!.setModel = () => {};
   await page.mouse.up();
+  await Bun.sleep(300);
+  assert(await page.locator("#overlay").isVisible(), "the picker stays open after the slider settles");
+  assert.equal(await page.locator("#overlay .mp-level").innerText(), "Ultra");
+  await page.keyboard.press("Escape");
   await page.locator("#composer-model").click();
-  await until(() => page.locator("#overlay .mp-level").innerText().then(text => text === "Low"), "a drag let go off the picker changes nothing");
+  await until(() => page.locator("#overlay .mp-level").innerText().then(text => text === "Ultra"), "the level was applied to the model in use");
+  const near = (await groove.boundingBox())!;
+  await page.mouse.click(near.x + 3, near.y + near.height / 2);
+  await until(() => page.locator("#overlay .mp-level").innerText().then(text => text === "Low"), "a click on the groove sets a level too");
+  assert(await page.locator("#overlay").isVisible(), "and the picker stays open");
+  delete smokeProcessor!.setModel;
   await capture("02-models");
   // Pointing at a model without thinking: the line says None, the panel keeps its height.
   const panelHeight = () => evaluate<number>("return document.querySelector('#overlay .mp')?.offsetHeight ?? 0;");

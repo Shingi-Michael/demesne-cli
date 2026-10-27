@@ -1846,7 +1846,6 @@ function lookLineHTML(run: WorkspaceRun): string {
 /// follows Try it and Go back, and the chat you're in comes back after it.
 async function lookAction(action: "try" | "keep" | "back" | "restart") {
   if (!state || window.demesne.mode !== "desktop") return;
-  if (action === "try" || action === "back") try { if (state.session && inSession()) sessionStorage.setItem("demesne-reopen", JSON.stringify({ id: state.session.id, path: state.session.workspace?.root ?? null })); } catch {}
   try {
     const next = await api<LookState | null>("desktop-look", { action, project: state.workspace ?? "" });
     if (next) { look = next; renderConversation(); renderSidebar(); }
@@ -1860,10 +1859,17 @@ async function refreshLook() {
   lookAsked = true;
   if (project) demesneProjects.set(project, "no");
   try {
-    const result = await api<{ demesne: "yes" | "behind" | "no"; look: LookState }>("desktop-look", { action: "state", project });
+    const result = await api<{ demesne: "yes" | "behind" | "no"; look: LookState; reopen: { id: string; path: string } | null }>("desktop-look", { action: "state", project });
     if (project) demesneProjects.set(project, result.demesne);
     look = result.look;
     renderConversation(); renderSidebar();
+    // After Try it here or Go back reloaded the window, the chat you were
+    // in comes back, whichever chat the host opened on.
+    const back = result.reopen;
+    if (back && state && (state.session?.id !== back.id || !inSession())) {
+      const here = !back.path || back.path === state.workspace;
+      void act(() => dispatch(here ? "select-session" : "project-session", here ? { id: back.id } : { id: back.id, path: back.path }));
+    }
   } catch {}
 }
 document.addEventListener("demesne:look", (event) => {
@@ -2378,15 +2384,6 @@ function renderLastChat() {
   void refreshLook();
   if (!lastChatOpened) {
     lastChatOpened = true;
-    // After the window reloaded into a look (Try it here, Go back), the
-    // chat you were in comes back first.
-    let reopen: { id?: string; path?: string | null } | null = null;
-    try { reopen = JSON.parse(sessionStorage.getItem("demesne-reopen") ?? "null"); sessionStorage.removeItem("demesne-reopen"); } catch {}
-    if (reopen?.id && reopen.id !== session?.id && state.sessions.some((item) => item.id === reopen!.id)) {
-      const here = !reopen.path || reopen.path === state.workspace;
-      void act(() => dispatch(here ? "select-session" : "project-session", here ? { id: reopen!.id } : { id: reopen!.id, path: reopen!.path }));
-      return;
-    }
     let saved: { id?: string; path?: string } | null = null;
     try { saved = JSON.parse(localStorage.getItem("demesne-last-chat") ?? "null"); } catch {}
     if (openOn === "last" && saved?.id && saved.id !== session?.id && state.sessions.some((item) => item.id === saved!.id)) {

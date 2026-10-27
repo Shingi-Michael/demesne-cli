@@ -9,14 +9,18 @@ import type { LookState } from "../workspace/self-build.ts";
 /// folder and serves the page from there, or builds the whole app and swaps
 /// it in once Demesne quits.
 
-/** The open project is Demesne itself: its package says so and it carries
- *  the script that builds the window's page. */
-export function isDemesneProject(root: string): boolean {
-  try {
-    const metadata = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-    return metadata?.name === "demesne-cli" && statSync(join(root, "scripts/prepare-ui.ts")).isFile();
-  } catch { return false; }
+/** Whether the open project is Demesne itself: `yes` when its package says
+ *  so and it carries the script that builds the window's page, `behind`
+ *  when the package says so but a checkout older than that script is open
+ *  (Try it here has nothing to run), else `no`. */
+export type DemesneProject = "yes" | "behind" | "no";
+export function demesneProject(root: string): DemesneProject {
+  let named = false;
+  try { named = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))?.name === "demesne-cli"; } catch { return "no"; }
+  if (!named) return "no";
+  try { return statSync(join(root, "scripts/prepare-ui.ts")).isFile() ? "yes" : "behind"; } catch { return "behind"; }
 }
+export const isDemesneProject = (root: string) => demesneProject(root) === "yes";
 
 /** Bun, which the project's scripts run under: DEMESNE_BUN, then the PATH,
  *  then where its installer and Homebrew put it (a Mac app started from the

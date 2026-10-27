@@ -206,7 +206,10 @@ let state: Snapshot | null = null;
 /// Demesne rebuilds its own look (pass 80): what the window shows, and which
 /// project roots are Demesne itself (asked once each).
 let look: LookState = { kind: "installed" }, lookAsked = false;
-const demesneProjects = new Map<string, boolean>();
+/// Per project: "yes" (Demesne, with its page builder), "behind" (Demesne,
+/// but a checkout from before the builder), "no". Asked again after every
+/// turn, since a chat may pull main or the project may change underneath.
+const demesneProjects = new Map<string, "yes" | "behind" | "no">();
 let overlay: OverlayName | null = null,
   overlayQuery = "",
   overlayIndex = 0,
@@ -1803,7 +1806,8 @@ function changedPaths(run: WorkspaceRun): string[] {
 /// open project is Demesne itself: its receipt carries the look line.
 let lookTurn: { id: string; change: "window" | "engine" | "both" } | null = null;
 function lookTurnFor(runs: WorkspaceRun[]) {
-  if (window.demesne.mode !== "desktop" || !state?.workspace || demesneProjects.get(state.workspace) !== true) return null;
+  const which = state?.workspace ? demesneProjects.get(state.workspace) : undefined;
+  if (window.demesne.mode !== "desktop" || !state?.workspace || (which !== "yes" && which !== "behind")) return null;
   for (let i = runs.length - 1; i >= 0; i--) {
     const run = runs[i]!;
     if (run.status !== "completed" || rewoundBy(run)) continue;
@@ -1824,6 +1828,9 @@ function lookLineHTML(run: WorkspaceRun): string {
   let body: string, tone = "";
   switch (look.kind) {
     case "installed":
+      // A checkout from before the page builder: the line says why it
+      // can't offer Try it here, instead of staying silent.
+      if (demesneProjects.get(state?.workspace ?? "") === "behind") { body = `${change === "engine" ? "This changes the engine" : "This changes how Demesne looks"}<span class="look-note">· this checkout is behind main, so Demesne can’t rebuild from it yet (scripts/prepare-ui.ts is missing)</span>`; break; }
       body = change === "window" ? `This changes how Demesne looks ${btn("look-try", "Try it here", {}, "link")}`
         : change === "both" ? `This changes the window and the engine ${btn("look-try", "Try the window’s part here", {}, "link")}<span class="look-note">· Keep builds it all in</span>`
         : `This changes the engine, which only a new build runs ${btn("look-keep", "Keep", {}, "link")}`;
@@ -1851,9 +1858,9 @@ async function refreshLook() {
   const project = state.workspace ?? "";
   if (lookAsked && (!project || demesneProjects.has(project))) return;
   lookAsked = true;
-  if (project) demesneProjects.set(project, false);
+  if (project) demesneProjects.set(project, "no");
   try {
-    const result = await api<{ demesne: boolean; look: LookState }>("desktop-look", { action: "state", project });
+    const result = await api<{ demesne: "yes" | "behind" | "no"; look: LookState }>("desktop-look", { action: "state", project });
     if (project) demesneProjects.set(project, result.demesne);
     look = result.look;
     renderConversation(); renderSidebar();
@@ -4921,7 +4928,11 @@ function renderState(next: Snapshot) {
   if (state && next.revision < state.revision) return;
   const wasStart = !state?.runs.length;
   const editorFocused = document.activeElement === editor;
+  // A turn that just ended may have changed what the project is (a pull,
+  // a checkout), so the look asks again.
+  const turnEnded = Boolean(state?.activeTurnId) && !next.activeTurnId;
   state = next;
+  if (turnEnded && next.workspace) { demesneProjects.delete(next.workspace); lookAsked = false; void refreshLook(); }
   if (lastSession !== next.session?.id) {
     lastSession = next.session?.id ?? "";
     reviewOpen.clear(); reviewFiles.clear(); diffNotes.clear(); noteEditing = null;

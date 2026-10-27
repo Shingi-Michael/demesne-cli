@@ -4,7 +4,7 @@ import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { isDemesneProject, SelfBuild } from "./self-build.ts";
+import { demesneProject, SelfBuild } from "./self-build.ts";
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -119,7 +119,7 @@ void app.whenReady().then(async () => {
     if (method === "desktop-look") {
       const { action, project } = args as Record<string, unknown>;
       const root = typeof project === "string" ? project : "";
-      if (action === "state") return { demesne: root !== "" && isDemesneProject(root), look: look!.state };
+      if (action === "state") return { demesne: root === "" ? "no" : demesneProject(root), look: look!.state };
       if (action === "try") return look!.try(root);
       if (action === "keep") return look!.keep(root);
       if (action === "back") return look!.back();

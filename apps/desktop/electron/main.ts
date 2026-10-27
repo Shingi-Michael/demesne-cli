@@ -170,6 +170,25 @@ void app.whenReady().then(async () => {
     } }] },
     { role: "windowMenu" },
   ]));
+  // Remove the Linux window menu entirely: Alt must not bring it back.
+  // Handle its useful accelerators directly without a native menu attached.
+  if (process.platform === "linux") {
+    window.removeMenu();
+    contents.on("before-input-event", (event, input) => {
+      if (input.type !== "keyDown" || input.alt || input.meta) return;
+      const key = input.key.toLowerCase();
+      if (input.control && ["o", ",", "q", "=", "+", "-", "0"].includes(key)) {
+        event.preventDefault();
+        if (key === "o") emit("demesne:desktop-action", { action: "open-project" });
+        else if (key === ",") emit("demesne:desktop-action", { action: "settings" });
+        else if (key === "q") void quit();
+        else applyZoom(key === "0" ? 0 : key === "-" ? -1 : 1);
+      } else if (!input.control && !input.shift && key === "f11") {
+        event.preventDefault();
+        window?.setFullScreen(!window.isFullScreen());
+      }
+    });
+  }
   window.on("close", event => {
     if (quitting) return;
     event.preventDefault();

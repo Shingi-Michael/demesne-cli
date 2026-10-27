@@ -94,10 +94,16 @@ test("the theme word unfolds its choices in place", () => {
 });
 
 test("glass runs from clear to solid, and the default is the built look", () => {
-  expect(glassAlphas(GLASS_DEFAULT)).toEqual({ shell: 0.063, panel: 0.498 });
-  expect(glassAlphas(0)).toEqual({ shell: 0, panel: 0.33 });
+  expect(glassAlphas(GLASS_DEFAULT)).toEqual({ shell: 0.325, panel: 0.498 });
+  expect(glassAlphas(0)).toEqual({ shell: 0.1, panel: 0.33 });
   expect(glassAlphas(100)).toEqual({ shell: 1, panel: 1 });
   expect(glassAlphas(140)).toEqual(glassAlphas(100));
+  expect(glassAlphas(-10)).toEqual(glassAlphas(0));
+  for (let glass = 0; glass <= 100; glass++) {
+    const { shell, panel } = glassAlphas(glass);
+    expect(shell).toBeLessThanOrEqual(panel);
+    expect(panel - shell).toBeLessThanOrEqual(0.231);
+  }
 });
 
 test("Glass shows where the window is glass (the Mac, Hyprland), Ink only for Demesne's own themes", () => {

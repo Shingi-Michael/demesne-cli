@@ -316,6 +316,11 @@ async function open(workspace = false, welcome = false, extraEnv: Record<string,
   assert.equal(await page.evaluate(() => typeof (window as any).process), "undefined", "No process or environment in the renderer");
   const isolation = await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.getLastWebPreferences());
   assert(isolation.sandbox && isolation.contextIsolation && !isolation.nodeIntegration && !isolation.webviewTag);
+  if (process.platform === "linux") {
+    assert.equal(await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isMenuBarVisible()), false, "Linux has no visible native menu bar");
+    await page.keyboard.press("Alt");
+    assert.equal(await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isMenuBarVisible()), false, "Alt cannot restore the Linux menu bar");
+  }
   const zoom = await desktop.evaluate(({ BrowserWindow, Menu }) => {
     const item = Menu.getApplicationMenu()!.items.find(item => item.label === "View")!.submenu!.items.find(item => item.label === "Zoom In")!;
     item.click();
@@ -1056,6 +1061,15 @@ try {
   await capture("06-work-survived-close");
   // Project groups expose their own chats and open the selected chat across
   // workspace boundaries, rather than restoring a different conversation.
+  const openProject = page.getByRole("button", { name: "Open New Project", exact: true });
+  assert(await openProject.isVisible(), "opening a project is available above the project list");
+  assert(await openProject.evaluate(button => Boolean(button.compareDocumentPosition(document.getElementById("sidebar-sessions")!) & Node.DOCUMENT_POSITION_FOLLOWING)), "the project picker precedes the project list");
+  await desktop!.evaluate(({ dialog }) => {
+    dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
+  });
+  await openProject.click();
+  await until(() => openProject.isEnabled(), "cancelling the project picker leaves navigation usable");
+  assert.equal(await page.locator("#sidebar-sessions").getAttribute("data-workspace"), f.workspace, "cancelling keeps the current project");
   const secondProject = join(f.root, "sidebar-project");
   mkdirSync(secondProject);
   await f.client.createSession({ workspacePath: secondProject, trustWorkspace: true });

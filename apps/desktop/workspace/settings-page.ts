@@ -160,7 +160,9 @@ export const isInk = (value: unknown): value is Ink => INKS.some(([id]) => id ==
 /// Glass, 0 (clear) to 100 (solid), as the shell's and the panel's opacity.
 export function glassAlphas(glass: number) {
   const g = Math.min(100, Math.max(0, glass)) / 100;
-  return { shell: Math.round(g * g * 1000) / 1000, panel: Math.round((0.33 + 0.67 * g) * 1000) / 1000 };
+  // Keep navigation readable over wallpaper: a gentler gap than the old
+  // quadratic shell curve, while the work panel remains the deeper plane.
+  return { shell: Math.round((0.1 + 0.9 * g) * 1000) / 1000, panel: Math.round((0.33 + 0.67 * g) * 1000) / 1000 };
 }
 export const GLASS_DEFAULT = 25;
 

@@ -11,8 +11,10 @@ body.desktop kbd { font-family: "JetBrains Mono", monospace; }
 .ico { flex: none; display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 /* New chat and Search sit above the groups; who you are and Settings stay below. */
 .sidebar-nav { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
-.sidebar-nav button { display: flex; width: 100%; align-items: center; gap: 11px; height: 32px; padding: 0 10px; border-radius: 8px; color: var(--t2); font-size: 13.5px; text-align: left; }
-.sidebar-nav button:hover { background: var(--surface2); color: var(--t1); }
+.sidebar-nav button, #sidebar-open-project { display: flex; width: 100%; align-items: center; gap: 11px; height: 32px; padding: 0 10px; border-radius: 8px; color: var(--t2); font-size: 13.5px; text-align: left; }
+.sidebar-nav button:hover, #sidebar-open-project:hover { background: var(--surface2); color: var(--t1); }
+#sidebar-open-project { margin-bottom: 8px; flex: none; }
+#sidebar-open-project .ico { color: var(--t3); }
 .sidebar-nav button.on { background: var(--surface2); color: var(--t1); }
 .sidebar-nav button .ico, .sidebar-search .ico { color: var(--t3); }
 .sidebar-foot { display: flex; align-items: center; gap: 9px; height: 40px; margin: auto -12px -10px; padding: 0 12px 0 22px; box-shadow: 0 -1px 0 var(--hair); color: var(--t2); }
@@ -500,7 +502,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 /* Polish: one surface system and motion. Surfaces are tones over the
    background and hairlines, not solid outlines; three radii (6, 10, 14);
    one shadow ramp; and everything that appears, folds or moves eases. */
-body.desktop { --hair: rgba(255, 255, 255, 0.08); --hair2: rgba(255, 255, 255, 0.13); --tone: rgba(255, 255, 255, 0.04); --tone2: rgba(255, 255, 255, 0.07); --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.25); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.3); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.5); --r-sm: 6px; --r: 10px; --r-lg: 14px; --ease: cubic-bezier(0.2, 0.7, 0.2, 1); }
+body.desktop { --hair: rgba(255, 255, 255, 0.08); --hair2: rgba(255, 255, 255, 0.13); --tone: rgba(255, 255, 255, 0.04); --tone2: rgba(255, 255, 255, 0.07); --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.25); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.3); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.5); --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.12); --r-sm: 6px; --r: 10px; --r-lg: 14px; --ease: cubic-bezier(0.2, 0.7, 0.2, 1); }
 /* Sidebar: the tone difference is the edge; rows and search have no line. */
 #desktop-sidebar { border-right: 0; }
 .sidebar-nav button, .sidebar-search, .sidebar-session, .sidebar-more { border-radius: var(--r); }
@@ -1100,7 +1102,8 @@ html[data-theme="demesne"] body.desktop {
 }
 html[data-theme="demesne-light"] body.desktop { --ink-fg: 46 46 46; --ink-base: 242 242 242; --ink-deep: 255 255 255; }
 html[data-theme="demesne"] body.desktop, html[data-theme="demesne-light"] body.desktop {
-  --shell: rgb(var(--ink-base)); --shell-glass: rgb(var(--ink-base) / var(--shell-a, 0.06)); --panel: rgb(var(--ink-deep)); --panel-glass: rgb(var(--ink-deep) / var(--panel-a, 0.5)); --panel-edge: rgb(var(--ink-fg) / 0.045);
+  --shell: rgb(var(--ink-base)); --shell-glass: rgb(var(--ink-base) / var(--shell-a, 0.325)); --panel: rgb(var(--ink-deep)); --panel-glass: rgb(var(--ink-deep) / var(--panel-a, 0.5)); --panel-edge: rgb(var(--ink-fg) / 0.045);
+  --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.12);
   --ink: var(--shell); --side: var(--shell);
   --hair: rgb(var(--ink-fg) / 0.07); --hair2: rgb(var(--ink-fg) / 0.12); --tone: rgb(var(--ink-fg) / 0.05); --tone2: rgb(var(--ink-fg) / 0.09);
   --t1: rgb(var(--ink-fg)); --t2: rgb(var(--ink-fg) / 0.72); --t3: rgb(var(--ink-fg) / 0.52); --t4: rgb(var(--ink-fg) / 0.38);
@@ -1119,6 +1122,7 @@ html[data-theme="demesne-light"] body.desktop {
   --t2: rgb(var(--ink-fg) / 0.76); --t3: rgb(var(--ink-fg) / 0.56); --t4: rgb(var(--ink-fg) / 0.42);
   --paper: rgb(var(--ink-fg) / 0.88); --secondary: rgb(var(--ink-fg) / 0.76); --muted: rgb(var(--ink-fg) / 0.56); --syntaxComment: rgb(var(--ink-fg) / 0.45);
   --panel-edge: rgb(var(--ink-fg) / 0.08);
+  --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.035);
   --composerQueuedBorder: color-mix(in srgb, var(--warn) 45%, transparent); --composerStoppedBorder: color-mix(in srgb, var(--bad) 45%, transparent); --composerRestoredBorder: color-mix(in srgb, var(--acc) 45%, transparent);
   --acc-soft: color-mix(in srgb, var(--acc) 10%, transparent);
   --surface: rgb(var(--ink-deep)); --surface2: color-mix(in srgb, rgb(var(--ink-fg)) 4.5%, rgb(var(--ink-deep))); --surface3: color-mix(in srgb, rgb(var(--ink-fg)) 9%, rgb(var(--ink-deep)));
@@ -1141,12 +1145,14 @@ html.glass #desktop-shell { background: var(--shell-glass, var(--ink)); }
    and menus stay solid. */
 html.glass #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { --ink: var(--panel-glass, var(--panel)); background: var(--panel-glass, var(--panel)); }
 html.glass #drive-peek { background: var(--panel-glass, var(--panel)); }
+html.glass body.desktop { --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.09); }
+html.glass[data-theme="demesne-light"] body.desktop { --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.03); }
 #desktop-sidebar, #desktop-toolbar { background: transparent; border: 0; box-shadow: none; }
 /* The panel: the deepest plane, with a hairline edge. Inside it --ink is the
    panel, so everything that paints "the background" paints the panel. */
-#desktop-shell > .live-app { --ink: var(--panel, var(--ink)); width: auto; height: auto; margin: 0 10px 10px 0; border-radius: 12px; overflow: hidden; background: var(--panel, var(--ink)); box-shadow: 0 0 0 1px var(--panel-edge, var(--hair)); }
+#desktop-shell > .live-app { --ink: var(--panel, var(--ink)); width: auto; height: auto; margin: 0 10px 10px 0; border-radius: 12px; overflow: hidden; background: var(--panel, var(--ink)); box-shadow: 0 0 0 1px var(--panel-edge, var(--hair)), var(--panel-inset); }
 #desktop-shell:has(#desktop-sidebar[hidden]) > .live-app { margin-left: 10px; }
-#desktop-home, #desktop-error { --ink: var(--panel, var(--ink)); margin: 10px 10px 10px 0; border-radius: 12px; overflow: auto; background: var(--panel, var(--ink)); box-shadow: 0 0 0 1px var(--panel-edge, var(--hair)); }
+#desktop-home, #desktop-error { --ink: var(--panel, var(--ink)); margin: 10px 10px 10px 0; border-radius: 12px; overflow: auto; background: var(--panel, var(--ink)); box-shadow: 0 0 0 1px var(--panel-edge, var(--hair)), var(--panel-inset); }
 #desktop-shell:has(#desktop-sidebar[hidden]) > :is(#desktop-home, #desktop-error) { margin-left: 10px; }
 /* No scrollbars: everything still scrolls by wheel and trackpad. Code,
    diffs and tool output keep a thin bar of their own. */

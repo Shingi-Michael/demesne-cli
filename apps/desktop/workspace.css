@@ -751,19 +751,16 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop #drive-reply.open .bf-row:nth-child(2) { transition-delay: 100ms, 100ms, 0ms; }
   .desktop #drive-reply.open .bf-row:nth-child(n+3), .desktop #drive-reply.open .bf-foot, .desktop #drive-reply.open .drive-live { transition-delay: 140ms, 140ms, 0ms; }
 }
-/* The cards on the right (top bar's panel icon): one column of quiet cards,
-   each a tone with a hairline ring; headers fold a card to one line. Shown
-   only where there is room. */
+/* The cards on the right: one column of quiet cards, each a tone with a
+   hairline ring, shown only while the chat uses one and where there is
+   room; headers fold a card to one line. */
 #cards { display: none; }
 @media (min-width: 1100px) {
   .desktop .live-app.cards-on #cards:not([hidden]) { display: flex; flex-direction: column; gap: 8px; flex: none; width: 288px; padding: 14px 14px 14px 0; overflow-y: auto; scrollbar-width: none; }
-  .desktop .live-app.cards-on #composer-context, #desktop-shell:has(.live-app.cards-on) #desktop-toolbar .chip { display: none; }
+  .desktop .live-app.cards-context #composer-context { display: none; }
 }
-#desktop-toolbar .header-cards { margin-left: auto; display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--r-sm); color: var(--t3); }
-#desktop-toolbar .header-cards:hover { background: var(--surface2); color: var(--t1); }
-#desktop-toolbar .header-cards.on { background: var(--tone2); color: var(--t1); }
-#desktop-toolbar .header-cards + .header-more { margin-left: 2px; }
-@media (max-width: 1099px) { #desktop-toolbar .header-cards { display: none; } #desktop-toolbar .header-cards + .header-more { margin-left: auto; } }
+@keyframes card-arrive { from { opacity: 0; transform: translateX(12px); } }
+@media (prefers-reduced-motion: no-preference) { .desktop #cards .card.arriving { animation: card-arrive 240ms cubic-bezier(.32,.72,0,1); } }
 .desktop #cards .card { background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair); border-radius: var(--r); font-size: 12.5px; color: var(--t2); }
 .desktop #cards .card-head { display: flex; align-items: center; gap: 4px; width: 100%; padding: 10px 12px; text-align: left; color: var(--t1); font-weight: 600; font-size: 12.5px; border-radius: var(--r); }
 .desktop #cards .card-head:hover .card-chev { opacity: 1; }
@@ -777,10 +774,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .card-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); }
 .desktop #cards .card-label em { font-style: normal; color: var(--t3); }
 .desktop #cards .card-right { flex: none; color: var(--t3); }
-.desktop #cards .card-on { color: var(--ok); }
-.desktop #cards .ico.beat { color: var(--ok); transform-origin: center; }
-@keyframes hb-beat { 0%, 40%, 100% { transform: scale(1); } 10% { transform: scale(1.22); } 20% { transform: scale(1.04); } 28% { transform: scale(1.16); } }
-@media (prefers-reduced-motion: no-preference) { .desktop #cards .ico.beat { animation: hb-beat 1.2s ease-out infinite; } }
 .desktop #cards .card-meter { display: inline-block; width: 28px; height: 4px; border-radius: 2px; background: var(--tone2); overflow: hidden; }
 .desktop #cards .card-meter i { display: block; height: 100%; background: var(--t2); }
 .desktop #cards .context-bar { display: flex; height: 6px; margin: 4px 0 8px; border-radius: 3px; overflow: hidden; background: var(--tone2); }
@@ -1265,7 +1258,7 @@ html.mac-chrome.fullscreen #desktop-shell:has(#desktop-sidebar[hidden]) #desktop
 #desktop-toolbar .header-drive.ready { color: var(--ok); }
 #desktop-toolbar .header-drive.ready i { background: var(--ok); }
 #desktop-toolbar .header-drive.ready:hover { background: color-mix(in srgb, var(--ok) 12%, transparent); }
-#desktop-toolbar .header-drive + .header-cards, #desktop-toolbar .header-drive + .header-more { margin-left: 2px; }
+#desktop-toolbar .header-drive + .header-more { margin-left: 2px; }
 @media (prefers-reduced-motion: no-preference) { #desktop-toolbar .header-drive.work i { animation: live-breathe 1.6s ease-in-out infinite; } }
 
 /* Words arrive softly: each new run of a streaming answer fades in. */

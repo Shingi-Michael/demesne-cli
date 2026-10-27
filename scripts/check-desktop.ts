@@ -422,6 +422,7 @@ try {
   await thinkingToggle.click();
   await trace.waitFor({ state: "visible" });
   await click("toggle-steps");
+  assert(await evaluate<boolean>("return document.getElementById('cards').hidden;"), "a chat that uses no card has no column on the right");
   // Native notifications: record them in the main process, and look away from the window.
   await desktop.evaluate(({ Notification }) => { (globalThis as any).banners = []; Notification.isSupported = () => true; Notification.prototype.show = function () { (globalThis as any).banners.push({ title: this.title, body: this.body }); }; });
   await page.evaluate(() => { document.hasFocus = () => false; });
@@ -1044,29 +1045,24 @@ try {
   const compacted = (await f.client.getSessionState(sessionId)).checkpoint!;
   assert(compacted && compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
-  // The cards on the right carry where the chat works, its context and what
-  // changed; the composer's ring and the branch chip stand aside meanwhile.
-  await until(() => page.locator("#cards [data-card=context]").innerText().then(text => text.includes(`${percentage}%`) && text.includes("Chat") && text.includes("Tools")), "the Context card shows the reduced context");
-  await until(() => page.locator("#cards [data-card=changes]").innerText().then(text => text.includes("+1") && text.includes("−1") && text.includes("Commit & PR")), "the Changes card lists what changed");
-  await until(() => page.locator("#cards [data-card=environment]").innerText().then(text => text.includes("This computer") && text.includes("Heartbeat")), "the Environment card names where the chat works");
+  // The cards on the right show only what this chat uses (pass 86 A): its
+  // own edit brings Changes in; there is no Environment card and no switch,
+  // and Context waits until half full, so the composer's ring stays.
+  await until(() => page.locator("#cards [data-card=changes]").innerText().then(text => text.includes("+1") && text.includes("−1") && text.includes("Commit & PR")), "the Changes card lists what this chat changed");
+  assert.equal(await page.locator("#cards [data-card=environment]").count(), 0, "there is no Environment card");
+  assert.equal(await page.locator(".header-cards").count(), 0, "the top bar has no cards switch");
+  if (percentage < 50) assert.equal(await page.locator("#cards [data-card=context]").count(), 0, "Context waits until the chat is half full");
   const cardInsets = await page.locator("#cards").evaluate((cards) => {
     const panel = cards.getBoundingClientRect();
-    const environment = cards.querySelector("[data-card=environment]")!.getBoundingClientRect();
-    return { top: environment.top - panel.top, right: panel.right - environment.right };
+    const first = cards.querySelector("[data-card=changes]")!.getBoundingClientRect();
+    return { top: first.top - panel.top, right: panel.right - first.right };
   });
   assert.equal(cardInsets.top, cardInsets.right, "the cards have matching top and right insets");
-  assert(!(await page.locator("#composer-context").isVisible()), "the composer ring stands aside while the cards show");
   await capture("04-cards");
-  // Cards that did not change are left in place: folding one repaints no other.
-  await page.evaluate(() => { (document.querySelector("#cards [data-card=context]") as HTMLElement & { kept?: boolean }).kept = true; });
-  await page.locator("#cards [data-card=environment] .card-head").click();
-  await until(() => page.locator("#cards [data-card=environment].folded").count().then(count => count === 1), "a card folds to one line");
-  assert(await page.evaluate(() => (document.querySelector("#cards [data-card=context]") as HTMLElement & { kept?: boolean }).kept === true), "folding one card leaves the others in place");
-  await page.locator("#cards [data-card=environment] .card-head").click();
-  await page.locator("#cards [data-card=environment] .card-body").waitFor();
-  // The panel icon hides the cards; the ring and the branch chip come back.
-  await page.locator(".header-cards").click();
-  await page.locator("#cards").waitFor({ state: "hidden" });
+  await page.locator("#cards [data-card=changes] .card-head").click();
+  await until(() => page.locator("#cards [data-card=changes].folded").count().then(count => count === 1), "a card folds to one line");
+  await page.locator("#cards [data-card=changes] .card-head").click();
+  await page.locator("#cards [data-card=changes] .card-body").waitFor();
   await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
   // The branch chip carries what changed since the last commit; the ring
   // unfolds the context breakdown above it until Esc.
@@ -1077,8 +1073,6 @@ try {
   await capture("04-context");
   await page.keyboard.press("Escape");
   await page.locator("#context-card").waitFor({ state: "hidden" });
-  await page.locator(".header-cards").click();
-  await page.locator("#cards [data-card=context]").waitFor();
   await until(() => page.locator(".compaction-card").count().then(count => count === 1), "conversation summary visible");
   const firstTurnId = completedSession.turns[0]!.id;
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Older conversation is unmounted by default");

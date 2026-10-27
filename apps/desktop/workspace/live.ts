@@ -1,4 +1,5 @@
 import { matchedRanges, matchesWords } from "./model-search.ts";
+import { modelCardHTML } from "./model-card.ts";
 import { compactedConversation } from "./compacted-conversation.ts";
 import { SidebarProjectOrder } from "./sidebar-project-order.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
@@ -3488,7 +3489,7 @@ function renderModelPopover(hidden: number) {
       label = `<div class="mp-group"><span>${h(row.group ?? "")}</span><span>${count}</span></div>`;
     }
     if (row.kind === "rest") lastGroup = row.group ?? "";
-    const title = [row.data.id !== row.label ? row.data.id : "", row.description].filter(Boolean).join(" · ");
+    const title = row.action === "model" ? "" : [row.data.id !== row.label ? row.data.id : "", row.description].filter(Boolean).join(" · ");
     const name = overlayQuery && row.action === "model" ? marked(row.label, overlayQuery) : h(row.label);
     return label + btn("choose-row", `<span class="name">${name}</span>${right}`, { index }, `mp-row${index === overlayIndex ? " selected" : ""}${row.kind === "more" || row.action === "focus-filter" ? " dim" : ""}`)
       .replace("<button ", `<button data-index="${index}" ${title ? `title="${h(String(title))}" ` : ""}`);
@@ -3518,6 +3519,44 @@ function renderModelPopover(hidden: number) {
     `<div class="mp-sep"></div>${thinking}${more ? `<div class="mp-sep"></div>${more}` : ""}` +
     (overlayQuery ? `<div class="mp-hint">${k("↵")} switch ${k("↑↓")} choose ${k("Esc")} close</div>` : "") + `</div>`;
   el("overlay").querySelector(".mp-row.selected")?.scrollIntoView({ block: "nearest" });
+  // An open card follows the highlight, from the pointer or the arrow keys.
+  if (modelCardOpen) placeModelCard(overlayIndex);
+}
+/// Pass 82 A: resting on a model in the picker opens a small card beside the
+/// panel, level with the row. A quarter-second rest opens it; once open it
+/// follows from row to row at once, and it closes when the pointer leaves
+/// the list or the picker closes.
+let modelCardOpen = false, modelCardTimer: ReturnType<typeof setTimeout> | null = null;
+function modelCardEl() {
+  let card = document.getElementById("model-card");
+  if (!card) { card = document.createElement("div"); card.id = "model-card"; card.className = "model-card"; card.setAttribute("role", "tooltip"); document.body.append(card); }
+  return card;
+}
+function placeModelCard(index: number) {
+  const row = overlayRows[index], model = row?.action === "model" ? models.find((item) => item.id === row.data.id && item.provider === row.group) ?? models.find((item) => item.id === row.data.id) : undefined;
+  const button = el("overlay").querySelector<HTMLElement>(`.mp-row[data-index="${index}"]`), panel = el("overlay").querySelector<HTMLElement>(".mp");
+  if (!model || !button || !panel || overlay !== "models") { hideModelCard(); return; }
+  const score = modelScores.get(`${model.provider}\u0000${model.id}`);
+  const card = modelCardEl();
+  card.innerHTML = modelCardHTML(model, { name: row!.label, record: score ? scoreLine(score) : "", levelWord });
+  const box = panel.getBoundingClientRect(), at = button.getBoundingClientRect(), width = card.offsetWidth || 220, height = card.offsetHeight || 160;
+  const right = box.right + 6 + width <= window.innerWidth - 8;
+  card.style.left = `${right ? box.right + 6 : Math.max(8, box.left - 6 - width)}px`;
+  card.style.top = `${Math.max(8, Math.min(at.top - 10, window.innerHeight - height - 8))}px`;
+  card.classList.add("show");
+  modelCardOpen = true;
+}
+function pointModelCard(index: number) {
+  if (modelCardTimer) clearTimeout(modelCardTimer);
+  modelCardTimer = null;
+  if (modelCardOpen) placeModelCard(index);
+  else modelCardTimer = setTimeout(() => { modelCardTimer = null; if (overlay === "models") placeModelCard(overlayIndex === index ? index : overlayIndex); }, 250);
+}
+function hideModelCard() {
+  if (modelCardTimer) clearTimeout(modelCardTimer);
+  modelCardTimer = null;
+  modelCardOpen = false;
+  document.getElementById("model-card")?.classList.remove("show");
 }
 /// Native notifications, each kind with its own switch in Settings › Notifications:
 /// a chat waits on you, stops with an error, Drive has a branch ready, a chat
@@ -3605,6 +3644,7 @@ function renderOverlay() {
   el("overlay").setAttribute("role", "dialog");
   el("overlay").setAttribute("aria-label", overlay === "models" ? "Choose a model" : overlay ?? "Dialog");
   placeOverlay();
+  if (overlay !== "models") hideModelCard();
   if (!overlay) return;
   const focused = el("overlay").querySelector<HTMLInputElement>("input"),
     hasFocus = focused === document.activeElement,
@@ -5108,9 +5148,10 @@ document.addEventListener("input", (event) => {
 document.addEventListener("mouseover", (event) => {
   if (overlay !== "models") return;
   const index = Number((event.target as Element).closest?.<HTMLElement>("#overlay .mp-row")?.dataset.index ?? NaN);
-  if (Number.isNaN(index) || index === overlayIndex) return;
-  overlayIndex = index;
-  renderOverlay();
+  // Off the rows, the card goes; on a model row it opens or follows.
+  if (Number.isNaN(index) || overlayRows[index]?.action !== "model") { if (modelCardOpen || modelCardTimer) hideModelCard(); if (Number.isNaN(index)) return; }
+  if (index !== overlayIndex) { overlayIndex = index; renderOverlay(); }
+  if (overlayRows[index]?.action === "model") pointModelCard(index);
 });
 document.addEventListener("submit", (event) => {
   event.preventDefault();

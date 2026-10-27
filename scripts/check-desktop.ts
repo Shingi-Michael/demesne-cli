@@ -890,6 +890,16 @@ try {
   await page.locator("#overlay .mp-row", { hasText: "Desktop Small" }).hover();
   await until(() => page.locator("#overlay .mp-level").innerText().then(text => text === "None"), "Thinking follows the row you point at");
   assert.equal(await panelHeight(), height, "the panel keeps its height");
+  // Resting on a model opens its card beside the panel, and it follows the pointer.
+  await until(() => page.locator("#model-card.show").isVisible(), "resting on a model opens its card");
+  const card = (await page.locator("#model-card").boundingBox())!, box = (await page.locator("#overlay .mp").boundingBox())!;
+  assert(card.x >= box.x + box.width || card.x + card.width <= box.x, "the card sits beside the picker, not over it");
+  assert((await page.locator("#model-card").innerText()).includes("Desktop Small"), "the card names the model you rest on");
+  await page.locator("#overlay .mp-row").first().hover();
+  await until(() => page.locator("#model-card").innerText().then(text => !text.includes("Desktop Small")), "the open card follows to the next row at once");
+  await capture("02-models-card");
+  await page.locator("#overlay .mp-search").hover();
+  await until(() => page.locator("#model-card.show").count().then(count => count === 0), "off the rows the card closes");
   await page.locator("#overlay .mp-row", { hasText: "More models" }).click();
   await until(() => page.locator("#overlay .mp-row", { hasText: "Far Away Large" }).isVisible(), "More models unfolds in the same panel");
   assert.equal(await page.locator("#overlay .mp-group", { hasText: "other" }).count(), 1, "the rest come by provider");

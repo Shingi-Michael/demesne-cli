@@ -370,6 +370,20 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .mp-row .name b { font-weight: 600; }
 .desktop .mp-row.dim { color: var(--t3); }
 .desktop .mp-row.selected { background: var(--tone2); color: var(--t1); }
+/* Pass 82 A: resting on a model opens a small card beside the picker. */
+.model-card { position: fixed; z-index: 60; width: 220px; padding: 12px 13px 11px; border-radius: var(--r-lg); background: var(--surface, #1c1d21); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); color: var(--t3); font-size: 12.5px; line-height: 18px; pointer-events: none; opacity: 0; transform: translateX(-4px); visibility: hidden; }
+.model-card.show { opacity: 1; transform: none; visibility: visible; }
+@media (prefers-reduced-motion: no-preference) { .model-card { transition: opacity 160ms var(--ease), transform 200ms var(--ease), top 180ms var(--ease), visibility 0s linear 200ms; } .model-card.show { transition: opacity 160ms var(--ease), transform 200ms var(--ease), top 180ms var(--ease), visibility 0s; } }
+.model-card .mc-name { color: var(--t1); font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
+.model-card .mc-by { margin-top: 1px; }
+.model-card .mc-bill.plan { color: var(--ok); }
+.model-card .mc-bill.credits { color: var(--warn); }
+.model-card .mc-bill.own { color: var(--t2); }
+.model-card .mc-facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin-top: 10px; }
+.model-card .mc-facts span { color: var(--t4); }
+.model-card .mc-facts b, .model-card .mc-you b { font-weight: 400; color: var(--t2); font-variant-numeric: tabular-nums; }
+.model-card .mc-you { margin-top: 10px; padding-top: 9px; box-shadow: inset 0 1px 0 var(--hair); }
+.model-card .mc-id { margin-top: 8px; font-family: var(--mono, ui-monospace, monospace); font-size: 11px; color: var(--t4); overflow-wrap: anywhere; }
 .desktop .mp-key { flex: none; color: var(--t4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .desktop .mp-tick { flex: none; color: var(--acc); font-size: 12px; }
 .desktop .mp-group { display: flex; justify-content: space-between; padding: 8px 9px 3px; font-size: 11px; color: var(--t4); }

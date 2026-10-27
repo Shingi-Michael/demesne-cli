@@ -62,13 +62,23 @@ jobs:
           for file in usr/bin/demesne-desktop resources/backend/demesne-desktop-host resources/backend/demesned resources/backend/node_modules/sharp/; do grep -q "$file" <<<"$contents"; done
           sudo apt-get install -y "./${{ matrix.artifact }}"
           command -v demesne-desktop
+          # The portable bundle install.sh unpacks on any x86_64 glibc distro.
+          mkdir -p portable && cp -a apps/desktop/release/linux-unpacked portable/demesne
+          cp apps/desktop/build/icon.png portable/demesne/icon.png
+          tar -czf demesne-desktop-linux-x64.tar.gz -C portable demesne
+          contents=$(tar -tzf demesne-desktop-linux-x64.tar.gz)
+          for file in demesne/demesne-desktop demesne/icon.png demesne/resources/backend/demesne-desktop-host demesne/resources/backend/demesned demesne/resources/backend/node_modules/sharp/; do grep -q "^$file" <<<"$contents"; done
       - name: Package Windows app
         if: runner.os == 'Windows'
         shell: bash
         run: cp apps/desktop/release/*.exe "${{ matrix.artifact }}"
       - name: Checksum
         shell: bash
-        run: bun -e 'const p=process.argv[1]; const bytes=await Bun.file(p).arrayBuffer(); await Bun.write(p+".sha256",new Bun.CryptoHasher("sha256").update(bytes).digest("hex")+"  "+p+"\n")' "${{ matrix.artifact }}"
+        run: |
+          for p in "${{ matrix.artifact }}" demesne-desktop-linux-x64.tar.gz; do
+            [ -f "$p" ] || continue
+            bun -e 'const p=process.argv[1]; const bytes=await Bun.file(p).arrayBuffer(); await Bun.write(p+".sha256",new Bun.CryptoHasher("sha256").update(bytes).digest("hex")+"  "+p+"\n")' "$p"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
@@ -76,6 +86,8 @@ jobs:
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.artifact }}.sha256
+            demesne-desktop-linux-x64.tar.gz
+            demesne-desktop-linux-x64.tar.gz.sha256
 
   release:
     needs: [desktop]

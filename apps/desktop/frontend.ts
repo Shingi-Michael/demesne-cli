@@ -163,7 +163,7 @@ async function openProject(path?: string, sessionId?: string, fresh?: { draft: s
     setBusy(false);
   }
 }
-for (const id of ["desktop-choose-project", "desktop-error-choose"])
+for (const id of ["desktop-choose-project", "desktop-error-choose", "sidebar-open-project"])
   el(id).addEventListener("click", () => { void openProject(); });
 document.addEventListener("demesne:open-project", (event) => {
   const { path, sessionId, fresh, draft } = (event as CustomEvent<{ path?: string; sessionId?: string; fresh?: boolean; draft?: string }>).detail;

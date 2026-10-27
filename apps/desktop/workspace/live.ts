@@ -22,6 +22,7 @@ import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from ".
 import { scheduledPage } from "./scheduled-page.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { FoundryChatArtifacts } from "./foundry-inline.ts";
+import { FoundryPane } from "./foundry-pane.ts";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
@@ -1410,7 +1411,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     : "";
   // Something made in Foundry opens from its step.
   const made = (tool.name === "foundry_save" || tool.name === "foundry_edit") && tool.state === "done"
-    ? btn("foundry-open-step", "Open in Foundry ›", { id: tool.input.id ?? null, title: tool.input.title ?? null, message: tool.message ?? null }, "fd-step-open")
+    ? btn("foundry-open-step", "Open ›", { id: tool.input.id ?? null, title: tool.input.title ?? null, message: tool.message ?? null }, "fd-step-open")
     : "";
   return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + (open && canFold ? stepFold(run, tool) : "");
 }
@@ -2005,17 +2006,8 @@ function renderConversation() {
       const content = document.createElement("div");
       content.className = "turn-content";
       const artifacts = new FoundryChatArtifacts({
-        read: (artifact) => api<FoundryArtifactDetail>("foundry-get", { id: artifact.id, version: artifact.version }),
-        markdown,
-        open: (artifact) => openFoundry(artifact.id, artifact.version),
-        revise: async (artifact) => {
-          await api("foundry-revise", { id: artifact.id, title: artifact.title });
-          editor.focus({ preventScroll: true });
-        },
-        export: async (artifact) => {
-          const result = await api<{ path: string } | null>("desktop-foundry-export", { id: artifact.id, version: artifact.version });
-          if (result?.path) notice(`Exported to ${result.path}`);
-        },
+        open: (artifact) => pane.show(artifact.id, artifact.version),
+        isOpen: (artifact) => pane.isOpen(artifact.id, artifact.version),
       });
       node.append(content, artifacts.element);
       root.append(node);
@@ -2069,6 +2061,7 @@ function renderConversation() {
       runNodes.delete(id);
       changed = true;
     }
+  if (changed) pane.refresh([...runNodes.values()].flatMap((item) => item.artifacts.artifacts));
   if (changed) {
     if (liveBefore) stage.scrollTop = stage.scrollHeight;
     else stage.scrollTop = top;
@@ -2208,6 +2201,28 @@ let pageOpen: "" | PageKind = "";
 /// Foundry: the gallery, the artifact open in it, and how it is shown.
 let foundryList: FoundryArtifact[] | null = null, foundryOpen: FoundryArtifactDetail | null = null, foundrySaves = -1;
 const foundryUi: FoundryUi = { tab: "all", view: "preview", width: "desktop", edit: null, draft: "", error: "", busy: false };
+/// The pane beside the conversation: one artifact open the way Claude
+/// shows one. Per chat; the chips in the chat open and mark it.
+const pane = new FoundryPane(el("pane"), {
+  read: (id, version) => api<FoundryArtifactDetail>("foundry-get", version ? { id, version } : { id }),
+  markdown,
+  copy: (text) => api("copy", { text }),
+  export: async (id, version) => {
+    const result = await api<{ path: string } | null>("desktop-foundry-export", { id, version });
+    if (result?.path) notice(`Exported to ${result.path}`);
+  },
+  revise: async (detail) => {
+    await api("foundry-revise", { id: detail.id, title: detail.title });
+    editor.focus({ preventScroll: true });
+  },
+  restore: (detail) => api<FoundryArtifactDetail>("foundry-save", { id: detail.id, source: detail.source }),
+  openFoundry: (id, version) => { void openFoundry(id, version); },
+  notice,
+  changed: () => {
+    el("app").classList.toggle("pane-on", pane.open);
+    runNodes.forEach((item) => item.artifacts.mark());
+  },
+});
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;
 const routineUi = { error: "", draft: "" };
@@ -4416,7 +4431,7 @@ async function foundryAction(action: string, args: Record<string, any>) {
       const list = await api<FoundryArtifact[]>("foundry-list").catch(() => [] as FoundryArtifact[]);
       id = list.find((item) => item.title === args.title)?.id ?? "";
     }
-    if (id) return openFoundry(id);
+    if (id) return pane.show(id);
     return openPage("foundry");
   }
   if (action === "foundry-close") { foundryOpen = null; foundryUi.edit = null; redraw(); void loadFoundry(); return; }
@@ -4445,6 +4460,7 @@ async function foundryAction(action: string, args: Record<string, any>) {
   if (action === "foundry-delete") {
     if (!confirm(`Delete "${open.title}" and all ${open.versions.length} version${open.versions.length === 1 ? "" : "s"}?`)) return;
     await act(() => api("foundry-delete", { id: open.id }));
+    pane.forget(open.id);
     foundryOpen = null;
     redraw();
     return loadFoundry();
@@ -5137,6 +5153,7 @@ function renderState(next: Snapshot) {
     runNodes.forEach((item) => { item.artifacts.dispose(); item.node.remove(); });
     runNodes.clear();
     heroSignature = overlaySignature = sidebarSignature = "";
+    pane.switchSession(next.session?.id ?? "");
   }
   const question=next.questions[0], slot=question ? `${question.id}:${question.answers?.length ?? 0}` : "chat";
   if (slot !== composerSlot) {

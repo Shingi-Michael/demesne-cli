@@ -32,3 +32,9 @@ test("malformed tool output cannot become a preview URL", () => {
   expect(chatArtifacts(invalid.map(value => save(value)))).toEqual([]);
   expect(chatArtifacts([{ name: "foundry_save", state: "done", message: "Truncated JSON{" }])).toEqual([]);
 });
+
+test("a chip's words name the kind and the version", async () => {
+  const { chipWords } = await import("../foundry-inline.ts");
+  expect(chipWords(artifact)).toBe("Prototype · v1");
+  expect(chipWords({ ...artifact, kind: "markdown", version: 4 })).toBe("Document · v4");
+});

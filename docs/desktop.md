@@ -27,7 +27,7 @@ bun run build:desktop
 
 Outputs under `apps/desktop/release` are a macOS `.app`, Linux `.deb`, or Windows NSIS `.exe`. Use `bun run build:desktop -- --dir` for an unpacked package. The package includes Chromium, the Bun host and daemon, frontend assets and native image dependencies. End users do not need Bun, Node.js or Rust. Configured external tools and model servers remain separate dependencies.
 
-The release workflow (run on a version tag) produces platform artifacts and checksums. Release signing, notarization and automatic updates still need configuration. Keep the complete application together; copying a single executable loses required resources.
+The release workflow (run on a version tag) produces platform artifacts and checksums, including `demesne-desktop-linux-x64.tar.gz`, the unpacked Linux app with its icon that `install.sh` installs per user. `install.sh --source` builds this package from a clone instead. Release signing, notarization and automatic updates still need configuration. Keep the complete application together; copying a single executable loses required resources.
 
 ## Closing the app and stopping work
 

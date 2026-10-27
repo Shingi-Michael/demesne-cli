@@ -1,6 +1,6 @@
 import { matchedRanges, matchesWords } from "./model-search.ts";
 import { modelCardHTML } from "./model-card.ts";
-import { commandIcon, groupWords, plainName } from "./command-menu.ts";
+import { commandIcon, groupWords, plainName, sectionRank, sectionTitle } from "./command-menu.ts";
 import { compactedConversation } from "./compacted-conversation.ts";
 import { SidebarProjectOrder } from "./sidebar-project-order.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
@@ -3841,7 +3841,7 @@ function renderOverlay() {
       value: command.description,
       action: "complete-command",
       data: { name: command.name },
-      group: command.section.toUpperCase(),
+      group: sectionTitle(command.section).toUpperCase(),
     }));
   }
   const allCount = overlay === "models" ? models.length : overlayRows.length;
@@ -3935,7 +3935,7 @@ function renderCompletion() {
         icon: "file",
       }));
   } else if (command) {
-    const row = (item: Snapshot["commands"][number], group = item.section.toUpperCase()) => ({
+    const row = (item: Snapshot["commands"][number], group = sectionTitle(item.section)) => ({
       label: plainName(item.name),
       description: item.description,
       hint: item.detail ?? item.aliases.join(" "),
@@ -3944,9 +3944,13 @@ function renderCompletion() {
       kind: "command" as const,
       icon: item.id,
     });
-    const all = state.commands.filter((item) =>
-      [item.name, ...item.aliases].some((name) => name.startsWith(value)),
-    );
+    // Commands sit in six groups by what they act on (pass 84), always in
+    // the same order, so each one is always in the same place.
+    const all = state.commands
+      .filter((item) => [item.name, ...item.aliases].some((name) => name.startsWith(value)))
+      .map((item, at) => ({ item, at }))
+      .sort((a, b) => sectionRank(a.item.section) - sectionRank(b.item.section) || a.at - b.at)
+      .map(({ item }) => item);
     // A bare "/" leads with your workflows and commands, then the ones you
     // used lately; the rest wait behind "N more" or a letter typed.
     const yours = value === "/" && !completionAll ? all.filter((item) => item.id.startsWith("workflow:") || item.id.startsWith("custom:")) : [];

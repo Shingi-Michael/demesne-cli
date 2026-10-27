@@ -1,3 +1,5 @@
+import { SLASH_COMMAND_SECTIONS } from "@demesne/brand";
+
 /// The menu that / and @ open (pass 83 A): one quiet panel like the model
 /// picker. Each row has an icon for what the command does, its plain name
 /// without the slash, a faint argument, and a short description. Groups are
@@ -45,3 +47,8 @@ export const plainName = (name: string) => name.replace(/^\//, "");
 
 /** A section name in sentence case: "SESSION" → "Session", "YOUR WORKFLOWS" → "Your workflows". */
 export const groupWords = (group: string) => (group ? group[0]!.toUpperCase() + group.slice(1).toLowerCase() : "");
+
+/** A command group's heading ("turn" → "The last turn"), and its place in
+ *  the menu's fixed order; unknown groups go last. */
+export const sectionTitle = (id: string) => SLASH_COMMAND_SECTIONS.find((section) => section.id === id)?.title ?? groupWords(id);
+export const sectionRank = (id: string) => { const at = SLASH_COMMAND_SECTIONS.findIndex((section) => section.id === id); return at < 0 ? SLASH_COMMAND_SECTIONS.length : at; };

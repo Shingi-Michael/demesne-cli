@@ -238,7 +238,17 @@ export class DemesneClient {
         ...init?.headers,
       },
     });
-    const body: unknown = await response.json();
+    // An empty or non-JSON error response must not hide its HTTP status behind
+    // a JSON parser error (which otherwise becomes an opaque desktop toast).
+    let body: unknown;
+    try { body = await response.json(); }
+    catch {
+      throw new ApiRequestError(
+        `Daemon request ${path} ${response.ok ? "returned invalid JSON" : "failed"} (HTTP ${response.status})`,
+        response.status,
+        null,
+      );
+    }
     if (!response.ok) {
       const message = parseApiError(body) ?? `Request failed with HTTP ${response.status}`;
       throw new ApiRequestError(message, response.status, parseApiErrorCode(body));

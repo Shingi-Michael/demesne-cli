@@ -3,14 +3,18 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/shingi-michael/demesne-cli/main/install.sh | sh
 #
+# Automatically detects fresh install vs upgrade; on upgrade, restarts any
+# running daemon so it runs the new version.
+#
 # Options (after `sh -s --` when piped):
 #   --version vX.Y.Z   install that release instead of the latest
 #   --source           build from source (needs git, Bun 1.4 and Node.js 22+)
+#   --no-restart       do not restart a running daemon on upgrade
 #   --uninstall        remove the app, its launcher and icon (keeps ~/.demesne)
 #
-# Environment: DEMESNE_VERSION, DEMESNE_FROM_SOURCE=1, DEMESNE_HOME (Linux
-# install root, default ~/.local/share/demesne), DEMESNE_REPO, and
-# DEMESNE_RELEASE_URL (a base URL that holds the release assets, for mirrors).
+# Environment: DEMESNE_VERSION, DEMESNE_FROM_SOURCE=1, DEMESNE_NO_RESTART=1,
+# DEMESNE_HOME (Linux install root, default ~/.local/share/demesne), DEMESNE_REPO,
+# and DEMESNE_RELEASE_URL (a base URL that holds the release assets, for mirrors).
 #
 # Linux installs into $DEMESNE_HOME with a launcher in ~/.local/share/applications
 # and `demesne-desktop` in ~/.local/bin. macOS installs Demesne.app into
@@ -22,6 +26,7 @@ set -eu
 REPO="${DEMESNE_REPO:-shingi-michael/demesne-cli}"
 VERSION="${DEMESNE_VERSION:-latest}"
 FROM_SOURCE="${DEMESNE_FROM_SOURCE:-0}"
+NO_RESTART="${DEMESNE_NO_RESTART:-0}"
 ACTION=install
 
 while [ $# -gt 0 ]; do
@@ -29,8 +34,10 @@ while [ $# -gt 0 ]; do
     --version) VERSION="${2:?--version needs a tag}"; shift 2 ;;
     --version=*) VERSION="${1#*=}"; shift ;;
     --source) FROM_SOURCE=1; shift ;;
+    --no-restart) NO_RESTART=1; shift ;;
+    --restart) NO_RESTART=0; shift ;;
     --uninstall) ACTION=uninstall; shift ;;
-    -h|--help) sed -n '2,19p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "install.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -152,8 +159,12 @@ EOF
   has update-desktop-database && update-desktop-database "$(dirname "$DESKTOP_FILE")" >/dev/null 2>&1 || true
   has gtk-update-icon-cache && gtk-update-icon-cache -q "$DATA_HOME/icons/hicolor" >/dev/null 2>&1 || true
 
-  say "installed to $APP_HOME"
-  case ":$PATH:" in *":$BIN_DIR:"*) ;; *) say "add $BIN_DIR to PATH to run demesne-desktop from a terminal" ;; esac
+  if [ "$IS_UPGRADE" = 1 ]; then
+    say "updated $APP_HOME"
+  else
+    say "installed to $APP_HOME"
+    case ":$PATH:" in *":$BIN_DIR:"*) ;; *) say "add $BIN_DIR to PATH to run demesne-desktop from a terminal" ;; esac
+  fi
 }
 
 install_macos() {
@@ -173,14 +184,84 @@ install_macos() {
   mv "$app" "$MAC_APP"
   # Preview builds are unsigned; clear the download quarantine so they open.
   xattr -dr com.apple.quarantine "$MAC_APP" 2>/dev/null || true
-  say "installed to $MAC_APP"
+  if [ "$IS_UPGRADE" = 1 ]; then
+    say "updated $MAC_APP"
+  else
+    say "installed to $MAC_APP"
+  fi
 }
 
-# An older daemon keeps serving until it restarts; say so rather than stop it
-# under running work.
-daemon_note() {
-  if [ -f "$HOME/.demesne/daemon.pid" ] && kill -0 "$(cat "$HOME/.demesne/daemon.pid")" 2>/dev/null; then
-    say "a daemon from the previous version is still running; use Settings › Data and daemon › Restart the daemon once nothing is working"
+find_running_daemon_pid() {
+  pid_file="$HOME/.demesne/daemon.pid"
+  lock_file="$HOME/.demesne/daemon.lock/owner.json"
+  pid=""
+  if [ -f "$pid_file" ]; then
+    p=$(cat "$pid_file" 2>/dev/null || true)
+    if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then
+      pid="$p"
+    fi
+  fi
+  if [ -z "$pid" ] && [ -f "$lock_file" ]; then
+    p=$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$lock_file" 2>/dev/null || true)
+    if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then
+      pid="$p"
+    fi
+  fi
+  echo "$pid"
+}
+
+# Stops and starts the daemon so it runs the newly installed binary.
+restart_daemon() {
+  old_pid="$1"
+  pid_file="$HOME/.demesne/daemon.pid"
+  if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+    say "stopping running daemon (pid $old_pid)..."
+    kill "$old_pid" 2>/dev/null || true
+    i=0
+    while kill -0 "$old_pid" 2>/dev/null && [ "$i" -lt 30 ]; do
+      sleep 0.2
+      i=$((i + 1))
+    done
+    if kill -0 "$old_pid" 2>/dev/null; then
+      say "warning: daemon pid $old_pid did not exit after 6s; kill it manually or use Settings › Data and daemon"
+      return 1
+    fi
+    say "stopped daemon (pid $old_pid)"
+    rm -f "$pid_file"
+  fi
+
+  daemon_bin=""
+  case "$(uname -s)" in
+    Darwin) daemon_bin="$MAC_APP/Contents/Resources/backend/demesned" ;;
+    *) daemon_bin="$APP_HOME/resources/backend/demesned" ;;
+  esac
+
+  if [ -x "$daemon_bin" ]; then
+    mkdir -p "$HOME/.demesne"
+    chmod 700 "$HOME/.demesne" 2>/dev/null || true
+    say "starting updated daemon..."
+    if has nohup; then
+      nohup "$daemon_bin" </dev/null >>"$HOME/.demesne/daemon.log" 2>&1 &
+    else
+      "$daemon_bin" </dev/null >>"$HOME/.demesne/daemon.log" 2>&1 &
+    fi
+    new_pid=$!
+    echo "$new_pid" >"$pid_file"
+    chmod 600 "$pid_file" 2>/dev/null || true
+    say "restarted daemon (pid $new_pid)"
+  else
+    say "daemon binary not found at $daemon_bin; launch Demesne desktop to start it"
+  fi
+}
+
+handle_daemon() {
+  # On upgrade, restart any running daemon so it runs the new version.
+  if [ "$IS_UPGRADE" = 1 ] && [ -n "$DAEMON_PID" ]; then
+    if [ "$NO_RESTART" = 1 ]; then
+      say "a daemon from the previous version is still running (pid $DAEMON_PID); restart it from Settings › Data and daemon once nothing is working"
+    else
+      restart_daemon "$DAEMON_PID"
+    fi
   fi
 }
 
@@ -196,9 +277,19 @@ uninstall() {
 }
 
 if [ "$ACTION" = uninstall ]; then uninstall; exit 0; fi
+
+# Detect fresh install vs upgrade before modifying files
+IS_UPGRADE=0
+case "$(uname -s)" in
+  Darwin) [ -d "$MAC_APP" ] && IS_UPGRADE=1 ;;
+  *) ([ -d "$APP_HOME" ] || [ -f "$BIN_DIR/demesne-desktop" ] || [ -f "$DESKTOP_FILE" ]) && IS_UPGRADE=1 ;;
+esac
+
+DAEMON_PID=$(find_running_daemon_pid)
+
 case "$(uname -s)" in
   Linux) install_linux ;;
   Darwin) install_macos ;;
   *) die "unsupported system $(uname -s); see https://github.com/$REPO#install" ;;
 esac
-daemon_note
+handle_daemon

@@ -98,6 +98,26 @@ describe("DemesneClient typed methods", () => {
     expect(calls.every((call) => call.headers.authorization === "Bearer secret")).toBe(true);
   });
 
+  test("theme requests preserve HTTP failures when the response is not JSON", async () => {
+    for (const response of [new Response("", { status: 404 }), new Response("Bad gateway", { status: 502 })]) {
+      const { fetch } = mockFetch(() => response);
+      const client = new DemesneClient({ server: "http://127.0.0.1:7337", fetch });
+      await expect(client.selectTheme("demesne-light")).rejects.toMatchObject({
+        name: "ApiRequestError", status: response.status, code: null,
+        message: `Daemon request /v1/themes failed (HTTP ${response.status})`,
+      });
+    }
+  });
+
+  test("reports malformed successful responses without leaking their content", async () => {
+    const { fetch } = mockFetch(() => new Response("private upstream details", { status: 200 }));
+    const client = new DemesneClient({ server: "http://127.0.0.1:7337", fetch });
+    await expect(client.themes()).rejects.toMatchObject({
+      name: "ApiRequestError", status: 200, code: null,
+      message: "Daemon request /v1/themes returned invalid JSON (HTTP 200)",
+    });
+  });
+
   test("returns raw export text and maps errors", async () => {
     const { fetch } = mockFetch((call) => {
       if (call.path.startsWith("/v1/sessions/s1/export")) return new Response("# Title\n", { status: 200 });

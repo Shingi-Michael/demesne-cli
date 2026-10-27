@@ -4,6 +4,7 @@ import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
 import type { ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize } from "./artifacts.ts";
+import { foundryReadTool, foundrySaveTool } from "./foundry.ts";
 import {
   encodeServerSentEvent,
   isRecord,
@@ -67,6 +68,7 @@ import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
 import { Routines } from "./routines.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
+import { selfBuildContext } from "./self-build-in-chat.ts";
 import { checkClaim, proofPass } from "./proofs.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
@@ -265,6 +267,8 @@ export function createDaemonApp(options: {
     if (process.platform === "darwin") tools.register(captureWindowTool());
   }
   if (options.images?.url && options.images.model) tools.register(imageGenerationTool(options.images, store));
+  tools.register(foundrySaveTool(store));
+  tools.register(foundryReadTool(store));
   const mcp = new McpManager({
     servers: options.mcpServers ?? {},
     log: (message) => console.warn(message),
@@ -311,7 +315,7 @@ export function createDaemonApp(options: {
       fallbackInference: (current, tried) => processor.createFallbackInference?.(current.thinkingEnabled, tried) ?? null,
       subagentModels: () => subagentModels(),
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
-      sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
+      sessionContext: (sessionId: string) => [driveInChat(sessionId), selfBuildInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
       ...(heartbeat ? { agentsIn: (workspaceRoot: string) => heartbeat.agentsIn(workspaceRoot) } : {}),
       ...options.agent,
     },
@@ -379,6 +383,11 @@ export function createDaemonApp(options: {
     const row = store.database.query("SELECT w.root FROM sessions s JOIN workspaces w ON w.id = s.workspace_id WHERE s.id = ?").get(sessionId) as { root: string } | null;
     if (!row || inDriveWorktree(row.root)) return null;
     return driveContext({ auto: driveAuto.state(row.root), ideas: chatIdeas(row.root).proposals, fixes: driveFixes.list(row.root), away: driveFixes.away(row.root) });
+  }
+  // A chat in Demesne's own checkout is told the window reloads itself.
+  function selfBuildInChat(sessionId: string): string | null {
+    const row = store.database.query("SELECT w.root FROM sessions s JOIN workspaces w ON w.id = s.workspace_id WHERE s.id = ?").get(sessionId) as { root: string } | null;
+    return row ? selfBuildContext(row.root) : null;
   }
   tools.register(driveRunTool({
     ideas: (root) => inDriveWorktree(root) || !workspaceTrust.isTrusted(root) ? null : chatIdeas(root),
@@ -1075,6 +1084,34 @@ export function createDaemonApp(options: {
         return new Response(formatSessionMarkdown(exported), {
           headers: { "Content-Type": "text/markdown; charset=utf-8" },
         });
+      }
+
+      // Foundry: artifacts the agent made, with every version kept.
+      if (path[0] === "v1" && path[1] === "foundry") {
+        if (request.method === "GET" && path.length === 2) return json({ artifacts: store.listFoundryArtifacts() });
+        const id = path[2];
+        if (request.method === "POST" && path.length === 2) {
+          const body = await readJson(request);
+          if (!isRecord(body) || typeof body.source !== "string") return apiError("invalid_request", "Foundry needs a source", 400);
+          try {
+            return json(store.saveFoundryArtifact({ id: typeof body.id === "string" ? body.id : undefined, title: typeof body.title === "string" ? body.title : undefined,
+              kind: typeof body.kind === "string" ? body.kind as never : undefined, workspace: typeof body.workspace === "string" ? body.workspace : null,
+              note: typeof body.note === "string" ? body.note.slice(0, 300) : "Edited by you", source: body.source }), 201);
+          } catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
+        }
+        if (id && path.length === 3 && request.method === "GET") {
+          const version = url.searchParams.get("version");
+          const found = store.getFoundryArtifact(id, version ? Number(version) : undefined);
+          return found ? json(found) : apiError("not_found", "Foundry artifact not found", 404);
+        }
+        if (id && path.length === 3 && request.method === "PATCH") {
+          const body = await readJson(request);
+          if (!isRecord(body) || typeof body.title !== "string") return apiError("invalid_request", "Enter a title", 400);
+          try { return json(store.renameFoundryArtifact(id, body.title)); }
+          catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : String(error), 400); }
+        }
+        if (id && path.length === 3 && request.method === "DELETE") return store.deleteFoundryArtifact(id) ? json({ deleted: true }) : apiError("not_found", "Foundry artifact not found", 404);
+        return apiError("not_found", "Unknown Foundry request", 404);
       }
 
       if(request.method==="POST"&&path.length===5&&path[0]==="v1"&&path[1]==="sessions"&&path[3]==="artifacts"&&path[4]==="import"){

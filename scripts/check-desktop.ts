@@ -16,7 +16,16 @@ mkdirSync(output, { recursive: true });
 const prompt = "Desktop smoke: update hello.ts and run its check";
 const followUp = "Desktop smoke: continue while the window is closed";
 const aside = "Desktop smoke: a second conversation";
+// Demesne rebuilds its own look: one turn changes the window's stylesheet,
+// another breaks it.
+const lookPrompt = "Desktop smoke: round the composer more", lookDone = "The composer is rounder now.";
+const breakPrompt = "Desktop smoke: break the stylesheet", breakDone = "The stylesheet is broken on purpose.";
+const lookRounds: Record<string, number> = {};
 const asideDone = "A second conversation is here.";
+// A sub-agent's turn: the chat asks an agent, the agent reads one file and
+// reasons (which must stay with it), then the chat answers.
+const agentPrompt = "Desktop smoke: ask an agent where the greeting lives", agentTask = "Find the greeting", agentAsk = "Where is the greeting defined?";
+const agentDone = "The agent found it.", agentFound = "hello.ts holds the greeting.", agentThought = "A private thought the window must never show.";
 const completed = "Verified the desktop change.";
 const afterClose = "Daemon work completed after the window closed.";
 const thinkingPrompt = "Desktop smoke: readable thinking";
@@ -225,6 +234,30 @@ const f = await fixture({
       yield { type: "finish", reason: "stop" };
       return;
     }
+    if (user === agentPrompt) {
+      // Earlier turns in this chat have tool results too: only this turn's count.
+      if (messages.slice(messages.findLastIndex(message => message.role === "user")).some(message => message.role === "tool")) { yield { type: "text_delta", delta: agentDone }; yield { type: "finish", reason: "stop" }; return; }
+      yield { type: "tool_call_delta", index: 0, idDelta: "ask-agent", nameDelta: "subagent", argumentsDelta: JSON.stringify({ description: agentTask, prompt: agentAsk }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
+    if (user === agentAsk) {
+      yield { type: "reasoning_delta", delta: agentThought };
+      if (messages.some(message => message.role === "tool")) { yield { type: "text_delta", delta: agentFound }; yield { type: "finish", reason: "stop" }; return; }
+      yield { type: "tool_call_delta", index: 0, idDelta: "agent-read", nameDelta: "read_file", argumentsDelta: JSON.stringify({ path: "hello.ts" }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
+    if (user === lookPrompt || user === breakPrompt) {
+      if ((lookRounds[user] = (lookRounds[user] ?? 0) + 1) === 1) {
+        yield { type: "tool_call_delta", index: 0, idDelta: `look-${user === breakPrompt ? "break" : "edit"}`, nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "apps/desktop/workspace.css", content: user === breakPrompt ? "BREAK {\n" : "#desktop-toolbar { --look-trial: 1; }\n" }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", delta: user === breakPrompt ? breakDone : lookDone };
+        yield { type: "finish", reason: "stop" };
+      }
+      return;
+    }
     if (user !== prompt) {
       // NEXT can ask this processor for proposals independently of the coder.
       yield { type: "text_delta", delta: "{\"proposals\":[]}" };
@@ -246,7 +279,19 @@ const f = await fixture({
 }, { heartbeatSocket });
 writeFileSync(join(f.workspace, "notes.ts"), "export const note = 'ours';\n");
 writeFileSync(join(f.workspace, "hello.ts"), "export const greeting = 'before';\n");
-writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ scripts: { check: "bun check.ts" } }));
+// The workspace is Demesne itself as far as the app can tell: its package
+// says so, and its prepare-ui.ts builds the window's page (here: the real
+// page plus whatever the turn wrote into workspace.css, or a failure).
+writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ name: "demesne-cli", scripts: { check: "bun check.ts" } }));
+mkdirSync(join(f.workspace, "scripts")); mkdirSync(join(f.workspace, "apps/desktop"), { recursive: true });
+writeFileSync(join(f.workspace, "apps/desktop/workspace.css"), "");
+writeFileSync(join(f.workspace, "scripts/prepare-ui.ts"), `import { appendFileSync, cpSync, readFileSync } from "node:fs";
+const out = process.argv[process.argv.indexOf("--out") + 1]!;
+const css = readFileSync("apps/desktop/workspace.css", "utf8");
+if (css.includes("BREAK")) { console.error("apps/desktop/workspace.css:1: a brace is missing"); process.exit(1); }
+cpSync(${JSON.stringify(join(application, "ui"))}, out, { recursive: true });
+appendFileSync(out + "/workspace.css", "\\n" + css);
+`);
 writeFileSync(join(f.workspace, "site.html"), '<h1>Fieldnote preview</h1>\n<button id="save">Save</button>\n');
 writeFileSync(join(f.workspace, "serve.ts"), "const server = Bun.serve({ port: 0, fetch: () => new Response('<h1>Fieldnote preview</h1><button id=\"save\">Save</button>', { headers: { 'content-type': 'text/html' } }) });\nconsole.log(`  \\u001b[32mLocal:\\u001b[39m http://localhost:${server.port}/`);\n");
 writeFileSync(join(f.workspace, "check.ts"), "import {readFileSync} from 'node:fs';if(!readFileSync('hello.ts','utf8').includes(\"'after'\"))throw new Error('Wrong file');console.log('DESKTOP_CHECK_PASSED');\n");
@@ -294,7 +339,7 @@ async function capture(name: string) {
 }
 async function open(workspace = false, welcome = false, extraEnv: Record<string, string> = {}) {
   desktop = await electron.launch({ ...(packagedExecutable ? { executablePath: resolve(packagedExecutable) } : {}), args: [...(packagedExecutable ? [] : [application]), `--user-data-dir=${join(f.root, "electron")}`, ...(workspace ? [`--workspace=${f.workspace}`] : []), `--server=${f.server.url}`], env: {
-    ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache"), ...extraEnv,
+    ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache"), DEMESNE_BUN: process.execPath, ...extraEnv,
   }, timeout: 30_000 });
   desktop.process().stderr?.on("data", bytes => { log = (log + String(bytes)).slice(-64 * 1024); });
   page = await desktop.firstWindow();
@@ -395,6 +440,7 @@ try {
   await thinkingToggle.click();
   await trace.waitFor({ state: "visible" });
   await click("toggle-steps");
+  assert(await evaluate<boolean>("return document.getElementById('cards').hidden;"), "a chat that uses no card has no column on the right");
   // Native notifications: record them in the main process, and look away from the window.
   await desktop.evaluate(({ Notification }) => { (globalThis as any).banners = []; Notification.isSupported = () => true; Notification.prototype.show = function () { (globalThis as any).banners.push({ title: this.title, body: this.body }); }; });
   await page.evaluate(() => { document.hasFocus = () => false; });
@@ -803,10 +849,11 @@ try {
   await until(() => page.evaluate("localStorage.getItem('demesne-open-on')").then(value => value === "home"), "Open on goes back to Home");
   await page.keyboard.press("ArrowDown");
   await page.locator("#settings-nav .st-nav.on").filter({ hasText: "Notifications" }).waitFor();
+  // Every kind starts on (#302), so the first click turns this one off.
   await page.getByRole("switch", { name: "A chat finishes" }).click();
-  await until(() => page.evaluate("JSON.parse(localStorage.getItem('demesne-notify-kinds') || '{}').done").then(value => value === true), "A chat finishes turns on");
+  await until(() => page.evaluate("JSON.parse(localStorage.getItem('demesne-notify-kinds') || '{}').done").then(value => value === false), "A chat finishes turns off");
   await page.getByRole("switch", { name: "A chat finishes" }).click();
-  await until(() => page.evaluate("JSON.parse(localStorage.getItem('demesne-notify-kinds') || '{}').done").then(value => value === false), "and off again");
+  await until(() => page.evaluate("JSON.parse(localStorage.getItem('demesne-notify-kinds') || '{}').done").then(value => value === true), "and on again");
   await page.getByRole("searchbox", { name: "Search settings" }).fill("palette");
   await until(() => page.locator("#page .st-tx b").allInnerTexts().then(titles => titles.includes("Theme") && !titles.includes("Open on")), "Settings search finds the theme row");
   assert.equal(await page.locator("#page .st-tx mark").first().innerText(), "palette", "the searched word is marked");
@@ -874,12 +921,37 @@ try {
   assert(await page.getByRole("textbox", { name: "Filter models" }).isVisible(), "the search sits on top, in sight");
   assert.equal(await evaluate<string>("return document.activeElement?.id;"), "chooser-filter", "the search has the keyboard");
   assert.equal(await page.locator("#overlay .mp").count(), 1, "the picker is one panel");
-  // Thinking is a track with a stop per level, inside the panel.
+  // Thinking is one smooth groove inside the panel, not a row of dots.
   const panel = (await page.locator("#overlay .mp").boundingBox())!;
-  const stops = page.locator("#overlay .mp-stop");
-  assert.equal(await stops.count(), 6, "a stop for each of the model's six levels");
-  for (const stop of await stops.all()) { const r = (await stop.boundingBox())!; assert(r.x >= panel.x && r.x + r.width <= panel.x + panel.width, "every thinking stop sits inside the panel"); }
+  const groove = page.getByRole("slider", { name: "Thinking" });
+  assert.equal(await groove.getAttribute("aria-valuemax"), "5", "the groove spans the model's six levels");
+  assert.equal(await page.locator("#overlay .mp-stop").count(), 0, "no dots");
+  const g = (await groove.boundingBox())!;
+  assert(g.x >= panel.x && g.x + g.width <= panel.x + panel.width, "the groove sits inside the panel");
   assert.equal(await page.locator("#overlay .mp-level").innerText(), "Low");
+  // Dragging it fills smoothly and settles on the nearest level when let go.
+  await page.mouse.move(g.x + 4, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g.x + g.width * 0.55, g.y + g.height / 2, { steps: 6 });
+  const mid = await evaluate<number>("return document.querySelector('#overlay .mp-fill')?.getBoundingClientRect().width ?? 0;");
+  assert(Math.abs(mid - g.width * 0.55) < 4, "the fill follows the pointer while dragging");
+  assert.equal(await page.locator("#overlay .mp-level").innerText(), "Extra high", "the word follows the fill to the nearest level");
+  await page.mouse.move(g.x + g.width - 2, g.y + g.height / 2, { steps: 4 });
+  assert.equal(await page.locator("#overlay .mp-level").innerText(), "Ultra", "the far end is the top level");
+  // Letting go keeps the picker open, and the model in use takes the level.
+  smokeProcessor!.setModel = () => {};
+  await page.mouse.up();
+  await Bun.sleep(300);
+  assert(await page.locator("#overlay").isVisible(), "the picker stays open after the slider settles");
+  assert.equal(await page.locator("#overlay .mp-level").innerText(), "Ultra");
+  await page.keyboard.press("Escape");
+  await page.locator("#composer-model").click();
+  await until(() => page.locator("#overlay .mp-level").innerText().then(text => text === "Ultra"), "the level was applied to the model in use");
+  const near = (await groove.boundingBox())!;
+  await page.mouse.click(near.x + 3, near.y + near.height / 2);
+  await until(() => page.locator("#overlay .mp-level").innerText().then(text => text === "Low"), "a click on the groove sets a level too");
+  assert(await page.locator("#overlay").isVisible(), "and the picker stays open");
+  delete smokeProcessor!.setModel;
   await capture("02-models");
   // Pointing at a model without thinking: the line says None, the panel keeps its height.
   const panelHeight = () => evaluate<number>("return document.querySelector('#overlay .mp')?.offsetHeight ?? 0;");
@@ -887,6 +959,16 @@ try {
   await page.locator("#overlay .mp-row", { hasText: "Desktop Small" }).hover();
   await until(() => page.locator("#overlay .mp-level").innerText().then(text => text === "None"), "Thinking follows the row you point at");
   assert.equal(await panelHeight(), height, "the panel keeps its height");
+  // Resting on a model opens its card beside the panel, and it follows the pointer.
+  await until(() => page.locator("#model-card.show").isVisible(), "resting on a model opens its card");
+  const card = (await page.locator("#model-card").boundingBox())!, box = (await page.locator("#overlay .mp").boundingBox())!;
+  assert(card.x >= box.x + box.width || card.x + card.width <= box.x, "the card sits beside the picker, not over it");
+  assert((await page.locator("#model-card").innerText()).includes("Desktop Small"), "the card names the model you rest on");
+  await page.locator("#overlay .mp-row").first().hover();
+  await until(() => page.locator("#model-card").innerText().then(text => !text.includes("Desktop Small")), "the open card follows to the next row at once");
+  await capture("02-models-card");
+  await page.locator("#overlay .mp-search").hover();
+  await until(() => page.locator("#model-card.show").count().then(count => count === 0), "off the rows the card closes");
   await page.locator("#overlay .mp-row", { hasText: "More models" }).click();
   await until(() => page.locator("#overlay .mp-row", { hasText: "Far Away Large" }).isVisible(), "More models unfolds in the same panel");
   assert.equal(await page.locator("#overlay .mp-group", { hasText: "other" }).count(), 1, "the rest come by provider");
@@ -895,6 +977,19 @@ try {
   await until(() => page.locator("#overlay .mp-row").count().then(count => count === 2), "a search lists only its matches");
   assert.equal(await page.locator("#overlay .mp-row b").first().innerText(), "Far", "the match is marked");
   await page.keyboard.press("Escape");
+  await page.locator("textarea").fill("/");
+  await page.locator("#completion .cm-row").first().waitFor();
+  assert.equal(await page.locator("#completion .cm-row .cm-name").first().innerText(), "new", "commands are listed without the slash");
+  assert.equal(await page.locator("#completion .cm-row .cm-ico").count(), await page.locator("#completion .cm-row").count(), "every command has an icon");
+  assert.equal(await page.locator("#completion .menu-footer").count(), 0, "no footer of key hints");
+  const groups = await page.locator("#completion .cm-group").allInnerTexts();
+  assert.deepEqual(groups.slice(0, 6), ["Chat", "The last turn", "Get work done", "Model", "Look", "Demesne"], `commands sit in six groups by what they act on: ${groups.join(", ")}`);
+  await capture("02-commands");
+  await page.locator("textarea").fill("/comp");
+  await until(() => page.locator("#completion .cm-row").count().then(count => count === 1), "typing narrows the list");
+  await page.keyboard.press("Tab");
+  await until(() => page.locator("textarea").inputValue().then(text => text.startsWith("/compact")), "choosing a row writes the command with its slash");
+  await page.locator("textarea").fill("");
 
 
   // The receipt opens the turn's steps; the edit's row unfolds its diff in place.
@@ -938,6 +1033,23 @@ try {
   await page.locator(`#turn-${editTurn} .rw-redo`).click();
   await until(() => page.locator(`#turn-${editTurn} .request`).count().then(count => count === 1), "Redo brings the turn back");
   assert.equal(readFileSync(join(f.workspace, "hello.ts"), "utf8"), "export const greeting = 'after';\n", "Redo puts the edit back");
+  // An agent is one step on the guide, like a read: its task, "✓ 1 step" on
+  // the right, and its own guide unfolding under it with what it found. No
+  // trace box, and nothing the agent thought.
+  await type(agentPrompt);
+  await textIncludes(agentDone);
+  await page.locator(".receipt-steps", { hasText: "1 step" }).last().click();
+  const agentStep = page.locator(".steps .tool-row", { hasText: agentTask }).last();
+  await until(() => agentStep.locator(".meta").innerText().then(text => /✓ 1 step · /.test(text)), "the agent's row ends in its step count and time");
+  assert.equal(await page.locator(".steps details.thinking").count(), 0, "no trace box under the agent");
+  assert.equal(await page.locator(".steps .agent-steps").count(), 0, "the agent's guide waits folded");
+  await agentStep.click();
+  await until(() => page.locator(".steps .agent-steps .tool-row.quiet .target").last().innerText().then(text => text === "hello.ts"), "the agent's own read unfolds as a quiet line");
+  assert((await page.locator(".steps .agent-found").last().innerText()).includes(`Found · ${agentFound}`), "the guide ends in what the agent found");
+  assert(!(await page.locator("#stage").innerText()).includes(agentThought), "the agent's thinking never reaches the window");
+  await capture("02-agent-step");
+  await agentStep.click();
+  await until(() => page.locator(".steps .agent-steps").count().then(count => count === 0), "a second click folds the agent's guide");
   // The mode word under the composer: ⇧⇥ steps Ask → Accept edits → Plan → Auto → Ask.
   await page.locator("textarea").focus();
   for (const [word, policy] of [["Accept edits", { acceptEdits: true, autoApprove: false }], ["Plan", { acceptEdits: false, autoApprove: false }],
@@ -993,29 +1105,24 @@ try {
   const compacted = (await f.client.getSessionState(sessionId)).checkpoint!;
   assert(compacted && compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
-  // The cards on the right carry where the chat works, its context and what
-  // changed; the composer's ring and the branch chip stand aside meanwhile.
-  await until(() => page.locator("#cards [data-card=context]").innerText().then(text => text.includes(`${percentage}%`) && text.includes("Chat") && text.includes("Tools")), "the Context card shows the reduced context");
-  await until(() => page.locator("#cards [data-card=changes]").innerText().then(text => text.includes("+1") && text.includes("−1") && text.includes("Commit & PR")), "the Changes card lists what changed");
-  await until(() => page.locator("#cards [data-card=environment]").innerText().then(text => text.includes("This computer") && text.includes("Heartbeat")), "the Environment card names where the chat works");
+  // The cards on the right show only what this chat uses (pass 86 A): its
+  // own edit brings Changes in; there is no Environment card and no switch,
+  // and Context waits until half full, so the composer's ring stays.
+  await until(() => page.locator("#cards [data-card=changes]").innerText().then(text => text.includes("+1") && text.includes("−1") && text.includes("Commit & PR")), "the Changes card lists what this chat changed");
+  assert.equal(await page.locator("#cards [data-card=environment]").count(), 0, "there is no Environment card");
+  assert.equal(await page.locator(".header-cards").count(), 0, "the top bar has no cards switch");
+  if (percentage < 50) assert.equal(await page.locator("#cards [data-card=context]").count(), 0, "Context waits until the chat is half full");
   const cardInsets = await page.locator("#cards").evaluate((cards) => {
     const panel = cards.getBoundingClientRect();
-    const environment = cards.querySelector("[data-card=environment]")!.getBoundingClientRect();
-    return { top: environment.top - panel.top, right: panel.right - environment.right };
+    const first = cards.querySelector("[data-card=changes]")!.getBoundingClientRect();
+    return { top: first.top - panel.top, right: panel.right - first.right };
   });
   assert.equal(cardInsets.top, cardInsets.right, "the cards have matching top and right insets");
-  assert(!(await page.locator("#composer-context").isVisible()), "the composer ring stands aside while the cards show");
   await capture("04-cards");
-  // Cards that did not change are left in place: folding one repaints no other.
-  await page.evaluate(() => { (document.querySelector("#cards [data-card=context]") as HTMLElement & { kept?: boolean }).kept = true; });
-  await page.locator("#cards [data-card=environment] .card-head").click();
-  await until(() => page.locator("#cards [data-card=environment].folded").count().then(count => count === 1), "a card folds to one line");
-  assert(await page.evaluate(() => (document.querySelector("#cards [data-card=context]") as HTMLElement & { kept?: boolean }).kept === true), "folding one card leaves the others in place");
-  await page.locator("#cards [data-card=environment] .card-head").click();
-  await page.locator("#cards [data-card=environment] .card-body").waitFor();
-  // The panel icon hides the cards; the ring and the branch chip come back.
-  await page.locator(".header-cards").click();
-  await page.locator("#cards").waitFor({ state: "hidden" });
+  await page.locator("#cards [data-card=changes] .card-head").click();
+  await until(() => page.locator("#cards [data-card=changes].folded").count().then(count => count === 1), "a card folds to one line");
+  await page.locator("#cards [data-card=changes] .card-head").click();
+  await page.locator("#cards [data-card=changes] .card-body").waitFor();
   await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
   // The branch chip carries what changed since the last commit; the ring
   // unfolds the context breakdown above it until Esc.
@@ -1026,8 +1133,6 @@ try {
   await capture("04-context");
   await page.keyboard.press("Escape");
   await page.locator("#context-card").waitFor({ state: "hidden" });
-  await page.locator(".header-cards").click();
-  await page.locator("#cards [data-card=context]").waitFor();
   await until(() => page.locator(".compaction-card").count().then(count => count === 1), "conversation summary visible");
   const firstTurnId = completedSession.turns[0]!.id;
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Older conversation is unmounted by default");
@@ -1059,6 +1164,40 @@ try {
   await until(() => page.locator("#page").isHidden(), "Back to chats closes Settings");
   // Launch lands on Home; the chat is one click away in the sidebar.
   await reopenChat(sessionId);
+  // Demesne rebuilds its own look (pass 80): a turn that changes the
+  // window's files ends with Try it here; the window reloads into the
+  // project's page, the top bar offers Go back (Keep needs an installed Mac
+  // app), and the chat comes back after the reload. A change that doesn't
+  // build goes back by itself and says why.
+  await until(() => page.locator("#workspace-title").innerText().then(text => text.startsWith("Desktop smoke")), "the chat is open again before the look prompt");
+  await type(lookPrompt);
+  await click("permission", { decision: "allow_once" });
+  await textIncludes(lookDone);
+  const lookLine = page.locator(".look-line");
+  await until(() => lookLine.innerText().then(text => text.includes("This changes how Demesne looks")), "the turn offers Try it here");
+  const trial = () => page.evaluate(() => getComputedStyle(document.getElementById("desktop-toolbar")!).getPropertyValue("--look-trial").trim());
+  assert.equal(await trial(), "", "the installed look first");
+  await click("look-try");
+  await until(async () => await trial() === "1", "the window reloads into the project's page", 60_000);
+  const lookWord = page.locator("#workspace-look");
+  await until(() => lookWord.innerText().then(text => text.includes("Your look") && text.includes("Go back")), "the top bar offers Go back");
+  assert(!(await lookWord.innerText()).includes("Keep"), "Keep needs an installed Mac app");
+  await until(() => page.locator(".look-line.ok").innerText().then(text => text.includes("You’re looking at it now")), "the chat came back after the reload, and its line says so");
+  await capture("05b-your-look");
+  await click("look-back");
+  await until(async () => await trial() === "", "Go back reloads the installed look", 30_000);
+  await until(() => lookWord.isHidden(), "and the top bar's words go");
+  await until(() => lookLine.innerText().then(text => text.includes("Try it here")), "the line offers it again");
+  await type(breakPrompt);
+  await click("permission", { decision: "allow_once" });
+  await textIncludes(breakDone);
+  await click("look-try");
+  await until(() => page.locator(".look-line.bad").innerText().then(text => text.includes("didn’t load, so Demesne went back")), "a change that doesn't build goes back by itself", 60_000);
+  assert.equal(await trial(), "", "on the installed look");
+  await click("look-why");
+  await until(() => page.locator(".look-why").innerText().then(text => text.includes("a brace is missing")), "See why shows the build's words");
+  await capture("05c-look-broken");
+  await click("look-why");
   await page.getByRole("button", { name: "Expand full history", exact: true }).waitFor();
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Reopening starts with compacted history collapsed");
   await page.getByRole("button", { name: "Expand full history", exact: true }).click();
@@ -1182,24 +1321,24 @@ try {
   await until(() => page.locator("#drive-reply .dt-sent").isVisible(), "the note says it was sent");
   await until(() => page.locator("#drive-reply .drive-told li").innerText().then(text => text.includes("Keep the tests green") && text.includes(`From ${home}`)), "the mission card shows your note");
   await capture("08-drive-tell");
-  // Drive's chat waits behind yours: one edge of its panel, its title down it.
-  await until(() => page.locator("#drive-peek.work").isVisible(), "Drive's panel waits behind yours while it works");
-  assert((await page.locator("#drive-peek").getAttribute("aria-label"))!.includes("Verify the Drive controls"), "the edge names the mission");
+  // Drive's word sits at the right end of the title bar while it works elsewhere.
+  await until(() => page.locator("#desktop-toolbar .header-drive.work").isVisible(), "the title bar says Drive is working elsewhere");
+  assert((await page.locator(".header-drive").getAttribute("aria-label"))!.includes("Verify the Drive controls"), "the title bar names the mission");
   // Its own chat says where it came from and shows the note; the link goes back.
   await page.locator('#drive-reply [data-action="select-session"]', { hasText: "Watch" }).click();
   await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "the mission's chat names the chat it came from");
   await until(() => page.locator("#drive-turn .drive-told li").innerText().then(text => text.includes("Keep the tests green")), "the mission's chat shows your note");
   assert.equal(await page.locator("#drive-turn .drive-heading").count(), 0, "the mission turn has no boxed details");
   assert.equal(await page.locator("#drive-turn").evaluate(node => getComputedStyle(node).borderTopWidth + getComputedStyle(node).backgroundColor), "0pxrgba(0, 0, 0, 0)", "the mission turn sits unboxed in the chat");
-  await until(() => page.locator("#drive-peek.back").getAttribute("aria-label").then(text => text === `Back to ${home}`), "inside Drive's chat the edge is the chat it came from");
+  assert.equal(await page.locator(".header-drive").count(), 0, "inside Drive's chat the title bar carries no Drive word; from is the way back");
   await capture("08-drive-chat");
-  await page.locator("#drive-peek").click();
-  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "clicking the edge swaps the two back");
-  await page.locator("#drive-peek.work").click();
-  await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "and the edge swaps them again");
   await page.locator("#workspace-from button").click();
   await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "from takes you back");
   assert(await page.locator("#workspace-from").isHidden(), "your own chat has no from");
+  await page.locator(".header-drive.work").click();
+  await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "Drive's word opens its chat");
+  await page.locator("#workspace-from button").click();
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "and from brings you back again");
   await line.locator(".bf-word").click();
   await control("pause").click();
   await control("resume").waitFor();
@@ -1352,6 +1491,14 @@ try {
   await capture("13-question");
   assert(await page.evaluate(() => { const stage = document.getElementById("stage")!; return stage.scrollWidth <= stage.clientWidth && stage.scrollLeft === 0; }), "the question never pushes the chat sideways");
   assert(!(await page.locator("#briefing").innerText()).includes("Discarded"), "Drive's line only says what Drive is doing");
+  // Typing an answer sends drafts to the daemon; the tile holds still under them.
+  await page.evaluate(() => document.querySelector("#stage .ask-q")!.setAttribute("data-held", "1"));
+  await page.locator("textarea").pressSequentially("war", { delay: 40 });
+  await until(() => evaluate<string>("return window.demesneInspect?.().host.questionDraft;").then(draft => draft === "war"), "the draft reaches the daemon");
+  await page.waitForTimeout(200);
+  assert.equal(await ask.getAttribute("data-held"), "1", "typing an answer never redraws the question");
+  await page.locator("textarea").fill("");
+  await until(() => evaluate<string>("return window.demesneInspect?.().host.questionDraft;").then(draft => draft === ""), "clearing the answer clears the draft");
   await page.locator("textarea").press("1");
   await textIncludes("Scoping the test job then.");
   await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the focused answer has completed");
@@ -1423,7 +1570,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "Demesne rebuilds its own look", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

@@ -30,7 +30,18 @@ export type SlashCommandId =
   | "status" | "context" | "diff" | "undo" | "compact" | "drive" | "clear" | "help" | "theme" | "themefy" | "providers" | "exit"
   | `custom:${string}` | `workflow:${string}`;
 export type SlashCommandArgument = "none" | "optional" | "required";
-export type SlashCommandSection = "session" | "inspect" | "control";
+/// What a command acts on (pass 84): your chat, the last turn, getting work
+/// done, the model, the look, or Demesne itself. The menu draws one heading
+/// per group, in this order.
+export type SlashCommandSection = "chat" | "turn" | "work" | "model" | "look" | "app";
+export const SLASH_COMMAND_SECTIONS: readonly { id: SlashCommandSection; title: string }[] = [
+  { id: "chat", title: "Chat" },
+  { id: "turn", title: "The last turn" },
+  { id: "work", title: "Get work done" },
+  { id: "model", title: "Model" },
+  { id: "look", title: "Look" },
+  { id: "app", title: "Demesne" },
+];
 
 export interface SlashCommand {
   id: SlashCommandId;
@@ -47,28 +58,28 @@ export interface SlashCommand {
 }
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
-  { id: "new", name: "/new", aliases: [], argument: "optional", argumentLabel: "title", description: "Start a fresh session", section: "session" },
-  { id: "sessions", name: "/sessions", aliases: [], argument: "optional", argumentLabel: "filter", description: "Browse or search recent sessions", section: "session" },
-  { id: "resume", name: "/resume", aliases: ["/switch"], argument: "required", argumentLabel: "id", description: "Switch to a session", section: "session" },
-  { id: "rename", name: "/rename", aliases: [], argument: "required", argumentLabel: "title", description: "Rename the current session", section: "session" },
-  { id: "delete", name: "/delete", aliases: ["/archive"], argument: "none", description: "Archive the current session", section: "session" },
-  { id: "cleanup", name: "/cleanup", aliases: [], argument: "none", description: "Delete empty, quick and old sessions", section: "session" },
-  { id: "model", name: "/model", aliases: [], argument: "optional", argumentLabel: "id", description: "Switch the active model", section: "session" },
-  { id: "subagent", name: "/subagent", aliases: [], argument: "optional", argumentLabel: "model", description: "Choose the model sub-agents run on", section: "session" },
-  { id: "theme", name: "/theme", aliases: [], argument: "optional", argumentLabel: "name", description: "Change the color theme", section: "session" },
-  { id: "themefy", name: "/themefy", aliases: [], argument: "optional", argumentLabel: "preferences|undo", description: "Design a theme with a guided interview", section: "session" },
-  { id: "providers", name: "/providers", aliases: ["/login", "/logout"], argument: "none", description: "Sign in to or out of model providers", section: "session" },
-  { id: "status", name: "/status", aliases: [], argument: "none", description: "Show session and runtime status", section: "inspect" },
-  { id: "context", name: "/context", aliases: [], argument: "none", description: "Show context and run details", section: "inspect" },
-  { id: "export", name: "/export", aliases: [], argument: "optional", argumentLabel: "md|json", description: "Export the session transcript", section: "inspect" },
-  { id: "diff", name: "/diff", aliases: [], argument: "none", description: "Review the last turn's changes", section: "inspect" },
-  { id: "plan", name: "/plan", aliases: [], argument: "required", argumentLabel: "prompt", description: "Draft a read-only plan before changing anything", section: "control" },
-  { id: "drive", name: "/drive", aliases: [], argument: "optional", argumentLabel: "mission|pause|resume|stop", description: "Give Agent Drive a mission or open its panel", section: "control" },
-  { id: "undo", name: "/undo", aliases: [], argument: "optional", argumentLabel: "path", description: "Revert last turn's changes", section: "control" },
-  { id: "compact", name: "/compact", aliases: [], argument: "optional", argumentLabel: "instructions", description: "Summarize older context, keeping recent turns", section: "control" },
-  { id: "clear", name: "/clear", aliases: [], argument: "none", description: "Refresh the current view", section: "control" },
-  { id: "help", name: "/help", aliases: [], argument: "none", description: "Show command help", section: "control" },
-  { id: "exit", name: "/exit", aliases: ["/quit", "/leave"], argument: "none", description: "Exit Demesne", section: "control" },
+  { id: "new", name: "/new", aliases: [], argument: "optional", argumentLabel: "title", description: "Start a fresh chat", section: "chat" },
+  { id: "sessions", name: "/sessions", aliases: [], argument: "optional", argumentLabel: "filter", description: "Browse or search your chats", section: "chat" },
+  { id: "resume", name: "/resume", aliases: ["/switch"], argument: "required", argumentLabel: "id", description: "Switch to a chat", section: "chat" },
+  { id: "rename", name: "/rename", aliases: [], argument: "required", argumentLabel: "title", description: "Rename this chat", section: "chat" },
+  { id: "export", name: "/export", aliases: [], argument: "optional", argumentLabel: "md|json", description: "Export the transcript", section: "chat" },
+  { id: "delete", name: "/delete", aliases: ["/archive"], argument: "none", description: "Archive this chat", section: "chat" },
+  { id: "cleanup", name: "/cleanup", aliases: [], argument: "none", description: "Delete empty, quick and old chats", section: "chat" },
+  { id: "diff", name: "/diff", aliases: [], argument: "none", description: "Review its changes", section: "turn" },
+  { id: "undo", name: "/undo", aliases: [], argument: "optional", argumentLabel: "path", description: "Revert its changes", section: "turn" },
+  { id: "compact", name: "/compact", aliases: [], argument: "optional", argumentLabel: "instructions", description: "Summarize older context, keeping recent turns", section: "turn" },
+  { id: "context", name: "/context", aliases: [], argument: "none", description: "What the context holds", section: "turn" },
+  { id: "plan", name: "/plan", aliases: [], argument: "required", argumentLabel: "prompt", description: "Draft a read-only plan before changing anything", section: "work" },
+  { id: "drive", name: "/drive", aliases: [], argument: "optional", argumentLabel: "mission|pause|resume|stop", description: "Give Agent Drive a mission or open its panel", section: "work" },
+  { id: "model", name: "/model", aliases: [], argument: "optional", argumentLabel: "id", description: "Switch the active model", section: "model" },
+  { id: "subagent", name: "/subagent", aliases: [], argument: "optional", argumentLabel: "model", description: "Choose the model sub-agents run on", section: "model" },
+  { id: "providers", name: "/providers", aliases: ["/login", "/logout"], argument: "none", description: "Sign in to or out of model providers", section: "model" },
+  { id: "theme", name: "/theme", aliases: [], argument: "optional", argumentLabel: "name", description: "Change the color theme", section: "look" },
+  { id: "themefy", name: "/themefy", aliases: [], argument: "optional", argumentLabel: "preferences|undo", description: "Design a theme with a guided interview", section: "look" },
+  { id: "status", name: "/status", aliases: [], argument: "none", description: "Session and runtime status", section: "app" },
+  { id: "clear", name: "/clear", aliases: [], argument: "none", description: "Refresh the current view", section: "app" },
+  { id: "help", name: "/help", aliases: [], argument: "none", description: "Show command help", section: "app" },
+  { id: "exit", name: "/exit", aliases: ["/quit", "/leave"], argument: "none", description: "Exit Demesne", section: "app" },
 ] as const;
 
 export function slashCommandCompletion(command: SlashCommand): string {

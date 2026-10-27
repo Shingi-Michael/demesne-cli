@@ -89,7 +89,7 @@ function parseCommandFile(path: string, name: string): CustomCommand | null {
       argument: "optional",
       argumentLabel: "arguments",
       description: description || "Custom command",
-      section: "session",
+      section: "work",
     },
     body: trimmed,
     source: path,

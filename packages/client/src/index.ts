@@ -169,6 +169,22 @@ export class DemesneClient {
   async removeRoutine(id: string): Promise<import("@demesne/protocol").RoutinesResponse> {
     return this.request(`/v1/routines/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
+  /// Foundry: artifacts the agent made, every version kept.
+  async foundryList(): Promise<import("@demesne/protocol").FoundryListResponse> {
+    return this.request("/v1/foundry");
+  }
+  async foundryGet(id: string, version?: number): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}${version ? `?version=${version}` : ""}`);
+  }
+  async foundrySave(body: { id?: string; title?: string; kind?: string; workspace?: string | null; note?: string; source: string }): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
+    return this.request("/v1/foundry", { method: "POST", body: JSON.stringify(body) });
+  }
+  async foundryRename(id: string, title: string): Promise<import("@demesne/protocol").FoundryArtifact> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) });
+  }
+  async foundryDelete(id: string): Promise<{ deleted: boolean }> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
   /// Starts nothing more; a run already working finishes.
   async stopDriveAway(workspace: string): Promise<import("@demesne/protocol").DriveAwayResponse> {
     return this.request("/v1/drive/away/stop", { method: "POST", body: JSON.stringify({ workspace }) });

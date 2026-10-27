@@ -1,7 +1,7 @@
-/// What a sub-agent's card says while it thinks: a cycling, irreverent label
-/// instead of "thinking · 3 tool calls". Real steps (read, search) still show
-/// as they happen; the trace under the card stays the real thinking.
-/// Dependency-free so the renderer can bundle it.
+/// What a sub-agent's line says while it works: a cycling, irreverent saying
+/// after its task, instead of "thinking · 3 tool calls". Its real steps live
+/// in the guide that unfolds under the row. Dependency-free so the renderer
+/// can bundle it.
 
 const BAD_INTENTIONS = [
   "Dreaming about rm -rf",
@@ -50,10 +50,3 @@ export function subagentPhrase(slot: number, now: number, model = ""): string {
   return phrases[(Math.floor(Math.max(0, now) / SUBAGENT_PHRASE_MS) + slot * 3) % phrases.length]!;
 }
 
-/// Progress lines that only say the sub-agent is between steps (starting,
-/// thinking, writing its report), optionally after a "<model> · " prefix.
-const STATUS = /^(?:([^·]+) · )?(?:starting|writing report|thinking · \d+ tool calls?)$/;
-export function subagentStatus(text: string): { model?: string } | null {
-  const match = STATUS.exec(text.trim());
-  return match ? (match[1] ? { model: match[1].trim() } : {}) : null;
-}

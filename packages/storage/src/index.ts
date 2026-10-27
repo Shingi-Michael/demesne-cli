@@ -3,6 +3,11 @@ import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import {
+  type FoundryArtifact,
+  type FoundryArtifactDetail,
+  type FoundryKind,
+  FOUNDRY_KINDS,
+  FOUNDRY_MAX_SOURCE_BYTES,
   type ImageArtifact,
   type TurnAttachment,
   type ArtifactPage,
@@ -177,6 +182,10 @@ interface ToolCallRow {
   error_message: string | null;
 }
 
+interface FoundryRow { id: string; title: string; kind: FoundryKind; workspace: string | null; session_id: string | null; created_at: string; updated_at: string; version: number }
+const foundryArtifact = (row: FoundryRow): FoundryArtifact => ({ id: row.id, title: row.title, kind: row.kind, workspace: row.workspace,
+  sessionId: row.session_id, createdAt: row.created_at, updatedAt: row.updated_at, version: row.version });
+
 export class NotFoundError extends Error {}
 export class InvalidStateError extends Error {}
 
@@ -229,6 +238,15 @@ export class DemesneStore {
       source_key TEXT NOT NULL UNIQUE,
       descriptor TEXT NOT NULL
     ); CREATE INDEX IF NOT EXISTS image_artifacts_session ON image_artifacts(session_id, sequence);`);
+    this.database.run(`CREATE TABLE IF NOT EXISTS foundry_artifacts (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, kind TEXT NOT NULL, workspace TEXT,
+      session_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, version INTEGER NOT NULL
+    ); CREATE INDEX IF NOT EXISTS foundry_artifacts_updated ON foundry_artifacts(updated_at);
+    CREATE TABLE IF NOT EXISTS foundry_versions (
+      artifact_id TEXT NOT NULL REFERENCES foundry_artifacts(id) ON DELETE CASCADE, version INTEGER NOT NULL,
+      created_at TEXT NOT NULL, session_id TEXT, turn_id TEXT, note TEXT NOT NULL, source TEXT NOT NULL,
+      PRIMARY KEY (artifact_id, version)
+    );`);
     if (schemaVersion < STORAGE_SCHEMA_VERSION) this.database.run(`PRAGMA user_version = ${STORAGE_SCHEMA_VERSION}`);
     this.recoverInterruptedTurns();
     this.userQuestions.recover();
@@ -270,6 +288,64 @@ export class DemesneStore {
       if (more) rows.pop();
       const watermark = (this.database.query("SELECT COALESCE(MAX(id),0) AS id FROM events WHERE session_id = ?").get(sessionId) as { id: number }).id;
       return { artifacts: rows.map((row) => JSON.parse(row.descriptor) as ImageArtifact), nextCursor: more ? rows.at(-1)!.sequence : null, watermark };
+    })();
+  }
+
+  /// Foundry: saves a new artifact, or a new version of one, in one step.
+  saveFoundryArtifact(input: { id?: string; title?: string; kind?: FoundryKind; workspace?: string | null; sessionId?: string | null; turnId?: string | null; note?: string; source: string }): FoundryArtifactDetail {
+    if (Buffer.byteLength(input.source) > FOUNDRY_MAX_SOURCE_BYTES) throw new InvalidStateError("Foundry source is larger than 512 KB");
+    const now = new Date().toISOString();
+    const id = this.database.transaction(() => {
+      if (input.id) {
+        const row = this.database.query("SELECT version FROM foundry_artifacts WHERE id = ?").get(input.id) as { version: number } | null;
+        if (!row) throw new NotFoundError("Foundry artifact not found");
+        const version = row.version + 1;
+        this.database.query("UPDATE foundry_artifacts SET version = ?, updated_at = ?, title = COALESCE(?, title) WHERE id = ?").run(version, now, input.title?.trim() || null, input.id);
+        this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source) VALUES (?,?,?,?,?,?,?)")
+          .run(input.id, version, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source);
+        return input.id;
+      }
+      if (!input.kind || !FOUNDRY_KINDS.includes(input.kind)) throw new InvalidStateError("Foundry kind must be html, svg or markdown");
+      const title = input.title?.trim();
+      if (!title) throw new InvalidStateError("A Foundry artifact needs a title");
+      const created = crypto.randomUUID();
+      this.database.query("INSERT INTO foundry_artifacts(id,title,kind,workspace,session_id,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,1)")
+        .run(created, title.slice(0, 200), input.kind, input.workspace ?? null, input.sessionId ?? null, now, now);
+      this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source) VALUES (?,1,?,?,?,?,?)")
+        .run(created, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source);
+      return created;
+    })();
+    return this.getFoundryArtifact(id)!;
+  }
+
+  listFoundryArtifacts(): FoundryArtifact[] {
+    const rows = this.database.query("SELECT * FROM foundry_artifacts ORDER BY updated_at DESC LIMIT 500").all() as FoundryRow[];
+    return rows.map(foundryArtifact);
+  }
+
+  getFoundryArtifact(id: string, version?: number): FoundryArtifactDetail | null {
+    const row = this.database.query("SELECT * FROM foundry_artifacts WHERE id = ?").get(id) as FoundryRow | null;
+    if (!row) return null;
+    const versions = this.database.query("SELECT version, created_at, session_id, turn_id, note, length(CAST(source AS BLOB)) AS bytes FROM foundry_versions WHERE artifact_id = ? ORDER BY version DESC")
+      .all(id) as { version: number; created_at: string; session_id: string | null; turn_id: string | null; note: string; bytes: number }[];
+    const pick = version ?? row.version;
+    const source = this.database.query("SELECT source FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(id, pick) as { source: string } | null;
+    if (!source) return null;
+    return { ...foundryArtifact(row), version: pick, source: source.source,
+      versions: versions.map((item) => ({ version: item.version, createdAt: item.created_at, sessionId: item.session_id, turnId: item.turn_id, note: item.note, byteLength: item.bytes })) };
+  }
+
+  renameFoundryArtifact(id: string, title: string): FoundryArtifact {
+    const clean = title.trim().slice(0, 200);
+    if (!clean) throw new InvalidStateError("Enter a title");
+    if (!this.database.query("UPDATE foundry_artifacts SET title = ? WHERE id = ?").run(clean, id).changes) throw new NotFoundError("Foundry artifact not found");
+    return foundryArtifact(this.database.query("SELECT * FROM foundry_artifacts WHERE id = ?").get(id) as FoundryRow);
+  }
+
+  deleteFoundryArtifact(id: string): boolean {
+    return this.database.transaction(() => {
+      this.database.query("DELETE FROM foundry_versions WHERE artifact_id = ?").run(id);
+      return this.database.query("DELETE FROM foundry_artifacts WHERE id = ?").run(id).changes > 0;
     })();
   }
 
@@ -1427,12 +1503,13 @@ export class DemesneStore {
   /// A running tool's live progress: a status line (`text`, such as what a
   /// sub-agent is reading) and/or a slice of its `thinking`. History replays
   /// these into the sub-agent's trace.
-  appendToolProgress(turnId: string, toolCallId: string, update: { text?: string; thinking?: string }): void {
+  /// A step line (`text`) or, once at the end, what a sub-agent found (`report`).
+  appendToolProgress(turnId: string, toolCallId: string, update: { text?: string; report?: string }): void {
     const turn = this.getTurnOrThrow(turnId);
     if (turn.status !== "running") return;
     const event = this.insertEvent("tool.call_progress", turn.sessionId, turnId, { toolCallId,
       ...(update.text !== undefined ? { text: update.text.slice(0, 500) } : {}),
-      ...(update.thinking ? { thinking: update.thinking.slice(0, 8000) } : {}) }, new Date().toISOString());
+      ...(update.report ? { report: update.report.slice(0, 4000) } : {}) }, new Date().toISOString());
     this.eventSink?.(event);
   }
 

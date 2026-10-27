@@ -198,9 +198,10 @@ async function start() {
     listeners.push(...await Promise.all([
       native.event.listen<StateUpdate>("demesne:update", (event) => bridge.update(event.payload)),
       native.event.listen<unknown>("demesne:desktop-error", (event) => showError(event.payload)),
-      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen" | "appearance"; sessionId?: string; path?: string; on?: boolean; dark?: boolean }>("demesne:desktop-action", (event) => {
+      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen" | "appearance" | "look"; sessionId?: string; path?: string; on?: boolean; dark?: boolean; look?: unknown }>("demesne:desktop-action", (event) => {
         if(event.payload.action==="appearance")void updateAppearance(event.payload.dark===true).catch(showActionError);
         else if (event.payload.action === "fullscreen") document.documentElement.classList.toggle("fullscreen", event.payload.on === true);
+        else if (event.payload.action === "look") document.dispatchEvent(new CustomEvent("demesne:look", { detail: event.payload.look }));
         else if (event.payload.action === "open-project") void openProject();
         else if (event.payload.action === "open-chat" && mounted && !fatal)
           document.dispatchEvent(new CustomEvent("demesne:open-chat", { detail: { sessionId: event.payload.sessionId, path: event.payload.path } }));

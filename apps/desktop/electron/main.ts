@@ -1,18 +1,20 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { demesneProject, SelfBuild } from "./self-build.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
-protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true } }]);
 app.setName("Demesne");
 // Match the installed Windows shortcut identity so native toasts can appear.
 if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
 const userData = app.commandLine.getSwitchValue("user-data-dir");
 if (userData && isAbsolute(userData)) app.setPath("userData", userData);
-let window: BrowserWindow | undefined, backend: Backend | undefined, quitting = false, exited = false;
+let window: BrowserWindow | undefined, backend: Backend | undefined, look: SelfBuild | undefined, quitting = false, exited = false;
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
 // Keep native notifications alive until the OS closes them or they are clicked.
@@ -22,11 +24,19 @@ function log(message: string) {
   try { const dir = app.getPath("logs"); mkdirSync(dir, { recursive: true }); appendFileSync(join(dir, "desktop.log"), `${new Date().toISOString()} ${message}\n`); } catch {}
 }
 function emit(channel: string, value: unknown) { if (window && !window.isDestroyed()) window.webContents.send(channel, value); }
+/// Restart after Keep: the swap opens the new app.
+let restarting = false;
+/// The chat the window was in when Try it here or Go back reloaded it, kept
+/// here rather than in the page (a reload, or two, may empty its storage):
+/// armed on every reload, handed to the window once with the look's state.
+let lastChat: { id: string; path: string } | null = null, reopen: { id: string; path: string; at: number } | null = null;
 async function quit() {
   if (quitting) return;
   quitting = true;
   log("exit requested");
   await backend?.close();
+  // A kept build takes the installed app's place once this process is gone.
+  if (look?.swapOnExit(restarting)) log("a kept build replaces the app"); else look?.cleanup();
   exited = true;
   app.quit();
 }
@@ -79,16 +89,34 @@ void app.whenReady().then(async () => {
   nativeTheme.on("updated", () => {
     if(nativeTheme.themeSource==="system")emit("demesne:desktop-action",{action:"appearance",dark:nativeTheme.shouldUseDarkColors});
   });
+  // Demesne rebuilds its own look: a trial look is served from its own
+  // folder instead of the app's page.
+  look = new SelfBuild({
+    userData: app.getPath("userData"), env: process.env, platform: process.platform, arch: process.arch, exePath: app.getPath("exe"), packaged: app.isPackaged,
+    reload: () => { reopen = lastChat && { ...lastChat, at: Date.now() }; contents.reload(); }, emit: state => emit("demesne:desktop-action", { action: "look", look: state }), log,
+  });
+  contents.on("did-fail-load", (_event, code, description) => look?.failed(`The page failed to load (${description || code})`));
+  contents.on("console-message", event => { if (event.level === "error") look?.failed(event.message); });
   session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.setPermissionCheckHandler(() => false);
   session.on("will-download", event => event.preventDefault());
   await session.protocol.handle("demesne", request => {
-    try { return net.fetch(pathToFileURL(assetPath(join(base, "ui"), request.url)).href); }
+    try { return net.fetch(pathToFileURL(assetPath(look?.uiRoot ?? join(base, "ui"), request.url)).href); }
     catch { return new Response("Not found", { status: 404 }); }
+  });
+  // Foundry: an artifact renders in its own frame, served here with a policy
+  // that blocks the network; the frame is sandboxed without the app's origin.
+  await session.protocol.handle("foundry", async request => {
+    if (!foundryURL(request.url)) return new Response("Not found", { status: 404 });
+    try {
+      const url = new URL(request.url), version = Number(url.searchParams.get("v"));
+      const found = await backend!.request("foundry-get", { id: decodeURIComponent(url.pathname.slice(1)), ...(Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as { kind: string; source: string; title: string };
+      return new Response(foundryDocument(found.kind, found.source, found.title), { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
+    } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }
   });
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
   contents.on("will-navigate", event => { if (!allowAppReload(event.url, true)) event.preventDefault(); });
-  contents.on("will-frame-navigate", event => { if (!allowAppReload(event.url, event.isMainFrame) && (event.isMainFrame || !previewURL(event.url))) event.preventDefault(); });
+  contents.on("will-frame-navigate", event => { if (!allowAppReload(event.url, event.isMainFrame) && (event.isMainFrame || !(previewURL(event.url) || foundryURL(event.url)))) event.preventDefault(); });
   contents.on("will-attach-webview", event => event.preventDefault());
   // Simple full screen sends no full-screen events, so the page hears of it
   // through the resize that comes with it.
@@ -103,7 +131,24 @@ void app.whenReady().then(async () => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
     validateRequest(method, args);
     if (quitting) throw new Error("The desktop app is closing");
-    if (method === "desktop-ready") { window?.show(); window?.focus(); return null; }
+    if (method === "desktop-ready") { window?.show(); window?.focus(); look?.loaded(); return null; }
+    // Demesne rebuilds its own look: try the open project's page in this
+    // window, go back, keep it as the installed app, or restart into it.
+    if (method === "desktop-look") {
+      const { action, project, sessionId } = args as Record<string, unknown>;
+      const root = typeof project === "string" ? project : "";
+      if (action === "state") {
+        const back = reopen && Date.now() - reopen.at < 180_000 ? { id: reopen.id, path: reopen.path } : null;
+        reopen = null;
+        return { demesne: root === "" ? "no" : demesneProject(root), look: look!.state, reopen: back };
+      }
+      if ((action === "try" || action === "back") && typeof sessionId === "string" && sessionId) lastChat = { id: sessionId, path: root };
+      if (action === "try") return look!.try(root);
+      if (action === "keep") return look!.keep(root);
+      if (action === "back") return look!.back();
+      if (action === "restart") { restarting = true; void quit(); return null; }
+      throw new Error("Unknown look action");
+    }
     if (method === "quit" || method === "desktop-quit") { void quit(); return null; }
     // The Dock icon counts the chats that need you (macOS and Linux docks).
     if (method === "desktop-badge") {
@@ -162,6 +207,17 @@ void app.whenReady().then(async () => {
     if (method === "desktop-select-project") {
       const selected = await dialog.showOpenDialog(window!, { title: "Open a Demesne project", properties: ["openDirectory"] });
       return selected.canceled ? backend!.request("desktop-bootstrap") : backend!.request("desktop-open-project", { ...args as Record<string, unknown>, path: selected.filePaths[0] });
+    }
+    // Foundry › Export: the artifact's source, saved where you choose.
+    if (method === "desktop-foundry-export") {
+      const { id, version } = args as Record<string, unknown>;
+      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" ? { version } : {}) }) as { kind: string; source: string; title: string };
+      const extension = ({ html: "html", svg: "svg", markdown: "md" } as Record<string, string>)[found.kind] ?? "txt";
+      const name = `${found.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "").trim().slice(0, 80) || "artifact"}.${extension}`;
+      const selected = await dialog.showSaveDialog(window!, { title: "Export from Foundry", defaultPath: join(app.getPath("downloads"), name) });
+      if (selected.canceled || !selected.filePath) return null;
+      await writeFile(selected.filePath, found.source, "utf8");
+      return { path: selected.filePath };
     }
     // A folder for a chat to move into: the path, or null when cancelled.
     if (method === "desktop-pick-folder") {

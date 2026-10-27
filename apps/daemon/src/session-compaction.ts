@@ -1,6 +1,7 @@
 import type { ContextPlan, SessionCheckpoint } from "@demesne/protocol";
 import type { ProviderMessage } from "@demesne/providers";
 import { DemesneStore, NotFoundError } from "@demesne/storage";
+import { FOUNDRY_TOOL_NAMES } from "./foundry.ts";
 import { agentSystemPrompt, assertModelResponseComplete, groupHistory, withProviderDeadlines } from "./engine.ts";
 import { planRawContextRequest } from "./context-planner.ts";
 import type { InferenceSchedulers } from "./inference-scheduler.ts";
@@ -48,7 +49,7 @@ export class SessionCompactor {
     if (!inference.contextCapacity || !inference.maxOutputTokens) throw new Error("Compaction requires a configured context window and output budget");
     const prefix = history.slice(0, -RETAINED_TURNS);
     const retained = history.slice(-RETAINED_TURNS);
-    const definitions = session.workspace ? this.tools.definitions() : [];
+    const definitions = this.tools.definitions().filter(tool => session.workspace || FOUNDRY_TOOL_NAMES.has(tool.name));
     const system: ProviderMessage = { role: "system", content: agentSystemPrompt({ workspaceRoot: session.workspace?.root,
       definitions, configured: this.options.systemPrompt, providerVision: this.options.providerVision }) };
     const estimate = (messages: ProviderMessage[]) => planRawContextRequest({ messages: [system, ...messages], tools: definitions,

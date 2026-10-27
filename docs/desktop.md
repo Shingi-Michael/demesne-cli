@@ -29,6 +29,8 @@ Outputs under `apps/desktop/release` are a macOS `.app`, Linux `.deb`, or Window
 
 The release workflow (run on a version tag) produces platform artifacts and checksums, including `demesne-desktop-linux-x64.tar.gz`, the unpacked Linux app with its icon that `install.sh` installs per user. `install.sh --source` builds this package from a clone instead. Release signing, notarization and automatic updates still need configuration. Keep the complete application together; copying a single executable loses required resources.
 
+The [release workflow's public-distribution TODO](../.github/workflows/release.yml) remains an unresolved macOS release blocker, not a stale note: `electron-builder.json` explicitly sets `mac.identity` to `null`, and the workflow neither imports a Developer ID certificate nor signs, notarizes or staples the macOS artifacts. It also does not execute the x86_64 CLI artifact (`smoke: false`). Before public distribution, configure signing and notarization credentials, publish archives containing the stapled app, and add an Intel or Rosetta smoke test. The current tag-triggered release job does not enforce these prerequisites.
+
 ## Closing the app and stopping work
 
 On macOS the window's close button hides it; click the Dock icon to return. Quit exits the app and its UI host. On Linux and Windows, closing the window quits. Daemon-owned turns continue after app exit. A running Drive mission is handed to a detached Bun host; reopening the project reclaims it. Use Esc twice or the stop square to cancel a turn, and Pause or Stop on a Drive mission's turn. Stopping the daemon is a separate operation.

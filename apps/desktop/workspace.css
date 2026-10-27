@@ -370,25 +370,59 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .mp-row .name b { font-weight: 600; }
 .desktop .mp-row.dim { color: var(--t3); }
 .desktop .mp-row.selected { background: var(--tone2); color: var(--t1); }
+/* Pass 83 A: the menu / and @ open is one quiet panel like the model picker. */
+.desktop #completion { right: auto; width: min(380px, 100%); max-height: min(360px, 46vh); padding: 6px; border-radius: 12px; }
+.desktop #completion .cm-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.desktop #completion .cm-list::-webkit-scrollbar { display: none; }
+.desktop .cm-group { padding: 8px 9px 3px; color: var(--t4); font-size: 11.5px; }
+.desktop .cm-group:first-child { padding-top: 3px; }
+.desktop .cm-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 30px; padding: 0 9px; border-radius: var(--r-sm); color: var(--t1); font-size: 13px; text-align: left; white-space: nowrap; flex: none; }
+.desktop .cm-row.selected, .desktop .cm-row:hover { background: var(--tone2); }
+.desktop .cm-ico { flex: none; width: 15px; height: 15px; fill: none; stroke: var(--t3); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.desktop .cm-row.selected .cm-ico { stroke: var(--t1); }
+.desktop .cm-name b { font-weight: 600; }
+.desktop .cm-arg { color: var(--t4); }
+.desktop .cm-desc { flex: 1; min-width: 0; margin-left: auto; padding-left: 12px; overflow: hidden; text-overflow: ellipsis; text-align: right; color: var(--t3); }
+.desktop .cm-more { display: flex; justify-content: space-between; align-items: center; flex: none; width: 100%; height: 30px; margin-top: 4px; padding: 0 9px; border-top: 1px solid var(--hair); color: var(--t3); font-size: 12.5px; }
+.desktop .cm-more:hover { color: var(--t1); }
+/* Pass 82 A: resting on a model opens a small card beside the picker. */
+.model-card { position: fixed; z-index: 60; width: 220px; padding: 12px 13px 11px; border-radius: var(--r-lg); background: var(--surface, #1c1d21); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); color: var(--t3); font-size: 12.5px; line-height: 18px; pointer-events: none; opacity: 0; transform: translateX(-4px); visibility: hidden; }
+.model-card.show { opacity: 1; transform: none; visibility: visible; }
+@media (prefers-reduced-motion: no-preference) { .model-card { transition: opacity 160ms var(--ease), transform 200ms var(--ease), top 180ms var(--ease), visibility 0s linear 200ms; } .model-card.show { transition: opacity 160ms var(--ease), transform 200ms var(--ease), top 180ms var(--ease), visibility 0s; } }
+.model-card .mc-name { color: var(--t1); font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
+.model-card .mc-by { margin-top: 1px; }
+.model-card .mc-bill.plan { color: var(--ok); }
+.model-card .mc-bill.credits { color: var(--warn); }
+.model-card .mc-bill.own { color: var(--t2); }
+.model-card .mc-facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin-top: 10px; }
+.model-card .mc-facts span { color: var(--t4); }
+.model-card .mc-facts b, .model-card .mc-you b { font-weight: 400; color: var(--t2); font-variant-numeric: tabular-nums; }
+.model-card .mc-you { margin-top: 10px; padding-top: 9px; box-shadow: inset 0 1px 0 var(--hair); }
+.model-card .mc-id { margin-top: 8px; font-family: var(--mono, ui-monospace, monospace); font-size: 11px; color: var(--t4); overflow-wrap: anywhere; }
 .desktop .mp-key { flex: none; color: var(--t4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .desktop .mp-tick { flex: none; color: var(--acc); font-size: 12px; }
 .desktop .mp-group { display: flex; justify-content: space-between; padding: 8px 9px 3px; font-size: 11px; color: var(--t4); }
 .desktop .mp-group:first-child { padding-top: 4px; }
 .desktop .mp-sep { flex: none; height: 1px; margin: 4px 6px; background: var(--hair); }
-.desktop .mp-thinking { display: flex; align-items: center; gap: 10px; flex: none; height: 34px; padding: 0 9px; font-size: 12px; color: var(--t3); }
-.desktop .mp-thinking-label { flex: none; width: 56px; }
-.desktop .mp-level { flex: none; width: 64px; text-align: right; color: var(--t1); font-size: 12.5px; white-space: nowrap; }
+/* Thinking is one soft groove that fills from the left (pass 77); the
+   fill's edge is the handle. Faint notches show the levels while you point
+   at it, and the fill covers the ones it has passed. */
+.desktop .mp-thinking { position: relative; flex: none; display: flex; align-items: center; height: 30px; margin: 4px 3px 2px; padding: 0 12px; border-radius: 15px; background: var(--tone); overflow: hidden; font-size: 12.5px; color: var(--t3); cursor: ew-resize; touch-action: none; user-select: none; }
+.desktop .mp-thinking.none { cursor: default; }
+.desktop .mp-thinking:not(.none):hover, .desktop .mp-thinking.drag { background: var(--tone2); }
+.desktop .mp-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 15px; background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 10%, transparent), color-mix(in srgb, var(--acc) 30%, transparent)); box-shadow: inset -1px 0 0 color-mix(in srgb, var(--acc) 45%, transparent); pointer-events: none; }
+.desktop .mp-notch { position: absolute; top: 11px; bottom: 11px; width: 1px; background: var(--hair2); opacity: 0; pointer-events: none; }
+.desktop .mp-thinking:hover .mp-notch, .desktop .mp-thinking.drag .mp-notch { opacity: 1; }
+.desktop .mp-thinking .mp-notch.in { opacity: 0; }
+.desktop .mp-thinking-label { position: relative; flex: 1; pointer-events: none; }
+.desktop .mp-level { position: relative; flex: none; text-align: right; color: var(--t1); white-space: nowrap; pointer-events: none; }
 .desktop .mp-level.off { color: var(--t4); }
-.desktop .mp-track { position: relative; flex: 1; display: flex; align-items: center; height: 22px; }
-.desktop .mp-track::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; margin: 0 calc(50% / var(--stops, 6)); background: var(--hair2); }
-.desktop .mp-track.none::before { margin: 0; background: none; border-top: 1px dashed var(--hair2); }
-.desktop .mp-fill { position: absolute; top: 50%; height: 2px; margin-top: -0.5px; border-radius: 1px; background: var(--acc); left: calc(50% / var(--stops, 6)); }
-.desktop .mp-stop { position: relative; flex: 1; display: grid; place-items: center; height: 22px; padding: 0; border-radius: var(--r-sm); }
-.desktop .mp-stop i { width: 7px; height: 7px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--t4); transition: transform 140ms var(--ease), background-color 140ms var(--ease); }
-.desktop .mp-stop.on i { background: var(--acc); box-shadow: none; }
-.desktop .mp-stop.at i { width: 13px; height: 13px; background: var(--t1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 35%, transparent); }
-.desktop .mp-stop:hover i { transform: scale(1.25); }
-.desktop .mp-stop:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop .mp-thinking { transition: background-color 200ms var(--ease); }
+  .desktop .mp-fill { transition: width 260ms var(--ease); }
+  .desktop .mp-thinking.drag .mp-fill { transition: none; }
+  .desktop .mp-notch { transition: opacity 200ms var(--ease); }
+}
 .desktop .mp-hint { display: flex; gap: 6px; align-items: center; padding: 4px 9px 2px; color: var(--t4); font-size: 11px; }
 .desktop .mp-empty { padding: 6px 9px; font-size: 12px; color: var(--t4); }
 .desktop #overlay.dropped .modal-title { display: none; }
@@ -717,19 +751,16 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop #drive-reply.open .bf-row:nth-child(2) { transition-delay: 100ms, 100ms, 0ms; }
   .desktop #drive-reply.open .bf-row:nth-child(n+3), .desktop #drive-reply.open .bf-foot, .desktop #drive-reply.open .drive-live { transition-delay: 140ms, 140ms, 0ms; }
 }
-/* The cards on the right (top bar's panel icon): one column of quiet cards,
-   each a tone with a hairline ring; headers fold a card to one line. Shown
-   only where there is room. */
+/* The cards on the right: one column of quiet cards, each a tone with a
+   hairline ring, shown only while the chat uses one and where there is
+   room; headers fold a card to one line. */
 #cards { display: none; }
 @media (min-width: 1100px) {
   .desktop .live-app.cards-on #cards:not([hidden]) { display: flex; flex-direction: column; gap: 8px; flex: none; width: 288px; padding: 14px 14px 14px 0; overflow-y: auto; scrollbar-width: none; }
-  .desktop .live-app.cards-on #composer-context, #desktop-shell:has(.live-app.cards-on) #desktop-toolbar .chip { display: none; }
+  .desktop .live-app.cards-context #composer-context { display: none; }
 }
-#desktop-toolbar .header-cards { margin-left: auto; display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--r-sm); color: var(--t3); }
-#desktop-toolbar .header-cards:hover { background: var(--surface2); color: var(--t1); }
-#desktop-toolbar .header-cards.on { background: var(--tone2); color: var(--t1); }
-#desktop-toolbar .header-cards + .header-more { margin-left: 2px; }
-@media (max-width: 1099px) { #desktop-toolbar .header-cards { display: none; } #desktop-toolbar .header-cards + .header-more { margin-left: auto; } }
+@keyframes card-arrive { from { opacity: 0; transform: translateX(12px); } }
+@media (prefers-reduced-motion: no-preference) { .desktop #cards .card.arriving { animation: card-arrive 240ms cubic-bezier(.32,.72,0,1); } }
 .desktop #cards .card { background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair); border-radius: var(--r); font-size: 12.5px; color: var(--t2); }
 .desktop #cards .card-head { display: flex; align-items: center; gap: 4px; width: 100%; padding: 10px 12px; text-align: left; color: var(--t1); font-weight: 600; font-size: 12.5px; border-radius: var(--r); }
 .desktop #cards .card-head:hover .card-chev { opacity: 1; }
@@ -743,10 +774,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .card-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); }
 .desktop #cards .card-label em { font-style: normal; color: var(--t3); }
 .desktop #cards .card-right { flex: none; color: var(--t3); }
-.desktop #cards .card-on { color: var(--ok); }
-.desktop #cards .ico.beat { color: var(--ok); transform-origin: center; }
-@keyframes hb-beat { 0%, 40%, 100% { transform: scale(1); } 10% { transform: scale(1.22); } 20% { transform: scale(1.04); } 28% { transform: scale(1.16); } }
-@media (prefers-reduced-motion: no-preference) { .desktop #cards .ico.beat { animation: hb-beat 1.2s ease-out infinite; } }
 .desktop #cards .card-meter { display: inline-block; width: 28px; height: 4px; border-radius: 2px; background: var(--tone2); overflow: hidden; }
 .desktop #cards .card-meter i { display: block; height: 100%; background: var(--t2); }
 .desktop #cards .context-bar { display: flex; height: 6px; margin: 4px 0 8px; border-radius: 3px; overflow: hidden; background: var(--tone2); }
@@ -1157,7 +1184,6 @@ html.glass #desktop-shell { background: var(--shell-glass, var(--ink)); }
 /* On the glass the panel lets a little of the blur through too; popovers
    and menus stay solid. */
 html.glass #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { --ink: var(--panel-glass, var(--panel)); background: var(--panel-glass, var(--panel)); }
-html.glass #drive-peek { background: var(--panel-glass, var(--panel)); }
 html.glass body.desktop { --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.09); }
 html.glass[data-theme="demesne-light"] body.desktop { --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.03); }
 #desktop-sidebar, #desktop-toolbar { background: transparent; border: 0; box-shadow: none; }
@@ -1241,19 +1267,18 @@ html.mac-chrome.fullscreen #desktop-shell:has(#desktop-sidebar[hidden]) #desktop
 @media (prefers-reduced-motion: no-preference) { #desktop-toolbar .header-live.work i { animation: live-breathe 1.6s ease-in-out infinite; } }
 @keyframes live-breathe { 50% { opacity: 0.35; } }
 
-/* Drive's panel behind yours (pass 74 D): one edge of a second panel shows
-   at the right of the open one, its title running down it. */
-#drive-peek { grid-column: 2; grid-row: 2; justify-self: end; position: relative; z-index: 0; width: 46px; margin: 8px 10px 18px 0; padding: 0; border: 0; border-radius: 12px; background: color-mix(in srgb, var(--panel, var(--ink)) 82%, var(--t1) 3%); box-shadow: 0 0 0 1px var(--panel-edge, var(--hair)); color: var(--t3); cursor: pointer; overflow: hidden; transition: box-shadow 160ms var(--ease, ease), color 160ms var(--ease, ease); }
-#drive-peek:hover { color: var(--t1); box-shadow: 0 0 0 1px var(--hair2); }
-#drive-peek.ready { color: var(--ok); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ok) 55%, transparent); }
-#drive-peek .dp-words { position: absolute; right: 6px; top: 16px; display: flex; align-items: center; gap: 9px; max-height: calc(100% - 32px); writing-mode: vertical-rl; font-size: 11.5px; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; }
-#drive-peek .dp-words span { overflow: hidden; text-overflow: ellipsis; }
-#drive-peek .dp-words i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
-#drive-peek.ready .dp-words i { background: var(--ok); }
-#drive-peek.back .dp-words i { width: 0; height: 0; border-radius: 0; border: 4px solid transparent; border-right: 5px solid currentColor; border-left: 0; background: none; transform: rotate(90deg); }
-@media (prefers-reduced-motion: no-preference) { #drive-peek.work .dp-words i { animation: live-breathe 1.6s ease-in-out infinite; } }
-#desktop-shell > .live-app { position: relative; z-index: 1; }
-#desktop-shell:has(#drive-peek:not([hidden])) > .live-app { margin-right: 40px; }
+/* Drive's word in the title bar (pass 79 A): a breathing dot and the mission
+   while Drive makes a branch elsewhere, green once it is ready; click opens
+   Drive's chat. The chat keeps its full width. */
+#desktop-toolbar .header-drive { flex: none; display: inline-flex; align-items: center; gap: 7px; max-width: 40%; margin: 0 2px 0 auto; padding: 4px 9px; border: 0; border-radius: var(--r-sm); background: none; font: 12px Inter, system-ui, sans-serif; color: var(--t3); white-space: nowrap; cursor: pointer; transition: background 160ms var(--ease, ease), color 160ms var(--ease, ease); }
+#desktop-toolbar .header-drive span { overflow: hidden; text-overflow: ellipsis; }
+#desktop-toolbar .header-drive i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
+#desktop-toolbar .header-drive:hover { background: var(--tone2); color: var(--t1); }
+#desktop-toolbar .header-drive.ready { color: var(--ok); }
+#desktop-toolbar .header-drive.ready i { background: var(--ok); }
+#desktop-toolbar .header-drive.ready:hover { background: color-mix(in srgb, var(--ok) 12%, transparent); }
+#desktop-toolbar .header-drive + .header-more { margin-left: 2px; }
+@media (prefers-reduced-motion: no-preference) { #desktop-toolbar .header-drive.work i { animation: live-breathe 1.6s ease-in-out infinite; } }
 
 /* Words arrive softly: each new run of a streaming answer fades in. */
 @keyframes md-in { from { opacity: 0; } }
@@ -1339,3 +1364,92 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 #system-theme-source { display: flex; align-items: center; gap: 8px; }
 #system-theme-source input { flex: 1; min-width: 0; width: 100%; }
 #system-theme-source button { flex: none; }
+/* Demesne rebuilds its own look (pass 80): the line after a turn that changed the window, and the top bar's words while you look at it. */
+.desktop .look-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 6px 0 4px 4px; padding-left: 14px; box-shadow: -1px 0 0 var(--hair); font-size: 12.5px; line-height: 19px; color: var(--t3); }
+.desktop .look-line .ico { flex: none; width: 14px; height: 14px; }
+.desktop .look-line.ok { color: var(--ok); }
+.desktop .look-line.bad { color: var(--bad); }
+.desktop .look-line .look-text { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.desktop .look-line button.link { color: var(--t1); padding: 1px 7px; border-radius: 9px; }
+.desktop .look-line button.link:hover { background: var(--tone2); }
+.desktop .look-line .look-note { color: var(--t4); }
+.desktop .look-prog { display: inline-block; width: 64px; height: 2px; border-radius: 1px; background: var(--hair2); overflow: hidden; vertical-align: middle; }
+.desktop .look-prog b { display: block; height: 2px; width: 40%; background: var(--acc); animation: look-slide 1.2s var(--ease) infinite; }
+@keyframes look-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+.desktop .look-why { margin: 0 0 8px 22px; max-height: 160px; overflow: auto; font: 11.5px/16px "JetBrains Mono", monospace; color: var(--t3); white-space: pre-wrap; }
+#workspace-look { flex: none; display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; font-size: 12.5px; color: var(--t2); white-space: nowrap; }
+#workspace-look .look-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--acc); margin-right: 6px; animation: look-breathe 1.6s var(--ease) infinite; }
+#workspace-look .look-dot.ok { background: var(--ok); animation: none; }
+#workspace-look .look-dot.bad { background: var(--bad); animation: none; }
+@keyframes look-breathe { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+#workspace-look .look-word { height: 26px; padding: 0 8px; border-radius: 13px; color: var(--t3); }
+#workspace-look .look-word.strong { color: var(--t1); }
+#workspace-look .look-word:hover { background: var(--tone2); color: var(--t1); }
+#workspace-look .look-sep { color: var(--t4); margin: 0 2px; }
+#workspace-look .look-prog { margin-left: 8px; }
+@media (prefers-reduced-motion: reduce) { .desktop .look-prog b, #workspace-look .look-dot { animation: none; } }
+
+
+/* Foundry: a gallery of what the agent made, and one artifact at a time with
+   its versions. Artifacts render in sandboxed foundry:// frames. */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.desktop #page[data-kind="foundry"] { max-width: 1040px; padding-left: 28px; padding-right: 28px; }
+.fd-make { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 14px; border-radius: var(--r-lg); background: var(--tone); box-shadow: 0 0 0 1px var(--hair) inset; transition: box-shadow 160ms var(--ease), background-color 160ms var(--ease); }
+.fd-make:focus-within { background: var(--tone2); box-shadow: 0 0 0 1px var(--hair2) inset; }
+.fd-make-icon { display: grid; place-items: center; color: var(--t3); }
+.fd-make-icon .ico { width: 16px; height: 16px; }
+.fd-make input { flex: 1; min-width: 0; padding: 0; border: 0; outline: none; background: transparent; color: var(--t1); font-size: 14px; }
+.fd-make input::placeholder { color: var(--t4); }
+.fd-make kbd { color: var(--t4); }
+.fd-tabs { margin-top: 26px; }
+.fd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.fd-card { position: relative; }
+.fd-card-open { display: flex; flex-direction: column; width: 100%; padding: 0; overflow: hidden; border-radius: var(--r-lg); background: var(--tone); box-shadow: 0 0 0 1px var(--hair) inset; text-align: left; transition: box-shadow 160ms var(--ease), transform 160ms var(--ease); }
+.fd-card-open:hover { box-shadow: 0 0 0 1px var(--hair2) inset, 0 8px 24px rgb(0 0 0 / 0.18); transform: translateY(-1px); }
+.fd-card-open:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 2px; }
+.fd-thumb { position: relative; height: 150px; overflow: hidden; background: #fff; pointer-events: none; }
+.fd-thumb.graphic { background: repeating-conic-gradient(var(--surface2) 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
+.fd-thumb.doc { display: grid; place-items: center; background: var(--surface2); color: var(--t3); }
+.fd-thumb.doc .ico { width: 34px; height: 34px; stroke-width: 1.2; }
+.fd-thumb-frame { position: absolute; top: 0; left: 0; width: 400%; height: 400%; border: 0; transform: scale(0.25); transform-origin: 0 0; }
+.fd-thumb.graphic .fd-thumb-frame { width: 100%; height: 100%; transform: none; }
+.fd-card-text { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px 12px; box-shadow: inset 0 1px 0 var(--hair); }
+.fd-card-text b { overflow: hidden; color: var(--t1); font-size: 13.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.fd-card-text span { display: flex; align-items: center; gap: 5px; color: var(--t3); font-size: 12px; }
+.fd-card-text .ico, .fd-meta .ico { width: 13px; height: 13px; }
+.fd-where { position: absolute; top: 8px; right: 8px; padding: 2px 7px; border-radius: 999px; background: rgb(0 0 0 / 0.55); color: #fff; font-size: 11px; pointer-events: none; }
+.fd-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 56px 20px; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair) inset; color: var(--t3); font-size: 13px; text-align: center; }
+.fd-empty .ico { width: 28px; height: 28px; margin-bottom: 4px; stroke-width: 1.3; }
+.fd-empty b { color: var(--t1); font-weight: 500; }
+.fd-empty span { max-width: 380px; }
+.fd-step-open { flex: none; height: 24px; padding: 0 9px; border-radius: var(--r-sm); color: var(--t2); font-size: 12px; }
+.fd-step-open:hover { color: var(--t1); background: var(--tone2); }
+.fd-top, .fd-bar { display: flex; align-items: center; gap: 6px; }
+.fd-top .sp, .fd-bar .sp { flex: 1; }
+.fd-back { margin: 0 0 0 -10px; }
+.fd-act { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: var(--r-sm); color: var(--t2); font-size: 12.5px; transition: background-color 140ms var(--ease), color 140ms var(--ease); }
+.fd-act .ico { width: 14px; height: 14px; }
+.fd-act:hover { color: var(--t1); background: var(--tone2); }
+.fd-act.primary { color: var(--t1); background: var(--tone2); box-shadow: 0 0 0 1px var(--hair) inset; }
+.fd-act.danger:hover { color: var(--bad); background: var(--bad-soft); }
+.fd-title { margin: 14px 0 14px; }
+.fd-title .cp-title { outline: none; border-radius: 4px; cursor: text; }
+.fd-title .cp-title[contenteditable="plaintext-only"] { box-shadow: 0 0 0 2px var(--hair2); }
+.fd-meta { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--t3); font-size: 12.5px; }
+.fd-bar { margin-bottom: 10px; }
+.fd-segs { display: inline-flex; padding: 2px; border-radius: var(--r); background: var(--tone); box-shadow: 0 0 0 1px var(--hair) inset; }
+.fd-seg { height: 24px; padding: 0 10px; border-radius: var(--r-sm); color: var(--t3); font-size: 12px; }
+.fd-seg:hover { color: var(--t1); }
+.fd-seg.on { color: var(--t1); background: var(--tone2); box-shadow: 0 1px 2px rgb(0 0 0 / 0.15); }
+.fd-versions select { height: 28px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: var(--tone); box-shadow: 0 0 0 1px var(--hair) inset; color: var(--t2); font-size: 12.5px; }
+.fd-older { margin-bottom: 10px; padding: 8px 12px; border-radius: var(--r); background: var(--tone); color: var(--t2); font-size: 12.5px; }
+.fd-stage { display: flex; justify-content: center; height: calc(100vh - 250px); min-height: 380px; overflow: hidden; border-radius: var(--r-lg); background: var(--surface2); box-shadow: 0 0 0 1px var(--hair) inset; }
+.fd-stage.graphic { background: repeating-conic-gradient(var(--surface2) 0 25%, transparent 0 50%) 0 0 / 20px 20px; }
+.fd-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; transition: width 200ms var(--ease); }
+.fd-stage.graphic .fd-frame { background: transparent; }
+.fd-stage.tablet .fd-frame { width: 820px; max-width: 100%; box-shadow: 0 0 0 1px var(--hair); }
+.fd-stage.phone .fd-frame { width: 390px; max-width: 100%; box-shadow: 0 0 0 1px var(--hair); }
+.fd-doc { max-width: 720px; margin: 0 auto; padding: 28px 32px; border-radius: var(--r-lg); background: var(--tone); box-shadow: 0 0 0 1px var(--hair) inset; color: var(--t1); }
+.fd-source { overflow: hidden; border-radius: var(--r-lg); background: var(--tone); box-shadow: 0 0 0 1px var(--hair) inset; }
+.live-app .fd-source textarea { display: block; width: 100%; height: calc(100vh - 300px); min-height: 320px; padding: 14px 16px; border: 0; outline: none; resize: none; background: transparent; color: var(--t1); font: 12.5px/1.6 "JetBrains Mono", monospace; tab-size: 2; }
+@media (prefers-reduced-motion: reduce) { .fd-card-open, .fd-frame { transition: none; } .fd-card-open:hover { transform: none; } }

@@ -79,7 +79,7 @@ describe("expandCustomCommand", () => {
         aliases: [],
         argument: "optional" as const,
         description: "Review",
-        section: "session" as const,
+        section: "work" as const,
       },
       body,
       source: "/commands/review.md",

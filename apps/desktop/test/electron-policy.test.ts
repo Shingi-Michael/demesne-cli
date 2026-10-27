@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, FOUNDRY_CSP, foundryDocument, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
 
 test("project switching may reload only the exact main application document", () => {
   expect(allowAppReload(APP_URL, true)).toBe(true);
@@ -50,4 +50,18 @@ test("glass where the desktop blurs behind the window: the Mac and Hyprland", ()
   expect(desktopBlurs("linux", { XDG_CURRENT_DESKTOP: "sway", DEMESNE_GLASS: "1" })).toBe(true);
   expect(desktopBlurs("linux", { HYPRLAND_INSTANCE_SIGNATURE: "abc_123", DEMESNE_GLASS: "0" })).toBe(false);
   expect(desktopBlurs("win32", { DEMESNE_GLASS: "1" })).toBe(false);
+});
+
+test("Foundry frames accept only artifact URLs and block the network", () => {
+  expect(foundryURL("foundry://artifact/2f6c1a3e-9b1d-4e0a-8c5b-1f2a3b4c5d6e?v=2")).toBe(true);
+  expect(foundryURL("foundry://artifact/a/b")).toBe(false);
+  expect(foundryURL("foundry://user:pw@artifact/abc")).toBe(false);
+  expect(foundryURL("foundry://other/abc")).toBe(false);
+  expect(foundryURL("https://artifact/abc")).toBe(false);
+  expect(FOUNDRY_CSP).toContain("default-src 'none'");
+  expect(FOUNDRY_CSP).not.toContain("connect-src");
+  // SVG renders as an image, so a script inside it never runs.
+  const page = foundryDocument("svg", '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', "Logo");
+  expect(page).toContain("data:image/svg+xml;base64,");
+  expect(page).not.toContain("<script>");
 });

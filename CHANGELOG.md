@@ -9,6 +9,10 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 - Self-build (Try it here, Your look · Keep · Go back): the window no longer rebuilds its own page from the open project or swaps the installed app, and chats in the Demesne checkout are no longer told to leave building and launching to the app. An agent in that project builds and relaunches Demesne like any other command.
 - The terminal app: the `demesne` command (terminal chat, `setup`, `doctor`, `auth`, `prompt`, `drive`, `daemon`), `install.sh` and the CLI release tarballs. Demesne is now only the desktop app, which carries its own daemon. Sign-in and setup live in the app under Settings › Providers.
 
+### Changed
+
+- Foundry shows what it made the way Claude shows an artifact: a chip in the conversation (kind, title, version) and the page itself in a pane beside the chat, edge to edge, with one line of controls above it (title, version arrows, Preview · Code, phone width, close) and one below (version note, Copy, Export, Revise, Open in Foundry, Make this the latest). A new artifact opens the pane by itself, a new version moves it on, Esc closes it, and each chat remembers whether it was open. The boxed 480px card that sat in the conversation under each save is gone.
+
 ### Added
 
 - Foundry revises like a file: `foundry_edit` applies exact find-and-replace edits to the version the model read, and `foundry_save` takes the same `base_version`, so a version you changed by hand (Edit source) or in another chat is never overwritten; the model is told to read the latest version and carry its change onto it. Artifact frames may now load pinned libraries from cdnjs, jsdelivr and unpkg and Google Fonts, so charts, React and real typefaces work; everything else stays blocked. The tools carry a design brief (custom-property colours with a dark set, hairlines over outlines, phone width, no stock AI looks, Demesne's tokens for Demesne UI).

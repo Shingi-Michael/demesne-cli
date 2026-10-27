@@ -1,5 +1,6 @@
-/** Real Electron check: invoke Foundry in chat and keep its live preview
- * interactive through streaming, turn completion, revisions and replay. */
+/** Real Electron check: invoke Foundry in chat, open what it made in the
+ * pane beside the conversation, and keep that page interactive through
+ * streaming, turn completion, revisions and replay. */
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
@@ -82,58 +83,80 @@ try {
   const editor = page.locator("textarea");
   await editor.fill("/foundry make me a small interactive mockup");
   await editor.press("Enter");
-  const cards = page.locator("#conversation .fd-chat-artifact");
-  const card = cards.first(), frame = card.frameLocator("iframe");
+  const chips = page.locator("#conversation .fd-chip");
+  const pane = page.locator("#pane"), frame = pane.frameLocator("iframe.pane-frame");
+  // A new artifact is a chip in the chat and opens in the pane beside it by itself.
+  await chips.first().filter({ hasText: "Idea garden" }).waitFor();
   await frame.getByRole("button", { name: "Plant an idea" }).waitFor();
-  assert(await page.locator("#page").isHidden(), "Foundry stays in the chat");
+  assert(await page.locator("#page").isHidden(), "Foundry stays beside the chat");
+  assert.equal(await page.locator("#conversation iframe").count(), 0, "Nothing live runs in the conversation");
+  assert.equal(await chips.first().getAttribute("aria-pressed"), "true", "The open chip is marked");
   const artifact = (await f.client.foundryList()).artifacts[0]!;
   assert.equal(artifact.workspace, null, "No project is required");
   await frame.getByRole("button", { name: "Plant an idea" }).click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
-  console.log("Initial inline interaction passed.");
+  console.log("Initial pane interaction passed.");
   await frame.getByRole("textbox", { name: "Your idea" }).fill("Keep my idea");
   response.resolve();
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
-  console.log("Streaming completion kept preview state.");
+  console.log("Streaming completion kept the page's state.");
   assert.equal(await frame.getByRole("textbox", { name: "Your idea" }).inputValue(), "Keep my idea");
   await page.locator('[data-action="toggle-steps"]').first().click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
-  console.log("Step folding kept preview state.");
-  await card.getByRole("button", { name: "Phone", exact: true }).click();
-  await card.getByRole("button", { name: "Code", exact: true }).click();
-  await card.locator(".fd-chat-code").filter({ hasText: "window.plants=0" }).waitFor();
-  await card.getByRole("button", { name: "Preview", exact: true }).click();
+  console.log("Step folding kept the page's state.");
+  await pane.getByRole("button", { name: "Phone width" }).click();
+  assert.equal(await pane.getByRole("button", { name: "Phone width" }).getAttribute("aria-pressed"), "true");
+  await pane.getByRole("button", { name: "Code", exact: true }).click();
+  await pane.locator(".pane-code").filter({ hasText: "window.plants=0" }).waitFor();
+  await pane.getByRole("button", { name: "Preview", exact: true }).click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
-  console.log("PASS: /foundry creates in chat; form and button state survive streaming, completion, step folding and preview controls.");
+  console.log("PASS: /foundry makes a chip and opens the pane; the page's state survives streaming, completion, step folding and the pane's controls.");
 
   await editor.fill("Make it blue"); await editor.press("Enter");
-  await cards.nth(1).frameLocator("iframe").getByRole("heading", { name: "A little room to grow" }).waitFor();
+  await chips.nth(1).filter({ hasText: "Prototype · v2" }).waitFor();
   await eventually(async () => (await f.client.foundryGet(artifact.id)).version === 2);
-  assert.equal(await cards.nth(1).getAttribute("data-artifact-id"), artifact.id);
+  assert.equal(await chips.nth(1).getAttribute("data-artifact-id"), artifact.id);
   assert.match((await f.client.foundryGet(artifact.id)).source, /#3158ba/);
   assert.equal((await f.client.foundryGet(artifact.id)).versions[0]!.note, "Blue");
-  await frame.getByRole("button", { name: "Planted 1" }).waitFor();
-  await cards.nth(1).getByRole("button", { name: "Revise", exact: true }).click();
+  // The pane follows the chat onto the new version; the arrows walk back.
+  await pane.locator(".pane-foot").filter({ hasText: "v2" }).waitFor();
+  await frame.getByRole("heading", { name: "A little room to grow" }).waitFor();
+  assert.equal(await chips.nth(1).getAttribute("aria-pressed"), "true");
+  assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "false");
+  await pane.getByRole("button", { name: "Earlier version" }).click();
+  await pane.locator(".pane-foot").filter({ hasText: "Make this the latest" }).waitFor();
+  assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "true");
+  await pane.getByRole("button", { name: "Later version" }).click();
+  await pane.locator(".pane-foot").filter({ hasText: "Blue" }).waitFor();
+  await pane.getByRole("button", { name: "Revise", exact: true }).click();
   await eventually(async () => (await editor.inputValue()).includes(artifact.id));
-  console.log("PASS: natural follow-up edits the artifact in place (foundry_edit) in the same chat; the earlier preview keeps its state.");
+  console.log("PASS: a follow-up edits the artifact in place (foundry_edit); the pane moves to v2 and walks the versions.");
 
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await editor.fill("Make an SVG badge graphic"); await editor.press("Enter");
-  await cards.nth(2).frameLocator("iframe").locator("img").waitFor();
+  await chips.nth(2).filter({ hasText: "Graphic · v1" }).waitFor();
+  await frame.locator("img").waitFor();
+  assert.equal(await pane.getByRole("button", { name: "Phone width" }).count(), 0, "A graphic has no phone width");
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await editor.fill("Make a project brief document"); await editor.press("Enter");
-  await cards.nth(3).getByRole("heading", { name: "Project brief" }).waitFor();
-  assert.equal(await cards.nth(3).locator("script").count(), 0);
+  await chips.nth(3).filter({ hasText: "Document · v1" }).waitFor();
+  await pane.locator(".pane-doc").getByRole("heading", { name: "Project brief" }).waitFor();
+  assert.equal(await pane.locator(".pane-doc script").count(), 0);
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await page.reload();
   await page.locator(`#sidebar-chats [data-action="select-session"][data-args*="${artifact.sessionId}"]`).click();
-  await cards.nth(3).getByRole("heading", { name: "Project brief" }).waitFor();
-  assert.equal(await cards.count(), 4, "Artifact previews return with the conversation history");
-  await card.scrollIntoViewIfNeeded();
+  await chips.nth(3).filter({ hasText: "Document · v1" }).waitFor();
+  assert.equal(await chips.count(), 4, "Chips return with the conversation history");
+  // The pane remembers what this chat had open; Esc closes it; a chip reopens it.
+  await pane.locator(".pane-doc").getByRole("heading", { name: "Project brief" }).waitFor();
   await page.screenshot({ path: join(output, "foundry-chat.png") });
+  await page.keyboard.press("Escape");
+  await pane.waitFor({ state: "hidden" });
+  await chips.first().click();
+  await frame.getByRole("button", { name: "Plant an idea" }).waitFor();
   assert.deepEqual(errors, []);
-  console.log("PASS: SVG and sanitized Markdown render inline; all saved previews return when the chat is reopened.");
+  console.log("PASS: graphics and sanitized documents open in the pane; chips and the pane return when the chat is reopened; Esc closes it.");
 } catch (error) {
   if (page) {
     console.error("HOST", await page.evaluate(() => (window.demesneInspect?.() as { host?: unknown })?.host));

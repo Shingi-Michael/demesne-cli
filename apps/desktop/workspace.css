@@ -1160,7 +1160,13 @@ body.desktop *, .desktop .live-app:not(.start) .stage { scrollbar-width: none; }
 body.desktop ::-webkit-scrollbar { display: none; width: 0; height: 0; }
 body.desktop :is(pre, .diff, .rv-diff, .step-fold, .pv-view) { scrollbar-width: thin; scrollbar-color: var(--hair2) transparent; }
 /* The composer is a tint inside the panel, not a box on a shadow. */
-.desktop #composer .composer-box { border: 0; border-radius: 12px; background: var(--tone); box-shadow: 0 0 0 1px var(--hair); }
+.desktop #composer .composer-box { border: 0; border-radius: var(--composer-radius, 12px); background: var(--tone); box-shadow: 0 0 0 1px var(--hair); }
+/* Match Home's glass and controls to the textbox's painted outer edge.
+   Its existing ring extends 1px beyond its layout box on each side. Keep the
+   textbox at its original width and widen the borderless lower surface to it. */
+.desktop .live-app.start #composer { --composer-radius: 12px; width: calc(100% + 2px); margin-inline: -1px; border-radius: var(--composer-radius); }
+.desktop .live-app.start #composer .composer-box { margin-inline: 1px; }
+.desktop .live-app.start #composer .composer-bar { box-sizing: border-box; width: 100%; min-width: 0; align-self: stretch; border-radius: 0 0 var(--composer-radius) var(--composer-radius); }
 .desktop #composer .composer-box:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair2)); }
 .desktop #composer.queued .composer-box { box-shadow: 0 0 0 1px var(--composerQueuedBorder); }
 .desktop #composer.restored .composer-box { box-shadow: 0 0 0 1px var(--composerRestoredBorder); }

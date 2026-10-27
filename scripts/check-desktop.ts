@@ -381,6 +381,13 @@ try {
   await textIncludes("The streamed update arrived.");
   finishThought();
   await textIncludes("Thinking check complete.");
+  await page.locator("textarea").fill("");
+  await page.locator("textarea").press("ArrowUp");
+  assert.equal(await page.locator("textarea").inputValue(), thinkingPrompt, "Up recalls the last prompt into an empty composer");
+  await page.locator("textarea").fill("Keep this draft");
+  await page.locator("textarea").press("ArrowUp");
+  assert.equal(await page.locator("textarea").inputValue(), "Keep this draft", "Up never replaces an existing draft");
+  await page.locator("textarea").fill("");
   await click("toggle-steps");
   await trace.waitFor({ state: "visible" });
   await thinkingToggle.click();

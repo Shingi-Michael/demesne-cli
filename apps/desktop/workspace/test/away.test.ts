@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { awaySentences, lastAsk, sinceWords, waitingAsk, type AwayInput, type AwayPart } from "../away.ts";
+import { awaySentences, lastAsk, lastPrompt, sinceWords, waitingAsk, type AwayInput, type AwayPart } from "../away.ts";
 
 const base: AwayInput = {
   now: new Date(2026, 9, 24, 9, 0).getTime(),
@@ -61,6 +61,13 @@ test("reads what an approval wants from its summary", () => {
 test("the last thing you asked skips Drive, mail and compactions", () => {
   expect(lastAsk([{ content: "make the folder rows match the mock\nmore" }, { content: "Continue", fromDrive: true }, { content: "summary", kind: "compaction" }])).toBe("make the folder rows match the mock");
   expect(lastAsk([])).toBe("");
+});
+
+test("prompt recall preserves full text and ignores background and empty turns", () => {
+  const prompt = `First line\n${"Full prompt. ".repeat(30)}\nLast line`;
+  expect(lastPrompt([{ content: "Older prompt" }, { content: prompt }, { content: "Continue", fromDrive: true }, { content: "summary", kind: "compaction" }, { content: "   " }])).toBe(prompt);
+  expect(lastPrompt([])).toBe("");
+  expect(lastPrompt([{ content: "Continue", fromDrive: true }])).toBe("");
 });
 
 test("since words", () => {

@@ -89,6 +89,7 @@ try {
     allowlistPath: process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(),
     mcpServers: config.mcp.servers,
     heartbeat: config.heartbeat,
+    assistantFolders: config.assistant?.folders,
     images: config.images,
     providerVision: config.provider.vision,
     agent: config.agent,

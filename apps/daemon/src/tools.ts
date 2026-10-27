@@ -366,7 +366,7 @@ export function readWorkspaceText(workspaceRoot: string, path: string): import("
 const WHOLE_FILE_LINES = 600;
 const MIN_READ_WINDOW = 200;
 
-async function readSingleFile(
+export async function readSingleFile(
   workspaceRoot: string,
   path: string,
   offset: number,

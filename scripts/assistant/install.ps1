@@ -9,6 +9,8 @@
 #   -LlamaServer PATH  llama-server.exe from a HIP (Radeon) build of llama.cpp (default: the one on PATH)
 #   -Demesned PATH     a built daemon (default: dist\demesned.exe, else bun from source)
 #   -Config            also write assistant.toml to %USERPROFILE%\.demesne\config.toml (backs up the old one)
+#   -AssistantHome PATH  the assistant's own folder (default: %USERPROFILE%\Assistant); its DEMESNE.md is
+#                      created from home\DEMESNE.md if missing, and never overwritten
 #   -DryRun            print what would be installed, and change nothing
 
 param(
@@ -16,6 +18,7 @@ param(
   [string] $LlamaServer,
   [string] $Demesned,
   [switch] $Config,
+  [string] $AssistantHome = (Join-Path $HOME 'Assistant'),
   [switch] $DryRun
 )
 $ErrorActionPreference = 'Stop'
@@ -54,6 +57,7 @@ if ($DryRun) {
     ''
   }
   if ($Config) { "# Would copy assistant.toml to $(Join-Path $HOME '.demesne\config.toml')" }
+  "# The assistant's folder: $AssistantHome"
   return
 }
 
@@ -86,7 +90,14 @@ if ($Config) {
   Copy-Item -LiteralPath (Join-Path $here 'assistant.toml') -Destination $configPath -Force
 }
 
+# The assistant's own folder, with its instructions. Yours to edit, so an
+# existing DEMESNE.md is left alone.
+New-Item -ItemType Directory -Force -Path $AssistantHome | Out-Null
+$instructions = Join-Path $AssistantHome 'DEMESNE.md'
+if (-not (Test-Path -LiteralPath $instructions)) { Copy-Item -LiteralPath (Join-Path $here 'home\DEMESNE.md') -Destination $instructions }
+
 Start-ScheduledTask -TaskPath '\Demesne\' -TaskName 'llama-server'
 Start-ScheduledTask -TaskPath '\Demesne\' -TaskName 'demesned'
 "Started. Check them with: Get-ScheduledTask -TaskPath \Demesne\"
 "Logs are in $state"
+"The assistant's folder is $AssistantHome. Open it as a project in Demesne and fill in DEMESNE.md."

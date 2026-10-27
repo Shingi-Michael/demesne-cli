@@ -30,6 +30,6 @@ describe("assistant services", () => {
   test("the installer fills in the model and names files that exist", () => {
     expect(serverArgs.get("--model")).toBe("@MODEL@");
     const installer = readFileSync(join(assistant, "install.ps1"), "utf8");
-    for (const file of installer.matchAll(/Join-Path \$here '(\w[^']+)'/g)) expect(() => readFileSync(join(assistant, file[1]!))).not.toThrow();
+    for (const file of installer.matchAll(/Join-Path \$here '(\w[^']+)'/g)) expect(() => readFileSync(join(assistant, ...file[1]!.split("\\")))).not.toThrow();
   });
 });

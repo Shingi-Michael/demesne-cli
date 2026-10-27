@@ -67,6 +67,7 @@ import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
 import { Routines } from "./routines.ts";
+import { personalFilesTool } from "./personal-files.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
 import { selfBuildContext } from "./self-build-in-chat.ts";
 import { checkClaim, proofPass } from "./proofs.ts";
@@ -133,6 +134,8 @@ export function createDaemonApp(options: {
   mcpServers?: Record<string, McpServerConfig>;
   /// Join Heartbeat, the agent message bus, when its daemon runs here.
   heartbeat?: HeartbeatConfig;
+  /// Folders outside any project that the assistant may read, by name.
+  assistantFolders?: Record<string, string>;
   images?: ImageGenerationConfig;
   contextPlanner?: ContextPlanner;
   providerFirstEventTimeoutMs?: number;
@@ -269,6 +272,7 @@ export function createDaemonApp(options: {
   if (options.images?.url && options.images.model) tools.register(imageGenerationTool(options.images, store));
   tools.register(foundrySaveTool(store));
   tools.register(foundryReadTool(store));
+  if (Object.keys(options.assistantFolders ?? {}).length) tools.register(personalFilesTool(options.assistantFolders!));
   const mcp = new McpManager({
     servers: options.mcpServers ?? {},
     log: (message) => console.warn(message),

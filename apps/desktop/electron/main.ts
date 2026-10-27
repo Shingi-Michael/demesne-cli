@@ -1,7 +1,8 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, shell } from "electron";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
@@ -27,6 +28,7 @@ async function quit() {
   if (quitting) return;
   quitting = true;
   log("exit requested");
+  try { unlinkSync(join(homedir(), ".demesne", "desktop.pid")); } catch {}
   await backend?.close();
   exited = true;
   app.quit();
@@ -59,6 +61,47 @@ void app.whenReady().then(async () => {
   // Only a zoom chosen in this app counts: the redesign is drawn at its own
   // size, so a level inherited from the previous shell is dropped once.
   try { const saved = JSON.parse(readFileSync(zoomPath, "utf8")); if (saved.version === ZOOM_VERSION && ZOOM_LEVELS.includes(saved.zoom)) zoom = saved.zoom; } catch {}
+  /// Persisted marker used to detect that the installed app was replaced by a
+  /// newer version, so the running renderer reloads to load it instead of
+  /// serving stale code.
+  const versionMarker = join(app.getPath("userData"), "version.json");
+  function persistedVersion(): string | null {
+    try { const value = JSON.parse(readFileSync(versionMarker, "utf8")); return typeof value.version === "string" ? value.version : null; } catch { return null; }
+  }
+  function persistVersion(version: string): void {
+    try { writeFileSync(versionMarker, JSON.stringify({ version }) + "\n", { encoding: "utf8" }); } catch { /* best effort */ }
+  }
+  const currentVersion = app.getVersion();
+  const previousVersion = persistedVersion();
+  let updatePending = previousVersion !== null && previousVersion !== currentVersion;
+  persistVersion(currentVersion);
+  const desktopPidFile = join(homedir(), ".demesne", "desktop.pid");
+  try {
+    mkdirSync(dirname(desktopPidFile), { recursive: true });
+    writeFileSync(desktopPidFile, `${process.pid}\n`, "utf8");
+  } catch {}
+  function reloadRenderer(reason: string) {
+    if (!window || window.isDestroyed()) return;
+    log(`hot reloading renderer (${reason})`);
+    window.webContents.reload();
+  }
+  const reloadMarker = join(homedir(), ".demesne", "desktop.reload");
+  let reloadDebounce: ReturnType<typeof setTimeout> | null = null;
+  try {
+    if (!existsSync(reloadMarker)) {
+      mkdirSync(dirname(reloadMarker), { recursive: true });
+      writeFileSync(reloadMarker, "", "utf8");
+    }
+    const reloadWatcher = watch(reloadMarker, () => {
+      if (reloadDebounce) clearTimeout(reloadDebounce);
+      reloadDebounce = setTimeout(() => reloadRenderer("desktop.reload file modified"), 300);
+      reloadDebounce.unref?.();
+    });
+    app.on("before-quit", () => reloadWatcher.close());
+  } catch {}
+  if (process.platform !== "win32") {
+    process.on("SIGUSR1", () => reloadRenderer("SIGUSR1 signal"));
+  }
   const glass = desktopBlurs(process.platform, process.env);
   window = new BrowserWindow({
     width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#161617",
@@ -117,6 +160,10 @@ void app.whenReady().then(async () => {
     if (quitting) throw new Error("The desktop app is closing");
     if (method === "desktop-ready") { window?.show(); window?.focus(); return null; }
     if (method === "quit" || method === "desktop-quit") { void quit(); return null; }
+    // Hot reload the renderer when the installed app has been updated, so the
+    // running window loads the new UI without the user relaunching. The host
+    // process (and its daemon-owned turns) survives the renderer reload.
+    if (method === "desktop-reload") { reloadRenderer("desktop-reload request"); return null; }
     // The Dock icon counts the chats that need you (macOS and Linux docks).
     if (method === "desktop-badge") {
       const count = Number((args as Record<string, unknown>).count);
@@ -233,6 +280,9 @@ void app.whenReady().then(async () => {
   });
   await window.loadURL(APP_URL);
   contents.setZoomFactor(zoom);
+  // An update replaced the installed app: reload the renderer once so it loads
+  // the new UI. The host process survives the renderer reload.
+  if (updatePending) window.webContents.reload();
   // Also show initialization errors if the host cannot bootstrap.
   window.show();
 }).catch(error => { log(String(error)); dialog.showErrorBox("Demesne could not start", String(error)); void quit(); });

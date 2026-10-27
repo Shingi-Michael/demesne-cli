@@ -2,7 +2,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { ConfigError, loadConfig, updateUserConfig, userConfigPath, type ProviderConfig } from "@demesne/config";
 import { MultiProviderProcessor } from "./multi-provider-processor.ts";
@@ -70,6 +70,14 @@ if (runtimeProfileRequiresSingleInferenceSlot(configuredRuntimeProfile) && (conf
 }
 const dataDirectory = prepareDataDirectory(config.dataDir);
 const dataDirectoryLock = acquireDataDirectoryLock(dataDirectory);
+// The daemon binary's stat at startup; reload() compares it to detect when an
+// updater has replaced the binary with a new version.
+let initialBinaryStat: { mtimeMs: number; size: number } | undefined;
+try {
+  const binaryStat = statSync(process.execPath);
+  initialBinaryStat = { mtimeMs: binaryStat.mtimeMs, size: binaryStat.size };
+} catch { /* the running source/binary cannot be stat'd; skip update detection */ }
+
 let app: ReturnType<typeof createDaemonApp>;
 const processor = createProcessor(await signedInAccounts());
 let server: ReturnType<typeof Bun.serve>;
@@ -87,6 +95,8 @@ try {
     inferenceSlots,
     providerInferenceSlots,
     allowlistPath: process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(),
+    configFile: configFiles.user ?? null,
+    initialBinaryStat,
     mcpServers: config.mcp.servers,
     heartbeat: config.heartbeat,
     images: config.images,
@@ -106,8 +116,30 @@ try {
 
 console.log(`demesned ${VERSION} listening on ${server.url}`);
 
+// Watch the user config file and hot-reload providers/theme when it changes
+// (for example after an update rewrites it). Debounced so a rapid save does
+// not reload more than once.
+let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+let configWatcher: ReturnType<typeof watch> | null = null;
+function scheduleConfigReload(): void {
+  if (reloadTimer) clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => {
+    reloadTimer = null;
+    void app.reload().then((report) => {
+      console.log(`daemon config reloaded: providers=${report.providers ? "switched" : "unchanged"}, theme=${report.theme.changed ? "changed" : "unchanged"}, binaryUpdated=${report.binaryUpdated}`);
+    }).catch((error) => console.warn(`daemon config auto-reload failed: ${error instanceof Error ? error.message : String(error)}`));
+  }, 1000);
+  reloadTimer.unref?.();
+}
+if (configFiles.user) {
+  try { configWatcher = watch(configFiles.user, () => scheduleConfigReload()); }
+  catch { /* watching the config is optional; reload on request still works */ }
+}
+
 async function shutdown(): Promise<void> {
   try {
+    configWatcher?.close();
+    if (reloadTimer) clearTimeout(reloadTimer);
     await server.stop(true);
     await app.close();
   } finally {

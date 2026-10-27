@@ -78,15 +78,26 @@ import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath
 import { imageGenerationTool } from "./image-generation.ts";
 import { captureWindowTool } from "./window-capture.ts";
 import { workspaceFileChanges, workspaceFileInfo } from "./workspace-file-info.ts";
+import { loadConfig, type LoadedConfig } from "@demesne/config";
 import type { AgentConfig, HeartbeatConfig, ImageGenerationConfig } from "@demesne/config";
 import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, InferenceSchedulers } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 export { PlaceholderTurnProcessor, type TurnProcessor } from "./processor.ts";
+
+export interface ReloadReport {
+  providers: { switched: boolean; restored?: boolean; model: string; provider: string; previous: { model: string; provider: string } } | null;
+  /// Whether the configured theme differed from the selected one and was re-selected.
+  theme: { changed: boolean; selected: string };
+  /// Whether the daemon binary on disk changed since the daemon started; an
+  /// updater should restart the process to run the new code.
+  binaryUpdated: boolean;
+  reloadedAt: string;
+}
 
 type EventListener = (event: EventEnvelope) => void;
 
@@ -113,6 +124,9 @@ export interface DaemonApp {
   /// Resolves once configured MCP servers have started and registered tools.
   ready: Promise<void>;
   close(): Promise<void>;
+  /// Re-reads the user config and re-applies whatever can change without a
+  /// restart (providers and theme). Returns a report of what changed.
+  reload(): Promise<ReloadReport>;
 }
 
 export function createDaemonApp(options: {
@@ -148,6 +162,10 @@ export function createDaemonApp(options: {
   saveSubagentModel?: (model: string | null) => void;
   /// Where breakage fixes get their git worktrees (default: beside the data directory).
   worktreeRoot?: string;
+  /// The user config file to re-read on reload; null skips config re-loading.
+  configFile?: string | null;
+  /// The daemon binary's stat at startup, used to detect a binary update on reload.
+  initialBinaryStat?: { mtimeMs: number; size: number } | null;
 }): DaemonApp {
   if (options.images && Object.values(options.images).some((value) => value !== undefined)
     && (!options.images.url || !options.images.model)) throw new Error("Image generation requires both images.url and images.model");
@@ -623,6 +641,42 @@ export function createDaemonApp(options: {
     return json({ rewindId: rewind.id, files: rewind.files.map((file) => file.path), eventId: event.eventId });
   }
 
+  /// Re-reads the user config and re-applies whatever can change without a
+  /// restart: providers and theme. The configured system prompt, provider
+  /// timeouts and inference slots are captured when the daemon starts and
+  /// require a restart to change, so reload() only reports what it applies.
+  async function reload(): Promise<ReloadReport> {
+    let fresh: LoadedConfig;
+    try {
+      fresh = loadConfig({ includeProject: false, userConfigPath: options.configFile });
+    } catch (error) {
+      throw new Error(`Cannot reload configuration: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    let providers: ReloadReport["providers"] = null;
+    if (options.reloadProviders) {
+      providers = await options.reloadProviders();
+    }
+    const current = themes.snapshot();
+    /// `auto` is a policy resolved at startup, not a stored theme selection;
+    /// only a concrete theme name that differs from the current one is re-applied.
+    const configuredTheme = fresh.config.theme;
+    let theme = { changed: false, selected: current.selected.name };
+    if (configuredTheme && configuredTheme !== "auto" && configuredTheme !== current.selected.name) {
+      themes.select(configuredTheme);
+      theme = { changed: true, selected: configuredTheme };
+    }
+    let binaryUpdated = false;
+    if (options.initialBinaryStat) {
+      try {
+        const currentStat = statSync(process.execPath);
+        if (currentStat.mtimeMs !== options.initialBinaryStat.mtimeMs || currentStat.size !== options.initialBinaryStat.size) {
+          binaryUpdated = true;
+        }
+      } catch { /* stat failed; treat as no change */ }
+    }
+    return { providers, theme, binaryUpdated, reloadedAt: new Date().toISOString() };
+  }
+
   async function fetch(request: Request): Promise<Response> {
     if (closing) return apiError("shutting_down", "Daemon is shutting down", 503);
     activeRequests += 1;
@@ -940,6 +994,13 @@ export function createDaemonApp(options: {
         if (!options.reloadProviders) return apiError("not_supported", "This daemon can't reload providers", 400);
         try { return json(await options.reloadProviders()); }
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not reload providers", 409); }
+      }
+
+      // Reload the daemon configuration on an update: providers and theme take
+      // effect without restarting the process.
+      if (request.method === "POST" && url.pathname === "/v1/daemon/reload") {
+        try { return json(await reload()); }
+        catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not reload daemon", 409); }
       }
 
       if (request.method === "POST" && url.pathname === "/v1/model") {
@@ -1494,6 +1555,7 @@ export function createDaemonApp(options: {
 
   return {
     fetch,
+    reload,
     ready: mcpReady,
     close() {
       closePromise ??= closeApplication();

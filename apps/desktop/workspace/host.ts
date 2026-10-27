@@ -219,6 +219,7 @@ export class WorkspaceHost {
   private watchedCommand = "none";
   private polling: Promise<void> | null = null;
   connection: "connecting" | "online" | "offline" = "connecting";
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   error: string | null = null;
   /// The workspace waiting for the user's "Do you trust this folder?" answer.
   untrustedWorkspace: string | null = null;
@@ -443,6 +444,10 @@ export class WorkspaceHost {
       } catch { this.chatgptAccount = null; }
       this.sessions = await this.client.listSessions();
       this.connection = "online";
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
       if (this.selectedSession) await this.select(this.selectedSession);
       else if (this.options.home === "plain") await this.newSession(undefined, { plain: true, reuse: true });
       else {
@@ -472,7 +477,17 @@ export class WorkspaceHost {
       this.connection = "offline";
       this.error = error instanceof Error ? error.message : String(error);
       this.publish();
+      this.scheduleReconnect();
     }
+  }
+  private scheduleReconnect() {
+    if (this.disposed || this.reconnectTimer || this.connection === "online") return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.disposed || this.connection === "online") return;
+      void this.connect().catch(() => {});
+    }, 1500);
+    this.reconnectTimer.unref?.();
   }
   private daemonControl() {
     const host = new URL(this.client.server).hostname;
@@ -1979,6 +1994,10 @@ export class WorkspaceHost {
     this.stopFollowingDrive();
     this.setup?.dispose();
     this.disposed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
     if (this.agentsTimer) clearTimeout(this.agentsTimer);
     this.generation++;

@@ -60,6 +60,7 @@ try {
     env: { ...f.env, DEMESNE_BUN: process.execPath }, timeout: 30000 });
   page = await desktop.firstWindow();
   page.setDefaultTimeout(10000);
+  await page.bringToFront();
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.locator("#composer-model").waitFor();
@@ -80,13 +81,17 @@ try {
   const artifact = (await f.client.foundryList()).artifacts[0]!;
   assert.equal(artifact.workspace, null, "No project is required");
   await frame.getByRole("button", { name: "Plant an idea" }).click();
+  await frame.getByRole("button", { name: "Planted 1" }).waitFor();
+  console.log("Initial inline interaction passed.");
   await frame.getByRole("textbox", { name: "Your idea" }).fill("Keep my idea");
   response.resolve();
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
+  console.log("Streaming completion kept preview state.");
   assert.equal(await frame.getByRole("textbox", { name: "Your idea" }).inputValue(), "Keep my idea");
   await page.locator('[data-action="toggle-steps"]').first().click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
+  console.log("Step folding kept preview state.");
   await card.getByRole("button", { name: "Phone", exact: true }).click();
   await card.getByRole("button", { name: "Code", exact: true }).click();
   await card.locator(".fd-chat-code").filter({ hasText: "window.plants=0" }).waitFor();

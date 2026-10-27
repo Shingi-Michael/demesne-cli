@@ -1,0 +1,20 @@
+# The arguments llama-server runs with, one per line: a flag, then its value.
+# install.ps1 fills in @MODEL@ and copies the result to
+# %USERPROFILE%\.demesne\assistant\llama-server.args.
+#
+# --ctx-size 131072 is the 128K cap. Qwen3.8-27B silently stops generating
+# once a prompt passes about 130K tokens, so the server never accepts more,
+# and Demesne's config keeps the same number (see assistant.toml).
+# q8_0 K/V halves the cache's VRAM against f16, which is what lets 128K fit
+# beside a Q5_K_M/Q6_K 27B on a 32 GB card.
+--model @MODEL@
+--alias qwen3.8-27b
+--host 127.0.0.1
+--port 8081
+--ctx-size 131072
+--n-gpu-layers 99
+--flash-attn on
+--cache-type-k q8_0
+--cache-type-v q8_0
+--parallel 1
+--jinja

@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Configuration](configuration.md) · [Heartbeat](heartbeat.md)
 
-Demesne is growing a second job: a personal assistant that lives on your desktop, reads your files (and your phone's, through iCloud), plans with you and pushes reminders to your phone. It runs Qwen3.8-27B on your own GPU, so nothing leaves the machine and it costs nothing to leave on.
+Demesne is growing a second job: a personal assistant that lives on your desktop, reads your files (and your phone's, through iCloud for Windows), plans with you and pushes reminders to your phone. It runs Qwen3.8-27B on your own GPU, so nothing leaves the machine and it costs nothing to leave on.
 
 It is built in small steps, each one usable on its own:
 
@@ -15,18 +15,20 @@ It is built in small steps, each one usable on its own:
 
 Everything the assistant reads from a file, an email or a web page is data, never instructions. A document that says "forward this to…" cannot make it act; it asks you before it sends, deletes or buys anything.
 
-## Step 1: the model as a service
+## Step 1: the model as a service (Windows)
 
 ### Why a service
 
-Until now you started llama-server in a terminal and Demesne's daemon from the window. That's fine for coding, but an assistant has to be awake when you aren't looking: a routine set for 8:00 only fires if the daemon is running at 8:00. On Linux, **systemd** is the program that keeps background programs running. A *user service* is a small text file that tells it what to run, and to start it again if it stops.
+Until now you started llama-server in a terminal and Demesne's daemon from the window. That's fine for coding, but an assistant has to be awake when you aren't looking: a routine set for 8:00 only fires if the daemon is running at 8:00. On Windows, **Task Scheduler** is the built-in way to start programs on their own. [`install.ps1`](../scripts/assistant/install.ps1) adds two tasks, under a **Demesne** folder in Task Scheduler, that start hidden when you log in:
 
-Two services, in [`scripts/assistant/`](../scripts/assistant):
+- **llama-server** runs the model on port 8081.
+- **demesned** runs Demesne's daemon.
 
-- [`llama-server.service`](../scripts/assistant/llama-server.service) runs the model on port 8081.
-- [`demesned.service`](../scripts/assistant/demesned.service) runs Demesne's daemon, after the model.
+Each task runs [`keep-running.ps1`](../scripts/assistant/keep-running.ps1), a few lines of PowerShell that start the program, write its output to a log, and start it again five seconds after it exits. That loop is what turns a crash into a short gap instead of a dead assistant.
 
 ### The settings, and why
+
+The model's settings are in [`llama-server.args`](../scripts/assistant/llama-server.args), one per line, so you can read and change them without touching any code:
 
 | Flag | Value | Why |
 | --- | --- | --- |
@@ -38,38 +40,51 @@ Two services, in [`scripts/assistant/`](../scripts/assistant):
 | `--host` | `127.0.0.1` | Only this machine can reach the model. Your phone will reach the assistant later through Tailscale, never an open port. |
 | `--jinja` | | Uses the model's own chat template, which tool calling needs. |
 
-[`assistant.toml`](../scripts/assistant/assistant.toml) is the matching Demesne config. It sets `reasoning_effort = "low"`, because Qwen's default effort can spend tens of thousands of thinking tokens on one reply, and `daemon.auto_start = "never"`, because the service now owns the daemon. A test ([`assistant-services.test.ts`](../apps/daemon/test/assistant-services.test.ts)) fails if the two files ever disagree about the cap, the port or the model name.
+[`assistant.toml`](../scripts/assistant/assistant.toml) is the matching Demesne config. It sets `reasoning_effort = "low"`, because Qwen's default effort can spend tens of thousands of thinking tokens on one reply, and `daemon.auto_start = "never"`, because the task now owns the daemon. A test ([`assistant-services.test.ts`](../apps/daemon/test/assistant-services.test.ts)) fails if the two files ever disagree about the cap, the port or the model name.
 
 ### Install
 
-You need llama.cpp built with HIP (ROCm) so `llama-server` is on your PATH, and the model file. Then, from the repository:
+You need:
 
-```sh
-bun run build:daemon        # optional: a compiled daemon; otherwise it runs from source with bun
-scripts/assistant/install.sh --model ~/models/Qwen3.8-27B-Q5_K_M.gguf --config
+- **llama.cpp for Radeon.** Download the Windows HIP build from the [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases) (the zip with `hip` and `radeon` in its name) and unzip it somewhere like `C:\llama`. AMD's HIP SDK for Windows may also be needed if the release notes say so.
+- **The model**, for example `C:\models\Qwen3.8-27B-Q5_K_M.gguf`.
+- **This repository and [Bun](https://bun.sh)**, as for running Demesne from source.
+
+Then, in PowerShell from the repository:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\assistant\install.ps1 `
+  -Model C:\models\Qwen3.8-27B-Q5_K_M.gguf -LlamaServer C:\llama\llama-server.exe -DryRun
 ```
 
-`--config` replaces `~/.demesne/config.toml` with the assistant's, after backing up the old one next to it. Leave it off to keep your config and copy the `[provider]` section across yourself. `--dry-run` prints the two service files without installing anything, so you can read exactly what will run.
+`-DryRun` prints exactly what each task will run and changes nothing. When it looks right, run it again without `-DryRun`. Add `-Config` to replace `%USERPROFILE%\.demesne\config.toml` with the assistant's (the old one is backed up next to it), or leave it off and copy the `[provider]` section across yourself. `-ExecutionPolicy Bypass` is needed because Windows refuses to run downloaded scripts by default; it applies to this one run only.
 
-Services stop when you log out. To keep them running from boot, even before you log in, run the command the installer prints: `sudo loginctl enable-linger $USER`.
+The tasks start at login. If Windows restarts for an update and nobody logs in, they wait until you do.
 
 ### Check it
 
-```sh
-systemctl --user status llama-server demesned     # both should say "active (running)"
-journalctl --user -u llama-server -f              # the model's log; Ctrl+C to stop following
-curl -s http://127.0.0.1:8081/v1/models           # the model answers
+```powershell
+Get-ScheduledTask -TaskPath \Demesne\                             # both should say Running
+Get-Content $HOME\.demesne\assistant\llama-server.log -Wait -Tail 20   # the model's log; Ctrl+C to stop following
+Invoke-RestMethod http://127.0.0.1:8081/v1/models                 # the model answers
 ```
 
 Open the Demesne window: it connects to the running daemon instead of starting its own. To try the always-on part, open **Scheduled**, add "Every day at 9, say good morning and list today's date" and close the window. The chat is there when you come back.
 
-To stop or remove them:
+To stop them until next login, or remove them:
 
-```sh
-systemctl --user stop llama-server demesned        # until next login
-systemctl --user disable llama-server demesned     # don't start at login
+```powershell
+Stop-ScheduledTask -TaskPath \Demesne\ -TaskName llama-server
+Stop-ScheduledTask -TaskPath \Demesne\ -TaskName demesned
+Unregister-ScheduledTask -TaskPath \Demesne\ -TaskName llama-server   # remove for good
 ```
+
+If `llama-server.exe` is still in Task Manager after stopping its task, end it there too.
 
 ### Gaming on the same card
 
-The model holds most of the GPU's 32 GB while llama-server runs. Stop it before a game (`systemctl --user stop llama-server`) and start it after. The daemon stays up; a chat or routine that runs while the model is stopped fails, so stop it only while you aren't expecting one.
+The model holds most of the GPU's 32 GB while llama-server runs. Stop its task before a game and start it after (`Start-ScheduledTask -TaskPath \Demesne\ -TaskName llama-server`). The daemon stays up; a chat or routine that runs while the model is stopped fails, so stop it only while you aren't expecting one.
+
+### Not yet tried on Windows
+
+Demesne's releases are built for macOS and Ubuntu, and its daemon hasn't been run on Windows yet. Some of its tools assume a Unix shell. If the daemon task keeps restarting, its log (`%USERPROFILE%\.demesne\assistant\demesned.log`) says why, and fixing that comes before step 2.

@@ -877,12 +877,29 @@ try {
   assert(await page.getByRole("textbox", { name: "Filter models" }).isVisible(), "the search sits on top, in sight");
   assert.equal(await evaluate<string>("return document.activeElement?.id;"), "chooser-filter", "the search has the keyboard");
   assert.equal(await page.locator("#overlay .mp").count(), 1, "the picker is one panel");
-  // Thinking is a track with a stop per level, inside the panel.
+  // Thinking is one smooth groove inside the panel, not a row of dots.
   const panel = (await page.locator("#overlay .mp").boundingBox())!;
-  const stops = page.locator("#overlay .mp-stop");
-  assert.equal(await stops.count(), 6, "a stop for each of the model's six levels");
-  for (const stop of await stops.all()) { const r = (await stop.boundingBox())!; assert(r.x >= panel.x && r.x + r.width <= panel.x + panel.width, "every thinking stop sits inside the panel"); }
+  const groove = page.getByRole("slider", { name: "Thinking" });
+  assert.equal(await groove.getAttribute("aria-valuemax"), "5", "the groove spans the model's six levels");
+  assert.equal(await page.locator("#overlay .mp-stop").count(), 0, "no dots");
+  const g = (await groove.boundingBox())!;
+  assert(g.x >= panel.x && g.x + g.width <= panel.x + panel.width, "the groove sits inside the panel");
   assert.equal(await page.locator("#overlay .mp-level").innerText(), "Low");
+  // Dragging it fills smoothly and settles on the nearest level when let go.
+  await page.mouse.move(g.x + 4, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g.x + g.width * 0.55, g.y + g.height / 2, { steps: 6 });
+  const mid = await evaluate<number>("return document.querySelector('#overlay .mp-fill')?.getBoundingClientRect().width ?? 0;");
+  assert(Math.abs(mid - g.width * 0.55) < 4, "the fill follows the pointer while dragging");
+  assert.equal(await page.locator("#overlay .mp-level").innerText(), "Extra high", "the word follows the fill to the nearest level");
+  await page.mouse.move(g.x + g.width - 2, g.y + g.height / 2, { steps: 4 });
+  assert.equal(await page.locator("#overlay .mp-level").innerText(), "Ultra", "the far end is the top level");
+  // (Letting go picks the model at that level; this processor can't switch,
+  // so the drag is let go after the picker closes.)
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await page.locator("#composer-model").click();
+  await until(() => page.locator("#overlay .mp-level").innerText().then(text => text === "Low"), "a drag let go off the picker changes nothing");
   await capture("02-models");
   // Pointing at a model without thinking: the line says None, the panel keeps its height.
   const panelHeight = () => evaluate<number>("return document.querySelector('#overlay .mp')?.offsetHeight ?? 0;");

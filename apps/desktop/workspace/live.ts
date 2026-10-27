@@ -3500,14 +3500,15 @@ function renderModelPopover(hidden: number) {
     levels = model?.reasoningLevels ?? [],
     level = model ? modelLevel(model) : undefined,
     at = level ? levels.indexOf(level) : -1;
-  // One stop per level; the line stays (flat, None) for a model without
-  // thinking, so the panel keeps its height as you move down the list.
-  const stops = levels.map((item, index) => btn("model", '<i aria-hidden="true"></i>', { id: model!.id, reasoning: item }, `mp-stop${index < at ? " on" : index === at ? " at" : ""}`)
-    .replace("<button ", `<button title="${h(levelWord(item))}" aria-label="${h(`Thinking ${levelWord(item)}`)}" aria-pressed="${index === at}" `)).join("");
-  // Stop i sits at the middle of its share of the track; the fill runs from
-  // the first stop to the chosen one.
-  const fill = at > 0 ? `<span class="mp-fill" style="width:calc(${at} * 100% / ${levels.length})"></span>` : "";
-  const thinking = `<div class="mp-thinking" title="←→ change it"><span class="mp-thinking-label">Thinking</span><span class="mp-track${levels.length ? "" : " none"}" style="--stops:${Math.max(1, levels.length)}" role="group" aria-label="Thinking">${fill}${stops}</span><span class="mp-level${levels.length ? "" : " off"}">${levels.length && level ? h(levelWord(level)) : "None"}</span></div>`;
+  // Thinking is one groove that fills from the left (pass 77): the fill's
+  // edge is the handle. Drag it, click anywhere on it, or use ←→; it settles
+  // on the nearest level. A model without thinking keeps the groove empty,
+  // reading None, so the panel keeps its height as you move down the list.
+  const n = levels.length, share = (index: number) => ((index + 1) / Math.max(1, n)) * 100;
+  const notches = levels.slice(1).map((_, index) => `<span class="mp-notch${index <= at ? " in" : ""}" style="left:${share(index)}%"></span>`).join("");
+  const thinking = n && model
+    ? `<div class="mp-thinking" role="slider" tabindex="-1" aria-label="Thinking" aria-valuemin="0" aria-valuemax="${n - 1}" aria-valuenow="${Math.max(0, at)}" aria-valuetext="${h(level ? levelWord(level) : "")}" data-model="${h(model.id)}" data-levels="${h(JSON.stringify(levels))}" title="Drag, click or ←→"><span class="mp-fill" style="width:${at >= 0 ? share(at) : 0}%"></span>${notches}<span class="mp-thinking-label">Thinking</span><span class="mp-level">${level ? h(levelWord(level)) : ""}</span></div>`
+    : `<div class="mp-thinking none"><span class="mp-thinking-label">Thinking</span><span class="mp-level off">None</span></div>`;
   const short = rows.filter(([row]) => row.kind === "short").map(([row, index]) => item(row, index)).join("");
   const rest = rows.filter(([row]) => row.kind === "rest").map(([row, index]) => item(row, index)).join("");
   const more = rows.filter(([row]) => row.kind === "more").map(([row, index]) => item(row, index)).join("");
@@ -5143,10 +5144,56 @@ document.addEventListener("input", (event) => {
   }
   if (input.closest("#setup")) setupInput(input);
 });
+/// Dragging the thinking groove: the fill follows the pointer, and letting
+/// go settles on the nearest level and picks the model at that level. The
+/// groove is found again on every move, since the picker may redraw.
+let thinkingDrag: { pointer: number; model: string; levels: string[] } | null = null;
+const grooveOf = () => el("overlay").querySelector<HTMLElement>(".mp-thinking[data-levels]");
+function grooveAt(groove: HTMLElement, x: number, count: number) {
+  const box = groove.getBoundingClientRect(), f = Math.max(0, Math.min(1, (x - box.left) / Math.max(1, box.width)));
+  return { f, index: Math.max(0, Math.min(count - 1, Math.ceil(f * count) - 1)) };
+}
+function paintGroove(groove: HTMLElement, f: number, index: number, levels: string[]) {
+  const fill = groove.querySelector<HTMLElement>(".mp-fill"), word = groove.querySelector<HTMLElement>(".mp-level");
+  if (fill) fill.style.width = `${Math.max(6, f * 100)}%`;
+  groove.querySelectorAll<HTMLElement>(".mp-notch").forEach((notch, k) => notch.classList.toggle("in", ((k + 1) / levels.length) * 100 <= f * 100 + 2));
+  if (word && word.textContent !== levelWord(levels[index]!)) word.textContent = levelWord(levels[index]!);
+  groove.setAttribute("aria-valuenow", String(index));
+  groove.setAttribute("aria-valuetext", levelWord(levels[index]!));
+}
+document.addEventListener("pointerdown", (event) => {
+  const groove = (event.target as Element).closest?.<HTMLElement>("#overlay .mp-thinking[data-levels]");
+  if (!groove || event.button !== 0) return;
+  event.preventDefault();
+  const levels = JSON.parse(groove.dataset.levels ?? "[]") as string[];
+  if (!levels.length) return;
+  thinkingDrag = { pointer: event.pointerId, model: groove.dataset.model ?? "", levels };
+  groove.classList.add("drag");
+  const { f, index } = grooveAt(groove, event.clientX, levels.length);
+  paintGroove(groove, f, index, levels);
+});
+document.addEventListener("pointermove", (event) => {
+  const groove = grooveOf();
+  if (!thinkingDrag || event.pointerId !== thinkingDrag.pointer || !groove) return;
+  groove.classList.add("drag");
+  const { f, index } = grooveAt(groove, event.clientX, thinkingDrag.levels.length);
+  paintGroove(groove, f, index, thinkingDrag.levels);
+});
+const settleGroove = (event: PointerEvent) => {
+  if (!thinkingDrag || event.pointerId !== thinkingDrag.pointer) return;
+  const drag = thinkingDrag, groove = grooveOf();
+  thinkingDrag = null;
+  groove?.classList.remove("drag");
+  if (!groove || event.type === "pointercancel") { renderOverlay(); return; }
+  const { index } = grooveAt(groove, event.clientX, drag.levels.length);
+  void act(() => dispatch("model", { id: drag.model, reasoning: drag.levels[index] }));
+};
+document.addEventListener("pointerup", settleGroove);
+document.addEventListener("pointercancel", settleGroove);
 // Pointing at a model in the picker highlights it, so Thinking is for the
 // row you are on.
 document.addEventListener("mouseover", (event) => {
-  if (overlay !== "models") return;
+  if (overlay !== "models" || thinkingDrag) return;
   const index = Number((event.target as Element).closest?.<HTMLElement>("#overlay .mp-row")?.dataset.index ?? NaN);
   // Off the rows, the card goes; on a model row it opens or follows.
   if (Number.isNaN(index) || overlayRows[index]?.action !== "model") { if (modelCardOpen || modelCardTimer) hideModelCard(); if (Number.isNaN(index)) return; }

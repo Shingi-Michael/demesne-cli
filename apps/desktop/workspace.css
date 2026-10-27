@@ -389,20 +389,25 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .mp-group { display: flex; justify-content: space-between; padding: 8px 9px 3px; font-size: 11px; color: var(--t4); }
 .desktop .mp-group:first-child { padding-top: 4px; }
 .desktop .mp-sep { flex: none; height: 1px; margin: 4px 6px; background: var(--hair); }
-.desktop .mp-thinking { display: flex; align-items: center; gap: 10px; flex: none; height: 34px; padding: 0 9px; font-size: 12px; color: var(--t3); }
-.desktop .mp-thinking-label { flex: none; width: 56px; }
-.desktop .mp-level { flex: none; width: 64px; text-align: right; color: var(--t1); font-size: 12.5px; white-space: nowrap; }
+/* Thinking is one soft groove that fills from the left (pass 77); the
+   fill's edge is the handle. Faint notches show the levels while you point
+   at it, and the fill covers the ones it has passed. */
+.desktop .mp-thinking { position: relative; flex: none; display: flex; align-items: center; height: 30px; margin: 4px 3px 2px; padding: 0 12px; border-radius: 15px; background: var(--tone); overflow: hidden; font-size: 12.5px; color: var(--t3); cursor: ew-resize; touch-action: none; user-select: none; }
+.desktop .mp-thinking.none { cursor: default; }
+.desktop .mp-thinking:not(.none):hover, .desktop .mp-thinking.drag { background: var(--tone2); }
+.desktop .mp-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 15px; background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 10%, transparent), color-mix(in srgb, var(--acc) 30%, transparent)); box-shadow: inset -1px 0 0 color-mix(in srgb, var(--acc) 45%, transparent); pointer-events: none; }
+.desktop .mp-notch { position: absolute; top: 11px; bottom: 11px; width: 1px; background: var(--hair2); opacity: 0; pointer-events: none; }
+.desktop .mp-thinking:hover .mp-notch, .desktop .mp-thinking.drag .mp-notch { opacity: 1; }
+.desktop .mp-thinking .mp-notch.in { opacity: 0; }
+.desktop .mp-thinking-label { position: relative; flex: 1; pointer-events: none; }
+.desktop .mp-level { position: relative; flex: none; text-align: right; color: var(--t1); white-space: nowrap; pointer-events: none; }
 .desktop .mp-level.off { color: var(--t4); }
-.desktop .mp-track { position: relative; flex: 1; display: flex; align-items: center; height: 22px; }
-.desktop .mp-track::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; margin: 0 calc(50% / var(--stops, 6)); background: var(--hair2); }
-.desktop .mp-track.none::before { margin: 0; background: none; border-top: 1px dashed var(--hair2); }
-.desktop .mp-fill { position: absolute; top: 50%; height: 2px; margin-top: -0.5px; border-radius: 1px; background: var(--acc); left: calc(50% / var(--stops, 6)); }
-.desktop .mp-stop { position: relative; flex: 1; display: grid; place-items: center; height: 22px; padding: 0; border-radius: var(--r-sm); }
-.desktop .mp-stop i { width: 7px; height: 7px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--t4); transition: transform 140ms var(--ease), background-color 140ms var(--ease); }
-.desktop .mp-stop.on i { background: var(--acc); box-shadow: none; }
-.desktop .mp-stop.at i { width: 13px; height: 13px; background: var(--t1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 35%, transparent); }
-.desktop .mp-stop:hover i { transform: scale(1.25); }
-.desktop .mp-stop:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop .mp-thinking { transition: background-color 200ms var(--ease); }
+  .desktop .mp-fill { transition: width 260ms var(--ease); }
+  .desktop .mp-thinking.drag .mp-fill { transition: none; }
+  .desktop .mp-notch { transition: opacity 200ms var(--ease); }
+}
 .desktop .mp-hint { display: flex; gap: 6px; align-items: center; padding: 4px 9px 2px; color: var(--t4); font-size: 11px; }
 .desktop .mp-empty { padding: 6px 9px; font-size: 12px; color: var(--t4); }
 .desktop #overlay.dropped .modal-title { display: none; }

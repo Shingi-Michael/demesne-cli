@@ -2,9 +2,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path";
 
 /// The window's page: frontend.ts bundled with its styles, fonts and KaTeX.
-/// prepare-desktop.ts builds it into the app. The app itself runs this with
-/// `--out` to try a look from the open project in its own window (Try it
-/// here), which is why it builds only the page and not the backends.
+/// prepare-desktop.ts builds it into the app; `--out` builds the page alone.
 const root = resolve(import.meta.dir, ".."), desktop = join(root, "apps/desktop"), workspace = join(desktop, "workspace");
 
 export async function prepareUi(out: string) {

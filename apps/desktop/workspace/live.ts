@@ -18,6 +18,7 @@ import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from ".
 import { scheduledPage } from "./scheduled-page.ts";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { lookChange, lookWords, type LookState } from "./self-build.ts";
+import { questionCardKey } from "./question-card.ts";
 import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
 import type { PlanLimits, ProofClaim, Routine } from "@demesne/protocol";
@@ -2981,7 +2982,7 @@ function branchNote() {
 function renderQuestion() {
   if (!state) return;
   const question = state.questions[0],
-    signature = JSON.stringify(question);
+    signature = questionCardKey(question);
   if (signature === questionSignature) return;
   questionSignature = signature;
   const index=question?.answers?.length ?? 0, answered=question && index>=question.questions.length,

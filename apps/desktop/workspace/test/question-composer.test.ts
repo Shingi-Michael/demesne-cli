@@ -1,6 +1,7 @@
 import { expect,test } from "bun:test";
 import { WorkspaceHost } from "../host.ts";
 import { fixture,eventually } from "./fixture.ts";
+import { questionCardKey } from "../question-card.ts";
 
 test("question replies keep the coding draft out of the queue and survive a new UI host",async()=>{
   let calls=0;
@@ -18,6 +19,8 @@ test("question replies keep the coding draft out of the queue and survive a new 
     const action={action:"draft" as const,index:0,revision:q.revision!,text:"warm olive",draftVersion:1};
     await host.handle("question-action",{sessionId,id:q.id,action});
     expect(host.draft).toBe("A separate coding request");expect(host.queue).toBe("");expect(calls).toBe(1);
+    // Saving the typed reply changes nothing the card shows, so it isn't rebuilt while you type.
+    const saved=host.snapshot().questions[0]!;expect(saved.draft).toBe("warm olive");expect(questionCardKey(saved)).toBe(questionCardKey(q));
     host.dispose();host=new WorkspaceHost({...options,sessionId});await host.connect();
     expect(host.snapshot().questions[0]!.draft).toBe("warm olive");
     const restored=host.snapshot().questions[0]!;

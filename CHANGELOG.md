@@ -38,6 +38,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
+- A sub-agent is one step on the guide: "Agent · task" with "N steps" on the right while it works and "✓ N steps · time" when done; click it and its own steps unfold one level in, drawn like the turn's (reads fold as Explored), ending in what it found. The "Sub-agent trace" box, its arrow lines, thinking and cycling phrases are gone. Sub-agents run with thinking off, whatever the chat chose.
 - Normal interactive `demesne` launches the graphics UI; non-interactive use retains the streaming CLI. The former text workbench and its `ui:*` preview scripts are removed.
 - Graphics delivery uses GPU rasterization, parallel compressed RGBA tile encoding, local file transfer when supported, backpressure and incremental state updates.
 - Plain `/drive MISSION` is continuous by default. Explicit `--bounded` and NEXT’s Run action stop after the bounded mission is verified.

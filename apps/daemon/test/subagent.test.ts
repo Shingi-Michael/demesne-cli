@@ -199,7 +199,7 @@ test("an unknown subagent_model fails the delegation clearly instead of falling 
   }, { subagentModel: "no-such-model" });
 });
 
-test("a sub-agent's thinking streams to its card in slices, and is withheld when thinking is off", async () => {
+test("a sub-agent's thinking never reaches the window, and its report rides the last progress line", async () => {
   for (const thinkingEnabled of [true, false]) {
     await fixture(async function* ({ messages }) {
       if (isSubagent(messages)) {
@@ -216,15 +216,9 @@ test("a sub-agent's thinking streams to its card in slices, and is withheld when
       const events = await consume(await client.submitTurn(id, { content: "Where?", thinkingEnabled }));
       expect(events.at(-1)?.type).toBe("turn.completed");
       const progress = events.filter((event) => event.type === "tool.call_progress").map((event) => event.payload);
-      const thinking = progress.flatMap((payload) => typeof payload.thinking === "string" ? [payload.thinking] : []);
-      if (thinkingEnabled) {
-        expect(thinking.join("")).toBe("I should read the notes file first. The notes answer it.");
-        // Batched: far fewer events than reasoning deltas.
-        expect(thinking.length).toBeLessThan(5);
-        // Order is preserved: the first slice of thinking precedes the read step.
-        const read = progress.findIndex((payload) => payload.text === "read notes.txt");
-        expect(progress.findIndex((payload) => typeof payload.thinking === "string")).toBeLessThan(read);
-      } else expect(thinking).toEqual([]);
+      expect(progress.some((payload) => "thinking" in payload)).toBe(false);
+      expect(progress.map((payload) => payload.text)).toEqual(["starting", "read notes.txt", "thinking · 1 tool call", undefined]);
+      expect(progress.at(-1)?.report).toBe("history.ts");
     });
   }
 });

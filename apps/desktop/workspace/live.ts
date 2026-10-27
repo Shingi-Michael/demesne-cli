@@ -14,7 +14,6 @@ import { awaySentences, lastPrompt, type AwayAsk, type AwayPart } from "./away.t
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
-import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
@@ -1322,9 +1321,9 @@ const spinner = () => `<span class="cube-mark" aria-hidden="true">${cubeSvg(cube
 /// The delay keeps a repainted line in step with the sweep instead of
 /// restarting it (3s each way).
 const shine = (text: string) => `<span class="shine" style="animation-delay:-${Date.now() % 6000}ms">${h(text)}</span>`;
-/// A running sub-agent's target: its task and a phrase that cycles the whole
-/// time it runs (updated in place by a timer); its steps count on the right.
-function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
+/// A step's target in mono: a path, a command by its program's name, a
+/// question's first words, a sub-agent's task.
+function toolTarget(tool: ToolEntry) {
   if (tool.name === "ask_user") {
     const asked = Array.isArray(tool.input.questions) ? tool.input.questions as { question?: unknown }[] : [];
     const first = typeof asked[0]?.question === "string" ? asked[0].question : "";
@@ -1333,17 +1332,13 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   // A command by its program's name: the full path is on hover.
   if (tool.name === "run_command") return h(base.replace(/^\S*\//, ""));
-  if (tool.name !== "subagent" || tool.state !== "running") return h(base);
-  // Still being written by the model: not running yet.
-  if (tool.drafting) return `${h(base || "…")}<span class="muted"> · writing</span>`;
-  const slot = run.entries.filter((entry) => entry.type === "tool" && entry.name === "subagent").indexOf(tool);
-  const model = /^([^·]+) · /.exec(tool.trace?.find((segment) => segment.kind === "step")?.text ?? "")?.[1]?.trim() ?? state!.model.id;
-  const phrase = matchMedia("(prefers-reduced-motion: reduce)").matches ? "thinking" : subagentPhrase(slot, Date.now(), model);
-  return `${h(base)}<span class="muted"> · </span><span class="phrase" data-subagent-phrase data-slot="${slot}" data-model="${h(model)}">${h(phrase)}</span>`;
+  // A sub-agent's task still being written by the model: not running yet.
+  if (tool.name === "subagent" && tool.drafting) return `${h(base || "…")}<span class="muted"> · writing</span>`;
+  return h(base);
 }
-/// "3 steps": a running sub-agent's progress, quietly on its row.
+/// "3 steps": how far a sub-agent has got, on the right of its row.
 function subagentSteps(tool: ToolEntry) {
-  const steps = tool.name === "subagent" ? (tool.trace ?? []).filter((segment) => segment.kind === "step").length : 0;
+  const steps = tool.name === "subagent" ? (tool.trace ?? []).length : 0;
   return steps ? `${steps} step${steps === 1 ? "" : "s"}` : "";
 }
 /// One quiet line per step: an icon for the kind of work, the verb, the
@@ -1360,6 +1355,7 @@ const STEP_ICONS: Record<string, string> = {
   other: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
 };
+const stepIconFor = (kind: string) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${STEP_ICONS[kind] ?? STEP_ICONS.other}</svg>`;
 const stepIcon = (tool: ToolEntry) => {
   const kind = tool.name === "run_command" ? "run"
     : tool.phase === "change" ? "edit"
@@ -1370,17 +1366,19 @@ const stepIcon = (tool: ToolEntry) => {
     : tool.name === "heartbeat" ? "mail"
     : ["read_file", "read_files", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
     : "other";
-  return `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${STEP_ICONS[kind]}</svg>`;
+  return stepIconFor(kind);
 };
 const ICON_SWITCH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h12l-3-3"/><path d="M21 17H9l3 3"/><path d="M15 7a6 6 0 0 1 6 6"/></svg>';
 const ICON_SPARK = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>';
 const ICON_COPY = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
 const ICON_UNDO = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>';
 const CHEVRON = '<svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
-/// Whether a step has something to unfold: an edit's diff, a command's output.
+/// Whether a step has something to unfold: an edit's diff, a command's
+/// output, a sub-agent's own steps and what it found.
 const foldable = (tool: ToolEntry) =>
   (tool.phase === "change" && tool.state !== "running" && !tool.drafting && (Boolean(tool.changes?.length) || Boolean(tool.diff))) ||
-  (tool.name === "run_command" && !tool.waiting && !tool.drafting && Boolean(tool.toolCallId));
+  (tool.name === "run_command" && !tool.waiting && !tool.drafting && Boolean(tool.toolCallId)) ||
+  (tool.name === "subagent" && !tool.drafting && Boolean(tool.toolCallId));
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   // A question still waiting is asked at the end of the conversation, not as a step.
   if (tool.name === "ask_user" && (tool.state === "running" || tool.waiting || tool.drafting)) return "";
@@ -1395,7 +1393,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
         : now
           ? subagentSteps(tool) || ""
           : tool.state === "done"
-            ? `<span class="success">✓</span> ${tool.exitCode != null && tool.exitCode !== 0 ? `exit ${tool.exitCode} · ` : ""}${duration(tool.durationMs)}`
+            ? `<span class="success">✓</span> ${tool.exitCode != null && tool.exitCode !== 0 ? `exit ${tool.exitCode} · ` : ""}${tool.name === "subagent" && subagentSteps(tool) ? `${subagentSteps(tool)} · ` : ""}${duration(tool.durationMs)}`
             : tool.state === "failed" || tool.state === "denied"
               ? `<span class="danger">×</span> ${tool.exitCode != null ? `exit ${tool.exitCode}` : h(tool.state)}`
               : `<span class="muted">${h(mark(tool.state))}</span> ${h(tool.state)}`;
@@ -1403,7 +1401,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     canFold ? "step" : "tool",
     // A running step keeps its own icon and only its words shine: the cube
     // means thinking or working overall, not one tool.
-    `${stepIcon(tool)}<span class="verb">${now && !served ? shine(verb(tool)) : served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    `${stepIcon(tool)}<span class="verb">${now && !served ? shine(verb(tool)) : served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -1440,9 +1438,11 @@ function rewindLine(rewind: Snapshot["rewinds"][number]) {
   ].filter(Boolean);
   return `<div class="rewind-line" title="${h(rewind.files.join("\n"))}"><span class="rw-mark" aria-hidden="true">${ICON_UNDO}</span><span class="rw-what">${words.join('<span class="muted"> · </span>')}</span>${rewind.redoable && !state!.activeTurnId ? btn("rewind-redo", "Redo", {}, "link rw-redo") : ""}</div>`;
 }
-/// What unfolds under a step: the edit's diff with a little context, or
-/// the command's recorded output (its tail), loaded when first opened.
+/// What unfolds under a step: the edit's diff with a little context, the
+/// command's recorded output (its tail), loaded when first opened, or a
+/// sub-agent's own guide.
 function stepFold(run: WorkspaceRun, tool: ToolEntry) {
+  if (tool.name === "subagent") return agentFold(run, tool);
   if (tool.phase === "change") {
     const files = tool.changes?.length ? tool.changes.map((change) => ({ path: change.path, before: change.before ?? "", after: change.after ?? "" })) : tool.diff ? [{ path: String(tool.input.path ?? tool.detail ?? ""), before: tool.diff.oldText, after: tool.diff.newText }] : [];
     const blocks = files.map((file) => {
@@ -1473,16 +1473,44 @@ function stepFold(run: WorkspaceRun, tool: ToolEntry) {
   const back = record?.serves ? btn("preview-output", "Preview", { key }, "pv-btn pv-back") : "";
   return `<div class="step-fold"><div class="fold-cmd">$ ${h(String(tool.detail ?? "").replace(/^\$\s*/, ""))}${back}</div>${body}</div>`;
 }
-/// A sub-agent's thinking and steps under its row: open while it works,
-/// collapsible like a thinking block afterwards.
-function subagentTrace(run: WorkspaceRun, tool: ToolEntry, key: string) {
-  if (tool.name !== "subagent" || !tool.trace?.length) return "";
-  const live = tool.state === "running";
-  const steps = tool.trace.filter((segment) => segment.kind === "step").length;
-  const body = tool.trace.map((segment) => segment.kind === "step"
-    ? `<div class="muted">→ ${h(segment.text)}</div>`
-    : `<p>${h(segment.text.trim())}</p>`).join("");
-  return `<details class="thinking ${live ? "live" : ""}" data-detail="${key}:trace"${(live && !detailsClosed.has(`${key}:trace`)) || detailsOpen.has(`${key}:trace`) ? " open" : ""}><summary>◇ Sub-agent trace · ${steps} step${steps === 1 ? "" : "s"}</summary><div>${body}</div></details>`;
+/// A sub-agent's guide, one level in under its row: its reads, searches and
+/// lists as the same quiet lines as the turn's own (three or more reads in a
+/// row fold as Explored), the last one shining while it runs, and at the end
+/// what it found, clipped to a few lines until clicked. No thinking: a
+/// sub-agent runs with it off.
+const foundOpen = new Set<string>();
+function agentFold(run: WorkspaceRun, tool: ToolEntry) {
+  const key = `${run.id}:${tool.id}`, live = tool.state === "running";
+  const steps = (tool.trace ?? []).map((segment) => {
+    const text = segment.text.replace(/^[^·]+ · /, "");
+    const match = /^(read|search|list|git \w+)(?: (.*))?$/.exec(text);
+    const kind = match?.[1] === "read" || match?.[1]?.startsWith("git") ? "read" : match?.[1] === "search" ? "search" : match?.[1] === "list" ? "list" : "other";
+    const verb = match?.[1] === "read" ? "Read" : match?.[1] === "search" ? "Searched" : match?.[1] === "list" ? "Listed" : match?.[1]?.startsWith("git") ? "Checked git" : text;
+    return { kind, verb, target: match ? match[2] ?? "" : "" };
+  });
+  const line = (kind: string, verb: string, target: string, meta: string, shining = false) =>
+    `<div class="tool-row quiet">${stepIconFor(kind)}<span class="verb">${shining ? shine(verb) : h(verb)}</span>${target ? `<code class="target" title="${h(target)}">${h(target)}</code>` : ""}<span class="sp"></span><small class="meta">${meta}</small></div>`;
+  let body = tool.subagentModel ? `<div class="tool-row quiet agent-on">${stepIconFor("agent")}<span class="verb">on ${h(tool.subagentModel)}</span></div>` : "";
+  for (let i = 0; i < steps.length; i++) {
+    const last = i === steps.length - 1 && live;
+    let j = i;
+    while (j < steps.length && steps[j]!.kind === "read" && !(j === steps.length - 1 && live)) j++;
+    if (j - i >= 3) {
+      const fold = `${key}:explored:${i}`;
+      body += `<details class="explored" data-detail="${fold}"${detailsOpen.has(fold) ? " open" : ""}><summary>${stepIconFor("read")}<span class="verb">Explored · ${j - i} reads</span><span class="sp"></span><small class="meta"></small></summary><div>${steps.slice(i, j).map((step) => line(step.kind, step.verb, step.target, '<span class="success">✓</span>')).join("")}</div></details>`;
+      i = j - 1;
+      continue;
+    }
+    body += line(steps[i]!.kind, steps[i]!.verb, steps[i]!.target, last ? "" : '<span class="success">✓</span>', last);
+  }
+  if (live && !steps.length) body += line("agent", "Starting", "", "", true);
+  if (tool.state === "failed" || tool.state === "denied" || tool.state === "stopped")
+    body += `<div class="agent-found"><b><span class="danger">×</span> ${h(tool.state === "stopped" ? "Stopped" : "Failed")}</b>${tool.message ? ` · ${h(tool.message.replace(/^Error: (sub-agent failed: )?/, "").split("\n")[0] ?? "")}` : ""}</div>`;
+  else if (tool.report) {
+    const open = foundOpen.has(key), text = tool.report.trim(), clipped = !open && text.length > 240;
+    body += `<div class="agent-found"><b>Found</b> · ${h(clipped ? `${text.slice(0, 240).trimEnd()}…` : text)}${text.length > 240 ? btn("agent-found", open ? "less" : "more", { key }, "link agent-more") : ""}</div>`;
+  }
+  return `<div class="agent-steps" role="group">${body}</div>`;
 }
 /// Proof marks. Each claim in an answer is wrapped in the rendered words:
 /// green line = a step proved it, dotted = nothing checked, red wavy = the
@@ -1615,7 +1643,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     if (entry.type === "tool") {
       const group: ToolEntry[] = [entry];
       let j = i + 1;
-      // A sub-agent stands alone: its card carries a report and a trace.
+      // A sub-agent stands alone: its row unfolds its own guide.
       if (entry.phase === "inspect" && entry.state === "done" && !entry.waiting && entry.name !== "subagent")
         while (j < run.entries.length) {
           const next = run.entries[j];
@@ -1635,7 +1663,7 @@ function runHTML(run: WorkspaceRun, index: number) {
         const summary=run.kind === "themefy" ? `Theme questions · ${group.filter(tool=>tool.name === "ask_user").length}${group.some(tool=>tool.name === "apply_theme" && tool.state === "done")?" · palette applied":""}` : `Explored · ${group.length} reads`;
         steps += `<details class="explored" data-detail="${key}"${detailsOpen.has(key) ? " open" : ""}><summary>${stepIcon(group[0]!)}<span class="verb">${h(summary)}</span><span class="sp"></span><small class="meta">${duration(sum)}</small></summary><div>${group.map((tool) => toolRow(run, tool)).join("")}</div></details>`;
         i = j - 1;
-      } else steps += toolRow(run, entry) + subagentTrace(run, entry, key);
+      } else steps += toolRow(run, entry);
     }
     if (entry.type === "notice" && !entry.closesTurn) {
       if (entry.steer) { steps += steerLine(entry.text); continue; }
@@ -1722,7 +1750,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   const thinkingLive = run.entries.at(-1)?.type === "reasoning" && !latestTool && !state!.questions.length;
   const trail = "";
   const activity = live && !thinkingLive && !(latestTool && !latestTool.drafting)
-    ? `<div class="live-activity">${spinner()}${shine(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + (latestTool?.name === "subagent" && latestTool.trace?.findLast((segment) => segment.kind === "step") ? ` · ${latestTool.trace.findLast((segment) => segment.kind === "step")!.text}` : "") + "…")}</div>`
+    ? `<div class="live-activity">${spinner()}${shine(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + "…")}</div>`
     : "";
   const answered = run.entries.some((e) => e.type === "assistant");
   const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}${canRewind(run) ? btn("rewind", "rewind", { turnId: run.id }).replace("<button ", '<button title="Put the files and the chat back to just before this message" ') : ""}</span>`;
@@ -4668,6 +4696,13 @@ async function dispatch(
     }
     return;
   }
+  if (action === "agent-found") {
+    const key = String(args.key);
+    foundOpen.has(key) ? foundOpen.delete(key) : foundOpen.add(key);
+    follow = false;
+    renderConversation();
+    return;
+  }
   if (action === "step") {
     const key = `${args.runId}:${args.id}`;
     stepOpen.has(key) ? stepOpen.delete(key) : stepOpen.add(key);
@@ -5230,8 +5265,11 @@ document.addEventListener("submit", (event) => {
 document.addEventListener(
   "toggle",
   (event) => {
+    // A fold's state outlives the next repaint (the guide redraws on every event).
     const detail = event.target as HTMLDetailsElement;
     if (detail.dataset.detail) {
+      if (detail.open) { detailsOpen.add(detail.dataset.detail); detailsClosed.delete(detail.dataset.detail); }
+      else { detailsOpen.delete(detail.dataset.detail); detailsClosed.add(detail.dataset.detail); }
     }
   },
   true,
@@ -5798,13 +5836,6 @@ const drawCubes = (now: number) => {
   for (const mark of marks) { mark.innerHTML = frame; mark.dataset.at = String(cube.beatAt); }
 };
 requestAnimationFrame(drawCubes);
-setInterval(() => {
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  for (const span of document.querySelectorAll<HTMLElement>("[data-subagent-phrase]")) {
-    const next = subagentPhrase(Number(span.dataset.slot), Date.now(), span.dataset.model ?? "");
-    if (span.textContent !== next) span.textContent = next;
-  }
-}, 300);
 setInterval(() => {
   if (state?.activeTurnId) renderStatus();
   renderDriveTurn();

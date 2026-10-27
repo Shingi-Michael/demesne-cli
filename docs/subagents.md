@@ -4,7 +4,7 @@
 
 ## What a subagent is
 
-The coding agent calls the `subagent` tool with a task label, a self-contained prompt, and optionally a configured model ID. Each invocation gets a fresh context. The parent receives its final report; the UI separately shows its model, thinking, tool steps and status.
+The coding agent calls the `subagent` tool with a task label, a self-contained prompt, and optionally a configured model ID. Each invocation gets a fresh context. The parent receives its final report. In the app a sub-agent is one step on the turn's guide, like a read or a command: "Agent · task" with its step count on the right, and clicking it unfolds the sub-agent's own steps one level in (reads folded as Explored, searches and lists as lines) and what it found. Sub-agents run with thinking off, and no thinking of theirs is shown.
 
 Allowed tools are `list_files`, `read_file`, `read_files`, `search_files`, `git_status`, `git_diff`, and `git_history`. Subagents cannot edit files, run commands, ask the human, or spawn more subagents. They are useful for independent investigations, not parallel code changes. [Implementation](../apps/daemon/src/subagent.ts) · [tests](../apps/daemon/test/subagent.test.ts).
 
@@ -47,7 +47,7 @@ Schedulers are per provider ID. The main agent, subagents, and Drive reviews usi
 | Tools per model response | At most 8 assembled calls |
 | Tool result/report clipping | 32 KiB / 16 KiB named limits in the implementation; applied by JavaScript string slicing |
 | Output/context budget | Inherits the selected model's configured limits |
-| Reasoning | Receives the parent's thinking choice; supported effort depends on its selected provider/model |
+| Reasoning | Off: a sub-agent's call is made with thinking disabled whatever the chat chose, and any reasoning a model produces anyway only counts toward the character limit |
 | Cancellation | Parent cancellation propagates to the subagent request and tools |
 
 These fixed research bounds are not `[agent] max_model_rounds`/`max_tool_calls`, which govern the parent turn. Per-subagent time, reasoning-token, and round-budget settings are not separate configurable fields today. A model-server reasoning budget is independent of Demesne's total output cap. More concurrent agents do not by themselves cure excessive reasoning or repeated investigation.

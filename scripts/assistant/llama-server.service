@@ -1,0 +1,32 @@
+# The assistant's model, always on. A systemd user service: it starts when
+# you log in (or at boot, with lingering on), and comes back if it crashes.
+# install.sh fills in @LLAMA_SERVER@ and @MODEL@.
+#
+# --ctx-size 131072 is the 128K cap. Qwen3.8-27B silently stops generating
+# once a prompt passes about 130K tokens, so the server never accepts more,
+# and Demesne's config keeps the same number (see assistant.toml).
+# q8_0 K/V halves the cache's VRAM against f16, which is what lets 128K fit
+# beside a Q5_K_M/Q6_K 27B on a 32 GB card.
+
+[Unit]
+Description=llama.cpp server for the Demesne assistant (Qwen3.8-27B)
+After=network.target
+
+[Service]
+ExecStart=@LLAMA_SERVER@ \
+  --model @MODEL@ \
+  --alias qwen3.8-27b \
+  --host 127.0.0.1 \
+  --port 8081 \
+  --ctx-size 131072 \
+  --n-gpu-layers 99 \
+  --flash-attn on \
+  --cache-type-k q8_0 \
+  --cache-type-v q8_0 \
+  --parallel 1 \
+  --jinja
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -33,6 +33,7 @@ import { claimTitle, locate, lookedAt, proofLine } from "./proof-marks.ts";
 import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.ts";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval } from "./session-model.ts";
+import { chatChanges, chatServers, contextInUse } from "./cards.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -946,16 +947,11 @@ function renderContextCard() {
   const share = (tokens: number) => (capacity ? (tokens / capacity) * 100 : 0);
   card.innerHTML = `<div class="context-head"><span>Context</span><span>${c.percentage}% · ${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span></div><div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div><div class="context-legend">${[...parts, { name: "Free", tokens: free, tone: "free" }].filter((part) => part.tokens > 0).map((part) => `<u class="tone-${part.tone}"></u><span>${part.name}</span><em>${tokensShort(part.tokens)}</em>`).join("")}</div>${worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : ""}`;
 }
-/// The cards on the right: where this chat works, how full its context is,
-/// what changed, and whatever else is live (agents, a preview,
-/// connectors). A card shows only when it has something to say; its header
-/// folds it to one line.
-const ICON_PANEL = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16"/></svg>';
-const ICON_COMPUTER = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>';
-const ICON_FOLDER = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>';
-const ICON_PULSE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>';
+/// The cards on the right: what this chat changed, its preview, its context
+/// once half full, the agents near its edits and the connectors it called.
+/// A card shows only while the chat uses it, and a chat that uses none has
+/// no column (pass 86 A); its header folds it to one line.
 const ICON_CHEVRON = '<svg class="ico card-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
-let cardsOn = (() => { try { return localStorage.getItem("demesne-cards") !== "off"; } catch { return true; } })();
 const cardsFolded = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-folded") ?? "[]") as string[]; } catch { return []; } })());
 let cardsSignature = "";
 /// The card whose body is unfolding now; only it animates.
@@ -966,32 +962,32 @@ function card(name: string, title: string, summary: string, body: string) {
 }
 function renderCards() {
   // A page in place of the chat (Settings, Customize…) hides the chat's cards.
-  const shown = Boolean(state) && cardsOn && inSession() && !pageOpen;
-  el("app").classList.toggle("cards-on", shown);
-  const aside = el("cards");
-  aside.hidden = !shown;
-  if (!shown) { cardsSignature = ""; return; }
-  // A plain chat has no folder: the card says Just a chat.
-  const s = state!, root = isPlain(s) ? "" : s.workspace ?? "", branch = s.session?.workspace?.gitBranch;
-  const c = context(), plan = s.provider?.contextPlan, changes = workingChanges();
-  const files = s.files.filter((file) => file.status);
-  const here = root ? s.agents.filter((agent) => agent.project === projectSlug(root)) : [];
-  const previews = s.processes.filter((command) => command.serves && command.status === "running");
-  const servers = s.connectors.servers;
-  const signature = JSON.stringify([root, branch, c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), s.connectors, Boolean(s.activeTurnId), [...cardsFolded]]);
+  const aside = el("cards"), app = el("app");
+  const hide = () => { app.classList.remove("cards-on", "cards-context"); aside.hidden = true; cardsSignature = ""; };
+  if (!state || !inSession() || pageOpen) return hide();
+  const s = state, root = isPlain(s) ? "" : s.workspace ?? "";
+  const c = context(), plan = s.provider?.contextPlan;
+  // What this chat itself did, rewound turns left out.
+  const used = s.runs.filter((run) => !rewoundBy(run)).flatMap(tools);
+  const files = chatChanges(s.files.filter((file) => file.status), used.flatMap((t) => t.phase === "change" && t.state === "done" ? t.changes?.map((change) => change.path) ?? [String(t.input.path ?? "")] : []), root);
+  const changes = { files: files.length, added: files.reduce((sum, file) => sum + (file.additions ?? 0), 0), removed: files.reduce((sum, file) => sum + (file.deletions ?? 0), 0) };
+  const calls = new Set(used.map((t) => t.toolCallId));
+  const previews = s.processes.filter((command) => command.serves && command.status === "running" && (!command.toolCallId || calls.has(command.toolCallId)));
+  // Demesne can't see which files another agent edits, so an agent in this
+  // project shows while this chat has edits of its own it could collide with.
+  const here = root && files.length ? s.agents.filter((agent) => agent.project === projectSlug(root)) : [];
+  const servers = chatServers(s.connectors.servers, used.map((t) => t.name));
+  const showContext = c.percentage != null && contextInUse(c.percentage);
+  if (!files.length && !previews.length && !showContext && !here.length && !servers.length) return hide();
+  app.classList.add("cards-on");
+  app.classList.toggle("cards-context", showContext);
+  aside.hidden = false;
+  const signature = JSON.stringify([c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsFolded]]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
-  const name = root.split(/[\\/]/).filter(Boolean).at(-1) ?? root;
-  const parent = root.slice(0, Math.max(0, root.length - name.length - 1)).replace(/^\/(Users|home)\/[^/]+/, "~");
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
   const out: string[] = [];
-  out.push(card("environment", "Environment", root ? h(branch ? `${name} · ${branch}` : name) : "Just a chat",
-    row(ICON_COMPUTER, "This computer") +
-    (root ? row(ICON_FOLDER, `${h(name)}${parent ? `<em> · ${h(parent)}</em>` : ""}`, "", root) : "") +
-    (branch ? row(ICON_BRANCH.replace("sidebar-branch", ""), h(branch)) : "") +
-    // The pulse beats while Heartbeat is running.
-    row(s.connectors.heartbeat ? ICON_PULSE.replace('class="ico"', 'class="ico beat"') : ICON_PULSE, "Heartbeat", s.connectors.heartbeat ? '<span class="card-on">On</span>' : "Off")));
-  if (c.percentage != null) {
+  if (showContext && c.percentage != null) {
     const capacity = c.capacity ?? 0;
     const parts = plan
       ? [{ name: "Chat", tokens: plan.estimatedMessageTokens, tone: "a" }, { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" }, ...(c.fresh ? [{ name: "Kept free", tokens: plan.reserves.totalTokens ?? 0, tone: "c" }] : [])]
@@ -1029,6 +1025,11 @@ function renderCards() {
       fresh.innerHTML = html;
       const replacement = fresh.content.firstElementChild as HTMLElement;
       replacement.dataset.html = html;
+      // A card the chat just started using slides in.
+      if (!node) {
+        replacement.classList.add("arriving");
+        replacement.addEventListener("animationend", () => replacement.classList.remove("arriving"), { once: true });
+      }
       if (key === cardUnfolding) {
         replacement.classList.add("unfolding");
         replacement.addEventListener("animationend", () => replacement.classList.remove("unfolding"), { once: true });
@@ -1123,7 +1124,6 @@ function renderStatus() {
     state.runs.length,
     inSession(),
     driveWord(),
-    cardsOn,
     pageOpen,
   ]);
   renderCards();
@@ -1152,7 +1152,7 @@ function renderStatus() {
   // session's own view (rename, compact, history). The sidebar shows what
   // needs you; Drive lives in its footer.
   el("header").innerHTML =
-    `<div class="header-state">${pageOpen ? "" : branchChip()}${rimWords(rim)}</div>${driveWords(peek)}${inSession() && !pageOpen ? `<button type="button" class="header-cards${cardsOn ? " on" : ""}" data-action="cards-toggle" aria-label="Cards" aria-pressed="${cardsOn}" title="${cardsOn ? "Hide" : "Show"} cards">${ICON_PANEL}</button>` : ""}${inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+    `<div class="header-state">${pageOpen ? "" : branchChip()}${rimWords(rim)}</div>${driveWords(peek)}${inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
 }
 /// Your plan's limit (pass 75 D): nothing under half; past it a small ring
 /// and the fuller window's percentage sit beside the model word, amber from
@@ -4506,13 +4506,6 @@ async function dispatch(
   if (action === "agent-message") return setDraft(`Message ${String(args.name)} at ${String(args.address)}: `);
   if (action === "project-session") {
     document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path: args.path, ...(action === "project-session" ? { sessionId: args.id } : {}) } }));
-    return;
-  }
-  if (action === "cards-toggle") {
-    cardsOn = !cardsOn;
-    try { localStorage.setItem("demesne-cards", cardsOn ? "on" : "off"); } catch {}
-    renderStatus();
-    document.querySelector<HTMLButtonElement>(".header-cards")?.focus({ preventScroll: true });
     return;
   }
   if (action === "card-fold") {

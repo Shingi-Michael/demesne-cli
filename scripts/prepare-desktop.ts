@@ -17,9 +17,12 @@ for (const entry of ["electron/main.ts", "electron/preload.ts"]) {
   if (!bundle.success) throw new Error(bundle.logs.map(String).join("\n"));
 }
 const version = resolveBuildVersion();
-writeFileSync(join(application, "package.json"), JSON.stringify({ name: "demesne-desktop", productName: "Demesne", version, description: "A coding workspace with durable sessions and Agent Drive", author: "Demesne contributors", main: "main.cjs" }, null, 2));
+writeFileSync(join(application, "package.json"), JSON.stringify({ name: "demesne", productName: "Demesne", version, description: "A coding workspace with durable sessions and Agent Drive", author: "Demesne contributors", main: "main.cjs" }, null, 2));
 const suffix = process.platform === "win32" ? ".exe" : "";
-await run([process.execPath, "build", join(desktop, "host.ts"), "--compile", ...buildVersionArgs(version), "--outfile", join(backend, `demesne-desktop-host${suffix}`)]);
+await run([process.execPath, "build", join(desktop, "host.ts"), "--compile", ...buildVersionArgs(version), "--outfile", join(backend, `demesne-host${suffix}`)]);
+// Compatibility for an already-running Electron main process upgraded in place:
+// it still knows the old private helper path until the app is relaunched.
+cpSync(join(backend, `demesne-host${suffix}`), join(backend, `demesne-desktop-host${suffix}`));
 await run([process.execPath, "run", "scripts/build-daemon.ts"]);
 cpSync(join(root, `dist/demesned${suffix}`), join(backend, `demesned${suffix}`));
 cpSync(join(root, "dist/node_modules"), join(backend, "node_modules"), { recursive: true, dereference: true });

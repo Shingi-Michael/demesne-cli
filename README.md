@@ -20,7 +20,7 @@ demesne is a coding agent that starts by reading your project. Its **Drive** loo
 ## Try it
 
 ```sh
-git clone https://github.com/Shingi-Michael/demesne-cli.git && cd demesne-cli
+git clone https://github.com/Shingi-Michael/demesne-cli.git demesne && cd demesne
 bun install --frozen-lockfile
 bun run desktop
 ```
@@ -77,19 +77,21 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 curl -fsSL https://raw.githubusercontent.com/shingi-michael/demesne-cli/main/install.sh | sh
 ```
 
-This installs Demesne for you alone, without sudo: on Linux (x86_64) into `~/.local/share/demesne` with a launcher and `demesne-desktop` in `~/.local/bin`, on an Apple silicon Mac into `~/Applications`. Run it again to update (it automatically detects upgrades and restarts a running daemon), or add `sh -s -- --uninstall` to remove the app. When a release has no prebuilt Linux bundle, it builds from source, which needs git, Bun 1.4 and Node.js 22. Your sessions and settings in `~/.demesne` are left alone.
+This installs Demesne for you alone, without sudo: on Linux (x86_64) into `~/.local/share/demesne` with a launcher and `demesne` in `~/.local/bin`, on an Apple silicon Mac into `~/Applications`. Run it again to update (it automatically detects upgrades and restarts a running daemon), or add `sh -s -- --uninstall` to remove the app. When a release has no prebuilt Linux bundle, it builds from source, which needs git, Bun 1.4 and Node.js 22. Your sessions and settings in `~/.demesne` are left alone.
+
+The public commands are `demesne` (the app) and `demesned` (its daemon). The installer accepts older release filenames and migrates its old `demesne-desktop` launcher to `demesne`; sessions and settings stay in the same place. The private bundled `demesne-host` helper is not a separate user command.
 
 Release downloads require a matching `.sha256`; a missing checksum or a network error stops installation before replacing the app. Only for a trusted legacy release without checksums, explicitly pass `--insecure-skip-checksum`. Use `sh -s -- --help` after the pipe to see all options. On upgrades, daemon restart success requires a live process and a successful `/healthz` check; failures print recent daemon logs and exit nonzero. Linux installer regression tests run with `python3 scripts/test-install.py` (no Bun or network required).
 
-Demesne is a desktop app for macOS and Linux (unsigned preview builds). To install by hand, download it from the [latest release](https://github.com/Shingi-Michael/demesne-cli/releases/latest): `demesne-desktop-darwin-arm64.zip` for Apple silicon Macs, `demesne-desktop-linux-amd64.deb` for Ubuntu. You don't need Bun or Node.js to run it.
+Demesne is a desktop app for macOS and Linux (unsigned preview builds). To install by hand, download it from the [latest release](https://github.com/Shingi-Michael/demesne-cli/releases/latest): `demesne-darwin-arm64.zip` for Apple silicon Macs, `demesne-linux-amd64.deb` for Ubuntu. You don't need Bun or Node.js to run it.
 
 ```sh
 # macOS: unzip, move to Applications, and clear the unsigned-download flag
-unzip demesne-desktop-darwin-arm64.zip && mv Demesne.app /Applications/
+unzip demesne-darwin-arm64.zip && mv Demesne.app /Applications/
 xattr -dr com.apple.quarantine /Applications/Demesne.app
 
 # Ubuntu 22.04/24.04
-sudo apt install ./demesne-desktop-linux-amd64.deb
+sudo apt install ./demesne-linux-amd64.deb
 ```
 
 To run it from source instead, use `bun run desktop`, or `bun run build:desktop` to build the app (needs [Node.js and a few platform packages](docs/desktop.md#prerequisites)). The [desktop guide](docs/desktop.md) has more.

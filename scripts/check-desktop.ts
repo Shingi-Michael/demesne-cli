@@ -16,6 +16,11 @@ mkdirSync(output, { recursive: true });
 const prompt = "Desktop smoke: update hello.ts and run its check";
 const followUp = "Desktop smoke: continue while the window is closed";
 const aside = "Desktop smoke: a second conversation";
+// Demesne rebuilds its own look: one turn changes the window's stylesheet,
+// another breaks it.
+const lookPrompt = "Desktop smoke: round the composer more", lookDone = "The composer is rounder now.";
+const breakPrompt = "Desktop smoke: break the stylesheet", breakDone = "The stylesheet is broken on purpose.";
+const lookRounds: Record<string, number> = {};
 const asideDone = "A second conversation is here.";
 const completed = "Verified the desktop change.";
 const afterClose = "Daemon work completed after the window closed.";
@@ -225,6 +230,16 @@ const f = await fixture({
       yield { type: "finish", reason: "stop" };
       return;
     }
+    if (user === lookPrompt || user === breakPrompt) {
+      if ((lookRounds[user] = (lookRounds[user] ?? 0) + 1) === 1) {
+        yield { type: "tool_call_delta", index: 0, idDelta: `look-${user === breakPrompt ? "break" : "edit"}`, nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "apps/desktop/workspace.css", content: user === breakPrompt ? "BREAK {\n" : "#desktop-toolbar { --look-trial: 1; }\n" }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", delta: user === breakPrompt ? breakDone : lookDone };
+        yield { type: "finish", reason: "stop" };
+      }
+      return;
+    }
     if (user !== prompt) {
       // NEXT can ask this processor for proposals independently of the coder.
       yield { type: "text_delta", delta: "{\"proposals\":[]}" };
@@ -246,7 +261,19 @@ const f = await fixture({
 }, { heartbeatSocket });
 writeFileSync(join(f.workspace, "notes.ts"), "export const note = 'ours';\n");
 writeFileSync(join(f.workspace, "hello.ts"), "export const greeting = 'before';\n");
-writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ scripts: { check: "bun check.ts" } }));
+// The workspace is Demesne itself as far as the app can tell: its package
+// says so, and its prepare-ui.ts builds the window's page (here: the real
+// page plus whatever the turn wrote into workspace.css, or a failure).
+writeFileSync(join(f.workspace, "package.json"), JSON.stringify({ name: "demesne-cli", scripts: { check: "bun check.ts" } }));
+mkdirSync(join(f.workspace, "scripts")); mkdirSync(join(f.workspace, "apps/desktop"), { recursive: true });
+writeFileSync(join(f.workspace, "apps/desktop/workspace.css"), "");
+writeFileSync(join(f.workspace, "scripts/prepare-ui.ts"), `import { appendFileSync, cpSync, readFileSync } from "node:fs";
+const out = process.argv[process.argv.indexOf("--out") + 1]!;
+const css = readFileSync("apps/desktop/workspace.css", "utf8");
+if (css.includes("BREAK")) { console.error("apps/desktop/workspace.css:1: a brace is missing"); process.exit(1); }
+cpSync(${JSON.stringify(join(application, "ui"))}, out, { recursive: true });
+appendFileSync(out + "/workspace.css", "\\n" + css);
+`);
 writeFileSync(join(f.workspace, "site.html"), '<h1>Fieldnote preview</h1>\n<button id="save">Save</button>\n');
 writeFileSync(join(f.workspace, "serve.ts"), "const server = Bun.serve({ port: 0, fetch: () => new Response('<h1>Fieldnote preview</h1><button id=\"save\">Save</button>', { headers: { 'content-type': 'text/html' } }) });\nconsole.log(`  \\u001b[32mLocal:\\u001b[39m http://localhost:${server.port}/`);\n");
 writeFileSync(join(f.workspace, "check.ts"), "import {readFileSync} from 'node:fs';if(!readFileSync('hello.ts','utf8').includes(\"'after'\"))throw new Error('Wrong file');console.log('DESKTOP_CHECK_PASSED');\n");
@@ -294,7 +321,7 @@ async function capture(name: string) {
 }
 async function open(workspace = false, welcome = false, extraEnv: Record<string, string> = {}) {
   desktop = await electron.launch({ ...(packagedExecutable ? { executablePath: resolve(packagedExecutable) } : {}), args: [...(packagedExecutable ? [] : [application]), `--user-data-dir=${join(f.root, "electron")}`, ...(workspace ? [`--workspace=${f.workspace}`] : []), `--server=${f.server.url}`], env: {
-    ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache"), ...extraEnv,
+    ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache"), DEMESNE_BUN: process.execPath, ...extraEnv,
   }, timeout: 30_000 });
   desktop.process().stderr?.on("data", bytes => { log = (log + String(bytes)).slice(-64 * 1024); });
   page = await desktop.firstWindow();
@@ -1035,6 +1062,39 @@ try {
   await until(() => page.locator("#page").isHidden(), "Back to chats closes Settings");
   // Launch lands on Home; the chat is one click away in the sidebar.
   await reopenChat(sessionId);
+  // Demesne rebuilds its own look (pass 80): a turn that changes the
+  // window's files ends with Try it here; the window reloads into the
+  // project's page, the top bar offers Go back (Keep needs an installed Mac
+  // app), and the chat comes back after the reload. A change that doesn't
+  // build goes back by itself and says why.
+  await type(lookPrompt);
+  await click("permission", { decision: "allow_once" });
+  await textIncludes(lookDone);
+  const lookLine = page.locator(".look-line");
+  await until(() => lookLine.innerText().then(text => text.includes("This changes how Demesne looks")), "the turn offers Try it here");
+  const trial = () => page.evaluate(() => getComputedStyle(document.getElementById("desktop-toolbar")!).getPropertyValue("--look-trial").trim());
+  assert.equal(await trial(), "", "the installed look first");
+  await click("look-try");
+  await until(async () => await trial() === "1", "the window reloads into the project's page", 60_000);
+  const lookWord = page.locator("#workspace-look");
+  await until(() => lookWord.innerText().then(text => text.includes("Your look") && text.includes("Go back")), "the top bar offers Go back");
+  assert(!(await lookWord.innerText()).includes("Keep"), "Keep needs an installed Mac app");
+  await until(() => page.locator(".look-line.ok").innerText().then(text => text.includes("You’re looking at it now")), "the chat came back after the reload, and its line says so");
+  await capture("05b-your-look");
+  await click("look-back");
+  await until(async () => await trial() === "", "Go back reloads the installed look", 30_000);
+  await until(() => lookWord.isHidden(), "and the top bar's words go");
+  await until(() => lookLine.innerText().then(text => text.includes("Try it here")), "the line offers it again");
+  await type(breakPrompt);
+  await click("permission", { decision: "allow_once" });
+  await textIncludes(breakDone);
+  await click("look-try");
+  await until(() => page.locator(".look-line.bad").innerText().then(text => text.includes("didn’t load, so Demesne went back")), "a change that doesn't build goes back by itself", 60_000);
+  assert.equal(await trial(), "", "on the installed look");
+  await click("look-why");
+  await until(() => page.locator(".look-why").innerText().then(text => text.includes("a brace is missing")), "See why shows the build's words");
+  await capture("05c-look-broken");
+  await click("look-why");
   await page.getByRole("button", { name: "Expand full history", exact: true }).waitFor();
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Reopening starts with compacted history collapsed");
   await page.getByRole("button", { name: "Expand full history", exact: true }).click();
@@ -1399,7 +1459,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "Demesne rebuilds its own look", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

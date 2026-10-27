@@ -36,8 +36,9 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-search input::-webkit-search-cancel-button { display: none; }
 #sidebar-sessions { min-height: 0; }
 .sidebar-session { display: flex; align-items: center; gap: 11px; width: 100%; height: 32px; padding: 0 10px; border-radius: 8px; color: var(--t2); text-align: left; font-size: 13.5px; white-space: nowrap; }
-.sidebar-session:hover { background: var(--surface2); }
-.sidebar-session.selected { background: var(--surface2); color: var(--t1); }
+/* Hover and the open chat draw a hairline outline; the row keeps its background. */
+.sidebar-session:hover { box-shadow: inset 0 0 0 1px var(--hair); }
+.sidebar-session.selected { box-shadow: inset 0 0 0 1px var(--hair); color: var(--t1); }
 /* Each state has its own shape, not only its own colour: a ring needs you,
    a filled dot is a new reply, a spinner works, a cross failed. A settled
    chat has no mark; its space stays so the titles line up. */
@@ -88,7 +89,7 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
    the conversation draws under its steps; the open chat lights its piece. */
 :is(.sidebar-project-chats, .sidebar-group-chats, .sidebar-agent-rows) { margin-left: 17px; box-shadow: -1px 0 0 var(--hair2); }
 :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session { padding-left: 9px; border-radius: 0 var(--r) var(--r) 0; }
-:is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected { box-shadow: -1px 0 0 var(--t2); }
+:is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected { box-shadow: inset 0 0 0 1px var(--hair), -1px 0 0 var(--t2); }
 :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-more { padding-left: 12px; border-radius: 0 var(--r) var(--r) 0; }
 :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-rename { padding-left: 9px; border-radius: 0 var(--r) var(--r) 0; }
 /* Group and sort unfolds under its heading at reading size, on the guide. */

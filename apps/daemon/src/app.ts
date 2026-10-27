@@ -67,6 +67,7 @@ import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
 import { Routines } from "./routines.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
+import { selfBuildContext } from "./self-build-in-chat.ts";
 import { checkClaim, proofPass } from "./proofs.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
@@ -311,7 +312,7 @@ export function createDaemonApp(options: {
       fallbackInference: (current, tried) => processor.createFallbackInference?.(current.thinkingEnabled, tried) ?? null,
       subagentModels: () => subagentModels(),
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
-      sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
+      sessionContext: (sessionId: string) => [driveInChat(sessionId), selfBuildInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
       ...(heartbeat ? { agentsIn: (workspaceRoot: string) => heartbeat.agentsIn(workspaceRoot) } : {}),
       ...options.agent,
     },
@@ -379,6 +380,11 @@ export function createDaemonApp(options: {
     const row = store.database.query("SELECT w.root FROM sessions s JOIN workspaces w ON w.id = s.workspace_id WHERE s.id = ?").get(sessionId) as { root: string } | null;
     if (!row || inDriveWorktree(row.root)) return null;
     return driveContext({ auto: driveAuto.state(row.root), ideas: chatIdeas(row.root).proposals, fixes: driveFixes.list(row.root), away: driveFixes.away(row.root) });
+  }
+  // A chat in Demesne's own checkout is told the window reloads itself.
+  function selfBuildInChat(sessionId: string): string | null {
+    const row = store.database.query("SELECT w.root FROM sessions s JOIN workspaces w ON w.id = s.workspace_id WHERE s.id = ?").get(sessionId) as { root: string } | null;
+    return row ? selfBuildContext(row.root) : null;
   }
   tools.register(driveRunTool({
     ideas: (root) => inDriveWorktree(root) || !workspaceTrust.isTrusted(root) ? null : chatIdeas(root),

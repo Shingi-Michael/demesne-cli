@@ -7,8 +7,20 @@ import type { PermissionMode, SessionStateResponse } from "@demesne/protocol";
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
 import { foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
+import { selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 
 const context = { workspaceRoot: "/tmp", signal: new AbortController().signal };
+
+test("project overview mockups keep Foundry tools instead of becoming file inspection", () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const definitions = [foundrySaveTool(store).definition, foundryReadTool(store).definition];
+    for (const request of ["Foundry: an overview of the project", "Make an overview of the project as a dashboard mockup"]) {
+      expect(selectToolsForTurn(definitions, request)).toEqual(definitions);
+      expect(turnToolGuidance(request)).toBeNull();
+    }
+  } finally { store.close(); }
+});
 const fixtures: { app: DaemonApp; root: string }[] = [];
 afterEach(async () => {
   for (const { app, root } of fixtures.splice(0)) {
@@ -156,4 +168,28 @@ test("foundry_save refuses a new artifact without a kind or title", async () => 
   await expect(save.execute({ kind: "svg", source: "<svg/>" }, context)).rejects.toThrow("title");
   await expect(save.execute({ id: "missing", source: "x" }, context)).rejects.toThrow();
   store.close();
+});
+
+test("artifact identity reaches live events and old replay without rewriting the journal", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const { session } = store.createSession("Foundry history");
+    const { turn } = store.createTurn(session.id, "Make a mockup");
+    store.startTurn(turn.id);
+    const { providerCallId } = store.startProviderCall(turn.id, "fixture", "fixture");
+    const input = { title: "Mockup", kind: "html", source: "<button>Interact</button>" };
+    const { toolCallId } = store.recordToolCall(turn.id, providerCallId, "save", "foundry_save", JSON.stringify(input));
+    const result = await foundrySaveTool(store).execute(input, { ...context, sessionId: session.id, turnId: turn.id });
+    const event = store.settleToolCall(toolCallId, "completed", result);
+    const artifact = JSON.parse(result);
+    const expected = { id: artifact.id, title: "Mockup", kind: "html", version: 1 };
+    expect(JSON.parse(event.payload.message as string)).toEqual(expected);
+    expect(event.payload.message).not.toContain(input.source);
+    const legacy = { ...event.payload }; delete legacy.message;
+    store.database.query("UPDATE events SET payload = ? WHERE id = ?").run(JSON.stringify(legacy), event.eventId);
+    expect(JSON.parse(store.eventsAfter(session.id, event.eventId - 1)[0]!.payload.message as string)).toEqual(expected);
+    expect(JSON.parse(store.eventsBetween(session.id, event.eventId - 1, event.eventId)[0]!.payload.message as string)).toEqual(expected);
+    const raw = store.database.query("SELECT payload FROM events WHERE id = ?").get(event.eventId) as { payload: string };
+    expect(JSON.parse(raw.payload).message).toBeUndefined();
+  } finally { store.close(); }
 });

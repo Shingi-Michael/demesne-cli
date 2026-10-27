@@ -19,11 +19,12 @@ import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
+import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { lookChange, lookWords, type LookState } from "./self-build.ts";
 import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
-import type { PlanLimits, ProofClaim, Routine } from "@demesne/protocol";
+import type { FoundryArtifact, FoundryArtifactDetail, PlanLimits, ProofClaim, Routine } from "@demesne/protocol";
 import { glanceHTML, type Glance } from "./glance.ts";
 import { backChoices, backState } from "./back-later.ts";
 import { agoWords, prHandable, prHandText, prStanding } from "./pr-row.ts";
@@ -201,6 +202,8 @@ const verb = (tool: ToolEntry) =>
     git_history: "History",
     session_tools: "Tool",
     subagent: "Agent",
+    foundry_save: "Made",
+    foundry_read: "Looked in Foundry",
   })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
 /// The heartbeat tool's actions, as the step rows name them.
 const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
@@ -749,7 +752,7 @@ function renderSidebar() {
     (sameControl ?? (focused >= 0 ? buttons[Math.min(focused, buttons.length - 1)] : null) ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
   }
   const title = document.getElementById("workspace-title");
-  if (title) { title.textContent = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen ? "All chats" : inSession() ? current?.title ?? "Conversation" : "Home"; title.title = title.textContent; }
+  if (title) { title.textContent = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "foundry" ? foundryOpen?.title ?? "Foundry" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen ? "All chats" : inSession() ? current?.title ?? "Conversation" : "Home"; title.title = title.textContent; }
   // A mission's chat says where it came from, and goes back there.
   const crumb = document.getElementById("workspace-from"), from = current && inSession() ? parentOf.get(current.id) : undefined;
   if (crumb) {
@@ -1331,6 +1334,8 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
     const first = typeof asked[0]?.question === "string" ? asked[0].question : "";
     return first ? `${h(first)}${asked.length > 1 ? `<span class="muted"> · ${asked.length - 1} more</span>` : ""}` : "";
   }
+  if (tool.name === "foundry_save") return h(String(tool.input.title || (tool.input.id ? "a new version" : "an artifact")));
+  if (tool.name === "foundry_read") return "";
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   // A command by its program's name: the full path is on hover.
   if (tool.name === "run_command") return h(base.replace(/^\S*\//, ""));
@@ -1415,7 +1420,11 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   const back = canRewind(run) && tool.toolCallId && ["done", "failed", "denied"].includes(tool.state) && !tool.waiting
     ? btn("rewind", `${ICON_UNDO}Rewind to here`, { turnId: run.id, toolCallId: tool.toolCallId }, "step-rewind").replace("<button ", '<button title="Put the files and the chat back to just after this step" ')
     : "";
-  return (back ? `<div class="step-line">${row}${back}</div>` : row) + (open && canFold ? stepFold(run, tool) : "");
+  // Something made in Foundry opens from its step.
+  const made = tool.name === "foundry_save" && tool.state === "done"
+    ? btn("foundry-open-step", "Open in Foundry ›", { id: tool.input.id ?? null, title: tool.input.title ?? null, message: tool.message ?? null }, "fd-step-open")
+    : "";
+  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + (open && canFold ? stepFold(run, tool) : "");
 }
 /// Rewind waits for running work, and only conversation turns rewind.
 const canRewind = (run: WorkspaceRun) => !state!.activeTurnId && !run.kind && run.status !== "running" && run.status !== "queued";
@@ -2269,8 +2278,11 @@ function renderHero() {
 }
 /// A page in place of the conversation, opened from the sidebar: All chats
 /// (Active or Archived), Scheduled, Customize or Settings. "" when closed.
-type PageKind = ChatsTab | "scheduled" | "customize" | "settings";
+type PageKind = ChatsTab | "scheduled" | "foundry" | "customize" | "settings";
 let pageOpen: "" | PageKind = "";
+/// Foundry: the gallery, the artifact open in it, and how it is shown.
+let foundryList: FoundryArtifact[] | null = null, foundryOpen: FoundryArtifactDetail | null = null, foundrySaves = -1;
+const foundryUi: FoundryUi = { tab: "all", view: "preview", width: "desktop", edit: null, draft: "", error: "", busy: false };
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;
 const routineUi = { error: "", draft: "" };
@@ -2439,12 +2451,52 @@ function openPage(kind: "" | PageKind) {
   if (kind === "active" || kind === "archived") void loadArchived();
   if (kind === "scheduled") { if (was !== "scheduled") routineUi.error = ""; void loadRoutines(); }
   if (kind === "customize") { if (was !== "customize") Object.assign(customizeUi, { editing: null, error: "" }); void loadCustomize(); }
+  if (kind === "foundry") { if (was !== "foundry") Object.assign(foundryUi, { edit: null, error: "" }); foundrySaves = foundrySaveCount(); void loadFoundry(); }
   if (kind === "settings" && was !== "settings") { Object.assign(settingsUi, { query: "", fold: "", error: "" }); loadSettings(); }
   if (state) renderState({ ...state });
   if (kind === "active" || kind === "archived") document.querySelector<HTMLElement>("#page .cp-tab.on")?.focus({ preventScroll: true });
   if (kind === "scheduled") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
+  if (kind === "foundry" && !foundryOpen) document.querySelector<HTMLInputElement>("#foundry-make input")?.focus({ preventScroll: true });
   if (kind === "settings" && was !== "settings") document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
   if (!kind && was === "settings") document.querySelector<HTMLElement>(".sidebar-settings")?.focus({ preventScroll: true });
+}
+/// Foundry saves seen in this window's chats: a new one refreshes the page.
+function foundrySaveCount() {
+  return (state?.runs ?? []).reduce((count, run) => count + tools(run).filter((tool) => tool.name === "foundry_save" && tool.state === "done").length, 0);
+}
+async function loadFoundry() {
+  try {
+    foundryList = await api<FoundryArtifact[]>("foundry-list");
+    // The open artifact follows its newest version unless an older one or an edit is on screen.
+    const open = foundryOpen, latest = open && foundryList.find((item) => item.id === open.id);
+    if (open && !latest) foundryOpen = null;
+    else if (open && latest && foundryUi.edit === null && open.version === open.versions[0]?.version && latest.version !== open.version) await openFoundry(open.id);
+    foundryUi.error = "";
+  } catch (error) {
+    foundryList = foundryList ?? [];
+    foundryUi.error = errorWords(error);
+  }
+  renderPage();
+}
+async function openFoundry(id: string, version?: number) {
+  try {
+    const found = await api<FoundryArtifactDetail>("foundry-get", version ? { id, version } : { id });
+    if (foundryOpen?.id !== found.id) Object.assign(foundryUi, { view: "preview", edit: null });
+    foundryOpen = found;
+    foundryUi.error = "";
+  } catch (error) { foundryUi.error = errorWords(error); }
+  if (pageOpen !== "foundry") openPage("foundry"); else { renderPage(); if (state) renderState({ ...state }); }
+  document.getElementById("page")?.scrollTo({ top: 0 });
+}
+const errorWords = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^.*?: /, "");
+async function foundryMake(text: string) {
+  foundryUi.busy = true; renderPage();
+  try {
+    await api("foundry-make", { text });
+    foundryUi.draft = foundryUi.error = "";
+    openPage("");
+  } catch (error) { foundryUi.error = errorWords(error); }
+  finally { foundryUi.busy = false; renderPage(); }
 }
 async function loadArchived() {
   try {
@@ -2479,6 +2531,14 @@ function renderPage() {
     // Typing in the new routine keeps the field as it is.
     if (document.activeElement?.closest("#routine-new")) routineUi.draft = (document.activeElement as HTMLInputElement).value;
     html = scheduledPage({ routines: routinesHere, auto: isPlain() ? null : state.breakage.auto, here: isPlain() ? "" : here, error: routineUi.error, draft: routineUi.draft });
+  } else if (pageOpen === "foundry") {
+    // Source being edited keeps its words through a redraw.
+    const area = root.querySelector<HTMLTextAreaElement>(".fd-source textarea:not([readonly])");
+    if (area && foundryUi.edit !== null) foundryUi.edit = area.value;
+    if (document.activeElement?.closest("#foundry-make")) foundryUi.draft = (document.activeElement as HTMLInputElement).value;
+    const saves = foundrySaveCount();
+    if (saves !== foundrySaves) { foundrySaves = saves; void loadFoundry(); }
+    html = foundryPage({ list: foundryList, open: foundryOpen, ui: foundryUi, here: isPlain() ? "" : here, markdownHtml: markdown });
   } else if (pageOpen === "customize") {
     // A file being edited keeps its words through a redraw.
     const area = root.querySelector<HTMLTextAreaElement>(".cz-edit textarea");
@@ -2512,6 +2572,7 @@ document.getElementById("page")?.addEventListener("input", (event) => {
 });
 document.getElementById("page")?.addEventListener("change", (event) => {
   const input = event.target as HTMLElement;
+  if (input instanceof HTMLSelectElement && input.matches("[data-foundry-version]") && foundryOpen) return void openFoundry(foundryOpen.id, Number(input.value));
   if (input instanceof HTMLInputElement && input.matches("[data-glass]")) try { localStorage.setItem("demesne-glass", String(glassLevel)); } catch {}
 });
 // A number in Settings saves on Enter, or when you leave it.
@@ -2575,6 +2636,13 @@ document.getElementById("page")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const value = form.querySelector("input")?.value.trim() ?? "";
     if (value) void settingsCall("settings-config", { key: form.dataset.key, value });
+    return;
+  }
+  if (form.id === "foundry-make") {
+    event.preventDefault();
+    const text = form.querySelector("input")?.value.trim() ?? "";
+    foundryUi.draft = text;
+    if (text && !foundryUi.busy) void foundryMake(text);
     return;
   }
   if (form.id !== "routine-new") return;
@@ -2756,7 +2824,7 @@ function renderPlainLine() {
   const show = Boolean(state) && isPlain() && inSession() && !state!.activeTurnId;
   if (!show && whereOpen === "move") whereOpen = null;
   node.hidden = !show;
-  const html = show ? `<p class="plain-note">Just a chat: it can’t see or change files. ${btn("where-move", `Move to a project ${whereOpen === "move" ? "⌄" : "›"}`, {}, "link").replace("<button ", `<button aria-expanded="${whereOpen === "move"}" `)}</p>${whereOpen === "move" ? `<div class="where-row" role="group" aria-label="Move this chat to">${whereRow("move")}</div>` : ""}` : "";
+  const html = show ? `<p class="plain-note">Create in Foundry here. ${btn("where-move", `Move to a project ${whereOpen === "move" ? "⌄" : "›"}`, {}, "link").replace("<button ", `<button aria-expanded="${whereOpen === "move"}" `)} to work with local files.</p>${whereOpen === "move" ? `<div class="where-row" role="group" aria-label="Move this chat to">${whereRow("move")}</div>` : ""}` : "";
   if (node.dataset.html !== html) { node.innerHTML = html; node.dataset.html = html; }
 }
 function renderComposer() {
@@ -4383,6 +4451,82 @@ function proofKey(event: KeyboardEvent, key: string, field: boolean): boolean {
   }
   return false;
 }
+/// Foundry's buttons: the gallery, one artifact, and handing it to a chat.
+async function foundryAction(action: string, args: Record<string, any>) {
+  const open = foundryOpen;
+  const redraw = () => { renderPage(); if (state) renderState({ ...state }); };
+  if (action === "foundry-tab") { foundryUi.tab = args.tab; return renderPage(); }
+  if (action === "foundry-open") return openFoundry(String(args.id));
+  if (action === "foundry-open-step") {
+    // A new artifact's id is in the tool's result; a revision names it in its input.
+    let id = typeof args.id === "string" ? args.id : "";
+    if (!id && typeof args.message === "string") try { id = JSON.parse(args.message).id ?? ""; } catch {}
+    if (!id) {
+      const list = await api<FoundryArtifact[]>("foundry-list").catch(() => [] as FoundryArtifact[]);
+      id = list.find((item) => item.title === args.title)?.id ?? "";
+    }
+    if (id) return openFoundry(id);
+    return openPage("foundry");
+  }
+  if (action === "foundry-close") { foundryOpen = null; foundryUi.edit = null; redraw(); void loadFoundry(); return; }
+  if (action === "foundry-view") { foundryUi.view = args.view === "source" ? "source" : "preview"; return renderPage(); }
+  if (action === "foundry-width") { foundryUi.width = args.width; return renderPage(); }
+  if (!open) return;
+  if (action === "foundry-version") return openFoundry(open.id, Number(args.version));
+  if (action === "foundry-reload") { const frame = document.querySelector<HTMLIFrameElement>("#page .fd-frame"); if (frame) frame.src = frame.src; return; }
+  if (action === "foundry-edit") { foundryUi.edit = open.source; foundryUi.view = "source"; renderPage(); document.querySelector<HTMLTextAreaElement>("#page .fd-source textarea")?.focus(); return; }
+  if (action === "foundry-edit-cancel") { foundryUi.edit = null; return renderPage(); }
+  if (action === "foundry-edit-save" || action === "foundry-restore") {
+    const area = document.querySelector<HTMLTextAreaElement>("#page .fd-source textarea:not([readonly])");
+    const source = action === "foundry-restore" ? open.source : area?.value ?? foundryUi.edit ?? "";
+    try {
+      foundryOpen = await api<FoundryArtifactDetail>("foundry-save", { id: open.id, source });
+      Object.assign(foundryUi, { edit: null, view: "preview", error: "" });
+    } catch (error) { foundryUi.error = errorWords(error); }
+    return renderPage();
+  }
+  if (action === "foundry-copy") { await act(() => api("copy", { text: open.source })); return notice("Copied the source"); }
+  if (action === "foundry-export") {
+    const saved = await act(() => api<{ path: string } | null>("desktop-foundry-export", { id: open.id, version: open.version }));
+    if (saved && typeof saved === "object" && "path" in saved) notice(`Exported to ${saved.path}`);
+    return;
+  }
+  if (action === "foundry-delete") {
+    if (!confirm(`Delete "${open.title}" and all ${open.versions.length} version${open.versions.length === 1 ? "" : "s"}?`)) return;
+    await act(() => api("foundry-delete", { id: open.id }));
+    foundryOpen = null;
+    redraw();
+    return loadFoundry();
+  }
+  if (action === "foundry-revise") {
+    await act(() => api("foundry-revise", { id: open.id, title: open.title, chat: open.sessionId }));
+    openPage("");
+    editor.focus({ preventScroll: true });
+  }
+}
+// Double-click an artifact's title to rename it; Enter keeps it, Esc puts it back.
+document.getElementById("page")?.addEventListener("dblclick", (event) => {
+  const title = (event.target as HTMLElement).closest<HTMLElement>("[data-foundry-title]");
+  if (!title || !foundryOpen || title.isContentEditable) return;
+  const before = foundryOpen.title, id = foundryOpen.id;
+  title.contentEditable = "plaintext-only";
+  title.focus();
+  getSelection()?.selectAllChildren(title);
+  const finish = async (keep: boolean) => {
+    title.removeEventListener("keydown", keys);
+    title.contentEditable = "false";
+    const next = (title.textContent ?? "").trim();
+    if (!keep || !next || next === before) { title.textContent = before; return; }
+    try { await api("foundry-rename", { id, title: next }); if (foundryOpen?.id === id) foundryOpen = { ...foundryOpen, title: next }; void loadFoundry(); }
+    catch (error) { title.textContent = before; notice(errorWords(error)); }
+  };
+  const keys = (key: KeyboardEvent) => {
+    if (key.key === "Enter") { key.preventDefault(); title.blur(); }
+    if (key.key === "Escape") { key.preventDefault(); key.stopPropagation(); void finish(false); }
+  };
+  title.addEventListener("keydown", keys);
+  title.addEventListener("blur", () => void finish(true), { once: true });
+});
 async function dispatch(
   action: string,
   args: Record<string, any>,
@@ -4392,8 +4536,9 @@ async function dispatch(
   if (action === "chats-page") return openPage(args.tab === "archived" ? "archived" : "active");
   if (action === "page-open") {
     const page = String(args.page ?? "");
-    return openPage(!page || pageOpen === page ? "" : (["customize", "settings", "active", "archived"].includes(page) ? page : "scheduled") as PageKind);
+    return openPage(!page || pageOpen === page ? "" : (["foundry", "customize", "settings", "active", "archived"].includes(page) ? page : "scheduled") as PageKind);
   }
+  if (action.startsWith("foundry-")) return foundryAction(action, args);
   if (action === "settings-section") return isSettingsSection(args.id) ? settingsSection(args.id) : undefined;
   if (action === "settings-fold") { settingsUi.fold = settingsUi.fold === args.fold ? "" : String(args.fold); return renderPage(); }
   if (action === "settings-local") {
@@ -5436,6 +5581,14 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (settingsUi.query) settingsSection(settingsUi.section);
     else { settingsUi.fold = ""; renderPage(); }
+    return;
+  }
+  // Esc in an open artifact goes back to Foundry's gallery first.
+  if (key === "escape" && !ctrl && pageOpen === "foundry" && foundryOpen && !field) {
+    event.preventDefault();
+    if (foundryUi.edit !== null) foundryUi.edit = null; else foundryOpen = null;
+    renderPage();
+    if (state) renderState({ ...state });
     return;
   }
   if (key === "escape" && !ctrl && pageOpen && (!field || (event.target as HTMLElement).id === "settings-search")) {

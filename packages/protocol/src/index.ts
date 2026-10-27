@@ -1031,3 +1031,41 @@ function parseRuleArguments(value: unknown): Record<string, unknown> {
     return {};
   }
 }
+
+/// Foundry: things the agent makes for the person (prototypes, graphics,
+/// documents). Each save is a new version; the source is text the person can
+/// read, revise and export.
+export type FoundryKind = "html" | "svg" | "markdown";
+export const FOUNDRY_KINDS: readonly FoundryKind[] = ["html", "svg", "markdown"];
+export const FOUNDRY_MAX_SOURCE_BYTES = 512 * 1024;
+
+export interface FoundryVersion {
+  version: number;
+  createdAt: string;
+  /// The chat and turn that saved it; null when saved by the person.
+  sessionId: string | null;
+  turnId: string | null;
+  note: string;
+  byteLength: number;
+}
+
+export interface FoundryArtifact {
+  id: string;
+  title: string;
+  kind: FoundryKind;
+  /// The project it belongs to, or null for "Just a chat".
+  workspace: string | null;
+  sessionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface FoundryArtifactDetail extends FoundryArtifact {
+  source: string;
+  versions: FoundryVersion[];
+}
+
+export interface FoundryListResponse {
+  artifacts: FoundryArtifact[];
+}

@@ -21,6 +21,19 @@ export function previewURL(value: string) {
     return ["http:", "https:"].includes(url.protocol) && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) && !url.username && !url.password;
   } catch { return false; }
 }
+/** A Foundry artifact's frame: foundry://artifact/<id>?v=<version>. */
+export function foundryURL(value: string) {
+  try { const url = new URL(value); return url.protocol === "foundry:" && url.hostname === "artifact" && /^\/[\w-]{1,200}$/.test(url.pathname) && !url.username && !url.password && !url.port; } catch { return false; }
+}
+/** What an artifact frame may do: run its own inline code and nothing else. */
+export const FOUNDRY_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:";
+/** The page an artifact frame shows: HTML as written, SVG as an image (so it runs no script). */
+export function foundryDocument(kind: string, source: string, title: string) {
+  const esc = (text: string) => text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);
+  if (kind === "html") return source;
+  if (kind === "svg") return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>html,body{margin:0;height:100%;background:transparent}body{display:grid;place-items:center}img{max-width:92%;max-height:92%}</style><img alt="${esc(title)}" src="data:image/svg+xml;base64,${Buffer.from(source).toString("base64")}">`;
+  return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><pre style="white-space:pre-wrap;font:14px/1.6 system-ui;padding:24px">${esc(source)}</pre>`;
+}
 export const EVENTS = ["demesne:update", "demesne:desktop-error", "demesne:desktop-action"] as const;
 export function localAppURL(value: string) {
   try { const url = new URL(value); return url.protocol === "demesne:" && url.hostname === "app" && !url.port && !url.username && !url.password; } catch { return false; }

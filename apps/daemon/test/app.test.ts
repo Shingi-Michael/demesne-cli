@@ -21,11 +21,26 @@ import { ProviderError, type ProviderAdapter, type ProviderMessage } from "@deme
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
 import { ProviderTurnProcessor } from "../src/provider-processor.ts";
-import { ANSWER_FORMAT_GUIDANCE } from "../src/engine.ts";
+import { agentSystemPrompt, ANSWER_FORMAT_GUIDANCE } from "../src/engine.ts";
+import { planRawContextRequest } from "../src/context-planner.ts";
+import { foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 
 const temporaryDirectories: string[] = [];
 const servers: Bun.Server<unknown>[] = [];
 const apps: DaemonApp[] = [];
+
+// Context-boundary fixtures account for tools available without a project.
+// Keep their transcript budgets stable as the tool definitions change.
+function plainChatToolOverhead(): number {
+  const store = new DemesneStore(":memory:");
+  try {
+    const definitions = [foundryReadTool(store).definition, foundrySaveTool(store).definition];
+    const estimate = (tools: typeof definitions) => planRawContextRequest({
+      messages: [{ role: "system", content: agentSystemPrompt({ definitions: tools }) }], tools, historicalTurns: [],
+    }).plan.estimatedInputTokens;
+    return estimate(definitions) - estimate([]);
+  } finally { store.close(); }
+}
 
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop(true);
@@ -861,7 +876,7 @@ describe("Demesne daemon", () => {
     const processor: TurnProcessor = {
       providerId: "planned-bounded-provider",
       modelId: "planned-bounded-model",
-      contextCapacity: 2_108 + FORMAT_GUIDANCE_TOKENS,
+      contextCapacity: 2_108 + FORMAT_GUIDANCE_TOKENS + plainChatToolOverhead(),
       maxOutputTokens: 128,
       async listModels() { return [{ id: this.modelId, provider: this.providerId, contextWindow: this.contextCapacity }]; },
       async *stream(messages) {
@@ -1231,7 +1246,7 @@ describe("Demesne daemon", () => {
     // A deny resets the count.
     await send("deny"); await send("allow_once");
     expect(asked.at(-1)!.allowedBefore).toBe(0);
-    const asks = await jsonRequest<{ thisWeek: number; lastWeek: number }>(running.url, `/v1/permissions/asks?workspace=${encodeURIComponent(workspacePath)}`);
+    const asks = await jsonRequest<{ thisWeek: number; lastWeek: number }>(running.url, `/v1/permissions/asks?workspace=${encodeURIComponent(created.session.workspace!.root)}`);
     expect(asks).toEqual({ thisWeek: 6, lastWeek: 0 });
   });
 
@@ -1550,7 +1565,7 @@ describe("Demesne daemon", () => {
     const processor: TurnProcessor = {
       providerId: "llama.cpp",
       modelId: "cache-aware-model",
-      contextCapacity: 2_600,
+      contextCapacity: 2_600 + plainChatToolOverhead(),
       maxOutputTokens: 128,
       preservesPromptCache: true,
       async listModels() { return []; },

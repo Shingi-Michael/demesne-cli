@@ -1194,6 +1194,8 @@ export class WorkspaceHost {
       "trust-workspace",
       "setup",
       "setup-action",
+      "foundry-list",
+      "foundry-get",
     ]);
     // A draft saved for a session that is no longer current (a workflow or
     // mission that just switched sessions, a keystroke racing a switch) has
@@ -1697,6 +1699,27 @@ export class WorkspaceHost {
     }
     if (method === "routine-set") return (await this.client.setRoutine(string(args.id, "routine", 200), args.on === true)).routines;
     if (method === "routine-remove") return (await this.client.removeRoutine(string(args.id, "routine", 200))).routines;
+    // Foundry: what the agent made. The list and a source are read by the
+    // window and by the viewer frame (which has no session).
+    if (method === "foundry-list") return (await this.client.foundryList()).artifacts;
+    if (method === "foundry-get") return this.client.foundryGet(string(args.id, "artifact", 200), typeof args.version === "number" && Number.isSafeInteger(args.version) && args.version > 0 ? args.version : undefined);
+    if (method === "foundry-rename") return this.client.foundryRename(string(args.id, "artifact", 200), string(args.title, "title", 200));
+    if (method === "foundry-delete") return this.client.foundryDelete(string(args.id, "artifact", 200));
+    if (method === "foundry-save") return this.client.foundrySave({ id: string(args.id, "artifact", 200), source: string(args.source, "source", 520_000), note: "Edited by you" });
+    // Make something: a new chat in this window's place, asked to use Foundry.
+    if (method === "foundry-make") {
+      const text = string(args.text, "request", 4000).trim();
+      if (!text) throw new Error("Describe what to make");
+      const plain = Boolean(this.current && !this.current.session.workspace);
+      await this.newSession(undefined, { plain, reuse: true });
+      await this.submit(`Create in Foundry: ${text}`, false, "ask");
+      return this.snapshot();
+    }
+    // Revise: the composer of the open chat gets a line naming the artifact.
+    if (method === "foundry-revise") {
+      this.carryDraft(`Revise the Foundry artifact "${string(args.title, "title", 200)}" (id ${string(args.id, "artifact", 200)}): `);
+      return;
+    }
     // Customize: this project's instructions, commands and workflows, read
     // and written in place; a plain chat has only yours.
     if (method === "customize" || method === "customize-read" || method === "customize-save" || method === "customize-new") {

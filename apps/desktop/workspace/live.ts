@@ -3187,7 +3187,11 @@ function renderBriefing() {
     setTimeout(() => { if (!reply.classList.contains("open")) { reply.hidden = true; reply.innerHTML = ""; } }, 320);
     return;
   }
-  if (!open) return;
+  if (!open) {
+    reply.hidden = true;
+    reply.innerHTML = "";
+    return;
+  }
   // A note half typed survives Drive's own updates redrawing the reply.
   const typing = reply.querySelector<HTMLInputElement>("#drive-tell-form input"), kept = typing && { value: typing.value, focus: document.activeElement === typing };
   reply.innerHTML = `<div class="dr-fold"><div><div class="dr-body">${fold}</div></div></div>`;

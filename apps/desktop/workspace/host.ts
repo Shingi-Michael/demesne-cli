@@ -195,6 +195,7 @@ export class WorkspaceHost {
   /// Proposals you hid: until a time (Not now, or while running) or for good.
   private nextHidden: Record<string, number | "never"> = {};
   private nextRequested = 0;
+  private nextForcePending = false;
   private autoStarted = false;
   readonly workspace: string;
   private client: DemesneClient;
@@ -1065,7 +1066,10 @@ export class WorkspaceHost {
   /// Asks the daemon for the Next queue: cached unless the workspace's
   /// signals changed; `force` regenerates it.
   async refreshNext(force = false) {
-    if (this.nextQueue.loading) return;
+    if (this.nextQueue.loading) {
+      this.nextForcePending ||= force;
+      return;
+    }
     this.nextRequested = Date.now();
     this.nextQueue = { ...this.nextQueue, loading: true, error: null };
     this.publish();
@@ -1080,6 +1084,11 @@ export class WorkspaceHost {
       this.nextQueue = { ...this.nextQueue, loading: false, error: error instanceof Error ? error.message : String(error) };
     }
     this.publish();
+    // Drain after success or failure, never alongside the current planner call.
+    if (this.nextForcePending) {
+      this.nextForcePending = false;
+      await this.refreshNext(true);
+    }
   }
   private accounts() {
     return this.providerAccounts ??= this.options.providerAccounts ?? new ProviderAccounts({ configPath: this.settings.configPath, dataDirectory: this.settings.dataDirectory, accountDataDirectory: this.settings.accountDataDirectory, open: (url) => this.open(url) });

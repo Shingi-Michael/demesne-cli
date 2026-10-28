@@ -91,3 +91,24 @@ test("settled, the files are in and the rows close up", () => {
   expect(settled.done).toBe(playing.done);
   expect(settled.rows.at(-1)!.y - settled.rows.at(-2)!.y).toBe(settled.rows[1]!.y - settled.rows[0]!.y);
 });
+
+test("your branch's first commit shows even beside three others", () => {
+  const others = ["drive/a", "b", "c"].map((name) => ({ name, base: main[0]!.sha, commits: [c(`${name}1`)], worktree: false }));
+  const mine = { name: "feature", base: main[2]!.sha, commits: [c("m1", "First")], worktree: false };
+  const scene = repoScene({ command: "commit", before: snap({ head: "feature", commits: main, lanes: others, files: [{ path: "a.ts", added: 1, removed: 0 }] }),
+    after: snap({ head: "feature", commits: main, lanes: [mine, ...others.slice(0, 2)], tip: "z" }) });
+  expect(scene.rows.some((row) => row.text === "feature")).toBe(true);
+  expect(scene.target).not.toBeNull();
+});
+
+test("a width spreads the tree across it; labels keep their column", () => {
+  const flow: RepoFlow = { command: "commit", before: snap({ commits: main, lanes: [drive] }), after: snap({ commits: [...main, c("n1")], lanes: [drive], tip: "n" }) };
+  const natural = repoScene(flow), wide = repoScene(flow, { width: 760 }), narrow = repoScene(flow, { width: natural.width - 40 });
+  expect(wide.width).toBeLessThanOrEqual(760);
+  expect(wide.width).toBeGreaterThan(740);
+  expect(wide.width - wide.labelX).toBe(natural.width - natural.labelX);
+  expect(narrow.width).toBeLessThanOrEqual(natural.width - 40);
+  expect(repoScene(flow, { width: 0 })).toEqual(natural);
+  const long = repoScene({ ...flow, after: { ...flow.after, commits: [...main, c("n1", "x".repeat(80))] } });
+  expect(long.rows[0]!.after!.length).toBeLessThanOrEqual(40);
+});

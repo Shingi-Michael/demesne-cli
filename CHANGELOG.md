@@ -4,6 +4,11 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ## [Unreleased]
 
+### Fixed
+
+- The conversation no longer flickers while the model writes a command: only the step's words change as they arrive, instead of the whole turn being redrawn every few characters.
+- A commit's tree always shows the branch you're on, even on its first commit next to three other branches, and long labels end in "…" inside their column.
+
 ### Removed
 
 - Proof marks: answers no longer carry underlined claims, the "N proved · M not checked" line, Prove it, or the extra model call after each answer that made them. The daemon's proof pass and `/proofs` route, the `turn.proofs` events, the Settings › Models switch and `[agent] proof_marks` are gone (a config that still names the key loads and ignores it).

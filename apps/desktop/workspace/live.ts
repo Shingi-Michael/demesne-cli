@@ -1419,6 +1419,9 @@ const repoSlot = (tool: ToolEntry) => `<div class="repo-flow-slot" data-repo-flo
 /// The trees drawn under commit and merge steps, by tool call. Each plays
 /// once, when it first appears in the turn that is running.
 const repoViews = new Map<string, RepoFlowView>();
+const repoResize = new ResizeObserver((entries) => {
+  for (const entry of entries) for (const view of repoViews.values()) if (view.element === entry.target) view.fit(entry.contentRect.width + 28);
+});
 /// Steps this window watched run play their tree; so does one that ran
 /// moments ago (a quick step can finish between two paints). A reload or
 /// history shows it settled.
@@ -1429,10 +1432,14 @@ function placeRepoFlows(container: ParentNode, run: WorkspaceRun) {
     if (!tool?.repo) continue;
     let view = repoViews.get(tool.toolCallId);
     if (!view) {
-      view = new RepoFlowView(tool.repo, String(tool.detail ?? "").replace(/^\$\s*/, ""));
+      const root = state?.session?.workspace?.root ?? "";
+      view = new RepoFlowView(tool.repo, String(tool.detail ?? "").replace(/^\$\s*/, ""), { repo: root.split(/[\\/]/).filter(Boolean).at(-1) ?? "" });
       repoViews.set(tool.toolCallId, view);
+      repoResize.observe(view.element);
     }
     slot.replaceWith(view.element);
+    // It spreads across the chat column it sits in.
+    view.fit(view.element.clientWidth);
     // It plays once for a step that just ran in this window, even the last
     // one of a turn that has already finished; history and a reload show it
     // settled.

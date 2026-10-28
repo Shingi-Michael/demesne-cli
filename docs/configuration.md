@@ -158,6 +158,12 @@ A turn belongs to the model that answered its first request. Models on providers
 
 `[drive]` controls new missions. See [Drive limits](agent-drive.md#mission-limits) for all fields and defaults. Existing saved missions keep their original limits. A provider output limit, a Drive token budget, and a server reasoning budget are separate controls.
 
+## Assistant folders
+
+`[assistant] folders` names folders outside any project that the assistant's read-only `personal_files` tool may list and read, as `name = 'absolute path'`. Names are one word. See [the assistant guide](assistant.md#one-tool-personal_files). The daemon reads this when it starts.
+
+`[assistant] ntfy` is an [ntfy](https://ntfy.sh) topic URL your phone subscribes to; with it, routines push their answers to your phone and chats get a `notify_phone` tool. The topic must be at least 16 characters, and the URL https (plain http only on this computer or a Tailscale `100.x` address). `ntfy_token` is sent as a bearer token for a server that needs one. See [the assistant guide](assistant.md#step-4-push-to-your-phone).
+
 ## Images and MCP
 
 Image generation is configured independently from the chat model:

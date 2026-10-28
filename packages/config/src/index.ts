@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 /// Typed, dependency-free configuration for both the daemon and the desktop host.
 ///
@@ -53,6 +53,16 @@ export interface HeartbeatConfig {
   /// Path of the daemon's control socket; default: HEARTBEAT_CONTROL_SOCKET,
   /// else <HEARTBEAT_DATA_DIR or ~/.local/state/heartbeat>/control.sock.
   socket?: string;
+}
+
+/// The always-on assistant. `folders` names the folders outside any project
+/// that it may read, as name = absolute path.
+export interface AssistantConfig {
+  folders?: Record<string, string>;
+  /// An ntfy topic URL your phone subscribes to, and its token if the
+  /// server needs one: routines push their answers there.
+  ntfy?: string;
+  ntfyToken?: string;
 }
 
 export interface DaemonConfig {
@@ -110,6 +120,7 @@ export interface DemesneConfig {
   ui: UiConfig;
   mcp: { servers: Record<string, McpServerConfig> };
   heartbeat?: HeartbeatConfig;
+  assistant?: AssistantConfig;
 }
 
 export interface LoadedConfig {
@@ -244,7 +255,7 @@ function applyDocument(
   const path = source === "user" ? "user config" : "project config";
   assertKnownKeys(document, [
     "server", "data_dir", "theme", "inference_slots",
-    "provider", "additional_providers", "images", "daemon", "agent", "drive", "permissions", "notifications", "ui", "mcp", "heartbeat",
+    "provider", "additional_providers", "images", "daemon", "agent", "drive", "permissions", "notifications", "ui", "mcp", "heartbeat", "assistant",
   ], path);
 
   assign(config, "server", document.server, source, sources, (value, key) => {
@@ -336,6 +347,28 @@ function applyDocument(
     const target = config.heartbeat ??= {};
     assignInto(target, "enabled", heartbeat.enabled, source, sources, "heartbeat.enabled", optionalBoolean);
     assignInto(target, "socket", heartbeat.socket, source, sources, "heartbeat.socket", optionalString);
+  }
+
+  if (document.assistant !== undefined) {
+    const assistant = objectValue(document.assistant, "assistant");
+    assertKnownKeys(assistant, ["folders", "ntfy", "ntfy_token"], `${path}.assistant`);
+    const target = config.assistant ??= {};
+    assignInto(target, "folders", assistant.folders, source, sources, "assistant.folders", (value, key) => {
+      const folders = stringRecord(value, key)!;
+      for (const [name, folder] of Object.entries(folders)) {
+        if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name)) throw new ConfigError(`${key}.${name}: a folder's name is one word of letters, digits, - or _`);
+        if (!isAbsolute(folder)) throw new ConfigError(`${key}.${name} must be an absolute path`);
+      }
+      return folders;
+    });
+    assignInto(target, "ntfy", assistant.ntfy, source, sources, "assistant.ntfy", (value, key) => {
+      const url = optionalString(value, key)!;
+      // Plain http only on this computer or over Tailscale (100.x addresses).
+      if (!url.startsWith("https://") && !/^http:\/\/(127\.0\.0\.1|localhost|100\.)/.test(url)) throw new ConfigError(`${key} must use https:// (plain http only on this computer or Tailscale)`);
+      if (!/\/[\w-]{16,}$/.test(url)) throw new ConfigError(`${key} must end in a topic of at least 16 letters, digits, - or _: anyone who guesses the topic can read it`);
+      return url;
+    });
+    assignInto(target, "ntfyToken", assistant.ntfy_token, source, sources, "assistant.ntfyToken", optionalString);
   }
 
   if (document.daemon !== undefined) {

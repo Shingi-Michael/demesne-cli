@@ -67,6 +67,9 @@ import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
 import { Routines } from "./routines.ts";
+import { personalFilesTool } from "./personal-files.ts";
+import { PersonalIndex, searchPersonalFilesTool } from "./personal-index.ts";
+import { notifyPhoneTool, routineMessage, type Phone } from "./notify-phone.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
@@ -145,6 +148,11 @@ export function createDaemonApp(options: {
   mcpServers?: Record<string, McpServerConfig>;
   /// Join Heartbeat, the agent message bus, when its daemon runs here.
   heartbeat?: HeartbeatConfig;
+  /// Folders outside any project that the assistant may read, by name.
+  assistantFolders?: Record<string, string>;
+  /// Your phone, through ntfy: routines push their answers to it, and chats
+  /// get a notify_phone tool.
+  phone?: Phone;
   images?: ImageGenerationConfig;
   contextPlanner?: ContextPlanner;
   providerFirstEventTimeoutMs?: number;
@@ -286,6 +294,27 @@ export function createDaemonApp(options: {
   tools.register(foundrySaveTool(store));
   tools.register(foundryReadTool(store));
   tools.register(foundryEditTool(store));
+  // The assistant's shared folders: a tool to read them, and a search index
+  // over them, brought up to date at start and every ten minutes.
+  let personalIndex: PersonalIndex | undefined;
+  let personalIndexTimer: ReturnType<typeof setInterval> | undefined;
+  const personalIndexing = new AbortController();
+  if (Object.keys(options.assistantFolders ?? {}).length) {
+    tools.register(personalFilesTool(options.assistantFolders!));
+    const index = personalIndex = new PersonalIndex(join(dirname(options.databasePath), "personal-index.sqlite"), options.assistantFolders!);
+    let updating: Promise<unknown> | undefined;
+    tools.register(searchPersonalFilesTool(index, () => updating));
+    const update = () => {
+      updating ??= index.update(personalIndexing.signal)
+        .catch((error) => { if (!personalIndexing.signal.aborted) console.warn("Indexing the assistant's folders failed", error); })
+        .finally(() => { updating = undefined; });
+      return updating;
+    };
+    void update();
+    personalIndexTimer = setInterval(update, 10 * 60_000);
+    personalIndexTimer.unref?.();
+  }
+  if (options.phone) tools.register(notifyPhoneTool(options.phone));
   const mcp = new McpManager({
     servers: options.mcpServers ?? {},
     log: (message) => console.warn(message),
@@ -373,7 +402,15 @@ export function createDaemonApp(options: {
       // Nobody is at the window to approve, so a project's routine runs on
       // Auto, like a Drive mission; a plain chat has no tools to approve.
       const { turn } = store.createTurn(sessionId, routine.prompt, routine.workspace ? "allow" : "deny", false, false);
-      void queueTurn(turn, snapshotTurnInference(processor, false));
+      const run = queueTurn(turn, snapshotTurnInference(processor, false));
+      // With a phone set up, the answer goes there: a routine runs because
+      // you aren't looking at the window.
+      const phone = options.phone;
+      if (phone) void run.then(async () => {
+        const done = store.getTurn(turn.id);
+        const message = done && routineMessage(title, done.status, done.responseText);
+        if (message) await phone.send(message);
+      }).catch((error) => console.warn("Couldn't send a routine's answer to the phone", error));
       return sessionId;
     },
   });
@@ -1502,6 +1539,8 @@ export function createDaemonApp(options: {
       driveLifecycle.abort(new DOMException("Daemon shutting down", "AbortError"));
       clearInterval(driveAutoTimer);
       clearInterval(routinesTimer);
+      clearInterval(personalIndexTimer);
+      personalIndexing.abort();
       for (const close of [...activeStreamClosers]) close();
       if (activeRequests > 0) {
         await new Promise<void>((resolve) => requestDrainWaiters.add(resolve));
@@ -1526,6 +1565,7 @@ export function createDaemonApp(options: {
       await commands.close();
       backgroundProcesses.shutdownAll();
       store.close();
+      personalIndex?.close();
   }
 }
 

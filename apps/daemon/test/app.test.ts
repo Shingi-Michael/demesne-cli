@@ -2023,6 +2023,63 @@ process.stdin.on("data", (chunk) => {
     expect(toolResult).toBe("echo: hi");
   });
 
+  test("a chat can search and read the assistant's shared folders", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const data = join(directory, "data");
+    const workspacePath = join(directory, "Assistant");
+    const documents = join(directory, "Documents");
+    for (const folder of [data, workspacePath, documents]) mkdirSync(folder);
+    writeFileSync(join(documents, "trip.md"), "Flight TP1345 to Lisbon on Friday 9:40\n");
+    let offered: string[] = [];
+    const results: string[] = [];
+    let round = 0;
+    const processor: TurnProcessor = {
+      providerId: "assistant-provider",
+      modelId: "assistant-model",
+      async listModels() {
+        return [{ id: this.modelId, provider: this.providerId }];
+      },
+      async *stream(messages, tools) {
+        if (round > 0) results.push(messages.findLast((message) => message.role === "tool")?.content ?? "");
+        const calls = [
+          { name: "search_personal_files", input: { query: "lisbon flight" } },
+          { name: "personal_files", input: { action: "read", folder: "documents", path: "trip.md" } },
+        ];
+        const call = calls[round++];
+        if (call) {
+          offered = tools.map((tool) => tool.name);
+          yield { type: "tool_call_delta" as const, index: 0, idDelta: `c${round}`, nameDelta: call.name, argumentsDelta: JSON.stringify(call.input) };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: "Friday 9:40" };
+      },
+    };
+    const app = createDaemonApp({ databasePath: join(data, "demesne.sqlite"), processor, assistantFolders: { documents } });
+    const server = Bun.serve({ port: 0, fetch: app.fetch });
+    apps.push(app);
+    servers.push(server);
+
+    const created = await jsonRequest<CreateSessionResponse>(server.url, "/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "Assistant", workspacePath, trustWorkspace: true }),
+    });
+    const submitted = await jsonRequest<SubmitTurnResponse>(
+      server.url,
+      `/v1/sessions/${created.session.id}/turns`,
+      { method: "POST", body: JSON.stringify({ content: "when is my flight?", permissionMode: "ask" }) },
+    );
+    let permissionRequested = false;
+    for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${created.session.id}&after=${submitted.eventId}`, server.url)))) {
+      if (event.type === "permission.requested") permissionRequested = true;
+      if (event.type === "turn.completed" || event.type === "turn.failed") break;
+    }
+    expect(permissionRequested).toBe(false);
+    expect(offered).toEqual(expect.arrayContaining(["personal_files", "search_personal_files"]));
+    expect(JSON.parse(results[0]!).hits[0]).toMatchObject({ folder: "documents", path: "trip.md" });
+    expect(JSON.parse(results[1]!).content).toBe("1: Flight TP1345 to Lisbon on Friday 9:40");
+  });
+
   test("event stream replays backlog and delivers a concurrent live event exactly once, in order", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

@@ -49,7 +49,7 @@ export interface AgentTool {
 
 /// Local-first error taxonomy: stable bracketed codes with a recovery hint,
 /// so small models can parse failures and self-correct in one turn.
-function toolError(code: string, message: string, hint: string): Error {
+export function toolError(code: string, message: string, hint: string): Error {
   return new Error(`[${code}] ${message}. Hint: ${hint}`);
 }
 

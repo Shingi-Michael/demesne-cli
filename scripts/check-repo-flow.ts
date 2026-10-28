@@ -22,7 +22,10 @@ const f = await fixture({
       yield { type: "tool_call_delta" as const, index: 0, idDelta: `run-${at}-${done}`, nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: steps[done] }) };
       yield { type: "finish", reason: "tool_calls" }; return;
     }
-    yield { type: "text_delta", delta: /merge/i.test(request) ? "Merged into main." : "Committed." };
+    // After the merge the answer takes its time, as a real model's does:
+    // the tree must not wait for the turn to end.
+    if (/merge/i.test(request)) for (const word of "Merged into main, and the branch is in.".split(" ")) { await Bun.sleep(700); yield { type: "text_delta", delta: `${word} ` }; }
+    else yield { type: "text_delta", delta: "Committed." };
     yield { type: "finish", reason: "stop" };
   },
 }, { workspaceName: "garden" });
@@ -113,7 +116,9 @@ try {
   await allow();
   await allow();
   const merged = page.locator("#conversation .repo-flow").last();
-  await eventually(async () => (await page!.locator("#conversation .repo-flow").count()) === 2, 15000);
+  // The tree draws while the answer is still being written.
+  await eventually(async () => (await page!.locator("#conversation .repo-flow").count()) === 2, 3000);
+  assert(!(await page.locator("#conversation").getByText("the branch is in.").count()), "the tree drew before the answer finished");
   await eventually(async () => (await merged.locator(".rf-caption span").last().evaluate(node => getComputedStyle(node).opacity)) === "1", 8000);
   assert.equal(await merged.locator(".rf-caption span").last().innerText(), "Merged feature into main");
   assert.equal(await merged.locator(".rf-new").innerHTML(), "main · #7 Grow the garden", "main's row names the merge");

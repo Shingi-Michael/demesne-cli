@@ -1419,8 +1419,10 @@ const repoSlot = (tool: ToolEntry) => `<div class="repo-flow-slot" data-repo-flo
 /// The trees drawn under commit and merge steps, by tool call. Each plays
 /// once, when it first appears in the turn that is running.
 const repoViews = new Map<string, RepoFlowView>();
-/// Steps that ran while this window was open play; a reload starts after.
-const windowOpenedAt = Date.now();
+/// Steps this window watched run play their tree; so does one that ran
+/// moments ago (a quick step can finish between two paints). A reload or
+/// history shows it settled.
+const windowOpenedAt = Date.now(), stepsSeenRunning = new Set<string>();
 function placeRepoFlows(container: ParentNode, run: WorkspaceRun) {
   for (const slot of container.querySelectorAll<HTMLElement>("[data-repo-flow]")) {
     const tool = run.entries.find((entry): entry is ToolEntry => entry.type === "tool" && entry.toolCallId === slot.dataset.repoFlow);
@@ -1434,7 +1436,7 @@ function placeRepoFlows(container: ParentNode, run: WorkspaceRun) {
     // It plays once for a step that just ran in this window, even the last
     // one of a turn that has already finished; history and a reload show it
     // settled.
-    view.render(tool.startedAt >= windowOpenedAt && Date.now() - tool.startedAt < 30_000);
+    view.render(stepsSeenRunning.has(tool.toolCallId) || (tool.startedAt >= windowOpenedAt && Date.now() - tool.startedAt < 30_000));
   }
 }
 /// Rewind waits for running work, and only conversation turns rewind.
@@ -1913,6 +1915,7 @@ function renderConversation() {
     const folded = rewoundBy(run);
     if (folded && (folded.toolCallId || folded.hiddenTurnIds.find((id) => state!.runs.some((item) => item.id === id)) !== run.id)) continue;
     ids.add(run.id);
+    for (const entry of run.entries) if (entry.type === "tool" && entry.state === "running" && !entry.drafting) stepsSeenRunning.add(entry.toolCallId);
     const signature = JSON.stringify([
       index === state.runs.length - 1,
       expanded.has(run.id),
@@ -1930,6 +1933,9 @@ function renderConversation() {
       reviewOpen.has(run.id) ? reviewVersion : 0,
       detailsOpen.has(`drive-asked:${run.id}`),
       state.rewinds.filter((rewind) => rewind.turnId === run.id || rewind.hiddenTurnIds.includes(run.id)),
+      // A commit or merge step's tree: the turn redraws the moment it lands,
+      // whatever else is streaming.
+      run.entries.flatMap((entry) => entry.type === "tool" && entry.repo && entry.state === "done" ? [entry.toolCallId] : []),
     ]);
     let saved = runNodes.get(run.id);
     if (!saved) {

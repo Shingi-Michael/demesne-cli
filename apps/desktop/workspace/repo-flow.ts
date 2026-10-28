@@ -23,37 +23,48 @@ export interface FlowScene {
   target: { x: number; y: number } | null;
   /// The lane that merged into main, if one did.
   merged: number | null;
-  older: { y: number; count: number } | null;
+  /// Branches not drawn, counted in the frame's top line.
+  older: number;
   done: string;
 }
 
 const short = (path: string) => { const parts = path.split("/"); const tail = parts.slice(-2).join("/"); return tail.length > 30 ? `…${tail.slice(-29)}` : tail; };
 const laneTone = (name: string, you: boolean): FlowTone => you ? "you" : name.startsWith("drive/") ? "drive" : "other";
-const laneText = (name: string) => name.startsWith("drive/") ? `Drive · ${name.slice(6)}` : name;
+/// A branch by a short name: Drive's without its prefix and random tail
+/// (its green says it's Drive's), and long ones cut at a word.
+export function laneText(name: string) {
+  const bare = name.startsWith("drive/") ? name.slice(6).replace(/-[0-9a-f]{4,8}$/, "") : name;
+  return cut(bare, 30);
+}
+const cut = (label: string, max: number) => {
+  if (label.length <= max) return label;
+  const head = label.slice(0, max - 1), at = Math.max(head.lastIndexOf("-"), head.lastIndexOf(" "), head.lastIndexOf("/"));
+  return `${(at > max * .6 ? head.slice(0, at) : head).trimEnd()}…`;
+};
 /// "Foundry assembles a page (#339)" reads "#339 Foundry assembles a page".
 export function commitWords(subject: string) {
   const pr = /\s*\(#(\d+)\)\s*$/.exec(subject);
   return pr ? `#${pr[1]} ${subject.slice(0, pr.index)}` : subject;
 }
-const fit = (label: string) => label.length > 40 ? `${label.slice(0, 39).trimEnd()}…` : label;
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /// Lays out the tree from git before and after the step. Pure, so the
 /// layout is tested on its own.
 /// How far apart things sit.
-interface Spacing { step: number; laneStep: number; bend: number; laneGap: number }
-/// The label column on the tree's right.
+interface Spacing { step: number; laneStep: number; bend: number; laneGap: number; labels: number }
+/// The label column on the tree's right; a narrow chat gets a narrower one.
 const LABELS = 250;
 /// `settled` is the tree after the step: the files are in, so the rows
 /// they waited on close up. With a `width`, the tree spreads across it:
 /// commits move apart and bends widen (up to twice), while the labels keep
 /// their column and size. `roomy` puts the branches further apart.
 export function repoScene(flow: RepoFlow, { settled = false, width = 0, roomy = false } = {}): FlowScene {
-  const at = (k: number) => layout(flow, settled, { step: STEP * k, laneStep: LANE_STEP * k, bend: BEND * Math.min(2, k), laneGap: roomy ? 54 : LANE_GAP });
+  const labels = width ? Math.round(Math.min(LABELS, Math.max(150, width * .45))) : LABELS;
+  const at = (k: number) => layout(flow, settled, { step: STEP * k, laneStep: LANE_STEP * k, bend: BEND * Math.min(2, k), laneGap: roomy ? 54 : LANE_GAP, labels });
   let scene = at(1);
   if (!width || Math.abs(width - scene.width) < 1) return scene;
-  // Narrower than its own size, it closes up a little (to just over half).
-  let low = .55, high = 8;
+  // Narrower than its own size, it closes up (to under half).
+  let low = .45, high = 8;
   scene = at(low);
   for (let round = 0; round < 14; round++) {
     const k = (low + high) / 2, next = at(k);
@@ -62,7 +73,7 @@ export function repoScene(flow: RepoFlow, { settled = false, width = 0, roomy = 
   return scene;
 }
 
-function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGap }: Spacing): FlowScene {
+function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGap, labels }: Spacing): FlowScene {
   const { before, after } = flow;
   const known = new Set(before.commits.map((commit) => commit.sha));
   const head = after.head ?? before.head;
@@ -133,14 +144,17 @@ function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGa
   if (active === -1 && freshMain.length) target = { x: xOf.get(freshMain.at(-1)!.sha)!, y: MAIN_Y };
   const newest = (lane: number) => lane === -1 ? freshMain.at(-1) : lanes[lane]?.lane.commits.at(-1);
   const rows: FlowRow[] = [{ y: MAIN_Y, text: after.main, tone: "main", lane: -1,
-    after: freshMain.length ? `${after.main} · ${commitWords(newest(-1)!.subject)}` : null }];
-  // Labels fit their column: a long one ends in "…".
-  for (const row of rows) { row.text = fit(row.text); if (row.after) row.after = fit(row.after); }
+    after: freshMain.length ? commitWords(newest(-1)!.subject) : null }];
   order.forEach((index) => {
     const item = lanes[index]!, tone = laneTone(item.lane.name, item.lane.name === head || item.merged);
-    rows.push({ y: rowY.get(index)!, text: fit(laneText(item.lane.name)), tone, lane: index,
-      after: index === active && item.fresh.includes(true) ? fit(`${laneText(item.lane.name)} · ${commitWords(newest(index)!.subject)}`) : null });
+    rows.push({ y: rowY.get(index)!, text: laneText(item.lane.name), tone, lane: index,
+      after: index === active && item.fresh.includes(true) ? commitWords(newest(index)!.subject) : null });
   });
+  // Labels fit their column, a long one ending in "…"; what landed is the
+  // commit's words beside the branch name (roughly 6.6px a mono character
+  // and 6.4px a word character at 11px).
+  for (const row of rows) row.text = cut(row.text, Math.floor((labels - 8) / 6.6));
+  for (const row of rows) if (row.after) row.after = cut(row.after, Math.max(10, Math.floor((labels - 24 - row.text.length * 6.6) / 6.4)));
   const filesY = active < -1 ? 0 : (rowY.get(active) ?? MAIN_Y) + FILES_TOP;
   const files = flow.command === "commit" && target && !settled ? before.files.map((file, index) => ({ y: filesY + index * FILE_ROW, path: short(file.path), added: file.added, removed: file.removed })) : [];
   const older = before.older + (lanes.length < names.length ? names.length - lanes.length : 0);
@@ -148,16 +162,19 @@ function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGa
   const committed = before.files.length + before.moreFiles;
   const branch = onMain ? after.main : head!;
   const done = flow.command === "commit"
-    ? `Committed ${committed ? `${plural(committed, "file")} ` : ""}to ${laneText(branch)}${committed ? ` · +${added} −${removed}` : ""}`
+    ? `Committed ${committed ? `${plural(committed, "file")} ` : ""}to ${laneText(branch)}${committed ? `  +${added} −${removed}` : ""}`
     : merged !== null ? `Merged ${laneText(lanes[merged]!.lane.name)} into ${after.main}` : `Merged into ${after.main}`;
   return {
-    width: labelX + LABELS, height: bottom + (older ? 30 : 10), labelX, paths, nodes, rows,
+    width: labelX + labels, height: bottom + 10, labelX, paths, nodes, rows,
     files, moreFiles: files.length ? before.moreFiles : 0, target, merged,
-    older: older ? { y: bottom + 22, count: older } : null, done,
+    older, done,
   };
 }
 
 const NS = "http://www.w3.org/2000/svg";
+const FRAME_PAD = 14;
+const BRANCH_ICON = `<svg class="rf-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="5.5" r="1.6"/><path d="M4.5 5.1v5.8M11.5 7.1c0 2.6-3.4 2.6-6.4 4.1"/></svg>`;
+const REPLAY_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3.2 8a4.8 4.8 0 1 0 1.5-3.5"/><path d="M3 2.6v2.6h2.6"/></svg>`;
 function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>, parent?: Element): SVGElementTagNameMap[K] {
   const node = document.createElementNS(NS, tag);
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
@@ -175,8 +192,18 @@ function text(parent: Element, x: number, y: number, words: string, className: s
 export class RepoFlowView {
   readonly element = document.createElement("div");
   private played = false;
-  constructor(readonly flow: RepoFlow, private readonly command: string, readonly spread: { width?: number; roomy?: boolean } = {}) {
+  /// While it plays, a resize waits: the drawing is not swapped mid-motion.
+  private playing = false;
+  /// `repo` names the project in the frame's top line; `width` is the
+  /// room the frame has, which the tree spreads across.
+  constructor(readonly flow: RepoFlow, private readonly command: string, private spread: { width?: number; roomy?: boolean; repo?: string } = {}) {
     this.element.className = "repo-flow";
+  }
+
+  /// The tree inside the frame gets the frame's width less its padding.
+  private scene(settled: boolean) {
+    const { width, ...rest } = this.spread;
+    return repoScene(this.flow, { ...rest, settled, width: width ? width - FRAME_PAD * 2 : 0 });
   }
 
   /// Draws the tree; `live` plays it once, otherwise it shows finished.
@@ -184,7 +211,23 @@ export class RepoFlowView {
     if (this.element.childElementCount) return;
     const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
     const playing = live && !reduced && !this.played;
-    this.draw(repoScene(this.flow, { ...this.spread, settled: !playing }), playing);
+    this.draw(this.scene(!playing), playing);
+  }
+
+  /// The room it has changed (a resize): settled, it spreads to fit again.
+  fit(width: number) {
+    if (!width || Math.abs(width - (this.spread.width ?? 0)) < 2) return;
+    this.spread = { ...this.spread, width };
+    if (this.playing || !this.element.childElementCount) return;
+    this.element.replaceChildren();
+    this.draw(this.scene(true), false);
+  }
+
+  /// Plays it again from the start.
+  replay() {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    this.element.replaceChildren();
+    this.draw(this.scene(false), true);
   }
 
   private draw(scene: FlowScene, playing: boolean) {
@@ -198,7 +241,14 @@ export class RepoFlowView {
     const nodeOf = scene.nodes.map((node) => el("circle", { cx: node.x, cy: node.y, r: node.merge ? 3.6 : 2.8, class: `rf-node rf-${node.tone}${node.merge ? " rf-ring" : ""}` }, dots));
     const ring = scene.target ? el("circle", { cx: scene.target.x, cy: scene.target.y, r: 5.5, class: "rf-wait rf-you" }, dots) : null;
     const rowOf = scene.rows.map((row) => text(words, scene.labelX, row.y, row.text, `rf-row rf-t-${row.tone}`));
-    const afterOf = scene.rows.map((row) => row.after ? text(words, scene.labelX, row.y, row.after, "rf-row rf-new") : null);
+    // What landed: the branch's name, then the commit's words.
+    const afterOf = scene.rows.map((row) => {
+      if (!row.after) return null;
+      const node = text(words, scene.labelX, row.y, row.text, `rf-row rf-new rf-t-${row.tone}`);
+      const message = el("tspan", { dx: 10, class: "rf-msg" }, node);
+      message.textContent = row.after;
+      return node;
+    });
     const fileOf: SVGElement[] = scene.files.map((file) => {
       const g = el("g", { class: "rf-file" }, words);
       text(g, scene.labelX, file.y, file.path, "rf-path");
@@ -207,13 +257,26 @@ export class RepoFlowView {
       return g;
     });
     if (scene.moreFiles) fileOf.push(text(words, scene.labelX, (scene.files.at(-1)?.y ?? 0) + FILE_ROW, `${scene.moreFiles} more`, "rf-path rf-file"));
-    if (scene.older) text(words, LEFT, scene.older.y, `${plural(scene.older.count, "older branch")}`.replace("branchs", "branches"), "rf-older");
+    // The frame: one quiet line on top (project, branch, what isn't drawn,
+    // play again), the tree, and one line under it.
+    const head = document.createElement("div");
+    head.className = "rf-head";
+    const flowHead = this.flow.after.head ?? this.flow.after.main;
+    head.innerHTML = `${BRANCH_ICON}<span class="rf-repo"></span><code class="rf-branch"></code><span class="rf-sp"></span>${scene.older ? `<span class="rf-more"></span>` : ""}<button type="button" class="rf-replay" title="Play again" aria-label="Play again">${REPLAY_ICON}</button>`;
+    head.querySelector(".rf-repo")!.textContent = this.spread.repo ?? "";
+    head.querySelector(".rf-branch")!.textContent = laneText(flowHead);
+    const more = head.querySelector(".rf-more");
+    if (more) more.textContent = `+${plural(scene.older, "branch")}`.replace("branchs", "branches");
+    head.querySelector(".rf-replay")!.addEventListener("click", () => this.replay());
     const caption = document.createElement("div");
     caption.className = "rf-caption";
     const doing = document.createElement("span"), done = document.createElement("span");
     doing.textContent = this.command; done.textContent = scene.done;
     caption.append(doing, done);
-    this.element.append(svg, caption);
+    const body = document.createElement("div");
+    body.className = "rf-body";
+    body.append(svg);
+    this.element.append(head, body, caption);
     const mergedParts = scene.merged === null ? [] : [...pipeOf].filter(([path]) => path.lane === scene.merged).map(([, node]) => node);
     const finish = () => {
       for (const node of fileOf) node.style.opacity = "0";
@@ -226,13 +289,16 @@ export class RepoFlowView {
     };
     if (!playing) { finish(); return; }
     this.played = true;
+    this.playing = true;
     const timeline = this.play(scene, { pipeOf, nodeOf, ring, rowOf, afterOf, fileOf, mergedParts, doing, done, sparks });
     // Once the files are in, the rows they waited on close up.
-    if (scene.files.length) timeline.then(() => setTimeout(() => {
+    timeline.then(() => setTimeout(() => {
+      this.playing = false;
+      if (!scene.files.length && scene.width === this.scene(true).width) return;
       this.element.replaceChildren();
-      this.draw(repoScene(this.flow, { ...this.spread, settled: true }), false);
-      this.element.animate([{ opacity: .55 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
-    }, 700));
+      this.draw(this.scene(true), false);
+      if (scene.files.length) this.element.animate([{ opacity: .55 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
+    }, scene.files.length ? 700 : 0));
   }
 
   private play(scene: FlowScene, parts: {

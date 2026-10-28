@@ -93,20 +93,24 @@ try {
     if (session) { const replay = await f.client.replayPage(session.id, 0, 10000); console.log(JSON.stringify(replay).slice(0, 6000)); }
     throw error;
   });
-  const rows = await tree.locator(".rf-row:not(.rf-new)").evaluateAll(nodes => nodes.map(node => node.innerHTML));
-  assert.deepEqual(rows.map(row => row.trim()), ["main", "feature", "Drive · fix-paths-1a2b"], "one row per line: main, your branch nearest, Drive below");
+  const rows = await tree.locator(".rf-row:not(.rf-new)").evaluateAll(nodes => nodes.map(node => node.textContent ?? ""));
+  assert.deepEqual(rows.map(row => row.trim()), ["main", "feature", "fix-paths"], "one row per line: main, your branch nearest, Drive below");
   await eventually(async () => (await tree.locator(".rf-file").count()) === 2);
   await page.waitForTimeout(1500);
   await tree.screenshot({ path: join(output, "repo-flow-commit-files.png") });
   await eventually(async () => (await tree.locator(".rf-caption span").last().evaluate(node => getComputedStyle(node).opacity)) === "1", 8000);
-  assert.equal(await tree.locator(".rf-caption span").last().innerText(), "Committed 2 files to feature · +3 −1");
-  assert.equal(await tree.locator(".rf-new").innerHTML(), "feature · Grow the garden", "the branch's row says what landed");
+  assert.equal(await tree.locator(".rf-caption span").last().textContent(), "Committed 2 files to feature  +3 −1");
+  assert.equal(await tree.locator(".rf-new").textContent(), "featureGrow the garden", "the branch's row says what landed");
+  assert.equal(await tree.locator(".rf-repo").textContent(), "garden", "the frame names the project");
+  // It spreads across the chat column.
+  const spread = await tree.evaluate(root => root.querySelector(".rf-body svg")!.getBoundingClientRect().width / root.getBoundingClientRect().width);
+  assert(spread > .9, `the tree fills its frame (${spread})`);
   // The files are in: the rows they waited on close up.
   await eventually(async () => (await tree.locator(".rf-file").count()) === 0, 5000);
   // Text never sits on the tree: every label starts right of every pipe.
   const clear = await tree.evaluate(root => {
     const right = Math.max(...[...root.querySelectorAll(".rf-pipe, .rf-node")].map(node => node.getBoundingClientRect().right));
-    return [...root.querySelectorAll("svg text")].every(node => node.getBoundingClientRect().left >= right + 4 || node.classList.contains("rf-older"));
+    return [...root.querySelectorAll(".rf-body svg text")].every(node => node.getBoundingClientRect().left >= right + 4);
   });
   assert(clear, "labels never overlap the tree");
   await tree.screenshot({ path: join(output, "repo-flow-commit.png") });
@@ -121,7 +125,7 @@ try {
   assert(!(await page.locator("#conversation").getByText("the branch is in.").count()), "the tree drew before the answer finished");
   await eventually(async () => (await merged.locator(".rf-caption span").last().evaluate(node => getComputedStyle(node).opacity)) === "1", 8000);
   assert.equal(await merged.locator(".rf-caption span").last().innerText(), "Merged feature into main");
-  assert.equal(await merged.locator(".rf-new").innerHTML(), "main · #7 Grow the garden", "main's row names the merge");
+  assert.equal(await merged.locator(".rf-new").textContent(), "main#7 Grow the garden", "main's row names the merge");
   assert.equal(await merged.locator(".rf-pipe[data-part=join]").count(), 1, "the branch bends back into main");
   await eventually(async () => Number(await merged.locator('.rf-pipe[data-part="join"]').evaluate(node => getComputedStyle(node).opacity)) < .3);
   await merged.screenshot({ path: join(output, "repo-flow-merge.png") });

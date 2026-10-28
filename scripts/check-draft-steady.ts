@@ -24,6 +24,8 @@ const desktop = await electron.launch({ args: [resolve("apps/desktop/build/app")
   env: { ...f.env, DEMESNE_BUN: process.execPath, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache") }, timeout: 30000 });
 try {
   const page = await desktop.firstWindow(); page.setDefaultTimeout(15000);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   await page.getByRole("heading", { name: "Make room for your next idea." }).waitFor({ timeout: 30000 });
   await desktop.evaluate(({ dialog }, w) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [w] }); }, f.workspace);
   await page.getByRole("button", { name: "Open a project", exact: false }).click();
@@ -43,5 +45,6 @@ try {
   const removed: string[] = await page.evaluate(() => (window as any).removed);
   assert(removed.filter((name) => name === "target").length >= 5, `the command's words grew in place: ${removed.join(", ")}`);
   assert.deepEqual(removed.filter((name) => name !== "target"), [], "nothing else is rebuilt while the command is written");
+  assert.deepEqual(errors, [], "no page errors while the command is written");
   console.log("Draft steady check passed.");
 } finally { await desktop.close(); await f.close(); }

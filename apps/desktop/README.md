@@ -24,7 +24,7 @@ Preparation bundles renderer/main/preload code into `build/app`, compiles the Bu
 
 The app command and package name are `demesne`; the daemon remains `demesned`. `demesne-host` is a private bundled helper, not another public command. App IDs and data locations are unchanged. Debian packages declare that they replace/conflict with the old `demesne-desktop` package; release builds temporarily retain old installer asset aliases and the private helper alias for in-place upgrades.
 
-Outputs are under `apps/desktop/release`: `mac-arm64/Demesne.app` (or `mac/Demesne.app` on Intel), a Linux `.deb`, or a Windows NSIS installer. `--dir` builds an unpacked application. Builds are unsigned until release signing credentials are configured.
+Outputs are under `apps/desktop/release`: `mac-arm64/Demesne.app` (or `mac/Demesne.app` on Intel), a Linux `.deb`, or a Windows NSIS installer. `--dir` builds an unpacked application. Builds are unsigned; credentials alone do not enable signing. See the [macOS release signing readiness assessment](../../docs/macos-release-signing.md) for blockers, required credentials and verification steps.
 
 ## Verification
 

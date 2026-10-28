@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { FoundryArtifactDetail } from "@demesne/protocol";
-import { neighbours, paneFoot, paneHead } from "../foundry-pane.ts";
+import { frameSource, neighbours, paneFoot, paneHead, paneMakingHead } from "../foundry-pane.ts";
 
 const versions = [3, 2, 1].map((version) => ({ version, createdAt: "2026-10-27T22:00:00.000Z", sessionId: null, turnId: null, note: version === 3 ? "Blue" : "", byteLength: 10 }));
 const detail: FoundryArtifactDetail = { id: "garden", title: "Tiny garden", kind: "html", workspace: null, sessionId: "s1", createdAt: versions[2]!.createdAt, updatedAt: versions[0]!.createdAt, version: 3, source: "<h1>Garden</h1>", versions };
@@ -38,4 +38,17 @@ test("the foot names the version and offers Make this the latest only on an olde
   expect(older).toContain('data-pane="restore"');
   expect(paneFoot(detail, { id: "garden", version: 3, view: "preview", phone: false }, "No such artifact")).toContain('role="alert"');
   expect(paneFoot(null, { id: "garden", version: 3, view: "preview", phone: false }, "")).toContain("Reading");
+});
+
+test("the first show of a version asks the frame to assemble; any other show is plain", () => {
+  expect(frameSource("garden", 2, true)).toBe("foundry://artifact/garden?v=2&assemble=1");
+  expect(frameSource("garden", 2, false)).toBe("foundry://artifact/garden?v=2");
+});
+
+test("while Foundry writes, the line above the pane is the title alone", () => {
+  const head = paneMakingHead("Tiny <garden>");
+  expect(head).toContain("Tiny &lt;garden&gt;");
+  expect(head).toContain("making…");
+  expect(head).toContain('data-pane="close"');
+  expect(head).not.toContain("Preview");
 });

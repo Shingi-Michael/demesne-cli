@@ -8,6 +8,9 @@ import { join, resolve } from "node:path";
 import { fixture, eventually } from "../apps/desktop/workspace/test/fixture.ts";
 
 const response = Promise.withResolvers<void>();
+/// The first save's arguments arrive in two parts: the title, then the page,
+/// once the pane has opened on the title.
+const making = Promise.withResolvers<void>();
 let first = true;
 const mockup = (blue = false) => `<!doctype html><html><head><meta charset="utf-8"><style>
 body{margin:0;padding:40px;font:16px system-ui;background:${blue ? "#eaf2ff" : "#f4f1eb"};color:#18342c}
@@ -46,10 +49,16 @@ const f = await fixture({
     if (!current.length) {
       assert(tools.some(tool => tool.name === "foundry_save"));
       const graphic = /graphic/i.test(request), document = /document/i.test(request);
-      yield call("foundry_save", { title: graphic ? "A simple badge" : document ? "Project brief" : "Idea garden",
+      const save = call("foundry_save", { title: graphic ? "A simple badge" : document ? "Project brief" : "Idea garden",
         kind: graphic ? "svg" : document ? "markdown" : "html",
         source: graphic ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#285b48"/></svg>'
           : document ? "# Project brief\n\nA document created in chat.\n\n<script>window.injected=true</script>" : mockup() });
+      if (first) {
+        const cut = save.argumentsDelta.indexOf('"source"');
+        yield { ...save, argumentsDelta: save.argumentsDelta.slice(0, cut) };
+        await making.promise;
+        yield { type: "tool_call_delta", index: 0, idDelta: "", nameDelta: "", argumentsDelta: save.argumentsDelta.slice(cut) };
+      } else yield save;
       yield { type: "finish", reason: "tool_calls" }; return;
     }
     yield { type: "text_delta", delta: "Here is your mockup. " };
@@ -84,9 +93,23 @@ try {
   await editor.press("Enter");
   const chips = page.locator("#conversation .fd-chip");
   const pane = page.locator("#pane"), frame = pane.frameLocator("iframe.pane-frame");
+  // While Foundry writes the page, the pane opens on its title alone.
+  await pane.locator(".pane-head").filter({ hasText: "making…" }).filter({ hasText: "Idea garden" }).waitFor();
+  assert.equal(await pane.locator("iframe").count(), 0, "nothing shows until the page is written");
+  making.resolve();
   // A new artifact is a chip in the chat and opens in the pane beside it by itself.
   await chips.first().filter({ hasText: "Idea garden" }).waitFor();
   await frame.getByRole("button", { name: "Plant an idea" }).waitFor();
+  // Its first show assembles the page: the frame is served with anime.js and
+  // the assembly; the pieces end up in place with no inline styles left.
+  const assembled = async (previous: "none" | "string") => {
+    assert.match((await pane.locator("iframe.pane-frame").getAttribute("src"))!, /[?&]assemble=1$/, "a version's first show asks for the assembly");
+    const inner = page!.frames().find(item => item.url().includes("assemble=1"));
+    assert(inner, "the assembling frame is reachable");
+    await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined && document.documentElement.style.visibility === "" && [...document.querySelectorAll("main, main > *")].every(el => !(el as HTMLElement).style.transform)));
+    assert.equal(await inner.evaluate(() => typeof (window as unknown as { __demesnePrevious: unknown }).__demesnePrevious), previous === "none" ? "object" : "string");
+  };
+  await assembled("none");
   assert(await page.locator("#page").isHidden(), "Foundry stays beside the chat");
   assert.equal(await page.locator("#conversation iframe").count(), 0, "Nothing live runs in the conversation");
   assert.equal(await chips.first().getAttribute("aria-pressed"), "true", "The open chip is marked");
@@ -121,6 +144,8 @@ try {
   // The pane follows the chat onto the new version; the arrows walk back.
   await pane.locator(".pane-foot").filter({ hasText: "v2" }).waitFor();
   await frame.getByRole("heading", { name: "A little room to grow" }).waitFor();
+  // A revision assembles against the version before it: only what changed moves.
+  await assembled("string");
   assert.equal(await chips.nth(1).getAttribute("aria-pressed"), "true");
   assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "false");
   await pane.getByRole("button", { name: "Earlier version" }).click();

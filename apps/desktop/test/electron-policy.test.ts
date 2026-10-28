@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
 import { APP_URL, allowAppReload, desktopBlurs, FOUNDRY_CSP, foundryDocument, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { ASSEMBLE_SCRIPT, assembledDocument, scriptText } from "../electron/foundry-assemble.ts";
 
 test("project switching may reload only the exact main application document", () => {
   expect(allowAppReload(APP_URL, true)).toBe(true);
@@ -68,4 +69,28 @@ test("Foundry frames accept only artifact URLs and block the network", () => {
   const page = foundryDocument("svg", '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', "Logo");
   expect(page).toContain("data:image/svg+xml;base64,");
   expect(page).not.toContain("<script>");
+});
+
+test("a version's first show carries the assembly: the library, the previous version and the script, and nothing can close the script early", () => {
+  const source = "<!doctype html><html><body><main><h1>Garden</h1><p>Grow</p></main></body></html>";
+  expect(foundryDocument("html", source, "Garden")).toBe(source);
+  const page = foundryDocument("html", source, "Garden", { library: "/*anime*/", previous: '<p>old</p><script>x="</script>"</script><!-- c -->' });
+  expect(page.startsWith(source)).toBe(true);
+  expect(page).toContain("<script>/*anime*/</script>");
+  expect(page).toContain("window.__demesnePrevious=");
+  expect(page).toContain(ASSEMBLE_SCRIPT);
+  // The previous version is a JSON string the page can't break out of.
+  const inner = page.slice(page.indexOf("window.__demesnePrevious=") + "window.__demesnePrevious=".length);
+  expect(inner.slice(0, inner.indexOf(";(function"))).not.toContain("</script>");
+  expect(scriptText("</script><!--")).toBe('"<\\/script><\\!--"');
+  expect(JSON.parse(scriptText("</script>").replace("<\\/", "</"))).toBe("</script>");
+  expect(assembledDocument(source, "L", null)).toContain("window.__demesnePrevious=null;");
+  // The script shows the page whatever happens and never animates under reduced motion.
+  expect(ASSEMBLE_SCRIPT).toContain("prefers-reduced-motion: reduce");
+  expect(ASSEMBLE_SCRIPT).toContain("setTimeout(show, 4000)");
+  expect(ASSEMBLE_SCRIPT).toContain("var kept = list.map");
+  // A graphic's first show eases in with CSS alone; a plain show doesn't.
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
+  expect(foundryDocument("svg", svg, "Logo", { library: "L", previous: null })).toContain("@keyframes in");
+  expect(foundryDocument("svg", svg, "Logo")).not.toContain("@keyframes");
 });

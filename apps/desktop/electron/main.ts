@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true } }]);
 app.setName("Demesne");
@@ -133,12 +133,26 @@ void app.whenReady().then(async () => {
   // Foundry: an artifact renders in its own frame, served here with a policy
   // that allows only pinned libraries and fonts from a short list of hosts;
   // the frame is sandboxed without the app's origin.
+  // The first show of a version carries ?assemble=1: the page is served with
+  // anime.js (bundled with the app, never fetched) and the assembly script,
+  // and a revision gets the version before it to find what changed.
+  let assembleLibrary: string | undefined;
   await session.protocol.handle("foundry", async request => {
     if (!foundryURL(request.url)) return new Response("Not found", { status: 404 });
     try {
-      const url = new URL(request.url), version = Number(url.searchParams.get("v"));
-      const found = await backend!.request("foundry-get", { id: decodeURIComponent(url.pathname.slice(1)), ...(Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as { kind: string; source: string; title: string };
-      return new Response(foundryDocument(found.kind, found.source, found.title), { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
+      const url = new URL(request.url), version = Number(url.searchParams.get("v")), id = decodeURIComponent(url.pathname.slice(1));
+      const at = Number.isSafeInteger(version) && version > 0 ? version : undefined;
+      const found = await backend!.request("foundry-get", { id, ...(at ? { version: at } : {}) }) as { kind: string; source: string; title: string; version: number };
+      let assembly: FoundryAssembly | undefined;
+      if (url.searchParams.get("assemble") === "1") {
+        assembleLibrary ??= readFileSync(join(base, "ui", "vendor", "anime.umd.min.js"), "utf8");
+        let previous: string | null = null;
+        if (found.kind === "html" && found.version > 1) {
+          try { const before = await backend!.request("foundry-get", { id, version: found.version - 1 }) as { kind: string; source: string }; if (before.kind === "html") previous = before.source; } catch {}
+        }
+        assembly = { library: assembleLibrary, previous };
+      }
+      return new Response(foundryDocument(found.kind, found.source, found.title, assembly), { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
     } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }
   });
   contents.setWindowOpenHandler(() => ({ action: "deny" }));

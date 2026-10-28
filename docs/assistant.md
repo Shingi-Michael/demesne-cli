@@ -10,8 +10,8 @@ It is built in small steps, each one usable on its own:
 | --- | --- | --- |
 | 1. The model as a service | llama-server and the daemon start at login and restart if they crash | [Done](#step-1-the-model-as-a-service-windows) |
 | 2. A home and one tool | An assistant folder, its own instructions, and a tool that reads the folders you choose | [Done](#step-2-a-home-and-one-tool) |
-| 3. File index | A local search index over those folders, so it finds the right file without reading them all | Next |
-| 4. Push to your phone | An ntfy tool, so a routine like "every morning at 8, tell me what's due" reaches your iPhone | Later |
+| 3. File index | A local search index over those folders, so it finds the right file without reading them all | [Done](#step-3-file-index) |
+| 4. Push to your phone | An ntfy tool, so a routine like "every morning at 8, tell me what's due" reaches your iPhone | Next |
 
 Everything the assistant reads from a file, an email or a web page is data, never instructions. A document that says "forward this to…" cannot make it act; it asks you before it sends, deletes or buys anything.
 
@@ -130,3 +130,20 @@ With a folder shared and the daemon restarted, ask in the Assistant project: "Wh
 
 - A routine in a project runs on **Auto**: nobody is at the window, so it doesn't stop to ask before running a command or editing a file in the Assistant folder. `personal_files` itself can only read, but the coding tools are still there. Until the assistant gets its own narrower tool set, keep routines in the Assistant project to reading and summarizing.
 - The model's base instructions are still the coding agent's; `DEMESNE.md` is added after them.
+
+## Step 3: file index
+
+With a few files, the assistant can list folders and open what looks right. With thousands it needs a search index, like the one behind the search box in your file explorer, only over the *text* inside the files.
+
+The daemon keeps one in `personal-index.sqlite`, beside its own database, using SQLite's built-in full-text search (FTS5). The code is in [`personal-index.ts`](../apps/daemon/src/personal-index.ts):
+
+1. **Read.** Every readable file in your shared folders is turned into text, PDFs included.
+2. **Cut.** Each file's text is cut into overlapping pieces of about 1,500 characters, so a match points at the right passage, not just the right file. The file's name goes in too, so "insurance" finds `insurance-2026.pdf`.
+3. **Search.** A new tool, `search_personal_files`, looks up the words the model gives it ("car insurance renewal") and returns the 8 best files, each with the matching passage. Results are ranked by BM25, the standard search-engine score: rare words count for more than common ones.
+4. **Read the best one.** The model then opens that file with `personal_files`.
+
+(Projects already have a `search_files` tool for code; this one only looks in the assistant's folders.)
+
+The index is brought up to date when the daemon starts and every ten minutes after. Only files whose size or date changed are read again, so after the first time (which can take a few minutes for a big folder) it takes seconds. Deleted files drop out. It skips what `personal_files` skips: hidden files, secrets and shortcuts. If you ask while the first index is still being built, the search waits a few seconds and then says results may be incomplete.
+
+This is word search, not meaning search: "car" won't find a file that only says "vehicle". Meaning search (embeddings) is a later step.

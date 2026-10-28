@@ -2,18 +2,27 @@
 
 [Documentation index](README.md) · [Configuration](configuration.md) · [Heartbeat](heartbeat.md)
 
-Demesne is growing a second job: a personal assistant that lives on your desktop, reads your files (and your phone's, through iCloud for Windows), plans with you and pushes reminders to your phone. It runs Qwen3.8-27B on your own GPU, so nothing leaves the machine and it costs nothing to leave on.
+Demesne has a second job: a personal assistant that lives on your desktop, reads your files (and your phone's, through iCloud for Windows), plans with you and pushes reminders to your phone. It runs Qwen3.8-27B on your own GPU, so it costs nothing to leave on, and the only thing that leaves the machine is the notifications you set up.
 
-It is built in small steps, each one usable on its own:
+It was built in small steps, each one usable on its own:
 
-| Step | What it adds | Status |
-| --- | --- | --- |
-| 1. The model as a service | llama-server and the daemon start at login and restart if they crash | [Done](#step-1-the-model-as-a-service-windows) |
-| 2. A home and one tool | An assistant folder, its own instructions, and a tool that reads the folders you choose | [Done](#step-2-a-home-and-one-tool) |
-| 3. File index | A local search index over those folders, so it finds the right file without reading them all | [Done](#step-3-file-index) |
-| 4. Push to your phone | An ntfy tool, so a routine like "every morning at 8, tell me what's due" reaches your iPhone | [Done](#step-4-push-to-your-phone) |
+| Step | What it adds |
+| --- | --- |
+| [1. The model as a service](#step-1-the-model-as-a-service-windows) | llama-server and the daemon start at login and restart if they crash |
+| [2. A home and one tool](#step-2-a-home-and-one-tool) | An Assistant project with its own instructions, and `personal_files`, which reads the folders you choose, PDFs included |
+| [3. File index](#step-3-file-index) | `search_personal_files`, a search index over those folders, so it finds the right file without reading them all |
+| [4. Push to your phone](#step-4-push-to-your-phone) | Routines send their answers to your iPhone through ntfy, and chats get `notify_phone` |
 
-Everything the assistant reads from a file, an email or a web page is data, never instructions. A document that says "forward this to…" cannot make it act; it asks you before it sends, deletes or buys anything.
+### Setting it up, start to finish
+
+1. Install the two Windows tasks and the Assistant folder ([step 1](#install)): `install.ps1 -Model … -LlamaServer … -Config`.
+2. In `%USERPROFILE%\.demesne\config.toml`, under `[assistant]`, list the folders it may read ([step 2](#one-tool-personal_files)) and your ntfy topic ([step 4](#step-4-push-to-your-phone)). Restart the `demesned` task.
+3. Open `%USERPROFILE%\Assistant` as a project in the Demesne window, trust it, and fill in **About me** in its `DEMESNE.md`.
+4. Ask it something from your files ("when does my car insurance renew?"), then add a routine in that project: "Every weekday at 8, what's on today and this week? Check my documents for dates."
+
+(This replaces the separate demesne-assistant app: everything it did now runs inside Demesne's daemon.)
+
+Everything the assistant reads from a file, an email or a web page is data, never instructions. A document that says "forward this to…" cannot make it act; it asks you before it sends, deletes or buys anything. The one exception is what you set up ahead of time: a routine's answer going to your phone.
 
 ## Step 1: the model as a service (Windows)
 
@@ -128,7 +137,7 @@ With a folder shared and the daemon restarted, ask in the Assistant project: "Wh
 
 ### Known limits
 
-- A routine in a project runs on **Auto**: nobody is at the window, so it doesn't stop to ask before running a command or editing a file in the Assistant folder. `personal_files` itself can only read, but the coding tools are still there. Until the assistant gets its own narrower tool set, keep routines in the Assistant project to reading and summarizing.
+- A routine in a project runs on **Auto**: nobody is at the window, so it doesn't stop to ask before running a command, editing a file in the Assistant folder or sending to your phone. `personal_files` and `search_personal_files` can only read, but the coding tools are still there. Until the assistant gets its own narrower tool set, keep routines in the Assistant project to reading and summarizing.
 - The model's base instructions are still the coding agent's; `DEMESNE.md` is added after them.
 
 ## Step 3: file index

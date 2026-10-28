@@ -16,7 +16,7 @@ These guides describe the current implementation. They were last audited on **20
 | [Questions and interviews](questions.md) | Typed composer answers, adaptive follow-ups, saved drafts, pause and recovery |
 | [Themefy and themes](themes.md) | LLM color interviews, instant palettes, saved themes, contrast validation and undo |
 | [Images](images.md) | What the daemon stores from tools, model vision, routes and limits |
-| [The always-on assistant](assistant.md) | Running the model and daemon at login on Windows; the personal-assistant build steps |
+| [The always-on assistant](assistant.md) | The personal assistant: the model and daemon at login on Windows, reading and searching your folders, and routines that push to your phone |
 | [Heartbeat](heartbeat.md) | Messages between agents on this and paired machines: addresses, mail as turns, the tool |
 | [Troubleshooting](troubleshooting.md) | Startup, old builds, opening the app, sign-in, stalled work |
 

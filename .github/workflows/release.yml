@@ -200,5 +200,5 @@ jobs:
           generate_release_notes: true
           make_latest: true
 
-  # TODO before public distribution: import a Developer ID certificate, sign
-  # and notarize Demesne.app, and publish the stapled archive.
+  # Signed public releases remain blocked: see docs/macos-release-signing.md
+  # for the signing-path assessment, required credentials and acceptance checks.

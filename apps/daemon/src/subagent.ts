@@ -163,7 +163,7 @@ async function runSubagentInference(options: Parameters<typeof runSubagent>[0]):
   throw new Error("Sub-agent could not produce a report");
 }
 
-/// One read-only tool for a sub-agent or a proof check; anything that would
+/// One read-only tool for a sub-agent; anything that would
 /// need an approval is refused.
 export async function runReadOnlyTool(call: ProviderToolCall, options: { workspaceRoot: string; sessionId: string; tools: ToolRegistry; signal: AbortSignal;
   progress: (update: { text?: string }) => void }): Promise<string> {

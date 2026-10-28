@@ -54,7 +54,6 @@ for (const permissionMode of ["ask", "allow", "deny"] as PermissionMode[]) {
     const offered: string[][] = [];
     let prompt = "";
     const { client } = daemon(async function* (messages, tools) {
-      if (tools.some(tool => tool.name === "proof_marks")) { yield { type: "finish", reason: "stop" }; return; }
       offered.push(tools.map(tool => tool.name));
       prompt = messages[0]!.content ?? "";
       if (!tools.some(tool => tool.name === "foundry_save")) {

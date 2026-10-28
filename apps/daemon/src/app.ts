@@ -69,6 +69,7 @@ import { DriveAutoRuns } from "./drive-auto.ts";
 import { Routines } from "./routines.ts";
 import { personalFilesTool } from "./personal-files.ts";
 import { PersonalIndex, searchPersonalFilesTool } from "./personal-index.ts";
+import { notifyPhoneTool, routineMessage, type Phone } from "./notify-phone.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
@@ -149,6 +150,9 @@ export function createDaemonApp(options: {
   heartbeat?: HeartbeatConfig;
   /// Folders outside any project that the assistant may read, by name.
   assistantFolders?: Record<string, string>;
+  /// Your phone, through ntfy: routines push their answers to it, and chats
+  /// get a notify_phone tool.
+  phone?: Phone;
   images?: ImageGenerationConfig;
   contextPlanner?: ContextPlanner;
   providerFirstEventTimeoutMs?: number;
@@ -310,6 +314,7 @@ export function createDaemonApp(options: {
     personalIndexTimer = setInterval(update, 10 * 60_000);
     personalIndexTimer.unref?.();
   }
+  if (options.phone) tools.register(notifyPhoneTool(options.phone));
   const mcp = new McpManager({
     servers: options.mcpServers ?? {},
     log: (message) => console.warn(message),
@@ -397,7 +402,15 @@ export function createDaemonApp(options: {
       // Nobody is at the window to approve, so a project's routine runs on
       // Auto, like a Drive mission; a plain chat has no tools to approve.
       const { turn } = store.createTurn(sessionId, routine.prompt, routine.workspace ? "allow" : "deny", false, false);
-      void queueTurn(turn, snapshotTurnInference(processor, false));
+      const run = queueTurn(turn, snapshotTurnInference(processor, false));
+      // With a phone set up, the answer goes there: a routine runs because
+      // you aren't looking at the window.
+      const phone = options.phone;
+      if (phone) void run.then(async () => {
+        const done = store.getTurn(turn.id);
+        const message = done && routineMessage(title, done.status, done.responseText);
+        if (message) await phone.send(message);
+      }).catch((error) => console.warn("Couldn't send a routine's answer to the phone", error));
       return sessionId;
     },
   });

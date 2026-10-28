@@ -10,6 +10,7 @@ import { ChatGPTAuth } from "@demesne/chatgpt-auth";
 import { CodexAuth } from "@demesne/codex-auth";
 import { ChatGPTProvider, CodexProvider, OpenAICompatibleProvider } from "@demesne/providers";
 import { createDaemonApp } from "./app.ts";
+import { ntfy } from "./notify-phone.ts";
 import { serveDaemon } from "./http-server.ts";
 import {
   createRuntimeProfileVerifier,
@@ -100,6 +101,7 @@ try {
     mcpServers: config.mcp.servers,
     heartbeat: config.heartbeat,
     assistantFolders: config.assistant?.folders,
+    phone: config.assistant?.ntfy ? ntfy(config.assistant.ntfy, config.assistant.ntfyToken) : undefined,
     images: config.images,
     providerVision: config.provider.vision,
     agent: config.agent,

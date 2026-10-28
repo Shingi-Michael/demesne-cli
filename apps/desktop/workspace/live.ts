@@ -1890,6 +1890,8 @@ function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry)
   next.innerHTML = toolRow(run, tool);
   const fresh = next.content.querySelector<HTMLButtonElement>("button.tool-row");
   if (!fresh || next.content.childElementCount !== 1) return false;
+  // Read before the swap below, which moves the fresh target into the row.
+  const title = fresh.querySelector(".target")?.getAttribute("title") ?? "";
   // The shining verb keeps running; only the words that changed are swapped.
   for (const part of [".verb", ".target", ".meta"]) {
     const was = row.querySelector(part), now = fresh.querySelector(part);
@@ -1897,7 +1899,7 @@ function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry)
     // (A shine's phase follows the clock, so the verb compares by its words.)
     if (part === ".verb" ? was.textContent !== now.textContent : was.innerHTML !== now.innerHTML) was.replaceWith(now);
   }
-  row.querySelector(".target")!.setAttribute("title", fresh.querySelector(".target")!.getAttribute("title") ?? "");
+  row.querySelector(".target")?.setAttribute("title", title);
   return true;
 }
 function revealCompactedTurn(id: string) {

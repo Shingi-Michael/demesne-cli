@@ -35,20 +35,43 @@ export function commitWords(subject: string) {
   const pr = /\s*\(#(\d+)\)\s*$/.exec(subject);
   return pr ? `#${pr[1]} ${subject.slice(0, pr.index)}` : subject;
 }
+const fit = (label: string) => label.length > 40 ? `${label.slice(0, 39).trimEnd()}…` : label;
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /// Lays out the tree from git before and after the step. Pure, so the
 /// layout is tested on its own.
+/// How far apart things sit.
+interface Spacing { step: number; laneStep: number; bend: number; laneGap: number }
+/// The label column on the tree's right.
+const LABELS = 250;
 /// `settled` is the tree after the step: the files are in, so the rows
-/// they waited on close up.
-export function repoScene(flow: RepoFlow, { settled = false } = {}): FlowScene {
+/// they waited on close up. With a `width`, the tree spreads across it:
+/// commits move apart and bends widen (up to twice), while the labels keep
+/// their column and size. `roomy` puts the branches further apart.
+export function repoScene(flow: RepoFlow, { settled = false, width = 0, roomy = false } = {}): FlowScene {
+  const at = (k: number) => layout(flow, settled, { step: STEP * k, laneStep: LANE_STEP * k, bend: BEND * Math.min(2, k), laneGap: roomy ? 54 : LANE_GAP });
+  let scene = at(1);
+  if (!width || Math.abs(width - scene.width) < 1) return scene;
+  // Narrower than its own size, it closes up a little (to just over half).
+  let low = .55, high = 8;
+  scene = at(low);
+  for (let round = 0; round < 14; round++) {
+    const k = (low + high) / 2, next = at(k);
+    if (next.width <= width) { low = k; scene = next; } else high = k;
+  }
+  return scene;
+}
+
+function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGap }: Spacing): FlowScene {
   const { before, after } = flow;
   const known = new Set(before.commits.map((commit) => commit.sha));
   const head = after.head ?? before.head;
   const onMain = !head || head === after.main;
   // Lanes: the branches before, then any new one (a branch's first commit).
   const names: string[] = [];
-  for (const lane of [...before.lanes, ...after.lanes]) if (!names.includes(lane.name)) names.push(lane.name);
+  // The branch you're on always shows, even on its first commit.
+  const all = [...before.lanes, ...after.lanes];
+  for (const lane of [...all.filter((lane) => lane.name === head), ...all]) if (!names.includes(lane.name)) names.push(lane.name);
   const lanes = names.slice(0, 3).map((name) => {
     const was = before.lanes.find((lane) => lane.name === name), now = after.lanes.find((lane) => lane.name === name);
     const lane = (now ?? was)!;
@@ -59,15 +82,15 @@ export function repoScene(flow: RepoFlow, { settled = false } = {}): FlowScene {
   // the right of every branch tip, so a merge bends forward into main.
   const xOf = new Map<string, number>();
   const old = after.commits.filter((commit) => known.has(commit.sha));
-  old.forEach((commit, index) => xOf.set(commit.sha, LEFT + 20 + index * STEP));
+  old.forEach((commit, index) => xOf.set(commit.sha, LEFT + 20 + index * step));
   const lastOld = Math.max(LEFT + 20, ...[...xOf.values()]);
   const forkX = (lane: RepoLane) => lane.base && xOf.has(lane.base) ? xOf.get(lane.base)! : LEFT + 4;
-  const laneX = lanes.map(({ lane }) => lane.commits.map((_, index) => forkX(lane) + BEND + 12 + index * LANE_STEP));
+  const laneX = lanes.map(({ lane }) => lane.commits.map((_, index) => forkX(lane) + bend + 12 + index * laneStep));
   const tips = laneX.map((xs) => xs.at(-1) ?? 0);
   const mergedTips = lanes.flatMap((item, index) => item.merged ? [tips[index]!] : []);
-  let nextX = Math.max(lastOld + STEP, ...mergedTips.map((x) => x + STEP + 6));
+  let nextX = Math.max(lastOld + step, ...mergedTips.map((x) => x + step + 6));
   const freshMain = after.commits.filter((commit) => !known.has(commit.sha));
-  for (const commit of freshMain) { xOf.set(commit.sha, nextX); nextX += STEP; }
+  for (const commit of freshMain) { xOf.set(commit.sha, nextX); nextX += step; }
   // Rows: main, then branches nearest first (the latest fork), so a farther
   // branch bends down before a nearer one starts and no pipes cross. Forks
   // from the same commit put your branch nearest.
@@ -81,7 +104,7 @@ export function repoScene(flow: RepoFlow, { settled = false } = {}): FlowScene {
   let y = MAIN_Y;
   rowY.set(-1, y);
   let grow = active === -1 ? fileRows * FILE_ROW : 0;
-  for (const index of order) { y += LANE_GAP + grow; rowY.set(index, y); grow = active === index ? fileRows * FILE_ROW : 0; }
+  for (const index of order) { y += laneGap + grow; rowY.set(index, y); grow = active === index ? fileRows * FILE_ROW : 0; }
   const bottom = y + grow;
   const xs = [...xOf.values(), ...laneX.flat()];
   const right = Math.max(...xs, lastOld) + 18;
@@ -96,8 +119,8 @@ export function repoScene(flow: RepoFlow, { settled = false } = {}): FlowScene {
     const ly = rowY.get(index)!, fx = forkX(item.lane), tone = laneTone(item.lane.name, item.lane.name === head || item.merged);
     const firstFresh = item.fresh.indexOf(true);
     const stable = item.isNew ? -1 : firstFresh === -1 ? laneX[index]!.length - 1 : firstFresh - 1;
-    const end = stable >= 0 ? laneX[index]![stable]! : fx + BEND + 6;
-    paths.push({ d: `M${fx} ${MAIN_Y}C${fx + BEND * .7} ${MAIN_Y} ${fx + BEND * .3} ${ly} ${fx + BEND} ${ly}H${end}`, tone, part: item.isNew ? "lane-new" : "lane", lane: index });
+    const end = stable >= 0 ? laneX[index]![stable]! : fx + bend + 6;
+    paths.push({ d: `M${fx} ${MAIN_Y}C${fx + bend * .7} ${MAIN_Y} ${fx + bend * .3} ${ly} ${fx + bend} ${ly}H${end}`, tone, part: item.isNew ? "lane-new" : "lane", lane: index });
     if (firstFresh !== -1 || item.isNew) paths.push({ d: `M${end} ${ly}H${tips[index]!}`, tone, part: "lane-new", lane: index });
     item.lane.commits.forEach((commit, at) => nodes.push({ x: laneX[index]![at]!, y: ly, tone, merge: commit.merge, fresh: item.fresh[at]!, lane: index }));
     if (item.merged) {
@@ -111,10 +134,12 @@ export function repoScene(flow: RepoFlow, { settled = false } = {}): FlowScene {
   const newest = (lane: number) => lane === -1 ? freshMain.at(-1) : lanes[lane]?.lane.commits.at(-1);
   const rows: FlowRow[] = [{ y: MAIN_Y, text: after.main, tone: "main", lane: -1,
     after: freshMain.length ? `${after.main} · ${commitWords(newest(-1)!.subject)}` : null }];
+  // Labels fit their column: a long one ends in "…".
+  for (const row of rows) { row.text = fit(row.text); if (row.after) row.after = fit(row.after); }
   order.forEach((index) => {
     const item = lanes[index]!, tone = laneTone(item.lane.name, item.lane.name === head || item.merged);
-    rows.push({ y: rowY.get(index)!, text: laneText(item.lane.name), tone, lane: index,
-      after: index === active && item.fresh.includes(true) ? `${laneText(item.lane.name)} · ${commitWords(newest(index)!.subject)}` : null });
+    rows.push({ y: rowY.get(index)!, text: fit(laneText(item.lane.name)), tone, lane: index,
+      after: index === active && item.fresh.includes(true) ? fit(`${laneText(item.lane.name)} · ${commitWords(newest(index)!.subject)}`) : null });
   });
   const filesY = active < -1 ? 0 : (rowY.get(active) ?? MAIN_Y) + FILES_TOP;
   const files = flow.command === "commit" && target && !settled ? before.files.map((file, index) => ({ y: filesY + index * FILE_ROW, path: short(file.path), added: file.added, removed: file.removed })) : [];
@@ -126,7 +151,7 @@ export function repoScene(flow: RepoFlow, { settled = false } = {}): FlowScene {
     ? `Committed ${committed ? `${plural(committed, "file")} ` : ""}to ${laneText(branch)}${committed ? ` · +${added} −${removed}` : ""}`
     : merged !== null ? `Merged ${laneText(lanes[merged]!.lane.name)} into ${after.main}` : `Merged into ${after.main}`;
   return {
-    width: labelX + 250, height: bottom + (older ? 30 : 10), labelX, paths, nodes, rows,
+    width: labelX + LABELS, height: bottom + (older ? 30 : 10), labelX, paths, nodes, rows,
     files, moreFiles: files.length ? before.moreFiles : 0, target, merged,
     older: older ? { y: bottom + 22, count: older } : null, done,
   };
@@ -150,7 +175,7 @@ function text(parent: Element, x: number, y: number, words: string, className: s
 export class RepoFlowView {
   readonly element = document.createElement("div");
   private played = false;
-  constructor(readonly flow: RepoFlow, private readonly command: string) {
+  constructor(readonly flow: RepoFlow, private readonly command: string, readonly spread: { width?: number; roomy?: boolean } = {}) {
     this.element.className = "repo-flow";
   }
 
@@ -159,7 +184,7 @@ export class RepoFlowView {
     if (this.element.childElementCount) return;
     const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
     const playing = live && !reduced && !this.played;
-    this.draw(repoScene(this.flow, { settled: !playing }), playing);
+    this.draw(repoScene(this.flow, { ...this.spread, settled: !playing }), playing);
   }
 
   private draw(scene: FlowScene, playing: boolean) {
@@ -205,7 +230,7 @@ export class RepoFlowView {
     // Once the files are in, the rows they waited on close up.
     if (scene.files.length) timeline.then(() => setTimeout(() => {
       this.element.replaceChildren();
-      this.draw(repoScene(this.flow, { settled: true }), false);
+      this.draw(repoScene(this.flow, { ...this.spread, settled: true }), false);
       this.element.animate([{ opacity: .55 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
     }, 700));
   }

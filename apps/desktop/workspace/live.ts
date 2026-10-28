@@ -1849,6 +1849,7 @@ function patchStream(
     const entry = run.entries[i]!,
       previous = before.entries[i]!;
     if (entry === previous) continue;
+    if (draftOnly(entry, previous)) continue;
     if (
       entry.type !== "assistant" ||
       previous.type !== "assistant" ||
@@ -1864,7 +1865,32 @@ function patchStream(
     const entry = run.entries[i]!;
     if (entry !== before.entries[i] && entry.type === "assistant")
       saved.views.get(entry.id)!.update(splitNextPrompt(entry.raw).text, run.status === "running");
+    else if (entry !== before.entries[i] && entry.type === "tool" && !patchDraftRow(saved.content, run, entry)) return false;
   }
+  return true;
+}
+/// A step the model is still writing changes with every few characters;
+/// only its words change, so the turn isn't rebuilt (which flickered).
+function draftOnly(entry: WorkspaceRun["entries"][number], previous: WorkspaceRun["entries"][number]) {
+  return entry.type === "tool" && previous.type === "tool" && entry.id === previous.id && entry.name === previous.name &&
+    Boolean(entry.drafting) && Boolean(previous.drafting) && entry.state === previous.state && !entry.waiting && !previous.waiting;
+}
+function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry) {
+  const args = JSON.stringify({ runId: run.id, id: tool.id });
+  const row = [...content.querySelectorAll<HTMLButtonElement>("button.tool-row")].find((node) => node.dataset.args === args);
+  if (!row) return !toolRow(run, tool);
+  const next = document.createElement("template");
+  next.innerHTML = toolRow(run, tool);
+  const fresh = next.content.querySelector<HTMLButtonElement>("button.tool-row");
+  if (!fresh || next.content.childElementCount !== 1) return false;
+  // The shining verb keeps running; only the words that changed are swapped.
+  for (const part of [".verb", ".target", ".meta"]) {
+    const was = row.querySelector(part), now = fresh.querySelector(part);
+    if (!was || !now) return false;
+    // (A shine's phase follows the clock, so the verb compares by its words.)
+    if (part === ".verb" ? was.textContent !== now.textContent : was.innerHTML !== now.innerHTML) was.replaceWith(now);
+  }
+  row.querySelector(".target")!.setAttribute("title", fresh.querySelector(".target")!.getAttribute("title") ?? "");
   return true;
 }
 function revealCompactedTurn(id: string) {

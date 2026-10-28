@@ -22,7 +22,6 @@ export const SETTINGS_KEYS: Record<string, { kind: "int" | "text" | "bool"; max?
   "drive.max_tasks": { kind: "int", max: 64, clear: true },
   "images.model": { kind: "text", restart: true },
   "heartbeat.enabled": { kind: "bool", restart: true },
-  "agent.proof_marks": { kind: "bool", restart: true },
 };
 
 /// What the host reads for Settings from config.toml and the daemon.
@@ -36,7 +35,7 @@ export interface SettingsInfo {
   /// Folders you trust, or null when the daemon can't say.
   trusted: string[] | null;
   subagent: { model: string | null; models: { id: string; provider: string }[] };
-  agent: { maxModelRounds: number; maxToolCalls: number; proofMarks: boolean };
+  agent: { maxModelRounds: number; maxToolCalls: number };
   drive: { maxActiveMinutes: number; maxTokens: number; maxTasks: number };
   /// Null when no image service is set up.
   images: { model: string | null } | null;
@@ -272,7 +271,6 @@ function pages(view: SettingsView): Page[] {
       ...(view.model.chatgpt !== null ? [{ title: "ChatGPT plan", line: `Usage counts against ${view.model.chatgpt || "your"} plan`, control: link("open-link", "Manage ↗", { url: "https://chatgpt.com/settings/usage" }), keywords: "usage billing account chatgpt" }] : []),
       ...(subagent ? [{ title: "Subagents run on", line: "Helpers a turn starts for side work", control: word("subagent", subagentLabel, view.fold === "subagent"), keywords: "subagent helper model",
         fold: view.fold === "subagent" ? choices("Subagent model", [["Same as the chat", !subagent.model, "subagent-model", { model: null }], ...subagent.models.map((model): [string, boolean, string, Record<string, unknown>] => [view.modelWords({ id: model.id }), subagent.model === model.id, "subagent-model", { model: model.id }])]) : "" }] : []),
-      ...(info ? [{ title: "Proof marks", line: info.agent.proofMarks ? "After each answer, one more call marks its claims with what the turn proved" : "Off: answers carry no marks", control: toggle(info.agent.proofMarks, "settings-config", { key: "agent.proof_marks", value: !info.agent.proofMarks }, "Proof marks"), keywords: "proof marks claims evidence prove" }] : []),
       ...(info?.images ? [{ title: "Images", line: "The model that makes pictures when you ask for one", control: `<form class="st-text" data-key="images.model"><input value="${h(info.images.model ?? "")}" aria-label="Image model" autocomplete="off" spellcheck="false"></form>`, keywords: "image picture generation" }] : []),
     ] },
     { name: "Limits for one turn", rows: info ? [

@@ -1,5 +1,5 @@
 {
-  "name": "demesne-cli",
+  "name": "demesne",
   "version": "0.1.0",
   "private": true,
   "packageManager": "bun@1.4.0",
@@ -17,6 +17,7 @@
     "build:daemon": "bun run scripts/build-daemon.ts",
     "clean": "rm -rf dist apps/desktop/release && rm -f .*.bun-build",
     "test": "bun test",
+    "test:installer": "python3 scripts/test-install.py",
     "typecheck": "tsc --noEmit",
     "fake:provider": "bun run scripts/fake-provider.ts",
     "desktop": "bun scripts/run-desktop.ts",

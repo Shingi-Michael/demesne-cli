@@ -35,8 +35,6 @@ import {
   type TurnStatus,
   type ToolFileChange,
   type SessionRewindState,
-  type ProofClaim,
-  applyProofEvents,
   derivePersistedRule,
   openedPullRequest,
 } from "@demesne/protocol";
@@ -1807,40 +1805,6 @@ export class DemesneStore {
     this.requireSession(sessionId);
     return (this.database.query("SELECT * FROM events WHERE session_id = ? AND (? IS NULL OR turn_id = ?) AND type IN ('tool.call_completed','turn.reverted','session.rewound','session.rewind_redone') ORDER BY id LIMIT 10001")
       .all(sessionId,turnId??null,turnId??null) as EventRow[]).map(mapEvent);
-  }
-
-  /// A turn's steps with their whole output, oldest first: what the proof
-  /// pass reads to pair the answer's claims with evidence.
-  turnToolCalls(turnId: string): Array<{ id: string; name: string; arguments: unknown; status: string; resultText: string }> {
-    const rows = this.database.query("SELECT id, name, arguments_json, status, result_text, error_message FROM tool_calls WHERE turn_id = ? ORDER BY created_at, rowid")
-      .all(turnId) as Pick<ToolCallRow, "id" | "name" | "arguments_json" | "status" | "result_text" | "error_message">[];
-    return rows.map((row) => {
-      let args: unknown = {};
-      try { args = JSON.parse(row.arguments_json); } catch { /* raw arguments stay opaque */ }
-      return { id: row.id, name: row.name, arguments: args, status: row.status, resultText: row.result_text ?? row.error_message ?? "" };
-    });
-  }
-
-  /// The proof marks of a turn as its events leave them.
-  turnProofs(turnId: string): ProofClaim[] {
-    const rows = this.database.query("SELECT * FROM events WHERE turn_id = ? AND type IN ('turn.proofs', 'turn.proof') ORDER BY id").all(turnId) as EventRow[];
-    return applyProofEvents(rows.map(mapEvent));
-  }
-
-  recordProofs(turnId: string, claims: ProofClaim[]): EventEnvelope {
-    const turn = this.getTurnOrThrow(turnId);
-    const event = this.insertEvent("turn.proofs", turn.sessionId, turnId, { claims }, new Date().toISOString());
-    this.eventSink?.(event);
-    return event;
-  }
-
-  /// One claim changes: a check starts, settles, the sentence is dropped or
-  /// corrected. A null field clears it.
-  updateProof(turnId: string, claimId: string, patch: { [K in keyof ProofClaim]?: ProofClaim[K] | null }): EventEnvelope {
-    const turn = this.getTurnOrThrow(turnId);
-    const event = this.insertEvent("turn.proof", turn.sessionId, turnId, { claimId, ...patch }, new Date().toISOString());
-    this.eventSink?.(event);
-    return event;
   }
 
   eventsAfter(sessionId: string, afterEventId: number, limit = 100): EventEnvelope[] {

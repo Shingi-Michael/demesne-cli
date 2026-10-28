@@ -104,7 +104,7 @@ export async function reclaimDrive(journal: string, control: ProcessControl = pr
   return marker;
 }
 
-/// The background process: `demesne-desktop-host --drive-away`.
+/// The background process: `demesne-host --drive-away`.
 export async function runDriveAway(options: { workspace: string; server?: string; sessionId: string },
   test: { settings?: WorkspaceHostOptions["settings"]; client?: WorkspaceHostOptions["client"]; resumed?: (host: WorkspaceHost) => void; pollMs?: number } = {}): Promise<number> {
   const settings = test.settings ?? loadCliSettings({ workspaceRoot: options.workspace, serverOverride: options.server });

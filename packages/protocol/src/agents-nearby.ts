@@ -1,6 +1,6 @@
 /// Agents nearby: the other coding agents Heartbeat can see, each placed in
 /// the project it works in. An agent's address names its project the way the
-/// Heartbeat CLI does (`claude@node/demesne-cli-k3x9a`: the project folder's
+/// Heartbeat CLI does (`claude@node/demesne-k3x9a`: the project folder's
 /// name, then a five-letter session suffix), so the sidebar can put it on
 /// that project's line without asking the agent.
 

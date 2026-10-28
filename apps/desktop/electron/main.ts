@@ -42,7 +42,7 @@ void app.whenReady().then(async () => {
   const runtime = join(resources, "backend");
   const suffix = process.platform === "win32" ? ".exe" : "";
   backend = new Backend({
-    executable: join(runtime, `demesne-desktop-host${suffix}`), args,
+    executable: join(runtime, `demesne-host${suffix}`), args,
     env: { ...process.env, DEMESNE_DAEMON_BIN: join(runtime, `demesned${suffix}`), DEMESNE_NATIVE_RUNTIME_DIR: runtime },
     emit, log,
     async native(method, args) {

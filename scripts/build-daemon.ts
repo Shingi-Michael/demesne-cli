@@ -1,6 +1,7 @@
 import { cpSync, mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve, relative, sep } from "node:path";
+import { buildVersionArgs } from "./build-version.ts";
 
 const root = resolve(import.meta.dir, "..");
 // `--target=bun-darwin-x64` cross-builds for a release. The target's sharp
@@ -8,7 +9,7 @@ const root = resolve(import.meta.dir, "..");
 // for other platforms are left out.
 const target = process.argv.slice(2).find((arg) => arg.startsWith("--target="))?.slice("--target=".length);
 const [, os = process.platform, cpu = process.arch] = target?.match(/^bun-(\w+)-(\w+)/) ?? [];
-const build = Bun.spawn([process.execPath, "build", "apps/daemon/src/main.ts", "--compile", ...(target ? [`--target=${target}`] : []), "--outfile", `dist/demesned${os === "windows" || os === "win32" ? ".exe" : ""}`], { cwd: root, stdout: "inherit", stderr: "inherit" });
+const build = Bun.spawn([process.execPath, "build", "apps/daemon/src/main.ts", "--compile", ...buildVersionArgs(), ...(target ? [`--target=${target}`] : []), "--outfile", `dist/demesned${os === "windows" || os === "win32" ? ".exe" : ""}`], { cwd: root, stdout: "inherit", stderr: "inherit" });
 if (await build.exited !== 0) process.exit(1);
 rmSync(join(root, "dist/node_modules"), { recursive: true, force: true });
 const copied = new Set<string>();

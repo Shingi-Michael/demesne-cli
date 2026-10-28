@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 const daemon = resolve(process.argv[2] ?? `apps/desktop/build/backend/demesned${process.platform === "win32" ? ".exe" : ""}`);
 const runtime = resolve(process.argv[3] ?? dirname(daemon));
 assert(existsSync(daemon)); assert(existsSync(join(runtime, "node_modules/sharp/dist/index.cjs")));
-const directory = mkdtempSync(join(tmpdir(), "demesne-desktop-backend-"));
+const directory = mkdtempSync(join(tmpdir(), "demesne-backend-"));
 const config = join(directory, "config.toml");
 writeFileSync(config, '[daemon]\nauto_start="never"\n', { mode: 0o600 });
 const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("reserved") });

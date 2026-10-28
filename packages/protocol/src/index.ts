@@ -55,6 +55,23 @@ export type TurnStatus = "queued" | "running" | "completed" | "cancelled" | "int
 
 /// Immutable per-operation file evidence. Omitted text is explicit (binary or
 /// over the preview limit); null means the file did not exist on that side.
+/// A commit on the tree a commit or merge step draws.
+export interface RepoCommit { sha: string; subject: string; merge: boolean }
+/// A branch that isn't in main yet: where it left main and its commits, oldest first.
+export interface RepoLane { name: string; base: string | null; commits: RepoCommit[]; worktree: boolean }
+/// A file waiting to be committed and its line counts.
+export interface RepoFile { path: string; added: number; removed: number }
+/// What git looked like around a step: main's last commits (oldest first),
+/// up to three branches not in main (the rest counted in `older`), and the
+/// files the step would commit.
+export interface RepoSnapshot {
+  main: string; head: string | null; tip: string | null;
+  commits: RepoCommit[]; lanes: RepoLane[]; older: number;
+  files: RepoFile[]; moreFiles: number;
+}
+/// A `git commit` or `git merge` the chat ran: the tree before and after.
+export interface RepoFlow { command: "commit" | "merge"; before: RepoSnapshot; after: RepoSnapshot }
+
 export interface ToolFileChange {
   path: string;
   before: string | null;

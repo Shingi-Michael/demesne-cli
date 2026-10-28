@@ -15,6 +15,7 @@ import type { QuestionBroker } from "./questions.ts";
 import type { ThemeStore } from "./themes.ts";
 import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
+import { gitIn, gitStep, repoSnapshot, stepDirectory } from "./repo-flow.ts";
 import { FOUNDRY_TOOL_NAMES } from "./foundry.ts";
 import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
@@ -692,6 +693,27 @@ export class AgentEngine {
     }
   }
 
+  /// The tree before a `git commit` or `git merge` the chat runs, or null
+  /// for any other command (or no repository).
+  private async repoBefore(workspaceRoot: string, input: unknown) {
+    if (!isRecord(input) || !Array.isArray(input.argv) || !input.argv.every((arg) => typeof arg === "string")) return null;
+    const step = gitStep(input.argv as string[]);
+    if (!step) return null;
+    try {
+      const git = gitIn(stepDirectory(resolveWorkspacePath(workspaceRoot, typeof input.cwd === "string" ? input.cwd : ".", false), step));
+      const before = await repoSnapshot(git, { all: step.all });
+      return before ? { step, git, before } : null;
+    } catch { return null; }
+  }
+
+  /// After the command: when git moved, the step gets its tree.
+  private async recordRepoFlow(turnId: string, toolCallId: string, repo: NonNullable<Awaited<ReturnType<AgentEngine["repoBefore"]>>>) {
+    try {
+      const after = await repoSnapshot(repo.git);
+      if (after && after.tip !== repo.before.tip) this.store.appendToolProgress(turnId, toolCallId, { repo: { command: repo.step.kind, before: repo.before, after } });
+    } catch { /* the step still completes; it just has no tree */ }
+  }
+
   private async executeTool(
     toolCallId: string,
     call: AssembledToolCall,
@@ -821,6 +843,8 @@ export class AgentEngine {
     signal.throwIfAborted();
     this.store.startToolCall(toolCallId);
     const snapshotTargets = this.captureSnapshot(turnId, sessionId, workspaceRoot, call.name, input);
+    // A commit or a merge: git before it, for the tree drawn under its step.
+    const repo = call.name === "run_command" ? await this.repoBefore(workspaceRoot, input) : null;
     try {
       const questions = permissionMode === "ask" ? this.options.questions : undefined;
       const output = await (tool.executeWithArtifacts ?? tool.execute)(input, { workspaceRoot, signal, sessionId, turnId,
@@ -848,6 +872,7 @@ export class AgentEngine {
       // A command the chat ran (a formatter, a codegen) may have changed files
       // it had seen: those changes are its own, not another agent's.
       if (workspaceRoot) this.noteFiles(sessionId, workspaceRoot, call.name === "run_command" ? [...this.seenFiles.get(sessionId)?.keys() ?? []] : touchedFiles(call.name, input));
+      if (repo) await this.recordRepoFlow(turnId, toolCallId, repo);
       this.store.settleToolCall(toolCallId, "completed", result, recordedToolChanges(workspaceRoot, snapshotTargets));
       return result;
     } catch (error) {

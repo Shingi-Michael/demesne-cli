@@ -10,8 +10,9 @@ const TRACE_LIMIT = 64 * 1024;
 /// lines (starting, writing report) and any thinking an old event carries
 /// are dropped. Live updates and history replay share this, so a reopened
 /// session shows the same steps.
-export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: string; subagentModel?: string }, payload: Record<string, unknown>): void {
+export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: string; subagentModel?: string; repo?: import("@demesne/protocol").RepoFlow }, payload: Record<string, unknown>): void {
   if (typeof payload.report === "string" && payload.report) tool.report = payload.report;
+  if (isRepoFlow(payload.repo)) tool.repo = payload.repo;
   if (typeof payload.text !== "string" || !payload.text) return;
   const status = subagentStatus(payload.text);
   if (status) { if (status.model) tool.subagentModel = status.model; return; }
@@ -19,6 +20,14 @@ export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: strin
   const size = trace.reduce((sum, segment) => sum + segment.text.length, 0);
   if (size >= TRACE_LIMIT) return;
   trace.push({ kind: "step", text: payload.text.slice(0, TRACE_LIMIT - size) });
+}
+
+/// A commit or merge step's tree, as the daemon recorded it.
+function isRepoFlow(value: unknown): value is import("@demesne/protocol").RepoFlow {
+  if (!value || typeof value !== "object") return false;
+  const flow = value as Record<string, unknown>;
+  const snapshot = (side: unknown) => Boolean(side) && typeof side === "object" && Array.isArray((side as Record<string, unknown>).commits) && Array.isArray((side as Record<string, unknown>).lanes) && Array.isArray((side as Record<string, unknown>).files);
+  return (flow.command === "commit" || flow.command === "merge") && snapshot(flow.before) && snapshot(flow.after);
 }
 
 export type ToolState = "running" | "done" | "failed" | "denied" | "stopped";
@@ -40,6 +49,8 @@ export interface ToolEntry {
   report?: string;
   /// The model a sub-agent reported running on, when not the chat's own.
   subagentModel?: string;
+  /// A `git commit` or `git merge` step's tree, drawn under its row.
+  repo?: import("@demesne/protocol").RepoFlow;
 }
 /// `quiet`: a line on the step guide (a provider switch), not a band.
 /// `steer`: words you sent mid-turn, on the guide where the model read them.

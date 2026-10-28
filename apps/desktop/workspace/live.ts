@@ -21,8 +21,9 @@ import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointe
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
-import { FoundryChatArtifacts } from "./foundry-inline.ts";
+import { FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
 import { FoundryPane } from "./foundry-pane.ts";
+import { assembleDocument } from "./assemble.ts";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
@@ -1962,6 +1963,10 @@ function renderConversation() {
       runNodes.delete(id);
       changed = true;
     }
+  // While Foundry writes a page, the pane opens on its title; the page then
+  // assembles in it the moment the save lands.
+  const writing = state.activeTurnId ? state.runs.find((run) => run.id === state!.activeTurnId) : undefined;
+  pane.making(writing && writing.status === "running" ? makingTitle(tools(writing)) : null);
   if (changed) pane.refresh([...runNodes.values()].flatMap((item) => item.artifacts.artifacts));
   if (changed) {
     if (liveBefore) stage.scrollTop = stage.scrollHeight;
@@ -2123,6 +2128,7 @@ const pane = new FoundryPane(el("pane"), {
     el("app").classList.toggle("pane-on", pane.open);
     runNodes.forEach((item) => item.artifacts.mark());
   },
+  assembleDocument,
 });
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;

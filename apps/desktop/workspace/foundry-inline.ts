@@ -32,6 +32,17 @@ interface ChipOptions {
   isOpen(artifact: ChatArtifact): boolean;
 }
 
+/** What Foundry is writing, from a save still being drafted: the title
+ * arrives early in the arguments, long before the page's source is done. */
+export function makingTitle(tools: readonly Pick<ToolEntry, "name" | "state" | "input" | "drafting" | "draftArguments">[]): string | null {
+  const writing = tools.findLast((tool) => tool.name === "foundry_save" && (tool.drafting || tool.state === "running"));
+  if (!writing) return null;
+  if (typeof writing.input.title === "string" && writing.input.title) return writing.input.title;
+  const found = /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(writing.draftArguments ?? "");
+  if (!found) return "Something new";
+  try { return (JSON.parse(`"${found[1]}"`) as string) || "Something new"; } catch { return "Something new"; }
+}
+
 /** The chip's words: what it is and which version. */
 export const chipWords = (artifact: ChatArtifact) => `${KIND_WORD[artifact.kind]} · v${artifact.version}`;
 

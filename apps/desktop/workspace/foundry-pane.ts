@@ -22,7 +22,13 @@ export interface PaneOptions {
   notice(text: string): void;
   /// The pane opened, closed or moved to another version.
   changed(): void;
+  /// A document drawn in the pane assembles on its first show (assemble.ts);
+  /// `previousHTML` is the version before it, for a revision.
+  assembleDocument?(root: HTMLElement, previousHTML: string | null): void;
 }
+
+/** The frame's address; the first show of a version asks for the assembly. */
+export const frameSource = (id: string, version: number, assemble: boolean) => `${frameURL(id, version)}${assemble ? "&assemble=1" : ""}`;
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -34,6 +40,13 @@ export function neighbours(versions: readonly { version: number }[], current: nu
   const numbers = versions.map((item) => item.version).sort((a, b) => a - b);
   const at = numbers.indexOf(current);
   return { earlier: at > 0 ? numbers[at - 1] : null, later: at >= 0 && at < numbers.length - 1 ? numbers[at + 1] : null, latest: numbers.at(-1) ?? current };
+}
+
+/// The one line above the page while Foundry is still writing it: the title
+/// alone, and ×.
+export function paneMakingHead(title: string) {
+  return `<b class="pane-title" title="${h(title)}">${h(title)}</b><span class="pane-making">making…</span><span class="sp"></span>`
+    + button("close", icon('<path d="M6 6l12 12M18 6 6 18"/>'), ' aria-label="Close" title="Close (Esc)"');
 }
 
 /// The one line above the page.
@@ -69,6 +82,12 @@ export class FoundryPane {
   private session = "";
   private frameKey = "";
   private loading = 0;
+  /// The version whose first show assembles the page, until its frame is made.
+  private assembleKey = "";
+  /// A document's last rendered HTML, so a revision can settle only what changed.
+  private lastDocument: { id: string; html: string } | null = null;
+  /// What Foundry is writing right now, shown while the pane has nothing open.
+  private makingTitle: string | null = null;
   /// Artifacts this chat has shown chips for; a new one opens the pane,
   /// the way Claude opens an artifact as it is made. History never does.
   private readonly seen = new Set<string>();
@@ -98,14 +117,26 @@ export class FoundryPane {
     });
   }
 
-  get open() { return this.state !== null; }
+  get open() { return this.state !== null || this.makingTitle !== null; }
   isOpen(id: string, version?: number) { return !!this.state && this.state.id === id && (version === undefined || this.state.version === version); }
+
+  /// Foundry is writing a page: the pane opens on its title while the words
+  /// arrive, so the page can assemble in front of you when they're done. With
+  /// nothing being written, a pane that was only waiting closes again. A pane
+  /// already showing an artifact keeps it.
+  making(title: string | null) {
+    if (this.state) { this.makingTitle = null; return; }
+    if (title === this.makingTitle) return;
+    this.makingTitle = title;
+    this.render();
+    this.options.changed();
+  }
 
   /// Each chat keeps its own pane; switching chats puts the other one back.
   switchSession(id: string) {
     if (id === this.session) return;
     this.session = id;
-    this.state = null; this.detail = null; this.error = ""; this.frameKey = "";
+    this.state = null; this.detail = null; this.error = ""; this.frameKey = ""; this.assembleKey = ""; this.lastDocument = null; this.makingTitle = null;
     this.seen.clear(); this.primed = false;
     let saved: PaneState | null = null;
     try { saved = id ? JSON.parse(localStorage.getItem(`demesne-pane:${id}`) ?? "null") : null; } catch {}
@@ -113,10 +144,13 @@ export class FoundryPane {
     else this.render();
   }
 
-  async show(id: string, version?: number, keep?: Partial<PaneState>) {
+  /// `assemble`: this is the version's first show, so the page puts itself together.
+  async show(id: string, version?: number, keep?: Partial<PaneState>, assemble = false) {
     const same = this.state?.id === id;
     this.state = { id, version: version ?? this.state?.version ?? 0, view: keep?.view ?? (same ? this.state!.view : "preview"), phone: keep?.phone ?? (same ? this.state!.phone : false) };
     if (!same) { this.detail = null; this.error = ""; }
+    this.makingTitle = null;
+    if (assemble && version !== undefined) this.assembleKey = `${id}:${version}`;
     this.render();
     const turn = ++this.loading;
     try {
@@ -135,8 +169,8 @@ export class FoundryPane {
   }
 
   close() {
-    if (!this.state) return;
-    this.state = null; this.detail = null; this.error = ""; this.frameKey = "";
+    if (!this.state && this.makingTitle === null) return;
+    this.state = null; this.detail = null; this.error = ""; this.frameKey = ""; this.assembleKey = ""; this.makingTitle = null;
     this.remember();
     this.render();
     this.options.changed();
@@ -149,12 +183,12 @@ export class FoundryPane {
     for (const item of artifacts) this.seen.add(`${item.id}:${item.version}`);
     this.primed = true;
     const open = this.state, made = fresh.at(-1);
-    if (!open) { if (made) void this.show(made.id, made.version); return; }
+    if (!open) { if (made) void this.show(made.id, made.version, undefined, true); return; }
     if (!this.detail) return;
     const latest = neighbours(this.detail.versions, open.version).latest;
     const newer = artifacts.find((item) => item.id === open.id && item.version > latest);
-    if (newer && open.version === latest) void this.show(open.id, newer.version);
-    else if (made && made.id !== open.id) void this.show(made.id, made.version);
+    if (newer && open.version === latest) void this.show(open.id, newer.version, undefined, true);
+    else if (made && made.id !== open.id) void this.show(made.id, made.version, undefined, true);
   }
 
   /// The pane after a delete elsewhere: gone with the artifact.
@@ -192,8 +226,16 @@ export class FoundryPane {
 
   private render() {
     const state = this.state, detail = this.detail;
-    this.root.hidden = !state;
-    if (!state) { this.stage.replaceChildren(); this.frameKey = ""; return; }
+    this.root.hidden = !state && this.makingTitle === null;
+    if (!state) {
+      this.stage.replaceChildren(); this.frameKey = "";
+      if (this.makingTitle !== null) {
+        this.head.innerHTML = paneMakingHead(this.makingTitle);
+        this.foot.innerHTML = "<span>writing the page…</span>";
+        this.code.hidden = true; this.stage.hidden = false; this.stage.className = "pane-stage";
+      }
+      return;
+    }
     this.head.innerHTML = paneHead(detail, state);
     this.foot.innerHTML = paneFoot(detail, state, this.error);
     const code = state.view === "code";
@@ -205,17 +247,22 @@ export class FoundryPane {
     const key = `${detail.kind}:${detail.id}:${state.version}`;
     if (key === this.frameKey) return;
     this.frameKey = key;
+    const assemble = this.assembleKey === `${detail.id}:${state.version}`;
+    this.assembleKey = "";
     if (detail.kind === "markdown") {
       const article = document.createElement("article");
       article.className = "pane-doc markdown";
       article.innerHTML = this.options.markdown(detail.source);
       this.stage.replaceChildren(article);
+      const previous = this.lastDocument?.id === detail.id ? this.lastDocument.html : null;
+      this.lastDocument = { id: detail.id, html: article.innerHTML };
+      if (assemble) this.options.assembleDocument?.(article, previous);
       return;
     }
     // The frame is made once per version: remaking it would reset the page.
     const frame = document.createElement("iframe");
     frame.className = "pane-frame";
-    frame.src = frameURL(detail.id, state.version);
+    frame.src = frameSource(detail.id, state.version, assemble);
     frame.title = `${detail.title} ${KIND_WORD[detail.kind].toLowerCase()}`;
     frame.setAttribute("sandbox", "allow-scripts allow-forms allow-modals");
     frame.referrerPolicy = "no-referrer";

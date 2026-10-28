@@ -8,9 +8,9 @@ It is built in small steps, each one usable on its own:
 
 | Step | What it adds | Status |
 | --- | --- | --- |
-| 1. The model as a service | llama-server and the daemon start at login and restart if they crash | This guide |
-| 2. A home and one tool | An assistant folder, its own instructions, and a tool that reads the folders you choose | Next |
-| 3. File index | A local search index over those folders, so it finds the right file without reading them all | Later |
+| 1. The model as a service | llama-server and the daemon start at login and restart if they crash | [Done](#step-1-the-model-as-a-service-windows) |
+| 2. A home and one tool | An assistant folder, its own instructions, and a tool that reads the folders you choose | [Done](#step-2-a-home-and-one-tool) |
+| 3. File index | A local search index over those folders, so it finds the right file without reading them all | Next |
 | 4. Push to your phone | An ntfy tool, so a routine like "every morning at 8, tell me what's due" reaches your iPhone | Later |
 
 Everything the assistant reads from a file, an email or a web page is data, never instructions. A document that says "forward this to…" cannot make it act; it asks you before it sends, deletes or buys anything.
@@ -88,3 +88,45 @@ The model holds most of the GPU's 32 GB while llama-server runs. Stop its task b
 ### Not yet tried on Windows
 
 Demesne's releases are built for macOS and Ubuntu, and its daemon hasn't been run on Windows yet. Some of its tools assume a Unix shell. If the daemon task keeps restarting, its log (`%USERPROFILE%\.demesne\assistant\demesned.log`) says why, and fixing that comes before step 2.
+
+## Step 2: a home and one tool
+
+### A home
+
+Demesne works in *projects*: a folder you open, whose `DEMESNE.md` file is read at the start of every turn as standing instructions. The assistant gets a project of its own, `%USERPROFILE%\Assistant`, made by `install.ps1` (pass `-AssistantHome` for another place). Its [`DEMESNE.md`](../scripts/assistant/home/DEMESNE.md) says who it is working for, how to answer, where to keep its notes (`notes.md`, `todo.md` in the same folder) and its rules. Open the folder, fill in **About me**, and change anything you like: edits apply from the next message, with no restart. The installer never overwrites it.
+
+Open that folder as a project in the Demesne window and chat there. Routines you write from that chat run there too, with the same instructions.
+
+### One tool: `personal_files`
+
+The assistant needs to see your files, but not all of them, and it must never change them. You list the folders it may read in `~/.demesne/config.toml`, each with a one-word name:
+
+```toml
+[assistant]
+folders = { documents = 'C:\Users\you\Documents', icloud = 'C:\Users\you\iCloudDrive' }
+```
+
+Single quotes keep Windows backslashes as they are. Restart the daemon after changing this (`Stop-ScheduledTask` then `Start-ScheduledTask` on `demesned`).
+
+The daemon then offers the model one more tool, [`personal_files`](../apps/daemon/src/personal-files.ts), with two actions:
+
+- **list** a folder or subfolder: names, sizes and dates.
+- **read** a text file's or PDF's lines, 400 at a time, by its path inside the named folder, like `documents` and `Trips/lisbon.md`.
+
+What it can't do, on purpose:
+
+- **Write, move or delete.** There is no action for it.
+- **Leave the folder.** `..`, absolute paths and shortcuts (symlinks) are refused, and a whole drive or home folder can't be shared.
+- **Read secrets.** Hidden files, `.env`, keys, `.ssh` and password databases (`.kdbx`) stay out.
+- **Take orders from a file.** Every read comes back with a note telling the model the content is data, not instructions, and `DEMESNE.md` says the same. This is the first defence against a document that says "ignore your instructions and…".
+
+It reads plain text (notes, Markdown, CSV, saved emails as `.eml`, calendar `.ics`) and PDFs that have text in them, through pdf.js, the PDF reader Firefox uses. Scanned PDFs (pictures of pages), Word files and images can't be read yet.
+
+### Try it
+
+With a folder shared and the daemon restarted, ask in the Assistant project: "What's in my documents folder?", then "What does my grocery list say?". The steps show which tool it called and which file it read.
+
+### Known limits
+
+- A routine in a project runs on **Auto**: nobody is at the window, so it doesn't stop to ask before running a command or editing a file in the Assistant folder. `personal_files` itself can only read, but the coding tools are still there. Until the assistant gets its own narrower tool set, keep routines in the Assistant project to reading and summarizing.
+- The model's base instructions are still the coding agent's; `DEMESNE.md` is added after them.

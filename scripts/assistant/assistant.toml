@@ -22,3 +22,9 @@ context_window = 131072
 max_output_tokens = 16384
 # The default effort can spend tens of thousands of thinking tokens a turn.
 reasoning_effort = "low"
+
+[assistant]
+# The folders the assistant may read with its personal_files tool, as
+# name = path. It only reads them. Uncomment and change to your own paths;
+# in TOML a Windows path uses single quotes so its backslashes stay as they are.
+# folders = { documents = 'C:\Users\you\Documents', icloud = 'C:\Users\you\iCloudDrive' }

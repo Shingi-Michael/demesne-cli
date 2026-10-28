@@ -73,12 +73,12 @@ jobs:
       matrix:
         include:
           - os: macos-14
-            artifact: demesne-desktop-darwin-arm64.zip
+            artifact: demesne-darwin-arm64.zip
           # Built on 22.04 so the package also installs on 24.04.
           - os: ubuntu-22.04
-            artifact: demesne-desktop-linux-amd64.deb
+            artifact: demesne-linux-amd64.deb
           - os: windows-latest
-            artifact: demesne-desktop-windows-x64.exe
+            artifact: demesne-windows-x64.exe
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,15 +102,21 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           app=apps/desktop/release/mac-arm64/Demesne.app
-          for file in demesne-desktop-host demesned; do test -x "$app/Contents/Resources/backend/$file"; done
+          for file in demesne-host demesne-desktop-host demesned; do test -x "$app/Contents/Resources/backend/$file"; done
           test -d "$app/Contents/Resources/backend/node_modules/sharp"
           ditto -c -k --keepParent "$app" "${{ matrix.artifact }}"
+          # Compatibility for saved copies of the old installer.
+          cp "${{ matrix.artifact }}" demesne-desktop-darwin-arm64.zip
       - name: Package Linux app
         if: runner.os == 'Linux'
         run: |
           cp apps/desktop/release/*.deb "${{ matrix.artifact }}"
+          test "$(dpkg-deb -f "${{ matrix.artifact }}" Package)" = demesne
+          for field in Replaces Conflicts; do
+            dpkg-deb -f "${{ matrix.artifact }}" "$field" | grep -qw demesne-desktop
+          done
           contents=$(dpkg-deb -c "${{ matrix.artifact }}")
-          for file in opt/Demesne/demesne-desktop resources/backend/demesne-desktop-host resources/backend/demesned resources/backend/node_modules/sharp/; do
+          for file in opt/Demesne/demesne resources/backend/demesne-host resources/backend/demesned resources/backend/node_modules/sharp/; do
             if ! grep -q "$file" <<<"$contents"; then
               echo "Missing expected file in deb: $file"
               echo "deb contents:"
@@ -120,19 +126,25 @@ jobs:
           done
           sudo apt-get update -q || true
           sudo apt-get install -y "./${{ matrix.artifact }}"
-          command -v demesne-desktop
+          command -v demesne
           # The portable bundle install.sh unpacks on any x86_64 glibc distro.
           mkdir -p portable && cp -a apps/desktop/release/linux-unpacked portable/demesne
           cp apps/desktop/build/icon.png portable/demesne/icon.png
-          tar -czf demesne-desktop-linux-x64.tar.gz -C portable demesne
-          contents=$(tar -tzf demesne-desktop-linux-x64.tar.gz)
-          for file in demesne/demesne-desktop demesne/icon.png demesne/resources/backend/demesne-desktop-host demesne/resources/backend/demesned demesne/resources/backend/node_modules/sharp/; do
+          # Old installers validate this executable before swapping the app.
+          ln -s demesne portable/demesne/demesne-desktop
+          tar -czf demesne-linux-x64.tar.gz -C portable demesne
+          cp demesne-linux-x64.tar.gz demesne-desktop-linux-x64.tar.gz
+          contents=$(tar -tzf demesne-linux-x64.tar.gz)
+          for file in demesne/demesne demesne/demesne-desktop demesne/icon.png demesne/resources/backend/demesne-host demesne/resources/backend/demesne-desktop-host demesne/resources/backend/demesned demesne/resources/backend/node_modules/sharp/; do
             if ! grep -q "^$file" <<<"$contents"; then
               echo "Missing expected file in tar.gz: $file"
               echo "tar.gz contents:"
               echo "$contents"
               exit 1
             fi
+          done
+          for file in demesne demesne-desktop resources/backend/demesne-host resources/backend/demesne-desktop-host resources/backend/demesned; do
+            test -x "portable/demesne/$file"
           done
       - name: Package Windows app
         if: runner.os == 'Windows'
@@ -141,7 +153,7 @@ jobs:
       - name: Checksum
         shell: bash
         run: |
-          for p in "${{ matrix.artifact }}" demesne-desktop-linux-x64.tar.gz; do
+          for p in "${{ matrix.artifact }}" demesne-linux-x64.tar.gz demesne-desktop-linux-x64.tar.gz demesne-desktop-darwin-arm64.zip; do
             [ -f "$p" ] || continue
             bun -e 'const p=process.argv[1]; const bytes=await Bun.file(p).arrayBuffer(); await Bun.write(p+".sha256",new Bun.CryptoHasher("sha256").update(bytes).digest("hex")+"  "+p+"\n")' "$p"
           done
@@ -152,7 +164,9 @@ jobs:
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.artifact }}.sha256
+            demesne-linux-x64.tar.gz*
             demesne-desktop-linux-x64.tar.gz*
+            demesne-desktop-darwin-arm64.zip*
           if-no-files-found: ignore
 
   release:

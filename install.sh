@@ -18,7 +18,7 @@
 # and DEMESNE_RELEASE_URL (a base URL that holds the release assets, for mirrors).
 #
 # Linux installs into $DEMESNE_HOME with a launcher in ~/.local/share/applications
-# and `demesne-desktop` in ~/.local/bin. macOS installs Demesne.app into
+# and `demesne` in ~/.local/bin. macOS installs Demesne.app into
 # ~/Applications. Nothing needs sudo. Your sessions and settings in ~/.demesne
 # are never touched.
 
@@ -76,10 +76,21 @@ MAC_APP="$HOME/Applications/Demesne.app"
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t demesne)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
+# Return 44 only for HTTP 404, so a transport/server failure is never treated
+# as an absent release asset and never triggers a downgrade or source build.
 if has curl; then
-  fetch() { curl -fsSL --retry 3 -o "$2" "$1"; }
+  fetch() {
+    if http_status=$(curl -fsSL --retry 3 -w '%{http_code}' -o "$2" "$1"); then return 0; fi
+    [ "$http_status" = 404 ] && return 44
+    return 1
+  }
 elif has wget; then
-  fetch() { wget -q -O "$2" "$1"; }
+  fetch() {
+    if wget --server-response -O "$2" "$1" 2>"$TMP/fetch-error"; then return 0; fi
+    cat "$TMP/fetch-error" >&2
+    if grep -q 'HTTP/[^ ]* 404' "$TMP/fetch-error"; then return 44; fi
+    return 1
+  }
 else
   die "needs curl or wget"
 fi
@@ -103,7 +114,12 @@ sha256() {
 # Downloads a release asset into $TMP and checks it against its .sha256.
 # Returns 1 when the release does not carry that asset.
 download() {
-  fetch "$(release_url "$1")" "$TMP/$1" 2>/dev/null || return 1
+  if fetch "$(release_url "$1")" "$TMP/$1"; then :
+  else
+    fetch_status=$?
+    [ "$fetch_status" = 44 ] && return 1
+    die "could not download $1; refusing fallback after a network or server error"
+  fi
   if [ "$SKIP_CHECKSUM" = 1 ]; then
     say "WARNING: checksum verification explicitly disabled for $1"
     return 0
@@ -115,7 +131,28 @@ download() {
   [ "$want" = "$got" ] || die "checksum mismatch for $1"
 }
 
-# Builds the desktop app from source into $TMP/src and prints the bundle path.
+# Try the current asset name first; older tags still publish the legacy name.
+# A checksum failure is fatal in download(), never a reason to try another asset.
+download_app() {
+  asset="$1"
+  if download "$asset"; then return 0; fi
+  asset="$2"
+  download "$asset"
+}
+
+# Normalize older bundles so the public command is always demesne. Keep only
+# private compatibility paths needed by an already-running old Electron main.
+normalize_backend() {
+  backend_dir="$1"
+  if [ ! -x "$backend_dir/demesne-host" ] && [ -x "$backend_dir/demesne-desktop-host" ]; then
+    ln -s demesne-desktop-host "$backend_dir/demesne-host"
+  fi
+  if [ ! -e "$backend_dir/demesne-desktop-host" ] && [ -x "$backend_dir/demesne-host" ]; then
+    ln -s demesne-host "$backend_dir/demesne-desktop-host"
+  fi
+}
+
+# Builds the desktop app from source into $TMP/src.
 build_from_source() {
   for tool in git bun node; do has "$tool" || die "--source needs $tool"; done
   ref=main
@@ -137,10 +174,15 @@ sandbox_flag() {
 install_linux() {
   [ "$(uname -m)" = x86_64 ] || [ "$FROM_SOURCE" = 1 ] \
     || die "prebuilt Linux builds are x86_64 only; try --source"
+  # A new public command name must not overwrite a different user's launcher.
+  if [ -e "$BIN_DIR/demesne" ] || [ -L "$BIN_DIR/demesne" ]; then
+    [ -L "$BIN_DIR/demesne" ] && [ "$(readlink "$BIN_DIR/demesne")" = "$APP_HOME/demesne" ] \
+      || die "$BIN_DIR/demesne already exists and is not this installation's launcher; move it aside first"
+  fi
   stage="$TMP/stage"
   mkdir -p "$stage"
-  if [ "$FROM_SOURCE" != 1 ] && download demesne-desktop-linux-x64.tar.gz; then
-    tar -xzf "$TMP/demesne-desktop-linux-x64.tar.gz" -C "$stage"
+  if [ "$FROM_SOURCE" != 1 ] && download_app demesne-linux-x64.tar.gz demesne-desktop-linux-x64.tar.gz; then
+    tar -xzf "$TMP/$asset" -C "$stage"
     bundle="$stage/demesne"
   else
     if [ "$FROM_SOURCE" != 1 ]; then
@@ -152,7 +194,11 @@ install_linux() {
     bundle="$TMP/src/apps/desktop/release/linux-unpacked"
     cp "$TMP/src/apps/desktop/build/icon.png" "$bundle/icon.png"
   fi
-  for file in demesne-desktop resources/backend/demesned resources/backend/demesne-desktop-host; do
+  if [ ! -x "$bundle/demesne" ] && [ -x "$bundle/demesne-desktop" ]; then
+    ln -s demesne-desktop "$bundle/demesne"
+  fi
+  normalize_backend "$bundle/resources/backend"
+  for file in demesne resources/backend/demesned resources/backend/demesne-host; do
     [ -x "$bundle/$file" ] || die "the bundle is missing $file"
   done
 
@@ -165,14 +211,16 @@ install_linux() {
   rm -rf "$APP_HOME.old"
 
   mkdir -p "$BIN_DIR" "$(dirname "$DESKTOP_FILE")" "$(dirname "$ICON_FILE")"
-  ln -sf "$APP_HOME/demesne-desktop" "$BIN_DIR/demesne-desktop"
+  ln -sf "$APP_HOME/demesne" "$BIN_DIR/demesne"
+  # Remove only our old launcher, never an unrelated user-owned command.
+  remove_legacy_launcher
   [ -f "$APP_HOME/icon.png" ] && cp "$APP_HOME/icon.png" "$ICON_FILE"
   cat >"$DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Demesne
 Comment=Coding agent with Drive
-Exec=$APP_HOME/demesne-desktop$(sandbox_flag) %U
+Exec=$APP_HOME/demesne$(sandbox_flag) %U
 Icon=demesne
 Terminal=false
 Categories=Development;
@@ -185,7 +233,7 @@ EOF
     say "updated $APP_HOME"
   else
     say "installed to $APP_HOME"
-    case ":$PATH:" in *":$BIN_DIR:"*) ;; *) say "add $BIN_DIR to PATH to run demesne-desktop from a terminal" ;; esac
+    case ":$PATH:" in *":$BIN_DIR:"*) ;; *) say "add $BIN_DIR to PATH to run demesne from a terminal" ;; esac
   fi
 }
 
@@ -196,11 +244,12 @@ install_macos() {
     build_from_source
     app="$TMP/src/apps/desktop/release/mac-arm64/Demesne.app"
   else
-    download demesne-desktop-darwin-arm64.zip || die "release $VERSION has no macOS app"
-    ditto -x -k "$TMP/demesne-desktop-darwin-arm64.zip" "$TMP/stage"
+    download_app demesne-darwin-arm64.zip demesne-desktop-darwin-arm64.zip || die "release $VERSION has no macOS app"
+    ditto -x -k "$TMP/$asset" "$TMP/stage"
     app="$TMP/stage/Demesne.app"
   fi
   [ -d "$app" ] || die "the download did not contain Demesne.app"
+  normalize_backend "$app/Contents/Resources/backend"
   mkdir -p "$(dirname "$MAC_APP")"
   rm -rf "$MAC_APP"
   mv "$app" "$MAC_APP"
@@ -321,12 +370,16 @@ find_running_desktop_pid() {
   fi
   if has pgrep; then
     # Match the full executable, not Linux's truncated comm name (which can
-    # also match demesne-desktop-host), nor arbitrary command-line substrings.
+    # also match a private host), nor arbitrary command-line substrings.
     case "$(uname -s)" in
       Darwin) desktop_exe="$MAC_APP/Contents/MacOS/Demesne" ;;
-      *) desktop_exe="$APP_HOME/demesne-desktop" ;;
+      *) desktop_exe="$APP_HOME/demesne" ;;
     esac
     desktop_pattern=$(printf '%s' "$desktop_exe" | sed 's/[][\\.^$*+?(){}|]/\\&/g')
+    # Older Electron processes may still be running under the old app name.
+    if [ "$(uname -s)" = Linux ]; then
+      desktop_pattern="$desktop_pattern(-desktop)?"
+    fi
     pgrep -u "$(id -u)" -f "^$desktop_pattern( |$)" 2>/dev/null | head -n 1 || true
   fi
 }
@@ -354,12 +407,21 @@ handle_daemon() {
   fi
 }
 
+remove_legacy_launcher() {
+  if [ -L "$BIN_DIR/demesne-desktop" ] && [ "$(readlink "$BIN_DIR/demesne-desktop")" = "$APP_HOME/demesne-desktop" ]; then
+    rm -f "$BIN_DIR/demesne-desktop"
+  fi
+}
+
 uninstall() {
   case "$(uname -s)" in
     Darwin) rm -rf "$MAC_APP" ;;
     *)
       rm -rf "$APP_HOME" "$DESKTOP_FILE" "$ICON_FILE"
-      [ -L "$BIN_DIR/demesne-desktop" ] && rm -f "$BIN_DIR/demesne-desktop"
+      if [ -L "$BIN_DIR/demesne" ] && [ "$(readlink "$BIN_DIR/demesne")" = "$APP_HOME/demesne" ]; then
+        rm -f "$BIN_DIR/demesne"
+      fi
+      remove_legacy_launcher
       ;;
   esac
   say "removed the app; sessions and settings remain in ~/.demesne"
@@ -371,7 +433,7 @@ if [ "$ACTION" = uninstall ]; then uninstall; exit 0; fi
 IS_UPGRADE=0
 case "$(uname -s)" in
   Darwin) [ -d "$MAC_APP" ] && IS_UPGRADE=1 ;;
-  *) ([ -d "$APP_HOME" ] || [ -f "$BIN_DIR/demesne-desktop" ] || [ -f "$DESKTOP_FILE" ]) && IS_UPGRADE=1 ;;
+  *) ([ -d "$APP_HOME" ] || [ -L "$BIN_DIR/demesne" ] || [ -L "$BIN_DIR/demesne-desktop" ] || [ -f "$DESKTOP_FILE" ]) && IS_UPGRADE=1 ;;
 esac
 
 DAEMON_PID=$(find_running_daemon_pid)

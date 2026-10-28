@@ -10,7 +10,7 @@
 
 ## Agents nearby
 
-The desktop sidebar shows the other agents Heartbeat can see (Claude Code in a terminal, Codex, Gemini and others, on this machine or a paired one) as small marks at the right of their project's line. An agent belongs to the project its address names: `claude@mac/demesne-cli-k3x7a` works in `demesne-cli`. Click the marks to list the agents under the project; **Message** on a row starts a note to that agent in the composer, which the chat sends over Heartbeat. `GET /v1/heartbeat/agents` returns the same list.
+The desktop sidebar shows the other agents Heartbeat can see (Claude Code in a terminal, Codex, Gemini and others, on this machine or a paired one) as small marks at the right of their project's line. An agent belongs to the project its address names: `claude@mac/demesne-k3x7a` works in `demesne`. Click the marks to list the agents under the project; **Message** on a row starts a note to that agent in the composer, which the chat sends over Heartbeat. `GET /v1/heartbeat/agents` returns the same list.
 
 When a chat is about to change a file that has changed since it last read or wrote it, and another agent is working in the project, it stops before the write. In Ask mode one amber line names the agent and the file: **Ask it first** (Enter) refuses the write and tells the model to message that agent before changing the file, and **Change anyway** goes ahead. On Auto (mail turns, Drive) nobody is at the window, so the write is refused and the model coordinates with the agent itself.
 
@@ -28,4 +28,4 @@ Both lines are optional. Without a running daemon the tool is not offered and no
 
 ## Reaching a demesne chat from elsewhere
 
-From a Claude Code or Codex session with the Heartbeat package installed, `heartbeat agents` lists demesne's addresses. Send with `heartbeat say --as YOU 'REQ#_ →demesne@NODE/demesne-cli-k3x9a why:"status of the tests"'`. The reply comes back to your mailbox the same way.
+From a Claude Code or Codex session with the Heartbeat package installed, `heartbeat agents` lists demesne's addresses. Send with `heartbeat say --as YOU 'REQ#_ →demesne@NODE/demesne-k3x9a why:"status of the tests"'`. The reply comes back to your mailbox the same way.

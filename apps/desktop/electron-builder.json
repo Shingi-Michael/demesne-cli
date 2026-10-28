@@ -36,18 +36,21 @@
       "deb"
     ],
     "category": "Development",
-    "executableName": "demesne-desktop",
+    "executableName": "demesne",
     "maintainer": "Demesne contributors"
   },
   "win": {
     "target": [
       "nsis"
     ],
-    "executableName": "demesne-desktop"
+    "executableName": "demesne"
   },
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true
   },
-  "artifactName": "demesne-desktop-${os}-${arch}.${ext}"
+  "deb": {
+    "fpm": ["--replaces", "demesne-desktop", "--conflicts", "demesne-desktop"]
+  },
+  "artifactName": "demesne-${os}-${arch}.${ext}"
 }

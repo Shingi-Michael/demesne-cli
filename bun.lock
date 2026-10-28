@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "demesne-cli",
+      "name": "demesne",
       "devDependencies": {
         "@types/bun": "1.4.0",
         "electron": "^44.7.2",

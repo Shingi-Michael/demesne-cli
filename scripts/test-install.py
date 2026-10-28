@@ -8,6 +8,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -52,11 +53,17 @@ args = sys.argv[1:]
 if "-o" in args:
     out = args[args.index("-o") + 1]
     name = args[-1].rsplit("/", 1)[-1]
-    mode = os.environ.get("CHECKSUM_FAILURE", "") if name.endswith(".sha256") else ""
+    with open(pathlib.Path(os.environ["FIXTURE_ROOT"], "downloads"), "a") as log:
+        log.write(name + "\\n")
+    mode = os.environ.get("CHECKSUM_FAILURE", "") if name.endswith(".sha256") else os.environ.get("ASSET_FAILURE", "")
+    if not (pathlib.Path(os.environ["FIXTURE_ASSETS"]) / name).exists():
+        mode = "404"
     if mode:
         print("curl: HTTP 404" if mode == "404" else "curl: network unavailable", file=sys.stderr)
+        print("404" if mode == "404" else "000", end="")
         sys.exit(22 if mode == "404" else 7)
     shutil.copyfile(pathlib.Path(os.environ["FIXTURE_ASSETS"]) / name, out)
+    print("200", end="")
 else:
     try:
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(args[-1], timeout=1) as r:
@@ -71,10 +78,12 @@ else:
         path.write_text(content)
         path.chmod(0o755)
 
-    def bundle(self, mode="healthy"):
+    def bundle(self, mode="healthy", legacy=False):
         bundle = self.root / "demesne"
-        bundle.mkdir(exist_ok=True)
-        for name in ("demesne-desktop", "resources/backend/demesne-desktop-host"):
+        shutil.rmtree(bundle, ignore_errors=True)
+        bundle.mkdir()
+        for name in (("demesne-desktop", "resources/backend/demesne-desktop-host") if legacy
+                     else ("demesne", "resources/backend/demesne-host")):
             path = bundle / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("#!/bin/sh\nexit 0\n")
@@ -99,7 +108,7 @@ else:
 ''')
         daemon.chmod(0o755)
         (bundle / "icon.png").write_bytes(b"fixture icon")
-        self.archive = self.assets / "demesne-desktop-linux-x64.tar.gz"
+        self.archive = self.assets / ("demesne-desktop-linux-x64.tar.gz" if legacy else "demesne-linux-x64.tar.gz")
         with tarfile.open(self.archive, "w:gz") as tar:
             tar.add(bundle, arcname="demesne")
         self.checksum = Path(str(self.archive) + ".sha256")
@@ -149,19 +158,21 @@ else:
 
     def test_install_upgrade_uninstall_without_user(self):
         self.assert_ok(self.run_installer(piped=True))
-        self.assertTrue((self.app / "demesne-desktop").is_file())
-        self.assertTrue((self.home / ".local/bin/demesne-desktop").is_symlink())
+        self.assertTrue((self.app / "demesne").is_file())
+        self.assertTrue((self.home / ".local/bin/demesne").is_symlink())
         desktop = self.home / "share/applications/demesne.desktop"
-        self.assertIn(str(self.app / "demesne-desktop"), desktop.read_text())
+        self.assertIn(str(self.app / "demesne"), desktop.read_text())
         result = self.run_installer("--no-restart")
         self.assert_ok(result)
         self.assertNotIn("unbound", result.stderr)
         lookup = (self.root / "pgrep.args").read_text().splitlines()
         self.assertEqual(lookup[:3], ["-u", str(os.getuid()), "-f"])
         pattern = lookup[3]
+        self.assertTrue(re.search(pattern, str(self.app / "demesne")))
         self.assertTrue(re.search(pattern, str(self.app / "demesne-desktop")))
+        self.assertFalse(re.search(pattern, str(self.app / "demesne-host")))
         self.assertFalse(re.search(pattern, str(self.app / "demesne-desktop-host")))
-        self.assertFalse(re.search(pattern, "editor " + str(self.app / "demesne-desktop")))
+        self.assertFalse(re.search(pattern, "editor " + str(self.app / "demesne")))
         self.assert_ok(self.run_installer("--uninstall"))
         self.assert_ok(self.run_installer("--uninstall"))
         self.assertFalse(self.app.exists())
@@ -193,6 +204,112 @@ else:
         result = self.run_installer("--insecure-skip-checksum")
         self.assert_ok(result)
         self.assertIn("WARNING", result.stdout)
+
+    def test_legacy_release_and_launcher_migration(self):
+        # Only the old release asset exists; a pinned install still works and
+        # exposes the new public command without modifying the old app.asar.
+        self.archive.unlink()
+        self.checksum.unlink()
+        self.bundle(legacy=True)
+        bin_dir = self.home / ".local/bin"
+        bin_dir.mkdir(parents=True)
+        old_link = bin_dir / "demesne-desktop"
+        old_link.symlink_to(self.app / "demesne-desktop")
+        result = self.run_installer("--version", "v0.2.1-test", "--no-restart")
+        self.assert_ok(result)
+        self.assertIn("updated", result.stdout)
+        self.assertFalse(old_link.is_symlink())
+        self.assertTrue((bin_dir / "demesne").is_file())
+        self.assertTrue((self.app / "resources/backend/demesne-host").is_file())
+        self.assertTrue((self.app / "resources/backend/demesne-desktop-host").is_file())
+        self.assert_ok(self.run_installer("--uninstall"))
+        self.assertFalse((bin_dir / "demesne").is_symlink())
+
+    def test_existing_legacy_install_upgrades_to_new_bundle(self):
+        self.app.mkdir()
+        (self.app / "demesne-desktop").write_text("old app")
+        bin_dir = self.home / ".local/bin"
+        bin_dir.mkdir(parents=True)
+        old_link = bin_dir / "demesne-desktop"
+        old_link.symlink_to(self.app / "demesne-desktop")
+        result = self.run_installer("--no-restart")
+        self.assert_ok(result)
+        self.assertIn("updated", result.stdout)
+        self.assertTrue((bin_dir / "demesne").is_file())
+        self.assertFalse(old_link.is_symlink())
+        self.assertTrue((self.app / "resources/backend/demesne-desktop-host").is_file())
+
+    def test_unrelated_legacy_launcher_is_preserved(self):
+        bin_dir = self.home / ".local/bin"
+        bin_dir.mkdir(parents=True)
+        unrelated = bin_dir / "demesne-desktop"
+        target = self.root / "another-app"
+        target.write_text("not ours")
+        unrelated.symlink_to(target)
+        self.assert_ok(self.run_installer())
+        self.assertEqual(unrelated.resolve(), target)
+        self.assert_ok(self.run_installer("--uninstall"))
+        self.assertEqual(unrelated.resolve(), target)
+
+    def test_legacy_dangling_launcher_is_removed_on_uninstall(self):
+        bin_dir = self.home / ".local/bin"
+        bin_dir.mkdir(parents=True)
+        old_link = bin_dir / "demesne-desktop"
+        old_link.symlink_to(self.app / "demesne-desktop")
+        self.assert_ok(self.run_installer("--uninstall"))
+        self.assertFalse(old_link.is_symlink())
+
+    def test_checksum_failure_does_not_fall_back_to_legacy(self):
+        self.bundle(legacy=True)
+        (self.root / "downloads").write_text("")
+        self.env["CHECKSUM_FAILURE"] = "404"
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("demesne-desktop-linux-x64.tar.gz", (self.root / "downloads").read_text())
+        self.assertFalse(self.app.exists())
+
+    def test_asset_network_error_never_falls_back(self):
+        self.bundle(legacy=True)
+        self.env["ASSET_FAILURE"] = "network"
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing fallback", result.stderr)
+        self.assertNotIn("demesne-desktop-linux-x64.tar.gz", (self.root / "downloads").read_text())
+        self.assertFalse(self.app.exists())
+
+    def test_new_launcher_collision_is_preserved(self):
+        bin_dir = self.home / ".local/bin"
+        bin_dir.mkdir(parents=True)
+        launcher = bin_dir / "demesne"
+        for symlink in (False, True):
+            with self.subTest(symlink=symlink):
+                if symlink:
+                    target = self.root / "unrelated-command"
+                    target.write_text("keep me")
+                    launcher.symlink_to(target)
+                else:
+                    launcher.write_text("keep me")
+                result = self.run_installer()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("not this installation's launcher", result.stderr)
+                self.assertEqual(launcher.read_text(), "keep me")
+                self.assertFalse(self.app.exists())
+                self.assert_ok(self.run_installer("--uninstall"))
+                self.assertEqual(launcher.read_text(), "keep me")
+                launcher.unlink()
+
+    def test_checksum_mismatch_does_not_fall_back_to_legacy(self):
+        self.assert_ok(self.run_installer())
+        sentinel = self.app / "existing-install"
+        sentinel.write_text("old app")
+        self.checksum.write_text("0" * 64 + "  " + self.archive.name)
+        self.bundle(legacy=True)
+        (self.root / "downloads").write_text("")
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checksum mismatch", result.stderr)
+        self.assertNotIn("demesne-desktop-linux-x64.tar.gz", (self.root / "downloads").read_text())
+        self.assertTrue(sentinel.exists())
 
     def test_daemon_ready_on_nondefault_port(self):
         self.running_upgrade("healthy")

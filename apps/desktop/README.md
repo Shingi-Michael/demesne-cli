@@ -22,6 +22,8 @@ bun run build:desktop
 
 Preparation bundles renderer/main/preload code into `build/app`, compiles the Bun host and daemon into `build/backend`, and copies native image dependencies beside them. Electron Builder packages those backends outside ASAR under `resources/backend`. No Rust toolchain or system webview is required. The normal build packages only the current host platform and architecture, ensuring Bun and sharp match it.
 
+The app command and package name are `demesne`; the daemon remains `demesned`. `demesne-host` is a private bundled helper, not another public command. App IDs and data locations are unchanged. Debian packages declare that they replace/conflict with the old `demesne-desktop` package; release builds temporarily retain old installer asset aliases and the private helper alias for in-place upgrades.
+
 Outputs are under `apps/desktop/release`: `mac-arm64/Demesne.app` (or `mac/Demesne.app` on Intel), a Linux `.deb`, or a Windows NSIS installer. `--dir` builds an unpacked application. Builds are unsigned until release signing credentials are configured.
 
 ## Verification
@@ -29,7 +31,7 @@ Outputs are under `apps/desktop/release`: `mac-arm64/Demesne.app` (or `mac/Demes
 ```sh
 bun scripts/prepare-desktop.ts
 bun test apps/desktop/test apps/desktop/workspace/test
-DEMESNE_TEST_DESKTOP_HOST="$PWD/apps/desktop/build/backend/demesne-desktop-host" bun test apps/desktop/test/host.test.ts
+DEMESNE_TEST_DESKTOP_HOST="$PWD/apps/desktop/build/backend/demesne-host" bun test apps/desktop/test/host.test.ts
 bun scripts/check-desktop-backend.ts
 bun run desktop:check
 bun run build:desktop

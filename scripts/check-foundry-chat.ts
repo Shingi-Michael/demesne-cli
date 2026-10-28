@@ -22,7 +22,6 @@ const f = await fixture({
   providerId: "fixture", modelId: "foundry-chat",
   async listModels() { return [{ id: "foundry-chat", provider: "fixture", contextWindow: 262144 }]; },
   async *stream(messages, tools) {
-    if (tools.some(tool => tool.name === "proof_marks")) { yield { type: "finish", reason: "stop" }; return; }
     const at = messages.findLastIndex(message => message.role === "user");
     const request = messages[at]?.content ?? "";
     const current = messages.slice(at + 1).filter(message => message.role === "tool");

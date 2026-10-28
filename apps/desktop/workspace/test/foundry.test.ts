@@ -8,7 +8,7 @@ for (const home of ["plain", "project"] as const) {
       providerId: "test", modelId: "foundry-test",
       async listModels() { return []; },
       async *stream(messages, tools) {
-        if (tools.some(tool => tool.name === "proof_marks") || messages.at(-1)?.role === "tool") {
+        if (messages.at(-1)?.role === "tool") {
           yield { type: "text_delta", delta: "Your page is in Foundry." };
           yield { type: "finish", reason: "stop" }; return;
         }

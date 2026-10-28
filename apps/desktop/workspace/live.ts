@@ -26,13 +26,12 @@ import { FoundryPane } from "./foundry-pane.ts";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
-import type { FoundryArtifact, FoundryArtifactDetail, PlanLimits, ProofClaim, Routine } from "@demesne/protocol";
+import type { FoundryArtifact, FoundryArtifactDetail, PlanLimits, Routine } from "@demesne/protocol";
 import { glanceHTML, type Glance } from "./glance.ts";
 import { backChoices, backState } from "./back-later.ts";
 import { agoWords, prHandable, prHandText, prStanding } from "./pr-row.ts";
 import { pullRequestNews, type SessionPullRequest } from "../../../packages/protocol/src/pull-requests.ts";
 import { PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, PLAN_LIMIT_SHOWN, planUsed, planWindows } from "@demesne/protocol";
-import { claimTitle, locate, lookedAt, proofLine } from "./proof-marks.ts";
 import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.ts";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval } from "./session-model.ts";
@@ -292,10 +291,6 @@ function toldNotes(drive: NonNullable<Snapshot["drive"]>) {
 const stepsOpen = new Set<string>();
 /// Steps whose diff or output is unfolded in place, keyed run:tool.
 const stepOpen = new Set<string>();
-/// Proof marks: the claim unfolded under its paragraph, per turn, and the
-/// claim ↑↓ is stepping through.
-const proofOpen = new Map<string, string>();
-let proofStep: { runId: string; index: number } | null = null;
 /// Live previews: the page a running dev server serves unfolds under the
 /// step that started it. Phone width and "show output" are per step.
 const previewPhone = new Set<string>(), previewOutput = new Set<string>(), previewSeen = new Set<string>();
@@ -1516,95 +1511,6 @@ function agentFold(run: WorkspaceRun, tool: ToolEntry) {
   }
   return `<div class="agent-steps" role="group">${body}</div>`;
 }
-/// Proof marks. Each claim in an answer is wrapped in the rendered words:
-/// green line = a step proved it, dotted = nothing checked, red wavy = the
-/// check disagreed. The proof unfolds under the claim's paragraph.
-const proofClaims = (run: WorkspaceRun) => (run.proofs ?? []).filter((claim) => claim.state !== "dropped");
-/// The step that backs a claim: its words and number on the guide.
-function proofStepOf(run: WorkspaceRun, claim: ProofClaim) {
-  if (!claim.toolCallId) return null;
-  const list = tools(run), tool = list.find((item) => item.toolCallId === claim.toolCallId);
-  return tool ? { tool, number: list.indexOf(tool) + 1, words: stepWords(tool), duration: duration(tool.durationMs) } : null;
-}
-/// "Ran bun test", "Edited sidebar.ts": a step in plain words.
-function stepWords(tool: ToolEntry) {
-  const past: Record<string, string> = { Run: "Ran", Read: "Read", Write: "Wrote", Edit: "Edited", Search: "Searched", List: "Listed", Diff: "Diffed", Git: "Checked git", History: "Read history", Agent: "Asked an agent" };
-  const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
-  const target = tool.name === "run_command" ? base.replace(/^\S*\//, "") : String(tool.input.path ?? base);
-  return `${past[verb(tool)] ?? verb(tool)} ${target}`.slice(0, 80);
-}
-function proofLineHTML(run: WorkspaceRun) {
-  const line = run.proofs ? proofLine(run.proofs) : null;
-  if (!line) return "";
-  const stepping = proofStep?.runId === run.id ? proofStep : null;
-  const parts = [
-    line.proved ? btn("proof-walk", line.proved, { runId: run.id, state: "proved" }, "pl-ok") : "",
-    line.checking ? `<span class="pl-live">${line.checking}</span>` : "",
-    line.wrong ? btn("proof-walk", line.wrong, { runId: run.id, state: "false" }, "pl-bad") : "",
-    line.unchecked ? btn("proof-walk", line.unchecked, { runId: run.id, state: "unchecked" }, "pl-open") : "",
-  ].filter(Boolean).join('<span class="pl-dot">·</span>');
-  return `<div class="proof-line">${parts}${stepping ? `<span class="pl-step">${stepping.index + 1} of ${proofClaims(run).length} · ↑↓ · Esc</span>` : ""}</div>`;
-}
-/// What unfolds under a claim: the step and the lines that back it, the
-/// check on its way, what the check found instead, or Prove it.
-function proofFoldHTML(run: WorkspaceRun, claim: ProofClaim) {
-  const step = proofStepOf(run, claim), args = { runId: run.id, claimId: claim.id };
-  const quote = claim.quote ? `<pre class="pf-quote">${h(claim.quote.split("\n").slice(0, 8).join("\n"))}</pre>` : "";
-  if (claim.state === "proved")
-    return `<div class="proof-fold ok"><div class="pf-src">${step ? `<b>${h(step.words)}</b> · step ${step.number}${step.duration ? ` · ${step.duration}` : ""}` : `<b>Checked</b>${claim.step ? ` · ${h(claim.step)}` : ""}`}${claim.words ? ` · corrected` : ""}</div>${quote}${step ? `<div class="pf-acts">${btn("proof-step", "Open the step ›", { runId: run.id, toolCallId: claim.toolCallId })}</div>` : ""}</div>`;
-  if (claim.state === "checking")
-    return `<div class="proof-fold live"><div class="pf-run">${spinner()}<span>Checking</span>${claim.step ? `<code>${h(claim.step)}</code>` : ""}</div></div>`;
-  if (claim.state === "false")
-    return `<div class="proof-fold bad"><div class="pf-src"><span class="danger">Not true.</span> ${h(claim.why ?? "")}${claim.step ? ` <span class="muted">· ${h(claim.step)}</span>` : ""}</div>${quote}<div class="pf-acts">${btn("proof-fix", "Fix it ↵", args, "pf-main")}${claim.words ? btn("proof-correct", "Correct the sentence", args) : ""}${btn("proof-check", "Check again", args)}</div></div>`;
-  const looked = lookedAt(tools(run).filter((tool) => tool.state === "done" && tool.name !== "ask_user").map((tool) => ({ words: stepWords(tool) })));
-  return `<div class="proof-fold"><div class="pf-src">${claim.why ? h(claim.why) : "Nothing in this turn checked this."}${looked ? ` ${h(looked)}` : ""}</div><div class="pf-acts">${btn("proof-check", "Prove it ↵", args, "pf-main")}${btn("proof-drop", "Drop the sentence", args)}</div></div>`;
-}
-/// Wraps each claim's words in the rendered answer and unfolds the open one
-/// under its paragraph. Idempotent: earlier marks come off first.
-function decorateProofs(run: WorkspaceRun, root: HTMLElement) {
-  for (const fold of root.querySelectorAll(".proof-fold")) fold.remove();
-  for (const mark of root.querySelectorAll(".claim")) mark.replaceWith(...mark.childNodes);
-  root.normalize();
-  const claims = run.proofs ?? [];
-  if (!claims.length) return;
-  const open = proofOpen.get(run.id);
-  for (const claim of claims) {
-    const nodes: Text[] = [];
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node as Text);
-    const found = locate(nodes.map((node) => node.data), claim.text);
-    if (!found) continue;
-    const step = proofStepOf(run, claim), spans: HTMLElement[] = [];
-    for (const part of found) {
-      const range = document.createRange();
-      range.setStart(nodes[part.segment]!, part.start);
-      range.setEnd(nodes[part.segment]!, part.end);
-      const span = document.createElement("span");
-      span.className = `claim ${claim.state}${open === claim.id ? " on" : ""}${claim.state === "checking" ? " shine" : ""}`;
-      span.dataset.claim = claim.id;
-      span.dataset.run = run.id;
-      span.title = claimTitle(claim, step);
-      span.tabIndex = 0;
-      span.setAttribute("role", "button");
-      range.surroundContents(span);
-      spans.push(span);
-    }
-    // Corrected: the true words stand where the claim was.
-    if (claim.state === "proved" && claim.words && claim.words !== claim.text) {
-      spans[0]!.textContent = claim.words;
-      for (const span of spans.slice(1)) span.textContent = "";
-    }
-    if (open !== claim.id) continue;
-    const template = document.createElement("template");
-    template.innerHTML = proofFoldHTML(run, claim);
-    const fold = template.content.firstElementChild!;
-    const item = spans[0]!.closest("li");
-    if (item && root.contains(item)) { item.append(fold); continue; }
-    let block: Element = spans[0]!;
-    while (block.parentElement && block.parentElement !== root) block = block.parentElement;
-    block.after(fold);
-  }
-}
 function runHTML(run: WorkspaceRun, index: number) {
   const rewound = rewoundBy(run);
   if (rewound) return rewindLine(rewound);
@@ -1679,7 +1585,6 @@ function runHTML(run: WorkspaceRun, index: number) {
   // Words you sent that the model hasn't read yet wait at the end of the guide.
   if (live && run.id === state!.activeTurnId) for (const steer of state!.steers ?? []) steps += steerLine(steer.text, true);
   flush();
-  body += proofLineHTML(run);
   const receipt = run.receipt,
     checks = items.filter(
       (tool) =>
@@ -1994,9 +1899,6 @@ function renderConversation() {
       reviewOpen.has(run.id) ? reviewVersion : 0,
       detailsOpen.has(`drive-asked:${run.id}`),
       state.rewinds.filter((rewind) => rewind.turnId === run.id || rewind.hiddenTurnIds.includes(run.id)),
-      run.proofs ?? null,
-      proofOpen.get(run.id) ?? "",
-      proofStep?.runId === run.id ? proofStep.index : -1,
     ]);
     let saved = runNodes.get(run.id);
     if (!saved) {
@@ -2038,7 +1940,6 @@ function renderConversation() {
         slot.replaceWith(view.element);
       }
       saved.content.replaceChildren(template.content);
-      for (const view of saved.views.values()) decorateProofs(run, view.element);
       const retained = new Set(
         [...saved.node.querySelectorAll<HTMLElement>("[data-entry]")].map(
           (node) => Number(node.dataset.entry),
@@ -4347,76 +4248,6 @@ function followLatest() {
   const stage = el("stage");
   stage.scrollTop = stage.scrollHeight;
 }
-/// Proof marks' actions: a claim opens or closes its proof, the count line
-/// walks the claims, Prove it / Drop / Correct go to the daemon, Fix it
-/// sends one message, Open the step unfolds it on the guide.
-async function proofAction(action: string, args: Record<string, any>) {
-  const runId = String(args.runId ?? ""), run = state?.runs.find((item) => item.id === runId);
-  if (!run) return;
-  const claimId = String(args.claimId ?? ""), claim = run.proofs?.find((item) => item.id === claimId);
-  if (action === "proof-open") {
-    if (proofOpen.get(runId) === claimId) { proofOpen.delete(runId); if (proofStep?.runId === runId) proofStep = null; }
-    else { proofOpen.set(runId, claimId); if (proofStep?.runId === runId) proofStep.index = Math.max(0, proofClaims(run).findIndex((item) => item.id === claimId)); }
-    follow = false;
-    renderConversation();
-    return;
-  }
-  if (action === "proof-walk") {
-    const live = proofClaims(run);
-    if (!live.length) return;
-    const index = Math.max(0, live.findIndex((item) => item.state === args.state));
-    proofStep = { runId, index };
-    proofOpen.set(runId, live[index]!.id);
-    follow = false;
-    renderConversation();
-    return;
-  }
-  if (action === "proof-step") {
-    const tool = tools(run).find((item) => item.toolCallId === args.toolCallId);
-    stepsOpen.add(runId);
-    if (tool && foldable(tool)) stepOpen.add(`${runId}:${tool.id}`);
-    follow = false;
-    renderConversation();
-    if (tool) document.querySelector(`#turn-${CSS.escape(runId)} .tool-row[data-args*='"id":${tool.id}}']`)?.scrollIntoView({ block: "center" });
-    return;
-  }
-  if (!claim) return;
-  if (action === "proof-fix") {
-    proofOpen.delete(runId);
-    proofStep = null;
-    await submitText(`You said "${claim.text}", but that isn't true${claim.why ? `: ${claim.why}` : ""}. Fix it.`);
-    return;
-  }
-  const kind = action === "proof-drop" ? "drop" : action === "proof-correct" ? "correct" : "check";
-  if (kind !== "check") { proofOpen.delete(runId); proofStep = null; }
-  await act(() => api("proof", { turnId: runId, claimId, action: kind }));
-}
-/// ↑↓ while walking claims, Esc off them, Enter takes the open proof's main
-/// action (Prove it, Fix it). True when the key was used.
-function proofKey(event: KeyboardEvent, key: string, field: boolean): boolean {
-  if (!state || event.ctrlKey || event.metaKey || event.altKey) return false;
-  const free = !field || (event.target === editor && !editor.value.trim());
-  if (proofStep && free && (key === "arrowdown" || key === "arrowup")) {
-    const run = state.runs.find((item) => item.id === proofStep!.runId), live = run ? proofClaims(run) : [];
-    if (!live.length) { proofStep = null; return false; }
-    proofStep.index = (proofStep.index + (key === "arrowdown" ? 1 : -1) + live.length) % live.length;
-    proofOpen.set(proofStep.runId, live[proofStep.index]!.id);
-    follow = false;
-    renderConversation();
-    return true;
-  }
-  if (key === "escape" && free && (proofStep || proofOpen.size)) {
-    proofStep = null;
-    proofOpen.clear();
-    renderConversation();
-    return true;
-  }
-  if (key === "enter" && !event.shiftKey && free && !state.approvals.length && !pendingQuestion()) {
-    const main = document.querySelector<HTMLButtonElement>(".proof-fold .pf-main");
-    if (main) { main.click(); return true; }
-  }
-  return false;
-}
 /// Foundry's buttons: the gallery, one artifact, and handing it to a chat.
 async function foundryAction(action: string, args: Record<string, any>) {
   const open = foundryOpen;
@@ -4765,7 +4596,6 @@ async function dispatch(
     await act(() => api(action, args));
     return;
   }
-  if (action.startsWith("proof-")) return proofAction(action, args);
   if (action === "drive-asked") {
     const key = String(args.key ?? "");
     if (detailsOpen.has(key)) detailsOpen.delete(key); else detailsOpen.add(key);
@@ -5247,12 +5077,6 @@ document.addEventListener("click", (event) => {
       detailsOpen.add(id);
     }
   }
-  const claim = (event.target as Element).closest<HTMLElement>(".claim[data-claim]");
-  if (claim) {
-    event.preventDefault();
-    void act(() => proofAction("proof-open", { runId: claim.dataset.run, claimId: claim.dataset.claim }));
-    return;
-  }
   const target = (event.target as Element).closest<HTMLElement>(
     "[data-action]",
   );
@@ -5549,10 +5373,9 @@ document.addEventListener("keydown", (event) => {
     ctrl = event.ctrlKey || event.metaKey;
   // Native details and buttons keep Enter and Space.
   if (!ctrl && !event.altKey && (key === "enter" || key === " ") && event.target instanceof Element) {
-    const control = event.target.closest<HTMLElement>(".approval-row button, .thinking-toggle, .claim[data-claim]");
+    const control = event.target.closest<HTMLElement>(".approval-row button, .thinking-toggle");
     if (control) { event.preventDefault(); control.click(); return; }
   }
-  if (!state.setup && !pageOpen && !overlay && proofKey(event, key, field)) { event.preventDefault(); return; }
   const run = (task: () => Promise<unknown> | void) => {
     event.preventDefault();
     void act(async () => task());

@@ -1506,12 +1506,14 @@ export class DemesneStore {
   /// sub-agent is reading) and/or a slice of its `thinking`. History replays
   /// these into the sub-agent's trace.
   /// A step line (`text`) or, once at the end, what a sub-agent found (`report`).
-  appendToolProgress(turnId: string, toolCallId: string, update: { text?: string; report?: string }): void {
+  /// A commit or merge step's tree (`repo`): git before and after it.
+  appendToolProgress(turnId: string, toolCallId: string, update: { text?: string; report?: string; repo?: import("@demesne/protocol").RepoFlow }): void {
     const turn = this.getTurnOrThrow(turnId);
     if (turn.status !== "running") return;
     const event = this.insertEvent("tool.call_progress", turn.sessionId, turnId, { toolCallId,
       ...(update.text !== undefined ? { text: update.text.slice(0, 500) } : {}),
-      ...(update.report ? { report: update.report.slice(0, 4000) } : {}) }, new Date().toISOString());
+      ...(update.report ? { report: update.report.slice(0, 4000) } : {}),
+      ...(update.repo ? { repo: update.repo } : {}) }, new Date().toISOString());
     this.eventSink?.(event);
   }
 

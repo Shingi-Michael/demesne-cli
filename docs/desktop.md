@@ -55,6 +55,10 @@ Previews run in sandboxed frames. A page may load pinned libraries from cdnjs, j
 
 After building the app, run `bun scripts/check-foundry-chat.ts` to verify in-chat creation, the pane, interaction, revisions and history replay in real Electron. Pass a packaged executable as the first argument to check an installed build.
 
+## Commits and merges
+
+When a chat runs `git commit` or `git merge`, the daemon reads the repository just before the step and again after it succeeds (main's recent commits, up to three branches not in main with their newest commits, which ones live in a worktree, and the staged files with their line counts). If the tip moved, the step carries both readings and the window draws them under the step with anime.js: main as a fine line, the branches below it (your branch nearest, Drive's branches in green), your files waiting on your branch and flowing into the new commit, or for a merge the branch bending back into a new commit on main and fading. Every label sits in one column to the right of the tree, one per line, and the git command under it turns into the result. It plays once while the window watches the step; history, a reload and **Reduce motion** show the finished tree. It is drawn from git alone, with no model call. `bun scripts/check-repo-flow.ts` checks it in the real app.
+
 ## Compacted conversation
 
 After successful compaction, the conversation shows the saved summary in place of older turns. The retained recent turns and subsequent messages stay visible. Use **Expand full history** on the summary card to restore the complete chronological conversation, then **Collapse older conversation** to return to the summary. Expansion stays in effect during streaming updates; reopening a session or creating a new checkpoint starts collapsed. This changes only the view; the complete transcript remains saved. Failed or cancelled compaction does not create a new collapsed section.

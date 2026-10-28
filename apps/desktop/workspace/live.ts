@@ -22,6 +22,7 @@ import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from ".
 import { scheduledPage } from "./scheduled-page.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
+import { RepoFlowView } from "./repo-flow.ts";
 import { FoundryPane } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
@@ -1409,7 +1410,32 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   const made = (tool.name === "foundry_save" || tool.name === "foundry_edit") && tool.state === "done"
     ? btn("foundry-open-step", "Open ›", { id: tool.input.id ?? null, title: tool.input.title ?? null, message: tool.message ?? null }, "fd-step-open")
     : "";
-  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + (open && canFold ? stepFold(run, tool) : "");
+  // A commit or a merge draws the tree under its step (repo-flow.ts); the
+  // drawing itself is kept across repaints and dropped into this slot.
+  const tree = tool.repo && tool.state === "done" ? repoSlot(tool) : "";
+  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + tree + (open && canFold ? stepFold(run, tool) : "");
+}
+const repoSlot = (tool: ToolEntry) => `<div class="repo-flow-slot" data-repo-flow="${h(tool.toolCallId)}"></div>`;
+/// The trees drawn under commit and merge steps, by tool call. Each plays
+/// once, when it first appears in the turn that is running.
+const repoViews = new Map<string, RepoFlowView>();
+/// Steps that ran while this window was open play; a reload starts after.
+const windowOpenedAt = Date.now();
+function placeRepoFlows(container: ParentNode, run: WorkspaceRun) {
+  for (const slot of container.querySelectorAll<HTMLElement>("[data-repo-flow]")) {
+    const tool = run.entries.find((entry): entry is ToolEntry => entry.type === "tool" && entry.toolCallId === slot.dataset.repoFlow);
+    if (!tool?.repo) continue;
+    let view = repoViews.get(tool.toolCallId);
+    if (!view) {
+      view = new RepoFlowView(tool.repo, String(tool.detail ?? "").replace(/^\$\s*/, ""));
+      repoViews.set(tool.toolCallId, view);
+    }
+    slot.replaceWith(view.element);
+    // It plays once for a step that just ran in this window, even the last
+    // one of a turn that has already finished; history and a reload show it
+    // settled.
+    view.render(tool.startedAt >= windowOpenedAt && Date.now() - tool.startedAt < 30_000);
+  }
 }
 /// Rewind waits for running work, and only conversation turns rewind.
 const canRewind = (run: WorkspaceRun) => !state!.activeTurnId && !run.kind && run.status !== "running" && run.status !== "queued";
@@ -1544,7 +1570,11 @@ function runHTML(run: WorkspaceRun, index: number) {
       flush();
       body += `<div class="answer"><span class="answer-mark" aria-hidden="true">d.</span><div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div></div>`;
     }
-    if (fold && (entry.type === "reasoning" || entry.type === "tool")) continue;
+    if (fold && (entry.type === "reasoning" || entry.type === "tool")) {
+      // Folded steps keep their trees: a commit or merge stays drawn.
+      if (entry.type === "tool" && entry.repo && entry.state === "done") { flush(); body += repoSlot(entry); }
+      continue;
+    }
     if (entry.type === "reasoning") {
       flush();
       const live = active(run) && i === run.entries.length - 1;
@@ -1941,6 +1971,7 @@ function renderConversation() {
         slot.replaceWith(view.element);
       }
       saved.content.replaceChildren(template.content);
+      placeRepoFlows(saved.content, run);
       const retained = new Set(
         [...saved.node.querySelectorAll<HTMLElement>("[data-entry]")].map(
           (node) => Number(node.dataset.entry),

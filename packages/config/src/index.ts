@@ -59,6 +59,10 @@ export interface HeartbeatConfig {
 /// that it may read, as name = absolute path.
 export interface AssistantConfig {
   folders?: Record<string, string>;
+  /// An ntfy topic URL your phone subscribes to, and its token if the
+  /// server needs one: routines push their answers there.
+  ntfy?: string;
+  ntfyToken?: string;
 }
 
 export interface DaemonConfig {
@@ -347,7 +351,7 @@ function applyDocument(
 
   if (document.assistant !== undefined) {
     const assistant = objectValue(document.assistant, "assistant");
-    assertKnownKeys(assistant, ["folders"], `${path}.assistant`);
+    assertKnownKeys(assistant, ["folders", "ntfy", "ntfy_token"], `${path}.assistant`);
     const target = config.assistant ??= {};
     assignInto(target, "folders", assistant.folders, source, sources, "assistant.folders", (value, key) => {
       const folders = stringRecord(value, key)!;
@@ -357,6 +361,14 @@ function applyDocument(
       }
       return folders;
     });
+    assignInto(target, "ntfy", assistant.ntfy, source, sources, "assistant.ntfy", (value, key) => {
+      const url = optionalString(value, key)!;
+      // Plain http only on this computer or over Tailscale (100.x addresses).
+      if (!url.startsWith("https://") && !/^http:\/\/(127\.0\.0\.1|localhost|100\.)/.test(url)) throw new ConfigError(`${key} must use https:// (plain http only on this computer or Tailscale)`);
+      if (!/\/[\w-]{16,}$/.test(url)) throw new ConfigError(`${key} must end in a topic of at least 16 letters, digits, - or _: anyone who guesses the topic can read it`);
+      return url;
+    });
+    assignInto(target, "ntfyToken", assistant.ntfy_token, source, sources, "assistant.ntfyToken", optionalString);
   }
 
   if (document.daemon !== undefined) {

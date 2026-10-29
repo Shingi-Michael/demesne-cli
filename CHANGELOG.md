@@ -18,6 +18,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
+- The assistant's chat gets its own tools and instructions instead of the coding agent's: it can search and read your shared folders, keep `notes.md` and `todo.md` with a new `assistant_notes` tool, push to your phone and ask you questions, and nothing else. The daemon refuses any other tool there, so a routine on Auto can't run a command, edit, move or delete. Each message reaches the model with the local date and time in front, so "today" means today. Without its folder the chat still reads your files.
 - Foundry shows what it made the way Claude shows an artifact: a chip in the conversation (kind, title, version) and the page itself in a pane beside the chat, edge to edge, with one line of controls above it (title, version arrows, Preview · Code, phone width, close) and one below (version note, Copy, Export, Revise, Open in Foundry, Make this the latest). A new artifact opens the pane by itself, a new version moves it on, Esc closes it, and each chat remembers whether it was open. The boxed 480px card that sat in the conversation under each save is gone.
 
 ### Added

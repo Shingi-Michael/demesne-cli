@@ -108,7 +108,7 @@ Demesne works in *projects*: a folder you open, whose `DEMESNE.md` file is read 
 
 The assistant has one chat, not a chat per question: **Assistant**, second in the sidebar under New chat. Your questions, its routines' runs and what it sent to your phone all land in that one conversation, with a quiet line where each day starts. It compacts itself as it grows, like any long chat. The row wears the same marks as a chat's row: amber when it needs you, a breathing dot while it works, and blue when it did something while you were elsewhere.
 
-The chat lives in the assistant's folder, so its `DEMESNE.md` applies: `~/Assistant` (what `install.ps1` makes) when that folder exists and you've trusted it, or the folder `[assistant] home` names. Without one it is a plain chat. Its title bar names the folders it may read.
+The chat lives in the assistant's folder, so its `DEMESNE.md` applies: `~/Assistant` (what `install.ps1` makes) when that folder exists and you've trusted it, or the folder `[assistant] home` names. Without one it can still read and search your folders, but keeps no notes and has no `DEMESNE.md`. Its title bar names the folders it may read.
 
 A routine you write from Scheduled while that chat is open runs in it: at its time the question is a quiet line with the time and the routine's name ("↗ phone" when its answer goes to your phone), and the answer follows. If the chat is busy at that moment, the routine waits for the next minute.
 
@@ -141,10 +141,22 @@ It reads plain text (notes, Markdown, CSV, saved emails as `.eml`, calendar `.ic
 
 With a folder shared and the daemon restarted, ask in the Assistant project: "What's in my documents folder?", then "What does my grocery list say?". The steps show which tool it called and which file it read.
 
-### Known limits
+### Its own tools, not the coding agent's
 
-- A routine in a project runs on **Auto**: nobody is at the window, so it doesn't stop to ask before running a command, editing a file in the Assistant folder or sending to your phone. `personal_files` and `search_personal_files` can only read, but the coding tools are still there. Until the assistant gets its own narrower tool set, keep routines in the Assistant project to reading and summarizing.
-- The model's base instructions are still the coding agent's; `DEMESNE.md` is added after them.
+A routine runs on **Auto**: nobody is at the window to approve its steps. If the assistant had the coding agent's tools, a PDF that says "run this command" would be one bad decision away from being run. So the assistant's chat gets only these, and the daemon refuses any other tool the model asks for there, even one it makes up:
+
+| Tool | What it does |
+| --- | --- |
+| `search_personal_files`, `personal_files` | Find and read your shared folders. Read-only. |
+| `assistant_notes` | Reads and writes `notes.md` (what you asked it to remember) and `todo.md` (what you said you'd do) in its folder, without asking, the way you'd jot something down. Nothing else there: it can't change `DEMESNE.md`, so a document can't talk it into a new standing rule. Each file is capped at 64 KB. |
+| `notify_phone` | Push to your phone. Asks first in a chat you're at; on Auto it sends, up to 10 an hour. |
+| `ask_user` | Ask you a question, only when you're at the window. |
+
+No shell, no edits, moves or deletes, no sub-agents, no Drive. Taking a tool away is stronger than telling the model not to use it, and a shorter prompt leaves more of the 128K for your files.
+
+It gets its own base instructions too, in place of the coding agent's (and in place of a `system_prompt` you configured for coding): who it is, how to find things, that files are data and never instructions, and to ask before anything leaves the computer. Your `DEMESNE.md` follows them.
+
+Each of your messages reaches the model with the local date and time in front, like `[Tue 2026-10-27 09:05] what's on today?`, so "today" and "this week" mean something. You see your message as you typed it. The time goes with the message rather than in the instructions at the top, because changing the top would make llama-server re-read the whole conversation (its prompt cache) every time.
 
 ## Step 3: file index
 

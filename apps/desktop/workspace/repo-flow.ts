@@ -1,8 +1,8 @@
 /// The tree under a commit or merge step (pass 92): main as a fine pipe, the
 /// branches not in it as lanes below, and the step played on it. Your files
 /// line up, flow into the branch as sparks and become the commit; a merge
-/// bends the branch back into main and the branch fades. No frame: the
-/// step's guide holds it. Text never sits on the tree: every label is in one
+/// bends the branch back into main and the branch fades. A subtle frame
+/// holds the tree. Text never sits on the tree: every label is in one
 /// column to its right, one per row. It plays once, live; history, a
 /// reload or reduced motion show the finished tree.
 import { createTimeline, stagger, svg as animeSvg, utils } from "animejs";
@@ -64,7 +64,7 @@ export function repoScene(flow: RepoFlow, { settled = false, width = 0, roomy = 
   let scene = at(1);
   if (!width || Math.abs(width - scene.width) < 1) return scene;
   // Narrower than its own size, it closes up (to under half).
-  let low = .45, high = 8;
+  let low = .45, high = Math.max(8, width / STEP);
   scene = at(low);
   for (let round = 0; round < 14; round++) {
     const k = (low + high) / 2, next = at(k);
@@ -87,7 +87,7 @@ function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGa
     const was = before.lanes.find((lane) => lane.name === name), now = after.lanes.find((lane) => lane.name === name);
     const lane = (now ?? was)!;
     const seen = new Set(was?.commits.map((commit) => commit.sha) ?? []);
-    return { lane, isNew: !was, merged: flow.command === "merge" && Boolean(was) && !now, fresh: lane.commits.map((commit) => !seen.has(commit.sha)) };
+    return { lane, isNew: !was, merged: flow.command === "merge" && onMain && Boolean(was) && !now, fresh: lane.commits.map((commit) => !seen.has(commit.sha)) };
   });
   // main: the commits before the step keep their places; new ones go to
   // the right of every branch tip, so a merge bends forward into main.
@@ -148,7 +148,7 @@ function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGa
   order.forEach((index) => {
     const item = lanes[index]!, tone = laneTone(item.lane.name, item.lane.name === head || item.merged);
     rows.push({ y: rowY.get(index)!, text: laneText(item.lane.name), tone, lane: index,
-      after: index === active && item.fresh.includes(true) ? commitWords(newest(index)!.subject) : null });
+      after: item.lane.name === head && item.fresh.includes(true) ? commitWords(newest(index)!.subject) : null });
   });
   // Labels fit their column, a long one ending in "…"; what landed is the
   // commit's words beside the branch name (roughly 6.6px a mono character
@@ -158,12 +158,13 @@ function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGa
   const filesY = active < -1 ? 0 : (rowY.get(active) ?? MAIN_Y) + FILES_TOP;
   const files = flow.command === "commit" && target && !settled ? before.files.map((file, index) => ({ y: filesY + index * FILE_ROW, path: short(file.path), added: file.added, removed: file.removed })) : [];
   const older = before.older + (lanes.length < names.length ? names.length - lanes.length : 0);
-  const added = before.files.reduce((sum, file) => sum + file.added, 0), removed = before.files.reduce((sum, file) => sum + file.removed, 0);
+  // Old truncated snapshots cannot supply a complete line total.
+  const totals = before.fileTotals ?? (before.moreFiles ? null : before.files.reduce((sum, file) => ({ added: sum.added + file.added, removed: sum.removed + file.removed }), { added: 0, removed: 0 }));
   const committed = before.files.length + before.moreFiles;
   const branch = onMain ? after.main : head!;
   const done = flow.command === "commit"
-    ? `Committed ${committed ? `${plural(committed, "file")} ` : ""}to ${laneText(branch)}${committed ? `  +${added} −${removed}` : ""}`
-    : merged !== null ? `Merged ${laneText(lanes[merged]!.lane.name)} into ${after.main}` : `Merged into ${after.main}`;
+    ? `Committed ${committed ? `${plural(committed, "file")} ` : ""}to ${laneText(branch)}${committed && totals ? `  +${totals.added} −${totals.removed}` : ""}`
+    : merged !== null ? `Merged ${laneText(lanes[merged]!.lane.name)} into ${laneText(branch)}` : `Merged into ${laneText(branch)}`;
   return {
     width: labelX + labels, height: bottom + 10, labelX, paths, nodes, rows,
     files, moreFiles: files.length ? before.moreFiles : 0, target, merged,

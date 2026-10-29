@@ -68,6 +68,8 @@ export interface RepoSnapshot {
   main: string; head: string | null; tip: string | null;
   commits: RepoCommit[]; lanes: RepoLane[]; older: number;
   files: RepoFile[]; moreFiles: number;
+  /// Totals across all files, including those omitted from the drawing.
+  fileTotals?: { added: number; removed: number };
 }
 /// A `git commit` or `git merge` the chat ran: the tree before and after.
 export interface RepoFlow { command: "commit" | "merge"; before: RepoSnapshot; after: RepoSnapshot }

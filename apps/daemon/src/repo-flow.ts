@@ -91,6 +91,7 @@ export async function repoSnapshot(git: Git, options: { all?: boolean } = {}): P
   return {
     main, head, tip, commits: commits(mainLog), lanes, older: open.length - lanes.length,
     files: files.slice(0, FILES), moreFiles: Math.max(0, files.length - FILES),
+    fileTotals: files.reduce((total, file) => ({ added: total.added + file.added, removed: total.removed + file.removed }), { added: 0, removed: 0 }),
   };
 }
 

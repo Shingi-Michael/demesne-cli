@@ -82,4 +82,15 @@ describe("repoSnapshot", () => {
     dirs.push(dir);
     expect(await repoSnapshot(gitIn(dir))).toBeNull();
   });
+
+  test("file totals include files beyond the five drawn", async () => {
+    const { dir, run } = await repo();
+    for (let i = 1; i <= 6; i++) writeFileSync(join(dir, `file-${i}.txt`), "new\n".repeat(i));
+    writeFileSync(join(dir, "a.txt"), "one\n");
+    await run("add", "-A");
+    const snapshot = (await repoSnapshot(gitIn(dir)))!;
+    expect(snapshot.files).toHaveLength(5);
+    expect(snapshot.moreFiles).toBe(2);
+    expect(snapshot.fileTotals).toEqual({ added: 21, removed: 1 });
+  });
 });

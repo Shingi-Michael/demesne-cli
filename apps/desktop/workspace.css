@@ -1486,9 +1486,9 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 @media (prefers-reduced-motion: reduce) { .fd-chip, .pane-frame, .pane-head button, .pane-foot button { transition: none; } }
 
 /* The tree under a commit or merge step (repo-flow.ts, pass 92): fine pipes
-   in faint channels, no frame, every label in one column beside the tree. */
-.repo-flow { margin: 2px 0 8px 22px; max-width: calc(100% - 22px); overflow-x: auto; scrollbar-width: none; }
-.response > .repo-flow { margin: 6px 0 10px; max-width: 100%; }
+   in faint channels, a subtle frame, labels in one column beside the tree. */
+.repo-flow { box-sizing: border-box; margin: 2px 0 8px 22px; width: calc(100% - 22px); max-width: calc(100% - 22px); min-width: 0; padding: 10px; border: 1px solid var(--hair); border-radius: 10px; background: color-mix(in srgb, var(--t3) 3%, transparent); overflow-x: auto; scrollbar-width: none; }
+.response > .repo-flow { margin: 6px 0 10px; width: 100%; max-width: 100%; }
 .repo-flow svg { display: block; overflow: visible; }
 .repo-flow .rf-track { fill: none; stroke: currentColor; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; opacity: .06; }
 .repo-flow .rf-pipe { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }

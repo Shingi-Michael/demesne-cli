@@ -12,7 +12,7 @@ const xs = (scene: FlowScene) => [...scene.nodes.map((node) => node.x), ...scene
 
 test("a commit on your branch: files wait on its row and flow into a new commit", () => {
   const before = snap({ head: "claude/el20ji", commits: main, lanes: [drive], tip: "x",
-    files: [{ path: "apps/desktop/electron/foundry-assemble.ts", added: 104, removed: 0 }, { path: "policy.ts", added: 18, removed: 3 }], moreFiles: 3 });
+    files: [{ path: "apps/desktop/electron/foundry-assemble.ts", added: 104, removed: 0 }, { path: "policy.ts", added: 18, removed: 3 }], moreFiles: 3, fileTotals: { added: 130, removed: 7 } });
   const after = snap({ head: "claude/el20ji", commits: main, tip: "y",
     lanes: [{ name: "claude/el20ji", base: main[2]!.sha, commits: [c("y1", "Foundry assembles a page")], worktree: false }, drive] });
   const scene = repoScene({ command: "commit", before, after });
@@ -24,7 +24,24 @@ test("a commit on your branch: files wait on its row and flow into a new commit"
   expect(scene.moreFiles).toBe(3);
   expect(scene.target).toEqual({ x: expect.any(Number), y: you.y });
   expect(scene.nodes.filter((node) => node.fresh)).toHaveLength(1);
-  expect(scene.done).toBe("Committed 5 files to claude/el20ji · +122 −3");
+  expect(scene.done).toBe("Committed 5 files to claude/el20ji · +130 −7");
+});
+
+test("a merge into a feature branch names and updates that branch", () => {
+  const lane = { name: "feature", base: main[1]!.sha, commits: [c("f1")], worktree: false };
+  const before = snap({ head: "feature", commits: main, lanes: [lane, drive] });
+  const after = snap({ head: "feature", commits: main, lanes: [{ ...lane, commits: [...lane.commits, c("m1", "Merge main", true)] }, drive] });
+  const scene = repoScene({ command: "merge", before, after });
+  expect(scene.done).toBe("Merged into feature");
+  expect(scene.rows.find(row => row.text === "feature")?.after).toBe("feature · Merge main");
+  expect(scene.paths.filter(path => path.part === "join")).toEqual([]);
+  expect(scene.nodes.some(node => node.fresh && node.merge && node.lane !== -1)).toBe(true);
+});
+
+test("old truncated snapshots do not claim partial line counts as totals", () => {
+  const before = snap({ commits: main, files: [{ path: "a", added: 5, removed: 2 }], moreFiles: 5 });
+  const scene = repoScene({ command: "commit", before, after: snap({ commits: [...main, c("n1")] }) });
+  expect(scene.done).toBe("Committed 6 files to main");
 });
 
 test("text never sits on the tree: every label is right of every pipe and rows don't collide", () => {

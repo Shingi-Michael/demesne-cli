@@ -1,8 +1,8 @@
 /// The tree under a commit or merge step (pass 92): main as a fine pipe, the
 /// branches not in it as lanes below, and the step played on it. Your files
 /// line up, flow into the branch as sparks and become the commit; a merge
-/// bends the branch back into main and the branch fades. No frame: the
-/// step's guide holds it. Text never sits on the tree: every label is in one
+/// bends the branch back into main and the branch fades. A subtle frame
+/// holds the tree. Text never sits on the tree: every label is in one
 /// column to its right, one per row. It plays once, live; history, a
 /// reload or reduced motion show the finished tree.
 import { createTimeline, stagger, svg as animeSvg, utils } from "animejs";
@@ -53,7 +53,7 @@ export function repoScene(flow: RepoFlow, { settled = false, width = 0, roomy = 
   let scene = at(1);
   if (!width || Math.abs(width - scene.width) < 1) return scene;
   // Narrower than its own size, it closes up a little (to just over half).
-  let low = .55, high = 8;
+  let low = .55, high = Math.max(8, width / STEP);
   scene = at(low);
   for (let round = 0; round < 14; round++) {
     const k = (low + high) / 2, next = at(k);
@@ -76,7 +76,7 @@ function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGa
     const was = before.lanes.find((lane) => lane.name === name), now = after.lanes.find((lane) => lane.name === name);
     const lane = (now ?? was)!;
     const seen = new Set(was?.commits.map((commit) => commit.sha) ?? []);
-    return { lane, isNew: !was, merged: flow.command === "merge" && Boolean(was) && !now, fresh: lane.commits.map((commit) => !seen.has(commit.sha)) };
+    return { lane, isNew: !was, merged: flow.command === "merge" && onMain && Boolean(was) && !now, fresh: lane.commits.map((commit) => !seen.has(commit.sha)) };
   });
   // main: the commits before the step keep their places; new ones go to
   // the right of every branch tip, so a merge bends forward into main.
@@ -139,17 +139,19 @@ function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGa
   order.forEach((index) => {
     const item = lanes[index]!, tone = laneTone(item.lane.name, item.lane.name === head || item.merged);
     rows.push({ y: rowY.get(index)!, text: fit(laneText(item.lane.name)), tone, lane: index,
-      after: index === active && item.fresh.includes(true) ? fit(`${laneText(item.lane.name)} · ${commitWords(newest(index)!.subject)}`) : null });
+      after: item.lane.name === head && item.fresh.includes(true) ? fit(`${laneText(item.lane.name)} · ${commitWords(newest(index)!.subject)}`) : null });
   });
   const filesY = active < -1 ? 0 : (rowY.get(active) ?? MAIN_Y) + FILES_TOP;
   const files = flow.command === "commit" && target && !settled ? before.files.map((file, index) => ({ y: filesY + index * FILE_ROW, path: short(file.path), added: file.added, removed: file.removed })) : [];
   const older = before.older + (lanes.length < names.length ? names.length - lanes.length : 0);
-  const added = before.files.reduce((sum, file) => sum + file.added, 0), removed = before.files.reduce((sum, file) => sum + file.removed, 0);
+  // Older saved trees have no totals. Only use their displayed files when
+  // they are complete; a partial sum would look like the commit's total.
+  const totals = before.fileTotals ?? (before.moreFiles ? null : before.files.reduce((sum, file) => ({ added: sum.added + file.added, removed: sum.removed + file.removed }), { added: 0, removed: 0 }));
   const committed = before.files.length + before.moreFiles;
   const branch = onMain ? after.main : head!;
   const done = flow.command === "commit"
-    ? `Committed ${committed ? `${plural(committed, "file")} ` : ""}to ${laneText(branch)}${committed ? ` · +${added} −${removed}` : ""}`
-    : merged !== null ? `Merged ${laneText(lanes[merged]!.lane.name)} into ${after.main}` : `Merged into ${after.main}`;
+    ? `Committed ${committed ? `${plural(committed, "file")} ` : ""}to ${laneText(branch)}${committed && totals ? ` · +${totals.added} −${totals.removed}` : ""}`
+    : merged !== null ? `Merged ${laneText(lanes[merged]!.lane.name)} into ${laneText(branch)}` : `Merged into ${laneText(branch)}`;
   return {
     width: labelX + LABELS, height: bottom + (older ? 30 : 10), labelX, paths, nodes, rows,
     files, moreFiles: files.length ? before.moreFiles : 0, target, merged,
@@ -175,8 +177,28 @@ function text(parent: Element, x: number, y: number, words: string, className: s
 export class RepoFlowView {
   readonly element = document.createElement("div");
   private played = false;
+  private animating = false;
+  private drawnWidth = 0;
   constructor(readonly flow: RepoFlow, private readonly command: string, readonly spread: { width?: number; roomy?: boolean } = {}) {
     this.element.className = "repo-flow";
+    new ResizeObserver(() => {
+      if (this.element.childElementCount && !this.animating && this.widthChanged()) this.settle();
+    }).observe(this.element);
+  }
+
+  private width() {
+    if (this.spread.width !== undefined) return this.spread.width;
+    const style = getComputedStyle(this.element);
+    return Math.max(0, this.element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
+  }
+  private widthChanged() { return this.width() > 0 && Math.abs(this.width() - this.drawnWidth) > 1; }
+  private scene(settled: boolean) {
+    this.drawnWidth = this.width();
+    return repoScene(this.flow, { ...this.spread, width: this.drawnWidth, settled });
+  }
+  private settle() {
+    this.element.replaceChildren();
+    this.draw(this.scene(true), false);
   }
 
   /// Draws the tree; `live` plays it once, otherwise it shows finished.
@@ -184,7 +206,7 @@ export class RepoFlowView {
     if (this.element.childElementCount) return;
     const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
     const playing = live && !reduced && !this.played;
-    this.draw(repoScene(this.flow, { ...this.spread, settled: !playing }), playing);
+    this.draw(this.scene(!playing), playing);
   }
 
   private draw(scene: FlowScene, playing: boolean) {
@@ -226,13 +248,16 @@ export class RepoFlowView {
     };
     if (!playing) { finish(); return; }
     this.played = true;
+    this.animating = true;
     const timeline = this.play(scene, { pipeOf, nodeOf, ring, rowOf, afterOf, fileOf, mergedParts, doing, done, sparks });
     // Once the files are in, the rows they waited on close up.
-    if (scene.files.length) timeline.then(() => setTimeout(() => {
-      this.element.replaceChildren();
-      this.draw(repoScene(this.flow, { ...this.spread, settled: true }), false);
-      this.element.animate([{ opacity: .55 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
-    }, 700));
+    timeline.then(() => setTimeout(() => {
+      this.animating = false;
+      if (scene.files.length || this.widthChanged()) {
+        this.settle();
+        if (scene.files.length) this.element.animate([{ opacity: .55 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
+      }
+    }, scene.files.length ? 700 : 0));
   }
 
   private play(scene: FlowScene, parts: {

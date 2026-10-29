@@ -101,6 +101,8 @@ try {
     mcpServers: config.mcp.servers,
     heartbeat: config.heartbeat,
     assistantFolders: config.assistant?.folders,
+    // install.ps1 makes ~/Assistant; `[assistant] home` names another folder.
+    assistantHome: config.assistant?.home ?? (existsSync(join(homedir(), "Assistant")) ? join(homedir(), "Assistant") : undefined),
     phone: config.assistant?.ntfy ? ntfy(config.assistant.ntfy, config.assistant.ntfyToken) : undefined,
     images: config.images,
     providerVision: config.provider.vision,

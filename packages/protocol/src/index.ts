@@ -349,6 +349,8 @@ export interface Turn {
   kind?: "compaction" | "themefy";
   /// Drive wrote this request to its coder; the person didn't type it.
   fromDrive?: boolean;
+  /// A routine asked this in the assistant's chat: the routine's name.
+  fromRoutine?: string;
   /// Images the person attached to this message.
   attachments?: TurnAttachment[];
 }
@@ -450,6 +452,8 @@ export interface Routine {
   at: string;
   /// The project the chat opens in; null for Just a chat.
   workspace: string | null;
+  /// Runs in the assistant's one chat instead of opening a chat of its own.
+  assistant?: boolean;
   on: boolean;
   createdAt: string;
   resumedAt?: string;
@@ -459,6 +463,11 @@ export interface Routine {
   next?: string | null;
 }
 export interface RoutinesResponse { routines: Routine[] }
+
+/// The always-on assistant's one chat: which session it is (null until it is
+/// first opened), the names of the folders it may read, and whether
+/// routines reach your phone.
+export interface AssistantResponse { sessionId: string | null; folders: string[]; phone: boolean }
 
 export interface UpdateSessionRequest {
   pinned?: boolean;

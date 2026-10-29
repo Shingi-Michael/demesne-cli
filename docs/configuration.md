@@ -162,6 +162,8 @@ A turn belongs to the model that answered its first request. Models on providers
 
 `[assistant] folders` names folders outside any project that the assistant's read-only `personal_files` tool may list and read, as `name = 'absolute path'`. Names are one word. See [the assistant guide](assistant.md#one-tool-personal_files). The daemon reads this when it starts.
 
+`[assistant] home` is the assistant's own folder (its `DEMESNE.md`, notes and todo), where its one chat lives; it must be absolute and trusted. Without it the daemon uses `~/Assistant` when that folder exists. See [the assistant guide](assistant.md#its-own-chat).
+
 `[assistant] ntfy` is an [ntfy](https://ntfy.sh) topic URL your phone subscribes to; with it, routines push their answers to your phone and chats get a `notify_phone` tool. The topic must be at least 16 characters, and the URL https (plain http only on this computer or a Tailscale `100.x` address). `ntfy_token` is sent as a bearer token for a server that needs one. See [the assistant guide](assistant.md#step-4-push-to-your-phone).
 
 ## Images and MCP

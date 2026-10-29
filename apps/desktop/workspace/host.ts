@@ -2,6 +2,7 @@ import { ChatGPTAuth, type ChatGPTAccount } from "@demesne/chatgpt-auth";
 import { configuredChatGPTAccount } from "@demesne/setup/chatgpt-auth.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import type {
+  AssistantResponse,
   CommandRecord,
   ReviewScope,
   TurnAttachment,
@@ -205,6 +206,9 @@ export class WorkspaceHost {
   reasoning: string | undefined;
   current: WorkspaceSession | null = null;
   sessions: Session[] = [];
+  /// The always-on assistant's one chat; it has its own row, not a place
+  /// in the list of chats.
+  assistant: AssistantResponse | null = null;
   files: WorkspaceFileInfo[] = [];
   processes: CommandRecord[] = [];
   queuePosition: number | null = null;
@@ -316,7 +320,17 @@ export class WorkspaceHost {
             acceptEdits: this.current.session.acceptEdits === true,
           }
         : null,
-      sessions: this.sessions.map((session) => ({
+      assistant: this.assistant ? (() => {
+        const chat = this.assistant.sessionId ? this.sessions.find((session) => session.id === this.assistant!.sessionId) : undefined;
+        return {
+          ...this.assistant,
+          workspace: chat?.workspace?.root ?? null,
+          updatedAt: chat?.updatedAt ?? null,
+          status: chat?.turns.at(-1)?.status,
+          waiting: Boolean(this.assistant.sessionId && this.waitingSessions.has(this.assistant.sessionId)),
+        };
+      })() : null,
+      sessions: this.sessions.filter((session) => session.id !== this.assistant?.sessionId).map((session) => ({
         id: session.id,
         title: session.title,
         updatedAt: session.updatedAt,
@@ -443,6 +457,7 @@ export class WorkspaceHost {
         const id = configuredChatGPTAccount(this.settings.configPath);
         this.chatgptAccount = id ? (await new ChatGPTAuth(this.settings.accountDataDirectory ?? this.settings.dataDirectory).accounts()).find(a => a.id === id) ?? null : null;
       } catch { this.chatgptAccount = null; }
+      try { this.assistant = await this.client.assistant(); } catch { this.assistant = null; }
       this.sessions = await this.client.listSessions();
       this.connection = "online";
       if (this.reconnectTimer) {
@@ -517,7 +532,8 @@ export class WorkspaceHost {
   /// `reuse`, an empty chat already there is opened rather than piling up.
   async newSession(title?: string, options: { plain?: boolean; reuse?: boolean } = {}) {
     if (options.reuse && !title) {
-      const empty = this.sessions.filter((session) => (options.plain ? !session.workspace : session.workspace?.root === this.workspace) && !session.turns.length)
+      // The assistant's chat is never a new chat, even while it's empty.
+      const empty = this.sessions.filter((session) => session.id !== this.assistant?.sessionId && (options.plain ? !session.workspace : session.workspace?.root === this.workspace) && !session.turns.length)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
       if (empty) {
         await this.select(empty.id);
@@ -825,7 +841,10 @@ export class WorkspaceHost {
   }
   async refreshSessions() {
     try {
-      this.sessions = await this.client.listSessions();
+      // The assistant's chat can be made, or replaced, by a routine or another window.
+      const [assistant, sessions] = await Promise.all([this.client.assistant().catch(() => this.assistant), this.client.listSessions()]);
+      this.assistant = assistant;
+      this.sessions = sessions;
       if (!this.agentsStarted) void this.refreshAgents();
       await this.checkBackground();
       this.publish();
@@ -1235,6 +1254,7 @@ export class WorkspaceHost {
       "start-daemon",
       "select-session",
       "new-session",
+      "assistant-open",
       "trust-workspace",
       "setup",
       "setup-action",
@@ -1397,6 +1417,14 @@ export class WorkspaceHost {
     }
     if (method === "select-session") {
       await this.select(string(args.id, "session id", 200));
+      return this.snapshot();
+    }
+    // The Assistant row: its one chat, made the first time it's opened.
+    if (method === "assistant-open") {
+      const opened = await this.client.openAssistant();
+      this.assistant = opened;
+      this.sessions = await this.client.listSessions();
+      await this.select(opened.sessionId);
       return this.snapshot();
     }
     if (method === "draft") {
@@ -1746,6 +1774,8 @@ export class WorkspaceHost {
     // window's project, or to no project in a plain chat.
     if (method === "routines") return (await this.client.routines()).routines;
     if (method === "routine-add") {
+      // One written in the assistant's chat runs in that chat.
+      if (this.current && this.current.session.id === this.assistant?.sessionId) return (await this.client.addRoutine(string(args.text, "routine", 2000), null, true)).routines;
       const plain = Boolean(this.current && !this.current.session.workspace);
       return (await this.client.addRoutine(string(args.text, "routine", 2000), plain ? null : this.current?.session.workspace?.root ?? this.workspace)).routines;
     }

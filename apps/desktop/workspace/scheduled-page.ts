@@ -23,6 +23,8 @@ export interface ScheduledView {
   auto: DriveAuto | null;
   /// This window's project, so a run's chat opens in place or switches.
   here: string;
+  /// Opened from the assistant's chat: a new routine runs there.
+  assistant?: boolean;
   error: string;
   draft: string;
 }
@@ -33,7 +35,7 @@ const onOff = (on: boolean, action: string, args: Record<string, unknown>, name:
 export function scheduledPage(view: ScheduledView, now = Date.now()) {
   const routines = view.routines;
   const rows = routines === null ? '<p class="cp-empty">Reading your routines…</p>' : [
-    ...routines.map((routine) => `<div class="sp-row${routine.on ? "" : " off"}"><span class="sp-when" title="${h(routine.text)}">${h(routine.when ?? routine.at)}</span><span class="sp-what"><b>${h(routine.prompt)}</b><span class="sp-sub">${routine.on && routine.next ? `Next ${h(aheadWord(routine.next, now))} at ${h(clock(routine.next))}` : routine.on ? "" : "Off"}${routine.runs.length ? ` · ran ${routine.runs.length}×` : ""}</span></span><span class="sp-where">${h(projectWords(routine.workspace))}</span>${btn("routine-remove", "Delete", { id: routine.id }, "sp-remove").replace("<button ", `<button aria-label="${h(`Delete ${routine.prompt}`)}" `)}${onOff(routine.on, "routine-set", { id: routine.id }, routine.prompt)}</div>`),
+    ...routines.map((routine) => `<div class="sp-row${routine.on ? "" : " off"}"><span class="sp-when" title="${h(routine.text)}">${h(routine.when ?? routine.at)}</span><span class="sp-what"><b>${h(routine.prompt)}</b><span class="sp-sub">${routine.on && routine.next ? `Next ${h(aheadWord(routine.next, now))} at ${h(clock(routine.next))}` : routine.on ? "" : "Off"}${routine.runs.length ? ` · ran ${routine.runs.length}×` : ""}</span></span><span class="sp-where">${h(routine.assistant ? "Assistant" : projectWords(routine.workspace))}</span>${btn("routine-remove", "Delete", { id: routine.id }, "sp-remove").replace("<button ", `<button aria-label="${h(`Delete ${routine.prompt}`)}" `)}${onOff(routine.on, "routine-set", { id: routine.id }, routine.prompt)}</div>`),
     view.auto ? `<div class="sp-row${view.auto.on ? "" : " off"}"><span class="sp-when">After ${view.auto.quietMinutes} quiet minutes</span><span class="sp-what"><b>Drive runs its best idea</b><span class="sp-sub">One branch at a time, at most ${view.auto.perDay} a day, never pushes${view.auto.usedToday ? ` · ${view.auto.usedToday} today` : ""}</span></span><span class="sp-where">${h(projectWords(view.auto.workspace))}</span>${onOff(view.auto.on, "drive-auto", {}, "Drive runs its best idea")}</div>` : "",
   ].join("") || '<p class="cp-empty">No routines yet. Write one below.</p>';
   const week = now - 7 * 86_400_000;
@@ -42,12 +44,12 @@ export function scheduledPage(view: ScheduledView, now = Date.now()) {
   const runRows = runs.map((run) => {
     const here = !run.routine.workspace || run.routine.workspace === view.here;
     const open = btn(here ? "select-session" : "project-session", "Open ›", { id: run.sessionId, ...(run.routine.workspace ? { path: run.routine.workspace } : {}) }, "sp-open");
-    return `<div class="sp-row"><span class="sp-when">${h(dayWord(run.at, new Date(now)))} · ${h(clock(run.at))}</span><span class="sp-what">${h(run.routine.prompt)}<span class="sp-sub"> · ${h(projectWords(run.routine.workspace))}</span></span>${open}</div>`;
+    return `<div class="sp-row"><span class="sp-when">${h(dayWord(run.at, new Date(now)))} · ${h(clock(run.at))}</span><span class="sp-what">${h(run.routine.prompt)}<span class="sp-sub"> · ${h(run.routine.assistant ? "Assistant" : projectWords(run.routine.workspace))}</span></span>${open}</div>`;
   }).join("");
   const count = routines ? routines.length + (view.auto ? 1 : 0) : "";
   return `<h1 class="cp-title">Scheduled</h1><p class="cp-lede">Chats that start on their own. Each run is a chat in its project, listed like any other.</p>`
     + `<div class="cp-head"><span>Routines</span><span>${count}</span></div><div class="cp-list">${rows}</div>`
     + (runRows ? `<div class="cp-head"><span>Last runs</span><span>this week</span></div><div class="cp-list">${runRows}</div>` : "")
     + `<form class="sp-new" id="routine-new"><input name="routine" value="${h(view.draft)}" placeholder="Every Monday at 9, list the PRs waiting on me" aria-label="A new routine: when, then what" autocomplete="off" spellcheck="false"><kbd aria-hidden="true">↵</kbd></form>`
-    + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : `<p class="sp-hint">When first, then what. At its time it opens a chat in ${h(view.here ? projectWords(view.here) : "Just a chat")}, whether or not this window is open.</p>`);
+    + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : `<p class="sp-hint">When first, then what. ${view.assistant ? "At its time the assistant answers it in its chat" : `At its time it opens a chat in ${h(view.here ? projectWords(view.here) : "Just a chat")}`}, whether or not this window is open.</p>`);
 }

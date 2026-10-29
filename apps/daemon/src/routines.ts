@@ -114,11 +114,14 @@ export class Routines {
     return this.items.map((routine) => ({ ...routine, when: whenWords(routine), next: nextSlot(routine, now)?.toISOString() ?? null }));
   }
 
-  add(text: string, workspace: string | null): Routine | { error: string } {
+  /// A routine written in the assistant's chat runs there: `assistant` keeps
+  /// it to that one chat, whatever folder the chat is in.
+  add(text: string, workspace: string | null, assistant = false): Routine | { error: string } {
     const parsed = parseRoutine(text);
     if ("error" in parsed) return parsed;
+    if (assistant) workspace = null;
     if (workspace && !this.host.trusted(workspace)) return { error: "Trust this folder before giving it routines." };
-    const routine: Routine = { id: crypto.randomUUID(), text: text.trim(), prompt: parsed.prompt, days: parsed.days, at: parsed.at, workspace, on: true, createdAt: new Date(this.now()).toISOString(), runs: [] };
+    const routine: Routine = { id: crypto.randomUUID(), text: text.trim(), prompt: parsed.prompt, days: parsed.days, at: parsed.at, workspace, ...(assistant ? { assistant: true } : {}), on: true, createdAt: new Date(this.now()).toISOString(), runs: [] };
     this.items.push(routine);
     this.save();
     return this.list().find((item) => item.id === routine.id)!;

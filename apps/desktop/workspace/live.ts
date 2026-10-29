@@ -20,6 +20,7 @@ import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
+import { dayLine } from "./assistant-chat.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
 import { RepoFlowView } from "./repo-flow.ts";
@@ -95,8 +96,10 @@ const modelWords = (model: { id: string; displayName?: string | null }) => model
 const projectLabel = (path: string) => path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path;
 /// A chat that isn't in a project: no files, commands or Drive.
 const isPlain = (snapshot: Snapshot | null = state) => Boolean(snapshot?.session && !snapshot.session.workspace);
+/// The always-on assistant's one chat is open.
+const inAssistant = (snapshot: Snapshot | null = state) => Boolean(snapshot?.assistant && snapshot.session?.id === snapshot.assistant.sessionId);
 const inSession = (snapshot: Snapshot | null = state) =>
-  Boolean(snapshot && (snapshot.runs.length || (snapshot.drive && snapshot.drive.homeSessionId === snapshot.session?.id)));
+  Boolean(snapshot && (snapshot.runs.length || (snapshot.drive && snapshot.drive.homeSessionId === snapshot.session?.id) || inAssistant(snapshot)));
 /// The thinking level each /model row would switch to: picked with ←→,
 /// else the current choice for the current model, else the model's default.
 const modelLevels = new Map<string, string>();
@@ -515,7 +518,33 @@ function sidebarDay(date: string) {
 }
 /// Pinned chats lead, then one group per project and Just a chat; worktree
 /// chats remain with their parent.
+/// The Assistant row under New chat: selected while its chat is open, and
+/// the same marks as a chat's row (amber when it needs you, the breathing
+/// dot while it works, blue for something it did while you were elsewhere).
+function renderAssistantRow() {
+  const row = document.getElementById("sidebar-assistant"), rail = document.getElementById("rail-assistant");
+  const assistant = state?.assistant ?? null;
+  for (const button of [row, rail]) if (button) button.hidden = !assistant;
+  if (!assistant || !row) return;
+  const open = inAssistant() && !pageOpen;
+  const asks = open ? Boolean(state!.approvals.length || state!.questions.length) : assistant.waiting;
+  const working = open ? Boolean(state!.activeTurnId) && !asks : !asks && (assistant.status === "running" || assistant.status === "queued");
+  const id = assistant.sessionId;
+  if (id && assistant.updatedAt && (open || !(id in seenChats))) markSeen(id, assistant.updatedAt);
+  const fresh = Boolean(id) && !open && assistant.status === "completed" && Boolean(assistant.updatedAt) && seenChats[id!] !== assistant.updatedAt;
+  const tone = asks ? "warn" : working ? "working" : assistant.status === "failed" ? "bad" : fresh ? "acc" : "";
+  row.classList.toggle("on", open);
+  if (open) row.setAttribute("aria-current", "page"); else row.removeAttribute("aria-current");
+  const mark = row.querySelector<HTMLElement>(".sidebar-session-mark");
+  if (mark) { mark.className = `sidebar-session-mark ${tone}`; mark.hidden = !tone; }
+  const about = STATE_WORDS[tone] ?? "";
+  row.title = about ? `Assistant, ${about}` : "Assistant";
+  row.setAttribute("aria-label", row.title);
+  const badge = rail?.querySelector<HTMLElement>(".rail-badge");
+  if (badge) { badge.hidden = !tone; badge.classList.toggle("blue", tone !== "warn"); }
+}
 function renderSidebar() {
+  renderAssistantRow();
   const list = document.getElementById("sidebar-sessions");
   if (!state || !list || projectOrder.dragging) return;
   // While a title is being renamed, the list holds still under the cursor.
@@ -757,8 +786,10 @@ function renderSidebar() {
   // Where an open chat lives: Just a chat, or its project.
   const where = document.getElementById("workspace-where");
   if (where) {
-    where.hidden = Boolean(pageOpen) || !inSession() || Boolean(from);
-    where.textContent = plainNow ? "Just a chat" : projectLabel(projectWorkspace);
+    // The assistant's chat names the folders it may read instead.
+    const reads = inAssistant() ? state.assistant!.folders.map((name) => name[0]!.toUpperCase() + name.slice(1)) : [];
+    where.hidden = Boolean(pageOpen) || !inSession() || Boolean(from) || (inAssistant() && !reads.length);
+    where.textContent = inAssistant() ? `reads ${reads.join(", ")}` : plainNow ? "Just a chat" : projectLabel(projectWorkspace);
   }
   // The rail: a dot where something waits, a ring for Drive's progress.
   const badge = document.getElementById("rail-sessions-badge"), ring = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
@@ -1707,9 +1738,10 @@ function runHTML(run: WorkspaceRun, index: number) {
     ? `<div class="request-att">${run.attachments.map((image) => attachmentPreviews.has(image.id)
       ? `<img src="${attachmentPreviews.get(image.id)}" alt="${h(image.filename)}" title="${h(image.filename)}">`
       : `<span class="att-name" title="${h(`${image.width}×${image.height}`)}">${h(image.filename)}</span>`).join("")}</div>` : "";
-  const request = mailRequest(run) ?? driveReport(run) ?? driveAsked(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+  const request = mailRequest(run) ?? driveReport(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
   const review = reviewOpen.has(run.id) && !live ? reviewHTML(run.id) : "";
-  return `${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}${activity}</div>${queued}`;
+  const day = assistantDay(run, index);
+  return `${day ? `<div class="day-line"><span>${h(day)}</span></div>` : ""}${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}${activity}</div>${queued}`;
 }
 /// The turn's changed files under its receipt: a header line per file, its
 /// changes with a little context, and the notes left on its lines.
@@ -1823,6 +1855,18 @@ function driveAsked(run: WorkspaceRun): string | null {
   const line = `${run.planOnly ? "Drive asked the coder for a plan" : "Drive asked the coder"}: ${first.length > 96 ? `${first.slice(0, 95)}…` : first}`;
   const fold = btn("drive-asked", `${h(line)}${CHEVRON}`, { key }, `ds-what ds-fold${open ? " open" : ""}`).replace("<button ", `<button aria-expanded="${open}" `);
   return `<div class="drive-asked"><span class="ds-mark" aria-hidden="true">→</span>${fold}<time>${clock(run.createdAt).slice(0, 5)}</time></div>${open ? `<div class="ds-said">${h(said)}</div>` : ""}`;
+}
+/// What a routine asked in the assistant's chat is the routine's, not yours:
+/// one quiet line with its time and name, and "↗ phone" when its answer
+/// goes to your phone.
+function routineAsked(run: WorkspaceRun): string | null {
+  if (!run.fromRoutine) return null;
+  const phone = state?.assistant?.phone ? '<span class="ra-phone" title="Its answer goes to your phone">↗ phone</span>' : "";
+  return `<div class="routine-asked" title="${h(run.content)}"><time>${clock(run.createdAt).slice(0, 5)}</time><b>${h(run.fromRoutine)}</b>${phone}</div>`;
+}
+/// In the assistant's chat, the first turn of each day says which day.
+function assistantDay(run: WorkspaceRun, index: number): string {
+  return inAssistant() ? dayLine(run.createdAt, state!.runs[index - 1]?.createdAt) : "";
 }
 /// "replied to claude@macbook": where a mail turn's answer went, for its
 /// receipt. A send that answers nobody in particular still counts.
@@ -1967,6 +2011,8 @@ function renderConversation() {
       state.activeTurnId,
       reviewOpen.has(run.id) ? reviewVersion : 0,
       detailsOpen.has(`drive-asked:${run.id}`),
+      assistantDay(run, index),
+      Boolean(state.assistant?.phone),
       state.rewinds.filter((rewind) => rewind.turnId === run.id || rewind.hiddenTurnIds.includes(run.id)),
       // A commit or merge step's tree: the turn redraws the moment it lands,
       // whatever else is streaming.
@@ -2455,7 +2501,7 @@ function renderPage() {
   if (pageOpen === "scheduled") {
     // Typing in the new routine keeps the field as it is.
     if (document.activeElement?.closest("#routine-new")) routineUi.draft = (document.activeElement as HTMLInputElement).value;
-    html = scheduledPage({ routines: routinesHere, auto: isPlain() ? null : state.breakage.auto, here: isPlain() ? "" : here, error: routineUi.error, draft: routineUi.draft });
+    html = scheduledPage({ routines: routinesHere, auto: isPlain() || inAssistant() ? null : state.breakage.auto, here: isPlain() ? "" : here, assistant: inAssistant(), error: routineUi.error, draft: routineUi.draft });
   } else if (pageOpen === "foundry") {
     // Source being edited keeps its words through a redraw.
     const area = root.querySelector<HTMLTextAreaElement>(".fd-source textarea:not([readonly])");
@@ -2752,7 +2798,7 @@ document.addEventListener("keydown", (event) => {
 /// A plain chat ends with one quiet line: what it can't do, and the way on.
 function renderPlainLine() {
   const node = el("plain-line");
-  const show = Boolean(state) && isPlain() && inSession() && !state!.activeTurnId;
+  const show = Boolean(state) && isPlain() && inSession() && !state!.activeTurnId && !inAssistant();
   if (!show && whereOpen === "move") whereOpen = null;
   node.hidden = !show;
   const html = show ? `<p class="plain-note">Create in Foundry here. ${btn("where-move", `Move to a project ${whereOpen === "move" ? "⌄" : "›"}`, {}, "link").replace("<button ", `<button aria-expanded="${whereOpen === "move"}" `)} to work with local files.</p>${whereOpen === "move" ? `<div class="where-row" role="group" aria-label="Move this chat to">${whereRow("move")}</div>` : ""}` : "";
@@ -2832,7 +2878,7 @@ function renderComposer() {
     : inSession()
     ? state.activeTurnId
       ? "Steer it while it works…"
-      : suggestion ? `${suggestion}   ⇥ Tab` : "Continue the conversation…"
+      : suggestion ? `${suggestion}   ⇥ Tab` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
     : driveSuggestion() ? `Drive suggests: ${driveSuggestion()}   ⇥ Tab` : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
   editor.disabled =
     state.connection !== "online" ||
@@ -3392,6 +3438,7 @@ function renderDriveTurn() {
   if (signature === driveTurnSignature) return;
   driveTurnSignature = signature;
   el("conversation").classList.toggle("driving", Boolean(drive));
+  el("conversation").classList.toggle("assistant", inAssistant());
   node.hidden = !drive;
   if (!drive) {
     node.innerHTML = "";
@@ -4412,7 +4459,16 @@ async function dispatch(
   args: Record<string, any>,
   target?: HTMLElement,
 ) {
-  if (pageOpen && ["select-session", "new-session", "project-new", "project-session", "review-open", "drive-open"].includes(action)) openPage("");
+  if (pageOpen && ["select-session", "new-session", "project-new", "project-session", "review-open", "drive-open", "assistant-open"].includes(action)) openPage("");
+  // The Assistant row opens its one chat; in its own folder, that folder
+  // opens as the window's project, like any chat in another project.
+  if (action === "assistant-open") {
+    const assistant = state?.assistant, here = document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace;
+    if (assistant?.workspace && assistant.workspace !== here) document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path: assistant.workspace, sessionId: assistant.sessionId } }));
+    else await api("assistant-open");
+    editor.focus({ preventScroll: true });
+    return;
+  }
   if (action === "chats-page") return openPage(args.tab === "archived" ? "archived" : "active");
   if (action === "page-open") {
     const page = String(args.page ?? "");

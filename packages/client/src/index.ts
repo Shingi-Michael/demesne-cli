@@ -158,8 +158,16 @@ export class DemesneClient {
   async routines(): Promise<import("@demesne/protocol").RoutinesResponse> {
     return this.request("/v1/routines");
   }
-  async addRoutine(text: string, workspace: string | null): Promise<import("@demesne/protocol").RoutinesResponse> {
-    return this.request("/v1/routines", { method: "POST", body: JSON.stringify({ text, workspace }) });
+  async addRoutine(text: string, workspace: string | null, assistant = false): Promise<import("@demesne/protocol").RoutinesResponse> {
+    return this.request("/v1/routines", { method: "POST", body: JSON.stringify({ text, workspace, ...(assistant ? { assistant: true } : {}) }) });
+  }
+  /// The always-on assistant's one chat; null until it is first opened.
+  async assistant(): Promise<import("@demesne/protocol").AssistantResponse> {
+    return this.request("/v1/assistant");
+  }
+  /// Opens the assistant's chat, making it the first time.
+  async openAssistant(): Promise<import("@demesne/protocol").AssistantResponse & { sessionId: string }> {
+    return this.request("/v1/assistant", { method: "POST", body: "{}" });
   }
   async setRoutine(id: string, on: boolean): Promise<import("@demesne/protocol").RoutinesResponse> {
     return this.request(`/v1/routines/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ on }) });

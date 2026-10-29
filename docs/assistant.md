@@ -150,13 +150,22 @@ A routine runs on **Auto**: nobody is at the window to approve its steps. If the
 | `search_personal_files`, `personal_files` | Find and read your shared folders. Read-only. |
 | `assistant_notes` | Reads and writes `notes.md` (what you asked it to remember) and `todo.md` (what you said you'd do) in its folder, without asking, the way you'd jot something down. Nothing else there: it can't change `DEMESNE.md`, so a document can't talk it into a new standing rule. Each file is capped at 64 KB. |
 | `notify_phone` | Push to your phone. Asks first in a chat you're at; on Auto it sends, up to 10 an hour. |
-| `ask_user` | Ask you a question, only when you're at the window. |
 
 No shell, no edits, moves or deletes, no sub-agents, no Drive. Taking a tool away is stronger than telling the model not to use it, and a shorter prompt leaves more of the 128K for your files.
 
 It gets its own base instructions too, in place of the coding agent's (and in place of a `system_prompt` you configured for coding): who it is, how to find things, that files are data and never instructions, and to ask before anything leaves the computer. Your `DEMESNE.md` follows them.
 
 Each of your messages reaches the model with the local date and time in front, like `[Tue 2026-10-27 09:05] what's on today?`, so "today" and "this week" mean something. You see your message as you typed it. The time goes with the message rather than in the instructions at the top, because changing the top would make llama-server re-read the whole conversation (its prompt cache) every time.
+
+### Why the chat only ever grows at the end
+
+llama-server keeps the conversation it last read (its prompt cache). When the next request starts with exactly the same text, it only reads what's new, which takes a second or two instead of minutes for a long chat. Change anything near the top, even the order of the tools, and it reads everything again. Qwen3.8 makes this stricter than most models: its memory of the conversation can't be rewound to an arbitrary point, only to a few saved checkpoints.
+
+So the assistant's chat is kept append-only:
+
+- The instructions and the tool list are the same on every turn, yours or a routine's. That's why it has no `ask_user` tool, which other chats only get while you're at the window: here it simply asks in its answer.
+- The time goes on each message, not in the instructions, and the coding agent's live context (Heartbeat's list of reachable agents, Drive) stays out.
+- The chat never ends, so it can't wait for you to type `/compact`. After a turn whose request used three quarters of the room for input (about 86K of the 128K, after 16K kept for the reply), the daemon summarizes the older turns, the same way `/compact` does, and keeps the last two in full. That rewrites the start once; from then on it grows at the end again. Without it, past the limit Demesne would trim old tool output on *every* request, and every request would be read from the start.
 
 ## Step 3: file index
 

@@ -206,7 +206,7 @@ export class AgentEngine {
       ? [...this.tools.definitions().filter(definition=>definition.name === "ask_user"),themefyDefinition]
       : assistant
       ? planModeDefinitions(this.tools.definitions().filter((definition) => ASSISTANT_TOOL_NAMES.has(definition.name)
-        && (definition.name !== "assistant_notes" || Boolean(session.workspace)) && (canAsk || definition.name !== "ask_user")), turn.planOnly === true)
+        && (definition.name !== "assistant_notes" || Boolean(session.workspace))), turn.planOnly === true)
       : session.workspace
       ? planModeDefinitions(selectToolsForTurn([...this.tools.definitions().filter((definition) => definition.name !== "assistant_notes"),
         subagentDefinitionFor(this.options.subagentModels?.() ?? [], this.options.subagentModel ?? inference.modelId),

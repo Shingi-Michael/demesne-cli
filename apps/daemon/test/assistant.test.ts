@@ -10,6 +10,7 @@ import { AgentEngine } from "../src/engine.ts";
 import { InferenceScheduler, InferenceSchedulers } from "../src/inference-scheduler.ts";
 import { PermissionBroker } from "../src/permissions.ts";
 import type { TurnInference } from "../src/processor.ts";
+import { QuestionBroker } from "../src/questions.ts";
 import { Routines } from "../src/routines.ts";
 import { ToolRegistry, type AgentTool } from "../src/tools.ts";
 
@@ -82,7 +83,7 @@ function engineFixture(home: string | undefined) {
   } satisfies AgentTool)));
   const schedulers = new InferenceSchedulers(new InferenceScheduler(1), "test");
   const engine = new AgentEngine(store, tools, new PermissionBroker(), schedulers, "Configured coding prompt", undefined, {
-    assistantChat: (id) => id === assistant, now: () => new Date(2026, 9, 27, 9, 5),
+    assistantChat: (id) => id === assistant, now: () => new Date(2026, 9, 27, 9, 5), questions: new QuestionBroker(),
   });
   return { store, assistant, coding, engine, executed, schedulers };
 }
@@ -106,6 +107,8 @@ test("the assistant's chat is offered only its own tools and instructions, with 
   try {
     const { turn } = store.createTurn(assistant, "What's on today?", "ask");
     await engine.run(turn.id, scripted([], seen), new AbortController().signal);
+    // The same list as a routine's, ask_user included or not: a list that
+    // changed between turns would make the model server read it all again.
     expect(seen[0]!.tools.sort()).toEqual(["assistant_notes", "notify_phone", "personal_files", "search_personal_files"]);
     expect(seen[0]!.system).toContain("You are the user's personal assistant");
     expect(seen[0]!.system).toContain("- Name: Mike");

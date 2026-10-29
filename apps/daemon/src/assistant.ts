@@ -49,13 +49,30 @@ export class AssistantChat {
 /// coding agent's shell, edits, moves and deletes stay out entirely: a
 /// document that says "run this" finds no tool to run it with. Taking a tool
 /// away is stronger than telling the model not to use it.
+///
+/// The list is the same for every turn, yours or a routine's. The tools sit
+/// at the top of each request, so a list that changed between turns would
+/// make llama-server read the whole conversation again. That's why `ask_user`
+/// isn't here: it's only offered when you're at the window, and in this chat
+/// the assistant can simply ask in its answer.
 export const ASSISTANT_TOOL_NAMES = new Set([
   "personal_files",
   "search_personal_files",
   "notify_phone",
   "assistant_notes",
-  "ask_user",
 ]);
+
+/// Share of the room left for input (the window less the reply) at which the
+/// assistant's chat is summarized after a turn. Below it every request only
+/// adds to the end of the last one, so llama-server reuses its prompt cache.
+/// Past the window's limit the planner would trim old tool output on every
+/// request instead, and each request would be read again from the start.
+export const ASSISTANT_COMPACT_AT = 0.75;
+
+export function assistantNeedsCompaction(inputTokens: number | undefined, contextCapacity: number | undefined, maxOutputTokens: number | undefined): boolean {
+  if (!inputTokens || !contextCapacity || !maxOutputTokens || contextCapacity <= maxOutputTokens) return false;
+  return inputTokens >= (contextCapacity - maxOutputTokens) * ASSISTANT_COMPACT_AT;
+}
 
 /// The assistant's own base instructions, in place of the coding agent's.
 /// Its folder's DEMESNE.md (who you are, how you like answers) follows them.

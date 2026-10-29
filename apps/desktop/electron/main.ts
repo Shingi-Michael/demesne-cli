@@ -103,19 +103,21 @@ void app.whenReady().then(async () => {
     process.on("SIGUSR1", () => reloadRenderer("SIGUSR1 signal"));
   }
   const glass = desktopBlurs(process.platform, process.env);
-  // macOS 26: the window is clear and the system's liquid glass sits behind
-  // the page (electron-liquid-glass's prebuilt addon, copied in by
-  // prepare-desktop). Older Macs, or a material named in DEMESNE_VIBRANCY,
-  // keep the frosted vibrancy.
-  const liquidAddon = join(base, "liquid-glass.node");
-  const liquid = liquidGlass(process.platform, release(), process.env) && existsSync(liquidAddon);
+  // macOS 26: the window is clear, so the wallpaper shows sharp behind the
+  // page's own tint. DEMESNE_GLASS_VARIANT=<n> puts Apple's liquid glass
+  // behind it instead (electron-liquid-glass's prebuilt addon, copied in by
+  // prepare-desktop; 1 is its clear variant). Older Macs, or a material named
+  // in DEMESNE_VIBRANCY, keep the frosted vibrancy.
+  const clear = liquidGlass(process.platform, release(), process.env);
+  const liquidAddon = join(base, "liquid-glass.node"), liquidVariant = Number(process.env.DEMESNE_GLASS_VARIANT);
+  const liquid = clear && process.env.DEMESNE_GLASS_VARIANT !== undefined && Number.isInteger(liquidVariant) && liquidVariant >= 0 && existsSync(liquidAddon);
   window = new BrowserWindow({
     width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#161617",
     // The Mac: no title bar, the traffic lights on the sidebar's glass, and
     // the window translucent under the shell (the page paints the tint).
     ...(process.platform === "darwin" ? {
       titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 17 },
-      ...(liquid ? { transparent: true } : { vibrancy: macVibrancy(process.env), visualEffectState: "active" as const }), backgroundColor: "#00000000",
+      ...(clear ? { transparent: true } : { vibrancy: macVibrancy(process.env), visualEffectState: "active" as const }), backgroundColor: "#00000000",
       // Full screen stays on the desktop's Space: a full-screen Space has no
       // wallpaper behind the window, so the glass would go flat there.
       simpleFullscreen: true, fullscreenable: false,
@@ -309,23 +311,17 @@ void app.whenReady().then(async () => {
     if (process.platform === "darwin") window?.hide(); else void quit();
   });
   await window.loadURL(APP_URL);
-  // DEMESNE_GLASS_VARIANT=none leaves the window clear with no glass at all:
-  // the wallpaper shows sharp behind the page's own tint.
-  if (liquid && process.env.DEMESNE_GLASS_VARIANT !== "none") {
+  if (liquid) {
     try {
       const addon = { exports: {} as { LiquidGlassNative: new () => { addView(handle: Buffer, options: object): number; setVariant(id: number, variant: number): void } } };
       process.dlopen(addon, liquidAddon);
       const native = new addon.exports.LiquidGlassNative(), id = native.addView(window.getNativeWindowHandle(), {});
       if (id < 0) throw new Error("no glass view");
-      // The clear variant (1) lets the wallpaper through sharp; regular (0)
-      // frosts it. DEMESNE_GLASS_VARIANT tries another.
-      const variant = Number(process.env.DEMESNE_GLASS_VARIANT ?? 1);
-      if (Number.isInteger(variant) && variant >= 0) native.setVariant(id, variant);
+      native.setVariant(id, liquidVariant);
       window.setWindowButtonVisibility(true);
-      log(`Liquid glass on (variant ${variant}).`);
+      log(`Liquid glass on (variant ${liquidVariant}).`);
     } catch (error) {
-      log(`Liquid glass unavailable, using frosted glass: ${String(error)}`);
-      window.setVibrancy(macVibrancy(process.env));
+      log(`Liquid glass unavailable, the window stays clear: ${String(error)}`);
     }
   }
   contents.setZoomFactor(zoom);

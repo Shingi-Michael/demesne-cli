@@ -18,7 +18,8 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
-- Real liquid glass on macOS 26: the window is clear and Apple's liquid glass sits behind it (through the MIT add-on electron-liquid-glass), instead of the older frosted blur. Older Macs, or a material named in `DEMESNE_VIBRANCY`, keep the frosted glass.
+- Clear glass on macOS 26: the window is see-through with no blur, so the wallpaper shows sharp behind the tint, instead of the older frosted blur. `DEMESNE_GLASS_VARIANT=<n>` puts Apple's liquid glass behind it instead (through the MIT add-on electron-liquid-glass). Older Macs, or a material named in `DEMESNE_VIBRANCY`, keep the frosted glass.
+- Full screen on the Mac always stays on the desktop's Space, green button included, so the glass never turns black.
 - Glass you can see: the Glass slider now runs from nearly see-through to solid (default 15), so full screen still looks like glass. The window's top edges catch a light rim, a soft sheen falls from the top, and answers and code get a soft backing while the glass is clear. On the Mac the blur under the glass is now `hud`, which lets the most wallpaper colour through; `DEMESNE_VIBRANCY` picks another material to try.
 - Foundry shows what it made the way Claude shows an artifact: a chip in the conversation (kind, title, version) and the page itself in a pane beside the chat, edge to edge, with one line of controls above it (title, version arrows, Preview · Code, phone width, close) and one below (version note, Copy, Export, Revise, Open in Foundry, Make this the latest). A new artifact opens the pane by itself, a new version moves it on, Esc closes it, and each chat remembers whether it was open. The boxed 480px card that sat in the conversation under each save is gone.
 

@@ -20,8 +20,9 @@ const VIBRANCIES = ["hud", "fullscreen-ui", "under-window", "sidebar", "window",
 export function macVibrancy(env: Record<string, string | undefined>): (typeof VIBRANCIES)[number] {
   return VIBRANCIES.find((name) => name === env.DEMESNE_VIBRANCY) ?? "hud";
 }
-/** Apple's liquid glass (NSGlassEffectView) exists from macOS 26, Darwin 25.
- *  Naming a material in DEMESNE_VIBRANCY keeps the older frosted blur. */
+/** macOS 26 (Darwin 25) gets the clear window, and Apple's liquid glass
+ *  (NSGlassEffectView) on request. Naming a material in DEMESNE_VIBRANCY
+ *  keeps the older frosted blur. */
 export function liquidGlass(platform: string, darwinRelease: string, env: Record<string, string | undefined>) {
   return platform === "darwin" && Number(darwinRelease.split(".")[0]) >= 25 && !env.DEMESNE_VIBRANCY;
 }

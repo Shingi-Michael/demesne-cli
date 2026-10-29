@@ -32,4 +32,12 @@ describe("assistant services", () => {
     const installer = readFileSync(join(assistant, "install.ps1"), "utf8");
     for (const file of installer.matchAll(/Join-Path \$here '(\w[^']+)'/g)) expect(() => readFileSync(join(assistant, ...file[1]!.split("\\")))).not.toThrow();
   });
+
+  test("the installer's header explains every option it takes", () => {
+    const installer = readFileSync(join(assistant, "install.ps1"), "utf8");
+    const options = [...installer.slice(installer.indexOf("param(")).split(")\n")[0]!.matchAll(/\] \$(\w+)/g)].map((match) => match[1]!);
+    expect(options).toContain("NoModel");
+    expect(options).toContain("LlamaArgs");
+    for (const option of options) expect(installer).toMatch(new RegExp(`^#\\s+-${option}\\b`, "m"));
+  });
 });

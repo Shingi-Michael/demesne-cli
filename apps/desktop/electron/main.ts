@@ -299,7 +299,9 @@ void app.whenReady().then(async () => {
     if (process.platform === "darwin") window?.hide(); else void quit();
   });
   await window.loadURL(APP_URL);
-  if (liquid) {
+  // DEMESNE_GLASS_VARIANT=none leaves the window clear with no glass at all:
+  // the wallpaper shows sharp behind the page's own tint.
+  if (liquid && process.env.DEMESNE_GLASS_VARIANT !== "none") {
     try {
       const addon = { exports: {} as { LiquidGlassNative: new () => { addView(handle: Buffer, options: object): number; setVariant(id: number, variant: number): void } } };
       process.dlopen(addon, liquidAddon);

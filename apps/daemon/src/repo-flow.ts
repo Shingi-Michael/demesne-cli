@@ -3,9 +3,9 @@
 /// window draws the two as main, the branches not in it, and the files
 /// flowing in (workspace/repo-flow.ts). Read-only, a handful of quick git
 /// calls; any failure (no repository, no main, a timeout) means no tree.
-import { isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 
-import type { RepoCommit, RepoFile, RepoLane, RepoSnapshot } from "@demesne/protocol";
+import type { RepoCommit, RepoFile, RepoLane, RepoSnapshot, RepoResult } from "@demesne/protocol";
 
 /// Runs one git command in the repository and returns its stdout, or null
 /// when it fails.
@@ -40,11 +40,12 @@ export function gitStep(argv: readonly string[]): GitStep | null {
 export const stepDirectory = (cwd: string, step: GitStep) => step.dir ? (isAbsolute(step.dir) ? step.dir : join(cwd, step.dir)) : cwd;
 
 const lines = (text: string | null) => (text ?? "").split("\n").map((line) => line.trimEnd()).filter(Boolean);
-const clip = (subject: string) => subject.length > 80 ? `${subject.slice(0, 79)}…` : subject;
+const clip = (subject: string) => subject.length > 500 ? `${subject.slice(0, 499)}…` : subject;
 function commits(text: string | null): RepoCommit[] {
   return lines(text).map((line) => {
     const [sha = "", subject = "", parents = ""] = line.split("\x1f");
-    return { sha, subject: clip(subject), merge: parents.trim().split(/\s+/).filter(Boolean).length > 1 };
+    const parentShas = parents.trim().split(/\s+/).filter(Boolean);
+    return { sha, subject: clip(subject), merge: parentShas.length > 1, parents: parentShas };
   }).filter((commit) => /^[0-9a-f]{7,64}$/.test(commit.sha)).reverse();
 }
 function numstat(text: string | null): RepoFile[] {
@@ -55,6 +56,32 @@ function numstat(text: string | null): RepoFile[] {
   });
 }
 const LOG = ["--format=%H%x1f%s%x1f%P"];
+
+/// Immutable evidence of what landed, not a guess from the staging area.
+/// NUL-delimited paths preserve whitespace, tabs and newlines in filenames.
+export async function repoResult(git: Git, tip: string, beforeTip: string | null, kind: "commit" | "merge"): Promise<RepoResult | undefined> {
+  const commit = commits(await git(["log", "-1", ...LOG, tip]))[0];
+  if (!commit) return undefined;
+  const base = kind === "merge" ? beforeTip : commit.parents?.[0];
+  const output = await git(base
+    ? ["diff", "--numstat", "-z", base, tip, "--"]
+    : ["diff-tree", "--root", "--no-commit-id", "-r", "--numstat", "-z", tip, "--"]);
+  if (output === null) return undefined;
+  const records = output.split("\0"), files: RepoFile[] = [];
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i]!;
+    if (!record) continue;
+    const first = record.indexOf("\t"), second = record.indexOf("\t", first + 1);
+    if (first < 0 || second < 0) continue;
+    const added = record.slice(0, first), removed = record.slice(first + 1, second);
+    let path = record.slice(second + 1);
+    if (!path) { const old = records[++i], next = records[++i]; if (old === undefined || next === undefined) break; path = `${old} → ${next}`; }
+    files.push({ path, added: Number(added) || 0, removed: Number(removed) || 0, ...(added === "-" ? { binary: true } : {}) });
+  }
+  const root = (await git(["rev-parse", "--show-toplevel"]))?.trim();
+  return { ...(root ? { repository: basename(root) } : {}), commit, files: files.slice(0, 200), moreFiles: Math.max(0, files.length - 200),
+    totals: files.reduce((sum, file) => ({ added: sum.added + file.added, removed: sum.removed + file.removed }), { added: 0, removed: 0 }) };
+}
 
 /// Reads the tree. `all` counts unstaged changes as about to be committed
 /// (`git commit -a`); otherwise the staged ones, or every change when
@@ -75,9 +102,9 @@ export async function repoSnapshot(git: Git, options: { all?: boolean } = {}): P
     options.all ? Promise.resolve(null) : git(["diff", "--cached", "--numstat"]),
   ]);
   const checkedOut = new Set(lines(worktrees).filter((line) => line.startsWith("branch refs/heads/")).map((line) => line.slice("branch refs/heads/".length)));
-  const names = lines(refs).filter((name) => name !== main).slice(0, BRANCHES_CHECKED);
+  const names = [...new Set([...(head && head !== main ? [head] : []), ...lines(refs).filter((name) => name !== main)])].slice(0, BRANCHES_CHECKED);
   const found = await Promise.all(names.map(async (name): Promise<RepoLane | null> => {
-    const ahead = commits(await git(["log", "-n", String(LANE_COMMITS), ...LOG, `${main}..${name}`, "--"]));
+    const ahead = commits(await git(["log", "--first-parent", "-n", String(LANE_COMMITS), ...LOG, `${main}..${name}`, "--"]));
     if (!ahead.length) return null;
     const base = (await git(["merge-base", main!, name]))?.trim() || null;
     return { name, base, commits: ahead, worktree: checkedOut.has(name) && name !== head };

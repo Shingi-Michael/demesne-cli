@@ -2,7 +2,7 @@ import { collectDriveReview } from "./drive-review.ts";
 import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
 import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
-import type { ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
+import type { AssistantResponse, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize } from "./artifacts.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "./foundry.ts";
 import {
@@ -67,6 +67,7 @@ import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
 import { Routines } from "./routines.ts";
+import { AssistantChat } from "./assistant.ts";
 import { personalFilesTool } from "./personal-files.ts";
 import { PersonalIndex, searchPersonalFilesTool } from "./personal-index.ts";
 import { notifyPhoneTool, routineMessage, type Phone } from "./notify-phone.ts";
@@ -150,6 +151,8 @@ export function createDaemonApp(options: {
   heartbeat?: HeartbeatConfig;
   /// Folders outside any project that the assistant may read, by name.
   assistantFolders?: Record<string, string>;
+  /// The assistant's own folder, with its DEMESNE.md: its one chat lives there.
+  assistantHome?: string;
   /// Your phone, through ntfy: routines push their answers to it, and chats
   /// get a notify_phone tool.
   phone?: Phone;
@@ -393,15 +396,25 @@ export function createDaemonApp(options: {
   });
   const driveAutoTimer = setInterval(() => { try { driveAuto.tick(); } catch { /* the next minute tries again */ } }, 60_000);
   driveAutoTimer.unref?.();
+  // The assistant's one chat, in its own folder once you trust that folder.
+  const assistantChat = new AssistantChat(join(dirname(options.databasePath), "assistant.json"), store, () => {
+    if (!options.assistantHome) return undefined;
+    try { const home = canonicalWorkspace(options.assistantHome); return workspaceTrust.isTrusted(home) ? home : undefined; }
+    catch { return undefined; }
+  });
   // Routines: chats that start on their own at their time, with or without a window.
   const routines = new Routines(join(dirname(options.databasePath), "routines.json"), {
     trusted: (workspace) => workspaceTrust.isTrusted(workspace),
     start: (routine) => {
       const title = routine.prompt.length > 60 ? `${routine.prompt.slice(0, 57).trimEnd()}…` : routine.prompt;
-      const sessionId = store.createSession(title, routine.workspace ? canonicalWorkspace(routine.workspace) : undefined).session.id;
+      // The assistant's routines are one more turn in its chat, marked as
+      // the routine's; while that chat is busy, the next minute tries again.
+      const assistantId = routine.assistant ? assistantChat.id() : null;
+      const workspace = assistantId ? store.getSession(assistantId)?.workspace?.root : routine.workspace ? canonicalWorkspace(routine.workspace) : undefined;
+      const sessionId = assistantId ?? store.createSession(title, workspace).session.id;
       // Nobody is at the window to approve, so a project's routine runs on
       // Auto, like a Drive mission; a plain chat has no tools to approve.
-      const { turn } = store.createTurn(sessionId, routine.prompt, routine.workspace ? "allow" : "deny", false, false);
+      const { turn } = store.createTurn(sessionId, routine.prompt, workspace ? "allow" : "deny", false, false, "chat", [], false, assistantId ? title : undefined);
       const run = queueTurn(turn, snapshotTurnInference(processor, false));
       // With a phone set up, the answer goes there: a routine runs because
       // you aren't looking at the window.
@@ -813,14 +826,19 @@ export function createDaemonApp(options: {
         if (!body.on && driveFixes.away(body.workspace)?.auto) driveFixes.stopAway(body.workspace);
         return json({ auto: driveAuto.set(body.workspace, body.on) } satisfies DriveAutoResponse);
       }
+      // Reading it changes nothing; opening it (POST) makes its chat once.
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/v1/assistant") {
+        const sessionId = request.method === "POST" ? assistantChat.id() : assistantChat.existing();
+        return json({ sessionId, folders: Object.keys(options.assistantFolders ?? {}), phone: Boolean(options.phone) } satisfies AssistantResponse);
+      }
       if (request.method === "GET" && url.pathname === "/v1/routines") {
         return json({ routines: routines.list() } satisfies RoutinesResponse);
       }
       if (request.method === "POST" && url.pathname === "/v1/routines") {
-        const body = await readJson(request) as { text?: unknown; workspace?: unknown };
+        const body = await readJson(request) as { text?: unknown; workspace?: unknown; assistant?: unknown };
         if (typeof body?.text !== "string" || !body.text.trim() || body.text.length > 2000) return apiError("invalid_request", "Expected the routine as a sentence", 400);
         if (body.workspace !== undefined && body.workspace !== null && typeof body.workspace !== "string") return apiError("invalid_request", "workspace must be a path", 400);
-        const added = routines.add(body.text, typeof body.workspace === "string" ? canonicalWorkspace(body.workspace) : null);
+        const added = routines.add(body.text, typeof body.workspace === "string" ? canonicalWorkspace(body.workspace) : null, body.assistant === true);
         if ("error" in added) return apiError("invalid_routine", added.error, 400);
         return json({ routines: routines.list() } satisfies RoutinesResponse);
       }

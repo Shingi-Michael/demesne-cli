@@ -17,6 +17,9 @@ body.desktop kbd { font-family: "JetBrains Mono", monospace; }
 #sidebar-open-project .ico { color: var(--t3); }
 .sidebar-nav button.on { background: var(--surface2); color: var(--t1); }
 .sidebar-nav button .ico, .sidebar-search .ico { color: var(--t3); }
+/* The Assistant row's mark sits at the row's end, where a chat's time would. */
+#sidebar-assistant .sidebar-session-mark { margin-left: auto; }
+#sidebar-assistant[hidden], #rail-assistant[hidden] { display: none; }
 .sidebar-foot { display: flex; align-items: center; gap: 9px; height: 40px; margin: auto -12px -10px; padding: 0 12px 0 22px; box-shadow: 0 -1px 0 var(--hair); color: var(--t2); }
 .sidebar-avatar { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--tone2); color: var(--t1); font-size: 10px; font-weight: 600; }
 .sidebar-you { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
@@ -937,6 +940,14 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .drive-asked .ds-fold { min-width: 0; flex: 0 1 auto; }
 .desktop .drive-asked time { flex: none; margin-left: auto; font-size: 11.5px; color: var(--t4); font-variant-numeric: tabular-nums; }
 .desktop .drive-asked + .ds-said { margin: 0 0 8px 22px; }
+/* The assistant's chat: a quiet line where each day starts, and a routine's
+   question as its time and name rather than a bubble of yours. */
+.desktop .day-line { display: flex; align-items: center; gap: 10px; margin: 18px 0 10px; font-size: 11.5px; color: var(--t4); }
+.desktop .day-line::before, .desktop .day-line::after { content: ""; flex: 1; height: 1px; background: var(--hair); }
+.desktop .routine-asked { display: flex; align-items: baseline; gap: 10px; min-width: 0; margin: 0 0 4px 4px; font-size: 12.5px; line-height: 19px; color: var(--t3); }
+.desktop .routine-asked time { flex: none; font-size: 11.5px; color: var(--t4); font-variant-numeric: tabular-nums; }
+.desktop .routine-asked b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--t2); }
+.desktop .routine-asked .ra-phone { flex: none; margin-left: auto; font-size: 11.5px; color: var(--t4); }
 .desktop .ds-said { margin: -2px 0 2px 20px; padding: 7px 10px; border-radius: var(--r); background: var(--tone); color: var(--t2); line-height: 1.5; white-space: pre-wrap; }
 
 /* Rewind sits at the end of a finished step and shows on hover, over the

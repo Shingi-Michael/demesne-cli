@@ -17,8 +17,8 @@ It was built in small steps, each one usable on its own:
 
 1. Install the two Windows tasks and the Assistant folder ([step 1](#install)): `install.ps1 -Model … -LlamaServer … -Config`.
 2. In `%USERPROFILE%\.demesne\config.toml`, under `[assistant]`, list the folders it may read ([step 2](#one-tool-personal_files)) and your ntfy topic ([step 4](#step-4-push-to-your-phone)). Restart the `demesned` task.
-3. Open `%USERPROFILE%\Assistant` as a project in the Demesne window, trust it, and fill in **About me** in its `DEMESNE.md`.
-4. Ask it something from your files ("when does my car insurance renew?"), then add a routine in that project: "Every weekday at 8, what's on today and this week? Check my documents for dates."
+3. Open `%USERPROFILE%\Assistant` as a project in the Demesne window once, trust it, and fill in **About me** in its `DEMESNE.md`.
+4. Click **Assistant** in the sidebar (under New chat). Ask it something from your files ("when does my car insurance renew?"), then open **Scheduled** from that chat and add a routine: "Every weekday at 8, what's on today and this week? Check my documents for dates."
 
 (This replaces the separate demesne-assistant app: everything it did now runs inside Demesne's daemon.)
 
@@ -104,7 +104,13 @@ Demesne's releases are built for macOS and Ubuntu, and its daemon hasn't been ru
 
 Demesne works in *projects*: a folder you open, whose `DEMESNE.md` file is read at the start of every turn as standing instructions. The assistant gets a project of its own, `%USERPROFILE%\Assistant`, made by `install.ps1` (pass `-AssistantHome` for another place). Its [`DEMESNE.md`](../scripts/assistant/home/DEMESNE.md) says who it is working for, how to answer, where to keep its notes (`notes.md`, `todo.md` in the same folder) and its rules. Open the folder, fill in **About me**, and change anything you like: edits apply from the next message, with no restart. The installer never overwrites it.
 
-Open that folder as a project in the Demesne window and chat there. Routines you write from that chat run there too, with the same instructions.
+### Its own chat
+
+The assistant has one chat, not a chat per question: **Assistant**, second in the sidebar under New chat. Your questions, its routines' runs and what it sent to your phone all land in that one conversation, with a quiet line where each day starts. It compacts itself as it grows, like any long chat. The row wears the same marks as a chat's row: amber when it needs you, a breathing dot while it works, and blue when it did something while you were elsewhere.
+
+The chat lives in the assistant's folder, so its `DEMESNE.md` applies: `~/Assistant` (what `install.ps1` makes) when that folder exists and you've trusted it, or the folder `[assistant] home` names. Without one it is a plain chat. Its title bar names the folders it may read.
+
+A routine you write from Scheduled while that chat is open runs in it: at its time the question is a quiet line with the time and the routine's name ("↗ phone" when its answer goes to your phone), and the answer follows. If the chat is busy at that moment, the routine waits for the next minute.
 
 ### One tool: `personal_files`
 
@@ -173,10 +179,10 @@ ntfy = "https://ntfy.sh/mike-assistant-7f3k2p9qx8mz"
 
 Then:
 
-- **Routines send their answer to your phone.** Write one in the Assistant project, like "Every weekday at 8, what's on today and this week? Check my documents for dates." At 8:00 the daemon opens a chat, the assistant looks through your files, and its answer arrives as a notification titled with the question. If the run fails, you get a notification saying so instead of silence. This applies to every routine once `ntfy` is set, so a coding routine's summary reaches your phone too.
+- **Routines send their answer to your phone.** Write one from the assistant's chat, like "Every weekday at 8, what's on today and this week? Check my documents for dates." At 8:00 the assistant asks it in its chat, looks through your files, and its answer arrives as a notification titled with the question. If the run fails, you get a notification saying so instead of silence. This applies to every routine once `ntfy` is set, so a coding routine's summary reaches your phone too.
 - **Chats get a `notify_phone` tool.** Say "send that to my phone" and the model can push a short note. In a chat you're at, it asks you first, like any step that reaches outside the computer. On Auto (routines, Heartbeat mail) it sends without asking. Either way it's limited to 10 notifications an hour.
 
 Two things to know:
 
 - **This is the one part that leaves your computer.** The text of each notification goes through ntfy.sh to reach your phone. Keep routines to things you're fine with that for, or host ntfy yourself later: `ntfy` takes any https address (or plain http on this computer or over Tailscale), and `ntfy_token` adds a password.
-- Each routine run is its own chat, so you can open it in Demesne later to see what it read.
+- A routine written in the assistant's chat runs in that chat; any other routine run is its own chat. Either way you can open it in Demesne later to see what it read.

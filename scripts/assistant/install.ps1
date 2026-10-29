@@ -12,7 +12,8 @@
 #   -NoModel           don't install the llama-server task: you start the model yourself,
 #                      and only the daemon becomes a task
 #   -Demesned PATH     a built daemon (default: dist\demesned.exe, else bun from source)
-#   -Config            also write assistant.toml to %USERPROFILE%\.demesne\config.toml (backs up the old one)
+#   -Config            also write assistant.toml to %USERPROFILE%\.demesne\config.toml (backs up the old one);
+#                      without it, only [daemon] auto_start is set to "never" in your config
 #   -AssistantHome PATH  the assistant's own folder (default: %USERPROFILE%\Assistant); its DEMESNE.md is
 #                      created from home\DEMESNE.md if missing, and never overwritten
 #   -DryRun            print what would be installed, and change nothing
@@ -62,6 +63,40 @@ else {
   $daemonArgs = @('run', (Join-Path $repo 'apps\daemon\src\main.ts'))
 }
 
+$configPath = Join-Path $HOME '.demesne\config.toml'
+
+# The task owns the daemon, so the window must never start one of its own: it
+# would take the data directory while the task restarts, and the task's daemon
+# would then fail on the lock until the window's one stopped. Returns the
+# config with [daemon] auto_start = "never", or $null when it already says so.
+function Set-AutoStartNever($Text) {
+  $lines = [System.Collections.Generic.List[string]]::new()
+  if ($Text) { $lines.AddRange([string[]] ($Text -split "`r?`n")) }
+  if ($lines.Count -and $lines[$lines.Count - 1] -eq '') { $lines.RemoveAt($lines.Count - 1) }
+  $start = -1
+  for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\s*\[daemon\]\s*(#.*)?$') { $start = $i; break } }
+  if ($start -lt 0) {
+    if ($lines.Count) { $lines.Add('') }
+    $lines.Add('[daemon]')
+    $lines.Add('auto_start = "never"')
+  } else {
+    $end = $lines.Count
+    for ($i = $start + 1; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\s*\[') { $end = $i; break } }
+    $found = $false
+    for ($i = $start + 1; $i -lt $end; $i++) {
+      if ($lines[$i] -match '^\s*auto_start\s*=') {
+        if ($lines[$i] -match '^\s*auto_start\s*=\s*"never"') { return $null }
+        $lines[$i] = 'auto_start = "never"'
+        $found = $true
+      }
+    }
+    if (-not $found) { $lines.Insert($start + 1, 'auto_start = "never"') }
+  }
+  return ($lines -join "`n") + "`n"
+}
+$configText = if (Test-Path -LiteralPath $configPath) { [IO.File]::ReadAllText($configPath) } else { '' }
+$autoStartConfig = if (-not $Config) { Set-AutoStartNever $configText }
+
 $tasks = @()
 if (-not $NoModel) { $tasks += @{ Name = 'llama-server'; Program = $LlamaServer; Args = $serverArgs } }
 $tasks += @{ Name = 'demesned'; Program = $daemonProgram; Args = $daemonArgs }
@@ -76,7 +111,8 @@ if ($DryRun) {
   }
   if ($NoModel) { "# No llama-server task: Demesne expects your model at $modelUrl" }
   if ($oldModelTask) { "# A \Demesne\llama-server task from an earlier install is still there; this leaves it alone" }
-  if ($Config) { "# Would copy assistant.toml to $(Join-Path $HOME '.demesne\config.toml')" }
+  if ($Config) { "# Would copy assistant.toml to $configPath" }
+  if ($autoStartConfig) { "# Would set [daemon] auto_start = `"never`" in $configPath, so the window doesn't start a second daemon" }
   "# The assistant's folder: $AssistantHome"
   return
 }
@@ -102,12 +138,18 @@ foreach ($task in $tasks) {
 }
 
 if ($Config) {
-  $configPath = Join-Path $HOME '.demesne\config.toml'
   if (Test-Path -LiteralPath $configPath) {
     Copy-Item -LiteralPath $configPath -Destination "$configPath.bak.$(Get-Date -Format yyyyMMddHHmmss)"
     'Backed up your old config next to it.'
   }
   Copy-Item -LiteralPath (Join-Path $here 'assistant.toml') -Destination $configPath -Force
+} elseif ($autoStartConfig) {
+  New-Item -ItemType Directory -Force -Path (Split-Path $configPath) | Out-Null
+  if (Test-Path -LiteralPath $configPath) {
+    Copy-Item -LiteralPath $configPath -Destination "$configPath.bak.$(Get-Date -Format yyyyMMddHHmmss)"
+  }
+  [IO.File]::WriteAllText($configPath, $autoStartConfig, [Text.UTF8Encoding]::new($false))
+  'Set [daemon] auto_start = "never" in your config (the old one is backed up next to it), so the window uses the task''s daemon.'
 }
 
 # The assistant's own folder, with its instructions. Yours to edit, so an

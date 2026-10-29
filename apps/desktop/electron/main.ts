@@ -1,12 +1,12 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, release } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, macVibrancy, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, liquidGlass, macVibrancy, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true } }]);
 app.setName("Demesne");
@@ -103,16 +103,24 @@ void app.whenReady().then(async () => {
     process.on("SIGUSR1", () => reloadRenderer("SIGUSR1 signal"));
   }
   const glass = desktopBlurs(process.platform, process.env);
+  // macOS 26: the window is clear, so the wallpaper shows sharp behind the
+  // page's own tint. DEMESNE_GLASS_VARIANT=<n> puts Apple's liquid glass
+  // behind it instead (electron-liquid-glass's prebuilt addon, copied in by
+  // prepare-desktop; 1 is its clear variant). Older Macs, or a material named
+  // in DEMESNE_VIBRANCY, keep the frosted vibrancy.
+  const clear = liquidGlass(process.platform, release(), process.env);
+  const liquidAddon = join(base, "liquid-glass.node"), liquidVariant = Number(process.env.DEMESNE_GLASS_VARIANT);
+  const liquid = clear && process.env.DEMESNE_GLASS_VARIANT !== undefined && Number.isInteger(liquidVariant) && liquidVariant >= 0 && existsSync(liquidAddon);
   window = new BrowserWindow({
     width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#161617",
     // The Mac: no title bar, the traffic lights on the sidebar's glass, and
     // the window translucent under the shell (the page paints the tint).
     ...(process.platform === "darwin" ? {
       titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 17 },
-      vibrancy: macVibrancy(process.env), visualEffectState: "active" as const, backgroundColor: "#00000000",
+      ...(clear ? { transparent: true } : { vibrancy: macVibrancy(process.env), visualEffectState: "active" as const }), backgroundColor: "#00000000",
       // Full screen stays on the desktop's Space: a full-screen Space has no
       // wallpaper behind the window, so the glass would go flat there.
-      simpleFullscreen: true,
+      simpleFullscreen: true, fullscreenable: false,
     } : {}),
     // Linux, where the desktop blurs behind clear pixels (Hyprland): the
     // window is see-through and the compositor makes it glass.
@@ -167,6 +175,16 @@ void app.whenReady().then(async () => {
     if (on !== fullscreen) { fullscreen = on; emit("demesne:desktop-action", { action: "fullscreen", on }); }
   };
   window.on("enter-full-screen", fullscreenChanged).on("leave-full-screen", fullscreenChanged).on("resize", fullscreenChanged);
+  // macOS's own full screen puts the window in its own Space, where nothing is
+  // behind it and the glass goes black. So the window can't go there at all
+  // (fullscreenable: false): the green button zooms, and the zoom is turned
+  // into simple full screen on the desktop's Space.
+  if (process.platform === "darwin") window.on("maximize", () => {
+    window?.unmaximize();
+    window?.setSimpleFullScreen(true);
+    log("Full screen (green button): simple, on the desktop's Space.");
+    fullscreenChanged();
+  });
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
@@ -262,7 +280,7 @@ void app.whenReady().then(async () => {
     { role: "editMenu" },
     { label: "View", submenu: [{ label: "Zoom In", accelerator: "CmdOrCtrl+=", click: () => applyZoom(1) }, { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: () => applyZoom(-1) }, { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: () => applyZoom(0) }, { label: "Toggle Full Screen", accelerator: process.platform === "darwin" ? "Ctrl+Cmd+F" : "F11", click: () => {
       if (!window) return;
-      if (process.platform === "darwin") window.setSimpleFullScreen(!window.isSimpleFullScreen());
+      if (process.platform === "darwin") { window.setSimpleFullScreen(!window.isSimpleFullScreen()); log(`Full screen (menu): simple ${window.isSimpleFullScreen() ? "on" : "off"}.`); }
       else window.setFullScreen(!window.isFullScreen());
       fullscreenChanged();
     } }] },
@@ -293,6 +311,19 @@ void app.whenReady().then(async () => {
     if (process.platform === "darwin") window?.hide(); else void quit();
   });
   await window.loadURL(APP_URL);
+  if (liquid) {
+    try {
+      const addon = { exports: {} as { LiquidGlassNative: new () => { addView(handle: Buffer, options: object): number; setVariant(id: number, variant: number): void } } };
+      process.dlopen(addon, liquidAddon);
+      const native = new addon.exports.LiquidGlassNative(), id = native.addView(window.getNativeWindowHandle(), {});
+      if (id < 0) throw new Error("no glass view");
+      native.setVariant(id, liquidVariant);
+      window.setWindowButtonVisibility(true);
+      log(`Liquid glass on (variant ${liquidVariant}).`);
+    } catch (error) {
+      log(`Liquid glass unavailable, the window stays clear: ${String(error)}`);
+    }
+  }
   contents.setZoomFactor(zoom);
   // An update replaced the installed app: reload the renderer once so it loads
   // the new UI. The host process survives the renderer reload.

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, macVibrancy, FOUNDRY_CSP, foundryDocument, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, liquidGlass, macVibrancy, FOUNDRY_CSP, foundryDocument, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
 import { ASSEMBLE_SCRIPT, assembledDocument, scriptText } from "../electron/foundry-assemble.ts";
 
 test("project switching may reload only the exact main application document", () => {
@@ -99,4 +99,11 @@ test("the Mac's blur is hud unless DEMESNE_VIBRANCY names a real material", () =
   expect(macVibrancy({})).toBe("hud");
   expect(macVibrancy({ DEMESNE_VIBRANCY: "fullscreen-ui" })).toBe("fullscreen-ui");
   expect(macVibrancy({ DEMESNE_VIBRANCY: "glassy" })).toBe("hud");
+});
+
+test("liquid glass from macOS 26 (Darwin 25) unless a frosted material is named", () => {
+  expect(liquidGlass("darwin", "25.5.0", {})).toBe(true);
+  expect(liquidGlass("darwin", "24.6.0", {})).toBe(false);
+  expect(liquidGlass("darwin", "25.5.0", { DEMESNE_VIBRANCY: "hud" })).toBe(false);
+  expect(liquidGlass("linux", "25.0.0", {})).toBe(false);
 });

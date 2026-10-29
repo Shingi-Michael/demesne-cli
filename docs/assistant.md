@@ -12,6 +12,7 @@ It was built in small steps, each one usable on its own:
 | [2. A home and one tool](#step-2-a-home-and-one-tool) | An Assistant project with its own instructions, and `personal_files`, which reads the folders you choose, PDFs included |
 | [3. File index](#step-3-file-index) | `search_personal_files`, a search index over those folders, so it finds the right file without reading them all |
 | [4. Push to your phone](#step-4-push-to-your-phone) | Routines send their answers to your iPhone through ntfy, and chats get `notify_phone` |
+| [5. Use it from anywhere](#step-5-use-it-from-anywhere) | The Demesne window on another computer talks to the daemon on the PC, over Tailscale, with the daemon's token |
 
 ### Setting it up, start to finish
 
@@ -218,3 +219,46 @@ Two things to know:
 
 - **This is the one part that leaves your computer.** The text of each notification goes through ntfy.sh to reach your phone. Keep routines to things you're fine with that for, or host ntfy yourself later: `ntfy` takes any https address (or plain http on this computer or over Tailscale), and `ntfy_token` adds a password.
 - A routine written in the assistant's chat runs in that chat; any other routine run is its own chat. Either way you can open it in Demesne later to see what it read.
+
+## Step 5: use it from anywhere
+
+The daemon and the model stay on the PC. The Demesne window on another computer (and later the iPhone app) talks to that daemon instead of running its own, so it's the same assistant, the same chat and the same files wherever you are.
+
+Three locks keep it yours:
+
+1. **Who can reach the PC: Tailscale.** [Tailscale](https://tailscale.com) is a private network of only your own devices, signed in with your account. Traffic between them is encrypted (WireGuard), and it works from any Wi-Fi or mobile data without opening a port on your router. Nothing on the open internet can see the PC.
+2. **The connection: `tailscale serve`.** It gives the daemon an `https://` address inside your tailnet, with a real certificate, and passes requests on to `127.0.0.1:7337`. The daemon itself still only listens on the PC (it refuses any other address), and llama-server stays on `127.0.0.1:8081`, where only the daemon talks to it.
+3. **Who can use the daemon: its token.** Every request except `/healthz` needs the token in `%USERPROFILE%\.demesne\daemon.token`, which the daemon made the first time it ran. A device on your tailnet without it gets `401 Unauthorized`. That's what limits it to your Demesne apps.
+
+Treat the token like a password. It can do anything the Demesne window on the PC can, including a coding chat that runs commands there. Copy it only over something private (a USB stick, or Taildrop between your own devices), never email or chat. If it leaks, delete `daemon.token`, restart the daemon (it makes a new one) and copy the new one to your other computers.
+
+Never use **Tailscale Funnel** or forward a router port for this. Both put the daemon on the public internet, where the token would be the only lock.
+
+### On the PC
+
+Turn on **MagicDNS** and **HTTPS Certificates** in the Tailscale admin console (DNS page) once. Then, in PowerShell:
+
+```powershell
+tailscale serve status                                    # what's already published here
+tailscale serve --bg --https=8443 http://127.0.0.1:7337   # the daemon, inside your tailnet only
+tailscale serve status                                    # shows https://<pc-name>.<tailnet>.ts.net:8443
+```
+
+Port 8443 leaves 443 free for anything you already publish (the iOS gateway, for example). `--bg` keeps it published across restarts; `tailscale serve --https=8443 off` takes it down.
+
+### On the other computer
+
+1. Install Tailscale and sign in with the same account.
+2. In `~/.demesne/config.toml`, point the window at the PC and stop it starting a daemon of its own:
+
+   ```toml
+   server = "https://demesne-pc.tail1234.ts.net:8443"
+
+   [daemon]
+   auto_start = "never"
+   ```
+
+3. Copy the PC's `daemon.token` to `~/.demesne/remote-daemons/demesne-pc.tail1234.ts.net_8443.token` (the PC's name and port, as in `server`). The window sends a token only to the host and port it is named for, and never sends this computer's own `daemon.token` anywhere else.
+4. Open Demesne. It connects to the PC, and **Assistant** in the sidebar is the PC's chat. **Start daemon** isn't offered for a daemon on another computer: the PC's login task starts it.
+
+(`DEMESNE_DAEMON_TOKEN` in the environment still overrides the file, as before.)

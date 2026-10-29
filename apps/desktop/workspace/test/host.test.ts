@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceHost, daemonAddress, daemonCredential } from "../host.ts";
+import { WorkspaceHost, daemonAddress, daemonCredential, remoteDaemonTokenPath } from "../host.ts";
 import { fixture, eventually } from "./fixture.ts";
 
 function hostFor(f: Awaited<ReturnType<typeof fixture>>) {
@@ -269,6 +270,22 @@ test("remote addresses do not receive local daemon credentials", () => {
   expect(
     daemonCredential("https://remote.example", "/missing", {}),
   ).toBeUndefined();
+});
+test("a daemon on another computer gets only the token saved for its host and port", () => {
+  const directory = mkdtempSync(join(tmpdir(), "demesne-remote-token-"));
+  try {
+    writeFileSync(join(directory, "daemon.token"), "this-computer\n");
+    const pc = "https://demesne-pc.tail1234.ts.net";
+    expect(remoteDaemonTokenPath(pc, directory)).toBe(join(directory, "remote-daemons", "demesne-pc.tail1234.ts.net_443.token"));
+    expect(daemonCredential(pc, directory, {})).toBeUndefined();
+    mkdirSync(join(directory, "remote-daemons"));
+    writeFileSync(remoteDaemonTokenPath(pc, directory), "the-pc\n");
+    expect(daemonCredential(pc, directory, {})).toBe("the-pc");
+    expect(daemonCredential("https://demesne-pc.tail1234.ts.net:8443", directory, {})).toBeUndefined();
+    expect(daemonCredential("https://other.example", directory, {})).toBeUndefined();
+    expect(daemonCredential("http://127.0.0.1:7337", directory, {})).toBe("this-computer");
+    expect(() => remoteDaemonTokenPath("http://remote.example", directory)).toThrow("HTTPS");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test("clicking around the desktop never pauses Drive; writing or sending does", async () => {
   const f = await fixture();

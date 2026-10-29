@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, liquidGlass, macVibrancy, FOUNDRY_CSP, foundryDocument, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, liquidGlass, macVibrancy, FOUNDRY_CSP, foundryDocument, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
 import { ASSEMBLE_SCRIPT, assembledDocument, scriptText } from "../electron/foundry-assemble.ts";
 
 test("project switching may reload only the exact main application document", () => {
@@ -41,7 +41,7 @@ test("the live preview frame loads only pages served on this machine", () => {
   for (const url of ["https://example.com/", "http://localhost.evil.com/", "http://user:pw@localhost:3000/", "file:///etc/passwd", "javascript:alert(1)", "demesne://app/index.html"]) expect(previewURL(url)).toBe(false);
 });
 
-test("glass where the desktop blurs behind the window: the Mac and Hyprland", () => {
+test("glass everywhere, blurred where the desktop blurs behind the window", () => {
   expect(desktopBlurs("darwin", {})).toBe(true);
   expect(desktopBlurs("darwin", { DEMESNE_GLASS: "0" })).toBe(true);
   expect(desktopBlurs("linux", { HYPRLAND_INSTANCE_SIGNATURE: "abc_123" })).toBe(true);
@@ -49,8 +49,13 @@ test("glass where the desktop blurs behind the window: the Mac and Hyprland", ()
   expect(desktopBlurs("linux", { XDG_CURRENT_DESKTOP: "KDE" })).toBe(false);
   expect(desktopBlurs("linux", { XDG_CURRENT_DESKTOP: "ubuntu:GNOME" })).toBe(false);
   expect(desktopBlurs("linux", { XDG_CURRENT_DESKTOP: "sway", DEMESNE_GLASS: "1" })).toBe(true);
-  expect(desktopBlurs("linux", { HYPRLAND_INSTANCE_SIGNATURE: "abc_123", DEMESNE_GLASS: "0" })).toBe(false);
-  expect(desktopBlurs("win32", { DEMESNE_GLASS: "1" })).toBe(false);
+  expect(desktopBlurs("win32", {})).toBe(true);
+  // Glass and its slider are on everywhere; DEMESNE_GLASS=0 turns them off
+  // on Linux and Windows.
+  for (const platform of ["darwin", "linux", "win32"]) expect(desktopGlass(platform, { XDG_CURRENT_DESKTOP: "ubuntu:GNOME" })).toBe(true);
+  expect(desktopGlass("linux", { DEMESNE_GLASS: "0" })).toBe(false);
+  expect(desktopGlass("win32", { DEMESNE_GLASS: "0" })).toBe(false);
+  expect(desktopGlass("darwin", { DEMESNE_GLASS: "0" })).toBe(true);
 });
 
 test("Foundry frames accept only artifact URLs and block the network", () => {

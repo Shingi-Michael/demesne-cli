@@ -1,8 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 const events = new Set(["demesne:update", "demesne:desktop-error", "demesne:desktop-action"]);
 contextBridge.exposeInMainWorld("demesneDesktop", {
-  // The desktop blurs behind the window (the Mac, Hyprland): the shell is glass.
-  glass: process.argv.includes("--demesne-glass"),
+  // The shell is glass; "sharp" where the desktop shows through unblurred.
+  glass: process.argv.some((arg) => arg === "--demesne-glass" || arg === "--demesne-glass=sharp"),
+  glassSharp: process.argv.includes("--demesne-glass=sharp"),
   core: {
     invoke(command: string, args: Record<string, unknown> = {}) {
       if (command !== "desktop_request") return Promise.reject(new Error("Unsupported desktop command"));

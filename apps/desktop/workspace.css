@@ -1247,8 +1247,19 @@ html.mac-chrome #desktop-sidebar > * { -webkit-app-region: no-drag; }
 html.mac-chrome #desktop-toolbar { -webkit-app-region: drag; }
 html.mac-chrome #desktop-toolbar :is(button, a, input, [role="button"], .chip, .header-state, header > *) { -webkit-app-region: no-drag; }
 html.mac-chrome #desktop-shell:has(#desktop-sidebar[hidden]) #desktop-toolbar { padding-left: 84px; }
-html.mac-chrome.fullscreen #desktop-sidebar { padding-top: 14px; }
-html.mac-chrome.fullscreen #desktop-shell:has(#desktop-sidebar[hidden]) #desktop-toolbar { padding-left: 16px; }
+/* The Mac's simple full screen has no title bar, so the page draws the
+   three buttons where the window's own sit (trafficLightPosition 18, 17). */
+#mac-lights { position: fixed; top: 17px; left: 18px; z-index: 50; display: flex; gap: 8px; }
+#mac-lights[hidden] { display: none; }
+#mac-lights button { position: relative; width: 12px; height: 12px; padding: 0; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.18); }
+#mac-lights [data-light="close"] { background: #ff5f57; }
+#mac-lights [data-light="minimize"] { background: #febc2e; }
+#mac-lights [data-light="fullscreen"] { background: #28c840; }
+#mac-lights button::after { position: absolute; inset: 0; display: grid; place-items: center; font: 600 9px/1 -apple-system, system-ui, sans-serif; color: rgb(0 0 0 / 0.55); opacity: 0; }
+#mac-lights:hover button::after { opacity: 1; }
+#mac-lights [data-light="close"]::after { content: "×"; font-size: 11px; }
+#mac-lights [data-light="minimize"]::after { content: "−"; }
+#mac-lights [data-light="fullscreen"]::after { content: "↙"; font-size: 8px; }
 
 /* The edge is a timeline (pass 74 A): where the scrollbar was, pointing at
    the panel's right edge shows the chat's shape. Filled dot = you, ring = an

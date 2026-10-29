@@ -37,6 +37,8 @@ import {
 import { loadCliSettings, type CliSettings } from "@demesne/setup/cli-config.ts";
 import {
   createDaemonControlDependencies,
+  managedDaemonBy,
+  managedDaemonMessage,
   startDaemon,
   stopDaemon,
 } from "@demesne/setup/daemon-control.ts";
@@ -493,9 +495,13 @@ export class WorkspaceHost {
       this.breakageStarted = this.breakage.start().catch(() => {});
       await this.applyStartup();
     } catch (error) {
+      // A daemon run by a scheduled task (the assistant's install) comes
+      // back on its own; one started here instead would take its data
+      // directory from it. Wait for it, whatever auto_start says.
+      const managedBy = managedDaemonBy(this.settings.dataDirectory);
       // The app bundles its daemon, so it starts it unless the config says
       // never ("prompt" had nothing left to ask once the CLI was gone).
-      if (!this.autoStarted && this.settings.autoStart !== "never") {
+      if (!managedBy && !this.autoStarted && this.settings.autoStart !== "never") {
         this.autoStarted = true;
         try {
           await this.startDaemon();
@@ -503,7 +509,7 @@ export class WorkspaceHost {
         } catch {}
       }
       this.connection = "offline";
-      this.error = error instanceof Error ? error.message : String(error);
+      this.error = managedBy ? managedDaemonMessage(this.settings.dataDirectory, managedBy) : error instanceof Error ? error.message : String(error);
       this.publish();
       this.scheduleReconnect();
     }

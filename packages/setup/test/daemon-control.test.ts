@@ -172,6 +172,21 @@ describe("startDaemon", () => {
     expect(readFileSync(join(directory, "daemon.pid"), "utf8").trim()).toBe("10492");
   });
 
+  test("does not spawn while a scheduled task owns the daemon, and says who does", async () => {
+    const directory = temporaryDirectory();
+    const state = createFakeDependencies(directory);
+    writeFileSync(join(directory, "daemon.managed"), "the scheduled task \\Demesne\\demesned\n");
+    const result = await startDaemon(state.deps);
+    expect(result.started).toBe(false);
+    expect(result.health).toBeNull();
+    expect(result.message).toContain("the scheduled task \\Demesne\\demesned runs the daemon");
+    expect(result.message).toContain(join(directory, "daemon.managed"));
+    expect(state.spawned).toEqual([]);
+    // A daemon that is up is still reported as such.
+    state.health = { status: "ok", provider: "local", model: "qwen3-4b" };
+    expect((await startDaemon(state.deps)).message).toContain("already running");
+  });
+
   test("does not spawn while a live daemon holds the data directory lock", async () => {
     const directory = temporaryDirectory();
     const state = createFakeDependencies(directory);

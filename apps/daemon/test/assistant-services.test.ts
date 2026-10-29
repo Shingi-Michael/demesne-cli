@@ -33,6 +33,20 @@ describe("assistant services", () => {
     for (const file of installer.matchAll(/Join-Path \$here '(\w[^']+)'/g)) expect(() => readFileSync(join(assistant, ...file[1]!.split("\\")))).not.toThrow();
   });
 
+  test("the task owns its program, and tells the window it owns the daemon", () => {
+    const loop = readFileSync(join(assistant, "keep-running.ps1"), "utf8");
+    // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, so stopping the task stops the program.
+    expect(loop).toContain("0x2000");
+    expect(loop).toContain("AssignProcessToJobObject");
+    expect(loop).toContain("Stop-LeftOver $Program $arguments");
+    const installer = readFileSync(join(assistant, "install.ps1"), "utf8");
+    expect(installer).toContain("daemon.managed");
+    expect(installer).toContain("Set-Content -LiteralPath $managedFile");
+    // Removing the task means removing the file, and the guide says so.
+    const guide = readFileSync(join(assistant, "..", "..", "docs", "assistant.md"), "utf8");
+    expect(guide).toContain("Remove-Item $HOME\\.demesne\\daemon.managed");
+  });
+
   test("the installer's header explains every option it takes", () => {
     const installer = readFileSync(join(assistant, "install.ps1"), "utf8");
     const options = [...installer.slice(installer.indexOf("param(")).split(")\n")[0]!.matchAll(/\] \$(\w+)/g)].map((match) => match[1]!);

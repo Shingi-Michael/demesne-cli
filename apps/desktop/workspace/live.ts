@@ -2300,8 +2300,8 @@ try {
   if (isInk(ink)) inkName = ink;
 } catch {}
 function applyGlass() {
-  const { shell, panel } = glassAlphas(glassLevel), root = document.documentElement.style;
-  root.setProperty("--shell-a", String(shell)); root.setProperty("--panel-a", String(panel));
+  const { shell, panel, back } = glassAlphas(glassLevel), root = document.documentElement.style;
+  root.setProperty("--shell-a", String(shell)); root.setProperty("--panel-a", String(panel)); root.setProperty("--back-a", String(back));
 }
 function applyInk() {
   if (inkName === "neutral") delete document.documentElement.dataset.ink;

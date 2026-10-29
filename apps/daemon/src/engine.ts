@@ -17,6 +17,7 @@ import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "./repo-flow.ts";
 import { FOUNDRY_TOOL_NAMES } from "./foundry.ts";
+import { ASSISTANT_TOOL_NAMES, assistantBasePrompt, assistantStamp } from "./assistant.ts";
 import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
 import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinitionFor, type SubagentModel } from "./subagent.ts";
@@ -66,6 +67,11 @@ interface AgentEngineOptions extends AgentConfig {
   sessionContext?: (sessionId: string) => string | null;
   /// Other agents working in a project (Heartbeat), for the overlap check.
   agentsIn?: (workspaceRoot: string) => Promise<NearbyAgent[]>;
+  /// Whether a chat is the always-on assistant's: it gets the assistant's
+  /// own tools and instructions instead of the coding agent's.
+  assistantChat?: (sessionId: string) => boolean;
+  /// The clock for the assistant's message stamps (tests set it).
+  now?: () => Date;
 }
 
 /// The files a write tool changes, as the model named them.
@@ -183,10 +189,14 @@ export class AgentEngine {
     // Attached images travel with the message as artifact ids; the text names
     // them so a model that can't see pixels still knows they are there.
     const attached = turn.attachments ?? [];
+    const assistant = !themefy && this.options.assistantChat?.(session.id) === true;
+    // The assistant's messages carry the date and time they were sent, saved
+    // with the message so the conversation's start never changes.
+    const content = assistant ? `${assistantStamp(this.options.now?.() ?? new Date())} ${turn.content}` : turn.content;
     const userMessage = attached.length
-      ? { role: "user" as const, content: `${turn.content}\n\n${attached.map((image) => `[Attached image ${image.filename}, ${image.width}×${image.height}]`).join("\n")}`,
+      ? { role: "user" as const, content: `${content}\n\n${attached.map((image) => `[Attached image ${image.filename}, ${image.width}×${image.height}]`).join("\n")}`,
         imageArtifactIds: attached.map((image) => image.id) }
-      : { role: "user" as const, content: turn.content };
+      : { role: "user" as const, content };
     const currentUser = this.store.appendModelMessage(turnId, userMessage);
     const currentMessages: ProviderMessage[] = [userMessage];
     // `ask_user` needs someone to answer: only in a chat you're in (ask).
@@ -194,8 +204,11 @@ export class AgentEngine {
     const canAsk = Boolean(this.options.questions) && turn.permissionMode === "ask";
     const definitions = themefy
       ? [...this.tools.definitions().filter(definition=>definition.name === "ask_user"),themefyDefinition]
+      : assistant
+      ? planModeDefinitions(this.tools.definitions().filter((definition) => ASSISTANT_TOOL_NAMES.has(definition.name)
+        && (definition.name !== "assistant_notes" || Boolean(session.workspace))), turn.planOnly === true)
       : session.workspace
-      ? planModeDefinitions(selectToolsForTurn([...this.tools.definitions(),
+      ? planModeDefinitions(selectToolsForTurn([...this.tools.definitions().filter((definition) => definition.name !== "assistant_notes"),
         subagentDefinitionFor(this.options.subagentModels?.() ?? [], this.options.subagentModel ?? inference.modelId),
         ...(this.options.sessionTools ? [sessionToolsDefinition] : [])], turn.content), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
@@ -223,7 +236,8 @@ export class AgentEngine {
       const finalizing = budgetReason !== undefined;
       const requestDefinitions = finalizing ? [] : definitions;
       const historyMessages = history.flatMap((entry) => entry.messages);
-      const systemPrompt = themefy ? THEMEFY_PROMPT : agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
+      const systemPrompt = themefy ? THEMEFY_PROMPT : assistant ? assistantSystemPrompt({ home: session.workspace?.root, definitions, planOnly: turn.planOnly })
+        : agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
         planOnly: turn.planOnly, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),
         providerVision: this.options.providerVision, configured: this.configuredSystemPrompt, sessionContext: this.options.sessionContext?.(session.id) ?? undefined });
       const unplannedMessages: ProviderMessage[] = [
@@ -734,7 +748,17 @@ export class AgentEngine {
       const result="Error: Themefy can only ask questions and apply palettes";
       this.store.settleToolCall(toolCallId,"denied",result);return result;
     }
-    if (!workspaceRoot && call.name !== "ask_user" && !FOUNDRY_TOOL_NAMES.has(call.name) && !(themefy && call.name === "apply_theme")) {
+    // The assistant's chat runs only the assistant's tools, whatever the
+    // model asks for: a tool it wasn't offered is refused, not run.
+    const assistant = !themefy && this.options.assistantChat?.(sessionId) === true;
+    if (assistant ? !ASSISTANT_TOOL_NAMES.has(call.name) : call.name === "assistant_notes") {
+      const result = assistant ? `Error: ${call.name} isn't one of the assistant's tools` : "Error: assistant_notes is only for the assistant's chat";
+      this.store.settleToolCall(toolCallId, "denied", result);
+      return result;
+    }
+    // The assistant's file, search and phone tools need no project folder.
+    if (!workspaceRoot && call.name !== "ask_user" && !FOUNDRY_TOOL_NAMES.has(call.name) && !(themefy && call.name === "apply_theme")
+      && !(assistant && call.name !== "assistant_notes")) {
       const result = "Error: this session is not bound to a workspace";
       this.store.settleToolCall(toolCallId, "failed", result);
       return result;
@@ -1030,6 +1054,15 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; definitions
     options.sessionContext ?? null]
     .filter((entry): entry is string => Boolean(entry)).join("\n");
   return guidance ? `${guided}\n${guidance}` : guided;
+}
+
+/// The assistant's chat: its own base instructions, then its folder's
+/// DEMESNE.md. The coding agent's prompt, a configured system prompt, Drive
+/// and Heartbeat stay out of it.
+export function assistantSystemPrompt(options: { home?: string; definitions: ProviderToolDefinition[]; planOnly?: boolean }): string {
+  const base = assistantBasePrompt(new Set(options.definitions.map((definition) => definition.name)));
+  const guided = composeSystemPrompt(base, loadProjectInstructions(options.home));
+  return [guided, ANSWER_FORMAT_GUIDANCE, planModeGuidance(options.planOnly === true)].filter((entry): entry is string => Boolean(entry)).join("\n");
 }
 
 export function defaultSystemPrompt(workspaceRoot: string | undefined, autoApprove = false): string {

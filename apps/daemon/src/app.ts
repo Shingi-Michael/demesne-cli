@@ -67,7 +67,7 @@ import { STALE_DAYS, suggestCleanup } from "./session-cleanup.ts";
 import { DriveFixes } from "./drive-fixes.ts";
 import { DriveAutoRuns } from "./drive-auto.ts";
 import { Routines } from "./routines.ts";
-import { AssistantChat } from "./assistant.ts";
+import { AssistantChat, assistantNeedsCompaction, assistantNotesTool } from "./assistant.ts";
 import { personalFilesTool } from "./personal-files.ts";
 import { PersonalIndex, searchPersonalFilesTool } from "./personal-index.ts";
 import { notifyPhoneTool, routineMessage, type Phone } from "./notify-phone.ts";
@@ -318,6 +318,8 @@ export function createDaemonApp(options: {
     personalIndexTimer.unref?.();
   }
   if (options.phone) tools.register(notifyPhoneTool(options.phone));
+  // Its own notes, in its own folder; offered only in its chat.
+  if (options.assistantHome) tools.register(assistantNotesTool());
   const mcp = new McpManager({
     servers: options.mcpServers ?? {},
     log: (message) => console.warn(message),
@@ -365,6 +367,7 @@ export function createDaemonApp(options: {
       subagentModels: () => subagentModels(),
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
       sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
+      assistantChat: (sessionId: string) => sessionId === assistantChat.existing(),
       ...(heartbeat ? { agentsIn: (workspaceRoot: string) => heartbeat.agentsIn(workspaceRoot) } : {}),
       ...options.agent,
     },
@@ -499,6 +502,23 @@ export function createDaemonApp(options: {
           queueTurn(submitted.turn, pending.inference);
         } catch (error) {
           console.error(`Could not schedule compaction after turn ${turn.id}`, error);
+        }
+      } else if (turn.kind !== "compaction" && !signal.aborted && !closing && turn.sessionId === assistantChat.existing()
+        && store.getTurn(turn.id)?.status === "completed") {
+        // The assistant's chat never ends, so it summarizes itself before it
+        // fills up, while every request still only adds to the last one.
+        // Compaction keeps the last two turns whole; with no more than that
+        // since the last one there is nothing older to summarize.
+        const state = store.getSessionState(turn.sessionId);
+        const turns = state?.session.turns ?? [];
+        const since = turns.length - 1 - turns.findLastIndex((entry) => entry.kind === "compaction");
+        const used = state?.latestProviderCall?.usage?.inputTokens ?? state?.latestProviderCall?.contextPlan?.estimatedInputTokens;
+        if (since > 2 && assistantNeedsCompaction(used, inference.contextCapacity, inference.maxOutputTokens)) {
+          try {
+            queueTurn(store.createTurn(turn.sessionId, "/compact", "deny", false, false, "compaction").turn, inference);
+          } catch (error) {
+            console.error(`Could not schedule compaction of the assistant's chat after turn ${turn.id}`, error);
+          }
         }
       }
     }

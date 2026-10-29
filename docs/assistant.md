@@ -67,7 +67,7 @@ powershell -ExecutionPolicy Bypass -File scripts\assistant\install.ps1 `
   -Model C:\models\Qwen3.8-27B-Q5_K_M.gguf -LlamaServer C:\llama\llama-server.exe -DryRun
 ```
 
-`-DryRun` prints exactly what each task will run and changes nothing. When it looks right, run it again without `-DryRun`. Add `-Config` to replace `%USERPROFILE%\.demesne\config.toml` with the assistant's (the old one is backed up next to it), or leave it off and copy the `[provider]` section across yourself. `-ExecutionPolicy Bypass` is needed because Windows refuses to run downloaded scripts by default; it applies to this one run only.
+`-DryRun` prints exactly what each task will run and changes nothing. When it looks right, run it again without `-DryRun`. Add `-Config` to replace `%USERPROFILE%\.demesne\config.toml` with the assistant's (the old one is backed up next to it), or leave it off and copy the `[provider]` section across yourself. Without `-Config` the installer still sets `[daemon] auto_start = "never"` in your config (backing it up first): the task owns the daemon, and a window that started its own while the task was restarting would hold the data directory, leaving the task's daemon failing on the lock. `-ExecutionPolicy Bypass` is needed because Windows refuses to run downloaded scripts by default; it applies to this one run only.
 
 The tasks start at login. If Windows restarts for an update and nobody logs in, they wait until you do.
 
@@ -100,7 +100,7 @@ Stop-ScheduledTask -TaskPath \Demesne\ -TaskName demesned
 Unregister-ScheduledTask -TaskPath \Demesne\ -TaskName llama-server   # remove for good
 ```
 
-If `llama-server.exe` is still in Task Manager after stopping its task, end it there too.
+Stopping a task ends its `keep-running.ps1` loop but not the program it started, so `llama-server.exe` or the daemon's `bun.exe` stays in Task Manager; end it there to stop it now. You don't have to before starting the task again: the loop first stops a copy left from an earlier run (same program and arguments, its loop gone) and notes it in the log.
 
 ### Gaming on the same card
 

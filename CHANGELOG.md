@@ -10,6 +10,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Fixed
 
+- The assistant's Windows tasks no longer fight the window over the daemon. `install.ps1` sets `[daemon] auto_start = "never"` even without `-Config`, so the window doesn't start a second daemon on its own while the task restarts. Starting a task again also stops the copy its last run left behind (stopping a task ends only its loop), instead of failing on "data directory is already in use" every five seconds.
 - The assistant's chat no longer shows Drive: no "Drive is choosing the first step…" in an empty chat, no Drive word in its title bar, no Drive line or branch notes, and the model there is told nothing of Drive.
 - The conversation no longer flickers while the model writes a command: only the step's words change as they arrive, instead of the whole turn being redrawn every few characters.
 - A commit's tree always shows the branch you're on, even on its first commit next to three other branches, and long labels end in "…" inside their column.

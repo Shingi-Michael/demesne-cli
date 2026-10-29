@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { WorkspaceHost } from "../host.ts";
 import type { DemesneClient } from "@demesne/client";
 import { loadCliSettings } from "@demesne/setup/cli-config.ts";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -44,7 +44,10 @@ describe("WorkspaceHost reconnect", () => {
 
     // An empty home: a real config with auto_start = "always" (as on a Mac
     // running Demesne) would swap in a client for the live daemon.
+    // auto_start = "never" keeps the app from starting a real daemon here.
     const home = mkdtempSync(join(tmpdir(), "demesne-reconnect-"));
+    mkdirSync(join(home, ".demesne"));
+    writeFileSync(join(home, ".demesne", "config.toml"), '[daemon]\nauto_start = "never"\n');
     const host = new WorkspaceHost({
       client: fakeClient,
       settings: loadCliSettings({ home, env: {}, workspaceRoot: home, includeProject: false }),

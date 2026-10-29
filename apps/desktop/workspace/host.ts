@@ -467,6 +467,8 @@ export class WorkspaceHost {
       try { this.assistant = await this.client.assistant(); } catch { this.assistant = null; }
       this.sessions = await this.client.listSessions();
       this.connection = "online";
+      // A daemon that stops later gets started again once.
+      this.autoStarted = false;
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
@@ -490,7 +492,9 @@ export class WorkspaceHost {
       this.breakageStarted = this.breakage.start().catch(() => {});
       await this.applyStartup();
     } catch (error) {
-      if (!this.autoStarted && this.settings.autoStart === "always") {
+      // The app bundles its daemon, so it starts it unless the config says
+      // never ("prompt" had nothing left to ask once the CLI was gone).
+      if (!this.autoStarted && this.settings.autoStart !== "never") {
         this.autoStarted = true;
         try {
           await this.startDaemon();

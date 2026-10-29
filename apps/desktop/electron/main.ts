@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, macVibrancy, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true } }]);
 app.setName("Demesne");
@@ -109,7 +109,7 @@ void app.whenReady().then(async () => {
     // the window translucent under the shell (the page paints the tint).
     ...(process.platform === "darwin" ? {
       titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 17 },
-      vibrancy: "fullscreen-ui" as const, visualEffectState: "active" as const, backgroundColor: "#00000000",
+      vibrancy: macVibrancy(process.env), visualEffectState: "active" as const, backgroundColor: "#00000000",
       // Full screen stays on the desktop's Space: a full-screen Space has no
       // wallpaper behind the window, so the glass would go flat there.
       simpleFullscreen: true,

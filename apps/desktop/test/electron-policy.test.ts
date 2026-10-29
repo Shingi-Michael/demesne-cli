@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, FOUNDRY_CSP, foundryDocument, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, macVibrancy, FOUNDRY_CSP, foundryDocument, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
 import { ASSEMBLE_SCRIPT, assembledDocument, scriptText } from "../electron/foundry-assemble.ts";
 
 test("project switching may reload only the exact main application document", () => {
@@ -93,4 +93,10 @@ test("a version's first show carries the assembly: the library, the previous ver
   const svg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
   expect(foundryDocument("svg", svg, "Logo", { library: "L", previous: null })).toContain("@keyframes in");
   expect(foundryDocument("svg", svg, "Logo")).not.toContain("@keyframes");
+});
+
+test("the Mac's blur is fullscreen-ui unless DEMESNE_VIBRANCY names a real material", () => {
+  expect(macVibrancy({})).toBe("fullscreen-ui");
+  expect(macVibrancy({ DEMESNE_VIBRANCY: "hud" })).toBe("hud");
+  expect(macVibrancy({ DEMESNE_VIBRANCY: "glassy" })).toBe("fullscreen-ui");
 });

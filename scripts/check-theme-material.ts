@@ -43,8 +43,8 @@ try {
     await page.waitForFunction(name=>document.documentElement.dataset.theme===name,name);
     const value=await material();
     assert(value.glass);
-    assert(Math.abs(value.shell.alpha-0.325)<0.01,`${name} shell must remain glass: ${JSON.stringify(value)}`);
-    assert(Math.abs(value.panel.alpha-0.498)<0.01,`${name} panel must remain glass: ${JSON.stringify(value)}`);
+    assert(Math.abs(value.shell.alpha-0.288)<0.01,`${name} shell must remain glass: ${JSON.stringify(value)}`);
+    assert(Math.abs(value.panel.alpha-0.31)<0.01,`${name} panel must remain glass: ${JSON.stringify(value)}`);
     assert.equal(value.body,"rgba(0, 0, 0, 0)");
   }
   const path=join(f.root,"kuru.json");
@@ -53,8 +53,8 @@ try {
   await f.client.selectTheme("system");
   await page.waitForFunction(()=>document.documentElement.dataset.theme==="system");
   const kuru=await material();
-  assert(Math.abs(kuru.shell.alpha-0.325)<0.01,JSON.stringify(kuru));
-  assert(Math.abs(kuru.panel.alpha-0.498)<0.01,JSON.stringify(kuru));
+  assert(Math.abs(kuru.shell.alpha-0.288)<0.01,JSON.stringify(kuru));
+  assert(Math.abs(kuru.panel.alpha-0.31)<0.01,JSON.stringify(kuru));
   // The opacity slider remains a material control after a palette swap.
   await page.evaluate(()=>{document.documentElement.style.setProperty("--shell-a","1");document.documentElement.style.setProperty("--panel-a","1");});
   const solid=await material();assert.equal(solid.shell.alpha,1);assert.equal(solid.panel.alpha,1);

@@ -118,7 +118,7 @@ void app.whenReady().then(async () => {
       ...(liquid ? { transparent: true } : { vibrancy: macVibrancy(process.env), visualEffectState: "active" as const }), backgroundColor: "#00000000",
       // Full screen stays on the desktop's Space: a full-screen Space has no
       // wallpaper behind the window, so the glass would go flat there.
-      simpleFullscreen: true,
+      simpleFullscreen: true, fullscreenable: false,
     } : {}),
     // Linux, where the desktop blurs behind clear pixels (Hyprland): the
     // window is see-through and the compositor makes it glass.
@@ -173,12 +173,15 @@ void app.whenReady().then(async () => {
     if (on !== fullscreen) { fullscreen = on; emit("demesne:desktop-action", { action: "fullscreen", on }); }
   };
   window.on("enter-full-screen", fullscreenChanged).on("leave-full-screen", fullscreenChanged).on("resize", fullscreenChanged);
-  // The green button and macOS's own Enter Full Screen still take the window
-  // into its own Space, where nothing is behind it and the glass goes flat.
-  // Bring it back to the desktop's Space as simple full screen instead.
-  if (process.platform === "darwin") window.on("enter-full-screen", () => {
-    window?.once("leave-full-screen", () => { window?.setSimpleFullScreen(true); fullscreenChanged(); });
-    window?.setFullScreen(false);
+  // macOS's own full screen puts the window in its own Space, where nothing is
+  // behind it and the glass goes black. So the window can't go there at all
+  // (fullscreenable: false): the green button zooms, and the zoom is turned
+  // into simple full screen on the desktop's Space.
+  if (process.platform === "darwin") window.on("maximize", () => {
+    window?.unmaximize();
+    window?.setSimpleFullScreen(true);
+    log("Full screen (green button): simple, on the desktop's Space.");
+    fullscreenChanged();
   });
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {
@@ -275,7 +278,7 @@ void app.whenReady().then(async () => {
     { role: "editMenu" },
     { label: "View", submenu: [{ label: "Zoom In", accelerator: "CmdOrCtrl+=", click: () => applyZoom(1) }, { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: () => applyZoom(-1) }, { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: () => applyZoom(0) }, { label: "Toggle Full Screen", accelerator: process.platform === "darwin" ? "Ctrl+Cmd+F" : "F11", click: () => {
       if (!window) return;
-      if (process.platform === "darwin") window.setSimpleFullScreen(!window.isSimpleFullScreen());
+      if (process.platform === "darwin") { window.setSimpleFullScreen(!window.isSimpleFullScreen()); log(`Full screen (menu): simple ${window.isSimpleFullScreen() ? "on" : "off"}.`); }
       else window.setFullScreen(!window.isFullScreen());
       fullscreenChanged();
     } }] },

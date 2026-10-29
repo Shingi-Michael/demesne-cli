@@ -55,7 +55,7 @@ The model's settings are in [`llama-server.args`](../scripts/assistant/llama-ser
 
 You need:
 
-- **llama.cpp for Radeon.** Download the Windows HIP build from the [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases) (the zip with `hip` and `radeon` in its name) and unzip it somewhere like `C:\llama`. AMD's HIP SDK for Windows may also be needed if the release notes say so.
+- **llama.cpp for Radeon.** Download the Windows HIP build from the [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases) (the zip with `hip` and `radeon` in its name) and unzip it somewhere like `C:\llama`. AMD's HIP SDK for Windows may also be needed if the release notes say so. The Vulkan build works too, without the SDK; see [If you already run llama-server](#if-you-already-run-llama-server) for its flags.
 - **The model**, for example `C:\models\Qwen3.8-27B-Q5_K_M.gguf`.
 - **This repository and [Bun](https://bun.sh)**, as for running Demesne from source.
 
@@ -69,6 +69,17 @@ powershell -ExecutionPolicy Bypass -File scripts\assistant\install.ps1 `
 `-DryRun` prints exactly what each task will run and changes nothing. When it looks right, run it again without `-DryRun`. Add `-Config` to replace `%USERPROFILE%\.demesne\config.toml` with the assistant's (the old one is backed up next to it), or leave it off and copy the `[provider]` section across yourself. `-ExecutionPolicy Bypass` is needed because Windows refuses to run downloaded scripts by default; it applies to this one run only.
 
 The tasks start at login. If Windows restarts for an update and nobody logs in, they wait until you do.
+
+### If you already run llama-server
+
+Maybe you already have a server you like: a Vulkan build instead of HIP, the model pinned to one of two cards, a bigger window. You don't have to switch to these settings. Two options:
+
+- **Let the task run your server.** Write your flags into a file in the same one-per-line form as [`llama-server.args`](../scripts/assistant/llama-server.args) and pass it with `-LlamaArgs C:\path\to\my.args`. Keep `--host 127.0.0.1`, `--port 8081` and `--alias qwen3.8-27b`, which is where and what Demesne's config looks for, and leave `@MODEL@` where the model path goes (or write the path itself and skip `-Model`). `llama-server --list-devices` names your GPUs; `--device Vulkan1` puts the model on the second.
+- **Keep starting it yourself.** Pass `-NoModel` and only the daemon becomes a task. Then the assistant only works while your server is up, so a routine at 8:00 needs it running at 8:00.
+
+Either way the installer finishes by asking `http://127.0.0.1:8081/v1/models` what it serves, and says so if nothing answers there.
+
+A server window bigger than 128K is fine: Demesne keeps to its own `context_window = 131072` (Qwen3.8-27B stops generating past about 130K, whatever the server allows). The extra only costs VRAM. With `--parallel` above 1, check that each slot still gets the whole window (`n_ctx` in `http://127.0.0.1:8081/props`), since older builds split it between slots.
 
 ### Check it
 

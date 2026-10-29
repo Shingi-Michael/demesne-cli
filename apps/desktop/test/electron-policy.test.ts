@@ -95,8 +95,8 @@ test("a version's first show carries the assembly: the library, the previous ver
   expect(foundryDocument("svg", svg, "Logo")).not.toContain("@keyframes");
 });
 
-test("the Mac's blur is fullscreen-ui unless DEMESNE_VIBRANCY names a real material", () => {
-  expect(macVibrancy({})).toBe("fullscreen-ui");
-  expect(macVibrancy({ DEMESNE_VIBRANCY: "hud" })).toBe("hud");
-  expect(macVibrancy({ DEMESNE_VIBRANCY: "glassy" })).toBe("fullscreen-ui");
+test("the Mac's blur is hud unless DEMESNE_VIBRANCY names a real material", () => {
+  expect(macVibrancy({})).toBe("hud");
+  expect(macVibrancy({ DEMESNE_VIBRANCY: "fullscreen-ui" })).toBe("fullscreen-ui");
+  expect(macVibrancy({ DEMESNE_VIBRANCY: "glassy" })).toBe("hud");
 });

@@ -301,10 +301,16 @@ void app.whenReady().then(async () => {
   await window.loadURL(APP_URL);
   if (liquid) {
     try {
-      const addon = { exports: {} as { LiquidGlassNative: new () => { addView(handle: Buffer, options: object): number } } };
+      const addon = { exports: {} as { LiquidGlassNative: new () => { addView(handle: Buffer, options: object): number; setVariant(id: number, variant: number): void } } };
       process.dlopen(addon, liquidAddon);
-      if (new addon.exports.LiquidGlassNative().addView(window.getNativeWindowHandle(), {}) < 0) throw new Error("no glass view");
+      const native = new addon.exports.LiquidGlassNative(), id = native.addView(window.getNativeWindowHandle(), {});
+      if (id < 0) throw new Error("no glass view");
+      // The clear variant (1) lets the wallpaper through sharp; regular (0)
+      // frosts it. DEMESNE_GLASS_VARIANT tries another.
+      const variant = Number(process.env.DEMESNE_GLASS_VARIANT ?? 1);
+      if (Number.isInteger(variant) && variant >= 0) native.setVariant(id, variant);
       window.setWindowButtonVisibility(true);
+      log(`Liquid glass on (variant ${variant}).`);
     } catch (error) {
       log(`Liquid glass unavailable, using frosted glass: ${String(error)}`);
       window.setVibrancy(macVibrancy(process.env));

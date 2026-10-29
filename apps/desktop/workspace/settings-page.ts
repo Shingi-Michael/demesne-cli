@@ -159,11 +159,15 @@ export const isInk = (value: unknown): value is Ink => INKS.some(([id]) => id ==
 /// Glass, 0 (clear) to 100 (solid), as the shell's and the panel's opacity.
 export function glassAlphas(glass: number) {
   const g = Math.min(100, Math.max(0, glass)) / 100;
-  // Keep navigation readable over wallpaper: a gentler gap than the old
-  // quadratic shell curve, while the work panel remains the deeper plane.
-  return { shell: Math.round((0.1 + 0.9 * g) * 1000) / 1000, panel: Math.round((0.33 + 0.67 * g) * 1000) / 1000 };
+  // Clear is nearly see-through, so full screen still reads as glass; the
+  // work panel stays a touch deeper than the shell. Below about 40% panel,
+  // answers and code get a soft backing (back) so text never sits on bare
+  // wallpaper.
+  const round = (n: number) => Math.round(n * 1000) / 1000;
+  const shell = round(0.05 + 0.95 * g), panel = round(0.08 + 0.92 * g);
+  return { shell, panel, back: round(Math.max(0, 0.42 - panel)) };
 }
-export const GLASS_DEFAULT = 25;
+export const GLASS_DEFAULT = 15;
 
 export interface SettingsRow { title: string; line?: string; control?: string; keywords?: string; fold?: string }
 interface Group { name: string; right?: string; rows: SettingsRow[]; hint?: string }

@@ -117,16 +117,23 @@ export function daemonCredential(
   env = process.env,
 ) {
   if (env.DEMESNE_DAEMON_TOKEN?.trim()) return env.DEMESNE_DAEMON_TOKEN.trim();
-  if (
-    !["127.0.0.1", "localhost", "[::1]", "::1"].includes(
-      new URL(server).hostname,
-    )
-  )
-    return;
-  const path = join(directory, "daemon.token");
+  const url = new URL(server);
+  // This computer's own token never goes to another one. A daemon elsewhere
+  // gets only the token saved for that exact host and port.
+  const path = ["127.0.0.1", "localhost", "[::1]", "::1"].includes(url.hostname)
+    ? join(directory, "daemon.token")
+    : remoteDaemonTokenPath(server, directory);
   return existsSync(path)
     ? readFileSync(path, "utf8").trim() || undefined
     : undefined;
+}
+/// Where the token for a daemon on another computer is kept: a copy of that
+/// computer's own daemon.token, named for its host and port, for example
+/// remote-daemons/demesne-pc.tail1234.ts.net_443.token.
+export function remoteDaemonTokenPath(server: string, directory: string) {
+  const url = new URL(daemonAddress(server));
+  const port = url.port || (url.protocol === "https:" ? "443" : "80");
+  return join(directory, "remote-daemons", `${url.hostname.replace(/[^a-z0-9.-]/gi, "_")}_${port}.token`);
 }
 
 /// How often the sidebar looks in on chats still working in the background.

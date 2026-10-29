@@ -1,46 +1,29 @@
-/// The tree under a commit or merge step (pass 92): main as a fine pipe, the
-/// branches not in it as lanes below, and the step played on it. Your files
-/// line up, flow into the branch as sparks and become the commit; a merge
-/// bends the branch back into main and the branch fades. A subtle frame
-/// holds the tree. Text never sits on the tree: every label is in one
-/// column to its right, one per row. It plays once, live; history, a
-/// reload or reduced motion show the finished tree.
-import { createTimeline, stagger, svg as animeSvg, utils } from "animejs";
+/// A real Git snapshot, replayed after success. The whole tree draws once;
+/// branch names, commit details and file evidence live outside the paths.
+import type { RepoFlow, RepoLane, RepoCommit, RepoFile } from "@demesne/protocol";
 
-import type { RepoFlow, RepoLane } from "@demesne/protocol";
-
-const LEFT = 8, MAIN_Y = 14, STEP = 50, LANE_GAP = 40, LANE_STEP = 36, BEND = 34, FILE_ROW = 15, FILES_TOP = 17;
+const LEFT = 8, MAIN_Y = 58, STEP = 50, LANE_GAP = 68, LANE_STEP = 36, BEND = 34;
 
 export type FlowTone = "main" | "you" | "drive" | "other";
 export interface FlowPath { d: string; tone: FlowTone; part: "main" | "main-new" | "lane" | "lane-new" | "join"; lane: number }
-export interface FlowNode { x: number; y: number; tone: FlowTone; merge: boolean; fresh: boolean; lane: number }
+export interface FlowNode { x: number; y: number; tone: FlowTone; merge: boolean; fresh: boolean; lane: number; sha: string; subject: string }
 export interface FlowRow { y: number; text: string; after: string | null; tone: FlowTone; lane: number }
-export interface FlowFile { y: number; path: string; added: number; removed: number }
+export type FlowFile = RepoFile;
 export interface FlowScene {
   width: number; height: number; labelX: number;
   paths: FlowPath[]; nodes: FlowNode[]; rows: FlowRow[]; files: FlowFile[]; moreFiles: number;
-  /// Where the files land: the new commit's node.
+  /// The new commit's node.
   target: { x: number; y: number } | null;
   /// The lane that merged into main, if one did.
   merged: number | null;
   /// Branches not drawn, counted in the frame's top line.
   older: number;
   done: string;
+  commit: RepoCommit | null;
 }
 
-const short = (path: string) => { const parts = path.split("/"); const tail = parts.slice(-2).join("/"); return tail.length > 30 ? `…${tail.slice(-29)}` : tail; };
 const laneTone = (name: string, you: boolean): FlowTone => you ? "you" : name.startsWith("drive/") ? "drive" : "other";
-/// A branch by a short name: Drive's without its prefix and random tail
-/// (its green says it's Drive's), and long ones cut at a word.
-export function laneText(name: string) {
-  const bare = name.startsWith("drive/") ? name.slice(6).replace(/-[0-9a-f]{4,8}$/, "") : name;
-  return cut(bare, 30);
-}
-const cut = (label: string, max: number) => {
-  if (label.length <= max) return label;
-  const head = label.slice(0, max - 1), at = Math.max(head.lastIndexOf("-"), head.lastIndexOf(" "), head.lastIndexOf("/"));
-  return `${(at > max * .6 ? head.slice(0, at) : head).trimEnd()}…`;
-};
+export const laneText = (name: string) => name;
 /// "Foundry assembles a page (#339)" reads "#339 Foundry assembles a page".
 export function commitWords(subject: string) {
   const pr = /\s*\(#(\d+)\)\s*$/.exec(subject);
@@ -52,19 +35,17 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 /// layout is tested on its own.
 /// How far apart things sit.
 interface Spacing { step: number; laneStep: number; bend: number; laneGap: number; labels: number }
-/// The label column on the tree's right; a narrow chat gets a narrower one.
-const LABELS = 250;
-/// `settled` is the tree after the step: the files are in, so the rows
-/// they waited on close up. With a `width`, the tree spreads across it:
-/// commits move apart and bends widen (up to twice), while the labels keep
-/// their column and size. `roomy` puts the branches further apart.
+/// All text lives outside the graph; only a small trailing margin remains.
+const LABELS = 0;
+/// Fit the graph to its container. Settled and playing use identical geometry;
+/// files and full branch labels wrap independently below it.
 export function repoScene(flow: RepoFlow, { settled = false, width = 0, roomy = false } = {}): FlowScene {
-  const labels = width ? Math.round(Math.min(LABELS, Math.max(150, width * .45))) : LABELS;
-  const at = (k: number) => layout(flow, settled, { step: STEP * k, laneStep: LANE_STEP * k, bend: BEND * Math.min(2, k), laneGap: roomy ? 54 : LANE_GAP, labels });
+  const labels = LABELS;
+  const at = (k: number) => layout(flow, settled, { step: STEP * k, laneStep: LANE_STEP * k, bend: BEND * Math.min(2, k), laneGap: roomy ? 84 : LANE_GAP, labels });
   let scene = at(1);
   if (!width || Math.abs(width - scene.width) < 1) return scene;
   // Narrower than its own size, it closes up (to under half).
-  let low = .45, high = Math.max(8, width / STEP);
+  let low = .05, high = Math.max(8, width / STEP);
   scene = at(low);
   for (let round = 0; round < 14; round++) {
     const k = (low + high) / 2, next = at(k);
@@ -87,7 +68,7 @@ function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGa
     const was = before.lanes.find((lane) => lane.name === name), now = after.lanes.find((lane) => lane.name === name);
     const lane = (now ?? was)!;
     const seen = new Set(was?.commits.map((commit) => commit.sha) ?? []);
-    return { lane, isNew: !was, merged: flow.command === "merge" && onMain && Boolean(was) && !now, fresh: lane.commits.map((commit) => !seen.has(commit.sha)) };
+    return { lane, isNew: !was, merged: flow.command === "merge" && onMain && Boolean(was) && !now && (!flow.result || flow.result.commit.parents?.includes(was!.commits.at(-1)!.sha) || flow.result.commit.sha === was!.commits.at(-1)!.sha), fresh: lane.commits.map((commit) => !seen.has(commit.sha)) };
   });
   // main: the commits before the step keep their places; new ones go to
   // the right of every branch tip, so a merge bends forward into main.
@@ -107,16 +88,14 @@ function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGa
   // from the same commit put your branch nearest.
   const mine = (index: number) => lanes[index]!.lane.name === head ? 0 : 1;
   const order = lanes.map((_, index) => index).sort((a, b) => forkX(lanes[b]!.lane) - forkX(lanes[a]!.lane) || mine(a) - mine(b));
-  // The row the files wait on: -1 is main; below that, nowhere.
+  // The active branch: -1 is main.
   const headLane = lanes.findIndex((item) => item.lane.name === head);
   const active = flow.command !== "commit" ? -2 : onMain ? -1 : headLane >= 0 ? headLane : -3;
-  const fileRows = flow.command === "commit" && !settled ? before.files.length + (before.moreFiles ? 1 : 0) : 0;
   const rowY = new Map<number, number>();
   let y = MAIN_Y;
   rowY.set(-1, y);
-  let grow = active === -1 ? fileRows * FILE_ROW : 0;
-  for (const index of order) { y += laneGap + grow; rowY.set(index, y); grow = active === index ? fileRows * FILE_ROW : 0; }
-  const bottom = y + grow;
+  for (const index of order) { y += laneGap; rowY.set(index, y); }
+  const bottom = y;
   const xs = [...xOf.values(), ...laneX.flat()];
   const right = Math.max(...xs, lastOld) + 18;
   const labelX = right + 22;
@@ -124,16 +103,16 @@ function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGa
   const lastOldMain = old.length ? lastOld + 18 : LEFT + 40;
   paths.push({ d: `M${LEFT} ${MAIN_Y}H${Math.max(lastOldMain, ...lanes.map(({ lane }) => forkX(lane) + 6))}`, tone: "main", part: "main", lane: -1 });
   if (freshMain.length) paths.push({ d: `M${lastOldMain} ${MAIN_Y}H${right}`, tone: "main", part: "main-new", lane: -1 });
-  for (const commit of after.commits) nodes.push({ x: xOf.get(commit.sha)!, y: MAIN_Y, tone: freshMain.includes(commit) && flow.command === "merge" ? "you" : "main", merge: commit.merge, fresh: !known.has(commit.sha), lane: -1 });
+  for (const commit of after.commits) nodes.push({ x: xOf.get(commit.sha)!, y: MAIN_Y, tone: freshMain.includes(commit) && flow.command === "merge" ? "you" : "main", merge: commit.merge, fresh: !known.has(commit.sha), lane: -1, sha: commit.sha, subject: commit.subject });
   let merged: number | null = null, target: FlowScene["target"] = null;
   lanes.forEach((item, index) => {
     const ly = rowY.get(index)!, fx = forkX(item.lane), tone = laneTone(item.lane.name, item.lane.name === head || item.merged);
     const firstFresh = item.fresh.indexOf(true);
     const stable = item.isNew ? -1 : firstFresh === -1 ? laneX[index]!.length - 1 : firstFresh - 1;
     const end = stable >= 0 ? laneX[index]![stable]! : fx + bend + 6;
-    paths.push({ d: `M${fx} ${MAIN_Y}C${fx + bend * .7} ${MAIN_Y} ${fx + bend * .3} ${ly} ${fx + bend} ${ly}H${end}`, tone, part: item.isNew ? "lane-new" : "lane", lane: index });
+    paths.push({ d: item.lane.base && xOf.has(item.lane.base) ? `M${fx} ${MAIN_Y}C${fx + bend * .7} ${MAIN_Y} ${fx + bend * .3} ${ly} ${fx + bend} ${ly}H${end}` : `M${LEFT} ${ly}H${end}`, tone, part: item.isNew ? "lane-new" : "lane", lane: index });
     if (firstFresh !== -1 || item.isNew) paths.push({ d: `M${end} ${ly}H${tips[index]!}`, tone, part: "lane-new", lane: index });
-    item.lane.commits.forEach((commit, at) => nodes.push({ x: laneX[index]![at]!, y: ly, tone, merge: commit.merge, fresh: item.fresh[at]!, lane: index }));
+    item.lane.commits.forEach((commit, at) => nodes.push({ x: laneX[index]![at]!, y: ly, tone, merge: commit.merge, fresh: item.fresh[at]!, lane: index, sha: commit.sha, subject: commit.subject }));
     if (item.merged) {
       merged = index;
       const mx = xOf.get(freshMain.at(-1)?.sha ?? "") ?? right, tx = tips[index]!;
@@ -144,241 +123,217 @@ function layout(flow: RepoFlow, settled: boolean, { step, laneStep, bend, laneGa
   if (active === -1 && freshMain.length) target = { x: xOf.get(freshMain.at(-1)!.sha)!, y: MAIN_Y };
   const newest = (lane: number) => lane === -1 ? freshMain.at(-1) : lanes[lane]?.lane.commits.at(-1);
   const rows: FlowRow[] = [{ y: MAIN_Y, text: after.main, tone: "main", lane: -1,
-    after: freshMain.length ? commitWords(newest(-1)!.subject) : null }];
+    after: freshMain.length ? newest(-1)!.subject : null }];
   order.forEach((index) => {
     const item = lanes[index]!, tone = laneTone(item.lane.name, item.lane.name === head || item.merged);
     rows.push({ y: rowY.get(index)!, text: laneText(item.lane.name), tone, lane: index,
-      after: item.lane.name === head && item.fresh.includes(true) ? commitWords(newest(index)!.subject) : null });
+      after: item.lane.name === head && item.fresh.includes(true) ? newest(index)!.subject : null });
   });
-  // Labels fit their column, a long one ending in "…"; what landed is the
-  // commit's words beside the branch name (roughly 6.6px a mono character
-  // and 6.4px a word character at 11px).
-  for (const row of rows) row.text = cut(row.text, Math.floor((labels - 8) / 6.6));
-  for (const row of rows) if (row.after) row.after = cut(row.after, Math.max(10, Math.floor((labels - 24 - row.text.length * 6.6) / 6.4)));
-  const filesY = active < -1 ? 0 : (rowY.get(active) ?? MAIN_Y) + FILES_TOP;
-  const files = flow.command === "commit" && target && !settled ? before.files.map((file, index) => ({ y: filesY + index * FILE_ROW, path: short(file.path), added: file.added, removed: file.removed })) : [];
+  const evidence = flow.result;
+  const files = evidence?.files ?? (flow.command === "commit" ? before.files : []);
+  const moreFiles = evidence?.moreFiles ?? (flow.command === "commit" ? before.moreFiles : 0);
+  const commit = evidence?.commit ?? [...after.commits, ...after.lanes.flatMap(lane => lane.commits)].find(commit => commit.sha === after.tip)
+    ?? (onMain ? freshMain.at(-1) : after.lanes.find(lane => lane.name === head)?.commits.at(-1)) ?? null;
+  // A merge into a feature branch joins a known parent on main to that branch.
+  if (flow.command === "merge" && !onMain && headLane >= 0 && commit?.parents) {
+    const parent = commit.parents.slice(1).find(sha => xOf.has(sha));
+    if (parent) {
+      const px = xOf.get(parent)!, tx = tips[headLane]!, ty = rowY.get(headLane)!;
+      paths.push({ d: `M${px} ${MAIN_Y}C${px + (tx - px) * .55} ${MAIN_Y} ${tx - (tx - px) * .55} ${ty} ${tx} ${ty}`, tone: "you", part: "join", lane: headLane });
+    }
+  }
   const older = before.older + (lanes.length < names.length ? names.length - lanes.length : 0);
   // Old truncated snapshots cannot supply a complete line total.
-  const totals = before.fileTotals ?? (before.moreFiles ? null : before.files.reduce((sum, file) => ({ added: sum.added + file.added, removed: sum.removed + file.removed }), { added: 0, removed: 0 }));
-  const committed = before.files.length + before.moreFiles;
+  const totals = evidence?.totals ?? before.fileTotals ?? (before.moreFiles ? null : before.files.reduce((sum, file) => ({ added: sum.added + file.added, removed: sum.removed + file.removed }), { added: 0, removed: 0 }));
+  const committed = files.length + moreFiles;
   const branch = onMain ? after.main : head!;
   const done = flow.command === "commit"
     ? `Committed ${committed ? `${plural(committed, "file")} ` : ""}to ${laneText(branch)}${committed && totals ? `  +${totals.added} −${totals.removed}` : ""}`
     : merged !== null ? `Merged ${laneText(lanes[merged]!.lane.name)} into ${laneText(branch)}` : `Merged into ${laneText(branch)}`;
   return {
-    width: labelX + labels, height: bottom + 10, labelX, paths, nodes, rows,
-    files, moreFiles: files.length ? before.moreFiles : 0, target, merged,
-    older, done,
+    width: labelX + labels, height: bottom + 30, labelX, paths, nodes, rows,
+    files, moreFiles, target, merged,
+    older, done, commit,
   };
 }
 
 const NS = "http://www.w3.org/2000/svg";
 const FRAME_PAD = 14;
-const BRANCH_ICON = `<svg class="rf-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="5.5" r="1.6"/><path d="M4.5 5.1v5.8M11.5 7.1c0 2.6-3.4 2.6-6.4 4.1"/></svg>`;
-const REPLAY_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3.2 8a4.8 4.8 0 1 0 1.5-3.5"/><path d="M3 2.6v2.6h2.6"/></svg>`;
-function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>, parent?: Element): SVGElementTagNameMap[K] {
+const DURATION = 3200;
+const clamp = (n: number) => Math.max(0, Math.min(1, n));
+const ease = (n: number) => 1 - (1 - clamp(n)) ** 3;
+function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>, parent: Element): SVGElementTagNameMap[K] {
   const node = document.createElementNS(NS, tag);
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
-  parent?.append(node);
+  parent.append(node);
   return node;
 }
-function text(parent: Element, x: number, y: number, words: string, className: string) {
-  const node = el("text", { x, y: y + 4, class: className }, parent);
+function html<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, words: string, parent: Element): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  node.className = className;
   node.textContent = words;
+  parent.append(node);
   return node;
 }
 
-/// The drawn tree for one step, kept across repaints so a running
-/// animation is never cut off.
+/// Main-line hashes have their own band above every path. Reserve actual
+/// label-sized intervals, prioritizing the new commit, even in a narrow pane.
+export function repoHashLabels(scene: FlowScene) {
+  const chosen: { node: FlowNode; x: number }[] = [];
+  for (const node of scene.nodes.filter(node => node.lane === -1).sort((a, b) => Number(b.fresh) - Number(a.fresh) || b.x - a.x)) {
+    const x = Math.max(0, Math.min(node.x - 20, scene.width - 60));
+    if (chosen.every(label => x + 60 < label.x || label.x + 60 < x)) chosen.push({ node, x });
+  }
+  return chosen;
+}
+
+/// The whole scene plays after Git succeeds. Files are an expandable receipt,
+/// never waiting objects or flying particles. Resize and history stay settled.
 export class RepoFlowView {
   readonly element = document.createElement("div");
   private played = false;
-  /// While it plays, a resize waits: the drawing is not swapped mid-motion.
   private playing = false;
-  /// `repo` names the project in the frame's top line; `width` is the
-  /// room the frame has, which the tree spreads across.
+  private raf = 0;
+  private filesOpen = false;
+  private openLanes = new Set<string>();
   constructor(readonly flow: RepoFlow, private readonly command: string, private spread: { width?: number; roomy?: boolean; repo?: string } = {}) {
     this.element.className = "repo-flow";
   }
-
-  /// The tree inside the frame gets the frame's width less its padding.
-  private scene(settled: boolean) {
-    const { width, ...rest } = this.spread;
-    return repoScene(this.flow, { ...rest, settled, width: width ? width - FRAME_PAD * 2 : 0 });
-  }
-
-  /// Draws the tree; `live` plays it once, otherwise it shows finished.
+  private scene() { return repoScene(this.flow, { width: this.spread.width ? this.spread.width - FRAME_PAD * 2 : 0, settled: true, roomy: this.spread.roomy }); }
   render(live: boolean) {
     if (this.element.childElementCount) return;
-    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const playing = live && !reduced && !this.played;
-    this.draw(this.scene(!playing), playing);
+    this.draw(live && !this.played && !matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
-
-  /// The room it has changed (a resize): settled, it spreads to fit again.
   fit(width: number) {
     if (!width || Math.abs(width - (this.spread.width ?? 0)) < 2) return;
     this.spread = { ...this.spread, width };
     if (this.playing || !this.element.childElementCount) return;
-    this.element.replaceChildren();
-    this.draw(this.scene(true), false);
+    this.draw(false);
   }
-
-  /// Plays it again from the start.
   replay() {
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (this.playing || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    this.draw(true);
+  }
+  private draw(playing: boolean) {
+    cancelAnimationFrame(this.raf);
+    const refocus = this.element.querySelector(".rf-replay") === document.activeElement;
     this.element.replaceChildren();
-    this.draw(this.scene(false), true);
-  }
-
-  private draw(scene: FlowScene, playing: boolean) {
-    const svg = el("svg", { viewBox: `0 0 ${scene.width} ${scene.height}`, width: scene.width, height: scene.height, role: "img", "aria-label": scene.done });
-    const tracks = el("g", { class: "rf-tracks" }, svg), pipes = el("g", { class: "rf-pipes" }, svg), dots = el("g", {}, svg), words = el("g", {}, svg), sparks = el("g", {}, svg);
-    const pipeOf = new Map<FlowPath, SVGPathElement>();
-    for (const path of scene.paths) {
-      el("path", { d: path.d, class: `rf-track rf-${path.tone}` }, tracks);
-      pipeOf.set(path, el("path", { d: path.d, class: `rf-pipe rf-${path.tone}`, "data-part": path.part, "data-lane": path.lane }, pipes));
-    }
-    const nodeOf = scene.nodes.map((node) => el("circle", { cx: node.x, cy: node.y, r: node.merge ? 3.6 : 2.8, class: `rf-node rf-${node.tone}${node.merge ? " rf-ring" : ""}` }, dots));
-    const ring = scene.target ? el("circle", { cx: scene.target.x, cy: scene.target.y, r: 5.5, class: "rf-wait rf-you" }, dots) : null;
-    const rowOf = scene.rows.map((row) => text(words, scene.labelX, row.y, row.text, `rf-row rf-t-${row.tone}`));
-    // What landed: the branch's name, then the commit's words.
-    const afterOf = scene.rows.map((row) => {
-      if (!row.after) return null;
-      const node = text(words, scene.labelX, row.y, row.text, `rf-row rf-new rf-t-${row.tone}`);
-      const message = el("tspan", { dx: 10, class: "rf-msg" }, node);
-      message.textContent = row.after;
-      return node;
+    const scene = this.scene();
+    this.playing = playing;
+    this.element.dataset.playing = String(playing);
+    if (playing) this.played = true;
+    const head = html("div", "rf-head", "", this.element);
+    html("span", "rf-repo", this.flow.result?.repository || this.spread.repo || "Repository", head);
+    if (scene.older) html("span", "rf-more", `+${scene.older} other branches`, head);
+    const body = html("div", "rf-body", "", this.element);
+    const svg = el("svg", { viewBox: `0 0 ${scene.width} ${scene.height}`, width: scene.width, height: scene.height, role: "img", "aria-label": scene.done }, body);
+    const mainLabel = el("text", { x: LEFT, y: 13, class: "rf-main-label" }, svg);
+    // Full branch names are always available in the wrapping legend below.
+    const main = this.flow.after.main;
+    const maxChars = Math.max(8, Math.floor((scene.width - 20) / 7));
+    mainLabel.textContent = main.length > maxChars ? `${main.slice(0, maxChars - 1)}…` : main;
+    const pathsGroup = el("g", {}, svg);
+    const paths = scene.paths.map(path => {
+      const node = el("path", { d: path.d, pathLength: 1, class: `rf-pipe rf-${path.tone}`, "data-part": path.part, "data-lane": path.lane }, pathsGroup);
+      return { path, node };
     });
-    const fileOf: SVGElement[] = scene.files.map((file) => {
-      const g = el("g", { class: "rf-file" }, words);
-      text(g, scene.labelX, file.y, file.path, "rf-path");
-      text(g, scene.labelX + 186, file.y, `+${file.added}`, "rf-add");
-      if (file.removed) text(g, scene.labelX + 222, file.y, `−${file.removed}`, "rf-del");
-      return g;
+    const nodes = scene.nodes.map(node => {
+      const circle = el("circle", { cx: node.x, cy: node.y, r: node.fresh ? 4.5 : 3, class: `rf-node rf-${node.fresh ? "you" : node.tone}${node.merge ? " rf-ring" : ""}${node.fresh ? " rf-fresh" : " rf-history"}`, "data-sha": node.sha }, svg);
+      el("title", {}, circle).textContent = `${node.sha.slice(0, 7)} · ${node.subject}`;
+      return { node, circle };
     });
-    if (scene.moreFiles) fileOf.push(text(words, scene.labelX, (scene.files.at(-1)?.y ?? 0) + FILE_ROW, `${scene.moreFiles} more`, "rf-path rf-file"));
-    // The frame: one quiet line on top (project, branch, what isn't drawn,
-    // play again), the tree, and one line under it.
-    const head = document.createElement("div");
-    head.className = "rf-head";
-    const flowHead = this.flow.after.head ?? this.flow.after.main;
-    head.innerHTML = `${BRANCH_ICON}<span class="rf-repo"></span><code class="rf-branch"></code><span class="rf-sp"></span>${scene.older ? `<span class="rf-more"></span>` : ""}<button type="button" class="rf-replay" title="Play again" aria-label="Play again">${REPLAY_ICON}</button>`;
-    head.querySelector(".rf-repo")!.textContent = this.spread.repo ?? "";
-    head.querySelector(".rf-branch")!.textContent = laneText(flowHead);
-    const more = head.querySelector(".rf-more");
-    if (more) more.textContent = `+${plural(scene.older, "branch")}`.replace("branchs", "branches");
-    head.querySelector(".rf-replay")!.addEventListener("click", () => this.replay());
-    const caption = document.createElement("div");
-    caption.className = "rf-caption";
-    const doing = document.createElement("span"), done = document.createElement("span");
-    doing.textContent = this.command; done.textContent = scene.done;
-    caption.append(doing, done);
-    const body = document.createElement("div");
-    body.className = "rf-body";
-    body.append(svg);
-    this.element.append(head, body, caption);
-    const mergedParts = scene.merged === null ? [] : [...pipeOf].filter(([path]) => path.lane === scene.merged).map(([, node]) => node);
-    const finish = () => {
-      for (const node of fileOf) node.style.opacity = "0";
-      if (ring) ring.style.opacity = "0";
-      scene.rows.forEach((row, index) => { if (row.after) { rowOf[index]!.style.opacity = "0"; afterOf[index]!.style.opacity = "1"; } });
-      for (const node of mergedParts) node.style.opacity = ".18";
-      scene.nodes.forEach((node, index) => { if (node.lane === scene.merged && node.lane !== -1) nodeOf[index]!.style.opacity = ".18"; });
-      if (scene.merged !== null) rowOf[scene.rows.findIndex((row) => row.lane === scene.merged)]!.style.opacity = ".3";
-      doing.style.opacity = "0"; done.style.opacity = "1";
-    };
-    if (!playing) { finish(); return; }
-    this.played = true;
-    this.playing = true;
-    const timeline = this.play(scene, { pipeOf, nodeOf, ring, rowOf, afterOf, fileOf, mergedParts, doing, done, sparks });
-    // Once the files are in, the rows they waited on close up.
-    timeline.then(() => setTimeout(() => {
-      this.playing = false;
-      if (!scene.files.length && scene.width === this.scene(true).width) return;
-      this.element.replaceChildren();
-      this.draw(this.scene(true), false);
-      if (scene.files.length) this.element.animate([{ opacity: .55 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
-    }, scene.files.length ? 700 : 0));
-  }
-
-  private play(scene: FlowScene, parts: {
-    pipeOf: Map<FlowPath, SVGPathElement>; nodeOf: SVGCircleElement[]; ring: SVGCircleElement | null;
-    rowOf: SVGTextElement[]; afterOf: (SVGTextElement | null)[]; fileOf: SVGElement[]; mergedParts: SVGPathElement[];
-    doing: HTMLSpanElement; done: HTMLSpanElement; sparks: SVGGElement;
-  }) {
-    const { pipeOf, nodeOf, ring, rowOf, afterOf, fileOf, mergedParts, doing, done, sparks } = parts;
-    const pipes = (test: (path: FlowPath) => boolean) => [...pipeOf].filter(([path]) => test(path)).map(([, node]) => node);
-    // Every pipe starts undrawn and draws on in its turn.
-    const drawable = new Map([...pipeOf.values()].map((node) => [node, animeSvg.createDrawable(node)[0]!] as const));
-    utils.set([...drawable.values()], { draw: "0 0" });
-    const draw = (nodes: SVGPathElement[]) => nodes.map((node) => drawable.get(node)!);
-    const nodes = (test: (node: FlowNode) => boolean) => scene.nodes.flatMap((node, index) => test(node) ? [nodeOf[index]!] : []);
-    const t = createTimeline({ defaults: { ease: "inOutQuad" } });
-    const hidden = (targets: Element[]) => { for (const node of targets) (node as SVGElement).style.opacity = "0"; };
-    // Everything new starts out of sight.
-    hidden([...nodeOf, ...rowOf, ...fileOf, ...afterOf.filter((node): node is SVGTextElement => Boolean(node)), done]);
-    if (ring) hidden([ring]);
-    const oldPipes = pipes((path) => path.part === "main" || path.part === "lane");
-    // 1 · the tree draws itself
-    t.add(draw(pipes((path) => path.part === "main")), { draw: ["0 0", "0 1"], duration: 520 }, 0);
-    t.add(draw(oldPipes.filter((node) => node.dataset.part === "lane")), { draw: ["0 0", "0 1"], duration: 480, delay: stagger(90) }, 260);
-    t.add(nodes((node) => !node.fresh), { opacity: [0, 1], scale: [0, 1], duration: 380, ease: "outBack(1.4)", delay: stagger(40) }, 300);
-    t.add(rowOf, { opacity: [0, 1], duration: 260, delay: stagger(60) }, 520);
-    let at = 900;
-    // 2 · the files wait at your branch
-    if (fileOf.length && ring && scene.target) {
-      t.add(draw(pipes((path) => path.part === "lane-new" || (path.part === "main-new" && scene.merged === null))), { draw: ["0 0", "0 1"], duration: 420 }, at);
-      t.add(ring, { opacity: [0, 1], scale: [0, 1], duration: 320, ease: "outBack(1.4)" }, at);
-      t.add(ring, { rotate: [0, 120], duration: 1700, ease: "linear" }, at);
-      t.add(fileOf, { opacity: [0, 1], translateX: [10, 0], duration: 300, delay: stagger(90), ease: "outQuad" }, at + 100);
-      at += 1000;
-      // 3 · they flow in as sparks and become the commit
-      const target = scene.target;
-      fileOf.forEach((file, index) => {
-        const y = scene.files[index]?.y ?? scene.files.at(-1)!.y + FILE_ROW, spark = el("circle", { cx: 0, cy: 0, r: 1.8, class: "rf-spark rf-you" }, sparks);
-        spark.style.opacity = "0";
-        t.add(file, { opacity: [1, 0], translateX: [0, -8], duration: 220, ease: "inQuad" }, at + index * 70);
-        t.add(spark, { translateX: [scene.labelX - 6, target.x], translateY: [y, target.y], opacity: [{ from: 0, to: 1, duration: 60 }, { to: 1, duration: 340 }, { to: 0, duration: 60 }], duration: 460, ease: "inOutCubic" }, at + index * 70 + 30);
-      });
-      at += 460 + fileOf.length * 70;
-      t.add(ring, { opacity: [1, 0], scale: [1, 1.5], duration: 220 }, at - 80);
-      t.add(nodes((node) => node.fresh && node.lane !== -1 || (node.fresh && scene.merged === null)), { opacity: [0, 1], scale: [1.35, 1], duration: 420, ease: "outBack(1.6)" }, at - 80);
-      at += 260;
-    }
-    // 4 · a merge bends the branch back into main
-    if (scene.merged !== null) {
-      const join = pipes((path) => path.part === "join");
-      t.add(draw(join), { draw: ["0 0", "0 1"], duration: 620 }, at);
-      t.add(draw(pipes((path) => path.part === "main-new")), { draw: ["0 0", "0 1"], duration: 700 }, at + 200);
-      for (const [index, path] of join.entries()) for (let k = 0; k < 3; k++) {
-        const spark = el("circle", { cx: 0, cy: 0, r: 1.8, class: "rf-spark rf-you" }, sparks);
-        spark.style.opacity = "0";
-        t.add(spark, { ...animeSvg.createMotionPath(path), duration: 620, ease: "inOutSine" }, at + 120 + k * 120 + index * 60);
-        t.add(spark, { opacity: [{ from: 0, to: 1, duration: 80 }, { to: 1, duration: 460 }, { to: 0, duration: 80 }], duration: 620, ease: "linear" }, at + 120 + k * 120 + index * 60);
+    const focus = scene.nodes.find(node => node.sha === scene.commit?.sha) ?? scene.nodes.find(node => node.fresh);
+    const halo = focus ? el("circle", { cx: focus.x, cy: focus.y, r: 7, class: "rf-halo rf-you" }, svg) : null;
+    const hashes = repoHashLabels(scene).map(({ node, x }) => {
+      const label = el("text", { x, y: 30, class: "rf-hash" }, svg);
+      label.textContent = node.sha.slice(0, 7);
+      return { node, label };
+    });
+    // Wrapping HTML keeps branch names and commit words clear of every path,
+    // including during the opening motion and at the narrowest pane width.
+    const legend = html("div", "rf-legend", "", this.element);
+    for (const row of scene.rows) {
+      const lane = html("details", `rf-lane rf-${row.tone}`, "", legend);
+      lane.open = this.openLanes.has(row.text);
+      lane.addEventListener("toggle", () => { if (lane.isConnected) { if (lane.open) this.openLanes.add(row.text); else this.openLanes.delete(row.text); } });
+      const summary = html("summary", "", "", lane);
+      html("span", "rf-row", row.text, summary);
+      const commits = scene.nodes.filter(node => node.lane === row.lane);
+      html("code", "rf-lane-tip", commits.at(-1)?.sha.slice(0, 7) ?? "", summary);
+      const log = html("div", "rf-lane-log", "", lane);
+      for (const commit of commits) {
+        const item = html("div", "", "", log);
+        html("code", "", commit.sha.slice(0, 7), item);
+        html("span", "", commit.subject, item);
       }
-      at += 700;
-      t.add(nodes((node) => node.fresh && node.lane === -1), { opacity: [0, 1], scale: [0, 1], duration: 440, ease: "outBack(1.6)" }, at);
-      at += 300;
-      t.add(mergedParts, { opacity: [1, .18], duration: 500, ease: "linear" }, at);
-      t.add(nodes((node) => node.lane === scene.merged), { opacity: [1, .18], duration: 500, ease: "linear" }, at);
-      const mergedRow = scene.rows.findIndex((row) => row.lane === scene.merged);
-      if (mergedRow >= 0) t.add(rowOf[mergedRow]!, { opacity: [1, .3], duration: 400 }, at);
-    } else if (!fileOf.length) {
-      // A commit with nothing listed (or a fast-forward): the new commits draw on.
-      t.add(draw(pipes((path) => path.part === "lane-new" || path.part === "main-new")), { draw: ["0 0", "0 1"], duration: 500 }, at);
-      t.add(nodes((node) => node.fresh), { opacity: [0, 1], scale: [0, 1], duration: 420, ease: "outBack(1.6)", delay: stagger(80) }, at + 200);
-      at += 700;
     }
-    // The row says what landed, and the line under the tree what happened.
-    scene.rows.forEach((row, index) => {
-      if (!row.after) return;
-      t.add(rowOf[index]!, { opacity: [1, 0], duration: 200 }, at);
-      t.add(afterOf[index]!, { opacity: [0, 1], duration: 260 }, at + 120);
-    });
-    t.add(doing, { opacity: [1, 0], duration: 200 }, at + 200);
-    t.add(done, { opacity: [0, 1], duration: 260 }, at + 320);
-    t.add(sparks, { opacity: [1, 0], duration: 1 }, at + 600);
-    return t;
+    const result = html("div", "rf-details", "", this.element);
+    html("div", "rf-status", this.flow.command === "merge" ? `Merged into ${this.flow.after.head ?? main}` : "Commit created", result);
+    html("div", "rf-title", scene.commit?.subject ?? this.command, result);
+    html("div", "rf-meta", `${(scene.commit?.sha ?? this.flow.after.tip ?? "").slice(0, 7)} · ${this.flow.after.head ?? "detached HEAD"}`, result);
+    // Keep the outcome in normal flow, so even very long branch names wrap.
+    html("div", "rf-outcome", scene.done, result);
+    const footer = html("div", "rf-footer", "", this.element);
+    const files = html("details", "rf-files", "", footer);
+    files.open = this.filesOpen;
+    files.addEventListener("toggle", () => { if (files.isConnected) this.filesOpen = files.open; });
+    const totals = this.flow.result?.totals ?? (this.flow.command === "commit" ? this.flow.before.fileTotals : undefined);
+    const sum = totals ?? (!scene.moreFiles ? scene.files.reduce((sum, file) => ({ added: sum.added + file.added, removed: sum.removed + file.removed }), { added: 0, removed: 0 }) : null);
+    html("summary", "", this.flow.command === "merge" && !this.flow.result ? "File details unavailable for this older merge" : `${plural(scene.files.length + scene.moreFiles, "file")} changed${sum ? ` · +${sum.added} −${sum.removed}` : ""}`, files);
+    const list = html("div", "rf-file-list", "", files);
+    for (const file of scene.files) {
+      const item = html("div", "rf-file-entry", "", list);
+      html("span", "rf-file-path", file.path, item);
+      html("span", "rf-file-count", file.binary ? "binary" : `+${file.added} −${file.removed}`, item);
+    }
+    if (scene.moreFiles) html("div", "rf-more", `${scene.moreFiles} more files not shown`, list);
+    const replay = html("button", "rf-replay", "Replay the scene", footer);
+    replay.type = "button";
+    replay.disabled = playing;
+    replay.addEventListener("click", () => this.replay());
+    if (refocus && !playing) replay.focus();
+    const paint = (progress: number) => {
+      const open = ease((progress - .12) / .43), reveal = ease((progress - .83) / .17);
+      pathsGroup.setAttribute("transform", `translate(0 ${MAIN_Y}) scale(1 ${Math.max(.001, open)}) translate(0 ${-MAIN_Y})`);
+      for (const { path, node } of paths) {
+        const fresh = path.part === "join" || path.part === "main-new" || path.part === "lane-new";
+        const start = path.part === "main" ? 0 : fresh ? .45 : .16;
+        const drawn = ease((progress - start) / (fresh ? .34 : .36));
+        node.style.strokeDasharray = "1";
+        node.style.strokeDashoffset = String(1 - drawn);
+        node.style.opacity = String(path.lane === scene.merged && path.part !== "join" ? 1 - .45 * reveal : .9);
+      }
+      for (const { node, circle } of nodes) {
+        const at = node.fresh ? .73 : .05 + node.x / scene.width * .25 + (node.lane === -1 ? 0 : .2);
+        const arrive = clamp((progress - at) / .16);
+        circle.setAttribute("cy", String(MAIN_Y + (node.y - MAIN_Y) * open));
+        circle.setAttribute("r", String((node.fresh ? 4.5 : node.merge ? 3.6 : 3) * (ease(arrive) + .16 * Math.sin(arrive * Math.PI))));
+        circle.style.opacity = String(arrive * (node.lane === scene.merged ? 1 - .45 * reveal : 1));
+      }
+      for (const { node, label } of hashes) label.style.opacity = String(ease((progress - (node.fresh ? .82 : .24)) / .14));
+      if (halo && focus) {
+        const pulse = progress > .73 && progress < 1 ? Math.sin((progress - .73) / .27 * Math.PI) : 0;
+        halo.setAttribute("cy", String(MAIN_Y + (focus.y - MAIN_Y) * open));
+        halo.setAttribute("r", String(7 + 11 * pulse));
+        halo.style.opacity = String(pulse * .45);
+      }
+      legend.style.opacity = String(ease((progress - .45) / .2));
+      result.style.opacity = String(reveal);
+      result.style.transform = `translateY(${4 * (1 - reveal)}px)`;
+    };
+    if (!playing) { paint(1); return; }
+    paint(0);
+    let start: number | undefined;
+    const frame = (time: number) => {
+      start ??= time;
+      const progress = matchMedia("(prefers-reduced-motion: reduce)").matches ? 1 : clamp((time - start) / DURATION);
+      paint(progress);
+      if (progress < 1) { this.raf = requestAnimationFrame(frame); return; }
+      this.playing = false;
+      this.element.dataset.playing = "false";
+      replay.disabled = false;
+      if (Math.abs(scene.width - this.scene().width) > 1) this.draw(false);
+    };
+    this.raf = requestAnimationFrame(frame);
   }
 }

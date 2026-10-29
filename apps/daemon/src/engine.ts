@@ -15,7 +15,7 @@ import type { QuestionBroker } from "./questions.ts";
 import type { ThemeStore } from "./themes.ts";
 import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
-import { gitIn, gitStep, repoSnapshot, stepDirectory } from "./repo-flow.ts";
+import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "./repo-flow.ts";
 import { FOUNDRY_TOOL_NAMES } from "./foundry.ts";
 import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
@@ -710,7 +710,10 @@ export class AgentEngine {
   private async recordRepoFlow(turnId: string, toolCallId: string, repo: NonNullable<Awaited<ReturnType<AgentEngine["repoBefore"]>>>) {
     try {
       const after = await repoSnapshot(repo.git);
-      if (after && after.tip !== repo.before.tip) this.store.appendToolProgress(turnId, toolCallId, { repo: { command: repo.step.kind, before: repo.before, after } });
+      if (after?.tip && after.tip !== repo.before.tip) {
+        const result = await repoResult(repo.git, after.tip, repo.before.tip, repo.step.kind);
+        this.store.appendToolProgress(turnId, toolCallId, { repo: { command: repo.step.kind, before: repo.before, after, ...(result ? { result } : {}) } });
+      }
     } catch { /* the step still completes; it just has no tree */ }
   }
 

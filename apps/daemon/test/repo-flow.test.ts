@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { gitIn, gitStep, repoSnapshot, stepDirectory } from "../src/repo-flow.ts";
+import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "../src/repo-flow.ts";
 
 describe("gitStep", () => {
   test("finds commits and merges, with -C and -a", () => {
@@ -75,6 +75,9 @@ describe("repoSnapshot", () => {
     const after = (await repoSnapshot(git))!;
     expect(after.lanes).toEqual([]);
     expect(after.commits.at(-1)).toMatchObject({ subject: "Merge feature (#3)", merge: true });
+    const result = (await repoResult(git, after.tip!, before.tip, "merge"))!;
+    expect(result.commit.parents).toEqual([before.tip!, before.lanes[0]!.commits.at(-1)!.sha]);
+    expect(result.files).toEqual([{ path: "b.txt", added: 1, removed: 0 }]);
   });
 
   test("no repository, no tree", async () => {
@@ -92,5 +95,24 @@ describe("repoSnapshot", () => {
     expect(snapshot.files).toHaveLength(5);
     expect(snapshot.moreFiles).toBe(2);
     expect(snapshot.fileTotals).toEqual({ added: 21, removed: 1 });
+    await run("commit", "-qm", "Seven files");
+    const tip = (await gitIn(dir)(["rev-parse", "HEAD"]))!.trim();
+    const result = (await repoResult(gitIn(dir), tip, snapshot.tip, "commit"))!;
+    expect(result.files).toHaveLength(7);
+    expect(result.totals).toEqual({ added: 21, removed: 1 });
+  });
+
+  test("result describes only what committed, preserving unusual paths and binaries", async () => {
+    const { dir, run } = await repo();
+    writeFileSync(join(dir, "line\tbreak\n.txt"), "added\n");
+    writeFileSync(join(dir, "binary.bin"), Buffer.from([0, 1, 2]));
+    writeFileSync(join(dir, "uncommitted.txt"), "later\n");
+    await run("add", "-A");
+    await run("commit", "-qm", "Selected files", "--", "line\tbreak\n.txt", "binary.bin");
+    const git = gitIn(dir), tip = (await git(["rev-parse", "HEAD"]))!.trim();
+    const result = (await repoResult(git, tip, null, "commit"))!;
+    expect(result.files).toEqual([{ path: "binary.bin", added: 0, removed: 0, binary: true }, { path: "line\tbreak\n.txt", added: 1, removed: 0 }]);
+    expect(result.totals).toEqual({ added: 1, removed: 0 });
+    expect(result.commit.parents).toHaveLength(1);
   });
 });

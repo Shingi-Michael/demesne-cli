@@ -173,6 +173,13 @@ void app.whenReady().then(async () => {
     if (on !== fullscreen) { fullscreen = on; emit("demesne:desktop-action", { action: "fullscreen", on }); }
   };
   window.on("enter-full-screen", fullscreenChanged).on("leave-full-screen", fullscreenChanged).on("resize", fullscreenChanged);
+  // The green button and macOS's own Enter Full Screen still take the window
+  // into its own Space, where nothing is behind it and the glass goes flat.
+  // Bring it back to the desktop's Space as simple full screen instead.
+  if (process.platform === "darwin") window.on("enter-full-screen", () => {
+    window?.once("leave-full-screen", () => { window?.setSimpleFullScreen(true); fullscreenChanged(); });
+    window?.setFullScreen(false);
+  });
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");

@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { WorkspaceHost } from "../host.ts";
 import type { DemesneClient } from "@demesne/client";
+import { loadCliSettings } from "@demesne/setup/cli-config.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 describe("WorkspaceHost reconnect", () => {
   test("automatically schedules reconnect when daemon is offline and recovers", async () => {
@@ -38,9 +42,13 @@ describe("WorkspaceHost reconnect", () => {
       events: async function* () {},
     } as unknown as DemesneClient;
 
+    // An empty home: a real config with auto_start = "always" (as on a Mac
+    // running Demesne) would swap in a client for the live daemon.
+    const home = mkdtempSync(join(tmpdir(), "demesne-reconnect-"));
     const host = new WorkspaceHost({
       client: fakeClient,
-      workspace: process.cwd(),
+      settings: loadCliSettings({ home, env: {}, workspaceRoot: home, includeProject: false }),
+      workspace: home,
       home: "plain",
       headless: true,
       changed: () => {},

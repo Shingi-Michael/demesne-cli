@@ -1,16 +1,23 @@
 import { isAbsolute, resolve, sep } from "node:path";
 import { assembledDocument } from "./foundry-assemble.ts";
 export const APP_URL = "demesne://app/index.html";
-/** Whether the desktop blurs what shows through a see-through window, so the
- *  shell can be glass: the Mac does (vibrancy), and so does Hyprland, which
- *  blurs behind any window with clear pixels. KDE and GNOME don't blur a window
- *  that hasn't asked them to, so there it stays solid. DEMESNE_GLASS=1 or 0
- *  says so on any other Linux desktop that blurs (SwayFX, Wayfire, a KWin
- *  script) or doesn't. */
-export function desktopBlurs(platform: string, env: Record<string, string | undefined>) {
+/** Whether the window is glass, with the Glass slider in Settings: on the
+ *  Mac, Windows and Linux alike. DEMESNE_GLASS=0 keeps Linux or Windows
+ *  solid. */
+export function desktopGlass(platform: string, env: Record<string, string | undefined>) {
   if (platform === "darwin") return true;
+  if (platform !== "linux" && platform !== "win32") return false;
+  return env.DEMESNE_GLASS !== "0";
+}
+/** Whether the desktop blurs what shows through the window: the Mac does
+ *  (vibrancy), Windows does (acrylic), and so does Hyprland, which blurs
+ *  behind any window with clear pixels. Other Linux desktops (KDE, GNOME)
+ *  show the wallpaper sharp, so the glass starts more solid there.
+ *  DEMESNE_GLASS=1 says a desktop blurs (SwayFX, Wayfire, a KWin script). */
+export function desktopBlurs(platform: string, env: Record<string, string | undefined>) {
+  if (platform === "darwin" || platform === "win32") return true;
   if (platform !== "linux") return false;
-  if (env.DEMESNE_GLASS === "1" || env.DEMESNE_GLASS === "0") return env.DEMESNE_GLASS === "1";
+  if (env.DEMESNE_GLASS === "1") return true;
   return (Boolean(env.HYPRLAND_INSTANCE_SIGNATURE) || /hyprland/i.test(env.XDG_CURRENT_DESKTOP ?? ""));
 }
 /** The Mac's blur under the glass: "hud", which let the most wallpaper colour

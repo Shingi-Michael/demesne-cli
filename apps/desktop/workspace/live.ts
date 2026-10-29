@@ -27,7 +27,7 @@ import { RepoFlowView } from "./repo-flow.ts";
 import { FoundryPane } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
-import { GLASS_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
+import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
 import type { FoundryArtifact, FoundryArtifactDetail, PlanLimits, Routine } from "@demesne/protocol";
 import { glanceHTML, type Glance } from "./glance.ts";
@@ -2292,7 +2292,7 @@ let settingsInfo: SettingsInfo | null = null, usageScores: ModelScore[] | null =
 let openOn: "home" | "last" = "home", keepAwake = true;
 try { if (localStorage.getItem("demesne-open-on") === "last") openOn = "last"; if (localStorage.getItem("demesne-awake") === "off") keepAwake = false; } catch {}
 /// Settings › Appearance › Glass and Ink, kept on this device.
-let glassLevel = GLASS_DEFAULT, inkName: Ink = "neutral";
+let glassLevel = (window as { demesneDesktop?: { glassSharp?: boolean } }).demesneDesktop?.glassSharp ? GLASS_SHARP_DEFAULT : GLASS_DEFAULT, inkName: Ink = "neutral";
 try {
   const saved = Number(localStorage.getItem("demesne-glass"));
   if (localStorage.getItem("demesne-glass") !== null && Number.isFinite(saved)) glassLevel = Math.min(100, Math.max(0, saved));

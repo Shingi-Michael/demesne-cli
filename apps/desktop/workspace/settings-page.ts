@@ -168,6 +168,9 @@ export function glassAlphas(glass: number) {
   return { shell, panel, back: round(Math.max(0, 0.42 - panel)) };
 }
 export const GLASS_DEFAULT = 15;
+/// Where the desktop doesn't blur behind the window (GNOME, KDE), the glass
+/// starts more solid so words stay readable over a sharp wallpaper.
+export const GLASS_SHARP_DEFAULT = 70;
 
 export interface SettingsRow { title: string; line?: string; control?: string; keywords?: string; fold?: string }
 interface Group { name: string; right?: string; rows: SettingsRow[]; hint?: string }

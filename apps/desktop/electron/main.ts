@@ -1,12 +1,12 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, release } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, macVibrancy, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, liquidGlass, macVibrancy, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true } }]);
 app.setName("Demesne");
@@ -103,13 +103,19 @@ void app.whenReady().then(async () => {
     process.on("SIGUSR1", () => reloadRenderer("SIGUSR1 signal"));
   }
   const glass = desktopBlurs(process.platform, process.env);
+  // macOS 26: the window is clear and the system's liquid glass sits behind
+  // the page (electron-liquid-glass's prebuilt addon, copied in by
+  // prepare-desktop). Older Macs, or a material named in DEMESNE_VIBRANCY,
+  // keep the frosted vibrancy.
+  const liquidAddon = join(base, "liquid-glass.node");
+  const liquid = liquidGlass(process.platform, release(), process.env) && existsSync(liquidAddon);
   window = new BrowserWindow({
     width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#161617",
     // The Mac: no title bar, the traffic lights on the sidebar's glass, and
     // the window translucent under the shell (the page paints the tint).
     ...(process.platform === "darwin" ? {
       titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 17 },
-      vibrancy: macVibrancy(process.env), visualEffectState: "active" as const, backgroundColor: "#00000000",
+      ...(liquid ? { transparent: true } : { vibrancy: macVibrancy(process.env), visualEffectState: "active" as const }), backgroundColor: "#00000000",
       // Full screen stays on the desktop's Space: a full-screen Space has no
       // wallpaper behind the window, so the glass would go flat there.
       simpleFullscreen: true,
@@ -293,6 +299,17 @@ void app.whenReady().then(async () => {
     if (process.platform === "darwin") window?.hide(); else void quit();
   });
   await window.loadURL(APP_URL);
+  if (liquid) {
+    try {
+      const addon = { exports: {} as { LiquidGlassNative: new () => { addView(handle: Buffer, options: object): number } } };
+      process.dlopen(addon, liquidAddon);
+      if (new addon.exports.LiquidGlassNative().addView(window.getNativeWindowHandle(), {}) < 0) throw new Error("no glass view");
+      window.setWindowButtonVisibility(true);
+    } catch (error) {
+      log(`Liquid glass unavailable, using frosted glass: ${String(error)}`);
+      window.setVibrancy(macVibrancy(process.env));
+    }
+  }
   contents.setZoomFactor(zoom);
   // An update replaced the installed app: reload the renderer once so it loads
   // the new UI. The host process survives the renderer reload.

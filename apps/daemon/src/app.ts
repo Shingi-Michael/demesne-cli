@@ -448,7 +448,8 @@ export function createDaemonApp(options: {
   }
   function driveInChat(sessionId: string): string | null {
     const row = store.database.query("SELECT w.root FROM sessions s JOIN workspaces w ON w.id = s.workspace_id WHERE s.id = ?").get(sessionId) as { root: string } | null;
-    if (!row || inDriveWorktree(row.root)) return null;
+    // The assistant's chat is told nothing of Drive, even in its own folder.
+    if (!row || inDriveWorktree(row.root) || sessionId === assistantChat.existing()) return null;
     return driveContext({ auto: driveAuto.state(row.root), ideas: chatIdeas(row.root).proposals, fixes: driveFixes.list(row.root), away: driveFixes.away(row.root) });
   }
   tools.register(driveRunTool({

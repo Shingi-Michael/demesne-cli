@@ -1278,7 +1278,8 @@ const peekSeen = new Set<string>();
 /// bar already says where it came from, so it carries nothing there.
 type Peek = { sessionId: string; kind: "work" | "ready"; words: string };
 function drivePeek(): Peek | null {
-  if (!state || !inSession() || pageOpen) return null;
+  // The assistant's chat isn't a coding chat: Drive says nothing there.
+  if (!state || !inSession() || pageOpen || inAssistant()) return null;
   const current = state.session?.id;
   const jobs = [state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId));
   const name = (job: (typeof jobs)[number]) => (job.mission ? job.mission.split("\n")[0]!.replace(/^--(bounded|continuous)\s+/, "") : job.title) || "Drive's branch";
@@ -3246,11 +3247,11 @@ function renderBriefing() {
   }
   // What the last Apply, PR or Discard did is its own quiet line in the
   // conversation, never part of Drive's line.
-  const done = el("branch-done"), outcome = inSession() ? branchNote() : "";
+  const done = el("branch-done"), outcome = inSession() && !inAssistant() ? branchNote() : "";
   done.innerHTML = outcome;
   done.hidden = !outcome;
-  // A chat with no project has no Drive.
-  node.hidden = !inSession() || !parts.length || isPlain();
+  // A chat with no project has no Drive, and neither has the assistant's.
+  node.hidden = !inSession() || !parts.length || isPlain() || inAssistant();
   // The folded reply empties too, so no stale control (a Pause after Stop) waits in it.
   if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").innerHTML = ""; el("drive-reply").classList.remove("open"); return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
@@ -3431,14 +3432,15 @@ function renderDriveTurn() {
   if (!state) return;
   const node = document.getElementById("drive-turn");
   if (!node) return;
-  const drive = inSession() ? driveTurnMission() : null, now = Date.now();
+  // Before the signature: opening the assistant's chat changes nothing Drive has.
+  el("conversation").classList.toggle("assistant", inAssistant());
+  const drive = inSession() && !inAssistant() ? driveTurnMission() : null, now = Date.now();
   const fix = state.breakage.fix, worktree = Boolean(drive && fix?.mission && ["starting", "running"].includes(fix.status));
   const retry = drive?.recovery && drive.recovery.retryAt > now ? Math.ceil((drive.recovery.retryAt - now) / 1000) : 0;
   const signature = JSON.stringify([drive, worktree, retry, detailsOpen.has("drive-details"), [...detailsOpen].filter((key) => key.startsWith("drive-step:")), drive ? Math.floor(now / 10_000) : 0]);
   if (signature === driveTurnSignature) return;
   driveTurnSignature = signature;
   el("conversation").classList.toggle("driving", Boolean(drive));
-  el("conversation").classList.toggle("assistant", inAssistant());
   node.hidden = !drive;
   if (!drive) {
     node.innerHTML = "";

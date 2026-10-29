@@ -40,6 +40,9 @@ try {
   assert.ok(sessionId);
   // Empty, it is still its chat, not Home.
   assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Ask your assistant…");
+  // Nothing of Drive: no "Drive is choosing the first step…", no word in the title bar.
+  assert.equal(await page.locator("#conversation").evaluate((node) => getComputedStyle(node, "::before").content), "none");
+  assert.equal(await page.locator(".header-drive").count(), 0);
   await page.screenshot({ path: join(output, "assistant-empty.png") });
   // The 8:00 routine asks in the assistant's chat while you're elsewhere.
   await page.locator('.sidebar-nav [data-action="new-session"]').click();

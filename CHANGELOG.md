@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Fixed
 
+- The assistant's chat no longer shows Drive: no "Drive is choosing the first step…" in an empty chat, no Drive word in its title bar, no Drive line or branch notes, and the model there is told nothing of Drive.
 - The conversation no longer flickers while the model writes a command: only the step's words change as they arrive, instead of the whole turn being redrawn every few characters.
 - A commit's tree always shows the branch you're on, even on its first commit next to three other branches, and long labels end in "…" inside their column.
 

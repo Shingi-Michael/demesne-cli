@@ -9,6 +9,9 @@
     "**/*"
   ],
   "asar": true,
+  "asarUnpack": [
+    "liquid-glass.node"
+  ],
   "npmRebuild": false,
   "extraResources": [
     {

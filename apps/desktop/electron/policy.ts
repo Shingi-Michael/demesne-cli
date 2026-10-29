@@ -13,6 +13,19 @@ export function desktopBlurs(platform: string, env: Record<string, string | unde
   if (env.DEMESNE_GLASS === "1" || env.DEMESNE_GLASS === "0") return env.DEMESNE_GLASS === "1";
   return (Boolean(env.HYPRLAND_INSTANCE_SIGNATURE) || /hyprland/i.test(env.XDG_CURRENT_DESKTOP ?? ""));
 }
+/** The Mac's blur under the glass: "hud", which let the most wallpaper colour
+ *  through on a real screen (fullscreen-ui close behind, under-window ~40%
+ *  greyer). DEMESNE_VIBRANCY names another material to try. */
+const VIBRANCIES = ["hud", "fullscreen-ui", "under-window", "sidebar", "window", "content", "header", "titlebar", "menu", "popover", "sheet", "tooltip", "under-page"] as const;
+export function macVibrancy(env: Record<string, string | undefined>): (typeof VIBRANCIES)[number] {
+  return VIBRANCIES.find((name) => name === env.DEMESNE_VIBRANCY) ?? "hud";
+}
+/** macOS 26 (Darwin 25) gets the clear window, and Apple's liquid glass
+ *  (NSGlassEffectView) on request. Naming a material in DEMESNE_VIBRANCY
+ *  keeps the older frosted blur. */
+export function liquidGlass(platform: string, darwinRelease: string, env: Record<string, string | undefined>) {
+  return platform === "darwin" && Number(darwinRelease.split(".")[0]) >= 25 && !env.DEMESNE_VIBRANCY;
+}
 /** Project changes reload the shell; other destinations and frames stay blocked. */
 export const allowAppReload = (url: string, isMainFrame: boolean) => isMainFrame && url === APP_URL;
 /** A chat's live preview may load only pages served on this machine. */

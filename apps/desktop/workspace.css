@@ -1198,6 +1198,17 @@ html.glass #desktop-shell { background: var(--shell-glass, var(--ink)); }
 html.glass #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { --ink: var(--panel-glass, var(--panel)); background: var(--panel-glass, var(--panel)); }
 html.glass body.desktop { --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.09); }
 html.glass[data-theme="demesne-light"] body.desktop { --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.03); }
+/* Glass you can see (pass 96): even over a plain wallpaper the window reads
+   as glass. A light rim catches the top edges, a soft sheen falls from the
+   top, the panel floats a little, and answers and code get a soft backing
+   that only shows while the glass is clear (--back-a). */
+html.glass body.desktop { --rim: rgb(255 255 255 / 0.12); --rim-edge: rgb(255 255 255 / 0.08); --sheen: rgb(255 255 255 / 0.045); --float: 0 18px 50px rgb(0 0 0 / 0.28); }
+html.glass[data-appearance="light"] body.desktop { --rim: rgb(255 255 255 / 0.6); --rim-edge: rgb(0 0 0 / 0.08); --sheen: rgb(255 255 255 / 0.22); --float: 0 18px 50px rgb(0 0 0 / 0.1); }
+html.glass #desktop-shell { box-shadow: inset 0 1px 0 var(--rim); }
+html.glass #desktop-sidebar:not([hidden]) { background: linear-gradient(180deg, var(--sheen), transparent 38%); }
+html.glass #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { background: linear-gradient(180deg, var(--sheen), transparent 30%), var(--panel-glass, var(--panel)); box-shadow: 0 0 0 1px var(--rim-edge), inset 0 1px 0 var(--rim), var(--float); }
+html.glass body.desktop .answer .markdown { position: relative; isolation: isolate; }
+html.glass body.desktop .answer .markdown::before { content: ""; position: absolute; inset: -4px -14px; z-index: -1; border-radius: 18px; filter: blur(10px); background: color-mix(in srgb, var(--panel) calc(var(--back-a, 0) * 100%), transparent); pointer-events: none; }
 #desktop-sidebar, #desktop-toolbar { background: transparent; border: 0; box-shadow: none; }
 /* The panel: the deepest plane, with a hairline edge. Inside it --ink is the
    panel, so everything that paints "the background" paints the panel. */

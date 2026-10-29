@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import sharp from "sharp";
 import { prepareUi } from "./prepare-ui.ts";
@@ -15,6 +15,14 @@ await prepareUi(out);
 for (const entry of ["electron/main.ts", "electron/preload.ts"]) {
   const bundle = await Bun.build({ entrypoints: [join(desktop, entry)], outdir: application, target: "node", format: "cjs", external: ["electron"], minify: true, naming: "[name].cjs" });
   if (!bundle.success) throw new Error(bundle.logs.map(String).join("\n"));
+}
+// The Mac's liquid glass: electron-liquid-glass's prebuilt addon for this
+// Mac, loaded by the main process on macOS 26 and later.
+if (process.platform === "darwin") {
+  const prebuilds = join(desktop, "node_modules/electron-liquid-glass/prebuilds");
+  const addon = process.arch === "arm64" ? join(prebuilds, "darwin-arm64/node.napi.armv8.node") : join(prebuilds, "darwin-x64/node.napi.node");
+  if (existsSync(addon)) cpSync(addon, join(application, "liquid-glass.node"));
+  else console.warn("No liquid glass addon for this Mac; the window keeps frosted glass.");
 }
 const version = resolveBuildVersion();
 writeFileSync(join(application, "package.json"), JSON.stringify({ name: "demesne", productName: "Demesne", version, description: "A coding workspace with durable sessions and Agent Drive", author: "Demesne contributors", main: "main.cjs" }, null, 2));

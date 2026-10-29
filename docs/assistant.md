@@ -67,7 +67,7 @@ powershell -ExecutionPolicy Bypass -File scripts\assistant\install.ps1 `
   -Model C:\models\Qwen3.8-27B-Q5_K_M.gguf -LlamaServer C:\llama\llama-server.exe -DryRun
 ```
 
-`-DryRun` prints exactly what each task will run and changes nothing. When it looks right, run it again without `-DryRun`. Add `-Config` to replace `%USERPROFILE%\.demesne\config.toml` with the assistant's (the old one is backed up next to it), or leave it off and copy the `[provider]` section across yourself. Without `-Config` the installer still sets `[daemon] auto_start = "never"` in your config (backing it up first): the task owns the daemon, and a window that started its own while the task was restarting would hold the data directory, leaving the task's daemon failing on the lock. `-ExecutionPolicy Bypass` is needed because Windows refuses to run downloaded scripts by default; it applies to this one run only.
+`-DryRun` prints exactly what each task will run and changes nothing. When it looks right, run it again without `-DryRun`. Add `-Config` to replace `%USERPROFILE%\.demesne\config.toml` with the assistant's (the old one is backed up next to it), or leave it off and copy the `[provider]` section across yourself. Either way the installer writes `%USERPROFILE%\.demesne\daemon.managed`, which names the task as the daemon's owner: while that file exists the Demesne window waits for the task's daemon instead of starting one of its own, whatever `[daemon] auto_start` says. (A window's daemon started while the task was restarting would hold the data directory, and the task's daemon would then fail on the lock every five seconds.) `-ExecutionPolicy Bypass` is needed because Windows refuses to run downloaded scripts by default; it applies to this one run only.
 
 The tasks start at login. If Windows restarts for an update and nobody logs in, they wait until you do.
 
@@ -90,7 +90,7 @@ Get-Content $HOME\.demesne\assistant\llama-server.log -Wait -Tail 20   # the mod
 Invoke-RestMethod http://127.0.0.1:8081/v1/models                 # the model answers
 ```
 
-Open the Demesne window: it connects to the running daemon instead of starting its own. To try the always-on part, open **Scheduled**, add "Every day at 9, say good morning and list today's date" and close the window. The chat is there when you come back.
+Open the Demesne window: it connects to the running daemon instead of starting its own, and while `daemon.managed` is there it never starts one, even when the task's daemon is away for a moment. To try the always-on part, open **Scheduled**, add "Every day at 9, say good morning and list today's date" and close the window. The chat is there when you come back.
 
 To stop them until next login, or remove them:
 
@@ -98,9 +98,11 @@ To stop them until next login, or remove them:
 Stop-ScheduledTask -TaskPath \Demesne\ -TaskName llama-server
 Stop-ScheduledTask -TaskPath \Demesne\ -TaskName demesned
 Unregister-ScheduledTask -TaskPath \Demesne\ -TaskName llama-server   # remove for good
+Unregister-ScheduledTask -TaskPath \Demesne\ -TaskName demesned
+Remove-Item $HOME\.demesne\daemon.managed                             # the window may start the daemon again
 ```
 
-Stopping a task ends its `keep-running.ps1` loop but not the program it started, so `llama-server.exe` or the daemon's `bun.exe` stays in Task Manager; end it there to stop it now. You don't have to before starting the task again: the loop first stops a copy left from an earlier run (same program and arguments, its loop gone) and notes it in the log.
+Stopping a task stops its program too: `keep-running.ps1` puts itself in a Windows job object that ends everything it started when it ends. A copy from before that, or one whose loop was killed some other way, is stopped the next time the task starts (same program and arguments, its loop gone), with a note in the log.
 
 ### Gaming on the same card
 

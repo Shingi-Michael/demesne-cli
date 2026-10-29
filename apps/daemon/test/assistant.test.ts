@@ -44,6 +44,23 @@ test("the chat lives in the assistant's folder when it has one", () => {
   store.close();
 });
 
+test("a chat opened before its folder was trusted moves into the folder, messages and all", () => {
+  const root = temporary(), home = join(root, "Assistant"), file = join(root, "assistant.json");
+  mkdirSync(home);
+  const store = new DemesneStore(join(root, "state.sqlite"));
+  let trusted = false;
+  const chat = new AssistantChat(file, store, () => (trusted ? home : undefined));
+  const id = chat.id();
+  store.createTurn(id, "hello", "deny", false, false, "chat", [], false);
+  expect(store.getSession(id)?.workspace).toBeNull();
+  trusted = true;
+  expect(chat.existing()).toBe(id);
+  expect(chat.id()).toBe(id);
+  expect(store.getSession(id)?.workspace?.root).toBe(home);
+  expect(store.getSession(id)?.turns).toHaveLength(1);
+  store.close();
+});
+
 test("a routine's turn in the assistant's chat keeps the routine's name", () => {
   const root = temporary();
   const store = new DemesneStore(join(root, "state.sqlite"));

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { WorkspaceHost } from "../host.ts";
 import type { DemesneClient } from "@demesne/client";
 import { loadCliSettings } from "@demesne/setup/cli-config.ts";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -67,6 +67,26 @@ describe("WorkspaceHost reconnect", () => {
     expect(connectCalls).toBeGreaterThanOrEqual(2);
     expect(host.connection).toBe("online");
 
+    host.dispose();
+  });
+
+  test("waits for a daemon a scheduled task owns instead of starting one, whatever auto_start says", async () => {
+    const fakeClient = {
+      server: "http://127.0.0.1:7337",
+      health: async () => { throw new Error("Connection refused"); },
+    } as unknown as DemesneClient;
+    const home = mkdtempSync(join(tmpdir(), "demesne-managed-"));
+    mkdirSync(join(home, ".demesne"));
+    writeFileSync(join(home, ".demesne", "config.toml"), '[daemon]\nauto_start = "always"\n');
+    writeFileSync(join(home, ".demesne", "daemon.managed"), "the scheduled task \\Demesne\\demesned\n");
+    const settings = loadCliSettings({ home, env: {}, workspaceRoot: home, includeProject: false });
+    const host = new WorkspaceHost({ client: fakeClient, settings, workspace: home, home: "plain", headless: true, changed: () => {} });
+    await host.connect();
+    expect(host.connection).toBe("offline");
+    expect(host.error).toContain("the scheduled task \\Demesne\\demesned runs the daemon");
+    // Nothing was spawned: no pid file, no daemon log.
+    expect(existsSync(join(settings.dataDirectory, "daemon.pid"))).toBe(false);
+    expect(existsSync(join(settings.dataDirectory, "daemon.log"))).toBe(false);
     host.dispose();
   });
 });

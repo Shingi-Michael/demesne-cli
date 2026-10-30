@@ -2242,13 +2242,15 @@ function renderSakura(show: boolean) {
   if (!host) return;
   if (show && !sakuraTried) {
     sakuraTried = true;
-    try { sakura = mountSakura(host, inkIsDark()); } catch { sakura = null; }
+    // the picture ends just above the greeting
+    const floor = () => { const eyebrow = el("hero").querySelector(".hero-eyebrow, h1"); return eyebrow ? eyebrow.getBoundingClientRect().top - host.getBoundingClientRect().top : host.clientHeight * .47; };
+    try { sakura = mountSakura(host, inkIsDark(), floor); } catch { sakura = null; }
   }
   host.hidden = !show || !sakura;
   if (!sakura) return;
   const dark = inkIsDark();
   if (dark !== sakuraDark) { sakuraDark = dark; sakura.setDark(dark); }
-  if (show) sakura.resume(); else sakura.pause();
+  if (show) { sakura.resume(); sakura.refit(); } else sakura.pause();
 }
 /// When the window was last in front of you, kept on this computer: Home
 /// says what happened since.

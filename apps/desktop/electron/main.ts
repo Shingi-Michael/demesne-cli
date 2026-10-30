@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, screen, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { homedir, release } from "node:os";
@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, liquidGlass, macVibrancy, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, liquidGlass, macVibrancy, notchInset, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true } }]);
 app.setName("Demesne");
@@ -172,23 +172,34 @@ void app.whenReady().then(async () => {
   contents.on("will-frame-navigate", event => { if (!allowAppReload(event.url, event.isMainFrame) && (event.isMainFrame || !(previewURL(event.url) || foundryURL(event.url)))) event.preventDefault(); });
   contents.on("will-attach-webview", event => event.preventDefault());
   // Simple full screen sends no full-screen events, so the page hears of it
-  // through the resize that comes with it.
-  let fullscreen = false;
+  // through the resize that comes with it, with how far down it must start
+  // to clear a camera notch.
+  let fullscreen = false, notch = 0;
   const fullscreenChanged = () => {
     const on = Boolean(window?.isFullScreen() || window?.isSimpleFullScreen());
-    if (on !== fullscreen) { fullscreen = on; emit("demesne:desktop-action", { action: "fullscreen", on }); }
+    if (on !== fullscreen) { fullscreen = on; emit("demesne:desktop-action", { action: "fullscreen", on, top: on ? notch : 0 }); }
   };
   window.on("enter-full-screen", fullscreenChanged).on("leave-full-screen", fullscreenChanged).on("resize", fullscreenChanged);
+  // The window's own size, kept from your last move or resize, to go back to
+  // after full screen.
+  let normalBounds = window.getBounds();
+  const remember = () => { if (window && !window.isSimpleFullScreen() && !window.isFullScreen() && !window.isMaximized()) normalBounds = window.getBounds(); };
+  window.on("resized", remember).on("moved", remember);
+  // The Mac's simple full screen, on the desktop's Space.
+  const simpleFullScreen = (on: boolean, why: string) => {
+    if (!window || on === window.isSimpleFullScreen()) return;
+    if (on) notch = notchInset(screen.getDisplayMatching(window.getBounds()));
+    window.setSimpleFullScreen(on);
+    if (!on) window.setBounds(normalBounds);
+    log(`Full screen (${why}): simple ${on ? `on, starting ${notch}pt down for the notch` : "off"}.`);
+    fullscreenChanged();
+  };
   // macOS's own full screen puts the window in its own Space, where nothing is
   // behind it and the glass goes black. So the window can't go there at all
-  // (fullscreenable: false): the green button zooms, and the zoom is turned
-  // into simple full screen on the desktop's Space.
-  if (process.platform === "darwin") window.on("maximize", () => {
-    window?.unmaximize();
-    window?.setSimpleFullScreen(true);
-    log("Full screen (green button): simple, on the desktop's Space.");
-    fullscreenChanged();
-  });
+  // (fullscreenable: false): the green button zooms, and the zoom becomes
+  // simple full screen at once. It isn't zoomed back first, which animated a
+  // second time; leaving restores the size from before.
+  if (process.platform === "darwin") window.on("maximize", () => simpleFullScreen(true, "green button"));
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
@@ -205,8 +216,7 @@ void app.whenReady().then(async () => {
     if (method === "desktop-window") {
       const action = (args as Record<string, unknown>).action;
       if (!window || !["close", "minimize", "fullscreen"].includes(String(action))) return null;
-      window.setSimpleFullScreen(false);
-      fullscreenChanged();
+      simpleFullScreen(false, "the page's lights");
       if (action === "close") window.close();
       else if (action === "minimize") window.minimize();
       return null;
@@ -295,9 +305,8 @@ void app.whenReady().then(async () => {
     { role: "editMenu" },
     { label: "View", submenu: [{ label: "Zoom In", accelerator: "CmdOrCtrl+=", click: () => applyZoom(1) }, { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: () => applyZoom(-1) }, { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: () => applyZoom(0) }, { label: "Toggle Full Screen", accelerator: process.platform === "darwin" ? "Ctrl+Cmd+F" : "F11", click: () => {
       if (!window) return;
-      if (process.platform === "darwin") { window.setSimpleFullScreen(!window.isSimpleFullScreen()); log(`Full screen (menu): simple ${window.isSimpleFullScreen() ? "on" : "off"}.`); }
-      else window.setFullScreen(!window.isFullScreen());
-      fullscreenChanged();
+      if (process.platform === "darwin") simpleFullScreen(!window.isSimpleFullScreen(), "menu");
+      else { window.setFullScreen(!window.isFullScreen()); fullscreenChanged(); }
     } }] },
     { role: "windowMenu" },
   ]));

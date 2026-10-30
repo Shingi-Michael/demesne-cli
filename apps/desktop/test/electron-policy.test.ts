@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, liquidGlass, macVibrancy, FOUNDRY_CSP, foundryDocument, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, foundryDocument, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
 import { ASSEMBLE_SCRIPT, assembledDocument, scriptText } from "../electron/foundry-assemble.ts";
 
 test("project switching may reload only the exact main application document", () => {
@@ -111,4 +111,16 @@ test("liquid glass from macOS 26 (Darwin 25) unless a frosted material is named"
   expect(liquidGlass("darwin", "24.6.0", {})).toBe(false);
   expect(liquidGlass("darwin", "25.5.0", { DEMESNE_VIBRANCY: "hud" })).toBe(false);
   expect(liquidGlass("linux", "25.0.0", {})).toBe(false);
+});
+
+test("simple full screen starts below the camera notch, and only where there is one", () => {
+  const screen = (width: number, height: number, bar: number, internal = true) => ({ bounds: { x: 0, y: 0, width, height }, workArea: { x: 0, y: bar, width, height: height - bar }, internal });
+  expect(notchInset(screen(1512, 982, 38))).toBe(38);
+  expect(notchInset(screen(1728, 1117, 33))).toBe(33);
+  expect(notchInset(screen(1440, 900, 25))).toBe(0);
+  expect(notchInset(screen(2560, 1440, 25, false))).toBe(0);
+  // The menu bar hidden: a notched panel's shape still says so.
+  expect(notchInset(screen(1512, 982, 0))).toBe(38);
+  expect(notchInset(screen(1440, 900, 0))).toBe(0);
+  expect(notchInset(screen(1512, 982, 0, false))).toBe(0);
 });

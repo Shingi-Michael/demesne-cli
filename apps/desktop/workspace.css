@@ -1223,7 +1223,10 @@ html.glass #desktop-shell { box-shadow: inset 0 1px 0 var(--rim); }
 html.glass #desktop-sidebar:not([hidden]) { background: linear-gradient(180deg, var(--sheen), transparent 38%); }
 html.glass #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { background: linear-gradient(180deg, var(--sheen), transparent 30%), var(--panel-glass, var(--panel)); box-shadow: 0 0 0 1px var(--rim-edge), inset 0 1px 0 var(--rim), var(--float); }
 html.glass body.desktop .answer .markdown { position: relative; isolation: isolate; }
-html.glass body.desktop .answer .markdown::before { content: ""; position: absolute; inset: -4px -14px; z-index: -1; border-radius: 18px; filter: blur(10px); background: color-mix(in srgb, var(--panel) calc(var(--back-a, 0) * 100%), transparent); pointer-events: none; }
+/* Its soft edge is a spread shadow, not a blur filter: a filter makes every
+   answer its own blurred layer, which scrolling repaints, and at full screen
+   size that dragged. */
+html.glass body.desktop .answer .markdown::before { --back: color-mix(in srgb, var(--panel) calc(var(--back-a, 0) * 100%), transparent); content: ""; position: absolute; inset: 0 -8px; z-index: -1; border-radius: 14px; background: var(--back); box-shadow: 0 0 12px 6px var(--back); pointer-events: none; }
 #desktop-sidebar, #desktop-toolbar { background: transparent; border: 0; box-shadow: none; }
 /* The panel: the deepest plane, with a hairline edge. Inside it --ink is the
    panel, so everything that paints "the background" paints the panel. */
@@ -1262,7 +1265,10 @@ html.mac-chrome #desktop-toolbar :is(button, a, input, [role="button"], .bar-tab
 html.mac-chrome #desktop-shell:has(#desktop-sidebar[hidden]) #desktop-toolbar { padding-left: 84px; }
 /* The Mac's simple full screen has no title bar, so the page draws the
    three buttons where the window's own sit (trafficLightPosition 18, 17). */
-#mac-lights { position: fixed; top: 17px; left: 18px; z-index: 50; display: flex; gap: 8px; }
+#mac-lights { position: fixed; top: calc(17px + var(--notch-top, 0px)); left: 18px; z-index: 50; display: flex; gap: 8px; }
+/* Simple full screen covers the camera notch's strip too, so the shell starts
+   below it (main.ts measures it); the strip stays glass, like the menu bar. */
+html.fullscreen #desktop-shell { box-sizing: border-box; padding-top: var(--notch-top, 0px); }
 #mac-lights[hidden] { display: none; }
 #mac-lights button { position: relative; width: 12px; height: 12px; padding: 0; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.18); }
 #mac-lights [data-light="close"] { background: #ff5f57; }

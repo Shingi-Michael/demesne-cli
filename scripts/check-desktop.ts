@@ -376,7 +376,8 @@ try {
   assert(await page.locator("#sidebar-sessions .sidebar-session-mark.working").count() > 0, "the working chat breathes a dot in the sidebar");
   assert.equal(await thinkingToggle.locator(".shine").innerText(), "Thinking");
   await until(() => page.locator("#app").getAttribute("class").then(value => value?.includes("rim-work") ?? false), "a working turn runs a light along the panel's rim");
-  assert.equal(await page.locator("#desktop-toolbar .header-live.work").innerText(), "Working", "the title line says it works");
+  await until(() => page.locator("#workspace-tabs .bar-tab.on .sidebar-session-mark.working").count().then(count => count === 1), "the open tab breathes a working dot");
+  assert((await page.locator("#workspace-tabs .bar-tab.on [role=tab]").getAttribute("title"))!.endsWith("· Working"), "the tab's tooltip says it works");
   await capture("01-thinking-cube");
   await thinkingToggle.click();
   await trace.waitFor({ state: "hidden" });
@@ -443,7 +444,8 @@ try {
   await until(() => page.locator(".tool-row.waiting .target").innerText().then(text => text === "bun run check"), "the waiting step names the command");
   assert.equal(await page.evaluate(() => { const row = document.querySelector("#approval .approval-row")!; return row.scrollWidth <= row.clientWidth; }), true, "the row fits its width");
   await until(() => page.locator("#app").getAttribute("class").then(value => value?.includes("rim-wait") ?? false), "waiting on you holds an amber arc on the rim");
-  assert.equal(await page.locator("#desktop-toolbar .header-live.wait").innerText(), "Waiting on you · run bun run check?", "the title line says what it waits for");
+  await until(() => page.locator("#workspace-tabs .bar-tab.on .sidebar-session-mark.warn").count().then(count => count === 1), "the open tab's dot turns amber");
+  assert((await page.locator("#workspace-tabs .bar-tab.on [role=tab]").getAttribute("title"))!.endsWith("Waiting on you · run bun run check?"), "the tab's tooltip says what it waits for");
   await capture("02-command-approval");
   await desktop!.evaluate(() => { (globalThis as any).banners = []; });
   await page.evaluate(() => { document.hasFocus = () => false; });
@@ -541,7 +543,7 @@ try {
   assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "true");
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.getByRole("heading", { name: /^What are we building/ }).waitFor();
-  await until(() => page.locator("#workspace-title").innerText().then(text => text === "Home"), "the top bar says Home for a new chat");
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === "New chat"), "the top bar's tab says New chat");
   const homeControls = await page.locator("#composer").evaluate(form => {
     const box = form.querySelector<HTMLElement>(".composer-box")!;
     const bar = form.querySelector<HTMLElement>(".composer-bar")!;
@@ -577,7 +579,6 @@ try {
   // ends with one quiet line that can move it into a project.
   await until(() => page.locator("#sidebar-chats .sidebar-item").count().then(count => count === 1), "a plain chat is listed under Just a chat");
   await until(() => page.locator("#plain-line .plain-note").isVisible(), "a plain chat ends with Move to a project");
-  assert.equal(await page.locator("#workspace-where").innerText(), "Just a chat");
   await click("where-move");
   await until(() => page.locator("#plain-line .where-opt").first().isVisible(), "Move to a project unfolds the projects");
   await capture("02-plain-chat");
@@ -600,6 +601,25 @@ try {
   await until(async () => !(await current())?.includes(sessionId), "Ctrl+Tab opens the next chat");
   await page.keyboard.press("Control+Shift+Tab");
   await until(async () => (await current())?.includes(sessionId), "Ctrl+Shift+Tab opens the one before");
+  await textIncludes(completed);
+  // The top bar is the open chats as tabs: the tab you're on shows its chat's
+  // title, Ctrl+2 goes to the second, Ctrl+W closes one without stopping it,
+  // and Ctrl+Shift+T brings it back where it was.
+  const tabs = page.locator("#workspace-tabs .bar-tab[data-tab]");
+  assert.equal(await tabs.count(), 2, "both chats are open as tabs");
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === "Desktop smoke, renamed"), "the tab you're on shows the chat's title");
+  await capture("02-tabs");
+  await page.keyboard.press("Control+2");
+  await until(async () => !(await current())?.includes(sessionId), "Ctrl+2 opens the second tab");
+  await page.keyboard.press("Control+W");
+  await until(() => tabs.count().then(count => count === 1), "Ctrl+W closes the tab");
+  await until(async () => (await current())?.includes(sessionId), "closing hands over to the tab beside it");
+  assert.equal(await page.locator("#sidebar-projects .sidebar-item").count(), 2, "a closed tab's chat stays in the sidebar");
+  await page.keyboard.press("Control+Shift+T");
+  await until(() => tabs.count().then(count => count === 2), "Ctrl+Shift+T reopens the tab");
+  await until(async () => !(await current())?.includes(sessionId), "and goes to it");
+  await page.keyboard.press("Control+1");
+  await until(async () => (await current())?.includes(sessionId), "Ctrl+1 goes back to the first tab");
   await textIncludes(completed);
   // Bring it back later: the bell beside Pin and Archive unfolds a few times;
   // the chat leaves the list until then, and comes back under Back now.
@@ -1059,9 +1079,7 @@ try {
   await page.locator("#cards [data-card=changes] .card-head").click();
   await page.locator("#cards [data-card=changes] .card-body").waitFor();
   await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
-  // The branch chip carries what changed since the last commit; the ring
-  // unfolds the context breakdown above it until Esc.
-  await until(() => page.locator("#desktop-toolbar .chip.ship").innerText().then(text => text.includes("+1") && text.includes("−1")), "branch chip shows the changes");
+  // The ring unfolds the context breakdown above it until Esc.
   await page.locator("#composer-context").click();
   await until(() => page.locator("#context-card").innerText().then(text => text.includes("Conversation") && text.includes("Tools") && text.includes(`${percentage}%`)), "context breakdown unfolds");
   if (percentage < 50) assert.equal(await page.locator("#context-card .context-compact").count(), 0, "Compact now waits until the context is half full");
@@ -1222,24 +1240,28 @@ try {
   await until(() => page.locator("#drive-reply .dt-sent").isVisible(), "the note says it was sent");
   await until(() => page.locator("#drive-reply .drive-told li").innerText().then(text => text.includes("Keep the tests green") && text.includes(`From ${home}`)), "the mission card shows your note");
   await capture("08-drive-tell");
-  // Drive's word sits at the right end of the title bar while it works elsewhere.
-  await until(() => page.locator("#desktop-toolbar .header-drive.work").isVisible(), "the title bar says Drive is working elsewhere");
-  assert((await page.locator(".header-drive").getAttribute("aria-label"))!.includes("Verify the Drive controls"), "the title bar names the mission");
-  // Its own chat says where it came from and shows the note; the link goes back.
+  // Drive is a small pinned tab at the start of the bar while it works elsewhere.
+  await until(() => page.locator("#desktop-toolbar .header-drive.work").isVisible(), "a pinned tab says Drive is working elsewhere");
+  assert((await page.locator(".header-drive").getAttribute("aria-label"))!.includes("Verify the Drive controls"), "the pinned tab names the mission");
+  // Its own chat opens as a tab and shows the note; your chat's tab goes back.
+  const chatTab = (name: string) => page.locator("#workspace-tabs .bar-tab[data-tab]", { hasText: name });
   await page.locator('#drive-reply [data-action="select-session"]', { hasText: "Watch" }).click();
-  await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "the mission's chat names the chat it came from");
+  await until(() => page.locator("#workspace-title").innerText().then(text => text.startsWith("Drive mission")), "the mission's chat opens as a tab");
   await until(() => page.locator("#drive-turn .drive-told li").innerText().then(text => text.includes("Keep the tests green")), "the mission's chat shows your note");
   assert.equal(await page.locator("#drive-turn .drive-heading").count(), 0, "the mission turn has no boxed details");
   assert.equal(await page.locator("#drive-turn").evaluate(node => getComputedStyle(node).borderTopWidth + getComputedStyle(node).backgroundColor), "0pxrgba(0, 0, 0, 0)", "the mission turn sits unboxed in the chat");
-  assert.equal(await page.locator(".header-drive").count(), 0, "inside Drive's chat the title bar carries no Drive word; from is the way back");
+  assert.equal(await page.locator(".header-drive").count(), 0, "with Drive's chat open as a tab there is no pinned Drive tab");
   await capture("08-drive-chat");
-  await page.locator("#workspace-from button").click();
-  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "from takes you back");
-  assert(await page.locator("#workspace-from").isHidden(), "your own chat has no from");
+  await chatTab(home).locator("[role=tab]").click();
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "your chat's tab takes you back");
+  // Closing the mission's tab leaves Drive pinned again, and the pin opens it.
+  await chatTab("Drive mission").hover();
+  await chatTab("Drive mission").locator(".bar-tab-close").click();
+  await until(() => page.locator("#desktop-toolbar .header-drive.work").isVisible(), "a closed mission tab hands back to the pinned Drive tab");
   await page.locator(".header-drive.work").click();
-  await until(() => page.locator("#workspace-from").innerText().then(text => text === `from ${home}`), "Drive's word opens its chat");
-  await page.locator("#workspace-from button").click();
-  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "and from brings you back again");
+  await until(() => page.locator("#workspace-title").innerText().then(text => text.startsWith("Drive mission")), "the pinned tab opens Drive's chat");
+  await chatTab(home).locator("[role=tab]").click();
+  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "and your tab brings you back again");
   await line.locator(".bf-word").click();
   await control("pause").click();
   await control("resume").waitFor();
@@ -1270,7 +1292,7 @@ try {
   await asked.locator(".ds-fold").click();
   await until(() => page.locator(".drive-asked + .ds-said").innerText().then(text => text.trim() === missionPushPrompt.trim()), "the line unfolds to the whole request");
   await capture("09-drive-asked");
-  await page.locator("#workspace-from button").click();
+  await chatTab(home).locator("[role=tab]").click();
   await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "back in your chat");
   // The finished mission left a worktree without changes; its review card
   // opens from Drive's line and discards it.

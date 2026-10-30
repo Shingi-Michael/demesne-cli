@@ -40,6 +40,7 @@ import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.t
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval, WorkspaceQuestion } from "./session-model.ts";
 import { chatChanges, chatServers, contextInUse } from "./cards.ts";
+import { OpenTabs } from "./tabs.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -398,6 +399,23 @@ function markSeen(id: string, updatedAt: string) {
 }
 /// What a row's dot means, in words: for its tooltip and screen readers.
 const STATE_WORDS: Record<string, string> = { warn: "needs you", working: "working", bad: "failed", acc: "new reply" };
+type Chat = Snapshot["sessions"][number];
+/// What a chat's dot says, in the sidebar and on its tab: amber when it
+/// needs you, a breathing dot while it works, a cross when it failed, blue
+/// for a reply you haven't seen.
+function chatTone(item: Chat) {
+  const selected = item.id === state!.session?.id;
+  const waiting = Boolean(state!.approvals.length || state!.questions.length), pinned = pinnedMission();
+  const asks = selected ? waiting : Boolean(item.waiting);
+  // A mission's chat keeps its mark while Drive plans between turns.
+  const driving = Boolean(pinned && pinned.homeSessionId === item.id && ["running", "waiting"].includes(pinned.status));
+  const working = selected ? (Boolean(state!.activeTurnId) || driving) && !waiting : !asks && (item.status === "running" || item.status === "queued" || driving);
+  // Looking at a chat marks it seen; one that has moved on since, while
+  // you were elsewhere, carries the blue dot until you open it.
+  if (selected || !(item.id in seenChats)) markSeen(item.id, item.updatedAt);
+  const fresh = !selected && item.status === "completed" && seenChats[item.id] !== item.updatedAt;
+  return asks ? "warn" : working ? "working" : item.status === "failed" ? "bad" : fresh ? "acc" : "";
+}
 /// Chats deleted from the sidebar a moment ago: they leave the list at once
 /// and are archived after UNDO_MS, so ⌘Z can bring the last one back.
 const UNDO_MS = 5_000;
@@ -588,21 +606,7 @@ function renderSidebar() {
   const focusedRow = document.activeElement?.closest(".sidebar-item")?.querySelector(".sidebar-session");
   const focused = focusedRow ? [...nav.querySelectorAll(".sidebar-session")].indexOf(focusedRow) : -1;
   const titleOf = (item: typeof sessions[number]) => item.id === current?.id ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
-  // What a chat's dot says: amber when it needs you, a breathing dot while
-  // it works, a cross when it failed, blue for a reply you haven't seen.
-  const toneOf = (item: typeof sessions[number]) => {
-    const selected = item.id === current?.id;
-    const asks = selected ? Boolean(waiting) : Boolean(item.waiting);
-    // A mission's chat keeps its mark while Drive plans between turns.
-    const driving = Boolean(pinned && pinned.homeSessionId === item.id && ["running", "waiting"].includes(pinned.status));
-    const working = selected ? (Boolean(state!.activeTurnId) || driving) && !waiting : !asks && (item.status === "running" || item.status === "queued" || driving);
-    // Looking at a chat marks it seen; one that has moved on since, while
-    // you were elsewhere, carries the blue dot until you open it.
-    if (selected || !(item.id in seenChats)) markSeen(item.id, item.updatedAt);
-    const fresh = !selected && item.status === "completed" && seenChats[item.id] !== item.updatedAt;
-    return asks ? "warn" : working ? "working" : item.status === "failed" ? "bad" : fresh ? "acc" : "";
-  };
-  const tones = new Map(sessions.map((item) => [item.id, toneOf(item)] as const));
+  const tones = new Map(sessions.map((item) => [item.id, chatTone(item)] as const));
   // Drive's own chats stay off the list: its work unfolds from its line in
   // your chat and lands as a branch to review. One you open shows while open.
   // An empty chat is the composer itself, and the New chat row above already
@@ -775,22 +779,7 @@ function renderSidebar() {
     const buttons = [...nav.querySelectorAll<HTMLElement>(".sidebar-session")].filter(button => !button.closest("[hidden]"));
     (sameControl ?? (focused >= 0 ? buttons[Math.min(focused, buttons.length - 1)] : null) ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
   }
-  const title = document.getElementById("workspace-title");
-  if (title) { title.textContent = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "foundry" ? foundryOpen?.title ?? "Foundry" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen ? "All chats" : inSession() ? current?.title ?? "Conversation" : "Home"; title.title = title.textContent; }
-  // A mission's chat says where it came from, and goes back there.
-  const crumb = document.getElementById("workspace-from"), from = current && inSession() ? parentOf.get(current.id) : undefined;
-  if (crumb) {
-    crumb.hidden = !from || Boolean(pageOpen);
-    crumb.innerHTML = from ? `from ${btn("select-session", h(chatTitle(from)), { id: from }, "workspace-from-link")}` : "";
-  }
-  // Where an open chat lives: Just a chat, or its project.
-  const where = document.getElementById("workspace-where");
-  if (where) {
-    // The assistant's chat names the folders it may read instead.
-    const reads = inAssistant() ? state.assistant!.folders.map((name) => name[0]!.toUpperCase() + name.slice(1)) : [];
-    where.hidden = Boolean(pageOpen) || !inSession() || Boolean(from) || (inAssistant() && !reads.length);
-    where.textContent = inAssistant() ? `reads ${reads.join(", ")}` : plainNow ? "Just a chat" : projectLabel(projectWorkspace);
-  }
+  renderTabs();
   // The rail: a dot where something waits, a ring for Drive's progress.
   const badge = document.getElementById("rail-sessions-badge"), ring = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
   // Chats that need you: the rail's chats icon wears the amber ring, and
@@ -826,13 +815,6 @@ document.getElementById("sidebar-projects")?.addEventListener("keydown", (event)
     remove.click();
   }
 });
-/// The chat above or below the open one in the list, for Ctrl+Tab.
-function neighbourChat(step: number) {
-  const ids = [...document.querySelectorAll<HTMLElement>('#sidebar-projects .sidebar-session[data-action="select-session"]')].filter(row => !row.closest("[hidden]")).map((row) => JSON.parse(row.dataset.args ?? "{}").id as string).filter(Boolean);
-  if (!ids.length) return undefined;
-  const at = ids.indexOf(state?.session?.id ?? "");
-  return ids[at < 0 ? (step > 0 ? 0 : ids.length - 1) : (at + step + ids.length) % ids.length];
-}
 // Double-click a title to rename it in place: Enter or leaving the field
 // keeps it, Escape puts it back.
 // The first click opens the chat and redraws the row, so the second click
@@ -874,12 +856,18 @@ async function showGlance(row: HTMLElement) {
   }
   if (glanceRow !== row || !row.isConnected) return;
   const card = document.getElementById("sidebar-glance") ?? Object.assign(document.createElement("div"), { id: "sidebar-glance", role: "tooltip" });
-  const title = row.querySelector(".sidebar-session-name")?.textContent ?? "";
+  const title = row.querySelector(".sidebar-session-name, .bar-tab-name")?.textContent ?? "";
   card.innerHTML = glanceHTML(title, row.dataset.about ?? "", row.dataset.when ?? "", glance, (model) => modelWords({ id: model, displayName: models.find((item) => item.id === model)?.displayName }));
   document.body.append(card);
   const box = row.getBoundingClientRect(), side = document.getElementById("desktop-sidebar")?.getBoundingClientRect();
-  card.style.left = `${Math.round((side?.right ?? box.right) + 6)}px`;
-  card.style.top = `${Math.round(Math.max(8, Math.min(box.top - 6, innerHeight - card.offsetHeight - 8)))}px`;
+  // A tab's glance hangs under it; a row's sits beside the sidebar.
+  if (row.closest("#workspace-tabs")) {
+    card.style.left = `${Math.round(Math.max(8, Math.min(box.left, innerWidth - card.offsetWidth - 8)))}px`;
+    card.style.top = `${Math.round(box.bottom + 8)}px`;
+  } else {
+    card.style.left = `${Math.round((side?.right ?? box.right) + 6)}px`;
+    card.style.top = `${Math.round(Math.max(8, Math.min(box.top - 6, innerHeight - card.offsetHeight - 8)))}px`;
+  }
   row.setAttribute("aria-describedby", "sidebar-glance");
 }
 document.getElementById("desktop-sidebar")?.addEventListener("pointerover", (event) => {
@@ -891,6 +879,82 @@ document.getElementById("desktop-sidebar")?.addEventListener("pointerover", (eve
   glanceTimer = setTimeout(() => void showGlance(row), 450);
 });
 document.getElementById("desktop-sidebar")?.addEventListener("pointerleave", hideGlance);
+// The tabs glance the same way, except the one you're on.
+const tabStrip = document.getElementById("workspace-tabs");
+tabStrip?.addEventListener("pointerover", (event) => {
+  const row = (event.target as Element).closest<HTMLElement>(".bar-tab:not(.on) [data-updated]");
+  if (row === glanceRow) return;
+  hideGlance();
+  if (!row) return;
+  glanceRow = row;
+  glanceTimer = setTimeout(() => void showGlance(row), 450);
+});
+tabStrip?.addEventListener("pointerleave", hideGlance);
+// A middle click closes a tab.
+tabStrip?.addEventListener("auxclick", (event) => {
+  const id = (event.target as Element).closest<HTMLElement>(".bar-tab[data-tab]")?.dataset.tab;
+  if (event.button !== 1 || !id) return;
+  event.preventDefault();
+  void act(async () => closeTab(id));
+});
+// Double-click a tab's title to rename its chat: Enter or leaving keeps it,
+// Escape puts it back.
+tabStrip?.addEventListener("dblclick", (event) => {
+  const name = (event.target as Element).closest<HTMLElement>(".bar-tab[data-tab] .bar-tab-name");
+  const id = name?.closest<HTMLElement>(".bar-tab")?.dataset.tab;
+  if (!name || !id) return;
+  tabRenaming = id;
+  const input = Object.assign(document.createElement("input"), { className: "bar-tab-rename", value: name.textContent ?? "", maxLength: 200 });
+  input.setAttribute("aria-label", `Rename ${name.textContent ?? "chat"}`);
+  name.replaceWith(input);
+  input.focus();
+  input.select();
+  const done = (save: boolean) => {
+    if (tabRenaming !== id) return;
+    tabRenaming = null;
+    tabsSignature = "";
+    const title = input.value.trim(), was = state?.sessions.find((item) => item.id === id)?.title;
+    renderTabs();
+    if (save && title && title !== was) void act(() => api("rename", { id, title }));
+  };
+  input.addEventListener("keydown", (key) => {
+    if (key.key === "Enter" || key.key === "Escape") { key.preventDefault(); key.stopPropagation(); done(key.key === "Enter"); }
+  });
+  input.addEventListener("blur", () => done(true));
+});
+// Drag a tab along the bar to put it somewhere else.
+let tabDragged: string | null = null;
+tabStrip?.addEventListener("dragstart", (event) => {
+  const tab = (event.target as Element).closest<HTMLElement>(".bar-tab[data-tab]");
+  if (!tab || tabRenaming) { event.preventDefault(); return; }
+  tabDragged = tab.dataset.tab!;
+  hideGlance();
+  event.dataTransfer?.setData("text/plain", tab.textContent ?? "");
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  tab.classList.add("dragging");
+});
+tabStrip?.addEventListener("dragover", (event) => {
+  const over = (event.target as Element).closest<HTMLElement>(".bar-tab[data-tab]");
+  if (!tabDragged || !over) return;
+  event.preventDefault();
+  const box = over.getBoundingClientRect(), after = event.clientX > box.left + box.width / 2;
+  const to = tabs.ids.indexOf(over.dataset.tab!) + (after ? 1 : 0), from = tabs.ids.indexOf(tabDragged);
+  if (over.dataset.tab === tabDragged || to === from || to === from + 1) return;
+  tabs.move(tabDragged, to > from ? to - 1 : to);
+  tabsSignature = "";
+  renderTabs();
+  tabStrip.querySelector(`.bar-tab[data-tab="${CSS.escape(tabDragged)}"]`)?.classList.add("dragging");
+});
+tabStrip?.addEventListener("drop", (event) => event.preventDefault());
+tabStrip?.addEventListener("dragend", () => {
+  tabDragged = null;
+  tabStrip.querySelector(".bar-tab.dragging")?.classList.remove("dragging");
+});
+// The Mac's ⌘W comes from the menu.
+document.addEventListener("demesne:close-tab", () => {
+  if (state?.session && inSession() && !pageOpen && !inAssistant()) void act(async () => closeTab(state!.session!.id));
+  else void act(async () => closeTab(""));
+});
 document.addEventListener("pointerdown", hideGlance, true);
 document.getElementById("sidebar-projects")?.addEventListener("scroll", hideGlance, { passive: true });
 document.getElementById("sidebar-projects")?.addEventListener("submit", (event) => { event.preventDefault(); endRename(true); });
@@ -920,21 +984,6 @@ function undoDelete() {
   return true;
 }
 let statusSignature = "";
-/// What changed since the last commit, from the workspace file list.
-function workingChanges() {
-  const files = state?.files.filter((file) => file.status) ?? [];
-  return { files: files.length, added: files.reduce((sum, file) => sum + (file.additions ?? 0), 0), removed: files.reduce((sum, file) => sum + (file.deletions ?? 0), 0) };
-}
-/// The top bar's branch, with what changed since the last commit. With
-/// changes it is a button: one click asks for a commit and a PR, as a turn.
-function branchChip() {
-  const branch = state?.session?.workspace?.gitBranch;
-  if (!branch) return "";
-  const changes = workingChanges();
-  if (!changes.files) return `<span class="chip">⎇ ${h(branch)}</span>`;
-  const tip = `${changes.files === 1 ? "1 file" : `${changes.files} files`} changed · click to commit and open a PR`;
-  return `<button type="button" class="chip ship" data-action="ship" title="${h(tip)}">⎇ ${h(branch)}<span class="plus">+${changes.added}</span><span class="minus">−${changes.removed}</span></button>`;
-}
 const SHIP_PROMPT = "Commit these changes, push the branch, and open a pull request. If this is the default branch, make a new branch for them first.";
 /// The context ring's breakdown, unfolded above it until Esc or a click away.
 let contextCardOpen = false;
@@ -1138,8 +1187,6 @@ function renderStatus() {
     state.workspace,
     state.session?.title,
     state.session?.autoApprove,
-    state.session?.workspace?.gitBranch,
-    workingChanges(),
     state.runs.length,
     inSession(),
     driveWord(),
@@ -1167,11 +1214,12 @@ function renderStatus() {
   renderContextCard();
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("page-open", `${k("Tab")} settings`, { page: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
-  // The top bar carries the session's branch and ⋯, which opens the
-  // session's own view (rename, compact, history). The sidebar shows what
-  // needs you; Drive lives in its footer.
-  el("header").innerHTML =
-    `<div class="header-state">${pageOpen ? "" : branchChip()}${rimWords(rim)}</div>${driveWords(peek)}${inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : ""}`;
+  // The top bar is your tabs and ⋯, which opens the chat's own view
+  // (rename, compact, history). The open tab's dot carries the live state,
+  // and the rim's words are its tooltip.
+  rimNow = rim;
+  renderTabs();
+  el("header").innerHTML = inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : "";
 }
 /// Your plan's limit (pass 75 D): nothing under half; past it a small ring
 /// and the fuller window's percentage sit beside the model word, amber from
@@ -1249,11 +1297,6 @@ function approvalWords(tool: WorkspaceApproval) {
   const words = tool.name === "run_command" && argv ? `run ${argv}` : path ? `${/write|create/.test(tool.name) ? "write" : "edit"} ${path}` : tool.name.replaceAll("_", " ");
   return words ? `${words.length > 40 ? `${words.slice(0, 39)}…` : words}?` : "";
 }
-function rimWords(rim: Rim) {
-  if (!rim) return "";
-  // A dot, not the cube: the cube lives in the conversation, and only once.
-  return `<span class="header-live ${rim.kind}"><i aria-hidden="true"></i><span>${h(rim.words)}</span></span>`;
-}
 function applyRim(rim: Rim) {
   const app = el("app");
   for (const kind of ["work", "wait", "fail"]) app.classList.toggle(`rim-${kind}`, rim?.kind === kind);
@@ -1293,10 +1336,75 @@ function drivePeek(): Peek | null {
   const ready = jobs.find((job) => job.status === "ready" && !peekSeen.has(job.id));
   return ready ? { sessionId: ready.sessionId!, kind: "ready", words: `Ready · ${name(ready)}` } : null;
 }
-function driveWords(peek: Peek | null) {
-  if (!peek) return "";
-  const title = `${peek.words} · open Drive's chat`;
-  return `<button type="button" class="header-drive ${peek.kind}" data-action="select-session" data-args="${h(JSON.stringify({ id: peek.sessionId }))}" title="${h(title)}" aria-label="${h(title)}"><i aria-hidden="true"></i><span>${h(peek.words)}</span></button>`;
+/// The top bar's tabs (pass 101): the chats you keep open, each with the
+/// same dot as its sidebar row. Pointing at one shows its glance, a chat
+/// that needs you elsewhere calls you over, and Drive's work sits as a small
+/// pinned tab at the start. Pages, Home and the assistant show as the one
+/// tab you are on, until you leave them.
+const tabs = new OpenTabs((() => { try { return localStorage; } catch { return null; } })());
+let tabOn: string | null = null, tabClosed: string | null = null, tabRenaming: string | null = null, tabsSignature = "", rimNow: Rim = null;
+const ICON_DRIVE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/></svg>';
+/// Where a chat opens from the bar: in place, or by switching to its project.
+function chatTarget(id: string): [string, Record<string, unknown>] {
+  const item = state?.sessions.find((chat) => chat.id === id), project = item?.workspace;
+  const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace;
+  const driveBranch = [state?.breakage.fix, ...(state?.breakage.inbox ?? [])].some((job) => job?.sessionId === id);
+  return !project || project === here || driveBranch ? ["select-session", { id }] : ["project-session", { id, path: project }];
+}
+const goChat = (id: string): Promise<unknown> => { const [action, args] = chatTarget(id); return dispatch(action, args); };
+/// The chat that needs you, other than the one you're on.
+const waitingElsewhere = () => state?.sessions.find((item) => item.waiting && item.id !== state!.session?.id && !deletedSessions.has(item.id));
+function renderTabs() {
+  const strip = document.getElementById("workspace-tabs");
+  if (!strip || !state) return;
+  // While a tab's title is being renamed, the bar holds still.
+  if (tabRenaming && strip.querySelector(".bar-tab-rename")) return;
+  const current = state.session, sessions = state.sessions.filter((item) => !deletedSessions.has(item.id));
+  const byId = new Map(sessions.map((item) => [item.id, item] as const));
+  if (state.sessions.length) tabs.keep((id) => state!.sessions.some((item) => item.id === id));
+  const chatOpen = Boolean(current && inSession() && !pageOpen && !inAssistant());
+  // The tab just closed stays closed while its chat hands over.
+  if (current?.id !== tabClosed) tabClosed = null;
+  if (chatOpen && current!.id !== tabClosed && tabs.open(current!.id, tabOn)) tabsSignature = "";
+  if (chatOpen) tabOn = current!.id;
+  const peek = drivePeek(), call = waitingElsewhere();
+  const here = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "foundry" ? foundryOpen?.title ?? "Foundry" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen ? "All chats" : inAssistant() ? current?.title ?? "Assistant" : chatOpen ? "" : "New chat";
+  const shown = tabs.ids.filter((id) => byId.has(id));
+  const tones = shown.map((id) => chatTone(byId.get(id)!));
+  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, byId.get(id)!.updatedAt]), tones, chatOpen && current!.id, here, peek, call?.id, call?.title, rimNow?.words]);
+  if (signature === tabsSignature) return;
+  tabsSignature = signature;
+  const tab = (id: string, tone: string) => {
+    const item = byId.get(id)!, on = chatOpen && id === current!.id, title = item.title || "New chat", about = STATE_WORDS[tone] ?? "";
+    const [action, args] = chatTarget(id);
+    const tip = on && rimNow ? `${title} · ${rimNow.words}` : about ? `${title}, ${about}` : title;
+    return `<div class="bar-tab${on ? " on" : ""}" draggable="true" data-tab="${h(id)}"><button type="button" role="tab" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}"><span class="sidebar-session-mark ${tone}" aria-hidden="true"></span><span class="bar-tab-name"${on ? ' id="workspace-title"' : ""}>${h(title)}</span></button>${btn("tab-close", "×", { id }, "bar-tab-close").replace("<button ", `<button title="Close tab" aria-label="Close ${h(title)}" tabindex="-1" `)}</div>`;
+  };
+  // Drive's work, while it makes a branch elsewhere: a pinned tab with its
+  // icon and dot; green once it's ready. Opened, its chat becomes a tab.
+  const drive = peek && !shown.includes(peek.sessionId) ? `<button type="button" class="bar-tab-pin header-drive ${peek.kind}" data-action="select-session" data-args="${h(JSON.stringify({ id: peek.sessionId }))}" title="${h(`${peek.words} · open Drive's chat`)}" aria-label="${h(`${peek.words} · open Drive's chat`)}">${ICON_DRIVE}<i aria-hidden="true"></i></button>` : "";
+  const page = here ? `<div class="bar-tab on here"><span class="bar-tab-label" role="tab" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
+  const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";
+  strip.innerHTML = `${drive}${shown.map((id, index) => tab(id, tones[index]!)).join("")}${page}${btn("new-session", "+", {}, "bar-tab-new").replace("<button ", `<button title="New chat (${h(shortcut("Ctrl+T"))})" aria-label="Open a new chat" aria-keyshortcuts="Control+T Meta+T" `)}`;
+  const callSlot = document.getElementById("workspace-call");
+  if (callSlot) callSlot.innerHTML = callButton;
+  strip.querySelector(".bar-tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+/// Closes a tab; the one you were on hands over to its neighbour, or Home.
+function closeTab(id: string): Promise<unknown> | void {
+  if (!id) { if (pageOpen) return openPage(""); if (tabOn && tabs.has(tabOn)) return goChat(tabOn); return; }
+  const open = state?.session?.id === id && !pageOpen;
+  const next = tabs.close(id);
+  tabClosed = open ? id : null;
+  tabsSignature = "";
+  renderTabs();
+  if (open) return next ? goChat(next) : dispatch("new-session", {});
+}
+function reopenTab() {
+  const id = tabs.reopen((id) => Boolean(state?.sessions.some((item) => item.id === id)));
+  if (!id) return;
+  tabsSignature = "";
+  return goChat(id);
 }
 function totals(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
@@ -4759,6 +4867,7 @@ async function dispatch(
     renderContextCard();
   }
   if (action === "ship") return submitText(SHIP_PROMPT);
+  if (action === "tab-close") return closeTab(String(args.id ?? ""));
   if (action === "toggle-compacted-history" && state?.checkpoint) {
     const id = state.checkpoint.id;
     if (expandedCompactions.has(id)) expandedCompactions.delete(id); else expandedCompactions.add(id);
@@ -5745,11 +5854,36 @@ document.addEventListener("keydown", (event) => {
     search?.select();
     return;
   }
-  // Ctrl+Tab and Ctrl+Shift+Tab step through the chats in the sidebar.
+  // The tabs: Ctrl+Tab and Ctrl+Shift+Tab step through them, ⌘1–⌘8 go to
+  // one and ⌘9 to the last, ⌘T opens a new chat, ⌘W closes the tab (the
+  // Mac's comes from its menu), ⌘⇧T reopens it, and ⌘⇧A goes to the chat
+  // that needs you.
   if (event.ctrlKey && !event.metaKey && !event.altKey && key === "tab") {
-    const id = neighbourChat(event.shiftKey ? -1 : 1);
-    if (id && id !== state.session?.id) run(() => dispatch("select-session", { id }));
-    else event.preventDefault();
+    event.preventDefault();
+    const id = tabs.step(state.session?.id, event.shiftKey ? -1 : 1);
+    if (id && id !== state.session?.id) run(() => goChat(id));
+    return;
+  }
+  if (ctrl && !event.altKey && !event.shiftKey && /^[1-9]$/.test(key)) {
+    event.preventDefault();
+    const id = key === "9" ? tabs.ids.at(-1) : tabs.ids[Number(key) - 1];
+    if (id && id !== state.session?.id) run(() => goChat(id));
+    return;
+  }
+  if (ctrl && !event.altKey && key === "t") {
+    event.preventDefault();
+    run(() => event.shiftKey ? reopenTab() : dispatch("new-session", {}));
+    return;
+  }
+  if (ctrl && !event.altKey && !event.shiftKey && key === "w") {
+    event.preventDefault();
+    document.dispatchEvent(new Event("demesne:close-tab"));
+    return;
+  }
+  if (ctrl && event.shiftKey && !event.altKey && key === "a") {
+    event.preventDefault();
+    const call = waitingElsewhere();
+    if (call) run(() => goChat(call.id));
     return;
   }
   if (ctrl && !event.shiftKey && !event.altKey && key === "z" && !field && pendingDeletes.size) {

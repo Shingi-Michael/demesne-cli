@@ -33,7 +33,6 @@ body.desktop { overflow: hidden; }
 }
 .desktop-home-wordmark { color: var(--electric); font-weight: 500; }
 #desktop-toolbar header { flex: none; border: 0; padding: 0; gap: 0; }
-#desktop-toolbar .header-state { font-size: 12px; margin-right: 8px; }
 .desktop-home, .desktop-error { display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center; overflow: auto; padding: 40px; }
 .desktop-home-content, .desktop-error-content { width: 540px; max-width: 100%; padding: 20px 0; }
 .desktop-home-wordmark { display: inline-block; font-size: 15px; margin-bottom: 32px; }

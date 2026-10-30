@@ -732,6 +732,7 @@ export class DemesneStore {
     lastEventId: number;
     pendingPermissions: PendingPermissionSnapshot[];
     pendingQuestions: QuestionState[];
+    answeredQuestions: QuestionState[];
     latestProviderCall: ProviderCallSnapshot | null;
     checkpoint: SessionCheckpoint | null;
     rewinds: SessionRewindState[];
@@ -774,6 +775,7 @@ export class DemesneStore {
         checkpoint,
         rewinds: this.rewindStates(id),
         pendingQuestions: this.userQuestions.list(id),
+        answeredQuestions: this.userQuestions.answered(id),
         pendingPermissions: rows.map((row) => {
           const rule = derivePersistedRule(row.name, row.arguments_json);
           return {
@@ -1622,7 +1624,7 @@ export class DemesneStore {
 
   /// The row survives a window or daemon restart. Register the live waiter
   /// before publishing, so even an immediate answer cannot race registration.
-  requestQuestions(toolCallId: string, questions: UserQuestion[], mode: QuestionMode = "clarification", publish = true): { questionId: string; event: EventEnvelope } {
+  requestQuestions(toolCallId: string, questions: UserQuestion[], mode: QuestionMode = "clarification", publish = true, open = false): { questionId: string; event: EventEnvelope } {
     const questionId = crypto.randomUUID();
     const event = this.database.transaction(() => {
       const call = this.getToolCallOrThrow(toolCallId);
@@ -1630,7 +1632,7 @@ export class DemesneStore {
       const pending=this.userQuestions.list(turn.sessionId).filter(q=>q.turnId===turn.id);
       if(pending.some(q=>q.mode==="interview") || mode==="interview" && pending.length)
         throw new InvalidStateError("Answer the current interview question before asking another");
-      const state = this.userQuestions.create(questionId,turn.sessionId,turn.id,toolCallId,questions,mode);
+      const state = this.userQuestions.create(questionId,turn.sessionId,turn.id,toolCallId,questions,mode,open);
       return this.insertEvent("question.requested", turn.sessionId, turn.id, { questionId, toolCallId, questions, state }, new Date().toISOString());
     })();
     if (publish) this.eventSink?.(event);

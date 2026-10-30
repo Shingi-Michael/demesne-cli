@@ -4,7 +4,7 @@ import { parseUserQuestions, type QuestionState, type QuestionMode, type UserQue
 interface Row {
   id: string; session_id: string; turn_id: string; tool_call_id: string;
   questions: string; answers: string; mode: QuestionMode; status: QuestionState["status"];
-  draft: string; draft_version: number; revision: number; turn_status: string;
+  draft: string; draft_version: number; revision: number; turn_status: string; open: number;
 }
 export class QuestionStateError extends Error {}
 
@@ -19,6 +19,8 @@ export class QuestionRepository {
       status TEXT NOT NULL, draft TEXT NOT NULL DEFAULT '', draft_version INTEGER NOT NULL DEFAULT 0,
       revision INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
     ); CREATE INDEX IF NOT EXISTS user_questions_session ON user_questions(session_id, created_at);`);
+    if (!(db.query("PRAGMA table_info(user_questions)").all() as { name: string }[]).some((column) => column.name === "open"))
+      db.run("ALTER TABLE user_questions ADD COLUMN open INTEGER NOT NULL DEFAULT 0");
     if(importLegacy) {
       const rows=db.query(`SELECT e.session_id,e.turn_id,e.payload FROM events e JOIN tool_calls c
         ON c.id=json_extract(e.payload,'$.toolCallId') WHERE e.type='question.requested' AND c.status IN ('pending','running')
@@ -30,9 +32,9 @@ export class QuestionRepository {
       }
     }
   }
-  create(id: string, sessionId: string, turnId: string, toolCallId: string, questions: UserQuestion[], mode: QuestionMode): QuestionState {
-    this.db.query(`INSERT INTO user_questions (id,session_id,turn_id,tool_call_id,questions,mode,status,created_at)
-      VALUES (?,?,?,?,?,?,'waiting',?)`).run(id,sessionId,turnId,toolCallId,JSON.stringify(questions),mode,new Date().toISOString());
+  create(id: string, sessionId: string, turnId: string, toolCallId: string, questions: UserQuestion[], mode: QuestionMode, open = false): QuestionState {
+    this.db.query(`INSERT INTO user_questions (id,session_id,turn_id,tool_call_id,questions,mode,status,created_at,open)
+      VALUES (?,?,?,?,?,?,'waiting',?,?)`).run(id,sessionId,turnId,toolCallId,JSON.stringify(questions),mode,new Date().toISOString(),open ? 1 : 0);
     return this.get(id)!;
   }
   get(id: string): QuestionState | null {
@@ -47,11 +49,16 @@ export class QuestionRepository {
     return (this.db.query(`SELECT q.*,t.status AS turn_status FROM user_questions q JOIN turns t ON t.id=q.turn_id
       WHERE q.turn_id=? ORDER BY q.rowid`).all(turnId) as Row[]).map(row=>this.map(row));
   }
+  /// What the person already answered in this chat, for the folded "Asked" step.
+  answered(sessionId: string): QuestionState[] {
+    return (this.db.query(`SELECT q.*,t.status AS turn_status FROM user_questions q JOIN turns t ON t.id=q.turn_id
+      WHERE q.session_id=? AND q.status='answered' ORDER BY q.rowid`).all(sessionId) as Row[]).map(row=>this.map(row));
+  }
   private map(row: Row): QuestionState {
     return { id:row.id,sessionId:row.session_id,turnId:row.turn_id,toolCallId:row.tool_call_id,
       questions:JSON.parse(row.questions),answers:JSON.parse(row.answers),mode:row.mode,status:row.status,
       draft:row.draft,draftVersion:row.draft_version,revision:row.revision,
-      interrupted: !["queued","running"].includes(row.turn_status) };
+      interrupted: !row.open && !["queued","running"].includes(row.turn_status), ...(row.open ? { open: true } : {}) };
   }
   change(id: string, action: QuestionActionRequest): QuestionState {
     return this.db.transaction(() => {
@@ -86,19 +93,20 @@ export class QuestionRepository {
     return this.get(id)!;
   }
   pauseTurn(turnId: string): QuestionState[] {
-    this.db.query("UPDATE user_questions SET status='paused',revision=revision+1 WHERE turn_id=? AND status='waiting'").run(turnId);
+    this.db.query("UPDATE user_questions SET status='paused',revision=revision+1 WHERE turn_id=? AND status='waiting' AND open=0").run(turnId);
     return (this.db.query(`SELECT q.*,t.status AS turn_status FROM user_questions q JOIN turns t ON t.id=q.turn_id
       WHERE q.turn_id=? AND q.status='paused'`).all(turnId) as Row[]).map(row=>this.map(row));
   }
   recover(): void {
-    this.db.query(`UPDATE user_questions SET status='cancelled',draft='',revision=revision+1 WHERE status IN ('waiting','paused')
+    // An open question outlives its turn: the answer starts the next one.
+    this.db.query(`UPDATE user_questions SET status='cancelled',draft='',revision=revision+1 WHERE status IN ('waiting','paused') AND open=0
       AND EXISTS(SELECT 1 FROM turns t WHERE t.id=user_questions.turn_id AND t.status IN ('cancelled','completed'))`).run();
     // A crash can land after answers commit but before their tool result does.
     // Keep those answers resumable instead of losing them from model history.
-    this.db.query(`UPDATE user_questions SET status='paused',revision=revision+1 WHERE status='answered'
+    this.db.query(`UPDATE user_questions SET status='paused',revision=revision+1 WHERE status='answered' AND open=0
       AND EXISTS(SELECT 1 FROM turns t WHERE t.id=user_questions.turn_id AND t.status='interrupted')
       AND NOT EXISTS(SELECT 1 FROM tool_calls c JOIN model_messages m ON m.turn_id=c.turn_id
         AND m.tool_call_id=c.provider_tool_call_id AND m.role='tool' WHERE c.id=user_questions.tool_call_id)`).run();
-    this.db.query("UPDATE user_questions SET status='paused',revision=revision+1 WHERE status='waiting'").run();
+    this.db.query("UPDATE user_questions SET status='paused',revision=revision+1 WHERE status='waiting' AND open=0").run();
   }
 }

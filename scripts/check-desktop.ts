@@ -188,12 +188,17 @@ const f = await fixture({
       yield { type: "finish", reason: "stop" };
       return;
     }
+    if (typeof user === "string" && user.startsWith('Answer to your question "Which direction')) {
+      yield { type: "text_delta", delta: "Scoping the test job then." };
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
     if (user === askPrompt) {
       if (askRound++ === 0) {
         yield { type: "tool_call_delta", index: 0, idDelta: "desktop-ask", nameDelta: "ask_user", argumentsDelta: JSON.stringify({ questions: [{ question: "Which direction do you want to take the CI failure now?", reason: "The last turn ended with a plan; I need your steer before acting.", suggestions: ["Scope the test job", "Fix the typecheck", "Paste the logs first"] }] }) };
         yield { type: "finish", reason: "tool_calls" };
       } else {
-        yield { type: "text_delta", delta: "Scoping the test job then." };
+        yield { type: "text_delta", delta: "Everything left depends on your pick." };
         yield { type: "finish", reason: "stop" };
       }
       return;
@@ -1365,8 +1370,9 @@ try {
   await page.locator("textarea").press("Enter");
   await textIncludes("I'll ask Claude Code before changing notes.ts.");
   assert.equal(readFileSync(join(f.workspace, "notes.ts"), "utf8"), "export const note = 'theirs';\n", "Enter asks first and leaves the other agent's change");
-  // The model's question is its next line in the conversation, with its
-  // suggestions as answers to pick; no step row and no "interview".
+  // The model's question is a card in the conversation at the step that
+  // asked it, with its suggestions as answers to pick; no step row and no
+  // "interview". The turn carries on, and the composer stays a composer.
   await desktop!.evaluate(({ Notification }) => {
     (globalThis as any).banners = [];
     Notification.isSupported = () => true;
@@ -1374,32 +1380,36 @@ try {
   });
   await page.evaluate(() => { document.hasFocus = () => false; });
   await type(askPrompt);
-  const ask = page.locator("#stage .ask-q");
+  const ask = page.locator("#stage .ask-card");
   await until(() => ask.isVisible(), "the question shows in the conversation", 20_000);
   await until(() => desktop!.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body === "Has a question for you")), "a question notifies while unfocused");
+  // The turn carries on past the question and ends on its own.
+  await textIncludes("Everything left depends on your pick.");
+  await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the asking turn has ended");
+  await page.waitForTimeout(300);
   await desktop!.evaluate(() => { (globalThis as any).banners = []; });
   await page.evaluate(() => { document.hasFocus = () => true; });
   assert.equal(await page.locator(".tool-row", { hasText: "ask_user" }).count(), 0, "no step row names the tool");
   assert(!(await page.locator("#stage").innerText()).toLowerCase().includes("interview"), "nothing says interview");
   assert.equal(await ask.locator(".ask-choice").count(), 3, "the suggestions are answers to pick");
-  assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Answer, or pick one above…");
+  assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Reply… the question stays in the chat");
   await page.waitForTimeout(500);
   await capture("13-question");
   assert(await page.evaluate(() => { const stage = document.getElementById("stage")!; return stage.scrollWidth <= stage.clientWidth && stage.scrollLeft === 0; }), "the question never pushes the chat sideways");
   assert(!(await page.locator("#briefing").innerText()).includes("Discarded"), "Drive's line only says what Drive is doing");
-  // Typing an answer sends drafts to the daemon; the tile holds still under them.
-  await page.evaluate(() => document.querySelector("#stage .ask-q")!.setAttribute("data-held", "1"));
+  // Typing in the composer is a message, not an answer; the card holds still.
+  await page.evaluate(() => document.querySelector("#stage .ask-card")!.setAttribute("data-held", "1"));
   await page.locator("textarea").pressSequentially("war", { delay: 40 });
-  await until(() => evaluate<string>("return window.demesneInspect?.().host.questionDraft;").then(draft => draft === "war"), "the draft reaches the daemon");
-  await page.waitForTimeout(200);
-  assert.equal(await ask.getAttribute("data-held"), "1", "typing an answer never redraws the question");
+  await page.waitForTimeout(300);
+  assert.equal(await ask.getAttribute("data-held"), "1", "typing never redraws the question");
+  assert.equal(await evaluate<string>("return window.demesneInspect?.().host.questionDraft ?? '';"), "", "the composer doesn't answer an open question");
   await page.locator("textarea").fill("");
-  await until(() => evaluate<string>("return window.demesneInspect?.().host.questionDraft;").then(draft => draft === ""), "clearing the answer clears the draft");
   await page.locator("textarea").press("1");
   await textIncludes("Scoping the test job then.");
+  await until(() => page.locator("#stage .ask-asked", { hasText: "Scope the test job" }).first().isVisible(), "the answered question folds into one Asked line");
   await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the focused answer has completed");
   await page.waitForTimeout(300);
-  assert.equal(await desktop!.evaluate(() => (globalThis as any).banners.length), 0, "focused completion does not notify");
+  assert.deepEqual(await desktop!.evaluate(() => (globalThis as any).banners), [], "focused completion does not notify");
   await page.evaluate(() => { delete (document as any).hasFocus; });
   // Enter while it works steers it: the words wait faintly at the end of the
   // guide, then sit where the model read them, in the same turn.

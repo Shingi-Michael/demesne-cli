@@ -4,6 +4,10 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ## [Unreleased]
 
+### Changed
+
+- The agent's questions live in the chat and no longer stop it: a clarification is a card at the step that asked it, and the agent keeps doing whatever doesn't depend on the answer. Answers are picked in the card (with what each choice means, several at once where the question allows, or your own words in its field); the composer stays a composer. The answer reaches a running turn after its current step, or starts the next one, and the question folds into one "✓ Asked · question · answer" line. The card springs in word by word (anime.js), amber only on its ring, top edge and suggested answer. Interviews such as `/themefy` still wait for each answer.
+
 ### Fixed
 
 - The assistant's chat no longer shows Drive: no "Drive is choosing the first step…" in an empty chat, no Drive word in its title bar, no Drive line or branch notes, and the model there is told nothing of Drive.

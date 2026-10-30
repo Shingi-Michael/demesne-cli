@@ -7,6 +7,7 @@ import {
   type Turn,
   type ProviderCallSnapshot,
   type UserQuestion,
+  type UserAnswer,
   type QuestionState,
   type TurnAttachment,
   type NearbyAgent,
@@ -80,6 +81,8 @@ export class WorkspaceSession {
   provider: ProviderCallSnapshot | null;
   approvals = new Map<string, WorkspaceApproval>();
   questions = new Map<string, WorkspaceQuestion>();
+  /// Answered questions by the step that asked them, for its folded line.
+  answered = new Map<string, { questions: UserQuestion[]; answers: UserAnswer[] }>();
   private journals = new Map<string, ReplayEvent[]>();
   private cache = new Map<string, WorkspaceRun>();
   constructor(
@@ -115,11 +118,13 @@ export class WorkspaceSession {
           allowedBefore: item.allowedBefore ?? 0,
         });
     for (const [id, question] of this.questions)
-      if (!this.isActive(question.turnId)) this.questions.delete(id);
+      if (!question.open && !this.isActive(question.turnId)) this.questions.delete(id);
     if (state.pendingQuestions) {
       this.questions.clear();
       for (const question of state.pendingQuestions) this.questions.set(question.id,question);
     }
+    for (const question of state.answeredQuestions ?? [])
+      this.answered.set(question.toolCallId, { questions: question.questions, answers: question.answers });
   }
   get session() {
     return this.state.session;
@@ -211,7 +216,7 @@ export class WorkspaceSession {
         for (const [id, item] of this.approvals)
           if (item.turnId === turn.id) this.approvals.delete(id);
         for (const [id, item] of this.questions)
-          if (item.turnId === turn.id && item.status !== "paused") this.questions.delete(id);
+          if (item.turnId === turn.id && item.status !== "paused" && !item.open) this.questions.delete(id);
       }
     }
     if (event.type === "model.request_started")
@@ -299,6 +304,10 @@ export class WorkspaceSession {
     if (event.type === "question.updated" && isRecord(p.state)) {
       const current=this.questions.get(String(p.questionId));
       if (current) this.questions.set(current.id,{...current,...p.state} as WorkspaceQuestion);
+    }
+    if (event.type === "question.resolved") {
+      const asked = this.questions.get(String(p.questionId));
+      if (asked && Array.isArray(p.answers)) this.answered.set(asked.toolCallId, { questions: asked.questions, answers: p.answers as UserAnswer[] });
     }
     if (event.type === "question.resolved" || event.type === "question.cancelled")
       this.questions.delete(String(p.questionId));

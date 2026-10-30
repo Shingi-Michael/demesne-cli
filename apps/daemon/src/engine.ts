@@ -52,6 +52,9 @@ interface AgentEngineOptions extends AgentConfig {
   /// Lets `ask_user` wait on the person at the terminal. Without it the tool
   /// is not offered, as in non-interactive (`deny`) turns.
   questions?: QuestionBroker;
+  /// Answers to open questions that reached a turn as it finished: the
+  /// caller hands them to the next turn instead.
+  lateAnswers?: (sessionId: string, turnId: string, texts: string[]) => void;
   themes?: ThemeStore;
   providerVision?: boolean;
   providerFirstEventTimeoutMs?: number;
@@ -168,7 +171,9 @@ export class AgentEngine {
     } finally {
       // Words that arrived too late stay with the window, which sends them next.
       this.running.delete(turnId);
+      const late = (this.steers.get(turnId) ?? []).filter((steer) => steer.id.startsWith("answer:"));
       this.steers.delete(turnId);
+      if (late.length && sessionId) this.options.lateAnswers?.(sessionId, turnId, late.map((steer) => steer.text));
       if (sessionId) for (const item of used) await item.release?.(sessionId);
     }
   }
@@ -883,7 +888,7 @@ export class AgentEngine {
           const answers = await waiting;
           this.store.resolveQuestions(questionId, toolCallId, answers);
           return answers;
-        } } : {}) });
+        }, post: (asked: UserQuestion[]) => { this.store.requestQuestions(toolCallId, asked, "clarification", true, true); } } : {}) });
       let result = typeof output === "string" ? output : output.text;
       if (typeof output !== "string") {
         for (const [index, image] of output.images.entries()) {

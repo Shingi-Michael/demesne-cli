@@ -2,7 +2,7 @@ import { collectDriveReview } from "./drive-review.ts";
 import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
 import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
-import type { AssistantResponse, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
+import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize } from "./artifacts.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "./foundry.ts";
 import {
@@ -204,22 +204,12 @@ export function createDaemonApp(options: {
     report: (sessionId, content) => {
       // A short turn in the person's own chat: no thinking, and no tool runs
       // without asking. It waits for a turn already running there.
-      const deliver = () => {
-        const session = store.getSession(sessionId);
-        if (!session || closing) return;
-        if (session.turns.some((turn) => turn.status === "queued" || turn.status === "running")) {
-          const unsubscribe = hub.subscribe(sessionId, () => {
-            if (store.getSession(sessionId)?.turns.some((turn) => turn.status === "queued" || turn.status === "running")) return;
-            unsubscribe(); deliver();
-          });
-          return;
-        }
+      whenIdle(sessionId, () => {
         try {
           const { turn } = store.createTurn(sessionId, content, "deny", false, false);
           void queueTurn(turn, snapshotTurnInference(processor, false));
         } catch (error) { console.warn(`Couldn't report the Drive mission: ${error instanceof Error ? error.message : error}`); }
-      };
-      deliver();
+      });
     },
     turn: (turnId) => store.getTurn(turnId),
     cancel: (turnId) => {
@@ -368,6 +358,7 @@ export function createDaemonApp(options: {
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
       sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
       assistantChat: (sessionId: string) => sessionId === assistantChat.existing(),
+      lateAnswers: (sessionId: string, turnId: string, texts: string[]) => void answerTurn(sessionId, turnId, texts.join("\n"), undefined),
       ...(heartbeat ? { agentsIn: (workspaceRoot: string) => heartbeat.agentsIn(workspaceRoot) } : {}),
       ...options.agent,
     },
@@ -624,6 +615,38 @@ export function createDaemonApp(options: {
     const { rewind, event } = store.recordRewind(sessionId, cut, plan, ran);
     const response: RewindResponse = { rewindId: rewind.id, files: plan.map((file) => file.path), commands: ran };
     return json({ ...response, eventId: event.eventId });
+  }
+
+  /// Runs `start` once the chat has no turn queued or running.
+  function whenIdle(sessionId: string, start: () => void): void {
+    const busy = () => store.getSession(sessionId)?.turns.some((turn) => turn.status === "queued" || turn.status === "running") ?? false;
+    if (!store.getSession(sessionId) || closing) return;
+    if (!busy()) return start();
+    const unsubscribe = hub.subscribe(sessionId, () => {
+      if (busy()) return;
+      unsubscribe(); whenIdle(sessionId, start);
+    });
+  }
+
+  /// An open question's answer: the chat's running turn reads it after its
+  /// current step; with nothing running, it starts the next turn.
+  function deliverAnswer(state: QuestionState, inference: TurnInference | undefined): { turnId?: string; eventId?: number } {
+    const text = state.questions.map((q, index) => `Answer to your question "${q.question}": ${state.answers[index]?.answer ?? "skipped, no preference given"}`).join("\n");
+    const running = store.getSession(state.sessionId)?.turns.find((item) => item.status === "running");
+    if (running && running.kind !== "themefy" && running.kind !== "compaction" && engine.steer(running.id, { id: `answer:${state.id}`, text })) return { turnId: running.id };
+    return answerTurn(state.sessionId, state.turnId, text, inference);
+  }
+  function answerTurn(sessionId: string, askedIn: string, text: string, inference: TurnInference | undefined): { turnId?: string; eventId?: number } {
+    const asked = store.getTurn(askedIn);
+    let started: { turnId?: string; eventId?: number } = {};
+    whenIdle(sessionId, () => {
+      try {
+        const next = store.createTurn(sessionId, text, asked?.permissionMode ?? "ask", asked?.thinkingEnabled ?? undefined, asked?.planOnly ?? false);
+        void queueTurn(next.turn, inference ?? snapshotTurnInference(processor, asked?.thinkingEnabled ?? undefined));
+        started = { turnId: next.turn.id, eventId: next.event.eventId };
+      } catch (error) { console.warn(`Couldn't hand the answer to the agent: ${error instanceof Error ? error.message : error}`); }
+    });
+    return started;
   }
 
   /// Steer: the running turn reads these words after its current step.
@@ -1369,15 +1392,15 @@ export function createDaemonApp(options: {
         if (!pending) return apiError("not_found","Question not found",404);
         if (!["waiting","paused"].includes(pending.status)) return apiError("invalid_state","This question is already closed",409);
         const original=store.getTurn(pending.turnId)!;
-        const live=questions.has(id);
-        if (!live && ["queued","running"].includes(original.status)) return apiError("invalid_state","The question is not ready to receive an answer",409);
+        const live=questions.has(id), open=pending.open === true;
+        if (!live && !open && ["queued","running"].includes(original.status)) return apiError("invalid_state","The question is not ready to receive an answer",409);
         const action=isRecord(input) && input.answers === undefined ? parseQuestionActionRequest(input) : undefined;
         const legacy=action ? undefined : parseAnswerQuestionsRequest(input);
         const finishing=legacy !== undefined || action?.action === "answer" && pending.answers.length+1 === pending.questions.length
           || action?.action === "resume" && pending.answers.length === pending.questions.length;
         const otherPending=store.userQuestions.list(pending.sessionId).some(q=>q.turnId===pending.turnId && q.id!==id);
         let resumeInference:TurnInference | undefined;
-        if(!live && finishing && !otherPending) {
+        if(!live && finishing && (open || !otherPending)) {
           try {resumeInference=snapshotTurnInference(processor,original.thinkingEnabled ?? undefined);}
           catch(error){return apiError("not_supported",`Select an available model before resuming: ${error instanceof Error?error.message:"model unavailable"}`,400);}
         }
@@ -1397,6 +1420,8 @@ export function createDaemonApp(options: {
             questions.resume(id);
             if(state.answers.length < state.questions.length)return json({question:state},202);
           }
+          // Dismissing an open question leaves the agent's work running.
+          if (action.action === "cancel" && open) return json({question:state},202);
           if (action.action === "cancel") {
             store.cancelQuestions(pending.turnId);
             const controller=activeControllers.get(pending.turnId);
@@ -1416,6 +1441,7 @@ export function createDaemonApp(options: {
           if (!questions.resolve(id,state.answers)) throw new InvalidStateError("Question waiter could not consume the answers");
           return json({question:state},202);
         }
+        if (open) return json({question:state,...deliverAnswer(state,resumeInference)},202);
         if(otherPending)return json({question:state},202);
         // The old model turn was interrupted on daemon shutdown. Resume from
         // saved history only after the person explicitly finishes answering.
@@ -1587,7 +1613,7 @@ export function createDaemonApp(options: {
       for (const [turnId, controller] of activeControllers) {
         const turn = store.getTurn(turnId);
         if (turn?.status === "queued" || turn?.status === "running") {
-          const waiting=store.userQuestions.list(turn.sessionId).some(q=>q.turnId===turnId);
+          const waiting=store.userQuestions.list(turn.sessionId).some(q=>q.turnId===turnId && !q.open);
           if (waiting) { store.pauseQuestions(turnId); store.interruptTurn(turnId,"Question interview paused for daemon shutdown"); }
           else store.cancelTurn(turnId);
         }

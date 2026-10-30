@@ -26,6 +26,7 @@ import { FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FoundryPane } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
+import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
@@ -37,7 +38,7 @@ import { pullRequestNews, type SessionPullRequest } from "../../../packages/prot
 import { PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, PLAN_LIMIT_SHOWN, planUsed, planWindows } from "@demesne/protocol";
 import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.ts";
 import type { WorkspaceHost } from "./host.ts";
-import type { WorkspaceRun, WorkspaceApproval } from "./session-model.ts";
+import type { WorkspaceRun, WorkspaceApproval, WorkspaceQuestion } from "./session-model.ts";
 import { chatChanges, chatServers, contextInUse } from "./cards.ts";
 import type {
   ToolEntry,
@@ -317,7 +318,6 @@ let compactionCard: HTMLElement | null = null;
 let compactionCardSignature = "";
 let overlaySignature = "",
   approvalSignature = "",
-  questionSignature = "",
   heroSignature = "";
 const diffCache = new Map<string, { added: number; removed: number }>();
 /// The last few requests and how they ended, for demesneInspect.
@@ -1109,7 +1109,7 @@ function renderStatus() {
     last = state.runs.at(-1),
     phase = state.approvals.length
       ? "approval"
-      : state.questions.length
+      : pendingQuestion()
         ? "waiting"
         : state.activeTurnId
           ? "running"
@@ -1408,9 +1408,27 @@ const foldable = (tool: ToolEntry) =>
   (tool.phase === "change" && tool.state !== "running" && !tool.drafting && (Boolean(tool.changes?.length) || Boolean(tool.diff))) ||
   (tool.name === "run_command" && !tool.waiting && !tool.drafting && Boolean(tool.toolCallId)) ||
   (tool.name === "subagent" && !tool.drafting && Boolean(tool.toolCallId));
+/// A turn the answer to an open question started reads as that answer,
+/// not as a message you typed.
+function answerAsked(run: WorkspaceRun) {
+  const lines = run.content.split("\n").map((line) => /^Answer to your question "(.*)": (.*)$/.exec(line));
+  if (!lines.length || lines.some((line) => !line)) return null;
+  return `<div class="request-asked">${askedLine({ questions: lines.map((line) => ({ question: line![1]! })), answers: lines.map((line) => ({ answer: line![2]! })) })}</div>`;
+}
+/// "✓ Asked · where to cache · On disk": a question once it's answered.
+function askedLine(asked: { questions: { question: string }[]; answers: { answer: string | null }[] }) {
+  const pairs = asked.questions.map((q, n) => `<span class="ask-q-was">${h(q.question)}</span><span class="ask-a">${h(asked.answers[n]?.answer ?? "Let it decide")}</span>`).join('<span class="ask-sep">·</span>');
+  return `<div class="tool-row ask-asked"><span class="ask-tick" aria-hidden="true">✓</span><b>Asked</b>${pairs}</div>`;
+}
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
-  // A question still waiting is asked at the end of the conversation, not as a step.
-  if (tool.name === "ask_user" && (tool.state === "running" || tool.waiting || tool.drafting)) return "";
+  // An open question is a card at its step; one the turn waits on is asked
+  // at the end of the conversation; an answered one folds into one line.
+  if (tool.name === "ask_user") {
+    if (tool.toolCallId && state?.questions.some((q) => q.open && q.toolCallId === tool.toolCallId)) return `<div class="ask-slot" data-ask-slot="${h(tool.toolCallId)}"></div>`;
+    if (tool.state === "running" || tool.waiting || tool.drafting) return "";
+    const asked = tool.toolCallId ? state?.answered[tool.toolCallId] : undefined;
+    if (asked) return askedLine(asked);
+  }
   const key = `${run.id}:${tool.id}`, open = stepOpen.has(key), canFold = foldable(tool);
   const now = tool.state === "running" || tool.drafting, served = serving(tool)?.serves;
   const meta = served ? `<span class="pv-live" aria-hidden="true"></span>${h(new URL(served).host)}` : tool.waiting
@@ -1715,7 +1733,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   const latestTool = items.findLast(
       (tool) => tool.state === "running" || tool.waiting,
     ),
-    phase = state!.questions.length
+    phase = pendingQuestion()
       ? "Waiting for your answer · "
       : latestTool?.waiting
         ? latestTool.name === "run_command" ? "Waiting for your approval" : "Waiting for your approval · "
@@ -1727,7 +1745,7 @@ function runHTML(run: WorkspaceRun, index: number) {
             ? latestTool.name === "run_command" ? "Running command" : `${verb(latestTool)} `
             : "Thinking";
   // The live thinking row already says "Thinking"; don't repeat it here.
-  const thinkingLive = run.entries.at(-1)?.type === "reasoning" && !latestTool && !state!.questions.length;
+  const thinkingLive = run.entries.at(-1)?.type === "reasoning" && !latestTool && !pendingQuestion();
   const trail = "";
   const activity = live && !thinkingLive && !(latestTool && !latestTool.drafting)
     ? `<div class="live-activity">${spinner()}${shine(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + "…")}</div>`
@@ -1739,7 +1757,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     ? `<div class="request-att">${run.attachments.map((image) => attachmentPreviews.has(image.id)
       ? `<img src="${attachmentPreviews.get(image.id)}" alt="${h(image.filename)}" title="${h(image.filename)}">`
       : `<span class="att-name" title="${h(`${image.width}×${image.height}`)}">${h(image.filename)}</span>`).join("")}</div>` : "";
-  const request = mailRequest(run) ?? driveReport(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+  const request = answerAsked(run) ?? mailRequest(run) ?? driveReport(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
   const review = reviewOpen.has(run.id) && !live ? reviewHTML(run.id) : "";
   const day = assistantDay(run, index);
   return `${day ? `<div class="day-line"><span>${h(day)}</span></div>` : ""}${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}${activity}</div>${queued}`;
@@ -2087,6 +2105,7 @@ function renderConversation() {
   const writing = state.activeTurnId ? state.runs.find((run) => run.id === state!.activeTurnId) : undefined;
   pane.making(writing && writing.status === "running" ? makingTitle(tools(writing)) : null);
   if (changed) pane.refresh([...runNodes.values()].flatMap((item) => item.artifacts.artifacts));
+  if (changed) placeQuestions();
   if (changed) {
     if (liveBefore) stage.scrollTop = stage.scrollHeight;
     else stage.scrollTop = top;
@@ -2649,7 +2668,10 @@ let composerSignature = "",
 let composerSlot = "chat", questionDraftVersion = 0;
 let answeringQuestion = false;
 let composerSession: string | null = null, heldChatDraft: string | null = null;
-function pendingQuestion() { return state?.questions[0]; }
+/// The question the turn waits on, which the composer answers. An open
+/// question doesn't hold the composer: you answer it in its card.
+function pendingQuestion() { return state?.questions.find((q) => !q.open); }
+const questionById = (id: unknown) => state?.questions.find((q) => q.id === id);
 function questionIndex() { return pendingQuestion()?.answers?.length ?? 0; }
 function replyCacheKey(id: string,index: number) { return `demesne-question-draft:${id}:${index}`; }
 function cachedReply(id: string,index: number): {text:string;version:number} | null {
@@ -2659,22 +2681,23 @@ function cachedReply(id: string,index: number): {text:string;version:number} | n
   } catch { return null; }
 }
 function clearReply(id: string,index: number) { try { localStorage.removeItem(replyCacheKey(id,index)); } catch {} }
-async function questionAction(action: "pause" | "resume" | "cancel") {
-  const q=pendingQuestion(); if(!q)return;
+async function questionAction(action: "pause" | "resume" | "cancel", q = pendingQuestion()) {
+  if(!q)return;
   const index=q.answers?.length ?? 0;
   clearTimeout(draftTimer);
   const result=await api("question-action",{id:q.id,action:{action,revision:q.revision ?? 0}});
   if(action === "cancel")clearReply(q.id,index);
   return result;
 }
-async function answerQuestion(value: string | null, source: "typed" | "suggestion" | "skipped" = "typed") {
-  const q=pendingQuestion(); if(!q || (source !== "skipped" && !value?.trim()) || answeringQuestion)return;
+async function answerQuestion(value: string | null, source: "typed" | "suggestion" | "skipped" = "typed", q = pendingQuestion()) {
+  if(!q || (source !== "skipped" && !value?.trim()) || answeringQuestion)return;
   clearTimeout(draftTimer);
-  const key=`${q.id}:${questionIndex()}`;
+  const index=q.answers?.length ?? 0, key=`${q.id}:${index}`;
   answeringQuestion=true;renderComposer();
   try {
-    await api("question-action",{id:q.id,action:{action:"answer",index:questionIndex(),revision:q.revision ?? 0,
+    await api("question-action",{id:q.id,action:{action:"answer",index,revision:q.revision ?? 0,
       answer:{source,answer:source === "skipped" ? null : value!.trim()}}});
+    questionPicks.delete(q.id);
     clearReply(q.id,q.answers?.length ?? 0);
     if (composerSlot===key) editor.value="";
   } finally { answeringQuestion=false;renderComposer(); }
@@ -2877,7 +2900,9 @@ function renderComposer() {
     : question
     ? answered ? "Your answers are saved. Choose Resume to continue." : question.status === "paused" ? "Type your answer to carry on…" : question.questions[questionIndex()]?.suggestions?.length ? "Answer, or pick one above…" : "Type your answer…"
     : inSession()
-    ? state.activeTurnId
+    ? state.questions.length
+      ? "Reply… the question stays in the chat"
+      : state.activeTurnId
       ? "Steer it while it works…"
       : suggestion ? `${suggestion}   ⇥ Tab` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
     : driveSuggestion() ? `Drive suggests: ${driveSuggestion()}   ⇥ Tab` : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
@@ -3066,32 +3091,114 @@ function branchNote() {
   if (!message) return "";
   return `<p class="bf-msg ${message.tone}"><span class="bf-dot ${message.tone === "ok" ? "ok" : "bad"}" aria-hidden="true"></span><span>${h(message.text)}</span>${message.url ? btn("breakage-open", "Open ›", {}, "link") : ""}${btn("breakage-close", "×", {}, "bf-x").replace("<button ", '<button aria-label="Dismiss" ')}</p>`;
 }
+/// The agent's questions, each a card in the conversation at the step that
+/// asked it (pass 99). A card is drawn once per question and per answer, then
+/// only moved: the conversation redraws its runs often, and a redraw would
+/// replay the card's entrance and drop what you were typing in it.
+const questionCards = new Map<string, { node: HTMLElement; signature: string }>();
+const questionPicks = new Map<string, Set<number>>();
+let questionChat = "", questionChatAt = 0;
+const SNAP = spring({ stiffness: 150, damping: 14 });
+function snap(targets: Element | Element[] | NodeListOf<Element> | null | undefined, values: Record<string, unknown>) {
+  const list = !targets ? [] : targets instanceof Element ? [targets] : [...targets];
+  if (!list.length || reducedMotion()) return;
+  animate(list, { ease: SNAP, ...values });
+}
+function questionCard(question: WorkspaceQuestion): string {
+  const index = question.answers?.length ?? 0, total = question.questions.length;
+  const answered = index >= total, item = question.questions[Math.min(index, total - 1)]!;
+  const paused = question.status === "paused", interview = question.mode === "interview";
+  const id = question.id, picks = questionPicks.get(id) ?? new Set<number>();
+  const tag = question.open ? "The agent asks · it keeps working meanwhile" : interview ? "The agent asks" : "The agent is waiting on you";
+  const trail = question.questions.slice(0, Math.min(index, total)).map((asked, n) =>
+    `<li><span>${h(asked.question)}</span><b>${h(question.answers?.[n]?.answer ?? "Let it decide")}</b></li>`).join("");
+  const choices = answered ? [] : item.suggestions ?? [];
+  const words = h(item.question).split(" ").map((word) => `<span class="w">${word} </span>`).join("");
+  const choice = (label: string, n: number) => btn(item.multiple ? "question-toggle" : "question-pick",
+    `<kbd>${n + 1}</kbd><span class="tx"><b>${h(label)}</b>${item.details?.[n] ? `<span>${h(item.details[n]!)}</span>` : ""}</span>${n === 0 && choices.length > 1 ? '<span class="rec">Suggested</span>' : ""}`,
+    { id, n, text: label }, `ask-choice${picks.has(n) ? " on" : ""}`).replace("<button ", `<button aria-pressed="${item.multiple ? picks.has(n) : false}" `);
+  const own = answered ? "" : `<label class="ask-own"><input data-ask-own="${h(id)}" maxlength="2000" placeholder="${choices.length ? "Or type your own answer" : "Type your answer"}" aria-label="Your own answer">${btn("question-own", "↵", { id }, "ask-send")}</label>`;
+  const foot = answered || paused
+    ? `<span>${answered ? "Answered" : "Paused"}</span>${btn("question-control", "Resume", { id, action: "resume" }, "ask-link")}`
+    : [item.multiple ? btn("question-multi", picks.size ? `Done · ${picks.size} picked` : "Pick any that apply", { id }, "ask-done-btn", !picks.size) : "",
+      interview ? "" : btn("question-skip", "Let it decide", { id }, "ask-link"),
+      question.open ? btn("question-dismiss", "Dismiss", { id }, "ask-link") : ""].filter(Boolean).join("");
+  return `<div class="ask-card${question.open ? " open" : ""}" data-question="${h(id)}"><div class="ask-tag"><i></i>${tag}${total > 1 ? `<span>${Math.min(index + 1, total)} of ${total}</span>` : ""}</div>${trail ? `<ol class="ask-trail">${trail}</ol>` : ""}<p class="ask-text">${words}</p>${item.reason ? `<p class="ask-why">${h(item.reason)}</p>` : ""}${choices.length ? `<div class="ask-choices">${choices.map(choice).join("")}</div>` : ""}${own}<div class="ask-foot">${foot}</div></div>`;
+}
 function renderQuestion() {
   if (!state) return;
-  // The signature is what the tile draws. Typing an answer sends drafts
-  // to the daemon, which come back on the question in its stored shape;
-  // neither the draft nor the shape may redraw the tile, since a redraw
-  // replays its entrance and flickers under every keystroke.
-  const question = state.questions[0],
-    signature = JSON.stringify(question ? [question.id, question.status, question.questions, question.answers] : null);
-  if (signature === questionSignature) return;
-  questionSignature = signature;
-  const index=question?.answers?.length ?? 0, answered=question && index>=question.questions.length,
-    item=question?.questions[Math.min(index,question.questions.length-1)];
-  // The model asking you is its next line in the conversation: the amber
-  // ring that means "needs you", the question, and its suggested answers.
-  const paused = question?.status === "paused", choices = answered || !item ? [] : item.suggestions ?? [];
-  const foot = answered || paused
-    ? `<span>${answered ? "Answered" : "Paused"}</span>${btn("question-control", "Resume", { action: "resume" }, "ask-link")}`
-    : btn("question-skip", "Skip this question", {}, "ask-link");
-  el("question").innerHTML = question && item
-    ? `<div class="ask-q"><span class="ask-mark" aria-hidden="true"></span><div class="ask-body"><p class="ask-text">${h(item.question)}${question.questions.length > 1 ? `<small>${Math.min(index + 1, question.questions.length)} of ${question.questions.length}</small>` : ""}</p>${item.reason ? `<p class="ask-why">${h(item.reason)}</p>` : ""}${answered ? `<p class="ask-why">${h(question.answers?.at(-1)?.answer ?? "Skipped")}</p>` : ""}${choices.length ? `<div class="ask-choices">${choices.map((choice, n) => btn("question-pick", `<kbd>${n + 1}</kbd>${h(choice)}`, { text: choice }, "ask-choice")).join("")}</div>` : ""}<div class="ask-foot">${foot}</div></div></div>`
-    : "";
+  const live = new Set(state.questions.map((question) => question.id));
+  for (const [id, card] of questionCards) if (!live.has(id)) { card.node.remove(); questionCards.delete(id); questionPicks.delete(id); }
+  // Questions there when the chat opens don't spring in; new ones do.
+  const chat = state.session?.id ?? "";
+  if (chat !== questionChat) { questionChat = chat; questionChatAt = Date.now(); }
+  const settled = Date.now() - questionChatAt < 800;
+  let fresh: HTMLElement | null = null;
+  for (const question of state.questions) {
+    // The signature is what the card draws. Drafts come back on the question
+    // in its stored shape; neither may redraw it under every keystroke.
+    const signature = JSON.stringify([question.status, question.questions, question.answers, [...(questionPicks.get(question.id) ?? [])]]);
+    let card = questionCards.get(question.id);
+    const isNew = !card;
+    if (!card) { const node = document.createElement("div"); node.className = "ask-slot-card"; card = { node, signature: "" }; questionCards.set(question.id, card); }
+    if (card.signature === signature) continue;
+    const step = card.signature && JSON.parse(card.signature)[2]?.length !== question.answers?.length;
+    const own = card.node.querySelector<HTMLInputElement>("[data-ask-own]")?.value ?? "";
+    card.signature = signature;
+    card.node.innerHTML = questionCard(question);
+    const input = card.node.querySelector<HTMLInputElement>("[data-ask-own]");
+    if (input && !step) input.value = own;
+    if (isNew || step) {
+      const root = card.node.firstElementChild!;
+      if (isNew && !settled) snap(root, { opacity: [0, 1], y: [12, 0], scale: [0.98, 1] });
+      if (!settled || step) {
+        snap(root.querySelectorAll(".ask-text .w"), { opacity: [0, 1], y: [10, 0], delay: stagger(22) });
+        snap(root.querySelectorAll(".ask-choice, .ask-own"), { opacity: [0, 1], y: [12, 0], delay: stagger(45, { start: 120 }) });
+      }
+      if (isNew) fresh = card.node;
+    }
+  }
+  placeQuestions();
   // A new question scrolls into view, as a new answer would.
-  if (question && question.id !== questionShown) el("stage").scrollTop = el("stage").scrollHeight;
-  questionShown = question?.id ?? "";
+  if (fresh && !settled) fresh.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+  renderQuestionBack();
 }
-let questionShown = "";
+/// Each card sits at the step that asked it; a question with no step on
+/// screen (a waiting interview, a turn that stopped) sits at the end.
+function placeQuestions() {
+  if (!state) return;
+  const focused = document.activeElement instanceof HTMLInputElement && document.activeElement.matches("[data-ask-own]") ? document.activeElement : null;
+  for (const question of state.questions) {
+    const card = questionCards.get(question.id);
+    if (!card) continue;
+    const slot = document.querySelector<HTMLElement>(`#conversation [data-ask-slot="${CSS.escape(question.toolCallId)}"]`) ?? el("question");
+    if (card.node.parentElement !== slot) slot.append(card.node);
+  }
+  if (focused && !focused.isConnected) return;
+  if (focused && document.activeElement !== focused) focused.focus({ preventScroll: true });
+}
+/// The way back to an open question you've scrolled past.
+function renderQuestionBack() {
+  let back = document.getElementById("ask-back");
+  const open = state?.questions.filter((question) => question.open) ?? [];
+  const stage = el("stage").getBoundingClientRect();
+  const away = open.find((question) => {
+    const rect = questionCards.get(question.id)?.node.getBoundingClientRect();
+    return rect && rect.height > 0 && (rect.bottom < stage.top + 24 || rect.top > stage.bottom - 24);
+  });
+  if (!away) { if (back) back.hidden = true; return; }
+  if (!back) {
+    back = document.createElement("button");
+    back.id = "ask-back";
+    back.setAttribute("type", "button");
+    back.dataset.action = "question-back";
+    el("input-area").prepend(back);
+  }
+  back.dataset.args = JSON.stringify({ id: away.id });
+  back.innerHTML = `<i aria-hidden="true"></i>${open.length > 1 ? `${open.length} questions wait for you` : "A question waits for you"} ↑`;
+  if (back.hidden !== false) { back.hidden = false; snap(back, { opacity: [0, 1], y: [8, 0] }); }
+}
+el("stage").addEventListener("scroll", () => renderQuestionBack(), { passive: true });
 /// Stops the host polling command output that an unfolded check started.
 const unwatchOutput = () => void api("panel-watch", { panel: null }).catch(() => {});
 /// Drive has no panel. Its mission is a turn in the conversation it started
@@ -4671,9 +4778,37 @@ async function dispatch(
     if(label)label.textContent=open ? "Show trace" : "Collapse";
     return;
   }
-  if (action === "question-control") return questionAction(args.action);
-  if (action === "question-pick") return answerQuestion(String(args.text ?? ""), "suggestion");
-  if (action === "question-skip") return answerQuestion(null, "skipped");
+  if (action === "question-control") return questionAction(args.action, questionById(args.id) ?? pendingQuestion());
+  if (action === "question-pick") {
+    snap(target, { scale: [0.96, 1], duration: 280 });
+    return answerQuestion(String(args.text ?? ""), "suggestion", questionById(args.id) ?? pendingQuestion());
+  }
+  if (action === "question-skip") return answerQuestion(null, "skipped", questionById(args.id) ?? pendingQuestion());
+  if (action === "question-dismiss") { const q = questionById(args.id); return q ? questionAction("cancel", q) : undefined; }
+  if (action === "question-toggle") {
+    const picks = questionPicks.get(String(args.id)) ?? new Set<number>(), n = Number(args.n);
+    if (picks.has(n)) picks.delete(n); else picks.add(n);
+    questionPicks.set(String(args.id), picks);
+    snap(target, { scale: [0.97, 1], duration: 240 });
+    return renderQuestion();
+  }
+  if (action === "question-multi") {
+    const q = questionById(args.id), picks = [...(questionPicks.get(String(args.id)) ?? [])].sort((a, b) => a - b);
+    const item = q?.questions[q.answers?.length ?? 0];
+    if (!q || !item || !picks.length) return;
+    return answerQuestion(picks.map((n) => item.suggestions[n]).filter(Boolean).join("; "), "suggestion", q);
+  }
+  if (action === "question-own") {
+    const q = questionById(args.id), input = document.querySelector<HTMLInputElement>(`[data-ask-own="${CSS.escape(String(args.id))}"]`);
+    if (!q || !input?.value.trim()) return input?.focus();
+    return answerQuestion(input.value, "typed", q);
+  }
+  if (action === "question-back") {
+    const card = questionCards.get(String(args.id))?.node;
+    card?.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
+    if (card) setTimeout(() => snap(card.firstElementChild!, { scale: [1.015, 1], duration: 420 }), reducedMotion() ? 0 : 320);
+    return;
+  }
   // A new chat starts on Home as Just a chat; the where word moves it.
   if (action === "new-session") return api("new-session", { plain: true, reuse: true });
   if (action === "where-toggle") return toggleWhere(whereOpen === "home" ? null : "home");
@@ -5125,7 +5260,7 @@ function renderState(next: Snapshot) {
     heroSignature = overlaySignature = sidebarSignature = "";
     pane.switchSession(next.session?.id ?? "");
   }
-  const question=next.questions[0], slot=question ? `${question.id}:${question.answers?.length ?? 0}` : "chat";
+  const question=next.questions.find((q) => !q.open), slot=question ? `${question.id}:${question.answers?.length ?? 0}` : "chat";
   if (slot !== composerSlot) {
     const sameSession=composerSession===(next.session?.id ?? null);
     if(question && composerSlot==="chat" && sameSession) {
@@ -5551,9 +5686,15 @@ document.addEventListener("keydown", (event) => {
     document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
     return;
   }
+  if ((event.target as HTMLElement).matches?.("[data-ask-own]") && key === "enter" && !event.shiftKey) {
+    event.preventDefault();
+    (event.target as HTMLElement).parentElement?.querySelector<HTMLElement>(".ask-send")?.click();
+    return;
+  }
   // 1, 2, 3… pick the model's suggested answers while nothing is typed.
   if (!ctrl && !event.altKey && /^[1-9]$/.test(key) && (!field || (event.target === editor && !editor.value))) {
-    const choice = document.querySelectorAll<HTMLElement>("#question .ask-choice")[Number(key) - 1];
+    const cards = document.querySelectorAll<HTMLElement>(".ask-card"), card = cards[cards.length - 1];
+    const choice = card?.querySelectorAll<HTMLElement>(".ask-choice")[Number(key) - 1];
     if (choice) { event.preventDefault(); choice.click(); return; }
   }
   if ((event.target as HTMLElement).id === "rv-note-input" && (key === "enter" || key === "escape")) {

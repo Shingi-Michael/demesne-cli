@@ -1445,7 +1445,9 @@ function nextSuggestion(): string | null {
 /// the others are, so repaints never restart it.
 let cube = restingCube(performance.now());
 const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
-const spinner = () => `<span class="cube-mark" aria-hidden="true">${cubeSvg(cube, performance.now(), reducedMotion())}</span>`;
+const cubeMarks = document.getElementsByClassName("cube-mark") as HTMLCollectionOf<HTMLElement>;
+let cubeFrame = 0;
+const spinner = () => (wakeCubes(), `<span class="cube-mark" aria-hidden="true">${cubeSvg(cube, performance.now(), reducedMotion())}</span>`);
 /// Words for work in progress, with a silver shine sweeping across them.
 /// The delay keeps a repainted line in step with the sweep instead of
 /// restarting it (3s each way).
@@ -6205,18 +6207,20 @@ void window.demesne
   });
 // Spinners and thinking sub-agents' phrases advance in place; the DOM (and
 // so the terminal's tiles) only changes when a glyph or phrase does.
-// One frame loop draws every cube mark, and only while a cube moves.
-const drawCubes = (now: number) => {
-  requestAnimationFrame(drawCubes);
-  if (reducedMotion()) return;
-  const marks = document.querySelectorAll<HTMLElement>(".cube-mark");
-  if (!marks.length) return;
+// One frame loop draws every cube mark, and only while a cube moves. It runs
+// only while marks are on the page (each new one wakes it): a loop that never
+// stops keeps the window drawing frames when nothing changes.
+function wakeCubes() { if (!cubeFrame) cubeFrame = requestAnimationFrame(drawCubes); }
+function drawCubes(now: number) {
+  cubeFrame = 0;
+  if (!cubeMarks.length || reducedMotion()) return;
+  cubeFrame = requestAnimationFrame(drawCubes);
+  const marks = [...cubeMarks];
   cube = advance(cube, now);
   if (!moving(cube, now) && marks[0]!.dataset.at === String(cube.beatAt)) return;
   const frame = cubeSvg(cube, now);
   for (const mark of marks) { mark.innerHTML = frame; mark.dataset.at = String(cube.beatAt); }
-};
-requestAnimationFrame(drawCubes);
+}
 // A working sub-agent's saying changes in place, without repainting the guide.
 setInterval(() => {
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;

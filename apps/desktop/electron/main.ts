@@ -190,7 +190,8 @@ void app.whenReady().then(async () => {
     if (!window || on === window.isSimpleFullScreen()) return;
     if (on) notch = notchInset(screen.getDisplayMatching(window.getBounds()));
     window.setSimpleFullScreen(on);
-    if (!on) window.setBounds(normalBounds);
+    // Leaving can come back with the window's own buttons still hidden.
+    if (!on) { window.setBounds(normalBounds); window.setWindowButtonVisibility(true); }
     log(`Full screen (${why}): simple ${on ? `on, starting ${notch}pt down for the notch` : "off"}.`);
     fullscreenChanged();
   };

@@ -977,12 +977,9 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .rewind-line .rw-mark .ico { width: 13px; height: 13px; }
 .desktop .rewind-line .rw-redo { color: var(--acc); font-size: 12.5px; }
 @media (prefers-reduced-motion: no-preference) { .desktop .step-rewind { transition: opacity 140ms var(--ease); } }
-/* Home's cherry blossom: behind the start screen's top half, on a sky tinted
-   from the theme's own ink. */
-#sakura { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
-  background: linear-gradient(color-mix(in srgb, var(--ink) 82%, #8a3a62) 0%, color-mix(in srgb, var(--ink) 92%, #8a3a62) 30%, var(--ink) 50%); }
-html[data-theme$="-light"] #sakura, html[data-theme="light"] #sakura { background: linear-gradient(color-mix(in srgb, var(--ink) 84%, #f2a7bf) 0%, color-mix(in srgb, var(--ink) 93%, #f2a7bf) 30%, var(--ink) 50%); }
-#sakura canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+/* Home's cherry blossom: a still print behind the start screen's top half. */
+#blossom { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+#blossom canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
 .live-app.start #stage { position: relative; z-index: 1; }
 .live-app.start .intro h1, .live-app.start .hero-eyebrow { text-shadow: 0 1px 16px var(--ink), 0 0 3px var(--ink); }
 .live-app.start #composer { background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px) saturate(1.2); }

@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
+- Home's cherry blossom is a still anime print instead of an animated tree: no falling petals or swaying, and it's drawn once, so Home stops redrawing while it sits there.
 - The agent's questions live in the chat and no longer stop it: a clarification is a card at the step that asked it, and the agent keeps doing whatever doesn't depend on the answer. Answers are picked in the card (with what each choice means, several at once where the question allows, or your own words in its field); the composer stays a composer. The answer reaches a running turn after its current step, or starts the next one, and the question folds into one "✓ Asked · question · answer" line. The card springs in word by word (anime.js), amber only on its ring, top edge and suggested answer. Interviews such as `/themefy` still wait for each answer.
 
 ### Fixed

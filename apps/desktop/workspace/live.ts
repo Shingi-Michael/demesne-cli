@@ -10,7 +10,7 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
-import { mountSakura, type Sakura } from "./sakura.ts";
+import { mountBlossom, type Blossom } from "./blossom.ts";
 import { awaySentences, lastPrompt, type AwayAsk, type AwayPart } from "./away.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
@@ -2226,9 +2226,8 @@ function renderConversation() {
 const reviewJobs = () =>
   state ? [state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job) && (job!.status === "ready" || job!.status === "failed")) : [];
 let reviewShown = false;
-/// Home's cherry blossom lives behind the start screen only, and sleeps while
-/// a chat or a page is showing.
-let sakura: Sakura | null = null, sakuraTried = false, sakuraDark: boolean | null = null;
+/// Home's cherry blossom lives behind the start screen only.
+let blossom: Blossom | null = null, blossomTried = false;
 const colorProbe = document.createElement("canvas").getContext("2d");
 function inkIsDark() {
   if (!colorProbe) return true;
@@ -2237,18 +2236,17 @@ function inkIsDark() {
   const hex = String(colorProbe.fillStyle), [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) || 0);
   return .2126 * r! + .7152 * g! + .0722 * b! < 128;
 }
-function renderSakura(show: boolean) {
-  const host = document.getElementById("sakura");
+function renderBlossom(show: boolean) {
+  const host = document.getElementById("blossom");
   if (!host) return;
-  if (show && !sakuraTried) {
-    sakuraTried = true;
-    try { sakura = mountSakura(host, inkIsDark()); } catch { sakura = null; }
+  host.hidden = !show;
+  if (!show) return;
+  if (!blossomTried) {
+    blossomTried = true;
+    const greeting = () => (document.querySelector(".live-app.start .intro .hero-eyebrow")?.getBoundingClientRect().top ?? 0) - host.getBoundingClientRect().top;
+    try { blossom = mountBlossom(host, inkIsDark(), greeting); } catch { blossom = null; }
   }
-  host.hidden = !show || !sakura;
-  if (!sakura) return;
-  const dark = inkIsDark();
-  if (dark !== sakuraDark) { sakuraDark = dark; sakura.setDark(dark); }
-  if (show) sakura.resume(); else sakura.pause();
+  blossom?.setDark(inkIsDark());
 }
 /// When the window was last in front of you, kept on this computer: Home
 /// says what happened since.
@@ -5412,7 +5410,7 @@ function renderState(next: Snapshot) {
   renderLastChat();
   if (start) renderHero();
   else if (wasStart || el("composer-slot").parentElement !== el("input-area")) el("input-area").append(el("composer-slot"));
-  renderSakura(start);
+  renderBlossom(start);
   renderStatus();
   renderConversation();
   renderDriveTurn();

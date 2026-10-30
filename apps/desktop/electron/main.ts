@@ -6,11 +6,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-<<<<<<< HEAD
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, liquidGlass, macVibrancy, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
-=======
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, liquidGlass, macVibrancy, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
->>>>>>> origin/main
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true } }]);
 app.setName("Demesne");
@@ -106,13 +102,9 @@ void app.whenReady().then(async () => {
   if (process.platform !== "win32") {
     process.on("SIGUSR1", () => reloadRenderer("SIGUSR1 signal"));
   }
-<<<<<<< HEAD
-  const glass = desktopBlurs(process.platform, process.env);
-=======
   const glass = desktopGlass(process.platform, process.env), blurs = desktopBlurs(process.platform, process.env);
   // Why the window is or isn't glass, for when someone on Linux can't find it.
   if (process.platform === "linux") log(`Glass ${glass ? "on" : "off"}, ${blurs ? "blurred" : "sharp"}: XDG_CURRENT_DESKTOP=${process.env.XDG_CURRENT_DESKTOP ?? "(unset)"}, Hyprland signature ${process.env.HYPRLAND_INSTANCE_SIGNATURE ? "set" : "unset"}, DEMESNE_GLASS=${process.env.DEMESNE_GLASS ?? "(unset)"}`);
->>>>>>> origin/main
   // macOS 26: the window is clear, so the wallpaper shows sharp behind the
   // page's own tint. DEMESNE_GLASS_VARIANT=<n> puts Apple's liquid glass
   // behind it instead (electron-liquid-glass's prebuilt addon, copied in by

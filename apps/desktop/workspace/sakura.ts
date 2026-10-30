@@ -214,21 +214,22 @@ export function mountSakura(host: HTMLElement, dark: boolean): Sakura | null {
     ctx!.globalAlpha = 1;
   }
   // Petals drift slowly, so 30 frames a second look the same as the
-  // display's 120 and cost the window a quarter of the redraws. They rest
-  // while you're in another app: a window that redraws behind the one you're
-  // using slows the whole Mac.
-  let drawn = 0;
-  function tick(now: number) {
+  // display's 120. Between frames nothing is asked of the page: a frame
+  // callback alone keeps the window compositing at the display's rate. They
+  // rest while you're in another app: a window that redraws behind the one
+  // you're using slows the whole Mac.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  function tick() {
     raf = 0;
     if (!running || document.hidden || !document.hasFocus()) return;
-    if (now - drawn >= 1000 / 30 - 4) { drawn = now; draw((performance.now() - start) / 1000); }
-    raf = requestAnimationFrame(tick);
+    draw((performance.now() - start) / 1000);
+    timer = setTimeout(() => { timer = undefined; wake(); }, 1000 / 30);
   }
-  const wake = () => { if (running && !still && !raf && !document.hidden && document.hasFocus()) raf = requestAnimationFrame(tick); };
+  const wake = () => { if (running && !still && !raf && !timer && !document.hidden && document.hasFocus()) raf = requestAnimationFrame(tick); };
   document.addEventListener("visibilitychange", wake);
   window.addEventListener("focus", wake);
   return {
-    pause() { running = false; observer.disconnect(); if (raf) cancelAnimationFrame(raf); raf = 0; },
+    pause() { running = false; observer.disconnect(); if (raf) cancelAnimationFrame(raf); raf = 0; clearTimeout(timer); timer = undefined; },
     resume() {
       if (running) return;
       running = !still; observer.observe(host); resize();

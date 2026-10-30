@@ -157,9 +157,14 @@ export function mountSakura(host: HTMLElement, dark: boolean): Sakura | null {
     W = r.width; PH = r.height; H = PH * .55;
     glc.width = pc.width = Math.round(W * dpr); glc.height = pc.height = Math.round(PH * dpr);
     place();
-    if (!running) draw(last);
+    draw(last);
   }
-  const observer = new ResizeObserver(resize);
+  // While the window is being resized the canvases stretch with it, and they
+  // are rebuilt at the new size once it settles: rebuilding them on every
+  // step cleared them (a flash each step) and reallocated two retina-sized
+  // buffers many times a second, which made resizing stutter.
+  let settle: ReturnType<typeof setTimeout> | undefined;
+  const observer = new ResizeObserver(() => { clearTimeout(settle); settle = setTimeout(resize, 150); });
 
   const start = performance.now();
   let last = 0, carry = 0, raf = 0, running = false;
@@ -229,7 +234,7 @@ export function mountSakura(host: HTMLElement, dark: boolean): Sakura | null {
   document.addEventListener("visibilitychange", wake);
   window.addEventListener("focus", wake);
   return {
-    pause() { running = false; observer.disconnect(); if (raf) cancelAnimationFrame(raf); raf = 0; clearTimeout(timer); timer = undefined; },
+    pause() { running = false; observer.disconnect(); clearTimeout(settle); if (raf) cancelAnimationFrame(raf); raf = 0; clearTimeout(timer); timer = undefined; },
     resume() {
       if (running) return;
       running = !still; observer.observe(host); resize();

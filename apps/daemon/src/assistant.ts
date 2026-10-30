@@ -12,16 +12,25 @@ import { toolError, type AgentTool } from "./tools.ts";
 export class AssistantChat {
   constructor(
     private readonly file: string,
-    private readonly store: Pick<DemesneStore, "getSession" | "createSession">,
+    private readonly store: Pick<DemesneStore, "getSession" | "createSession" | "setSessionWorkspace">,
     /// The assistant's own folder (its DEMESNE.md), when it has one you trust.
     private readonly home: () => string | undefined,
   ) {}
 
   /// The chat, if it has been opened yet and is still there.
+  ///
+  /// A chat opened moments before its folder was trusted has no folder: no
+  /// DEMESNE.md, no notes, no to-do list. It moves into the folder the first
+  /// time it's looked up after the trust, with its messages.
   existing(): string | null {
     const saved = this.saved();
     const session = saved ? this.store.getSession(saved) : null;
-    return session && !session.archivedAt ? session.id : null;
+    if (!session || session.archivedAt) return null;
+    const home = this.home();
+    if (!session.workspace && home) {
+      try { this.store.setSessionWorkspace(session.id, home); } catch { /* the next lookup tries again */ }
+    }
+    return session.id;
   }
 
   /// The chat, made the first time it's opened.

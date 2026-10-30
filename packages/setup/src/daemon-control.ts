@@ -112,12 +112,38 @@ export async function daemonHealth(deps: DaemonControlDependencies): Promise<Dae
   }
 }
 
+/// Written by the assistant's Windows installer next to the daemon's data:
+/// it names the scheduled task that runs the daemon and restarts it on its
+/// own. While it exists nothing else starts a daemon here, however briefly
+/// the task's one is away: a second daemon would take the data directory,
+/// and the task's would then fail on it every few seconds.
+export const MANAGED_DAEMON_FILE = "daemon.managed";
+
+/// Who runs the daemon in this data directory, when it isn't the app: the
+/// first line of `daemon.managed`, or null when the app may start one.
+export function managedDaemonBy(dataDirectory: string): string | null {
+  try {
+    const name = readFileSync(join(dataDirectory, MANAGED_DAEMON_FILE), "utf8").split(/\r?\n/)[0]!.trim();
+    return name || "another program";
+  } catch {
+    return null;
+  }
+}
+
+export function managedDaemonMessage(dataDirectory: string, by: string): string {
+  return `${by} runs the daemon and restarts it on its own, so the app doesn't start one. `
+    + `If it stays down, start that task again; remove ${join(dataDirectory, MANAGED_DAEMON_FILE)} if it's gone for good.`;
+}
+
 export async function startDaemon(
   deps: DaemonControlDependencies,
   options: { timeoutMs?: number } = {},
 ): Promise<{ started: boolean; pid: number | null; health: DaemonHealth | null; message: string }> {
   const existing = await daemonHealth(deps);
   if (existing) return { started: false, pid: readPid(deps), health: existing, message: "Daemon is already running." };
+
+  const managedBy = managedDaemonBy(deps.dataDirectory);
+  if (managedBy) return { started: false, pid: lockOwnerDaemonPid(deps), health: null, message: managedDaemonMessage(deps.dataDirectory, managedBy) };
 
   // A daemon that holds the data directory but is not answering health checks
   // (busy, or listening elsewhere) would make a new one exit on the lock.

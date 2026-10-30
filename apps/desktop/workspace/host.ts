@@ -37,6 +37,8 @@ import {
 import { loadCliSettings, type CliSettings } from "@demesne/setup/cli-config.ts";
 import {
   createDaemonControlDependencies,
+  managedDaemonBy,
+  managedDaemonMessage,
   startDaemon,
   stopDaemon,
 } from "@demesne/setup/daemon-control.ts";
@@ -493,9 +495,13 @@ export class WorkspaceHost {
       this.breakageStarted = this.breakage.start().catch(() => {});
       await this.applyStartup();
     } catch (error) {
+      // A daemon run by a scheduled task (the assistant's install) comes
+      // back on its own; one started here instead would take its data
+      // directory from it. Wait for it, whatever auto_start says.
+      const managedBy = managedDaemonBy(this.settings.dataDirectory);
       // The app bundles its daemon, so it starts it unless the config says
       // never ("prompt" had nothing left to ask once the CLI was gone).
-      if (!this.autoStarted && this.settings.autoStart !== "never") {
+      if (!managedBy && !this.autoStarted && this.settings.autoStart !== "never") {
         this.autoStarted = true;
         try {
           await this.startDaemon();
@@ -503,7 +509,7 @@ export class WorkspaceHost {
         } catch {}
       }
       this.connection = "offline";
-      this.error = error instanceof Error ? error.message : String(error);
+      this.error = managedBy ? managedDaemonMessage(this.settings.dataDirectory, managedBy) : error instanceof Error ? error.message : String(error);
       this.publish();
       this.scheduleReconnect();
     }
@@ -538,6 +544,24 @@ export class WorkspaceHost {
       server: this.client.server,
       token: daemonCredential(this.client.server, this.settings.dataDirectory),
     });
+    await this.connect();
+  }
+  /// After a stop, waits for the daemon its scheduled task brings back and
+  /// connects to it. The task's loop tries every five seconds and the daemon
+  /// takes a few more to listen; the token file stays the same.
+  async awaitManagedDaemon(managedBy: string, timeoutMs = 30_000) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      try {
+        await this.client.health();
+        break;
+      } catch {
+        if (Date.now() >= deadline)
+          throw new Error(`${managedBy} hasn't started the daemon again after ${Math.round(timeoutMs / 1000)} seconds. Check that task. `
+            + managedDaemonMessage(this.settings.dataDirectory, managedBy));
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
     await this.connect();
   }
   /// A plain chat has no project: no files, commands or Drive. With
@@ -1973,7 +1997,11 @@ export class WorkspaceHost {
       const control = this.daemonControl();
       const stopped = await stopDaemon(control);
       if (!stopped.stopped && stopped.message !== "Daemon is not running.") throw new Error(stopped.message);
-      await this.startDaemon();
+      // A scheduled task's daemon comes back on its own within seconds; one
+      // started here would take the data directory from it.
+      const managedBy = managedDaemonBy(this.settings.dataDirectory);
+      if (managedBy) await this.awaitManagedDaemon(managedBy);
+      else await this.startDaemon();
       this.restartFor.clear();
       return this.settingsInfo();
     }

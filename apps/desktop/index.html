@@ -12,6 +12,8 @@
   <link rel="stylesheet" href="workspace.css">
 </head>
 <body class="desktop">
+  <!-- The Mac's simple full screen drops the window's own buttons; these stand in for them there. -->
+  <div id="mac-lights" role="group" aria-label="Window" hidden><button type="button" data-light="close" aria-label="Close"></button><button type="button" data-light="minimize" aria-label="Minimize"></button><button type="button" data-light="fullscreen" aria-label="Exit full screen"></button></div>
   <div id="desktop-shell">
     <aside id="desktop-sidebar" aria-label="Workspace navigation" hidden>
       <nav class="sidebar-nav" aria-label="Workspace">

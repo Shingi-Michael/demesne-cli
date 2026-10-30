@@ -6,7 +6,11 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
+<<<<<<< HEAD
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, FOUNDRY_CSP, liquidGlass, macVibrancy, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+=======
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, liquidGlass, macVibrancy, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+>>>>>>> origin/main
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true } }]);
 app.setName("Demesne");
@@ -102,7 +106,13 @@ void app.whenReady().then(async () => {
   if (process.platform !== "win32") {
     process.on("SIGUSR1", () => reloadRenderer("SIGUSR1 signal"));
   }
+<<<<<<< HEAD
   const glass = desktopBlurs(process.platform, process.env);
+=======
+  const glass = desktopGlass(process.platform, process.env), blurs = desktopBlurs(process.platform, process.env);
+  // Why the window is or isn't glass, for when someone on Linux can't find it.
+  if (process.platform === "linux") log(`Glass ${glass ? "on" : "off"}, ${blurs ? "blurred" : "sharp"}: XDG_CURRENT_DESKTOP=${process.env.XDG_CURRENT_DESKTOP ?? "(unset)"}, Hyprland signature ${process.env.HYPRLAND_INSTANCE_SIGNATURE ? "set" : "unset"}, DEMESNE_GLASS=${process.env.DEMESNE_GLASS ?? "(unset)"}`);
+>>>>>>> origin/main
   // macOS 26: the window is clear, so the wallpaper shows sharp behind the
   // page's own tint. DEMESNE_GLASS_VARIANT=<n> puts Apple's liquid glass
   // behind it instead (electron-liquid-glass's prebuilt addon, copied in by
@@ -122,10 +132,12 @@ void app.whenReady().then(async () => {
       // wallpaper behind the window, so the glass would go flat there.
       simpleFullscreen: true, fullscreenable: false,
     } : {}),
-    // Linux, where the desktop blurs behind clear pixels (Hyprland): the
-    // window is see-through and the compositor makes it glass.
+    // Linux: the window is see-through, and a compositor that blurs behind
+    // clear pixels (Hyprland) makes it frosted glass.
     ...(process.platform === "linux" && glass ? { transparent: true, backgroundColor: "#00000000" } : {}),
-    webPreferences: { additionalArguments: glass ? ["--demesne-glass"] : [], preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true, backgroundThrottling: false },
+    // Windows 11: acrylic behind the window.
+    ...(process.platform === "win32" && glass ? { backgroundMaterial: "acrylic" as const, backgroundColor: "#00000000" } : {}),
+    webPreferences: { additionalArguments: glass ? [blurs ? "--demesne-glass" : "--demesne-glass=sharp"] : [], preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true, backgroundThrottling: false },
   });
   const contents = window.webContents, session = contents.session;
   nativeTheme.on("updated", () => {
@@ -196,6 +208,17 @@ void app.whenReady().then(async () => {
     // running window loads the new UI without the user relaunching. The host
     // process (and its daemon-owned turns) survives the renderer reload.
     if (method === "desktop-reload") { reloadRenderer("desktop-reload request"); return null; }
+    // The page's own traffic lights, shown in the Mac's simple full screen
+    // (which has no title bar): each leaves full screen first.
+    if (method === "desktop-window") {
+      const action = (args as Record<string, unknown>).action;
+      if (!window || !["close", "minimize", "fullscreen"].includes(String(action))) return null;
+      window.setSimpleFullScreen(false);
+      fullscreenChanged();
+      if (action === "close") window.close();
+      else if (action === "minimize") window.minimize();
+      return null;
+    }
     // The Dock icon counts the chats that need you (macOS and Linux docks).
     if (method === "desktop-badge") {
       const count = Number((args as Record<string, unknown>).count);

@@ -47,7 +47,7 @@ allow = []
 
 A configured model needs a context capacity and output allowance, either explicitly or through a supported runtime profile. The output allowance must be smaller than the context. These are operational limits, not a claim about the model's theoretical maximum.
 
-`daemon.auto_start` is `prompt`, `always`, or `never`. The desktop window offers **Start daemon** when offline; `always` attempts an automatic start. The daemon binds only to loopback. A client `server` override does not make the daemon a remotely exposed service.
+`daemon.auto_start` is `prompt`, `always`, or `never`. The desktop app starts its bundled daemon when it can't reach one, unless this is `never` (`prompt` and `always` both start it); if the daemon stops later, the app starts it once more. With `never`, the window offers **Start daemon** when offline. The daemon binds only to loopback. A client `server` override does not make the daemon a remotely exposed service. To use a daemon on another computer, publish it over a private network (Tailscale Serve) and give the window its `https://` address as `server`, with that daemon's token in `<data_dir>/remote-daemons/<host>_<port>.token`; see [use it from anywhere](assistant.md#step-5-use-it-from-anywhere).
 
 ## Provider fields
 

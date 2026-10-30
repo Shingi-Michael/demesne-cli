@@ -12,6 +12,7 @@ It was built in small steps, each one usable on its own:
 | [2. A home and one tool](#step-2-a-home-and-one-tool) | An Assistant project with its own instructions, and `personal_files`, which reads the folders you choose, PDFs included |
 | [3. File index](#step-3-file-index) | `search_personal_files`, a search index over those folders, so it finds the right file without reading them all |
 | [4. Push to your phone](#step-4-push-to-your-phone) | Routines send their answers to your iPhone through ntfy, and chats get `notify_phone` |
+| [5. Use it from anywhere](#step-5-use-it-from-anywhere) | The Demesne window on another computer talks to the daemon on the PC, over Tailscale, with the daemon's token |
 
 ### Setting it up, start to finish
 
@@ -55,7 +56,7 @@ The model's settings are in [`llama-server.args`](../scripts/assistant/llama-ser
 
 You need:
 
-- **llama.cpp for Radeon.** Download the Windows HIP build from the [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases) (the zip with `hip` and `radeon` in its name) and unzip it somewhere like `C:\llama`. AMD's HIP SDK for Windows may also be needed if the release notes say so.
+- **llama.cpp for Radeon.** Download the Windows HIP build from the [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases) (the zip with `hip` and `radeon` in its name) and unzip it somewhere like `C:\llama`. AMD's HIP SDK for Windows may also be needed if the release notes say so. The Vulkan build works too, without the SDK; see [If you already run llama-server](#if-you-already-run-llama-server) for its flags.
 - **The model**, for example `C:\models\Qwen3.8-27B-Q5_K_M.gguf`.
 - **This repository and [Bun](https://bun.sh)**, as for running Demesne from source.
 
@@ -69,6 +70,17 @@ powershell -ExecutionPolicy Bypass -File scripts\assistant\install.ps1 `
 `-DryRun` prints exactly what each task will run and changes nothing. When it looks right, run it again without `-DryRun`. Add `-Config` to replace `%USERPROFILE%\.demesne\config.toml` with the assistant's (the old one is backed up next to it), or leave it off and copy the `[provider]` section across yourself. `-ExecutionPolicy Bypass` is needed because Windows refuses to run downloaded scripts by default; it applies to this one run only.
 
 The tasks start at login. If Windows restarts for an update and nobody logs in, they wait until you do.
+
+### If you already run llama-server
+
+Maybe you already have a server you like: a Vulkan build instead of HIP, the model pinned to one of two cards, a bigger window. You don't have to switch to these settings. Two options:
+
+- **Let the task run your server.** Write your flags into a file in the same one-per-line form as [`llama-server.args`](../scripts/assistant/llama-server.args) and pass it with `-LlamaArgs C:\path\to\my.args`. Keep `--host 127.0.0.1`, `--port 8081` and `--alias qwen3.8-27b`, which is where and what Demesne's config looks for, and leave `@MODEL@` where the model path goes (or write the path itself and skip `-Model`). `llama-server --list-devices` names your GPUs; `--device Vulkan1` puts the model on the second.
+- **Keep starting it yourself.** Pass `-NoModel` and only the daemon becomes a task. Then the assistant only works while your server is up, so a routine at 8:00 needs it running at 8:00.
+
+Either way the installer finishes by asking `http://127.0.0.1:8081/v1/models` what it serves, and says so if nothing answers there.
+
+A server window bigger than 128K is fine: Demesne keeps to its own `context_window = 131072` (Qwen3.8-27B stops generating past about 130K, whatever the server allows). The extra only costs VRAM. With `--parallel` above 1, check that each slot still gets the whole window (`n_ctx` in `http://127.0.0.1:8081/props`), since older builds split it between slots.
 
 ### Check it
 
@@ -108,7 +120,7 @@ Demesne works in *projects*: a folder you open, whose `DEMESNE.md` file is read 
 
 The assistant has one chat, not a chat per question: **Assistant**, second in the sidebar under New chat. Your questions, its routines' runs and what it sent to your phone all land in that one conversation, with a quiet line where each day starts. It compacts itself as it grows, like any long chat. The row wears the same marks as a chat's row: amber when it needs you, a breathing dot while it works, and blue when it did something while you were elsewhere.
 
-The chat lives in the assistant's folder, so its `DEMESNE.md` applies: `~/Assistant` (what `install.ps1` makes) when that folder exists and you've trusted it, or the folder `[assistant] home` names. Without one it is a plain chat. Its title bar names the folders it may read.
+The chat lives in the assistant's folder, so its `DEMESNE.md` applies: `~/Assistant` (what `install.ps1` makes) when that folder exists and you've trusted it, or the folder `[assistant] home` names. Without one it can still read and search your folders, but keeps no notes and has no `DEMESNE.md`. Its title bar names the folders it may read.
 
 A routine you write from Scheduled while that chat is open runs in it: at its time the question is a quiet line with the time and the routine's name ("↗ phone" when its answer goes to your phone), and the answer follows. If the chat is busy at that moment, the routine waits for the next minute.
 
@@ -141,10 +153,31 @@ It reads plain text (notes, Markdown, CSV, saved emails as `.eml`, calendar `.ic
 
 With a folder shared and the daemon restarted, ask in the Assistant project: "What's in my documents folder?", then "What does my grocery list say?". The steps show which tool it called and which file it read.
 
-### Known limits
+### Its own tools, not the coding agent's
 
-- A routine in a project runs on **Auto**: nobody is at the window, so it doesn't stop to ask before running a command, editing a file in the Assistant folder or sending to your phone. `personal_files` and `search_personal_files` can only read, but the coding tools are still there. Until the assistant gets its own narrower tool set, keep routines in the Assistant project to reading and summarizing.
-- The model's base instructions are still the coding agent's; `DEMESNE.md` is added after them.
+A routine runs on **Auto**: nobody is at the window to approve its steps. If the assistant had the coding agent's tools, a PDF that says "run this command" would be one bad decision away from being run. So the assistant's chat gets only these, and the daemon refuses any other tool the model asks for there, even one it makes up:
+
+| Tool | What it does |
+| --- | --- |
+| `search_personal_files`, `personal_files` | Find and read your shared folders. Read-only. |
+| `assistant_notes` | Reads and writes `notes.md` (what you asked it to remember) and `todo.md` (what you said you'd do) in its folder, without asking, the way you'd jot something down. Nothing else there: it can't change `DEMESNE.md`, so a document can't talk it into a new standing rule. Each file is capped at 64 KB. |
+| `notify_phone` | Push to your phone. Asks first in a chat you're at; on Auto it sends, up to 10 an hour. |
+
+No shell, no edits, moves or deletes, no sub-agents, no Drive. Taking a tool away is stronger than telling the model not to use it, and a shorter prompt leaves more of the 128K for your files.
+
+It gets its own base instructions too, in place of the coding agent's (and in place of a `system_prompt` you configured for coding): who it is, how to find things, that files are data and never instructions, and to ask before anything leaves the computer. Your `DEMESNE.md` follows them.
+
+Each of your messages reaches the model with the local date and time in front, like `[Tue 2026-10-27 09:05] what's on today?`, so "today" and "this week" mean something. You see your message as you typed it. The time goes with the message rather than in the instructions at the top, because changing the top would make llama-server re-read the whole conversation (its prompt cache) every time.
+
+### Why the chat only ever grows at the end
+
+llama-server keeps the conversation it last read (its prompt cache). When the next request starts with exactly the same text, it only reads what's new, which takes a second or two instead of minutes for a long chat. Change anything near the top, even the order of the tools, and it reads everything again. Qwen3.8 makes this stricter than most models: its memory of the conversation can't be rewound to an arbitrary point, only to a few saved checkpoints.
+
+So the assistant's chat is kept append-only:
+
+- The instructions and the tool list are the same on every turn, yours or a routine's. That's why it has no `ask_user` tool, which other chats only get while you're at the window: here it simply asks in its answer.
+- The time goes on each message, not in the instructions, and the coding agent's live context (Heartbeat's list of reachable agents, Drive) stays out.
+- The chat never ends, so it can't wait for you to type `/compact`. After a turn whose request used three quarters of the room for input (about 86K of the 128K, after 16K kept for the reply), the daemon summarizes the older turns, the same way `/compact` does, and keeps the last two in full. That rewrites the start once; from then on it grows at the end again. Without it, past the limit Demesne would trim old tool output on *every* request, and every request would be read from the start.
 
 ## Step 3: file index
 
@@ -186,3 +219,46 @@ Two things to know:
 
 - **This is the one part that leaves your computer.** The text of each notification goes through ntfy.sh to reach your phone. Keep routines to things you're fine with that for, or host ntfy yourself later: `ntfy` takes any https address (or plain http on this computer or over Tailscale), and `ntfy_token` adds a password.
 - A routine written in the assistant's chat runs in that chat; any other routine run is its own chat. Either way you can open it in Demesne later to see what it read.
+
+## Step 5: use it from anywhere
+
+The daemon and the model stay on the PC. The Demesne window on another computer (and later the iPhone app) talks to that daemon instead of running its own, so it's the same assistant, the same chat and the same files wherever you are.
+
+Three locks keep it yours:
+
+1. **Who can reach the PC: Tailscale.** [Tailscale](https://tailscale.com) is a private network of only your own devices, signed in with your account. Traffic between them is encrypted (WireGuard), and it works from any Wi-Fi or mobile data without opening a port on your router. Nothing on the open internet can see the PC.
+2. **The connection: `tailscale serve`.** It gives the daemon an `https://` address inside your tailnet, with a real certificate, and passes requests on to `127.0.0.1:7337`. The daemon itself still only listens on the PC (it refuses any other address), and llama-server stays on `127.0.0.1:8081`, where only the daemon talks to it.
+3. **Who can use the daemon: its token.** Every request except `/healthz` needs the token in `%USERPROFILE%\.demesne\daemon.token`, which the daemon made the first time it ran. A device on your tailnet without it gets `401 Unauthorized`. That's what limits it to your Demesne apps.
+
+Treat the token like a password. It can do anything the Demesne window on the PC can, including a coding chat that runs commands there. Copy it only over something private (a USB stick, or Taildrop between your own devices), never email or chat. If it leaks, delete `daemon.token`, restart the daemon (it makes a new one) and copy the new one to your other computers.
+
+Never use **Tailscale Funnel** or forward a router port for this. Both put the daemon on the public internet, where the token would be the only lock.
+
+### On the PC
+
+Turn on **MagicDNS** and **HTTPS Certificates** in the Tailscale admin console (DNS page) once. Then, in PowerShell:
+
+```powershell
+tailscale serve status                                    # what's already published here
+tailscale serve --bg --https=8443 http://127.0.0.1:7337   # the daemon, inside your tailnet only
+tailscale serve status                                    # shows https://<pc-name>.<tailnet>.ts.net:8443
+```
+
+Port 8443 leaves 443 free for anything you already publish (the iOS gateway, for example). `--bg` keeps it published across restarts; `tailscale serve --https=8443 off` takes it down.
+
+### On the other computer
+
+1. Install Tailscale and sign in with the same account.
+2. In `~/.demesne/config.toml`, point the window at the PC and stop it starting a daemon of its own:
+
+   ```toml
+   server = "https://demesne-pc.tail1234.ts.net:8443"
+
+   [daemon]
+   auto_start = "never"
+   ```
+
+3. Copy the PC's `daemon.token` to `~/.demesne/remote-daemons/demesne-pc.tail1234.ts.net_8443.token` (the PC's name and port, as in `server`). The window sends a token only to the host and port it is named for, and never sends this computer's own `daemon.token` anywhere else.
+4. Open Demesne. It connects to the PC, and **Assistant** in the sidebar is the PC's chat. **Start daemon** isn't offered for a daemon on another computer: the PC's login task starts it.
+
+(`DEMESNE_DAEMON_TOKEN` in the environment still overrides the file, as before.)

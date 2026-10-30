@@ -5,8 +5,12 @@
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\assistant\install.ps1 -Model C:\models\Qwen3.8-27B-Q5_K_M.gguf
 #
-#   -Model PATH        the GGUF file to serve (required)
-#   -LlamaServer PATH  llama-server.exe from a HIP (Radeon) build of llama.cpp (default: the one on PATH)
+#   -Model PATH        the GGUF file to serve (required, unless -NoModel or your -LlamaArgs names it)
+#   -LlamaServer PATH  llama-server.exe from a HIP or Vulkan build of llama.cpp (default: the one on PATH)
+#   -LlamaArgs PATH    your own arguments file instead of llama-server.args, in the same
+#                      one-flag-per-line form, for example to pick a GPU (--device Vulkan1)
+#   -NoModel           don't install the llama-server task: you start the model yourself,
+#                      and only the daemon becomes a task
 #   -Demesned PATH     a built daemon (default: dist\demesned.exe, else bun from source)
 #   -Config            also write assistant.toml to %USERPROFILE%\.demesne\config.toml (backs up the old one)
 #   -AssistantHome PATH  the assistant's own folder (default: %USERPROFILE%\Assistant); its DEMESNE.md is
@@ -14,8 +18,10 @@
 #   -DryRun            print what would be installed, and change nothing
 
 param(
-  [Parameter(Mandatory)] [string] $Model,
+  [string] $Model,
   [string] $LlamaServer,
+  [string] $LlamaArgs,
+  [switch] $NoModel,
   [string] $Demesned,
   [switch] $Config,
   [string] $AssistantHome = (Join-Path $HOME 'Assistant'),
@@ -27,11 +33,23 @@ $here = $PSScriptRoot
 $repo = (Resolve-Path (Join-Path $here '..\..')).Path
 $state = Join-Path $HOME '.demesne\assistant'
 
-if (-not (Test-Path -LiteralPath $Model -PathType Leaf)) { throw "No model file at $Model." }
-$Model = (Resolve-Path -LiteralPath $Model).Path
-if (-not $LlamaServer) { $LlamaServer = (Get-Command llama-server -ErrorAction SilentlyContinue).Source }
-if (-not $LlamaServer -or -not (Test-Path -LiteralPath $LlamaServer)) {
-  throw "llama-server isn't on PATH. Download a HIP (Radeon) build of llama.cpp and pass -LlamaServer C:\path\to\llama-server.exe."
+# Where Demesne's config expects the model (assistant.toml's [provider] url).
+$modelUrl = 'http://127.0.0.1:8081/v1/models'
+
+if (-not $NoModel) {
+  # PowerShell names ignore case: $llamaArgs would be the -LlamaArgs path itself.
+  $argsTemplate = if ($LlamaArgs) { $LlamaArgs } else { Join-Path $here 'llama-server.args' }
+  if (-not (Test-Path -LiteralPath $argsTemplate -PathType Leaf)) { throw "No arguments file at $argsTemplate." }
+  $serverArgs = Get-Content -LiteralPath $argsTemplate
+  if ($serverArgs -match '@MODEL@') {
+    if (-not $Model) { throw "Pass -Model C:\path\to\model.gguf (or -NoModel if you start llama-server yourself)." }
+    if (-not (Test-Path -LiteralPath $Model -PathType Leaf)) { throw "No model file at $Model." }
+    $serverArgs = $serverArgs -replace '@MODEL@', (Resolve-Path -LiteralPath $Model).Path
+  }
+  if (-not $LlamaServer) { $LlamaServer = (Get-Command llama-server -ErrorAction SilentlyContinue).Source }
+  if (-not $LlamaServer -or -not (Test-Path -LiteralPath $LlamaServer)) {
+    throw "llama-server isn't on PATH. Download a HIP or Vulkan build of llama.cpp and pass -LlamaServer C:\path\to\llama-server.exe."
+  }
 }
 
 # The daemon: the compiled one if you built it, otherwise bun running the source.
@@ -44,11 +62,11 @@ else {
   $daemonArgs = @('run', (Join-Path $repo 'apps\daemon\src\main.ts'))
 }
 
-$llamaArgs = (Get-Content -LiteralPath (Join-Path $here 'llama-server.args')) -replace '@MODEL@', $Model
-$tasks = @(
-  @{ Name = 'llama-server'; Program = $LlamaServer; Args = $llamaArgs },
-  @{ Name = 'demesned'; Program = $daemonProgram; Args = $daemonArgs }
-)
+$tasks = @()
+if (-not $NoModel) { $tasks += @{ Name = 'llama-server'; Program = $LlamaServer; Args = $serverArgs } }
+$tasks += @{ Name = 'demesned'; Program = $daemonProgram; Args = $daemonArgs }
+# A task from an earlier install keeps starting the model at login.
+$oldModelTask = if ($NoModel) { Get-ScheduledTask -TaskPath '\Demesne\' -TaskName 'llama-server' -ErrorAction SilentlyContinue }
 
 if ($DryRun) {
   foreach ($task in $tasks) {
@@ -56,6 +74,8 @@ if ($DryRun) {
     $task.Args | Where-Object { $_ -and -not $_.StartsWith('#') }
     ''
   }
+  if ($NoModel) { "# No llama-server task: Demesne expects your model at $modelUrl" }
+  if ($oldModelTask) { "# A \Demesne\llama-server task from an earlier install is still there; this leaves it alone" }
   if ($Config) { "# Would copy assistant.toml to $(Join-Path $HOME '.demesne\config.toml')" }
   "# The assistant's folder: $AssistantHome"
   return
@@ -96,8 +116,20 @@ New-Item -ItemType Directory -Force -Path $AssistantHome | Out-Null
 $instructions = Join-Path $AssistantHome 'DEMESNE.md'
 if (-not (Test-Path -LiteralPath $instructions)) { Copy-Item -LiteralPath (Join-Path $here 'home\DEMESNE.md') -Destination $instructions }
 
-Start-ScheduledTask -TaskPath '\Demesne\' -TaskName 'llama-server'
-Start-ScheduledTask -TaskPath '\Demesne\' -TaskName 'demesned'
+foreach ($task in $tasks) { Start-ScheduledTask -TaskPath '\Demesne\' -TaskName $task.Name }
 "Started. Check them with: Get-ScheduledTask -TaskPath \Demesne\"
+if ($oldModelTask) {
+  "A \Demesne\llama-server task from an earlier install is still there and starts a model at login."
+  "Remove it if you start your own: Unregister-ScheduledTask -TaskPath \Demesne\ -TaskName llama-server"
+}
+
+# The model takes a minute to load; say whether Demesne can reach it.
+$served = $null
+$tries = if ($NoModel) { 1 } else { 24 }
+foreach ($attempt in 1..$tries) {
+  try { $served = (Invoke-RestMethod -Uri $modelUrl -TimeoutSec 5).data.id; break } catch { if (-not $NoModel) { Start-Sleep -Seconds 5 } }
+}
+if ($served) { "The model answers at $modelUrl as: $($served -join ', ')" }
+else { "Nothing answers at $modelUrl yet. Demesne's config looks for the model there, so start it on 127.0.0.1 port 8081 (or change [provider] url)." }
 "Logs are in $state"
 "The assistant's folder is $AssistantHome. Open it as a project in Demesne and fill in DEMESNE.md."

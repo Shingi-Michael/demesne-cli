@@ -19,7 +19,7 @@ async function fixture(run: (value: {
   client: DemesneClient; id: string; initialMessages: unknown[]; originalTurns: string[]; db: Database;
   requests: ProviderMessage[][]; consume: (submitted: SubmitTurnResponse) => Promise<EventEnvelope[]>;
   restart: () => Promise<void>; setStream: (stream: TurnProcessor["stream"]) => void; close: () => Promise<void>;
-}) => Promise<void>, options: { count?: number; size?: number; capacity?: number; source?: string; undo?: boolean; stopped?: number[] } = {}) {
+}) => Promise<void>, options: { count?: number; size?: number; capacity?: number; source?: string; undo?: boolean; stopped?: number[]; assistant?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "demesne-compaction-"));
   mkdirSync(join(root, "data"));
   const databasePath = join(root, "data/state.sqlite");
@@ -46,6 +46,7 @@ async function fixture(run: (value: {
     if (options.stopped?.includes(i)) store.interruptTurn(turn.id, "Reached the model-round allowance");
     else store.completeTurn(turn.id);
   }
+  if (options.assistant) writeFileSync(join(root, "data/assistant.json"), JSON.stringify({ sessionId: session.id }));
   const initialMessages = store.database.query("SELECT * FROM model_messages ORDER BY id").all();
   store.close();
   const requests: ProviderMessage[][] = [];
@@ -405,4 +406,53 @@ test("failure of the calling turn discards scheduled compaction", async () => {
     expect(state.checkpoint).toBeNull();
     expect(state.session.turns.some(turn => turn.kind === "compaction")).toBe(false);
   }, { undo: true });
+});
+// The assistant's chat never ends: it summarizes itself after a turn once its
+// last request used most of the room, so it never reaches the planner's
+// trimming, which would change the start of every request after it.
+async function settledTurns(client: DemesneClient, id: string, count: number) {
+  // A summary is queued just after the turn that called for it completes.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  for (let i = 0; i < 100; i++) {
+    const turns = (await client.getSessionState(id)).session.turns;
+    if (turns.length >= count && turns.every((turn) => !["queued", "running"].includes(turn.status))) return turns;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("Turns did not settle");
+}
+
+function usingTokens(inputTokens: number): TurnProcessor["stream"] {
+  return async function* (messages) {
+    if (messages[0]?.content?.includes("immutable coding-session checkpoints")) yield { type: "text_delta", delta: summary };
+    else yield { type: "text_delta", delta: "Here's what I found" };
+    yield { type: "finish", reason: "stop" };
+    yield { type: "usage", usage: { inputTokens, outputTokens: 200, totalTokens: inputTokens + 200 } };
+  };
+}
+
+test("the assistant's chat summarizes itself once a request fills three quarters of the room", async () => {
+  await fixture(async ({ client, id, consume, setStream }) => {
+    // 32768 window, 1024 for the reply: three quarters of the rest is 23808.
+    setStream(usingTokens(23000));
+    await consume(await client.submitTurn(id, { content: "What's on today?" }));
+    expect((await settledTurns(client, id, 6)).map((turn) => turn.kind)).not.toContain("compaction");
+    setStream(usingTokens(24000));
+    await consume(await client.submitTurn(id, { content: "And tomorrow?" }));
+    const turns = await settledTurns(client, id, 8);
+    expect(turns.at(-1)).toMatchObject({ kind: "compaction", status: "completed", content: "/compact" });
+    expect((await client.getSessionState(id)).checkpoint).not.toBeNull();
+    // Right after a summary there is nothing older to summarize yet.
+    await consume(await client.submitTurn(id, { content: "Thanks" }));
+    const after = await settledTurns(client, id, 9);
+    expect(after).toHaveLength(9);
+    expect(after.at(-1)?.kind).not.toBe("compaction");
+  }, { assistant: true });
+});
+
+test("other chats are only summarized when you ask", async () => {
+  await fixture(async ({ client, id, consume, setStream }) => {
+    setStream(usingTokens(30000));
+    await consume(await client.submitTurn(id, { content: "Keep going" }));
+    expect((await settledTurns(client, id, 6)).map((turn) => turn.kind)).not.toContain("compaction");
+  });
 });

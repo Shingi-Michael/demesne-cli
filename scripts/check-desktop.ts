@@ -296,7 +296,8 @@ async function capture(name: string) {
 }
 async function open(workspace = false, welcome = false, extraEnv: Record<string, string> = {}) {
   desktop = await electron.launch({ ...(packagedExecutable ? { executablePath: resolve(packagedExecutable) } : {}), args: [...(packagedExecutable ? [] : [application]), `--user-data-dir=${join(f.root, "electron")}`, ...(workspace ? [`--workspace=${f.workspace}`] : []), `--server=${f.server.url}`], env: {
-    ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache"), ...extraEnv,
+    // Solid unless a launch asks for glass (DEMESNE_GLASS="" leaves it on).
+    ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache"), DEMESNE_GLASS: "0", ...extraEnv,
   }, timeout: 30_000 });
   desktop.process().stderr?.on("data", bytes => { log = (log + String(bytes)).slice(-64 * 1024); });
   page = await desktop.firstWindow();
@@ -789,7 +790,7 @@ try {
   await page.keyboard.press("Escape");
   await until(() => page.getByRole("searchbox", { name: "Search settings" }).inputValue().then(value => value === ""), "Esc clears the search");
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Appearance" }).click();
-  assert.equal(await page.locator("#page [data-glass]").count(), 0, "no Glass slider where the desktop doesn't blur behind the window");
+  assert.equal(await page.locator("#page [data-glass]").count(), 0, "no Glass slider when DEMESNE_GLASS=0 keeps the window solid");
   await page.locator("#page .st-word").first().click();
   await page.locator("#page .st-choice").first().waitFor();
   await capture("02-themes");
@@ -1080,7 +1081,7 @@ try {
   assert.equal((await f.client.health()).model, "desktop-test", "Closing the app leaves the daemon alive");
   // No workspace/session args: private preferences restore the project. This
   // launch is on Hyprland, which blurs behind clear pixels: the window is glass.
-  await open(false, false, { HYPRLAND_INSTANCE_SIGNATURE: "smoke" });
+  await open(false, false, { HYPRLAND_INSTANCE_SIGNATURE: "smoke", DEMESNE_GLASS: "" });
   assert(await page.evaluate(() => document.documentElement.classList.contains("glass")), "on Hyprland the shell is glass");
   assert(!await page.evaluate(() => document.documentElement.classList.contains("mac-chrome")), "with the desktop's own window chrome");
   // (Xvfb has no compositor, so the window itself can't be checked for clear pixels here.)

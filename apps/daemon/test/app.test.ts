@@ -159,7 +159,7 @@ describe("Demesne daemon", () => {
     expect((await read("missing.ts")).content).toBeNull();
   });
 
-  test("ask_user pauses the turn until the user answers, then hands the answers to the model", async () => {
+  test("ask_user puts questions in the chat without stopping the turn; the answers start the next one", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);
     const workspacePath = join(directory, "workspace");
@@ -184,6 +184,10 @@ describe("Demesne daemon", () => {
           yield { type: "text_delta" as const, delta: "Done." };
           return;
         }
+        if (String(last?.content).startsWith("Answer to your question")) {
+          yield { type: "text_delta" as const, delta: `Going with: ${last?.content}` };
+          return;
+        }
         yield { type: "tool_call_delta" as const, index: 0, idDelta: "call-ask", nameDelta: "ask_user", argumentsDelta: JSON.stringify({ questions }) };
       },
     };
@@ -200,11 +204,16 @@ describe("Demesne daemon", () => {
     const mismatched = await fetch(new URL(`/v1/questions/${questionId}`, running.url), { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ answers: [{ source: "suggestion", answer: "The lexer guard" }] }) });
     expect(mismatched.status).toBe(409);
-    await jsonRequest(running.url, `/v1/questions/${questionId}`, { method: "POST",
-      body: JSON.stringify({ answers: [{ source: "suggestion", answer: "The lexer guard" }, { source: "typed", answer: "yes, after the first letter" }] }) });
     const events = await collectPersistedEvents(running.url, created.session.id, submitted.eventId);
-    expect(events.map((event) => event.type)).toEqual(expect.arrayContaining(["question.requested", "question.resolved", "tool.call_completed", "turn.completed"]));
-    expect(toolResult).toBe("1. Which guard should change?\n   Answer: The lexer guard\n2. Allow digits?\n   Answer: yes, after the first letter (the user's own words)");
+    expect(events.map((event) => event.type)).toEqual(expect.arrayContaining(["question.requested", "tool.call_completed", "turn.completed"]));
+    expect(toolResult).toStartWith("Asked in the chat");
+    const answered = await fetch(new URL(`/v1/questions/${questionId}`, running.url), { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers: [{ source: "suggestion", answer: "The lexer guard" }, { source: "typed", answer: "yes, after the first letter" }] }) });
+    const next = await answered.json() as { turnId: string; eventId: number };
+    expect(answered.status).toBe(202);
+    await collectPersistedEvents(running.url, created.session.id, next.eventId);
+    const after = await jsonRequest<{ session: { turns: { id: string; content: string; responseText: string }[] } }>(running.url, `/v1/sessions/${created.session.id}`);
+    expect(after.session.turns.at(-1)!.content).toBe('Answer to your question "Which guard should change?": The lexer guard\nAnswer to your question "Allow digits?": yes, after the first letter');
     expect(offered[0]).toContain("ask_user");
     // A non-interactive turn is never offered the tool.
     const quiet = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`,

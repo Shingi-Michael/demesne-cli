@@ -79,7 +79,9 @@ export function restoreSessionEntries(state: SessionStateResponse, events: reado
       }
       if (event.type === "turn.steered" && typeof payload.text === "string") {
         assistant = undefined;
-        entries.push({ id: id++, type: "notice", tone: "info", quiet: true, steer: true, text: payload.text });
+        // An open question's answer shows on its folded "Asked" step instead.
+        if (!String(payload.steerId ?? "").startsWith("answer:"))
+          entries.push({ id: id++, type: "notice", tone: "info", quiet: true, steer: true, text: payload.text });
       }
       if (event.type === "model.usage" && context && !context.estimated) {
         context.used = typeof payload.totalTokens === "number" ? payload.totalTokens

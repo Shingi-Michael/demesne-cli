@@ -82,6 +82,16 @@ describe("ask_user", () => {
     active.abort();expect(broker.has("19")).toBe(false);
   });
 
+  test("a clarification posts in the chat and returns at once; suggestions carry what they mean", async () => {
+    const posted: unknown[] = [];
+    const result = await tool.execute({ questions: [{ question: "Cache where?", suggestions: ["On disk", { label: "In memory", detail: "Fast, gone on restart" }], multiple: true }] },
+      { ...context, post: (list) => posted.push(list), ask: async () => { throw new Error("must not wait"); } });
+    expect(result).toStartWith("Asked in the chat");
+    expect(posted).toEqual([[{ question: "Cache where?", suggestions: ["On disk", "In memory"], details: ["", "Fast, gone on restart"], multiple: true }]]);
+    expect(parseUserQuestions([{ question: "q", suggestions: ["a", "b"], details: ["first"], multiple: "yes" }]))
+      .toEqual([{ question: "q", suggestions: ["a", "b"], details: ["first", ""] }]);
+  });
+
   test("rejects malformed questions and answers", async () => {
     await expect(tool.execute({ questions: [] }, context)).rejects.toThrow("1 to 4 questions");
     expect(() => parseUserQuestions([{ question: " " }])).toThrow("question must be");

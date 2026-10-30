@@ -229,7 +229,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .hero-pick:hover b, .hero-pick:hover .pick-go { color: var(--t1); }
 .desktop .live-app.start .composer textarea::placeholder { color: var(--t4); }
 .desktop .live-app.start .hints button { font-size: 12.5px; color: var(--t3); }
-.desktop #input-area { padding: 12px 32px 22px; }
+.desktop #input-area { position: relative; padding: 12px 32px 22px; }
 .desktop #input-area > * { max-width: 780px; margin-left: auto; margin-right: auto; }
 .desktop .composer { border-radius: 12px; padding: 12px 14px 8px; gap: 8px; background: var(--surface); border-color: var(--line2); box-shadow: 0 5px 24px #00000012; }
 .desktop .composer:focus-within { border-color: color-mix(in srgb, var(--electric) 60%, var(--borderBright)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--electric) 7%, transparent); }
@@ -814,35 +814,62 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 }
 @keyframes shine { from { background-position: 100% 0; } to { background-position: 0 0; } }
 
-/* The model asking you: its next line in the conversation, with the amber
-   ring that means "needs you", the question in reading type, and its
-   suggested answers as quiet tiles you can click. */
+/* The model asking you (pass 99): a card in the conversation at the step
+   that asked, neutral glass with amber only as the accent that means
+   "needs you": the ring, the top edge, the suggested answer. A question
+   the turn waits on sits at the end of the conversation instead. Answered,
+   it folds into one "Asked" line among the steps. */
 .desktop #question:empty { display: none; }
-.desktop .ask-q { position: relative; display: flex; gap: 12px; max-width: 780px; margin: -30px auto 18px; padding: 16px 18px 14px; border-radius: var(--r-lg);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--warn) 7%, transparent), color-mix(in srgb, var(--warn) 2%, transparent) 70%);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 18%, transparent); }
-.desktop .ask-mark { position: relative; flex: none; width: 10px; height: 10px; margin: 6px 4px 0 1px; border-radius: 50%; box-shadow: 0 0 0 2px var(--warn); }
-.desktop .ask-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; flex: 1; }
-.desktop .ask-text { margin: 0; color: var(--t1); font-size: 15px; line-height: 1.5; font-weight: 500; letter-spacing: -0.005em; text-wrap: pretty; }
-.desktop .ask-text small { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--t3); font-variant-numeric: tabular-nums; }
-.desktop .ask-why { margin: -4px 0 0; color: var(--t3); font-size: 13px; line-height: 1.5; }
-.desktop .ask-choices { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
-.desktop .ask-choice { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border: 0; border-radius: var(--r); background: var(--surface2, var(--tone)); box-shadow: 0 0 0 1px var(--hair); color: var(--t1); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
-.desktop .ask-choice kbd { flex: none; width: 18px; height: 18px; display: grid; place-items: center; border-radius: var(--r-sm); background: var(--tone); color: var(--t3); font: 500 11px/1 Inter, system-ui, sans-serif; }
-.desktop .ask-choice:hover kbd, .desktop .ask-choice:focus-visible kbd { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--t1); }
-.desktop .ask-choice::after { content: "↵"; margin-left: auto; color: var(--t4); opacity: 0; transform: translateX(-3px); }
-.desktop .ask-choice:hover, .desktop .ask-choice:focus-visible { background: color-mix(in srgb, var(--warn) 10%, var(--surface2, var(--tone))); box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 35%, transparent); outline: none; }
-.desktop .ask-choice:hover::after, .desktop .ask-choice:focus-visible::after { opacity: 1; transform: none; }
-.desktop .ask-foot { display: flex; align-items: center; gap: 8px; color: var(--t4); font-size: 12px; }
+.desktop #question .ask-card { max-width: 780px; margin: -30px auto 18px; }
+.desktop .ask-slot { margin: 6px 0 10px; }
+.desktop .ask-card { position: relative; display: flex; flex-direction: column; padding: 14px 16px 12px; border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--t1) 4%, transparent);
+  box-shadow: 0 0 0 1px var(--hair), inset 0 1.5px 0 color-mix(in srgb, var(--warn) 75%, transparent); }
+.desktop .ask-tag { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--t3); font-size: 12px; }
+.desktop .ask-tag i { position: relative; flex: none; width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 0 2px var(--warn); }
+.desktop .ask-tag span { margin-left: auto; font-variant-numeric: tabular-nums; }
+.desktop .ask-trail { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; padding: 0 0 0 10px; border-left: 1px solid var(--hair); list-style: none; font-size: 12.5px; color: var(--t3); }
+.desktop .ask-trail li { display: flex; gap: 8px; min-width: 0; }
+.desktop .ask-trail li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop .ask-trail b { flex: none; font-weight: 500; color: var(--t1); }
+.desktop .ask-text { margin: 0; color: var(--t1); font-size: 16px; line-height: 23px; font-weight: 600; letter-spacing: -0.005em; text-wrap: pretty; }
+.desktop .ask-text .w { display: inline-block; white-space: pre; }
+.desktop .ask-why { margin: 3px 0 0; color: var(--t3); font-size: 13px; line-height: 1.5; }
+.desktop .ask-choices { display: grid; gap: 6px; margin-top: 12px; }
+.desktop .ask-choice { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 12px; border: 0; border-radius: var(--r); background: color-mix(in srgb, var(--t1) 4%, transparent); box-shadow: 0 0 0 1px var(--hair); color: var(--t1); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.desktop .ask-choice kbd { flex: none; width: 18px; height: 18px; margin-top: 1px; display: grid; place-items: center; border-radius: var(--r-sm); background: var(--tone); color: var(--t3); font: 500 11px/1 Inter, system-ui, sans-serif; }
+.desktop .ask-choice .tx { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.desktop .ask-choice .tx b { font-weight: 500; }
+.desktop .ask-choice .tx span { font-size: 12.5px; color: var(--t3); }
+.desktop .ask-choice .rec { align-self: center; flex: none; font-size: 11.5px; color: var(--warn); }
+.desktop .ask-choice:hover, .desktop .ask-choice:focus-visible { background: color-mix(in srgb, var(--t1) 7%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--t1) 16%, transparent); outline: none; }
+.desktop .ask-choice.on { box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 55%, transparent); }
+.desktop .ask-choice.on kbd { background: color-mix(in srgb, var(--warn) 24%, transparent); color: var(--t1); }
+.desktop .ask-own { display: flex; gap: 8px; align-items: center; margin-top: 8px; padding: 3px 3px 3px 12px; border-radius: var(--r); background: color-mix(in srgb, var(--t1) 3%, transparent); box-shadow: 0 0 0 1px var(--hair); }
+.desktop .ask-own:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--t1) 22%, transparent); }
+.desktop .ask-own input { flex: 1; min-width: 0; padding: 6px 0; border: 0; outline: 0; background: none; color: var(--t1); font: inherit; font-size: 13.5px; }
+.desktop .ask-own input::placeholder { color: var(--t4); }
+.desktop .ask-send { padding: 4px 10px; border: 0; border-radius: var(--r-sm); background: var(--t1); color: var(--surface, #141414); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.desktop .ask-own:not(:focus-within) .ask-send { opacity: .3; }
+.desktop .ask-foot { display: flex; align-items: center; gap: 14px; margin-top: 10px; color: var(--t4); font-size: 12px; }
 .desktop .ask-link { padding: 0; border: 0; background: none; color: var(--t3); font: inherit; cursor: pointer; }
 .desktop .ask-link:hover { color: var(--t1); }
+.desktop .ask-done-btn { padding: 4px 10px; border: 0; border-radius: var(--r-sm); background: var(--t1); color: var(--surface, #141414); font: inherit; font-weight: 500; cursor: pointer; }
+.desktop .ask-done-btn[disabled] { background: var(--tone); color: var(--t3); cursor: default; }
+.desktop .tool-row.ask-asked { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--t3); font-size: 12.5px; }
+.desktop .ask-asked .ask-tick { color: var(--ok, #7fd29a); width: 12px; text-align: center; }
+.desktop .ask-asked b { font-weight: 500; color: var(--t2); }
+.desktop .ask-asked .ask-q-was { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.desktop .ask-asked .ask-a { flex: none; color: var(--t1); }
+.desktop .ask-asked .ask-sep { color: var(--t4); }
+.desktop .request-asked { display: flex; justify-content: flex-end; margin: 4px 0 14px; }
+.desktop #ask-back { position: absolute; left: 50%; bottom: calc(100% + 8px); z-index: 3; display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 10px; border: 0; border-radius: 999px; transform: translateX(-50%);
+  background: var(--panel, rgba(30,30,32,.95)); box-shadow: 0 0 0 1px var(--hair), 0 6px 20px rgba(0,0,0,.3); color: var(--t2); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.desktop #ask-back[hidden] { display: none; }
+.desktop #ask-back i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
 @media (prefers-reduced-motion: no-preference) {
-  .desktop .ask-q { animation: desktop-appear 220ms var(--ease); }
-  .desktop .ask-mark::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; box-shadow: 0 0 0 2px var(--warn); animation: ask-breathe 2.4s var(--ease) infinite; }
+  .desktop .ask-tag i::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; box-shadow: 0 0 0 2px var(--warn); animation: ask-breathe 2.4s var(--ease) infinite; }
   .desktop .ask-choice { transition: background 160ms var(--ease), box-shadow 160ms var(--ease); }
-  .desktop .ask-choice::after { transition: opacity 160ms var(--ease), transform 160ms var(--ease); }
-  .desktop .ask-choice { animation: desktop-appear 220ms var(--ease) both; }
-  .desktop .ask-choice:nth-child(2) { animation-delay: 40ms; } .desktop .ask-choice:nth-child(3) { animation-delay: 80ms; } .desktop .ask-choice:nth-child(4) { animation-delay: 120ms; }
 }
 @keyframes ask-breathe { 0% { opacity: .55; transform: scale(1); } 70%, 100% { opacity: 0; transform: scale(2); } }
 /* Something broke: Drive's line says it with a red cross and unfolds in

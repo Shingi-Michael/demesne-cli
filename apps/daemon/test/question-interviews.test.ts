@@ -21,6 +21,7 @@ function processor(batched=false) {
     offered.push(tools.map(tool=>tool.name));
     const content=messages.findLast(m=>m.role==="user")?.content ?? "";
     const results=messages.filter(m=>m.role==="tool");
+    if(content.startsWith("Answer to your question")){yield{type:"text_delta",delta:"Carrying on with: "+content};yield{type:"finish",reason:"stop"};return;}
     if(content.startsWith("Continue this interrupted request")){yield{type:"text_delta",delta:"Resumed from the typed preference: "+content};yield{type:"finish",reason:"stop"};return;}
     if(results.length >= (batched?1:2)){yield{type:"text_delta",delta:"Preferences recorded: "+results.map(m=>m.content).join("\n")};yield{type:"finish",reason:"stop"};return;}
     const questions=batched?[{question:"Dark or light?"},{question:"Which accent?"}]:[{question:results.length?"You chose warm. Which accent fits that mood?":"What mood do you want?"}];
@@ -72,14 +73,29 @@ test("timeout pauses without a model continuation; drafts persist and stale acti
   expect((await until(()=>f.client.getSessionState(session.id),s=>s.pendingQuestions?.[0]?.id!==saved.id && Boolean(s.pendingQuestions?.length))).pendingQuestions![0]!.mode).toBe("interview");
 });
 
-test("batch answers are collected sequentially without another model call or stale index reuse",async()=>{
+test("an open question lets the turn carry on; its answers, collected one by one, start the next turn",async()=>{
   const f=fixture({batched:true}),{session,q}=await first(f);
+  expect(q.open).toBe(true);expect(q.interrupted).toBe(false);
+  const carried=await until(()=>f.client.getSessionState(session.id),s=>s.session.turns[0]?.status==="completed");
+  expect(f.seen).toHaveLength(2);expect(carried.pendingQuestions?.map(p=>p.id)).toEqual([q.id]);
   const partial=await f.client.questionAction(q.id,answer(q,"dark"));
-  expect(partial.question.answers).toEqual([{answer:"dark",source:"typed"}]);expect(f.seen).toHaveLength(1);
+  expect(partial.question.answers).toEqual([{answer:"dark",source:"typed"}]);expect(f.seen).toHaveLength(2);
   await expect(f.client.questionAction(q.id,{...answer(partial.question,"bad"),index:0})).rejects.toThrow("earlier question");
   await f.client.questionAction(q.id,answer(partial.question,"olive"));
-  const done=await until(()=>f.client.getSessionState(session.id),s=>s.session.turns[0]?.status==="completed");
-  expect(done.session.turns[0]!.responseText).toContain("olive");expect(f.seen).toHaveLength(2);
+  const done=await until(()=>f.client.getSessionState(session.id),s=>s.session.turns.length===2 && s.session.turns[1]!.status==="completed");
+  expect(done.session.turns[1]!.content).toContain("Dark or light?");expect(done.session.turns[1]!.responseText).toContain("olive");
+  expect(done.pendingQuestions).toEqual([]);expect(done.answeredQuestions?.[0]?.answers.map(a=>a.answer)).toEqual(["dark","olive"]);
+});
+
+test("an open question survives a daemon restart, and dismissing it leaves the chat alone",async()=>{
+  const f=fixture({batched:true}),{session,q}=await first(f);
+  await until(()=>f.client.getSessionState(session.id),s=>s.session.turns[0]?.status==="completed");
+  await f.app.close();const reopened=f.start();
+  const restored=(await reopened.client.getSessionState(session.id)).pendingQuestions![0]!;
+  expect(restored.id).toBe(q.id);expect(restored.status).toBe("waiting");expect(restored.open).toBe(true);
+  await reopened.client.questionAction(q.id,{action:"cancel",revision:restored.revision});
+  const after=await reopened.client.getSessionState(session.id);
+  expect(after.pendingQuestions).toEqual([]);expect(after.session.turns).toHaveLength(1);expect(after.session.turns[0]!.status).toBe("completed");
 });
 
 test("explicit cancellation closes the question and turn without guessing or continuing",async()=>{
@@ -168,4 +184,27 @@ test("an explicitly cancelled turn never restores an answered-but-uncommitted qu
   store.startToolCall(toolCallId);const {questionId}=store.requestQuestions(toolCallId,[{question:"Mood?",suggestions:[]}],"interview");
   store.resolveQuestions(questionId,toolCallId,[{answer:"warm",source:"typed"}]);store.cancelTurn(turn.id);store.close();
   const reopened=f.start();expect((await reopened.client.getSessionState(session.id)).pendingQuestions).toEqual([]);expect(f.seen).toHaveLength(0);
+});
+
+test("an answer given while the turn still works reaches it after its current step",async()=>{
+  const root=mkdtempSync(join(tmpdir(),"demesne-interview-"));roots.push(root);
+  const workspace=join(root,"workspace"),data=join(root,"data");mkdirSync(workspace);mkdirSync(data);
+  let release=()=>{};const held=new Promise<void>(resolve=>{release=resolve;});const seen:ProviderMessage[][]=[];
+  const provider:TurnProcessor={providerId:"fixture",modelId:"fixture",async listModels(){return[];},async *stream(messages){
+    seen.push(structuredClone(messages));
+    if(seen.length===1){yield{type:"tool_call_delta",index:0,idDelta:"ask",nameDelta:"ask_user",argumentsDelta:JSON.stringify({questions:[{question:"Cache where?",suggestions:["On disk","In memory"]}]})};yield{type:"finish",reason:"tool_calls"};return;}
+    if(seen.length===2){await held;yield{type:"tool_call_delta",index:0,idDelta:"look",nameDelta:"list_files",argumentsDelta:"{}"};yield{type:"finish",reason:"tool_calls"};return;}
+    yield{type:"text_delta",delta:"Done with "+String(messages.at(-1)?.content)};yield{type:"finish",reason:"stop"};
+  }};
+  const app=createDaemonApp({databasePath:join(data,"db.sqlite"),processor:provider,allowlistPath:join(data,"config.toml"),agent:{maxModelRounds:6,maxToolCalls:6}});apps.push(app);
+  const client=new DemesneClient({server:"http://fixture",fetch:((url,init)=>Promise.resolve(app.fetch(new Request(url,init)))) as typeof fetch});
+  const {session}=await client.createSession({workspacePath:workspace,trustWorkspace:true,title:"Open"});
+  await client.submitTurn(session.id,{content:"Cache the model list",permissionMode:"ask"});
+  const asked=await until(()=>client.getSessionState(session.id),s=>Boolean(s.pendingQuestions?.length)&&seen.length===2);
+  const q=asked.pendingQuestions![0]!;
+  await client.questionAction(q.id,{action:"answer",index:0,revision:q.revision,answer:{answer:"On disk",source:"suggestion"}});
+  release();
+  const done=await until(()=>client.getSessionState(session.id),s=>s.session.turns[0]?.status==="completed");
+  expect(done.session.turns).toHaveLength(1);
+  expect(done.session.turns[0]!.responseText).toContain('Answer to your question "Cache where?": On disk');
 });

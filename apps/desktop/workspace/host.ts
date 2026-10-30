@@ -363,6 +363,7 @@ export class WorkspaceHost {
       rewinds: this.current?.rewinds ?? [],
       approvals: [...(this.current?.approvals.values() ?? [])],
       questions: [...(this.current?.questions.values() ?? [])],
+      answered: Object.fromEntries(this.current?.answered ?? []),
       activeTurnId: this.active?.id ?? null,
       busy: this.busy,
       files: this.files,

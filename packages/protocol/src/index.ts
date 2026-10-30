@@ -513,6 +513,8 @@ export interface SessionStateResponse {
   lastEventId: number;
   pendingPermissions: PendingPermissionSnapshot[];
   pendingQuestions?: QuestionState[];
+  /// Questions already answered here, for the folded "Asked" steps.
+  answeredQuestions?: QuestionState[];
   latestProviderCall: ProviderCallSnapshot | null;
   /// `argv`/`cwd` are set for command grants: that exact command, there.
   sessionGrants?: Array<{ tool: string; pathPrefix: string; argv?: string[]; cwd?: string }>;
@@ -823,11 +825,14 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
 }
 
 /// A question the agent puts to the user mid-turn (`ask_user`). The first
-/// suggestion is the agent's recommended answer.
+/// suggestion is the agent's recommended answer; `details[i]` says what
+/// suggestion i means, and `multiple` lets the person take several.
 export interface UserQuestion {
   question: string;
   reason?: string;
   suggestions: string[];
+  details?: string[];
+  multiple?: boolean;
 }
 
 /// How one question was answered: a suggestion taken as offered, the user's
@@ -855,6 +860,9 @@ export interface QuestionState {
   draftVersion: number;
   revision: number;
   interrupted: boolean;
+  /// Asked without waiting: the agent keeps working, and the answer reaches
+  /// it as the person's next words.
+  open?: boolean;
 }
 export type QuestionActionRequest =
   | { action: "answer"; index: number; revision: number; answer: UserAnswer }
@@ -894,13 +902,21 @@ export function parseUserQuestions(value: unknown): UserQuestion[] {
     if (entry.reason !== undefined && (typeof entry.reason !== "string" || entry.reason.length > 500)) {
       throw new ProtocolValidationError(`questions[${index}].reason must be at most 500 characters`);
     }
+    // A suggestion is its words, or { label, detail } for what it means.
     const suggestions = entry.suggestions ?? [];
+    const label = (item: unknown) => isRecord(item) ? item.label : item;
     if (!Array.isArray(suggestions) || suggestions.length > MAX_QUESTION_SUGGESTIONS
-      || !suggestions.every((item) => typeof item === "string" && item.trim() && item.length <= 200)) {
+      || !suggestions.every((item) => { const text = label(item); return typeof text === "string" && text.trim() && text.length <= 200; })) {
       throw new ProtocolValidationError(`questions[${index}].suggestions must be up to ${MAX_QUESTION_SUGGESTIONS} strings of 1 to 200 characters`);
     }
+    const detail = (item: unknown) => isRecord(item) && typeof item.detail === "string" ? item.detail.trim().slice(0, 300) : "";
+    const given = Array.isArray(entry.details) ? entry.details as unknown[] : null;
+    const details = given
+      ? suggestions.map((_, n) => typeof given[n] === "string" ? (given[n] as string).trim().slice(0, 300) : "")
+      : suggestions.map(detail);
     const reason = typeof entry.reason === "string" ? entry.reason.trim() : "";
-    return { question: entry.question.trim(), ...(reason ? { reason } : {}), suggestions: (suggestions as string[]).map((item) => item.trim()) };
+    return { question: entry.question.trim(), ...(reason ? { reason } : {}), suggestions: suggestions.map((item) => (label(item) as string).trim()),
+      ...(details.some(Boolean) ? { details } : {}), ...(entry.multiple === true && suggestions.length > 1 ? { multiple: true } : {}) };
   });
 }
 

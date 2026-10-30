@@ -33,6 +33,9 @@ export interface ToolContext {
   /// Puts questions to the person at the terminal and waits for the answers.
   /// Absent when nobody can answer (non-interactive turns).
   ask?: (questions: UserQuestion[], mode?: QuestionMode) => Promise<UserAnswer[]>;
+  /// Puts questions in the chat without waiting: the answer comes back as the
+  /// person's next words. Absent where only a waiting question works.
+  post?: (questions: UserQuestion[]) => void;
 }
 
 export interface ToolPermission {
@@ -78,13 +81,14 @@ export class ToolRegistry {
   }
 }
 
-/// Lets the agent pause for decisions that are the user's to make. The
-/// suggestions are optional hints; answers are explicitly typed in the composer.
+/// Lets the agent ask for decisions that are the user's to make. A
+/// clarification sits in the chat while the agent keeps working; an
+/// interview waits for each typed answer.
 function askUserTool(): AgentTool {
   return {
     definition: {
       name: "ask_user",
-      description: `Ask the user for decisions or preferences and wait for typed answers in the composer. Use interview mode for guided conversations: ask one question, use its answer to choose the next question, retain refinements, and do not repeat answered questions. Stop interviewing once you understand the request. In clarification mode ask up to ${MAX_USER_QUESTIONS} questions. Ask only for choices that belong to the user, not facts you can inspect or permission to proceed. Unanswered questions pause; never guess a missing interview preference. Suggestions are optional hints.`,
+      description: `Ask the user for decisions or preferences. In clarification mode (up to ${MAX_USER_QUESTIONS} questions) the question appears in the chat and you do not wait: keep doing the work that doesn't depend on the answer, never guess the answer, and when only dependent work is left, say what waits on it and end your turn. The answer arrives as the user's next message. Use interview mode for guided conversations: it waits for each typed answer; ask one question, use its answer to choose the next, retain refinements, and do not repeat answered questions. Stop interviewing once you understand the request. Ask only for choices that belong to the user, not facts you can inspect or permission to proceed. Never guess a missing interview preference.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -97,6 +101,8 @@ function askUserTool(): AgentTool {
                 question: { type: "string", description: "One question, one decision." },
                 reason: { type: "string", description: "One short sentence on why it matters or what you would otherwise assume." },
                 suggestions: { type: "array", items: { type: "string" }, maxItems: MAX_QUESTION_SUGGESTIONS, description: "Possible answers, recommended first." },
+                details: { type: "array", items: { type: "string" }, maxItems: MAX_QUESTION_SUGGESTIONS, description: "Optional, one short line per suggestion in the same order: what choosing it means." },
+                multiple: { type: "boolean", description: "The user may pick more than one suggestion." },
               },
               required: ["question"],
             },
@@ -111,6 +117,10 @@ function askUserTool(): AgentTool {
       const mode = isRecord(input) ? input.mode ?? "clarification" : "clarification";
       if (mode !== "clarification" && mode !== "interview") throw new Error("Question mode must be clarification or interview");
       if (mode === "interview" && questions.length !== 1) throw new Error("Interview mode asks one question at a time");
+      if (mode === "clarification" && context.post) {
+        context.post(questions);
+        return `Asked in the chat; the answer will arrive as the user's next message. Keep doing the work that doesn't depend on it, and don't guess the answer. If everything left depends on it, say what waits and end your turn.`;
+      }
       if (!context.ask) throw new Error("User input is unavailable. Pause this request; do not infer the user's preferences.");
       const answers = await context.ask(questions,mode);
       if (answers.length !== questions.length) throw new Error("User answers do not match the questions");

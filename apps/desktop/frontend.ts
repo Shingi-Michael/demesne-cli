@@ -202,10 +202,12 @@ async function start() {
     listeners.push(...await Promise.all([
       native.event.listen<StateUpdate>("demesne:update", (event) => bridge.update(event.payload)),
       native.event.listen<unknown>("demesne:desktop-error", (event) => showError(event.payload)),
-      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen" | "appearance" | "close-tab"; sessionId?: string; path?: string; on?: boolean; dark?: boolean }>("demesne:desktop-action", (event) => {
+      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen" | "appearance" | "close-tab"; sessionId?: string; path?: string; on?: boolean; top?: number; dark?: boolean }>("demesne:desktop-action", (event) => {
         if(event.payload.action==="appearance")void updateAppearance(event.payload.dark===true).catch(showActionError);
         else if (event.payload.action === "fullscreen") {
           document.documentElement.classList.toggle("fullscreen", event.payload.on === true);
+          // Below the camera notch, which simple full screen also covers.
+          document.documentElement.style.setProperty("--notch-top", `${Math.max(0, Number(event.payload.top) || 0)}px`);
           document.getElementById("mac-lights")!.hidden = !(mac && event.payload.on === true);
         }
         else if (event.payload.action === "open-project") void openProject();

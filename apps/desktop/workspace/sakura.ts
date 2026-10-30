@@ -1,245 +1,257 @@
-/// Home's cherry blossom: two real boughs (CC0 photos from the WordPress photo
-/// directory, sky cut away) over the top half of the start screen. Each bough
-/// is one rigid piece on a damped spring about where it enters the frame;
-/// bending a photo pixel by pixel reads as water, so nothing is ever warped.
-/// The rest of the life is petals: a steady fall and a flurry on each gust.
-/// Runs only while Home shows and the window is visible; under
-/// prefers-reduced-motion it draws one still frame.
-import spawnPoints from "./sakura-spawns.json";
+/// Home's cherry blossom (pass 102 D, the anime print): two boughs drawn in
+/// from the top corners over the start screen's top half, with cel-shaded
+/// five-petal blossoms and buds. By night a large moon with a halo and a sky
+/// of stars; by day a blue sky with cel clouds and faint beams of light. It is
+/// a still picture, drawn when Home shows, when the window settles at a new
+/// size and when the theme changes: nothing moves, so Home costs nothing while
+/// it sits there. The boughs stop above the greeting, so no text sits on them.
 
-type Layer = {
-  src: string; side: "left" | "right"; height: number; lift: number; inset: number; anchor: [number, number]; haze: number;
-  spawns: number[][]; img?: HTMLImageElement; tx?: WebGLTexture; rect: [number, number, number, number]; aspect: number;
-  ang: number; vel: number; freq: number; damp: number; gain: number; ph: number;
+export type Sakura = { pause(): void; resume(): void; setDark(dark: boolean): void; refit(): void };
+
+type Palette = {
+  sky: [string, string, string]; bark: string; rim: string; petal: [string, string]; tip: string;
+  line: string; center: string; stamen: string; bud: string; glow: string;
 };
-type Petal = { x: number; y: number; z: number; vx: number; vy: number; rx: number; ry: number; rz: number; wx: number; wy: number; wz: number; kind: number; seed: number; born: number };
-export type Sakura = { pause(): void; resume(): void; setDark(dark: boolean): void };
+const PALETTES: Record<"dark" | "light", Palette> = {
+  dark: { sky: ["#141436", "#2c2150", "#3d2a55"], bark: "#2a1b2c", rim: "rgba(190,170,255,.55)", petal: ["#ffd9e6", "#f59bbb"], tip: "#fff2f6", line: "#a8406a", center: "#d6336c", stamen: "#ffe08a", bud: "#ee5f8e", glow: "rgba(255,170,205,.22)" },
+  light: { sky: ["#7fc3ee", "#bfe0f6", "#fbe1ea"], bark: "#3a2530", rim: "rgba(255,240,230,.75)", petal: ["#ffe3ec", "#f7a5c0"], tip: "#ffffff", line: "#c2507a", center: "#e0457a", stamen: "#f2b84b", bud: "#f0628f", glow: "rgba(255,255,255,.55)" },
+};
+/// The bough Mike picked; the same one every launch.
+const SEED = 3;
 
-const VS = `attribute vec2 p; uniform vec4 rect; varying vec2 v;
-void main(){ v = rect.xy + p*rect.zw; gl_Position = vec4(v.x*2.-1., 1.-v.y*2., 0., 1.); }`;
-const FS = `precision highp float;
-varying vec2 v; uniform sampler2D img; uniform vec4 rect; uniform float aspect, ang, lift, dark, haze, flip;
-uniform vec2 anchor; uniform vec3 sky; uniform float reachFrom;
-float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float n(vec2 p){ vec2 i = floor(p), f = fract(p), u = f*f*(3.-2.*f);
-  return mix(mix(h(i), h(i+vec2(1,0)), u.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), u.x), u.y); }
-void main(){
-  vec2 uv = (v - rect.xy) / rect.zw;
-  vec2 q = (uv - anchor) * vec2(aspect, 1.);
-  float c = cos(ang), s = sin(ang);
-  q = vec2(c*q.x + s*q.y, -s*q.x + c*q.y);
-  vec2 src = anchor + q / vec2(aspect, 1.) + vec2(0., lift);
-  vec4 col = texture2D(img, clamp(vec2(src.x, mix(src.y, 1. - src.y, flip)), .001, .999));
-  // the photo's own edges dissolve unevenly, so no bough ends on a straight cut
-  float ragged = (n(src * vec2(5., 9.)) - .5) * .2;
-  float inner = anchor.x < .5 ? 1. - src.x : src.x;
-  col *= smoothstep(0., .01, min(src.x, 1. - src.x)) * smoothstep(0., .005, src.y)
-    * smoothstep(0., .22, 1. - src.y + ragged) * smoothstep(0., .22, inner + ragged);
-  // the end away from where the bough enters thins out, never a cut edge
-  float reach = anchor.x < .5 ? src.x : 1. - src.x;
-  col *= 1. - smoothstep(reachFrom + n(src * 6.) * .14, .97 + reachFrom * .05, reach);
-  vec3 rgb = col.rgb / max(col.a, .001);
-  // pale sakura photographed against blue read grey: give them back their pink
-  float bloom = smoothstep(.38, .82, dot(rgb, vec3(.333)));
-  rgb = mix(rgb, rgb * vec3(1.05, .80, .87) + vec3(.03, 0., .015), bloom);
-  rgb = mix(rgb, mix(rgb, vec3(.40, .31, .30), mix(.55, .35, dark)) + .10 * (1. - dark), (1. - bloom) * .7);
-  // by night the bark sinks and the blossoms keep a moonlit glow
-  rgb = mix(rgb, rgb * mix(vec3(.42, .36, .42), vec3(.92, .82, .88), bloom), dark);
-  rgb = mix(rgb, sky, haze);
-  // a ragged lower edge, never a level line above the greeting
-  float a = col.a * (1. - smoothstep(.85, 1.1, v.y / .5 + (n(v * vec2(7., 3.)) - .5) * .25)) * (1. - haze * .3);
-  gl_FragColor = vec4(rgb * a, a);
-}`;
-const TINTS = [["#e59ab2", "#f7cdd9", "#fff4f7"], ["#dc86a2", "#f3bccc", "#fde8ee"], ["#e9aec1", "#fadbe4", "#ffffff"]];
-const PETAL = "M0 22 C-15 12 -17 -8 -9 -19 C-6 -23 -3 -22 0 -17 C3 -22 6 -23 9 -19 C17 -8 15 12 0 22Z";
+type Point = { x: number; y: number; w: number };
+type Branch = Point[];
+type Tip = { x: number; y: number; a: number; spur?: boolean };
 
-function petalSprite(tint: string[], blur: number) {
-  const c = document.createElement("canvas"); c.width = c.height = 72;
-  const x = c.getContext("2d")!;
-  x.filter = blur ? `blur(${blur}px)` : "none";
-  x.translate(36, 36);
-  const g = x.createLinearGradient(0, 22, 0, -22);
-  g.addColorStop(0, tint[0]!); g.addColorStop(.4, tint[1]!); g.addColorStop(1, tint[2]!);
-  x.fillStyle = g; x.fill(new Path2D(PETAL));
-  x.globalAlpha = .16; x.strokeStyle = tint[0]!; x.lineWidth = .8;
-  x.beginPath(); x.moveTo(0, 20); x.quadraticCurveTo(1, 0, 0, -15); x.stroke();
-  return c;
+function random(seed: number) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
-/// Mounts the blossom into `host` (sized by CSS). Returns null when WebGL is
-/// unavailable, and Home simply keeps its plain background.
-export function mountSakura(host: HTMLElement, dark: boolean): Sakura | null {
-  const glc = document.createElement("canvas"), pc = document.createElement("canvas");
-  glc.className = "sk-tree"; pc.className = "sk-petals";
-  const gl = glc.getContext("webgl", { premultipliedAlpha: true, alpha: true, antialias: true });
-  const ctx = pc.getContext("2d");
-  if (!gl || !ctx) return null;
-  host.append(glc, pc);
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const shader = (type: number, source: string) => {
-    const s = gl.createShader(type)!; gl.shaderSource(s, source); gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? "shader");
-    return s;
+/// A bough grows as a limb that bends a little as it goes, side shoots along
+/// it, a leader at its end, and short spurs where single blossoms sit.
+function grow(r: () => number, from: [number, number], angle: number, length: number, width: number, depth: number, branches: Branch[], tips: Tip[]) {
+  const pts: Point[] = [];
+  let [x, y] = from, a = angle;
+  const steps = Math.max(4, Math.round(length / 14)), bend = (r() - .5) * .5;
+  for (let i = 0; i <= steps; i++) {
+    pts.push({ x, y, w: width * (1 - i / steps * .55) });
+    a += bend / steps + (r() - .5) * .16;
+    x += Math.cos(a) * length / steps; y += Math.sin(a) * length / steps;
+  }
+  branches.push(pts);
+  const end = pts[pts.length - 1]!;
+  if (depth <= 0 || width < 1.1) { tips.push({ x: end.x, y: end.y, a }); return; }
+  const shoots = depth > 2 ? 2 + Math.floor(r() * 2) : 1 + Math.floor(r() * 2);
+  for (let k = 0; k < shoots; k++) {
+    const at = pts[Math.floor((.35 + r() * .55) * (pts.length - 1))]!;
+    grow(r, [at.x, at.y], a + (r() < .5 ? -1 : 1) * (.45 + r() * .55), length * (.42 + r() * .25), at.w * (.5 + r() * .15), depth - 1, branches, tips);
+  }
+  grow(r, [end.x, end.y], a + (r() - .5) * .35, length * (.55 + r() * .2), end.w * .78, depth - 1, branches, tips);
+  for (let k = 0; k < 3; k++) {
+    const at = pts[Math.floor(r() * pts.length)]!;
+    tips.push({ x: at.x, y: at.y, a: a + (r() - .5) * 2, spur: true });
+  }
+}
+
+/// A limb: a smooth tapered shape in the bark ink, with a rim of light along
+/// its upper edge.
+function limb(ctx: CanvasRenderingContext2D, p: Branch, pal: Palette) {
+  const left: [number, number][] = [], right: [number, number][] = [];
+  p.forEach((q, i) => {
+    const n = p[Math.min(i + 1, p.length - 1)]!, m = p[Math.max(i - 1, 0)]!;
+    const dx = n.x - m.x, dy = n.y - m.y, l = Math.hypot(dx, dy) || 1;
+    left.push([q.x - dy / l * q.w / 2, q.y + dx / l * q.w / 2]);
+    right.push([q.x + dy / l * q.w / 2, q.y - dx / l * q.w / 2]);
+  });
+  const smooth = (pts: [number, number][], first: boolean) => {
+    if (first) ctx.moveTo(pts[0]![0], pts[0]![1]); else ctx.lineTo(pts[0]![0], pts[0]![1]);
+    for (let i = 1; i < pts.length - 1; i++) ctx.quadraticCurveTo(pts[i]![0], pts[i]![1], (pts[i]![0] + pts[i + 1]![0]) / 2, (pts[i]![1] + pts[i + 1]![1]) / 2);
+    ctx.lineTo(pts[pts.length - 1]![0], pts[pts.length - 1]![1]);
   };
-  const prog = gl.createProgram()!;
-  gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS));
-  gl.linkProgram(prog); gl.useProgram(prog);
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
-  const loc = gl.getAttribLocation(prog, "p"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  const uniforms = new Map<string, WebGLUniformLocation | null>();
-  const u = (name: string) => { if (!uniforms.has(name)) uniforms.set(name, gl.getUniformLocation(prog, name)); return uniforms.get(name)!; };
-  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  ctx.beginPath(); smooth(left, true); smooth(right.slice().reverse(), false); ctx.closePath();
+  ctx.fillStyle = pal.bark; ctx.fill();
+  ctx.save(); ctx.clip();
+  ctx.beginPath(); smooth(left, true);
+  ctx.strokeStyle = pal.rim; ctx.lineWidth = Math.max(1, p[0]!.w * .22); ctx.lineCap = "round"; ctx.stroke();
+  ctx.restore();
+}
 
-  // The far bough comes in from the right, soft and hazed; the near one hangs
-  // from the top-left corner (its photo turned over, so the thick limb is in
-  // view instead of below the fade). Each is a spring: the near one quicker, so they never move in step.
-  const bough = (src: string, side: Layer["side"], height: number, lift: number, inset: number, anchor: [number, number], haze: number, spawns: number[][], i: number): Layer =>
-    ({ src, side, height, lift, inset, anchor, haze, spawns, rect: [0, 0, 1, 1], aspect: 1, ang: 0, vel: 0, freq: haze ? .26 : .34, damp: haze ? .9 : 1.1, gain: haze ? 1.35 : 1, ph: i * 2.1 });
-  const layers = [
-    bough("assets/sakura/far.webp", "right", 1.15, .02, 0, [1, .2], .1, spawnPoints.far, 0),
-    bough("assets/sakura/near.webp", "left", 1.1, .06, .03, [0, .22], 0, spawnPoints.near, 1),
-  ];
-  let W = 0, H = 0, PH = 0, dpr = 1, darkness = dark ? 1 : 0, wantDark = darkness;
-  function place() {
-    for (const l of layers) {
-      const hh = l.height * .5, ww = hh * PH * l.aspect / Math.max(W, 1);
-      l.rect = [l.side === "left" ? -l.inset * ww : 1 - ww + l.inset * ww, -l.lift * hh, ww, hh];
+/// One petal: rounded, with the cherry's notch at its tip.
+function petal(ctx: CanvasRenderingContext2D, len: number, wid: number) {
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.bezierCurveTo(wid * .9, -len * .15, wid * 1.05, -len * .78, wid * .32, -len * .98);
+  ctx.quadraticCurveTo(wid * .1, -len * .86, 0, -len * .8);
+  ctx.quadraticCurveTo(-wid * .1, -len * .86, -wid * .32, -len * .98);
+  ctx.bezierCurveTo(-wid * 1.05, -len * .78, -wid * .9, -len * .15, 0, 0);
+  ctx.closePath();
+}
+
+/// A blossom in flat cel tones: a deeper base, a pale upper half, a white
+/// glint and a rose line, with its eye and stamens.
+function blossom(ctx: CanvasRenderingContext2D, r: () => number, x: number, y: number, size: number, rot: number, tilt: number, pal: Palette, scale: number) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot); ctx.scale(1, tilt);
+  for (let i = 0; i < 5; i++) {
+    ctx.save();
+    ctx.rotate(i * Math.PI * 2 / 5 + (r() - .5) * .18);
+    const len = size * (.92 + r() * .16), wid = size * .52;
+    petal(ctx, len, wid);
+    ctx.fillStyle = pal.petal[1]; ctx.fill();
+    ctx.save(); ctx.clip();
+    ctx.beginPath(); ctx.ellipse(0, -len * .72, wid * .95, len * .5, 0, 0, Math.PI * 2); ctx.fillStyle = pal.petal[0]; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-wid * .28, -len * .78, wid * .16, len * .1, -.4, 0, Math.PI * 2); ctx.fillStyle = pal.tip; ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = pal.line; ctx.lineWidth = .9 * scale; ctx.stroke();
+    ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(0, 0, size * .2, 0, Math.PI * 2); ctx.fillStyle = pal.center; ctx.globalAlpha = .9; ctx.fill(); ctx.globalAlpha = 1;
+  const stamens = 9 + Math.floor(r() * 5);
+  for (let i = 0; i < stamens; i++) {
+    const a = r() * Math.PI * 2, l = size * (.35 + r() * .2);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * l, Math.sin(a) * l);
+    ctx.strokeStyle = pal.center; ctx.globalAlpha = .55; ctx.lineWidth = .55 * scale; ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(Math.cos(a) * l, Math.sin(a) * l, size * .045 + .4, 0, Math.PI * 2); ctx.fillStyle = pal.stamen; ctx.fill();
+  }
+  ctx.restore();
+}
+
+function bud(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, rot: number, pal: Palette, scale: number) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -size * .9);
+  ctx.strokeStyle = pal.bark; ctx.lineWidth = .8 * scale; ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(0, -size * 1.25, size * .32, size * .5, 0, 0, Math.PI * 2);
+  ctx.fillStyle = pal.bud; ctx.fill();
+  ctx.strokeStyle = pal.line; ctx.lineWidth = .8 * scale; ctx.stroke();
+  ctx.restore();
+}
+
+/// The sky behind the boughs, over the top half.
+function sky(ctx: CanvasRenderingContext2D, W: number, H: number, pal: Palette, dark: boolean, r: () => number, scale: number) {
+  const top = H * .55, g = ctx.createLinearGradient(0, 0, 0, top);
+  g.addColorStop(0, pal.sky[0]); g.addColorStop(.45, pal.sky[1]); g.addColorStop(.75, pal.sky[2]);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, top);
+  if (dark) {
+    // stars, a few with four points, and a big moon with its halo
+    for (let i = 0; i < 90; i++) {
+      const x = r() * W, y = r() * top * .8, s = (r() < .1 ? 1.6 : .7 + r() * .6) * scale;
+      ctx.globalAlpha = .35 + r() * .55; ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
+      if (s > 1.4 * scale) { ctx.fillRect(x - s * 4, y - .4 * scale, s * 8, .8 * scale); ctx.fillRect(x - .4 * scale, y - s * 4, .8 * scale, s * 8); }
     }
+    ctx.globalAlpha = 1;
+    const mx = W * .64, my = H * .13, mr = W * .07;
+    const halo = ctx.createRadialGradient(mx, my, mr * .8, mx, my, mr * 3.2);
+    halo.addColorStop(0, "rgba(255,226,236,.35)"); halo.addColorStop(1, "rgba(255,226,236,0)");
+    ctx.fillStyle = halo; ctx.fillRect(mx - mr * 3.2, my - mr * 3.2, mr * 6.4, mr * 6.4);
+    const disc = ctx.createRadialGradient(mx - mr * .3, my - mr * .3, mr * .1, mx, my, mr);
+    disc.addColorStop(0, "#fffaf6"); disc.addColorStop(1, "#f7dbe4");
+    ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fillStyle = disc; ctx.fill();
+    return;
   }
-  for (const l of layers) {
-    const img = new Image();
-    img.onload = () => {
-      l.aspect = img.naturalWidth / img.naturalHeight; l.img = img;
-      l.tx = gl.createTexture()!; gl.bindTexture(gl.TEXTURE_2D, l.tx);
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-      for (const [k, value] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]] as const)
-        gl.texParameteri(gl.TEXTURE_2D, k, value);
-      place();
-      if (still || !running) draw(0);
-    };
-    img.src = l.src;
+  // cel clouds: a white body over a pale blue underside
+  const cloud = (cx: number, cy: number, w: number) => {
+    const puffs = [[0, 0, .32], [-.3, .08, .22], [.3, .07, .24], [-.12, -.12, .24], [.16, -.1, .2]] as const;
+    ctx.fillStyle = "#dbe9f7";
+    for (const [dx, dy, rr] of puffs) { ctx.beginPath(); ctx.arc(cx + dx * w, cy + dy * w + w * .05, rr * w, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = "#ffffff";
+    for (const [dx, dy, rr] of puffs) { ctx.beginPath(); ctx.arc(cx + dx * w, cy + dy * w - w * .02, rr * w * .94, 0, Math.PI * 2); ctx.fill(); }
+  };
+  cloud(W * .58, H * .2, W * .2); cloud(W * .86, H * .3, W * .13); cloud(W * .3, H * .27, W * .1);
+  // soft beams that fade before they reach the greeting
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 3; i++) {
+    const x = W * (.6 + i * .14), w = W * (.04 + i * .015);
+    const beam = ctx.createLinearGradient(0, 0, 0, top * .8);
+    beam.addColorStop(0, "rgba(255,250,235,.10)"); beam.addColorStop(1, "rgba(255,250,235,0)");
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + w, 0); ctx.lineTo(x + w - W * .2, top * .8); ctx.lineTo(x - W * .2 - w, top * .8); ctx.closePath();
+    ctx.fillStyle = beam; ctx.filter = `blur(${6 * scale}px)`; ctx.fill(); ctx.filter = "none";
   }
+  ctx.restore();
+}
 
-  // Wind: a breeze that breathes, and gusts that rise in a second and die slowly.
-  let gusts: { at: number; power: number }[] = [], nextGust = 2.5 + Math.random() * 3;
-  function wind(t: number) {
-    if (t > nextGust) { gusts.push({ at: t, power: .8 + Math.random() * 1.2 }); nextGust = t + 6 + Math.random() * 9; }
-    gusts = gusts.filter((g) => t - g.at < 9);
-    const gust = gusts.reduce((sum, g) => { const a = t - g.at; return sum + g.power * (a < 1.4 ? Math.sin(a / 1.4 * Math.PI / 2) ** 2 : Math.exp(-(a - 1.4) / 2.2)); }, 0);
-    const breathe = Math.sin(t * .31) * .18 + Math.sin(t * .83 + 1.3) * .09 + Math.sin(t * 2.3) * .03;
-    return { x: .3 + breathe + gust * .9, y: Math.sin(t * .41) * .06, gust };
-  }
-  function swing(l: Layer, w: { x: number; gust: number }, t: number, dt: number) {
-    const k = (2 * Math.PI * l.freq) ** 2, dir = l.side === "left" ? 1 : -1;
-    const push = (w.x * .0035 + w.gust * .009 + (Math.sin(t * .7 + l.ph) + Math.sin(t * 1.13 + l.ph * 1.7) * .6) * .0011) * l.gain * dir;
-    l.vel += (k * (push - l.ang) - l.damp * l.vel) * dt;
-    l.ang += l.vel * dt;
-  }
-
-  const sprites = TINTS.map((tint) => [petalSprite(tint, 0), petalSprite(tint, 1.4), petalSprite(tint, 3.4)]);
-  const petals: Petal[] = [];
-  function spawn(t: number, fromTree: boolean) {
-    let x = Math.random() * W, y = -16;
-    if (fromTree) {
-      const l = Math.random() < .8 ? layers[1]! : layers[0]!;
-      if (!l.img) return;
-      const [su = 0, sv = 0] = l.spawns[(Math.random() * l.spawns.length) | 0] ?? [];
-      x = (l.rect[0] + su * l.rect[2]) * W; y = (l.rect[1] + (l.side === "left" ? 1 - sv : sv) * l.rect[3]) * PH;
-      if (x < -20 || x > W + 20 || y < -10 || y > H * .95) return;
-    }
-    petals.push({ x, y, z: .55 + Math.random() ** 1.7 * 1.5, vx: 0, vy: 0, rx: Math.random() * 6.28, ry: Math.random() * 6.28, rz: Math.random() * 6.28,
-      wx: (Math.random() - .5) * 3.6, wy: (Math.random() - .5) * 2.8, wz: (Math.random() - .5) * 1.8, kind: (Math.random() * 3) | 0, seed: Math.random() * 100, born: t });
-  }
-
-  function resize() {
-    const r = host.getBoundingClientRect(); dpr = Math.min(devicePixelRatio || 1, 2);
-    W = r.width; PH = r.height; H = PH * .55;
-    glc.width = pc.width = Math.round(W * dpr); glc.height = pc.height = Math.round(PH * dpr);
-    place();
-    draw(last);
-  }
-  // While the window is being resized the canvases stretch with it, and they
-  // are rebuilt at the new size once it settles: rebuilding them on every
-  // step cleared them (a flash each step) and reallocated two retina-sized
-  // buffers many times a second, which made resizing stutter.
-  let settle: ReturnType<typeof setTimeout> | undefined;
-  const observer = new ResizeObserver(() => { clearTimeout(settle); settle = setTimeout(resize, 150); });
-
-  const start = performance.now();
-  let last = 0, carry = 0, raf = 0, running = false;
-  function draw(t: number) {
-    const dt = Math.min(.05, t - last || .016); last = t;
-    darkness += (wantDark - darkness) * (still ? 1 : Math.min(1, dt * 4));
-    const w = still ? { x: .3, y: 0, gust: 0 } : wind(t);
-    gl!.viewport(0, 0, glc.width, glc.height); gl!.clearColor(0, 0, 0, 0); gl!.clear(gl!.COLOR_BUFFER_BIT);
-    gl!.uniform1f(u("dark"), darkness);
-    gl!.uniform3f(u("sky"), .115 * darkness + .985 * (1 - darkness), .085 * darkness + .935 * (1 - darkness), .11 * darkness + .95 * (1 - darkness));
-    gl!.uniform1i(u("img"), 0);
-    for (const l of layers) {
-      if (!l.tx) continue;
-      if (!still) swing(l, w, t, dt);
-      gl!.activeTexture(gl!.TEXTURE0); gl!.bindTexture(gl!.TEXTURE_2D, l.tx);
-      gl!.uniform4f(u("rect"), ...l.rect); gl!.uniform1f(u("aspect"), l.aspect);
-      gl!.uniform2f(u("anchor"), ...l.anchor); gl!.uniform1f(u("haze"), l.haze);
-      gl!.uniform1f(u("flip"), l.side === "left" ? 1 : 0); gl!.uniform1f(u("reachFrom"), l.side === "left" ? .72 : .8);
-      gl!.uniform1f(u("ang"), l.ang); gl!.uniform1f(u("lift"), -Math.abs(l.ang) * .15);
-      gl!.drawArrays(gl!.TRIANGLE_STRIP, 0, 4);
-    }
-    if (!still) {
-      carry += dt * (2.4 + w.gust * 12);
-      while (carry > 1) { carry -= 1; spawn(t, Math.random() < .85); }
-      if (petals.length > 260) petals.splice(0, petals.length - 260);
-    } else if (!petals.length && layers[1]!.img) {
-      for (let i = 0; i < 18; i++) { spawn(0, true); const p = petals[petals.length - 1]; if (p) p.y += Math.random() * PH * .5; }
-    }
-    ctx!.setTransform(dpr, 0, 0, dpr, 0, 0); ctx!.clearRect(0, 0, W, PH);
-    const edge = PH * .86;
-    for (let i = petals.length - 1; i >= 0; i--) {
-      const p = petals[i]!;
-      if (!still) {
-        // a flat petal sails, an edge-on petal drops
-        const flat = Math.abs(Math.cos(p.rx)) * Math.abs(Math.cos(p.ry));
-        const tx = w.x * 85 * p.z + Math.sin(p.y * .011 + t * .8 + p.seed) * 26 + Math.sin(p.x * .006 - t * .5) * 12;
-        const ty = (42 + (1 - flat) * 58) * p.z + w.y * 40 + Math.cos(p.x * .01 + t * 1.1 + p.seed) * 12 - w.gust * 10;
-        p.vx += (tx - p.vx) * Math.min(1, dt * 1.5); p.vy += (ty - p.vy) * Math.min(1, dt * 1.1);
-        p.x += p.vx * dt; p.y += p.vy * dt;
-        const spin = 1 + w.gust * 1.4;
-        p.rx += p.wx * dt * spin; p.ry += p.wy * dt * spin; p.rz += p.wz * dt * spin;
+/// `floor` is where the greeting starts, in canvas pixels: the picture is laid
+/// out to end just above it.
+function paint(canvas: HTMLCanvasElement, dark: boolean, floor: number) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const W = canvas.width, scale = W / 920, pal = PALETTES[dark ? "dark" : "light"], r = random(SEED);
+  ctx.clearRect(0, 0, W, canvas.height);
+  // the layout's height: its clip line (.47 of it) sits on the floor
+  const H = Math.min(canvas.height, floor / .47);
+  sky(ctx, W, H, pal, dark, r, scale);
+  const branches: Branch[] = [], tips: Tip[] = [];
+  // the near bough from the top-left, the far one from the top-right
+  grow(r, [-W * .04, H * .05], .32, W * .34, 26 * scale, 4, branches, tips);
+  const far = branches.length;
+  grow(r, [W * 1.03, -H * .02], Math.PI - .55, W * .26, 17 * scale, 3, branches, tips);
+  const limit = H * .42;
+  ctx.save();
+  // nothing reaches the greeting
+  ctx.beginPath(); ctx.rect(0, 0, W, H * .47); ctx.clip();
+  branches.forEach((b, i) => {
+    if (b[0]!.y > limit) return;
+    ctx.globalAlpha = i >= far ? .8 : 1;
+    limb(ctx, b, pal);
+  });
+  ctx.globalAlpha = 1;
+  // blossoms in clusters at twig ends and on spurs, buds among them
+  for (const t of tips) {
+    if (t.y > limit || t.y < -10 || t.x < -10 || t.x > W + 10) continue;
+    const count = t.spur ? (r() < .5 ? 1 : 0) : (r() < .15 ? 0 : 1 + Math.floor(r() * 3.4));
+    for (let i = 0; i < count; i++) {
+      const fx = t.x + (r() - .5) * 26 * scale, fy = t.y + (r() - .5) * 22 * scale;
+      const distant = r() < .3, size = (distant ? 5 + r() * 3 : 8 + r() * 8) * scale;
+      ctx.save();
+      if (distant) ctx.globalAlpha = .6;
+      else {
+        const glow = ctx.createRadialGradient(fx, fy, 0, fx, fy, size * 2.2);
+        glow.addColorStop(0, pal.glow); glow.addColorStop(1, pal.glow.replace(/[\d.]+\)$/, "0)"));
+        ctx.fillStyle = glow; ctx.fillRect(fx - size * 2.2, fy - size * 2.2, size * 4.4, size * 4.4);
       }
-      if (p.y > edge + 30 || p.x > W + 60 || p.x < -80) { petals.splice(i, 1); continue; }
-      const fade = Math.min(1, (t - p.born) * 3 + (still ? 1 : 0)) * (1 - Math.max(0, Math.min(1, (p.y - edge * .7) / (edge * .3))));
-      const size = (p.z > 1.75 ? 20 : 15) * p.z, sx = Math.cos(p.ry), sy = Math.cos(p.rx);
-      const blur = p.z > 1.75 ? 2 : p.z < .72 ? 1 : 0;
-      ctx!.globalAlpha = fade * (p.z < .72 ? .6 : p.z > 1.75 ? .8 : .95) * (blur === 2 ? 1 : .7 + .3 * Math.abs(sx * sy)) * (darkness > .5 ? .92 : 1);
-      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0); ctx!.translate(p.x, p.y); ctx!.rotate(p.rz);
-      ctx!.scale((Math.abs(sx) < .08 ? .08 : sx) * size / 44, (Math.abs(sy) < .08 ? .08 : sy) * size / 44);
-      ctx!.drawImage(sprites[p.kind]![blur]!, -36, -36);
+      blossom(ctx, r, fx, fy, size, r() * 6.28, .55 + r() * .45, pal, scale);
+      ctx.restore();
     }
-    ctx!.globalAlpha = 1;
+    if (r() < .5) bud(ctx, t.x, t.y, (6 + r() * 3) * scale, t.a + Math.PI / 2 + (r() - .5), pal, scale);
   }
-  // Petals drift slowly, so 30 frames a second look the same as the
-  // display's 120. Between frames nothing is asked of the page: a frame
-  // callback alone keeps the window compositing at the display's rate. They
-  // rest while you're in another app: a window that redraws behind the one
-  // you're using slows the whole Mac.
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  function tick() {
-    raf = 0;
-    if (!running || document.hidden || !document.hasFocus()) return;
-    draw((performance.now() - start) / 1000);
-    timer = setTimeout(() => { timer = undefined; wake(); }, 1000 / 30);
-  }
-  const wake = () => { if (running && !still && !raf && !timer && !document.hidden && document.hasFocus()) raf = requestAnimationFrame(tick); };
-  document.addEventListener("visibilitychange", wake);
-  window.addEventListener("focus", wake);
+  ctx.restore();
+  // the lower edge fades out into the page behind
+  ctx.save(); ctx.globalCompositeOperation = "destination-out";
+  const fade = ctx.createLinearGradient(0, H * .36, 0, H * .5);
+  fade.addColorStop(0, "rgba(0,0,0,0)"); fade.addColorStop(1, "rgba(0,0,0,1)");
+  ctx.fillStyle = fade; ctx.fillRect(0, H * .36, W, H * .64);
+  ctx.restore();
+}
+
+/// Mounts the blossom into `host` (sized by CSS). `floor` says how far down
+/// the greeting starts, in CSS pixels from the host's top. Returns null without
+/// a 2D canvas, and Home keeps its plain background.
+export function mountSakura(host: HTMLElement, dark: boolean, floor: () => number): Sakura | null {
+  const canvas = document.createElement("canvas");
+  if (!canvas.getContext("2d")) return null;
+  host.append(canvas);
+  let shown = false, drawnFloor = -1, settle: ReturnType<typeof setTimeout> | undefined;
+  const draw = () => {
+    const box = host.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2);
+    canvas.width = Math.round(box.width * dpr); canvas.height = Math.round(box.height * dpr);
+    drawnFloor = floor();
+    paint(canvas, dark, Math.max(0, drawnFloor - 12) * dpr);
+  };
+  // While the window is being resized the picture stretches with it, and it is
+  // drawn again at the new size once the window settles.
+  const observer = new ResizeObserver(() => { clearTimeout(settle); settle = setTimeout(draw, 150); });
   return {
-    pause() { running = false; observer.disconnect(); clearTimeout(settle); if (raf) cancelAnimationFrame(raf); raf = 0; clearTimeout(timer); timer = undefined; },
-    resume() {
-      if (running) return;
-      running = !still; observer.observe(host); resize();
-      if (still) draw(0); else { last = (performance.now() - start) / 1000; wake(); }
-    },
-    setDark(next) { wantDark = next ? 1 : 0; if (!running) { darkness = wantDark; draw(last); } },
+    pause() { shown = false; observer.disconnect(); clearTimeout(settle); },
+    resume() { if (shown) return; shown = true; observer.observe(host); draw(); },
+    setDark(next) { if (next === dark) return; dark = next; if (shown) draw(); },
+    // Home's greeting moved (it grew a line, or lost one): end the picture above it again.
+    refit() { if (shown && Math.abs(floor() - drawnFloor) > 4) draw(); },
   };
 }

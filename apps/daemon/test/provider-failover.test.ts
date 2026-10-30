@@ -18,7 +18,7 @@ const inference = (providerId: string, stream: TurnInference["stream"], released
   ({ providerId, modelId: `${providerId}-model`, profile: null, thinkingEnabled: undefined, preservesPromptCache: false, stream,
     release: async () => { released.push(providerId); } });
 
-function fixture(fallback: (tried: string[]) => TurnInference | null, questions?: QuestionBroker) {
+function fixture(fallback: (tried: string[]) => TurnInference | null, questions?: QuestionBroker, assistant = false) {
   const workspace = realpathSync(mkdtempSync(join(tmpdir(), "demesne-failover-")));
   const store = new DemesneStore(":memory:");
   const { session } = store.createSession("Failover", workspace);
@@ -26,7 +26,7 @@ function fixture(fallback: (tried: string[]) => TurnInference | null, questions?
   store.setEventSink((event) => events.push(event));
   const schedulers = new InferenceSchedulers(new InferenceScheduler(1), "test");
   const engine = new AgentEngine(store, new ToolRegistry([]), new PermissionBroker(), schedulers, undefined, undefined,
-    { fallbackInference: (_current, tried) => fallback(tried), ...(questions ? { questions } : {}) });
+    { fallbackInference: (_current, tried) => fallback(tried), ...(questions ? { questions } : {}), ...(assistant ? { assistantChat: () => true } : {}) });
   return { store, session, events, engine, close: async () => { await schedulers.close(); store.close(); rmSync(workspace, { recursive: true, force: true }); } };
 }
 
@@ -48,6 +48,19 @@ test("a turn whose provider drops carries on with the next one, and says so once
     expect(switched[0]!.payload).toMatchObject({ from: { provider: "Qwen on PC" }, to: { provider: "ChatGPT", model: "ChatGPT-model" } });
     expect(events.map((event) => event.type).filter((type) => type.startsWith("model.request_"))).toEqual(["model.request_started", "model.request_failed", "model.request_started", "model.request_completed"]);
     expect(released.sort()).toEqual(["ChatGPT", "Qwen on PC"]);
+  } finally { await close(); }
+});
+
+test("the assistant's chat never carries on with another provider: its turn fails instead", async () => {
+  const asked: string[] = [];
+  const pc = inference("Qwen on PC", async function* () { throw new Error("The socket connection was closed unexpectedly"); });
+  const codex = inference("Codex", async function* (messages) { asked.push(messages.at(-1)!.content as string); yield { type: "text_delta", delta: "Here is your file." }; });
+  const { store, session, events, engine, close } = fixture(() => codex, undefined, true);
+  try {
+    const { turn } = store.createTurn(session.id, "Summarize my immigration letter", "allow");
+    await expect(engine.run(turn.id, pc, new AbortController().signal)).rejects.toThrow("closed unexpectedly");
+    expect(asked).toEqual([]);
+    expect(events.filter((event) => event.type === "model.provider_switched")).toHaveLength(0);
   } finally { await close(); }
 });
 

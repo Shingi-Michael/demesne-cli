@@ -104,6 +104,8 @@ try {
     // install.ps1 makes ~/Assistant; `[assistant] home` names another folder.
     assistantHome: config.assistant?.home ?? (existsSync(join(homedir(), "Assistant")) ? join(homedir(), "Assistant") : undefined),
     phone: config.assistant?.ntfy ? ntfy(config.assistant.ntfy, config.assistant.ntfyToken) : undefined,
+    // The assistant's chat never follows the picker to another provider.
+    assistantModel: config.assistant?.model ?? config.provider.model,
     images: config.images,
     providerVision: config.provider.vision,
     agent: config.agent,

@@ -394,7 +394,9 @@ export class AgentEngine {
           // (Continue · Stop); Drive, mail and other Auto turns carry on and
           // the guide says so once.
           if (!signal.aborted && roundText.length === 0 && assembled.size === 0 && isProviderDropped(error)) {
-            const next = this.options.fallbackInference?.(inference, triedProviders) ?? null;
+            // The assistant's chat runs on its own model only: its reading
+            // of your files never continues on another provider.
+            const next = this.options.assistantChat?.(turn.sessionId) ? null : this.options.fallbackInference?.(inference, triedProviders) ?? null;
             if (next && !triedProviders.includes(next.providerId)) {
               const reason = error instanceof Error ? error.message : String(error);
               if (!(await this.continueElsewhere(turnId, turn.permissionMode, providerCallId, inference, next, signal))) {

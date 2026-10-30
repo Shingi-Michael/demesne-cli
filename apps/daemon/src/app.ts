@@ -156,6 +156,10 @@ export function createDaemonApp(options: {
   /// Your phone, through ntfy: routines push their answers to it, and chats
   /// get a notify_phone tool.
   phone?: Phone;
+  /// The model the assistant's chat always runs on. The picker switches the
+  /// daemon's model for every other chat; your personal files never follow
+  /// it to another provider.
+  assistantModel?: string;
   images?: ImageGenerationConfig;
   contextPlanner?: ContextPlanner;
   providerFirstEventTimeoutMs?: number;
@@ -207,7 +211,7 @@ export function createDaemonApp(options: {
       whenIdle(sessionId, () => {
         try {
           const { turn } = store.createTurn(sessionId, content, "deny", false, false);
-          void queueTurn(turn, snapshotTurnInference(processor, false));
+          void queueTurn(turn, inferenceIn(sessionId, false));
         } catch (error) { console.warn(`Couldn't report the Drive mission: ${error instanceof Error ? error.message : error}`); }
       });
     },
@@ -274,7 +278,7 @@ export function createDaemonApp(options: {
       if (!turn || turn.sessionId !== context.sessionId || turn.status !== "running" || turn.kind === "compaction")
         throw new Error("Compaction requires the current running conversation turn");
       if (!pendingCompactions.has(turn.id)) pendingCompactions.set(turn.id, {
-        instructions: body.instructions ?? "", inference: snapshotTurnInference(processor, false),
+        instructions: body.instructions ?? "", inference: inferenceIn(context.sessionId, false),
       });
       return JSON.stringify({ status: "scheduled", message: "Compaction will run after this turn completes successfully. Full transcript remains in History." });
     },
@@ -327,7 +331,7 @@ export function createDaemonApp(options: {
       // Mail runs on Auto, like a Drive mission: nobody is at the window to
       // approve, and a turn that waits never answers the sender.
       const { turn } = store.createTurn(sessionId, content, "allow");
-      queueTurn(turn, snapshotTurnInference(processor, undefined));
+      queueTurn(turn, inferenceIn(sessionId, undefined));
     },
     waitForIdle: (sessionId) => new Promise((resolve) => {
       const active = () => store.getSession(sessionId)?.turns.some((turn) => turn.status === "queued" || turn.status === "running") ?? false;
@@ -409,7 +413,7 @@ export function createDaemonApp(options: {
       // Nobody is at the window to approve, so a project's routine runs on
       // Auto, like a Drive mission; a plain chat has no tools to approve.
       const { turn } = store.createTurn(sessionId, routine.prompt, workspace ? "allow" : "deny", false, false, "chat", [], false, assistantId ? title : undefined);
-      const run = queueTurn(turn, snapshotTurnInference(processor, false));
+      const run = queueTurn(turn, inferenceIn(sessionId, false));
       // With a phone set up, the answer goes there: a routine runs because
       // you aren't looking at the window.
       const phone = options.phone;
@@ -456,6 +460,18 @@ export function createDaemonApp(options: {
   let closing = false;
   let closePromise: Promise<void> | undefined;
 
+  /// The call a turn in `sessionId` runs on: the daemon's selected model,
+  /// or for the assistant's chat its own pinned model, however the picker
+  /// is set. A pinned model nobody serves fails the turn rather than
+  /// sending the assistant's reading elsewhere.
+  function inferenceIn(sessionId: string, thinkingEnabled: boolean | undefined): TurnInference {
+    if (!options.assistantModel || sessionId !== assistantChat.existing()) return snapshotTurnInference(processor, thinkingEnabled);
+    try {
+      return snapshotTurnInference(processor, thinkingEnabled, { model: options.assistantModel });
+    } catch (error) {
+      throw new Error(`The assistant's chat runs only on ${options.assistantModel} ([assistant] model, or the [provider] model), which no configured provider serves: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   function queueTurn(turn: Turn, inference: TurnInference): Promise<void> {
     const controller = new AbortController();
     activeControllers.set(turn.id, controller);
@@ -642,7 +658,7 @@ export function createDaemonApp(options: {
     whenIdle(sessionId, () => {
       try {
         const next = store.createTurn(sessionId, text, asked?.permissionMode ?? "ask", asked?.thinkingEnabled ?? undefined, asked?.planOnly ?? false);
-        void queueTurn(next.turn, inference ?? snapshotTurnInference(processor, asked?.thinkingEnabled ?? undefined));
+        void queueTurn(next.turn, inference ?? inferenceIn(sessionId, asked?.thinkingEnabled ?? undefined));
         started = { turnId: next.turn.id, eventId: next.event.eventId };
       } catch (error) { console.warn(`Couldn't hand the answer to the agent: ${error instanceof Error ? error.message : error}`); }
     });
@@ -1314,7 +1330,7 @@ export function createDaemonApp(options: {
 
       if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "compact") {
         const body = parseCompactSessionRequest(await readJson(request));
-        const inference = snapshotTurnInference(processor, false);
+        const inference = inferenceIn(path[2]!, false);
         const { turn, event } = store.createTurn(path[2]!, `/compact${body.instructions ? ` ${body.instructions}` : ""}`, "deny", false, false, "compaction");
         queueTurn(turn, inference);
         return json({ turn, eventId: event.eventId } satisfies SubmitTurnResponse, 202);
@@ -1330,7 +1346,7 @@ export function createDaemonApp(options: {
         const body = parseSubmitTurnRequest(await readJson(request));
         let inference: TurnInference;
         try {
-          inference = snapshotTurnInference(processor, body.thinkingEnabled);
+          inference = inferenceIn(path[2]!, body.thinkingEnabled);
         } catch (error) {
           const message = error instanceof Error ? error.message : "Turn processor cannot snapshot inference configuration";
           return apiError("not_supported", message, 400);
@@ -1381,7 +1397,7 @@ export function createDaemonApp(options: {
       if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "themefy") {
         const body=await readJson(request);
         if(!isRecord(body) || (body.preferences !== undefined && (typeof body.preferences !== "string" || body.preferences.length>2000)))throw new ProtocolValidationError("Theme preferences must be at most 2000 characters");
-        const inference=snapshotTurnInference(processor,true);
+        const inference=inferenceIn(path[2]!,true);
         const content=`/themefy${body.preferences ? ` ${body.preferences}`:""}`;
         const {turn,event}=store.createTurn(path[2]!,content,"ask",true,false,"themefy");
         queueTurn(turn,inference);
@@ -1401,7 +1417,7 @@ export function createDaemonApp(options: {
         const otherPending=store.userQuestions.list(pending.sessionId).some(q=>q.turnId===pending.turnId && q.id!==id);
         let resumeInference:TurnInference | undefined;
         if(!live && finishing && (open || !otherPending)) {
-          try {resumeInference=snapshotTurnInference(processor,original.thinkingEnabled ?? undefined);}
+          try {resumeInference=inferenceIn(original.sessionId,original.thinkingEnabled ?? undefined);}
           catch(error){return apiError("not_supported",`Select an available model before resuming: ${error instanceof Error?error.message:"model unavailable"}`,400);}
         }
         let state=pending;

@@ -47,7 +47,12 @@ There is no separate `/thinking` command. Settings and the model picker expose s
 | Ctrl+Q (⌘Q on macOS) | Close the window; daemon work continues |
 | Ctrl+O (⌘O on macOS) | Open another project |
 | Ctrl+G | Follow live output |
-| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous chat in the sidebar |
+| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
+| ⌘1–⌘8, ⌘9 | Go to that tab, or the last one |
+| ⌘T | New chat |
+| ⌘W | Close the tab; its chat keeps working (⇧⌘W closes the window on macOS) |
+| ⇧⌘T | Reopen the tab closed last, where it was |
+| ⇧⌘A | Go to the chat that needs you |
 | ↑ ↓ Home End, Delete | Move through the sidebar's chats, archive the focused one |
 | ⌘Z outside a text field | Bring back the chat you just archived |
 | ⌘= / ⌘- / ⌘0 | Zoom in, out, actual size |

@@ -10,6 +10,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Fixed
 
+- The buttons drawn in Mac full screen work with the sidebar open too: its drag region was still taking their clicks.
 - The assistant's Windows tasks and the window no longer fight over the daemon. `install.ps1` writes `daemon.managed` in the data directory, naming the task as the daemon's owner; while it exists the window waits for that daemon instead of starting one of its own, whatever `[daemon] auto_start` says; **Start daemon** says who runs it, and Settings › **Restart the daemon** stops it and waits for the task to bring it back. Stopping a task now stops its program too (`keep-running.ps1` ties the two with a Windows job object), and a copy left from before is stopped the next time the task starts, instead of the new daemon failing on "data directory is already in use" every five seconds.
 - The assistant's chat moves into its folder when the folder is trusted a moment after the chat was first opened, instead of staying without `DEMESNE.md`, notes or a to-do list for good.
 - The assistant's chat no longer shows Drive: no "Drive is choosing the first step…" in an empty chat, no Drive word in its title bar, no Drive line or branch notes, and the model there is told nothing of Drive.

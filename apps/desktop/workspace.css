@@ -1265,8 +1265,10 @@ html.mac-chrome #desktop-toolbar :is(button, a, input, [role="button"], .bar-tab
 html.mac-chrome #desktop-shell:has(#desktop-sidebar[hidden]) #desktop-toolbar { padding-left: 84px; }
 /* The Mac's simple full screen has no title bar, so the page draws the
    three buttons where the window's own sit (trafficLightPosition 18, 17). */
-/* They sit over the sidebar's drag strip, which would swallow their clicks. */
-#mac-lights { position: fixed; top: calc(17px + var(--notch-top, 0px)); left: 18px; z-index: 50; display: flex; gap: 8px; -webkit-app-region: no-drag; }
+/* The window can't move there, so the drag regions go: they'd swallow the
+   buttons' clicks, whatever is painted on top and even with no-drag here. */
+html.fullscreen :is(#desktop-sidebar, #desktop-toolbar) { -webkit-app-region: no-drag; }
+#mac-lights { position: fixed; top: calc(17px + var(--notch-top, 0px)); left: 18px; z-index: 50; display: flex; gap: 8px; }
 /* Simple full screen covers the camera notch's strip too, so the shell starts
    below it (main.ts measures it); the strip stays glass, like the menu bar. */
 html.fullscreen #desktop-shell { box-sizing: border-box; padding-top: var(--notch-top, 0px); }

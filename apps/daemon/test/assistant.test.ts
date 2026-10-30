@@ -80,6 +80,14 @@ test("[assistant] home must be an absolute path", () => {
   expect(() => loadConfig({ userConfigPath: config, projectConfigPath: null, env: {} })).toThrow("absolute");
 });
 
+test("[assistant] model names the one model the assistant's chat runs on", () => {
+  const root = temporary(), config = join(root, "config.toml");
+  writeFileSync(config, '[provider]\nmodel = "qwen3-4b"\n[assistant]\nmodel = "qwen3-4b-instruct"\n');
+  expect(loadConfig({ userConfigPath: config, projectConfigPath: null, env: {} }).config.assistant?.model).toBe("qwen3-4b-instruct");
+  writeFileSync(config, '[assistant]\nmodel = 7\n');
+  expect(() => loadConfig({ userConfigPath: config, projectConfigPath: null, env: {} })).toThrow();
+});
+
 test("a routine written in the assistant's chat belongs to that chat, not a folder", () => {
   const routines = new Routines(join(temporary(), "routines.json"), { trusted: () => false, start: () => "s" });
   expect(routines.add("Every day at 8, what's on today", "/untrusted", true)).toMatchObject({ assistant: true, workspace: null });

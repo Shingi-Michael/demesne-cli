@@ -164,6 +164,8 @@ A turn belongs to the model that answered its first request. Models on providers
 
 `[assistant] home` is the assistant's own folder (its `DEMESNE.md`, notes and todo), where its one chat lives; it must be absolute and trusted. Without it the daemon uses `~/Assistant` when that folder exists. See [the assistant guide](assistant.md#its-own-chat).
 
+`[assistant] model` is the model the assistant's chat always runs on, by the id a provider lists it under (`qwen3-4b`, say). Without it, the `[provider]` model. The window's model picker switches the daemon's model for every other chat; the assistant's chat and its routines stay on this one, and a turn there that loses its provider fails instead of carrying on elsewhere, so what it reads of your files never goes to another provider. A model no provider serves fails the assistant's turns with a message that says so.
+
 `[assistant] ntfy` is an [ntfy](https://ntfy.sh) topic URL your phone subscribes to; with it, routines push their answers to your phone and chats get a `notify_phone` tool. The topic must be at least 16 characters, and the URL https (plain http only on this computer or a Tailscale `100.x` address). `ntfy_token` is sent as a bearer token for a server that needs one. See [the assistant guide](assistant.md#step-4-push-to-your-phone).
 
 ## Images and MCP

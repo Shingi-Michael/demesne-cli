@@ -21,6 +21,7 @@ import { ProviderError, type ProviderAdapter, type ProviderMessage } from "@deme
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
 import { ProviderTurnProcessor } from "../src/provider-processor.ts";
+import type { TurnInference } from "../src/processor.ts";
 import { agentSystemPrompt, ANSWER_FORMAT_GUIDANCE } from "../src/engine.ts";
 import { planRawContextRequest } from "../src/context-planner.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
@@ -2087,6 +2088,57 @@ process.stdin.on("data", (chunk) => {
     expect(offered).toEqual(expect.arrayContaining(["personal_files", "search_personal_files"]));
     expect(JSON.parse(results[0]!).hits[0]).toMatchObject({ folder: "documents", path: "trip.md" });
     expect(JSON.parse(results[1]!).content).toBe("1: Flight TP1345 to Lisbon on Friday 9:40");
+  });
+
+  test("the assistant's chat stays on its own model, whatever the picker chose for the daemon", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    let currentModel = "qwen3-4b";
+    const served: string[] = [];
+    const inferenceFor = (model: string): TurnInference => ({
+      providerId: model.startsWith("codex/") ? "codex" : "local", modelId: model, profile: null, thinkingEnabled: false, preservesPromptCache: false,
+      async *stream() { served.push(model); yield { type: "text_delta" as const, delta: "ok" }; },
+    });
+    const processor: TurnProcessor = {
+      providerId: "local",
+      get modelId() { return currentModel; },
+      setModel(modelId: string) { currentModel = modelId; },
+      createTurnInference: (_thinking, overrides) => inferenceFor(overrides?.model ?? currentModel),
+      async listModels() { return [{ id: "qwen3-4b", provider: "local" }, { id: "codex/gpt", provider: "codex" }]; },
+      async *stream() { yield { type: "text_delta" as const, delta: "ok" }; },
+    };
+    const app = createDaemonApp({ databasePath: join(directory, "demesne.sqlite"), processor, assistantModel: "qwen3-4b" });
+    const server = Bun.serve({ port: 0, fetch: app.fetch });
+    apps.push(app);
+    servers.push(server);
+    // The picker moves the daemon to Codex.
+    await jsonRequest(server.url, "/v1/model", { method: "POST", body: JSON.stringify({ model: "codex/gpt" }) });
+    expect((await jsonRequest<{ model: string }>(server.url, "/healthz")).model).toBe("codex/gpt");
+    const assistant = await jsonRequest<{ sessionId: string }>(server.url, "/v1/assistant", { method: "POST" });
+    const asked = await jsonRequest<SubmitTurnResponse>(server.url, `/v1/sessions/${assistant.sessionId}/turns`, { method: "POST", body: JSON.stringify({ content: "What's on today?" }) });
+    expect(await collectPersistedEventTypes(server.url, assistant.sessionId, asked.eventId)).toContain("turn.completed");
+    const other = await jsonRequest<CreateSessionResponse>(server.url, "/v1/sessions", { method: "POST", body: JSON.stringify({ title: "Other" }) });
+    const coding = await jsonRequest<SubmitTurnResponse>(server.url, `/v1/sessions/${other.session.id}/turns`, { method: "POST", body: JSON.stringify({ content: "hi" }) });
+    expect(await collectPersistedEventTypes(server.url, other.session.id, coding.eventId)).toContain("turn.completed");
+    expect(served).toEqual(["qwen3-4b", "codex/gpt"]);
+  });
+
+  test("a pinned model nobody serves fails the assistant's turn, and says which model", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const processor: TurnProcessor = {
+      providerId: "local", modelId: "qwen3-4b",
+      async listModels() { return [{ id: "qwen3-4b", provider: "local" }]; },
+      async *stream() { yield { type: "text_delta" as const, delta: "ok" }; },
+    };
+    const app = createDaemonApp({ databasePath: join(directory, "demesne.sqlite"), processor, assistantModel: "gone-4b" });
+    const server = Bun.serve({ port: 0, fetch: app.fetch });
+    apps.push(app);
+    servers.push(server);
+    const assistant = await jsonRequest<{ sessionId: string }>(server.url, "/v1/assistant", { method: "POST" });
+    const response = await fetch(new URL(`/v1/sessions/${assistant.sessionId}/turns`, server.url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "hi" }) });
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("runs only on gone-4b");
   });
 
   test("event stream replays backlog and delivers a concurrent live event exactly once, in order", async () => {

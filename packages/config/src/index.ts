@@ -62,6 +62,9 @@ export interface AssistantConfig {
   /// The assistant's own folder (its DEMESNE.md, notes and todo), where its
   /// one chat lives. Defaults to ~/Assistant when that folder exists.
   home?: string;
+  /// The model the assistant's chat always runs on, whatever the window's
+  /// picker chose for the daemon. Defaults to the [provider] model.
+  model?: string;
   /// An ntfy topic URL your phone subscribes to, and its token if the
   /// server needs one: routines push their answers there.
   ntfy?: string;
@@ -354,7 +357,7 @@ function applyDocument(
 
   if (document.assistant !== undefined) {
     const assistant = objectValue(document.assistant, "assistant");
-    assertKnownKeys(assistant, ["folders", "home", "ntfy", "ntfy_token"], `${path}.assistant`);
+    assertKnownKeys(assistant, ["folders", "home", "model", "ntfy", "ntfy_token"], `${path}.assistant`);
     const target = config.assistant ??= {};
     assignInto(target, "folders", assistant.folders, source, sources, "assistant.folders", (value, key) => {
       const folders = stringRecord(value, key)!;
@@ -372,6 +375,7 @@ function applyDocument(
       return url;
     });
     assignInto(target, "ntfyToken", assistant.ntfy_token, source, sources, "assistant.ntfyToken", optionalString);
+    assignInto(target, "model", assistant.model, source, sources, "assistant.model", optionalString);
     assignInto(target, "home", assistant.home, source, sources, "assistant.home", (value, key) => {
       const home = optionalString(value, key)!;
       if (!isAbsolute(home)) throw new ConfigError(`${key} must be an absolute path`);

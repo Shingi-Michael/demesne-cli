@@ -124,6 +124,8 @@ The assistant has one chat, not a chat per question: **Assistant**, second in th
 
 The chat lives in the assistant's folder, so its `DEMESNE.md` applies: `~/Assistant` (what `install.ps1` makes) when that folder exists and you've trusted it, or the folder `[assistant] home` names. Without one it can still read and search your folders, but keeps no notes and has no `DEMESNE.md`. Its title bar names the folders it may read.
 
+The chat always runs on the `[provider]` model (or the one `[assistant] model` names), however the window's model picker is set: picking Codex or another provider in a chat changes the daemon's model for the other chats, not for the assistant, and a turn of its that loses its provider fails rather than carrying on elsewhere. What it reads of your files stays with the model you chose for it.
+
 A routine you write from Scheduled while that chat is open runs in it: at its time the question is a quiet line with the time and the routine's name ("↗ phone" when its answer goes to your phone), and the answer follows. If the chat is busy at that moment, the routine waits for the next minute.
 
 ### One tool: `personal_files`

@@ -19,6 +19,8 @@ let window: BrowserWindow | undefined, backend: Backend | undefined, quitting = 
 let awakeBlocker: number | null = null;
 // Keep native notifications alive until the OS closes them or they are clicked.
 const notifications = new Set<Notification>();
+// Where the Mac window's own red, yellow and green buttons sit.
+const LIGHTS = { x: 18, y: 17 };
 const args = process.argv.slice(1).filter(arg => /^--(workspace|server|session|model|prompt)=/.test(arg) || arg === "--setup");
 function log(message: string) {
   try { const dir = app.getPath("logs"); mkdirSync(dir, { recursive: true }); appendFileSync(join(dir, "desktop.log"), `${new Date().toISOString()} ${message}\n`); } catch {}
@@ -118,7 +120,7 @@ void app.whenReady().then(async () => {
     // The Mac: no title bar, the traffic lights on the sidebar's glass, and
     // the window translucent under the shell (the page paints the tint).
     ...(process.platform === "darwin" ? {
-      titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 17 },
+      titleBarStyle: "hiddenInset" as const, trafficLightPosition: LIGHTS,
       ...(clear ? { transparent: true } : { vibrancy: macVibrancy(process.env), visualEffectState: "active" as const }), backgroundColor: "#00000000",
       // Full screen stays on the desktop's Space: a full-screen Space has no
       // wallpaper behind the window, so the glass would go flat there.
@@ -182,7 +184,7 @@ void app.whenReady().then(async () => {
   window.on("enter-full-screen", fullscreenChanged).on("leave-full-screen", fullscreenChanged).on("resize", fullscreenChanged);
   // The window's own size, kept from your last move or resize, to go back to
   // after full screen.
-  let normalBounds = window.getBounds();
+  let normalBounds = window.getBounds(), leftAt = 0;
   const remember = () => { if (window && !window.isSimpleFullScreen() && !window.isFullScreen() && !window.isMaximized()) normalBounds = window.getBounds(); };
   window.on("resized", remember).on("moved", remember);
   // The Mac's simple full screen, on the desktop's Space.
@@ -191,16 +193,30 @@ void app.whenReady().then(async () => {
     if (on) notch = notchInset(screen.getDisplayMatching(window.getBounds()));
     window.setSimpleFullScreen(on);
     // Leaving can come back with the window's own buttons still hidden.
-    if (!on) { window.setBounds(normalBounds); window.setWindowButtonVisibility(true); }
+    if (!on) { leftAt = Date.now(); window.setBounds(normalBounds); window.setWindowButtonVisibility(true); }
     log(`Full screen (${why}): simple ${on ? `on, starting ${notch}pt down for the notch` : "off"}.`);
     fullscreenChanged();
   };
   // macOS's own full screen puts the window in its own Space, where nothing is
   // behind it and the glass goes black. So the window can't go there at all
-  // (fullscreenable: false): the green button zooms, and the zoom becomes
-  // simple full screen at once. It isn't zoomed back first, which animated a
-  // second time; leaving restores the size from before.
-  if (process.platform === "darwin") window.on("maximize", () => simpleFullScreen(true, "green button"));
+  // (fullscreenable: false): the green button zooms, and that zoom becomes
+  // simple full screen on its first step. A window that has finished zooming
+  // snaps back to its old size on entering, then grows again. A resize with the
+  // cursor on the green button is that click, not a drag or the Window menu's
+  // Fill; a zoom from anywhere else still ends in full screen, snap included.
+  if (process.platform === "darwin") {
+    // The green button's centre: the lights are 12pt wide, 20pt apart.
+    const green = { x: LIGHTS.x + 46, y: LIGHTS.y + 6 };
+    let dragging = false;
+    window.on("will-resize", () => { dragging = true; }).on("resized", () => { dragging = false; });
+    window.on("resize", () => {
+      // Leaving full screen resizes too, with the cursor maybe on the page's own green light.
+      if (!window || dragging || window.isSimpleFullScreen() || Date.now() - leftAt < 600) return;
+      const cursor = screen.getCursorScreenPoint(), bounds = window.getBounds();
+      if (Math.abs(cursor.x - bounds.x - green.x) <= 10 && Math.abs(cursor.y - bounds.y - green.y) <= 10) simpleFullScreen(true, "green button");
+    });
+    window.on("maximize", () => simpleFullScreen(true, "green button"));
+  }
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");

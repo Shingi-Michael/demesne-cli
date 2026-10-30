@@ -10,6 +10,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Fixed
 
+- The green button goes straight to full screen on the Mac: the window no longer grows, snaps back and grows again.
 - The buttons drawn in Mac full screen work with the sidebar open too: its drag region was still taking their clicks.
 - The assistant's Windows tasks and the window no longer fight over the daemon. `install.ps1` writes `daemon.managed` in the data directory, naming the task as the daemon's owner; while it exists the window waits for that daemon instead of starting one of its own, whatever `[daemon] auto_start` says; **Start daemon** says who runs it, and Settings › **Restart the daemon** stops it and waits for the task to bring it back. Stopping a task now stops its program too (`keep-running.ps1` ties the two with a Windows job object), and a copy left from before is stopped the next time the task starts, instead of the new daemon failing on "data directory is already in use" every five seconds.
 - The assistant's chat runs only on its own model: the `[provider]` model, or the one `[assistant] model` names. Before, the window's model picker switched the daemon's model for every chat at once, so picking Codex in any chat sent the assistant's next routine, and the files it read, to Codex until the daemon restarted; a dropped provider could do the same mid-turn. Now the assistant's turns are pinned, and one that loses its provider fails instead of continuing elsewhere.

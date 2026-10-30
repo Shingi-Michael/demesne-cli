@@ -546,6 +546,24 @@ export class WorkspaceHost {
     });
     await this.connect();
   }
+  /// After a stop, waits for the daemon its scheduled task brings back and
+  /// connects to it. The task's loop tries every five seconds and the daemon
+  /// takes a few more to listen; the token file stays the same.
+  async awaitManagedDaemon(managedBy: string, timeoutMs = 30_000) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      try {
+        await this.client.health();
+        break;
+      } catch {
+        if (Date.now() >= deadline)
+          throw new Error(`${managedBy} hasn't started the daemon again after ${Math.round(timeoutMs / 1000)} seconds. Check that task. `
+            + managedDaemonMessage(this.settings.dataDirectory, managedBy));
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+    await this.connect();
+  }
   /// A plain chat has no project: no files, commands or Drive. With
   /// `reuse`, an empty chat already there is opened rather than piling up.
   async newSession(title?: string, options: { plain?: boolean; reuse?: boolean } = {}) {
@@ -1979,7 +1997,11 @@ export class WorkspaceHost {
       const control = this.daemonControl();
       const stopped = await stopDaemon(control);
       if (!stopped.stopped && stopped.message !== "Daemon is not running.") throw new Error(stopped.message);
-      await this.startDaemon();
+      // A scheduled task's daemon comes back on its own within seconds; one
+      // started here would take the data directory from it.
+      const managedBy = managedDaemonBy(this.settings.dataDirectory);
+      if (managedBy) await this.awaitManagedDaemon(managedBy);
+      else await this.startDaemon();
       this.restartFor.clear();
       return this.settingsInfo();
     }

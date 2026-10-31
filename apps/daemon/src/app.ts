@@ -173,6 +173,8 @@ export function createDaemonApp(options: {
   /// external GitHub queries from the caller's account and CI environment.
   driveSignals?: typeof collectDriveSignals;
   providerVision?: boolean;
+  /// Name chats from their first answer (the daemon on; tests off).
+  nameChats?: boolean;
   agent?: AgentConfig;
   /// Persists the sub-agent default chosen at runtime (null clears it).
   saveSubagentModel?: (model: string | null) => void;
@@ -355,6 +357,7 @@ export function createDaemonApp(options: {
       providerRequestTimeoutMs: options.providerRequestTimeoutMs,
       providerEventLimit: options.providerEventLimit,
       providerVision: options.providerVision,
+      nameChats: options.nameChats,
       questions,
       themes,
       commands,

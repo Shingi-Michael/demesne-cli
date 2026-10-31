@@ -317,14 +317,17 @@ async function open(workspace = false, welcome = false, extraEnv: Record<string,
   page = await desktop.firstWindow();
   page.on("pageerror", error => { log += String(error); });
   if (welcome) {
-    await page.getByRole("heading", { name: "Make room for your next idea." }).waitFor();
-    await capture("00-welcome");
+    // No project yet: Home opens anyway, as Just a chat; there is no welcome page.
+    await until(async () => (await page.locator("#composer-where").textContent().catch(() => ""))?.startsWith("Just a chat") ?? false, "the first launch lands on Home as Just a chat", 30_000);
+    assert.equal(await evaluate("return document.getElementById('sidebar-sessions')?.dataset.workspace;"), "", "no project is shown before one is opened");
+    assert.equal(await page.getByText("Open a project to get started", { exact: false }).count(), 0, "the welcome page is gone");
+    await capture("00-home-no-project");
     // Stub only the OS picker result; project opening still goes through the
     // real preload, main process, and canonical host workspace validation.
     await desktop.evaluate(({ dialog }, workspace) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
     }, f.workspace);
-    await page.getByRole("button", { name: "Open a project", exact: false }).click();
+    await page.locator("#sidebar-open-project").click();
   }
   await until(() => evaluate<boolean>("const editor=document.querySelector('textarea');return !!editor && editor.getBoundingClientRect().width>0 && document.body.innerText.includes('Desktop Test');"), "connected desktop project", 30_000);
   assert.equal(await evaluate("return document.getElementById('sidebar-sessions')?.dataset.workspace;"), f.workspace);

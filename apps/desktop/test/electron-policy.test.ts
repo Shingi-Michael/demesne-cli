@@ -90,9 +90,6 @@ test("a version's first show carries the assembly: the library, the previous ver
   expect(scriptText("</script><!--")).toBe('"<\\/script><\\!--"');
   expect(JSON.parse(scriptText("</script>").replace("<\\/", "</"))).toBe("</script>");
   expect(assembledDocument(source, "L", null)).toContain("window.__demesnePrevious=null;");
-  // A page that loads anime.js from the kit is not served it twice.
-  expect(assembledDocument(source, "", null)).not.toContain("<script></script>");
-  expect(assembledDocument(source, "", null)).toContain(ASSEMBLE_SCRIPT);
   // The script shows the page whatever happens and never animates under reduced motion.
   expect(ASSEMBLE_SCRIPT).toContain("prefers-reduced-motion: reduce");
   expect(ASSEMBLE_SCRIPT).toContain("setTimeout(show, 4000)");

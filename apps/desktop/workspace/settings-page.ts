@@ -4,7 +4,7 @@
 /// it holds, and groups of rows on a hairline ring. Each row is a title, one
 /// quiet line and its control on the right: a switch, words that unfold in
 /// place, a number you type, or a link. Nothing opens a menu.
-import type { ModelScore, NearbyAgent } from "@demesne/protocol";
+import { PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, planWindows, type ModelScore, type NearbyAgent, type PlanLimits } from "@demesne/protocol";
 import type { ChatsPageChat } from "./chats-page.ts";
 
 const h = (value: unknown) =>
@@ -45,9 +45,10 @@ export interface SettingsInfo {
   restart: string[];
 }
 
-export type SettingsSection = "general" | "notifications" | "appearance" | "keys" | "archived" | "usage" | "permissions" | "drive" | "models" | "providers" | "connectors" | "heartbeat" | "data";
+export type SettingsSection = "overview" | "general" | "notifications" | "appearance" | "keys" | "archived" | "usage" | "permissions" | "drive" | "models" | "providers" | "connectors" | "heartbeat" | "data";
 const icon = (path: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${path}</svg>`;
 export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = [
+  ["", [["overview", "Overview", '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>']]],
   ["You", [
     ["general", "General", '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>'],
     ["notifications", "Notifications", '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>'],
@@ -138,7 +139,7 @@ export interface SettingsView {
   fold: string;
   general: { openOn: "home" | "last"; awake: boolean };
   notify: Record<NotifyKind, boolean>;
-  appearance: { theme: string; themes: { name: string; label: string }[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; systemSource?: {enabled:boolean;path:string;error?:string} | null };
+  appearance: { theme: string; themes: SettingsTheme[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; systemSource?: {enabled:boolean;path:string;error?:string} | null };
   archived: ChatsPageChat[] | null;
   usage: ModelScore[] | null;
   modelWords: (model: { id: string; displayName?: string }) => string;
@@ -150,7 +151,12 @@ export interface SettingsView {
   agents: NearbyAgent[];
   chats: { here: number; all: number };
   online: boolean;
+  /// What each plan has left, for the model's provider first.
+  plans: PlanLimits[];
 }
+
+/// A theme as Settings draws its card: the background, the panel, the accent and the text.
+export interface SettingsTheme { name: string; label: string; light?: boolean; colors?: { bg: string; surface: string; accent: string; text: string } }
 
 /// Settings › Appearance › Ink: the hue every grey is made from (Demesne's own themes).
 export const INKS = [["neutral", "Neutral", "#8e8e93"], ["warm", "Warm", "#c58b5c"], ["cool", "Cool", "#6f8fd6"], ["moss", "Moss", "#7da37a"], ["rose", "Rose", "#c47a9b"]] as const;
@@ -174,7 +180,7 @@ export const GLASS_SHARP_DEFAULT = 70;
 
 export interface SettingsRow { title: string; line?: string; control?: string; keywords?: string; fold?: string }
 interface Group { name: string; right?: string; rows: SettingsRow[]; hint?: string }
-interface Page { id: SettingsSection; title: string; sub: string; groups: Group[]; note?: string }
+interface Page { id: SettingsSection; title: string; sub: string; groups: Group[]; note?: string; html?: string }
 
 const toggle = (on: boolean, action: string, data: Record<string, unknown>, label: string) =>
   `<button type="button" class="settings-toggle${on ? " on" : ""}" role="switch" aria-checked="${on}" aria-label="${h(label)}" data-action="${action}" data-args="${h(JSON.stringify(data))}"><i></i></button>`;
@@ -204,6 +210,7 @@ function shortcuts(mac: boolean): Group[] {
 function pages(view: SettingsView): Page[] {
   const info = view.info;
   const out: Page[] = [];
+  out.push({ id: "overview", title: "Settings", sub: "", html: overview(view), groups: [] });
   const restartNote = (prefixes: string[]) => info?.restart.some((key) => prefixes.some((prefix) => key.startsWith(prefix))) ? "Changed here: applies when the daemon restarts." : undefined;
   out.push({ id: "general", title: "General", sub: "Where Demesne opens and what it keeps doing while you work.", groups: [
     { name: "Starting", rows: [
@@ -219,17 +226,15 @@ function pages(view: SettingsView): Page[] {
   ] });
   const systemSource=view.appearance.systemSource;
   const themeLabel = view.appearance.themes.find((item) => item.name === view.appearance.theme)?.label ?? view.appearance.theme;
-  const themeGroups: [string, { name: string; label: string }[]][] = [["Yours", []], ["Dark", []], ["Light", []]];
-  for (const item of view.appearance.themes) themeGroups[item.name.startsWith("custom-") ? 0 : /light|latte/.test(item.name) ? 2 : 1]![1].push(item);
-  out.push({ id: "appearance", title: "Appearance", sub: "How the app looks on this computer.", groups: [
+  const themeGroups: [string, SettingsTheme[]][] = [["Yours", []], ["Dark", []], ["Light", []]];
+  for (const item of view.appearance.themes) themeGroups[item.name.startsWith("custom-") ? 0 : (item.light ?? /light|latte/.test(item.name)) ? 2 : 1]![1].push(item);
+  out.push({ id: "appearance", title: "Appearance", sub: "How the app looks on this computer. The window below is drawn with your choices.", html: appearanceTop(view, themeLabel, themeGroups), groups: [
     { name: "Look", rows: [
-      { title: "Theme", line: "The palette for the whole app", control: (view.appearance.canUndo ? link("settings-set", "Undo", { method: "theme-undo", args: {} }) : "") + word("theme", themeLabel, view.fold === "theme"), keywords: "colour color dark light palette theme",
-        fold: view.fold === "theme" ? themeGroups.filter(([, items]) => items.length).map(([heading, items]) => choices(`${heading} themes`, items.map((item) => [item.label, item.name === view.appearance.theme, "settings-set", { method: "theme", args: { name: item.name } }]), heading)).join("") : "" },
       ...(systemSource ? [
         { title: "Use an external System palette", line: "Off uses Demesne’s own colors and follows system light/dark. On reads the palette file below when System is selected.", control: toggle(systemSource.enabled,"system-theme-toggle",{enabled:!systemSource.enabled},"Use an external System palette"), keywords: "system theme palette external kuru switch" },
         { title: "System palette file", line: systemSource.error ? `Could not reload: ${systemSource.error}. Keeping the last valid palette, or Demesne’s default.` : "A JSON file or symlink on the daemon’s computer. Saving a path does not enable it or change the selected theme.", fold: `<form id="system-theme-source" class="st-text" data-kind="system-theme"><input name="path" value="${h(systemSource.path)}" aria-label="System palette file" maxlength="4096" autocomplete="off" spellcheck="false"><button type="submit" class="st-link">Save path</button></form>`, keywords: "system theme file path symlink kuru external json" },
       ] : []),
-      { title: "Make a theme", line: "Answer a few questions and Demesne builds a palette from your answers", control: link("settings-command", "Start", { text: "/themefy " }), keywords: "themefy custom palette" },
+      { title: "Theme", line: `${themeLabel}. The palette for the whole app, picked from the cards above`, keywords: "colour color dark light palette theme" },
       ...(view.desktop && view.glass ? [{ title: "Glass", line: "How much of the desktop shows through the window", control: `<label class="st-range">Clear<input type="range" min="0" max="100" step="1" value="${view.appearance.glass}" data-glass aria-label="Glass">Solid</label>`, keywords: "glass transparent translucent blur vibrancy opacity" }] : []),
       ...(/^demesne(-light)?$/.test(view.appearance.theme) ? [{ title: "Ink", line: "The colour every grey is made from, and the accent with it", control: `<span class="st-inks" role="group" aria-label="Ink">${INKS.map(([id, label, swatch]) => `<button type="button" class="${view.appearance.ink === id ? "on" : ""}" style="--swatch:${swatch}" title="${label}" aria-label="${label}" aria-pressed="${view.appearance.ink === id}" data-action="settings-local" data-args="${h(JSON.stringify({ key: "ink", value: id }))}"></button>`).join("")}</span>`, keywords: "ink tint hue colour color accent warm cool" }] : []),
       ...(view.desktop ? [{ title: "Text size", line: "The size of everything in the window", control: segments(([["Small", 0.9], ["Default", 1], ["Large", 1.1]] as [string, number][]).map(([label, zoom]) => [label, view.appearance.zoom === zoom, "settings-set", { method: "desktop-zoom", args: { zoom } }]), "Text size"), keywords: "zoom font scale" }] : []),
@@ -243,7 +248,7 @@ function pages(view: SettingsView): Page[] {
   const scores = (view.usage ?? []).filter((score) => score.turns > 0).sort((a, b) => b.turns - a.turns);
   const most = Math.max(1, ...scores.map((score) => score.turns));
   const runs = scores.reduce((sum, score) => sum + score.driveRuns, 0), landed = scores.reduce((sum, score) => sum + score.driveLanded, 0);
-  out.push({ id: "usage", title: "Usage", sub: "The last 30 days, by model, counted from your own chats on this computer.", groups: [
+  out.push({ id: "usage", title: "Usage", sub: "The last 30 days, counted from your own chats on this computer, and what your plan has left.", html: usageTop(view, scores), groups: [
     { name: "By model", right: scores.length ? `${scores.reduce((sum, score) => sum + score.turns, 0)} turns` : "", rows: view.usage === null ? [{ title: "Counting…" }] : scores.length ? scores.map((score) => {
       const ended = score.finished + score.failed;
       return { title: view.modelWords({ id: score.model }), line: [`${score.provider}`, `${score.turns} ${score.turns === 1 ? "turn" : "turns"}`, ended ? `${Math.round((score.finished / ended) * 100)}% finished` : "", score.tokensPerSecond ? `${Math.round(score.tokensPerSecond)} tok/s` : ""].filter(Boolean).join(" · "), control: `<span class="st-bar" aria-hidden="true"><i style="width:${Math.max(3, Math.round((score.turns / most) * 100))}%"></i></span><span class="st-count">${score.turns}</span>`, keywords: "usage turns tokens speed model" };
@@ -251,12 +256,8 @@ function pages(view: SettingsView): Page[] {
     { name: "Drive", rows: [{ title: "Runs", line: runs ? `${landed} applied or opened as a PR` : "None in the last 30 days", control: `<span class="st-count">${runs}</span>`, keywords: "drive runs branches" }] },
   ] });
   const rules = info?.allow ?? [], mode = view.permissions.mode;
-  out.push({ id: "permissions", title: "Permissions", sub: "What it may do without asking, where it may work, and what it learned you always allow.", groups: [
-    ...(mode ? [{ name: "This chat", rows: [{ title: "Mode", line: mode === "ask" ? "Asks before edits and commands" : mode === "edits" ? "Edits without asking; asks before commands" : mode === "plan" ? "Reads and proposes; changes nothing" : "Does everything without asking", control: segments(([["Ask", "ask"], ["Accept edits", "edits"], ["Plan", "plan"], ["Auto", "auto"]] as const).map(([label, value]) => [label, mode === value, "permission-mode", { mode: value }]), "Mode"), keywords: "mode ask accept edits plan auto approvals" }], hint: "Each chat keeps its own; ⇧⇥ changes it in the composer." }] : []),
-    { name: "It no longer asks about", right: rules.length ? String(rules.length) : "", rows: info === null ? [{ title: "Reading…" }] : rules.length ? rules.map(({ rule, mine }) => {
-      const words = ruleWords(rule);
-      return { title: `\`${words.what}\``, line: `${words.how}${mine ? "" : " · in the project's config"}`, control: mine ? link("allow-rule-remove", "Ask again", { rule }, " quiet") : "", keywords: "allow rule always learned approvals" };
-    }) : [{ title: "Nothing yet", line: "Always on an approval adds a rule here" }] },
+  out.push({ id: "permissions", title: "Permissions", sub: "What it may do without asking. Green is what each mode does freely.", html: permissionsTop(view), groups: [
+    ...(info !== null && !rules.length ? [{ name: "It no longer asks about", rows: [{ title: "Nothing yet", line: "Always on an approval adds a rule here", keywords: "allow rule always learned approvals" }] }] : []),
     { name: "Trusted folders", right: info?.trusted?.length ? String(info.trusted.length) : "", rows: info === null ? [{ title: "Reading…" }] : info.trusted === null ? [{ title: "The daemon can't list them", line: "Restart the daemon to update it" }] : info.trusted.length ? info.trusted.map((root) => ({ title: `\`${homeWords(root, view.home)}\``, line: "Its chats read its files and run its commands", control: link("trusted-forget", "Untrust", { root }, " quiet"), keywords: "trust folder project untrust" })) : [{ title: "None yet", line: "A folder asks once, the first time you open it" }] },
   ], note: view.permissions.asks && (view.permissions.asks.thisWeek || view.permissions.asks.lastWeek) ? `Asked you ${view.permissions.asks.thisWeek} ${view.permissions.asks.thisWeek === 1 ? "time" : "times"} this week, ${view.permissions.asks.lastWeek} the week before.` : undefined });
   const auto = view.drive.auto;
@@ -331,6 +332,121 @@ function pages(view: SettingsView): Page[] {
   return out;
 }
 
+const ov = (id: SettingsSection) => `data-action="settings-section" data-args="${h(JSON.stringify({ id }))}"`;
+const pct = (value: number) => `${Math.round(value)}%`;
+/// A ring for one share, 0 to 100.
+const ring = (used: number, size = 30) => {
+  const r = size / 2 - 3, c = 2 * Math.PI * r, warn = used >= PLAN_LIMIT_AMBER;
+  return `<svg class="ov-ring${warn ? " warn" : ""}" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true"><circle cx="${size / 2}" cy="${size / 2}" r="${r}"/><circle cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-dasharray="${(c * Math.min(100, used) / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 ${size / 2} ${size / 2})"/></svg>`;
+};
+const windowWords = (name: string) => name === "weekly" ? "this week" : name.replace("-hour", " hours").replace("-day", " days").replace("-minute", " minutes");
+const resetAt = (at: string | null) => {
+  if (!at) return "";
+  const date = new Date(at), ms = date.getTime() - Date.now();
+  if (ms <= 0) return "";
+  if (ms < 86_400_000) { const hours = Math.floor(ms / 3_600_000), minutes = Math.round((ms % 3_600_000) / 60_000); return `resets in ${hours ? `${hours} h ` : ""}${minutes} min`; }
+  return `resets ${date.toLocaleDateString([], { weekday: "long" })}`;
+};
+const planTitle = (plan: PlanLimits) => `${plan.provider[0]!.toUpperCase()}${plan.provider.slice(1)}${plan.plan ? ` ${plan.plan[0]!.toUpperCase()}${plan.plan.slice(1)}` : ""}`;
+const MODES = [["ask", "Ask", "Asks before edits and commands", ["read"]], ["edits", "Accept edits", "Edits freely, asks before commands", ["read", "edit"]], ["plan", "Plan", "Reads and proposes, changes nothing", ["read"]], ["auto", "Auto", "Does everything without asking", ["read", "edit", "run"]]] as const;
+const modeWords = (mode: SettingsView["permissions"]["mode"]) => mode === "edits" ? "edits freely and asks before commands" : mode === "plan" ? "only reads and proposes" : mode === "auto" ? "does everything without asking" : mode === "ask" ? "asks before edits and commands" : "lets each chat choose what it asks about";
+/// Turns a day over the window, all models together.
+const dailyTotal = (scores: ModelScore[]) => scores.reduce<number[]>((sum, score) => (score.daily ?? []).map((n, i) => n + (sum[i] ?? 0)), []);
+
+/// Settings › Overview: one sentence on how it's set up, six tiles, and what's worth a look.
+function overview(view: SettingsView): string {
+  const info = view.info, own = view.plans.find((item) => item.provider === view.model.provider), plan = own ?? view.plans[0], auto = view.drive.auto, mode = view.permissions.mode;
+  const linkTo = (id: SettingsSection, text: string) => `<button type="button" class="ov-link" ${ov(id)}>${h(text)}</button>`;
+  const source = own ? ` on your ${h(planTitle(own))} plan` : view.model.provider ? ` from ${h(view.model.provider)}` : "";
+  const drive = !view.drive.project ? "Drive works in a project you open" : auto?.on ? `Drive starts on its own after ${auto.quietMinutes} quiet minutes` : "Drive waits until you start it";
+  const sentence = `<p class="ov-say">Answers come from ${linkTo("models", view.model.words || "your model")}${source}, it ${linkTo("permissions", modeWords(mode))}, and ${linkTo("drive", drive)}.</p>`;
+
+  const tile = (id: SettingsSection, label: string, right: string, body: string, extra = "") =>
+    `<div class="ov-tile${extra}" ${ov(id)}><div class="ov-top"><button type="button" class="ov-label" ${ov(id)}>${h(label)}</button>${right ? `<span>${right}</span>` : ""}</div>${body}</div>`;
+  const subagent = info?.subagent.model ? view.modelWords({ id: info.subagent.model }) : "";
+  const model = tile("models", "Model", view.model.reasoning ? `${h(view.model.reasoning)} thinking` : "",
+    `<b class="ov-big">${h(view.model.words || "No model yet")}</b><small>${view.model.provider ? `<i class="ov-dot${view.online ? "" : " off"}"></i>${h(view.model.provider)}${view.model.chatgpt ? ", signed in" : ""}` : "Pick one in Models"}${subagent ? `<br>Subagents on ${h(subagent)}` : ""}</small>` +
+    `<button type="button" class="st-link ov-act" data-action="overlay" data-args='{"name":"models"}'>Change</button>`);
+  const windows = plan ? planWindows(plan) : [];
+  const fullest = windows.reduce<number>((top, item) => Math.max(top, item.window.usedPercent), 0);
+  const planTile = tile("usage", "Your plan", plan?.plan ? h(plan.plan[0]!.toUpperCase() + plan.plan.slice(1)) : "",
+    windows.length
+      ? `<div class="ov-rings">${windows.map(({ name, window }) => `<div>${ring(window.usedPercent)}<span><b>${pct(window.usedPercent)}</b><small>${h(windowWords(name))}</small></span></div>`).join("")}</div><small>${h(resetAt(windows[0]!.window.resetsAt).replace(/^r/, "R"))}${resetAt(windows[0]!.window.resetsAt) ? ". " : ""}${fullest >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs." : `Drive waits at ${PLAN_LIMIT_DRIVE_PAUSE}%.`}</small>`
+      : `<b class="ov-big">No limits reported</b><small>${view.model.provider ? `${h(view.model.provider)} doesn't say what's left` : "Sign in to a provider to see what's left"}</small>`);
+  const scores = (view.usage ?? []).filter((score) => score.turns > 0);
+  const turns = scores.reduce((sum, score) => sum + score.turns, 0), ended = scores.reduce((sum, score) => sum + score.finished + score.failed, 0), finished = scores.reduce((sum, score) => sum + score.finished, 0);
+  const speeds = scores.filter((score) => score.tokensPerSecond).map((score) => score.tokensPerSecond!), runs = scores.reduce((sum, score) => sum + score.driveRuns, 0);
+  const daily = dailyTotal(scores), top = Math.max(1, ...daily);
+  const usageTile = tile("usage", "Last 30 days", turns ? `${turns} ${turns === 1 ? "turn" : "turns"}` : "",
+    view.usage === null ? `<small>Counting…</small>` : turns
+      ? `<div class="ov-spark" aria-hidden="true">${daily.map((n) => `<i style="height:${n ? Math.max(8, Math.round((n / top) * 100)) : 4}%"${n ? "" : ' class="none"'}></i>`).join("")}</div><small>${[ended ? `${Math.round((finished / ended) * 100)}% finished` : "", speeds.length ? `${Math.round(speeds.reduce((a, b) => a + b, 0) / speeds.length)} tok/s` : "", `${runs} Drive ${runs === 1 ? "run" : "runs"}`].filter(Boolean).join(" · ")}</small>`
+      : `<b class="ov-big">Nothing yet</b><small>Turns show here once a model has answered</small>`);
+  const modeIndex = MODES.findIndex(([id]) => id === mode);
+  const permissionsTile = tile("permissions", "Permissions", mode ? "this chat" : "",
+    `<b class="ov-big">${mode ? h(MODES[modeIndex]![1]) : "Each chat chooses"}</b><div class="ov-steps" aria-hidden="true">${MODES.map((_, i) => `<i${i === modeIndex ? ' class="on"' : ""}></i>`).join("")}</div><small>${info ? `${info.allow.length} ${info.allow.length === 1 ? "rule" : "rules"} it no longer asks about${info.trusted ? `<br>${info.trusted.length} trusted ${info.trusted.length === 1 ? "folder" : "folders"}` : ""}` : "Reading…"}</small>`);
+  const driveTile = tile("drive", "Drive", view.drive.project ? h(view.drive.project) : "",
+    !view.drive.project || !auto ? `<b class="ov-big">In a project</b><small>Open a project to set Drive for it</small>`
+      : `<b class="ov-big">${auto.on ? "On its own" : "Waits for you"}</b><small>${auto.usedToday} of ${auto.perDay} ${auto.perDay === 1 ? "run" : "runs"} today${info ? ` · up to ${info.drive.maxActiveMinutes} min each` : ""}</small><div class="ov-meter" aria-hidden="true"><i style="width:${Math.min(100, Math.round((auto.usedToday / Math.max(1, auto.perDay)) * 100))}%"></i></div>`);
+  const waiting = info?.restart.includes("app.update") ? "update waiting" : info?.restart.length ? "restart waiting" : "";
+  const computer = tile("data", "This computer", waiting ? `<em class="ov-warn">${waiting}</em>` : "",
+    `<b class="ov-big"><i class="ov-dot${view.online ? "" : " off"}"></i>${view.online ? "Daemon running" : "Daemon not answering"}</b><small>${info ? `Chats in <code>${h(homeWords(info.dataDirectory, view.home))}</code>` : ""}${view.chats.all ? `${info ? " · " : ""}${view.chats.all} ${view.chats.all === 1 ? "chat" : "chats"}` : ""}</small>` +
+    (waiting ? `<button type="button" class="st-link ov-act" data-action="restart-daemon" data-args="{}">Restart when idle</button>` : ""));
+
+  const looks: { icon: string; title: string; line: string; action: string }[] = [];
+  if (info?.restart.includes("app.update")) looks.push({ icon: "↻", title: "A newer daemon came with this app", line: "It restarts by itself once nothing is working, or now", action: link("restart-daemon", "Restart") });
+  else if (info?.restart.length) looks.push({ icon: "↻", title: "Settings you changed wait for a restart", line: info.restart.join(", "), action: link("restart-daemon", "Restart") });
+  for (const server of view.connectors.servers.filter((item) => item.state === "failed"))
+    looks.push({ icon: "⌁", title: `The ${server.name} connector didn't start`, line: info?.mcp.find((item) => item.name === server.name)?.command ? `\`${info.mcp.find((item) => item.name === server.name)!.command}\` exits on start` : "Its server exits on start", action: link("settings-section", "Look", { id: "connectors" }) });
+  if (plan && fullest >= PLAN_LIMIT_AMBER) looks.push({ icon: "◔", title: `Your ${planTitle(plan)} plan is ${pct(fullest)} used`, line: fullest >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs until it resets" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`, action: link("settings-section", "Usage", { id: "usage" }) });
+  const asks = view.permissions.asks;
+  if (asks && asks.thisWeek >= 10 && asks.thisWeek > asks.lastWeek) looks.push({ icon: "✓", title: `It asked you ${asks.thisWeek} times this week`, line: "Always on an approval, or Accept edits, asks less", action: link("settings-section", "Permissions", { id: "permissions" }) });
+  if (!view.online) looks.push({ icon: "!", title: "The daemon isn't answering", line: "Chats and Drive wait until it's back", action: link("restart-daemon", "Restart") });
+  const look = `<div class="st-head"><span>Worth a look</span></div><div class="st-group">${looks.length
+    ? looks.map((item) => `<div class="st-row"><span class="ov-icon" aria-hidden="true">${h(item.icon)}</span><div class="st-tx"><b>${h(item.title)}</b><small>${words(item.line, [])}</small></div><div class="st-ctl">${item.action}</div></div>`).join("")
+    : `<div class="st-row"><span class="ov-icon" aria-hidden="true">✓</span><div class="st-tx"><b>Nothing needs you</b><small>Restarts, failing connectors and a filling plan show here</small></div></div>`}</div>`;
+  return `${sentence}<div class="ov-tiles">${model}${planTile}${usageTile}${permissionsTile}${driveTile}${computer}</div>${look}`;
+}
+
+/// Appearance: a small window drawn with the app's own colours, then the themes as cards.
+function appearanceTop(view: SettingsView, themeLabel: string, groups: [string, SettingsTheme[]][]): string {
+  const preview = `<div class="ap-preview" aria-label="Preview of ${h(themeLabel)}"><div class="ap-win"><div class="ap-side"><span class="ap-mark">d.</span><i class="on">Settings page</i><i>Top bar tabs</i><i>Still blossom</i></div><div class="ap-main"><span class="ap-me">Make settings look good</span><p>Here’s an overview of your setup, with what’s <em>worth a look</em> first.</p><div class="ap-box"><span>Ask anything</span><em>${h(view.model.words)}</em></div></div></div></div>`;
+  const card = (theme: SettingsTheme) => {
+    const c = theme.colors, on = theme.name === view.appearance.theme;
+    const art = c ? `<span class="ap-art" style="--bg:${h(c.bg)};--sf:${h(c.surface)};--ac:${h(c.accent)};--tx:${h(c.text)}"><i></i><b></b></span>` : `<span class="ap-art plain"><i></i><b></b></span>`;
+    return `<button type="button" class="ap-card${on ? " on" : ""}" aria-pressed="${on}" data-action="settings-set" data-args="${h(JSON.stringify({ method: "theme", args: { name: theme.name } }))}">${art}<span class="ap-name">${h(theme.label)}</span></button>`;
+  };
+  const make = `<button type="button" class="ap-card make" data-action="settings-command" data-args='{"text":"/themefy "}'><span class="ap-art plain">+</span><span class="ap-name">Make one…</span></button>`;
+  const all = groups.flatMap(([, items]) => items);
+  return preview + `<div class="st-head"><span>Theme</span>${view.appearance.canUndo ? link("settings-set", "Undo", { method: "theme-undo", args: {} }, " quiet") : ""}</div><div class="ap-cards">${all.map(card).join("")}${make}</div>`;
+}
+
+const SERIES = ["var(--acc)", "var(--blossom, #f2b6c8)", "var(--ok, #6cc68e)", "var(--t4)"];
+/// Usage: each plan's windows, then turns a day stacked by model.
+function usageTop(view: SettingsView, scores: ModelScore[]): string {
+  const plans = view.plans.filter((plan) => planWindows(plan).length);
+  const planCards = plans.length ? `<div class="us-plans">${plans.map((plan) => `<div class="us-plan"><div class="ov-top"><span>${h(planTitle(plan))}</span>${plan.provider.toLowerCase() === "chatgpt" ? link("open-link", "Manage ↗", { url: "https://chatgpt.com/settings/usage" }, " quiet") : ""}</div><div class="ov-rings">${planWindows(plan).map(({ name, window }) => `<div>${ring(window.usedPercent, 34)}<span><b>${pct(window.usedPercent)} of ${h(windowWords(name))}</b><small>${h(resetAt(window.resetsAt) || "no reset reported")}</small></span></div>`).join("")}</div></div>`).join("")}</div>` : "";
+  const counted = scores.filter((score) => score.daily?.length);
+  if (!counted.length) return planCards;
+  const series = [...counted.slice(0, 3).map((score, i) => ({ name: view.modelWords({ id: score.model }), daily: score.daily!, color: SERIES[i]! }))];
+  if (counted.length > 3) series.push({ name: "Other models", daily: dailyTotal(counted.slice(3)), color: SERIES[3]! });
+  const days = series[0]!.daily.length, totals = Array.from({ length: days }, (_, i) => series.reduce((sum, item) => sum + (item.daily[i] ?? 0), 0));
+  const top = Math.max(1, ...totals), all = totals.reduce((a, b) => a + b, 0);
+  const label = (back: number) => new Date(Date.now() - back * 86_400_000).toLocaleDateString([], { month: "short", day: "numeric" });
+  const bars = totals.map((total, i) => `<div class="us-day" title="${h(label(days - 1 - i))}: ${total} ${total === 1 ? "turn" : "turns"}">${series.map((item) => item.daily[i] ? `<i style="height:${((item.daily[i]! / top) * 100).toFixed(1)}%;background:${item.color}"></i>` : "").join("")}</div>`).join("");
+  return planCards + `<div class="st-head"><span>Turns a day</span><span>${all} in ${days} days</span></div><div class="us-chart" aria-hidden="true">${bars}</div><div class="us-axis"><span>${h(label(days - 1))}</span><span>${h(label(Math.floor(days / 2)))}</span><span>today</span></div><div class="us-legend">${series.map((item) => `<span><u style="background:${item.color}"></u>${h(item.name)}</span>`).join("")}</div>`;
+}
+
+/// Permissions: the four modes as cards, then the rules as chips you can take back.
+function permissionsTop(view: SettingsView): string {
+  const mode = view.permissions.mode, rules = view.info?.allow ?? [];
+  const modes = mode ? `<div class="st-head"><span>This chat</span><span>⇧⇥ in the composer</span></div><div class="pm-modes">${MODES.map(([id, label, line, free]) => `<button type="button" class="pm-mode${mode === id ? " on" : ""}" aria-pressed="${mode === id}" data-action="permission-mode" data-args="${h(JSON.stringify({ mode: id }))}"><b>${h(label)}</b><small>${h(line)}</small><span class="pm-can">${(["read", "edit", "run"] as const).map((can) => `<em${(free as readonly string[]).includes(can) ? ' class="free"' : ""}>${can}</em>`).join("")}</span></button>`).join("")}</div>` : "";
+  const chips = rules.length ? `<div class="st-head"><span>It no longer asks about</span><span>${rules.length} · × asks again</span></div><div class="pm-chips">${rules.map(({ rule, mine }) => {
+    const said = ruleWords(rule);
+    return `<span class="pm-chip" title="${h(`${said.how}${mine ? "" : " · in the project's config"}`)}"><code>${h(said.what)}</code>${mine ? "" : "<small>project</small>"}${mine ? `<button type="button" aria-label="Ask again about ${h(said.what)}" data-action="allow-rule-remove" data-args="${h(JSON.stringify({ rule }))}">×</button>` : ""}</span>`;
+  }).join("")}</div>` : "";
+  return modes + chips;
+}
+
 /// Plain words with `code`, escaped, with the searched words marked.
 function words(text: string, marks: string[]) {
   return text.split("`").map((piece, index) => {
@@ -364,7 +480,7 @@ export function settingsPage(view: SettingsView) {
   }
   const page = pages(view).find((item) => item.id === view.section) ?? pages(view)[0]!;
   const note = page.note ? `<p class="st-note${page.id === "permissions" ? " foot" : ""}">${h(page.note)}${page.note.startsWith("Changed here") ? ` ${link("restart-daemon", "Restart now")}` : ""}</p>` : "";
-  return `<h1 class="cp-title">${h(page.title)}</h1><p class="cp-lede">${h(page.sub)}</p>${error}${page.id === "permissions" ? "" : note}${page.groups.map((group) => groupHtml(group, [])).join("")}${page.id === "permissions" ? note : ""}`;
+  return `<h1 class="cp-title">${h(page.title)}</h1>${page.sub ? `<p class="cp-lede">${h(page.sub)}</p>` : ""}${error}${page.id === "permissions" ? "" : note}${page.html ?? ""}${page.groups.map((group) => groupHtml(group, [])).join("")}${page.id === "permissions" ? note : ""}`;
 }
 
 /// The sidebar while Settings is open: Back to chats, the search, the list.
@@ -376,7 +492,7 @@ export function settingsNav(view: Pick<SettingsView, "section" | "query" | "arch
   const searching = Boolean(view.query.trim());
   return `<button type="button" class="st-back" data-action="page-open" data-args='{"page":""}'>${icon('<path d="m15 6-6 6 6 6"/>')}Back to chats</button>` +
     `<label class="sidebar-search st-search">${icon('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>')}<input id="settings-search" type="search" placeholder="Search settings" aria-label="Search settings" value="${h(view.query)}" autocomplete="off" spellcheck="false"></label>` +
-    SETTINGS_GROUPS.map(([name, items]) => `<div class="st-nav-group">${h(name)}</div>${items.map(([id, label, path]) => {
+    SETTINGS_GROUPS.map(([name, items]) => `${name ? `<div class="st-nav-group">${h(name)}</div>` : ""}${items.map(([id, label, path]) => {
       const on = !searching && id === view.section;
       return `<button type="button" class="st-nav${on ? " on" : ""}" data-action="settings-section" data-args="${h(JSON.stringify({ id }))}"${on ? ' aria-current="page"' : ""}>${icon(path)}<span>${h(label)}</span>${counts[id] ? `<span class="st-nav-n">${h(counts[id])}</span>` : ""}</button>`;
     }).join("")}`).join("");

@@ -2683,7 +2683,7 @@ async function editCustomizable(path: string) {
 }
 /// Settings: the section shown, the search, the row whose words are unfolded,
 /// and what the host read from config.toml and the daemon.
-const settingsUi = { section: "general" as SettingsSection, query: "", fold: "", error: "" };
+const settingsUi = { section: "overview" as SettingsSection, query: "", fold: "", error: "" };
 let settingsInfo: SettingsInfo | null = null, usageScores: ModelScore[] | null = null,
   /// The window's zoom, read from the desktop shell when Settings opens.
   zoomLevel: number | null = null;
@@ -2727,6 +2727,7 @@ function loadSettings() {
   void settingsCall("settings-info");
   void loadArchived();
   void api("providers-refresh").catch(() => {});
+  void loadPlanLimits().then(() => renderPage());
   void api<ModelScoreboardResponse>("model-scores").then((result) => { usageScores = result.models; renderPage(); }, () => { usageScores = usageScores ?? []; renderPage(); });
   if (window.demesne.mode === "desktop")
     void api<{ zoom?: number }>("desktop-zoom").then((result) => { zoomLevel = typeof result?.zoom === "number" ? result.zoom : null; renderPage(); }, () => {});
@@ -2741,7 +2742,11 @@ function settingsView(): SettingsView {
     info: settingsInfo,
     general: { openOn, awake: keepAwake },
     notify: notifyOn,
-    appearance: { theme: s.theme, themes: s.themes.map((name) => ({ name, label: s.themeOptions.find((item) => item.name === name)?.label ?? name })), canUndo: s.themeCanUndo, systemSource: s.systemThemeSource, zoom: zoomLevel, glass: glassLevel, ink: inkName },
+    appearance: { theme: s.theme, themes: s.themes.map((name) => {
+      const option = s.themeOptions.find((item) => item.name === name);
+      return { name, label: option?.label ?? name, light: option ? isLightTheme(name) : undefined,
+        colors: option?.colors ? { bg: option.colors.ink, surface: option.colors.surface, accent: option.colors.electric, text: option.colors.paper } : undefined };
+    }), canUndo: s.themeCanUndo, systemSource: s.systemThemeSource, zoom: zoomLevel, glass: glassLevel, ink: inkName },
     archived: archivedChats,
     usage: usageScores,
     modelWords,
@@ -2753,6 +2758,7 @@ function settingsView(): SettingsView {
     agents: s.agents,
     chats: { here: s.sessions.filter((item) => item.workspace === here && item.turns).length, all: s.sessions.filter((item) => item.turns).length },
     online: s.connection === "online",
+    plans: [...planLimits].sort((a, b) => Number(b.provider === s.model.provider) - Number(a.provider === s.model.provider)),
   };
 }
 /// The sidebar holds Settings' list while it is open; the search keeps the
@@ -2776,7 +2782,7 @@ function settingsSection(id: SettingsSection) {
   settingsUi.query = settingsUi.fold = "";
   const search = document.getElementById("settings-search") as HTMLInputElement | null;
   if (search) search.value = "";
-  if (id === "usage" || id === "archived" || id === "permissions" || id === "data") loadSettings();
+  if (id === "overview" || id === "usage" || id === "archived" || id === "permissions" || id === "data") loadSettings();
   renderPage();
   document.getElementById("page")?.scrollTo?.({ top: 0 });
 }

@@ -841,10 +841,18 @@ try {
   // Settings is a page: the sidebar becomes its list, each row has its own control.
   await page.locator(".sidebar-settings").click();
   await page.locator('#page[data-kind="settings"]').waitFor();
-  await page.locator("#settings-nav .st-nav.on").filter({ hasText: "General" }).waitFor();
+  // It opens on the Overview: one sentence, six tiles, and what's worth a look (pass 116 A).
+  await page.locator("#settings-nav .st-nav.on").filter({ hasText: "Overview" }).waitFor();
   assert(await page.locator("#sidebar-projects").isHidden(), "the sidebar holds Settings' list instead of the chats");
   assert.equal(await page.locator("#workspace-title").innerText(), "Settings", "the title bar says Settings");
-  assert.equal(await page.locator("#settings-nav .st-nav").count(), 13, "thirteen sections");
+  assert.equal(await page.locator("#settings-nav .st-nav").count(), 14, "fourteen sections");
+  await page.locator("#page .ov-say").filter({ hasText: "Answers come from" }).waitFor();
+  assert.equal(await page.locator("#page .ov-tile").count(), 6, "six tiles");
+  await capture("02-settings-overview");
+  await page.locator("#page .ov-tile").filter({ hasText: "Permissions" }).click();
+  await page.locator("#settings-nav .st-nav.on").filter({ hasText: "Permissions" }).waitFor();
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "General" }).click();
+  await page.locator("#settings-nav .st-nav.on").filter({ hasText: "General" }).waitFor();
   await capture("02-settings");
   assert(await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("#page .st-tx")].every(text => text.getBoundingClientRect().width >= 200)), "every settings row keeps its text readable");
   await page.locator("#page .st-row").filter({ hasText: "Open on" }).getByRole("button", { name: "Last chat" }).click();
@@ -866,10 +874,10 @@ try {
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Appearance" }).click();
   // DEMESNE_GLASS=0 turns glass off on Linux and Windows; the Mac always has it (policy.ts desktopGlass).
   assert.equal(await page.locator("#page [data-glass]").count(), process.platform === "darwin" ? 1 : 0, "the Glass slider follows desktopGlass: always on the Mac, off with DEMESNE_GLASS=0 elsewhere");
-  await page.locator("#page .st-word").first().click();
-  await page.locator("#page .st-choice").first().waitFor();
+  await page.locator("#page .ap-preview").waitFor();
+  await page.locator("#page .ap-card.on").waitFor();
   await capture("02-themes");
-  await page.locator(`#page .st-choice[data-args*='"demesne-light"']`).click();
+  await page.locator(`#page .ap-card[data-args*='"demesne-light"']`).click();
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#F6F8FA");
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "rgb(242 242 242)", "The desktop wears its own light palette");
   assert(await page.locator('#page[data-kind="settings"]').isVisible(), "Settings stays open while the theme changes");
@@ -884,8 +892,7 @@ try {
   await capture("02-light-conversation");
   await page.locator(".sidebar-settings").click();
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Appearance" }).click();
-  await page.locator("#page .st-word").first().click();
-  await page.locator(`#page .st-choice[data-args*='"demesne"']`).click();
+  await page.locator(`#page .ap-card[data-args*='"demesne"']`).click();
   await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#0B1218");
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "rgb(22 22 23)", "The desktop wears its own dark palette");
   const accent = () => page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--acc").trim());
@@ -907,7 +914,11 @@ try {
   assert.match(readFileSync(join(f.home, ".demesne/config.toml"), "utf8"), /max_tokens = 400000/, "Drive's token limit lands in config.toml");
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Permissions" }).click();
   await until(() => page.locator("#page .st-row", { hasText: "Its chats read its files" }).count().then(count => count >= 1), "the trusted folders are listed");
+  assert.equal(await page.locator("#page .pm-mode").count(), 4, "the four modes are cards");
   await capture("02-permissions");
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Usage" }).click();
+  await page.locator('#page .cp-title').filter({ hasText: "Usage" }).waitFor();
+  await capture("02-usage");
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Keyboard shortcuts" }).click();
   assert(await page.locator("#page .st-keys").count() > 10, "the shortcuts are listed");
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Providers" }).click();

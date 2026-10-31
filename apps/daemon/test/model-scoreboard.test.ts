@@ -59,6 +59,10 @@ test("the scoreboard scores each model from its own turns, tool calls, speed, ch
       // 400 tokens in 10 s and 200 in 5 s are both 40 tok/s; an 8-token reply is too short to time.
       tokensPerSecond: 40, firstTokenMs: 1000, checkedTurns: 2, passingTurns: 1, driveRuns: 2, driveLanded: 1 });
     expect(hosted).toMatchObject({ provider: "openrouter", model: "big-model", local: false, turns: 2, finished: 1, failed: 0, toolCalls: 1, toolErrors: 0, tokensPerSecond: 100, checkedTurns: 0 });
+    // Turns by day: 30 entries, all of them today's.
+    expect(local!.daily).toHaveLength(30);
+    expect(local!.daily!.reduce((sum, n) => sum + n, 0)).toBe(2);
+    expect(local!.daily!.at(-1)).toBe(2);
     // A provider the daemon knows is on your own machine counts as local, whatever its id.
     expect(modelScoreboard(store.database, { days: 30, localProviders: ["OpenRouter"] })[1]!.local).toBe(true);
     // One project only.

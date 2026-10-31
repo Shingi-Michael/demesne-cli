@@ -370,11 +370,13 @@ try {
   assert(layout.height > layout.lineHeight, "Thinking preserves multiple lines");
   assert(layout.scrollWidth <= layout.width + 1, "Long thinking text wraps without horizontal overflow");
   await capture("01-thinking-expanded");
-  // While it thinks, the toggle carries the cube and the shining word.
-  assert((await thinkingToggle.locator(".cube-mark svg polygon").count()) >= 8, "the working cube draws its cubelets");
+  // While it thinks, the working line under the turn carries the cube and the silver words.
+  const working = page.locator(".working-line").last();
+  assert((await working.locator(".cube-mark svg polygon").count()) >= 8, "the working cube draws its cubelets");
   assert.equal(await page.locator("#sidebar-sessions .cube-mark").count(), 0, "one cube on screen: the sidebar shows a dot");
   assert(await page.locator("#sidebar-sessions .sidebar-session-mark.working").count() > 0, "the working chat breathes a dot in the sidebar");
-  assert.equal(await thinkingToggle.locator(".shine").innerText(), "Thinking");
+  assert.equal(await thinkingToggle.locator(".shine, .cube-mark").count(), 0, "the thinking row is quiet: one silver line, one cube");
+  assert.equal((await working.locator(".wl-words:not(.wl-copy) .wl-word:not(.out)").innerText()).trim(), "Thinking", "a thought without headings says Thinking");
   await until(() => page.locator("#app").getAttribute("class").then(value => value?.includes("rim-work") ?? false), "a working turn runs a light along the panel's rim");
   await until(() => page.locator("#workspace-tabs .bar-tab.on .sidebar-session-mark.working").count().then(count => count === 1), "the open tab breathes a working dot");
   assert((await page.locator("#workspace-tabs .bar-tab.on [role=tab]").getAttribute("title"))!.endsWith("· Working"), "the tab's tooltip says it works");

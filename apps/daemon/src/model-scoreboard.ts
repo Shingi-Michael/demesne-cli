@@ -19,7 +19,8 @@ const median = (values: number[]) => {
 
 export function modelScoreboard(database: Database, options: { days: number; workspace?: string | null; drive?: CalibrationRecord[]; localProviders?: string[]; now?: number }): ModelScore[] {
   const local = new Set([...LOCAL, ...(options.localProviders ?? []).map((id) => id.toLowerCase())]);
-  const since = new Date((options.now ?? Date.now()) - options.days * 86_400_000).toISOString();
+  const sinceMs = (options.now ?? Date.now()) - options.days * 86_400_000, since = new Date(sinceMs).toISOString();
+  const day = (at: string) => Math.min(options.days - 1, Math.max(0, Math.floor((Date.parse(at) - sinceMs) / 86_400_000)));
   // Turns in the window (and workspace), with the model of their first request.
   const scope = options.workspace ? "AND s.workspace_id = (SELECT id FROM workspaces WHERE root = ?)" : "";
   const params = options.workspace ? [since, options.workspace] : [since];
@@ -31,13 +32,13 @@ export function modelScoreboard(database: Database, options: { days: number; wor
       output_tokens: number | null; duration_ms: number | null; time_to_first_token_ms: number | null; turn_status: string }[];
   if (!calls.length && !options.drive?.length) return [];
 
-  type Tally = ModelScore & { speeds: number[]; firsts: number[] };
+  type Tally = ModelScore & { speeds: number[]; firsts: number[]; daily: number[] };
   const scores = new Map<string, Tally>();
   const tally = (provider: string, model: string, at: string) => {
     const key = `${provider}\u0000${model}`;
     let score = scores.get(key);
     if (!score) scores.set(key, score = { provider, model, local: local.has(provider.toLowerCase()), turns: 0, finished: 0, failed: 0, toolCalls: 0, toolErrors: 0,
-      tokensPerSecond: null, firstTokenMs: null, checkedTurns: 0, passingTurns: 0, driveRuns: 0, driveLanded: 0, lastUsed: at, speeds: [], firsts: [] });
+      tokensPerSecond: null, firstTokenMs: null, checkedTurns: 0, passingTurns: 0, driveRuns: 0, driveLanded: 0, lastUsed: at, speeds: [], firsts: [], daily: Array<number>(options.days).fill(0) });
     if (at > score.lastUsed) score.lastUsed = at;
     return score;
   };
@@ -49,6 +50,7 @@ export function modelScoreboard(database: Database, options: { days: number; wor
     if (!turnModel.has(call.turn_id)) {
       turnModel.set(call.turn_id, score);
       score.turns++;
+      score.daily[day(call.started_at)]!++;
       if (call.turn_status === "completed") score.finished++;
       else if (call.turn_status === "failed" || call.turn_status === "interrupted") score.failed++;
     }

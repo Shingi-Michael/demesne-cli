@@ -27,7 +27,7 @@ const view = (patch: Partial<SettingsView> = {}): SettingsView => ({
   model: { words: "GPT-6.1 Sol", provider: "ChatGPT", reasoning: "low", chatgpt: "" },
   providers: { items: [], signingIn: null, message: null },
   connectors: { servers: [{ name: "github", state: "ready", tools: 26 }], heartbeat: true },
-  agents: [], chats: { here: 4, all: 9 }, online: true,
+  agents: [], chats: { here: 4, all: 9 }, online: true, plans: [],
   ...patch,
 });
 
@@ -69,8 +69,9 @@ test("numbers are typed as you would say them", () => {
   expect(homeWords("/Users/mike/projects/x", "/Users/mike")).toBe("~/projects/x");
 });
 
-test("every section draws, and the list has thirteen", () => {
-  expect(SETTINGS_ORDER).toHaveLength(13);
+test("every section draws, and the list has fourteen with Overview first", () => {
+  expect(SETTINGS_ORDER).toHaveLength(14);
+  expect(SETTINGS_ORDER[0]).toBe("overview");
   for (const section of SETTINGS_ORDER) expect(settingsPage(view({ section }))).toContain('class="cp-title"');
   const nav = settingsNav({ section: "permissions", query: "", archived: [], info });
   expect(nav).toContain("Back to chats");
@@ -81,7 +82,9 @@ test("permissions list the rules, the trusted folders and the score", () => {
   const html = settingsPage(view({ section: "permissions" }));
   expect(html).toContain("<code>bun test</code>");
   expect(html).toContain("in the project&#39;s config");
-  expect(html.match(/Ask again/g)).toHaveLength(1);
+  // Only your own rule can be taken back; the project's has no ×.
+  expect(html.match(/Ask again about/g)).toHaveLength(1);
+  expect(html).toContain('pm-mode on" aria-pressed="true" data-action="permission-mode" data-args="{&quot;mode&quot;:&quot;ask&quot;}"');
   expect(html).toContain("<code>~/projects/demesne-cli</code>");
   expect(html).toContain("Asked you 12 times this week, 31 the week before.");
 });
@@ -99,11 +102,36 @@ test("search looks through every section and marks the words", () => {
   expect(settingsPage(view({ query: "zzzz" }))).toContain("Nothing matches");
 });
 
-test("the theme word unfolds its choices in place", () => {
-  expect(settingsPage(view({ section: "appearance" }))).not.toContain("st-choice");
-  const open = settingsPage(view({ section: "appearance", fold: "theme" }));
-  expect(open).toContain("Demesne Light");
-  expect(open).toContain('st-choice on');
+test("themes are cards drawn in their own colours, with a live preview above", () => {
+  const html = settingsPage(view({ section: "appearance", appearance: { ...view().appearance, themes: [{ name: "demesne", label: "Demesne", colors: { bg: "#111111", surface: "#222222", accent: "#3366ff", text: "#eeeeee" } }, { name: "demesne-light", label: "Demesne Light", light: true }] } }));
+  expect(html).toContain("ap-preview");
+  expect(html).toContain('ap-card on" aria-pressed="true"');
+  expect(html).toContain("--ac:#3366ff");
+  expect(html).toContain("Demesne Light");
+  expect(html).toContain("Make one…");
+});
+
+test("the overview says how it's set up, shows six tiles and what's worth a look", () => {
+  const plan = { provider: "ChatGPT", plan: "plus", at: new Date().toISOString(), primary: { usedPercent: 82, windowMinutes: 300, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }, secondary: { usedPercent: 18, windowMinutes: 10_080, resetsAt: null } };
+  const usage = [{ provider: "ChatGPT", model: "gpt-6.1-sol", local: false, turns: 3, finished: 3, failed: 0, toolCalls: 0, toolErrors: 0, tokensPerSecond: 50, firstTokenMs: 800, checkedTurns: 0, passingTurns: 0, driveRuns: 1, driveLanded: 1, lastUsed: "", daily: [...Array(29).fill(0), 3] }];
+  const html = settingsPage(view({ section: "overview", plans: [plan], usage, info: { ...info, restart: ["app.update"] }, connectors: { servers: [{ name: "linear", state: "failed", tools: 0 }], heartbeat: false } }));
+  expect(html).toContain("Answers come from");
+  expect(html).toContain("on your ChatGPT Plus plan");
+  expect(html).toContain("asks before edits and commands");
+  expect(html).toContain("Drive starts on its own after 20 quiet minutes");
+  expect(html.match(/class="ov-tile[ "]/g)).toHaveLength(6);
+  expect(html).toContain("82%");
+  expect(html).toContain("A newer daemon came with this app");
+  expect(html).toContain("The linear connector didn&#39;t start");
+  expect(html).toContain("is 82% used");
+  expect(settingsPage(view({ section: "overview" }))).toContain("Nothing needs you");
+});
+
+test("usage draws each day stacked by model", () => {
+  const usage = [{ provider: "ChatGPT", model: "a", local: false, turns: 2, finished: 2, failed: 0, toolCalls: 0, toolErrors: 0, tokensPerSecond: null, firstTokenMs: null, checkedTurns: 0, passingTurns: 0, driveRuns: 0, driveLanded: 0, lastUsed: "", daily: [1, 0, 1] }];
+  const html = settingsPage(view({ section: "usage", usage }));
+  expect(html.match(/class="us-day"/g)).toHaveLength(3);
+  expect(html).toContain("2 in 3 days");
 });
 
 test("glass runs from nearly clear to solid, with text backing only while it is clear", () => {

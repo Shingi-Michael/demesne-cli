@@ -99,5 +99,7 @@ export interface ModelScore {
   /// Drive proposals it ran, and how many you applied or opened as a PR.
   driveRuns: number; driveLanded: number;
   lastUsed: string;
+  /// Turns it answered each day, oldest first, one entry per day of the window.
+  daily?: number[];
 }
 export interface ModelScoreboardResponse { days: number; workspace: string | null; models: ModelScore[] }

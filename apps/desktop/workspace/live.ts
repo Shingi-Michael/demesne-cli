@@ -24,6 +24,7 @@ import { dayLine } from "./assistant-chat.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
+import { catchUp, seenStore } from "./catch-up.ts";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FoundryPane } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
@@ -341,6 +342,10 @@ let noteEditing: { runId: string; path: string; side: "old" | "new"; line: numbe
 /// The turn whose changes the undo confirmation reverts.
 let undoTurnId: string | null = null;
 const expandedCompactions = new Set<string>();
+/// "Since you looked": when each chat was last on screen, and the line for
+/// this visit (worked out once, as the chat opens).
+const seen = seenStore.read();
+let catchUpFor = "", catchUpSince: number | null = null, catchUpOpened = 0, catchUpLine: HTMLElement | null = null, catchUpPlaced = false, seenWritten = 0;
 let compactionCard: HTMLElement | null = null;
 let compactionCardSignature = "";
 let overlaySignature = "",
@@ -2377,7 +2382,36 @@ function renderConversation() {
     if (liveBefore) stage.scrollTop = stage.scrollHeight;
     else stage.scrollTop = top;
   }
+  renderCatchUp();
 }
+/// One line before the first turn you didn't see, for this visit; on the way
+/// in, the chat opens at it so you read on from where you left.
+function renderCatchUp() {
+  if (!state) return;
+  const id = state.session?.id ?? "";
+  if (id !== catchUpFor) {
+    catchUpFor = id; catchUpSince = id ? seen[id] ?? null : null; catchUpOpened = Date.now(); catchUpPlaced = false;
+    catchUpLine?.remove(); catchUpLine = null;
+  }
+  // Only what happened before you came back: a turn you watch finish isn't news.
+  const line = id && inSession() ? catchUp(state.runs.filter((run) => !run.completedAt || Date.parse(run.completedAt) <= catchUpOpened), catchUpSince, { approvals: state.approvals.length, questions: state.questions.length }) : null;
+  const before = line ? runNodes.get(line.before)?.node : undefined;
+  if (!line || !before) { catchUpLine?.remove(); catchUpLine = null; }
+  else {
+    if (!catchUpLine) { catchUpLine = document.createElement("div"); catchUpLine.className = "catch-up"; }
+    const html = `<i></i><span><b>Since you looked</b> · ${h(line.words)}</span>`;
+    if (catchUpLine.innerHTML !== html) catchUpLine.innerHTML = html;
+    if (catchUpLine.nextElementSibling !== before) before.before(catchUpLine);
+    if (!catchUpPlaced) { catchUpPlaced = true; follow = false; el("stage").scrollTop = Math.max(0, catchUpLine.offsetTop - 16); }
+  }
+  // While the chat is in front of you, it's seen.
+  if (id && inSession() && document.hasFocus() && !document.hidden) {
+    seen[id] = Date.now();
+    if (Date.now() - seenWritten > 5_000) { seenWritten = Date.now(); seenStore.write(seen); }
+  }
+}
+window.addEventListener("blur", () => seenStore.write(seen));
+window.addEventListener("pagehide", () => seenStore.write(seen));
 /// Finished worktree branches waiting for a decision. On the start screen
 /// they are one line under the project name; their cards open from it.
 const reviewJobs = () =>

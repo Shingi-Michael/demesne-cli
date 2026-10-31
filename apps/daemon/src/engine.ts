@@ -29,7 +29,7 @@ import {
   planContextRequest,
   type ContextPlanner,
 } from "./context-planner.ts";
-import { keepLines, NOTE_INSTRUCTION, NoteFilter, NOTES_FROM, roughTokens } from "./turn-notes.ts";
+import { keepLines, type KeepEdits, NOTE_INSTRUCTION, NoteFilter, NOTES_FROM, RECALL_TURN, recallText, recallTurnDefinition, roughTokens } from "./turn-notes.ts";
 
 interface AssembledToolCall {
   id: string;
@@ -71,6 +71,8 @@ interface AgentEngineOptions extends AgentConfig {
   subagentModels?: () => SubagentModel[];
   /// The model's own presets and compositions, per session.
   sessionTools?: SessionToolStore;
+  /// What you added to or took off each chat's Keep list.
+  keepEdits?: KeepEdits;
   /// Lines added to the system prompt for this chat (its Heartbeat address).
   sessionContext?: (sessionId: string) => string | null;
   /// Other agents working in a project (Heartbeat), for the overlap check.
@@ -245,12 +247,14 @@ export class AgentEngine {
         FOUNDRY_TOOL_NAMES.has(definition.name) || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
     const checkpoint = themefy ? null : this.store.getSessionCheckpoint(session.id);
     const checkpointMessages: ProviderMessage[] = checkpoint ? [{ role: "assistant", content: checkpoint.summary }] : [];
+    // Turns swapped for notes can be brought back whole, one at a time.
+    if (!themefy && !assistant && checkpoint?.noteTurnIds?.some(Boolean)) definitions.push(recallTurnDefinition);
     // Past NOTES_FROM of the window the model ends each answer with a hidden
     // note, so compacting later swaps old turns for notes with no model call.
     const noting = !themefy && !assistant && Boolean(inference.contextCapacity)
       && roughTokens([...checkpointMessages, ...history.flatMap((entry) => entry.messages)]) >= inference.contextCapacity! * NOTES_FROM;
     const notesState = noting || checkpoint?.notes ? {
-      keep: keepLines(history.flatMap((entry) => entry.messages), checkpoint?.keep),
+      keep: keepLines(history.flatMap((entry) => entry.messages), checkpoint?.keep, this.options.keepEdits?.read(session.id)),
       notedTurns: checkpoint?.notes?.length ?? 0,
       wholeTurns: history.length,
     } : null;
@@ -777,6 +781,21 @@ export class AgentEngine {
     } catch { /* the step still completes; it just has no tree */ }
   }
 
+  /// recall_turn: one turn that was swapped for a note, brought back whole.
+  private recallTurn(toolCallId: string, input: unknown, sessionId: string): string {
+    const note = isRecord(input) && Number.isSafeInteger(input.note) ? input.note as number : 0;
+    const turnId = this.store.getSessionCheckpoint(sessionId)?.noteTurnIds?.[note - 1];
+    if (!turnId) {
+      const result = note ? `Error: note ${note} has no turn to recall; it summarizes several earlier turns` : "Error: pass the note's number";
+      this.store.settleToolCall(toolCallId, "failed", result);
+      return result;
+    }
+    this.store.startToolCall(toolCallId);
+    const result = recallText(this.store.getTurnModelMessages(sessionId, turnId));
+    this.store.settleToolCall(toolCallId, "completed", result);
+    return result;
+  }
+
   private async executeTool(
     toolCallId: string,
     call: AssembledToolCall,
@@ -803,7 +822,7 @@ export class AgentEngine {
       return result;
     }
     // The assistant's file, search and phone tools need no project folder.
-    if (!workspaceRoot && call.name !== "ask_user" && !FOUNDRY_TOOL_NAMES.has(call.name) && !(themefy && call.name === "apply_theme")
+    if (!workspaceRoot && call.name !== "ask_user" && call.name !== RECALL_TURN && !FOUNDRY_TOOL_NAMES.has(call.name) && !(themefy && call.name === "apply_theme")
       && !(assistant && call.name !== "assistant_notes")) {
       const result = "Error: this session is not bound to a workspace";
       this.store.settleToolCall(toolCallId, "failed", result);
@@ -839,6 +858,7 @@ export class AgentEngine {
     if(themefy && call.name === "ask_user" && (!isRecord(input) || input.mode !== "interview")) {
       const result="Error: Themefy questions must use mode=interview";this.store.settleToolCall(toolCallId,"failed",result);return result;
     }
+    if (call.name === RECALL_TURN) return this.recallTurn(toolCallId, input, sessionId);
     if (call.name === SUBAGENT_TOOL && inference) return this.executeSubagent(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
     if (call.name === SESSION_TOOLS) return this.executeSessionTool(toolCallId, call, input, permissionMode, workspaceRoot, turnId, sessionId, signal, planOnly, imageArtifactIds, inference);
     // ls, cat, grep… through run_command: answered by the built-in read tool

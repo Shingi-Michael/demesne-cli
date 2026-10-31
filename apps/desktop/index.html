@@ -12,6 +12,8 @@
   <link rel="stylesheet" href="workspace.css">
 </head>
 <body class="desktop">
+  <!-- The Demesne mark: a d whose full stop is this version's flower (Cherry Blossom). -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><mask id="demesne-heart"><rect x="-40" y="-40" width="80" height="80" fill="#fff"/><circle r="5" fill="#000"/></mask><symbol id="demesne-mark" viewBox="0 0 100 100"><circle cx="43" cy="59" r="15" fill="none" stroke="currentColor" stroke-width="9"/><path d="M58 24V74" stroke="currentColor" stroke-width="9" stroke-linecap="round"/><g transform="translate(80 66) scale(.31)" fill="#e0457a" mask="url(#demesne-heart)"><path d="M0 -3C-11 -9 -17 -24 -9 -35L0 -29.5L9 -35C17 -24 11 -9 0 -3Z" transform="rotate(0)"/><path d="M0 -3C-11 -9 -17 -24 -9 -35L0 -29.5L9 -35C17 -24 11 -9 0 -3Z" transform="rotate(72)"/><path d="M0 -3C-11 -9 -17 -24 -9 -35L0 -29.5L9 -35C17 -24 11 -9 0 -3Z" transform="rotate(144)"/><path d="M0 -3C-11 -9 -17 -24 -9 -35L0 -29.5L9 -35C17 -24 11 -9 0 -3Z" transform="rotate(216)"/><path d="M0 -3C-11 -9 -17 -24 -9 -35L0 -29.5L9 -35C17 -24 11 -9 0 -3Z" transform="rotate(288)"/></g></symbol></defs></svg>
   <!-- The Mac's simple full screen drops the window's own buttons; these stand in for them there. -->
   <div id="mac-lights" role="group" aria-label="Window" hidden><button type="button" data-light="close" aria-label="Close"></button><button type="button" data-light="minimize" aria-label="Minimize"></button><button type="button" data-light="fullscreen" aria-label="Exit full screen"></button></div>
   <div id="desktop-shell">
@@ -38,7 +40,7 @@
         <button type="button" class="sidebar-settings sidebar-foot-button" data-action="page-open" data-args='{"page":"settings"}' aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
       </div>
       <div class="sidebar-rail" aria-label="Collapsed navigation">
-        <button type="button" class="rail-mark" id="rail-expand" aria-label="Show sidebar" title="Show sidebar"><span class="project-mark" aria-hidden="true">d.</span></button>
+        <button type="button" class="rail-mark" id="rail-expand" aria-label="Show sidebar" title="Show sidebar"><span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span></button>
         <button type="button" class="rail-button" data-action="new-session" aria-label="New chat" title="New chat (Ctrl+N)"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
         <button type="button" class="rail-button" id="rail-assistant" data-action="assistant-open" aria-label="Assistant" title="Assistant" hidden><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2"/></svg><i class="rail-badge blue" hidden></i></button>
         <button type="button" class="rail-button" data-action="page-open" data-args='{"page":"foundry"}' aria-label="Foundry" title="Foundry"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M4 15h16l-2 5H6z"/><path d="M8 15V9h8v6"/><path d="M10 9V5h4v4"/></svg></button>
@@ -57,7 +59,7 @@
     </div>
     <section id="desktop-home" class="desktop-home" aria-labelledby="desktop-home-title">
       <div class="desktop-home-content">
-        <span class="desktop-home-wordmark"><span class="brand-symbol" aria-hidden="true">d.</span> Demesne</span>
+        <span class="desktop-home-wordmark"><span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span> Demesne <span class="brand-version">Cherry Blossom</span></span>
         <span class="hero-eyebrow">FROM AN IDEA TO WORKING CODE</span>
         <h1 id="desktop-home-title">Make room for your next idea.</h1>
         <p id="desktop-home-description">One workspace for your conversations, code, and agent work. Open a project to get started.</p>
@@ -72,7 +74,7 @@
     </section>
     <section id="desktop-error" class="desktop-error" aria-labelledby="desktop-error-title" hidden>
       <div class="desktop-error-content">
-        <span class="desktop-home-wordmark"><span class="brand-symbol" aria-hidden="true">d.</span> Demesne</span>
+        <span class="desktop-home-wordmark"><span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span> Demesne <span class="brand-version">Cherry Blossom</span></span>
         <h1 id="desktop-error-title">Couldn’t open Demesne.</h1>
         <p id="desktop-error-message" role="alert"></p>
         <div class="desktop-error-actions">

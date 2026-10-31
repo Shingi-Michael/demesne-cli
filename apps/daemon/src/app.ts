@@ -47,6 +47,7 @@ import { DemesneStore, InvalidStateError, NotFoundError, QuestionStateError } fr
 import { PlaceholderTurnProcessor, snapshotTurnInference, type TurnInference, type TurnProcessor } from "./processor.ts";
 import { AgentEngine } from "./engine.ts";
 import { SessionCompactor } from "./session-compaction.ts";
+import { AUTO_COMPACT_AT } from "./turn-notes.ts";
 import type { ContextPlanner } from "./context-planner.ts";
 import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
@@ -373,7 +374,7 @@ export function createDaemonApp(options: {
     },
   );
   const activeTurns = new Set<Promise<void>>();
-  const compactor = new SessionCompactor(store, scheduler, tools, options);
+  const compactor = new SessionCompactor(store, scheduler, tools, options, (sessionId) => sessionId !== assistantChat.existing());
   const activeControllers = new Map<string, AbortController>();
   const activeStreamClosers = new Set<() => void>();
   const driveLifecycle = new AbortController();
@@ -530,6 +531,22 @@ export function createDaemonApp(options: {
             queueTurn(store.createTurn(turn.sessionId, "/compact", "deny", false, false, "compaction").turn, inference);
           } catch (error) {
             console.error(`Could not schedule compaction of the assistant's chat after turn ${turn.id}`, error);
+          }
+        }
+      } else if (!turn.kind && !signal.aborted && !closing && store.getTurn(turn.id)?.status === "completed") {
+        // A chat compacts itself from its turns' notes (pass 114) once it
+        // fills past AUTO_COMPACT_AT of the room for input, so it never fills.
+        const state = store.getSessionState(turn.sessionId);
+        const turns = state?.session.turns ?? [];
+        const since = turns.length - 1 - turns.findLastIndex((entry) => entry.kind === "compaction");
+        const busy = turns.some((entry) => entry.id !== turn.id && (entry.status === "queued" || entry.status === "running"));
+        const used = state?.latestProviderCall?.usage?.inputTokens ?? state?.latestProviderCall?.contextPlan?.estimatedInputTokens;
+        const room = inference.contextCapacity && inference.maxOutputTokens ? inference.contextCapacity - inference.maxOutputTokens : 0;
+        if (since > 2 && !busy && used && room > 0 && used >= room * AUTO_COMPACT_AT) {
+          try {
+            queueTurn(store.createTurn(turn.sessionId, "/compact", "deny", false, false, "compaction").turn, inference);
+          } catch (error) {
+            console.error(`Could not schedule compaction after turn ${turn.id}`, error);
           }
         }
       }

@@ -9,9 +9,12 @@ import type { TurnInference } from "./processor.ts";
 import { providerStreamLimits } from "./provider-limits.ts";
 import { buildSummaryCheckpointPrompt, parseSummaryCheckpoint, renderSummaryCheckpoint, type SummaryCheckpointContentV1 } from "./summary-checkpoint.ts";
 import type { ToolRegistry } from "./tools.ts";
+import { keepLines, renderNotes, roughTokens, turnNote } from "./turn-notes.ts";
 
 const RETAINED_TURNS = 2;
 const MAX_SUMMARY_ROUNDS = 32;
+/// Share of the window the stitched notes may take before the model merges them.
+const NOTES_BUDGET = 0.25;
 
 interface SummarySource {
   message: ProviderMessage;
@@ -24,7 +27,9 @@ interface SummarySource {
 export class SessionCompactor {
   constructor(private readonly store: DemesneStore, private readonly scheduler: InferenceSchedulers,
     private readonly tools: ToolRegistry, private readonly options: { systemPrompt?: string; providerVision?: boolean;
-      providerFirstEventTimeoutMs?: number; providerRequestTimeoutMs?: number; providerEventLimit?: number } = {}) {}
+      providerFirstEventTimeoutMs?: number; providerRequestTimeoutMs?: number; providerEventLimit?: number } = {},
+    /// Which chats compact from their turns' notes; the assistant's chat keeps its own summaries.
+    private readonly fromNotes: (sessionId: string) => boolean = () => true) {}
 
   async run(turnId: string, inference: TurnInference, signal: AbortSignal): Promise<void> {
     const turn = this.store.getTurn(turnId);
@@ -57,6 +62,23 @@ export class SessionCompactor {
         (this.options.providerVision && messages.some((message) => message.role === "tool" && message.imageArtifactIds?.length) ? 4096 : 0) }).plan;
     let checkpointMessage: ProviderMessage | undefined = previous ? { role: "assistant", content: previous.summary } : undefined;
     const before = estimate([...(checkpointMessage ? [checkpointMessage] : []), ...history.flatMap((entry) => entry.messages)]);
+    // Notes first (pass 114): the older turns swap for their notes, with no
+    // model call. The model summarizes only when you give it priorities, or
+    // when the notes themselves have grown too long.
+    const keep = keepLines(prefix.flatMap((entry) => entry.messages), previous?.keep);
+    const notes = [...(previous?.notes ?? (previous ? [`Earlier summary:\n${previous.summary}`] : [])), ...prefix.map((entry) => turnNote(entry.messages))];
+    const stitched: ProviderMessage = { role: "assistant", content: renderNotes(keep, notes) };
+    const noted = estimate([stitched, ...retained.flatMap((entry) => entry.messages)]);
+    if (!instructions && this.fromNotes(session.id) && roughTokens([stitched]) <= inference.contextCapacity * NOTES_BUDGET && noted.estimatedInputTokens < before.estimatedInputTokens) {
+      signal.throwIfAborted();
+      const checkpoint: SessionCheckpoint = { id: crypto.randomUUID(), sessionId: session.id, turnId, createdAt: new Date().toISOString(),
+        summary: stitched.content!, instructions, firstRetainedMessageId: retained[0]!.firstMessageId, firstRetainedTurnId: retained[0]!.id,
+        summarizedTurns: (previous?.summarizedTurns ?? 0) + prefix.length, retainedTurns: retained.length,
+        beforeTokens: before.estimatedInputTokens, afterTokens: noted.estimatedInputTokens, contextPlan: noted, keep, notes };
+      this.store.completeCompaction(turnId, checkpoint, `Context compacted from notes: ~${checkpoint.beforeTokens.toLocaleString("en-US")} → ~${checkpoint.afterTokens.toLocaleString("en-US")} tokens (estimated).\n`
+        + `Kept ${prefix.length} older turn${prefix.length === 1 ? "" : "s"} as notes; kept the latest ${retained.length} turns whole. Full transcript remains in History.`, version);
+      return;
+    }
     const pending: SummarySource[] = prefix.flatMap((entry) => entry.messages.map((message) => ({ message })));
     let content: SummaryCheckpointContentV1 | undefined;
     let rounds = 0;

@@ -1379,6 +1379,16 @@ describe("Demesne daemon", () => {
     expect(readFileSync(outside, "utf8")).toBe("outside\n");
   });
 
+  test("health names the daemon's build so the app can tell an older one", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const app = createDaemonApp({ databasePath: join(directory, "demesne.sqlite"), version: "0.1.0", build: "abc1234.x" });
+    const server = Bun.serve({ port: 0, fetch: app.fetch });
+    apps.push(app);
+    servers.push(server);
+    expect(await (await fetch(new URL("/healthz", server.url))).json()).toMatchObject({ version: "0.1.0", build: "abc1234.x" });
+  });
+
   test("requires authentication when configured", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

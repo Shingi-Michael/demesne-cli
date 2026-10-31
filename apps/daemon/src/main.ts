@@ -21,7 +21,7 @@ import {
 } from "./ollama-runtime.ts";
 import { ProviderTurnProcessor } from "./provider-processor.ts";
 import { acquireDataDirectoryLock } from "./data-directory-lock.ts";
-import { VERSION } from "./version.ts";
+import { BUILD, VERSION } from "./version.ts";
 
 const OPENROUTER_API = "https://openrouter.ai/api/v1";
 
@@ -93,6 +93,7 @@ try {
     theme: config.theme,
     authToken: loadDaemonToken(dataDirectory),
     version: VERSION,
+    ...(BUILD ? { build: BUILD } : {}),
     inferenceSlots,
     providerInferenceSlots,
     allowlistPath: process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(),

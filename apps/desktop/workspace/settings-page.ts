@@ -321,7 +321,7 @@ function pages(view: SettingsView): Page[] {
     { name: "The daemon", rows: [
       { title: "Address", line: `${info ? `\`${info.server}\` · ` : ""}${view.online ? "running" : "not answering"}`, keywords: "daemon server address" },
       { title: "Keeps running when you close the window", line: "So Drive, routines and mail go on", keywords: "quit close background" },
-      { title: "Restart the daemon", line: info?.restart.length ? "Settings you changed wait for a restart" : "It reads its settings again; waits until nothing is working", control: link("restart-daemon", "Restart", {}, info?.restart.length ? " warn" : ""), keywords: "restart daemon reload" },
+      { title: "Restart the daemon", line: info?.restart.includes("app.update") ? "A newer daemon came with this app; it restarts by itself once nothing is working" : info?.restart.length ? "Settings you changed wait for a restart" : "It reads its settings again; waits until nothing is working", control: link("restart-daemon", "Restart", {}, info?.restart.length ? " warn" : ""), keywords: "restart daemon reload" },
     ] },
     { name: "Conversations", rows: [
       { title: "All conversations", line: `${view.chats.all} ${view.chats.all === 1 ? "chat" : "chats"}${view.chats.here !== view.chats.all ? `, ${view.chats.here} in this project` : ""}`, control: link("page-open", "Show", { page: "active" }), keywords: "sessions history chats" },

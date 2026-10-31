@@ -2,11 +2,11 @@ import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import sharp from "sharp";
 import { prepareUi } from "./prepare-ui.ts";
-import { buildVersionArgs, resolveBuildVersion } from "./build-version.ts";
+import { buildVersionArgs, resolveBuildId, resolveBuildVersion } from "./build-version.ts";
 const root = resolve(import.meta.dir, ".."), desktop = join(root, "apps/desktop");
 const build = join(desktop, "build"), application = join(build, "app"), out = join(application, "ui"), backend = join(build, "backend");
 async function run(args: string[]) {
-  const child = Bun.spawn(args, { cwd: root, stdout: "inherit", stderr: "inherit" });
+  const child = Bun.spawn(args, { cwd: root, env: process.env, stdout: "inherit", stderr: "inherit" });
   if (await child.exited !== 0) throw new Error(`Desktop preparation failed: ${args.slice(1, 3).join(" ")}`);
 }
 rmSync(build, { recursive: true, force: true }); mkdirSync(application, { recursive: true }); mkdirSync(backend, { recursive: true });
@@ -25,6 +25,8 @@ if (process.platform === "darwin") {
   else console.warn("No liquid glass addon for this Mac; the window keeps frosted glass.");
 }
 const version = resolveBuildVersion();
+// One build id for the host and the daemon built below (build-daemon reads it from the environment).
+process.env.DEMESNE_BUILD_ID = resolveBuildId();
 writeFileSync(join(application, "package.json"), JSON.stringify({ name: "demesne", productName: "Demesne", version, description: "A coding workspace with durable sessions and Agent Drive", author: "Demesne contributors", main: "main.cjs" }, null, 2));
 const suffix = process.platform === "win32" ? ".exe" : "";
 await run([process.execPath, "build", join(desktop, "host.ts"), "--compile", ...buildVersionArgs(version), "--outfile", join(backend, `demesne-host${suffix}`)]);

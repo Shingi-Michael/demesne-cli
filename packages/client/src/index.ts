@@ -85,6 +85,8 @@ export interface HealthResponse {
   /// The chosen thinking level, when one was picked.
   reasoning?: string;
   version?: string;
+  /// Which build the daemon is, when it was built standalone.
+  build?: string;
 }
 
 export class DemesneClient {

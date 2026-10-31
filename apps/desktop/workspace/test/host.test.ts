@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceHost, daemonAddress, daemonCredential, remoteDaemonTokenPath } from "../host.ts";
+import { WorkspaceHost, daemonAddress, daemonCredential, olderDaemon, remoteDaemonTokenPath } from "../host.ts";
 import { fixture, eventually } from "./fixture.ts";
 
 function hostFor(f: Awaited<ReturnType<typeof fixture>>) {
@@ -423,4 +423,13 @@ test("the window picks up an away run Drive started and leaves each one to revie
     expect(host.breakage.state.fix).toBeNull();
     expect(host.breakage.state.away).toBeNull();
   } finally { host.dispose(); await f.close(); }
+});
+
+test("the app replaces only a daemon from another stamped build of itself", () => {
+  expect(olderDaemon("abc.1", "abc.0")).toBe(true);
+  expect(olderDaemon("abc.1", "abc.1")).toBe(false);
+  // Run from source on either side: never touched.
+  expect(olderDaemon("", "abc.0")).toBe(false);
+  expect(olderDaemon("abc.1", undefined)).toBe(false);
+  expect(olderDaemon("abc.1", "")).toBe(false);
 });

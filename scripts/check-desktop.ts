@@ -1118,7 +1118,8 @@ try {
   // launch is on Hyprland, which blurs behind clear pixels: the window is glass.
   await open(false, false, { HYPRLAND_INSTANCE_SIGNATURE: "smoke", DEMESNE_GLASS: "" });
   assert(await page.evaluate(() => document.documentElement.classList.contains("glass")), "on Hyprland the shell is glass");
-  assert(!await page.evaluate(() => document.documentElement.classList.contains("mac-chrome")), "with the desktop's own window chrome");
+  // A real Mac keeps its own chrome whatever the environment says.
+  if (process.platform !== "darwin") assert(!await page.evaluate(() => document.documentElement.classList.contains("mac-chrome")), "with the desktop's own window chrome");
   // (Xvfb has no compositor, so the window itself can't be checked for clear pixels here.)
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgba(0, 0, 0, 0)", "the page leaves clear pixels for Hyprland to blur");
   await page.locator(".sidebar-settings").click();

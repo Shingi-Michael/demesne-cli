@@ -94,8 +94,10 @@ describe("WorkspaceHost reconnect", () => {
     // No pid file and no lock: stopping finds nothing to stop, and the
     // daemon answers again on the third health check, as the task brings it back.
     let healthCalls = 0;
+    // A closed port: stopping must never find a real daemon on this machine
+    // (7337 on a Mac running Demesne), and stopping goes by the client's server.
     const fakeClient = {
-      server: "http://127.0.0.1:7337",
+      server: "http://127.0.0.1:9",
       health: async () => {
         healthCalls++;
         if (healthCalls >= 2 && healthCalls <= 3) throw new Error("Connection refused");
@@ -115,7 +117,6 @@ describe("WorkspaceHost reconnect", () => {
     mkdirSync(join(home, ".demesne"));
     writeFileSync(join(home, ".demesne", "config.toml"), 'server = "http://127.0.0.1:9"\n[daemon]\nauto_start = "always"\n');
     writeFileSync(join(home, ".demesne", "daemon.managed"), "the scheduled task \\Demesne\\demesned\n");
-    // A closed port: stopping must never find a real daemon on this machine (7337 on a Mac running Demesne).
     const settings = loadCliSettings({ home, env: {}, workspaceRoot: home, includeProject: false });
     const host = new WorkspaceHost({ client: fakeClient, settings, workspace: home, home: "plain", headless: true, changed: () => {} });
     await host.connect();

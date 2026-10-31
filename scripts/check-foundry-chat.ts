@@ -98,19 +98,20 @@ try {
   // A new artifact is a chip in the chat and opens in the pane beside it by itself.
   await chips.first().filter({ hasText: "Idea garden" }).waitFor();
   await frame.getByRole("button", { name: "Plant an idea" }).waitFor();
-  // Its first show assembles the page: the frame is served with anime.js and
-  // the assembly; the pieces end up in place with no inline styles left.
-  const assembled = async (previous: "none" | "string") => {
+  // Its first show asks for the assembly, but a page that moves by itself
+  // (the kit's anime.js) is served plain: its own Arrive motion is the
+  // arrival, and the assembly would cancel it and leave the page faded.
+  const assembled = async () => {
     assert.match((await pane.locator("iframe.pane-frame").getAttribute("src"))!, /[?&]assemble=1$/, "a version's first show asks for the assembly");
     const inner = page!.frames().find(item => item.url().includes("assemble=1"));
-    assert(inner, "the assembling frame is reachable");
-    await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined && document.documentElement.style.visibility === "" && [...document.querySelectorAll("main, main > *")].every(el => !(el as HTMLElement).style.transform)));
-    // The kit reached the page: its stylesheet and its anime.js (the assembly brought no second copy).
+    assert(inner, "the first-show frame is reachable");
+    await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined && document.documentElement.style.visibility === ""));
+    // The kit reached the page: its stylesheet and its anime.js, and no assembly beside it.
     assert.equal(await inner.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--radius").trim()), "8px", "foundry://kit/base.css is served to the frame");
-    assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), 2, "a page that loads anime.js from the kit is not served it twice");
-    assert.equal(await inner.evaluate(() => typeof (window as unknown as { __demesnePrevious: unknown }).__demesnePrevious), previous === "none" ? "object" : "string");
+    assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), 1, "a page that moves by itself is not served the assembly");
+    assert.equal(await inner.evaluate(() => "__demesnePrevious" in window), false, "no assembly, no previous version to diff");
   };
-  await assembled("none");
+  await assembled();
   // The page named a motion: the thin line under the page plays, scrubs and replays it.
   const motion = pane.locator(".pane-motion");
   await motion.getByRole("button", { name: "Arrive" }).waitFor();
@@ -156,8 +157,8 @@ try {
   // The pane follows the chat onto the new version; the arrows walk back.
   await pane.locator(".pane-foot").filter({ hasText: "v2" }).waitFor();
   await frame.getByRole("heading", { name: "A little room to grow" }).waitFor();
-  // A revision assembles against the version before it: only what changed moves.
-  await assembled("string");
+  // A revision's first show is the page's own motion again, with no assembly diff.
+  await assembled();
   assert.equal(await chips.nth(1).getAttribute("aria-pressed"), "true");
   assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "false");
   await pane.getByRole("button", { name: "Earlier version" }).click();

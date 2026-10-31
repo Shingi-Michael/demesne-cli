@@ -149,7 +149,10 @@ void app.whenReady().then(async () => {
   // the frame is sandboxed without the app's origin.
   // The first show of a version carries ?assemble=1: the page is served with
   // anime.js (bundled with the app, never fetched) and the assembly script,
-  // and a revision gets the version before it to find what changed.
+  // and a revision gets the version before it to find what changed. A page
+  // that loads the kit's anime.js moves by itself and is served plain: the
+  // assembly animating the same pieces would cancel the page's own motion
+  // and leave it faded.
   let assembleLibrary: string | undefined;
   const kitFile = (name: string) => { const file = FOUNDRY_KIT[name]!; return Buffer.concat([readFileSync(join(base, "ui", file.path)), ...(file.then ? [Buffer.from("\n"), readFileSync(join(base, "ui", file.then))] : [])]); };
   await session.protocol.handle("foundry", async request => {
@@ -162,13 +165,13 @@ void app.whenReady().then(async () => {
       const at = Number.isSafeInteger(version) && version > 0 ? version : undefined;
       const found = await backend!.request("foundry-get", { id, ...(at ? { version: at } : {}) }) as { kind: string; source: string; title: string; version: number };
       let assembly: FoundryAssembly | undefined;
-      if (url.searchParams.get("assemble") === "1") {
+      if (url.searchParams.get("assemble") === "1" && !(found.kind === "html" && found.source.includes(FOUNDRY_KIT_SCRIPT))) {
         assembleLibrary ??= readFileSync(join(base, "ui", "vendor", "anime.umd.min.js"), "utf8");
         let previous: string | null = null;
         if (found.kind === "html" && found.version > 1) {
           try { const before = await backend!.request("foundry-get", { id, version: found.version - 1 }) as { kind: string; source: string }; if (before.kind === "html") previous = before.source; } catch {}
         }
-        assembly = { library: found.source.includes(FOUNDRY_KIT_SCRIPT) ? "" : assembleLibrary, previous };
+        assembly = { library: assembleLibrary, previous };
       }
       return new Response(foundryDocument(found.kind, found.source, found.title, assembly), { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
     } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }

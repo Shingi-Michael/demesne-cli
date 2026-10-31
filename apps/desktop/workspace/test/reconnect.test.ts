@@ -113,8 +113,9 @@ describe("WorkspaceHost reconnect", () => {
     } as unknown as DemesneClient;
     const home = mkdtempSync(join(tmpdir(), "demesne-managed-restart-"));
     mkdirSync(join(home, ".demesne"));
-    writeFileSync(join(home, ".demesne", "config.toml"), '[daemon]\nauto_start = "always"\n');
+    writeFileSync(join(home, ".demesne", "config.toml"), 'server = "http://127.0.0.1:9"\n[daemon]\nauto_start = "always"\n');
     writeFileSync(join(home, ".demesne", "daemon.managed"), "the scheduled task \\Demesne\\demesned\n");
+    // A closed port: stopping must never find a real daemon on this machine (7337 on a Mac running Demesne).
     const settings = loadCliSettings({ home, env: {}, workspaceRoot: home, includeProject: false });
     const host = new WorkspaceHost({ client: fakeClient, settings, workspace: home, home: "plain", headless: true, changed: () => {} });
     await host.connect();

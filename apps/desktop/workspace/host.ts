@@ -100,10 +100,19 @@ const argsRecord = (value: unknown) => {
 };
 /// Which build this app is (scripts/build-version.ts); empty when run from source.
 const APP_BUILD = process.env.DEMESNE_BUILD_ID || "";
-/// The app replaces a daemon from another build of itself, never one run from
-/// source or by hand: both builds must be stamped, and they must differ.
-export function olderDaemon(app: string, daemon: string | undefined) {
+/// The app replaces a daemon from another build of itself (older, or newer
+/// when an older app is opened: the app and its daemon always match), never
+/// one run from source or by hand: both builds must be stamped, and differ.
+export function otherBuildDaemon(app: string, daemon: string | undefined) {
   return !!app && !!daemon && app !== daemon;
+}
+
+/// The daemon the app bundles: beside the host in the package's backend
+/// folder (Contents/Resources/backend on the Mac). Without it named, the
+/// daemon command falls to PATH first, which can be an older install.
+export function bundledDaemon(execPath = process.execPath) {
+  const file = join(dirname(execPath), process.platform === "win32" ? "demesned.exe" : "demesned");
+  return existsSync(file) ? file : null;
 }
 
 export function daemonAddress(value: string) {
@@ -537,8 +546,8 @@ export class WorkspaceHost {
     if (!["127.0.0.1", "localhost", "[::1]", "::1"].includes(host))
       throw new Error("Start the remote daemon on its host.");
     const env = { ...process.env };
-    const bundled = join(dirname(process.execPath), "../demesned");
-    if (!env.DEMESNE_DAEMON_BIN && existsSync(bundled))
+    const bundled = bundledDaemon();
+    if (!env.DEMESNE_DAEMON_BIN && bundled)
       env.DEMESNE_DAEMON_BIN = bundled;
     return createDaemonControlDependencies(
       this.client.server,
@@ -554,9 +563,9 @@ export class WorkspaceHost {
   private replacingDaemon = false;
   private olderDaemonTimer: ReturnType<typeof setTimeout> | null = null;
   private async replaceOlderDaemon(health: HealthResponse) {
-    if (!olderDaemon(APP_BUILD, health.build) || this.replacingDaemon || managedDaemonBy(this.settings.dataDirectory)) return false;
-    // Only an app that bundles its daemon has a newer one to start.
-    if (!existsSync(join(dirname(process.execPath), "../demesned"))) return false;
+    if (!otherBuildDaemon(APP_BUILD, health.build) || this.replacingDaemon || managedDaemonBy(this.settings.dataDirectory)) return false;
+    // Only an app that bundles its daemon has its own to start.
+    if (!bundledDaemon()) { console.error(`Daemon is build ${health.build}, the app is ${APP_BUILD}, but no bundled daemon is beside ${process.execPath}; leaving it.`); return false; }
     let control: ReturnType<WorkspaceHost["daemonControl"]>;
     try { control = this.daemonControl(); } catch { return false; }
     const status = await this.client.status().catch(() => null);
@@ -565,6 +574,7 @@ export class WorkspaceHost {
     const busy = !status || status.active.length > 0 || status.activeInferences > 0 || status.queuedInferences > 0
       || (this.driveState && ["running", "waiting"].includes(this.driveState.status));
     if (busy) {
+      if (!this.restartFor.has("app.update")) console.error(`Daemon is build ${health.build}, the app is ${APP_BUILD}; restarting it once nothing is working.`);
       this.restartFor.add("app.update");
       if (!this.olderDaemonTimer && !this.disposed) {
         this.olderDaemonTimer = setTimeout(() => {
@@ -577,13 +587,14 @@ export class WorkspaceHost {
       return false;
     }
     this.replacingDaemon = true;
+    console.error(`Daemon is build ${health.build}, the app is ${APP_BUILD}; restarting it from the bundled daemon.`);
     try {
       const stopped = await stopDaemon(control);
-      if (!stopped.stopped && stopped.message !== "Daemon is not running.") return false;
+      if (!stopped.stopped && stopped.message !== "Daemon is not running.") { console.error(`Couldn't stop the older daemon: ${stopped.message}`); return false; }
       await this.startDaemon();
       this.restartFor.delete("app.update");
       return true;
-    } catch { return false; } finally { this.replacingDaemon = false; }
+    } catch (error) { console.error(`Couldn't replace the older daemon: ${error instanceof Error ? error.message : String(error)}`); return false; } finally { this.replacingDaemon = false; }
   }
   async startDaemon() {
     const result = await startDaemon(this.daemonControl());

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceHost, daemonAddress, daemonCredential, olderDaemon, remoteDaemonTokenPath } from "../host.ts";
+import { WorkspaceHost, daemonAddress, daemonCredential, bundledDaemon, otherBuildDaemon, remoteDaemonTokenPath } from "../host.ts";
 import { fixture, eventually } from "./fixture.ts";
 
 function hostFor(f: Awaited<ReturnType<typeof fixture>>) {
@@ -425,11 +425,20 @@ test("the window picks up an away run Drive started and leaves each one to revie
   } finally { host.dispose(); await f.close(); }
 });
 
+test("the bundled daemon is the one beside the host, as the package lays it out", () => {
+  const backend = mkdtempSync(join(tmpdir(), "demesne-backend-"));
+  const host = join(backend, "demesne-host");
+  expect(bundledDaemon(host)).toBeNull();
+  writeFileSync(join(backend, process.platform === "win32" ? "demesned.exe" : "demesned"), "");
+  expect(bundledDaemon(host)).toBe(join(backend, process.platform === "win32" ? "demesned.exe" : "demesned"));
+  rmSync(backend, { recursive: true, force: true });
+});
+
 test("the app replaces only a daemon from another stamped build of itself", () => {
-  expect(olderDaemon("abc.1", "abc.0")).toBe(true);
-  expect(olderDaemon("abc.1", "abc.1")).toBe(false);
+  expect(otherBuildDaemon("abc.1", "abc.0")).toBe(true);
+  expect(otherBuildDaemon("abc.1", "abc.1")).toBe(false);
   // Run from source on either side: never touched.
-  expect(olderDaemon("", "abc.0")).toBe(false);
-  expect(olderDaemon("abc.1", undefined)).toBe(false);
-  expect(olderDaemon("abc.1", "")).toBe(false);
+  expect(otherBuildDaemon("", "abc.0")).toBe(false);
+  expect(otherBuildDaemon("abc.1", undefined)).toBe(false);
+  expect(otherBuildDaemon("abc.1", "")).toBe(false);
 });

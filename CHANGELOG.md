@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
+- Since you looked: open a chat that worked while you were elsewhere and a line before the first turn you didn't see says what happened (turns finished, files changed, how the checks went, what waits for you), worked out from the turns with no model call. The chat opens at that line so you read on from where you left.
 - The Dock shows Demesne working: while any chat, queued chat or Drive mission works, the icon's progress bar runs; it clears once nothing works. The badge still counts the chats waiting on you.
 - Answer from the notification: when a chat waits on you while Demesne is in the background, its banner says the question itself and carries its suggestions as buttons and a reply field, or Allow once and Deny for an approval. Your pick or reply goes straight to that chat, open or not.
 - When a chat changes Demesne's own source, its last changing turn says whether the app you're in runs that change yet: "Changed, not running yet" until the app's build is newer than the turn, then "Running now". On a Mac, **Rebuild and open** builds the app from the chat's folder, waits until nothing is working, swaps it in (keeping the old one as Demesne.app.prev, put back if the copy fails) and reopens. A folder that doesn't have the commit the app was built from says so instead of offering to rebuild.

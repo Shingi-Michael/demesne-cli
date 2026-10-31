@@ -1164,6 +1164,10 @@ try {
   await open();
   await reopenChat(sessionId);
   await textIncludes(afterClose);
+  // It finished while the window was closed: the chat says so before that turn.
+  const caughtUp = page.locator("#conversation .catch-up");
+  await until(() => caughtUp.isVisible(), "a chat that worked while you were away says what happened since you looked");
+  assert.match(await caughtUp.innerText(), /^Since you looked · it finished a turn/, "the line says what happened");
   // Your plan's mark: the fuller window beside the context ring, amber from 75%.
   const limitWord = page.locator("#composer-limit");
   await limitWord.waitFor();

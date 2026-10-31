@@ -1706,4 +1706,8 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop .live-build .lb-go:hover { background: var(--hair2); }
 .desktop .live-build .spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--hair2, rgba(255,255,255,.2)); border-top-color: var(--acc); animation: lb-spin .8s linear infinite; flex: none; }
 @keyframes lb-spin { to { transform: rotate(360deg); } }
+/* Since you looked (pass 115): before the first turn you didn't see. */
+.desktop .catch-up { display: flex; align-items: baseline; gap: 9px; margin: 6px 0 14px; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--blossom, #f2b6c8) 7%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blossom, #f2b6c8) 20%, transparent); font-size: 12.5px; color: var(--t2); }
+.desktop .catch-up > i { width: 6px; height: 6px; border-radius: 50%; background: var(--blossom, #f2b6c8); flex: none; transform: translateY(-1px); }
+.desktop .catch-up b { font-weight: 600; color: var(--t1); }
 

@@ -262,6 +262,11 @@ void app.whenReady().then(async () => {
       app.setBadgeCount(Number.isInteger(count) && count > 0 && count < 1000 ? count : 0);
       return null;
     }
+    // Working: the Dock icon's progress bar runs without an end while anything works.
+    if (method === "desktop-working") {
+      window?.setProgressBar((args as Record<string, unknown>).on === true ? 2 : -1, { mode: "indeterminate" });
+      return null;
+    }
     // Native notifications on Linux, macOS and Windows; clicking opens the chat.
     if (method === "desktop-notify") {
       const { title, body, sessionId, path, key, actions, reply } = args as Record<string, unknown>;

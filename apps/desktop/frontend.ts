@@ -251,6 +251,14 @@ document.addEventListener("demesne:needs-you", (event) => {
   badge = count;
   void request("desktop-badge", { count }).catch(() => {});
 });
+// While anything works, the Dock icon shows it (an indeterminate bar on the Mac, a pulse on Linux docks).
+let working: boolean | null = null;
+document.addEventListener("demesne:working", (event) => {
+  const on = (event as CustomEvent<boolean>).detail === true;
+  if (on === working) return;
+  working = on;
+  void request("desktop-working", { on }).catch(() => {});
+});
 // The shortcuts live in tooltips, not on the rows.
 document.querySelector("#desktop-sidebar .sidebar-nav [data-action='new-session']")?.setAttribute("title", `New chat (${mac ? "⌘N" : "Ctrl+N"})`);
 el("sidebar-search").setAttribute("title", `Search (${mac ? "⌘K" : "Ctrl+K"})`);

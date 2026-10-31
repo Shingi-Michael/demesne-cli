@@ -22,7 +22,7 @@ import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from ".
 import { scheduledPage } from "./scheduled-page.ts";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
-import { FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
+import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FoundryPane } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
@@ -2214,7 +2214,12 @@ function renderConversation() {
   // assembles in it the moment the save lands.
   const writing = state.activeTurnId ? state.runs.find((run) => run.id === state!.activeTurnId) : undefined;
   pane.making(writing && writing.status === "running" ? makingTitle(tools(writing)) : null);
-  if (changed) pane.refresh([...runNodes.values()].flatMap((item) => item.artifacts.artifacts));
+  if (changed) {
+    // An artifact keeps its chip in the turn that first showed it; later changes are an "Edited" line.
+    const shown = state.runs.flatMap((run) => runNodes.get(run.id) ?? []);
+    editedIn(shown.map((item) => item.artifacts.artifacts)).forEach((edited, at) => shown[at]!.artifacts.shape(edited));
+    pane.refresh(shown.flatMap((item) => item.artifacts.artifacts));
+  }
   if (changed) placeQuestions();
   if (changed) {
     if (liveBefore) stage.scrollTop = stage.scrollHeight;
@@ -2366,10 +2371,6 @@ const pane = new FoundryPane(el("pane"), {
   export: async (id, version) => {
     const result = await api<{ path: string } | null>("desktop-foundry-export", { id, version });
     if (result?.path) notice(`Exported to ${result.path}`);
-  },
-  revise: async (detail) => {
-    await api("foundry-revise", { id: detail.id, title: detail.title });
-    editor.focus({ preventScroll: true });
   },
   restore: (detail) => api<FoundryArtifactDetail>("foundry-save", { id: detail.id, source: detail.source }),
   openFoundry: (id, version) => { void openFoundry(id, version); },
@@ -2937,7 +2938,7 @@ function renderPlainLine() {
   const show = Boolean(state) && isPlain() && inSession() && !state!.activeTurnId && !inAssistant();
   if (!show && whereOpen === "move") whereOpen = null;
   node.hidden = !show;
-  const html = show ? `<p class="plain-note">Create in Foundry here. ${btn("where-move", `Move to a project ${whereOpen === "move" ? "⌄" : "›"}`, {}, "link").replace("<button ", `<button aria-expanded="${whereOpen === "move"}" `)} to work with local files.</p>${whereOpen === "move" ? `<div class="where-row" role="group" aria-label="Move this chat to">${whereRow("move")}</div>` : ""}` : "";
+  const html = show ? `<p class="plain-note">${btn("where-move", `Move to a project ${whereOpen === "move" ? "⌄" : "›"}`, {}, "link").replace("<button ", `<button aria-expanded="${whereOpen === "move"}" `)} to work with local files.</p>${whereOpen === "move" ? `<div class="where-row" role="group" aria-label="Move this chat to">${whereRow("move")}</div>` : ""}` : "";
   if (node.dataset.html !== html) { node.innerHTML = html; node.dataset.html = html; }
 }
 function renderComposer() {

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { FoundryArtifactDetail } from "@demesne/protocol";
-import { frameSource, motionLine, motionMessage, neighbours, paneFoot, paneHead, paneMakingHead } from "../foundry-pane.ts";
+import { frameSource, motionLine, motionMessage, neighbours, paneHead, paneMakingHead } from "../foundry-pane.ts";
 
 const versions = [3, 2, 1].map((version) => ({ version, createdAt: "2026-10-27T22:00:00.000Z", sessionId: null, turnId: null, note: version === 3 ? "Blue" : "", byteLength: 10 }));
 const detail: FoundryArtifactDetail = { id: "garden", title: "Tiny garden", kind: "html", workspace: null, sessionId: "s1", createdAt: versions[2]!.createdAt, updatedAt: versions[0]!.createdAt, version: 3, source: "<h1>Garden</h1>", versions };
@@ -12,32 +12,34 @@ test("the versions either side of the one shown", () => {
   expect(neighbours([], 1)).toEqual({ earlier: null, later: null, latest: 1 });
 });
 
-test("the head is one line: title, version arrows, Preview · Code, phone, close", () => {
+test("the pane is one line: the title opens Foundry, the version and its arrows, then code, phone, export, close", () => {
   const head = paneHead(detail, { id: "garden", version: 3, view: "preview", phone: false });
-  expect(head).toContain('class="pane-title" title="Tiny garden"');
+  expect(head).toContain('data-pane="foundry" class="pane-title" title="Open in Foundry">Tiny garden</button>');
   expect(head).toContain('data-pane="earlier" aria-label="Earlier version" title="v2"');
   expect(head).toContain('data-pane="later" aria-label="Later version" disabled');
-  expect(head).toContain('data-pane="preview" aria-pressed="true"');
-  expect(head).toContain('data-pane="code" aria-pressed="false"');
+  // The version's note and day are its tooltip.
+  expect(head).toMatch(/class="pane-v" title="Blue · [^"]+">v3</);
+  expect(head).toContain('data-pane="code" aria-label="Code" title="Code" aria-pressed="false"');
   expect(head).toContain('aria-label="Phone width" title="Phone width" aria-pressed="false"');
+  expect(head).toContain('data-pane="export"');
   expect(head).toContain('data-pane="close"');
+  // No foot, no Revise (the composer revises), no Copy outside code view, no Make this the latest on the latest.
+  for (const word of ["Revise", "copy", "restore", "Preview"]) expect(head).not.toContain(word);
+  const code = paneHead(detail, { id: "garden", version: 3, view: "code", phone: false });
+  expect(code).toContain('data-pane="copy"');
+  expect(code).toContain('data-pane="code" aria-label="Code" title="Code" aria-pressed="true"');
+  const older = paneHead(detail, { id: "garden", version: 1, view: "preview", phone: false });
+  expect(older).toContain('data-pane="restore" class="pane-word">Make this the latest');
+  expect(older).toContain('title="first version');
   // Only a prototype has a phone width; a graphic or document has no such button.
   expect(paneHead({ ...detail, kind: "svg" }, { id: "garden", version: 3, view: "code", phone: false })).not.toContain("Phone width");
-  expect(paneHead(null, { id: "garden", version: 1, view: "preview", phone: false })).toContain("Loading…");
+  const loading = paneHead(null, { id: "garden", version: 1, view: "preview", phone: false });
+  expect(loading).toContain("Loading…");
+  expect(loading).not.toContain('data-pane="code"');
+  const failed = paneHead(null, { id: "garden", version: 1, view: "preview", phone: false }, "No such artifact");
+  expect(failed).toContain('role="alert" title="No such artifact"');
+  expect(failed).toContain('data-pane="close"');
   expect(paneHead({ ...detail, title: '<b>"x"</b>' }, { id: "garden", version: 3, view: "preview", phone: false })).not.toContain("<b>");
-});
-
-test("the foot names the version and offers Make this the latest only on an older one", () => {
-  const latest = paneFoot(detail, { id: "garden", version: 3, view: "preview", phone: false }, "");
-  expect(latest).toContain("<b>v3</b>");
-  expect(latest).toContain("Blue");
-  expect(latest).not.toContain("Make this the latest");
-  for (const word of ["Copy", "Export", "Revise", "Open in Foundry ›"]) expect(latest).toContain(word);
-  const older = paneFoot(detail, { id: "garden", version: 1, view: "preview", phone: false }, "");
-  expect(older).toContain("first version");
-  expect(older).toContain('data-pane="restore"');
-  expect(paneFoot(detail, { id: "garden", version: 3, view: "preview", phone: false }, "No such artifact")).toContain('role="alert"');
-  expect(paneFoot(null, { id: "garden", version: 3, view: "preview", phone: false }, "")).toContain("Reading");
 });
 
 test("the first show of a version asks the frame to assemble; any other show is plain", () => {
@@ -50,7 +52,7 @@ test("while Foundry writes, the line above the pane is the title alone", () => {
   expect(head).toContain("Tiny &lt;garden&gt;");
   expect(head).toContain("making…");
   expect(head).toContain('data-pane="close"');
-  expect(head).not.toContain("Preview");
+  expect(head).not.toContain("Code");
 });
 
 test("the frame's runtime is heard only in the two shapes it speaks, and nothing else", () => {

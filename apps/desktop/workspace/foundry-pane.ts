@@ -1,9 +1,10 @@
 /// The pane: one Foundry artifact open beside the conversation, the way
 /// Claude shows an artifact. The window splits, the page fills the right
-/// side edge to edge, and one line above it carries the title, the version
-/// arrows, Preview · Code, the phone width and ×; a thin line below names
-/// the version and holds Copy, Export, Revise and Open in Foundry. The
-/// pane is per chat and remembers whether it was open. A page that named
+/// side edge to edge, and one line above it carries everything: the title
+/// (it opens the page in Foundry), the version arrows, and icons for code,
+/// phone width, export and ×. Copy is there only in code view, and "Make
+/// this the latest" only on an older version; revising is the composer's
+/// job. The pane is per chat and remembers whether it was open. A page that named
 /// its motions (demesne.motion, the kit's runtime) gets one more thin line
 /// under the page: play or pause, a scrubber, the motions by name, half
 /// speed and Replay; the frame and the pane talk by postMessage.
@@ -18,7 +19,6 @@ export interface PaneOptions {
   markdown(source: string): string;
   copy(text: string): Promise<unknown>;
   export(id: string, version: number): Promise<unknown>;
-  revise(detail: FoundryArtifactDetail): Promise<unknown>;
   /// Make this the latest: an older version saved again as the newest.
   restore(detail: FoundryArtifactDetail): Promise<FoundryArtifactDetail>;
   openFoundry(id: string, version: number): void;
@@ -49,21 +49,30 @@ export function neighbours(versions: readonly { version: number }[], current: nu
 /// alone, and ×.
 export function paneMakingHead(title: string) {
   return `<b class="pane-title" title="${h(title)}">${h(title)}</b><span class="pane-making">making…</span><span class="sp"></span>`
-    + button("close", icon('<path d="M6 6l12 12M18 6 6 18"/>'), ' aria-label="Close" title="Close (Esc)"');
+    + button("close", icon('<path d="M6 6l12 12M18 6 6 18"/>'), ' aria-label="Close" title="Close (Esc)" class="pane-ico"');
 }
 
-/// The one line above the page.
-export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState) {
-  const title = detail?.title ?? "Loading…";
+/// The one line above the page: the title, the version and its arrows (the
+/// version's note on hover), and the icons. An error takes the middle.
+export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState, error = "") {
+  const title = detail?.title ?? (error ? "Couldn't open it" : "Loading…");
   const near = detail ? neighbours(detail.versions, state.version) : { earlier: null, later: null, latest: state.version };
+  const version = detail?.versions.find((item) => item.version === state.version);
+  const words = version ? [version.note || (state.version === 1 ? "first version" : ""), dayWord(version.createdAt)].filter(Boolean).join(" · ") : "";
   const arrow = (action: string, to: number | null, label: string, path: string) =>
     button(action, icon(path), ` aria-label="${label}"${to === null ? " disabled" : ` title="v${to}"`}`);
-  return `<b class="pane-title" title="${h(title)}">${h(title)}</b>`
-    + `<span class="pane-vers">${arrow("earlier", near.earlier, "Earlier version", '<path d="m15 6-6 6 6 6"/>')}<span>v${state.version}</span>${arrow("later", near.later, "Later version", '<path d="m9 6 6 6-6 6"/>')}</span>`
+  const tool = (action: string, label: string, path: string, extra = "") => button(action, icon(path), ` aria-label="${label}" title="${label}"${extra} class="pane-ico"`);
+  const code = state.view === "code";
+  return (detail ? button("foundry", h(title), ` class="pane-title" title="Open in Foundry"`) : `<b class="pane-title">${h(title)}</b>`)
+    + `<span class="pane-vers">${arrow("earlier", near.earlier, "Earlier version", '<path d="m15 6-6 6 6 6"/>')}<span class="pane-v"${words ? ` title="${h(words)}"` : ""}>v${state.version}</span>${arrow("later", near.later, "Later version", '<path d="m9 6 6 6-6 6"/>')}</span>`
+    + (error ? `<span class="bad" role="alert" title="${h(error)}">${h(error)}</span>` : "")
     + `<span class="sp"></span>`
-    + `<span class="pane-seg" role="group" aria-label="View">${button("preview", "Preview", ` aria-pressed="${state.view === "preview"}"`)}${button("code", "Code", ` aria-pressed="${state.view === "code"}"`)}</span>`
-    + (detail?.kind === "html" ? button("phone", icon('<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>'), ` aria-label="Phone width" title="Phone width" aria-pressed="${state.phone}"`) : "")
-    + button("close", icon('<path d="M6 6l12 12M18 6 6 18"/>'), ' aria-label="Close" title="Close (Esc)"');
+    + (detail && state.version !== near.latest ? button("restore", "Make this the latest", ' class="pane-word"') : "")
+    + (detail && code ? tool("copy", "Copy the source", '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/>') : "")
+    + (detail ? tool("code", "Code", '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>', ` aria-pressed="${code}"`) : "")
+    + (detail?.kind === "html" ? tool("phone", "Phone width", '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>', ` aria-pressed="${state.phone}"`) : "")
+    + (detail ? tool("export", "Export the file", '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>') : "")
+    + button("close", icon('<path d="M6 6l12 12M18 6 6 18"/>'), ' aria-label="Close" title="Close (Esc)" class="pane-ico"');
 }
 
 /// A motion the page named with demesne.motion(name, timeline) (the kit's
@@ -106,18 +115,6 @@ export function motionLine(motions: readonly PaneMotion[], state: MotionState | 
     + button("mo-replay", "Replay", ' title="Play it again from the start"');
 }
 
-/// The thin line below the page.
-export function paneFoot(detail: FoundryArtifactDetail | null, state: PaneState, error: string) {
-  if (error) return `<span class="bad" role="alert">${h(error)}</span><span class="sp"></span>${button("close", "Close")}`;
-  if (!detail) return `<span>Reading the artifact…</span>`;
-  const version = detail.versions.find((item) => item.version === state.version);
-  const latest = neighbours(detail.versions, state.version).latest;
-  const words = [version?.note || (state.version === 1 ? "first version" : ""), version ? dayWord(version.createdAt) : ""].filter(Boolean).join(" · ");
-  return `<b>v${state.version}</b><span class="note" title="${h(words)}">${h(words)}</span><span class="sp"></span>`
-    + (state.version !== latest ? button("restore", "Make this the latest") : "")
-    + button("copy", "Copy") + button("export", "Export") + button("revise", "Revise") + button("foundry", "Open in Foundry ›");
-}
-
 export class FoundryPane {
   state: PaneState | null = null;
   detail: FoundryArtifactDetail | null = null;
@@ -145,15 +142,13 @@ export class FoundryPane {
   private readonly stage: HTMLElement;
   private readonly code: HTMLPreElement;
   private readonly motion: HTMLElement;
-  private readonly foot: HTMLElement;
 
   constructor(readonly root: HTMLElement, private readonly options: PaneOptions) {
-    root.innerHTML = '<div class="pane-head"></div><div class="pane-body"><div class="pane-stage"></div><pre class="pane-code" tabindex="0" aria-label="Source" hidden></pre></div><div class="pane-motion" hidden></div><div class="pane-foot"></div>';
+    root.innerHTML = '<div class="pane-head"></div><div class="pane-body"><div class="pane-stage"></div><pre class="pane-code" tabindex="0" aria-label="Source" hidden></pre></div><div class="pane-motion" hidden></div>';
     this.head = root.querySelector(".pane-head")!;
     this.stage = root.querySelector(".pane-stage")!;
     this.code = root.querySelector(".pane-code")!;
     this.motion = root.querySelector(".pane-motion")!;
-    this.foot = root.querySelector(".pane-foot")!;
     root.addEventListener("click", (event) => {
       const target = (event.target as HTMLElement).closest<HTMLElement>("[data-pane]");
       if (target && !(target as HTMLButtonElement).disabled && target.dataset.pane !== "mo-seek") void this.act(target.dataset.pane!, target.dataset.name);
@@ -282,7 +277,7 @@ export class FoundryPane {
     if (action === "mo-replay") return this.tell({ action: "restart" });
     if (action === "mo-pick" && name) { this.motionCurrent = name; return this.tell({ action: "restart", name }); }
     if (action === "mo-speed") { this.slow = !this.slow; this.renderMotion(); return this.tell({ action: "speed", value: this.slow ? 0.5 : 1 }); }
-    if (action === "preview" || action === "code") { state.view = action; this.remember(); return this.render(); }
+    if (action === "code") { state.view = state.view === "code" ? "preview" : "code"; this.remember(); return this.render(); }
     if (action === "phone") { state.phone = !state.phone; this.remember(); return this.render(); }
     if (!detail) return;
     const near = neighbours(detail.versions, state.version);
@@ -291,7 +286,6 @@ export class FoundryPane {
     try {
       if (action === "copy") { await this.options.copy(detail.source); this.options.notice("Copied the source"); }
       else if (action === "export") await this.options.export(state.id, state.version);
-      else if (action === "revise") await this.options.revise(detail);
       else if (action === "foundry") this.options.openFoundry(state.id, state.version);
       else if (action === "restore") { const saved = await this.options.restore(detail); await this.show(saved.id, saved.version); }
     } catch (reason) {
@@ -333,13 +327,11 @@ export class FoundryPane {
       this.stage.replaceChildren(); this.frameKey = ""; this.forgetMotions();
       if (this.makingTitle !== null) {
         this.head.innerHTML = paneMakingHead(this.makingTitle);
-        this.foot.innerHTML = "<span>writing the page…</span>";
         this.code.hidden = true; this.stage.hidden = false; this.stage.className = "pane-stage";
       }
       return;
     }
-    this.head.innerHTML = paneHead(detail, state);
-    this.foot.innerHTML = paneFoot(detail, state, this.error);
+    this.head.innerHTML = paneHead(detail, state, this.error);
     const code = state.view === "code";
     this.code.hidden = !code;
     this.stage.hidden = code;

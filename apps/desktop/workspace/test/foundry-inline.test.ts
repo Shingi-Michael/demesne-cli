@@ -39,6 +39,13 @@ test("a chip's words name the kind and the version", async () => {
   expect(chipWords({ ...artifact, kind: "markdown", version: 4 })).toBe("Document · v4");
 });
 
+test("an artifact keeps one chip, in the turn that first showed it; later turns that changed it are Edited lines", async () => {
+  const { editedIn } = await import("../foundry-inline.ts");
+  const garden = { id: "garden", title: "Garden", kind: "html" as const, version: 1 }, badge = { id: "badge", title: "Badge", kind: "svg" as const, version: 1 };
+  expect(editedIn([[garden], [], [{ ...garden, version: 2 }, badge], [{ ...badge, version: 2 }, { ...garden, version: 3 }]]).map((set) => [...set]))
+    .toEqual([[], [], ["garden"], ["badge", "garden"]]);
+});
+
 test("the title of the page Foundry is writing comes from the arguments still arriving", () => {
   const draft = (draftArguments: string, extra: Partial<ToolEntry> = {}) => ({ name: "foundry_save", state: "running" as const, input: {}, drafting: true, draftArguments, ...extra });
   expect(makingTitle([])).toBeNull();

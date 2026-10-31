@@ -30,6 +30,7 @@ import {
   type RewindSessionRequest,
   type SteerTurnRequest,
   type RewindResponse,
+  type TurnVersions,
   type UndoTurnResponse,
   type UpdateSessionRequest,
   type UpdateSessionResponse,
@@ -481,6 +482,16 @@ export class DemesneClient {
 
   async steer(sessionId: string, request: SteerTurnRequest): Promise<{ steerId: string; turnId: string }> {
     return this.request(`/v1/sessions/${sessionId}/steer`, { method: "POST", body: JSON.stringify(request) });
+  }
+
+  /// Ask again: the chat's last message answered once more by the model in use.
+  async askAgain(sessionId: string, turnId: string): Promise<SubmitTurnResponse> {
+    return this.request<SubmitTurnResponse>(`/v1/sessions/${sessionId}/again`, { method: "POST", body: JSON.stringify({ turnId }) });
+  }
+
+  /// Leave this answer showing; the model reads it from now on.
+  async chooseVersion(sessionId: string, turnId: string): Promise<TurnVersions & { eventId: number }> {
+    return this.request(`/v1/sessions/${sessionId}/versions`, { method: "POST", body: JSON.stringify({ turnId }) });
   }
 
   async redoRewind(sessionId: string): Promise<{ rewindId: string; files: string[] }> {

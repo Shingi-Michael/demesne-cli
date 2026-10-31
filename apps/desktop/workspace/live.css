@@ -2435,6 +2435,28 @@ button:disabled {
 .turn-receipt .copy-answer {
   opacity: 1;
 }
+/* Ask again: ‹ 1 of 2 › between a message's answers. */
+.turn-receipt .versions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--secondary);
+  font-variant-numeric: tabular-nums;
+}
+.turn-receipt .version-arrow {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: var(--secondary);
+}
+.turn-receipt .version-arrow:hover:not(:disabled) {
+  color: var(--strong);
+  background: var(--tone);
+}
+.turn-receipt .version-arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 .live-app:not(.start) .response {
   gap: 14px;
 }

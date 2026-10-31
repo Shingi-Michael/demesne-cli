@@ -1664,6 +1664,7 @@ const ICON_SWITCH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><pa
 const ICON_SPARK = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>';
 const ICON_COPY = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
 const ICON_UNDO = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>';
+const ICON_AGAIN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>';
 const CHEVRON = '<svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 /// Whether a step has something to unfold: an edit's diff, a command's
 /// output, a sub-agent's own steps and what it found.
@@ -1776,6 +1777,30 @@ const canRewind = (run: WorkspaceRun) => !state!.activeTurnId && !run.kind && ru
 const rewindIn = (run: WorkspaceRun) => state!.rewinds.find((rewind) => rewind.turnId === run.id && rewind.toolCallId);
 /// The rewind that folded this turn away, if one did.
 const rewoundBy = (run: WorkspaceRun) => state!.rewinds.find((rewind) => rewind.hiddenTurnIds.includes(run.id));
+/// Ask again (pass 115): the answers this message shares its spot with.
+const versionsOf = (run: WorkspaceRun) => state!.versions.find((group) => group.turnIds.includes(run.id));
+const lastAsk = () => state!.runs.findLast((run) => !run.kind);
+/// The model in the composer, in words, when it isn't the one that answered.
+function otherModel(run: WorkspaceRun) {
+  const answered = (run.receipt?.model ?? "").split("/").at(-1) ?? "", now = state!.model.id ?? "";
+  return now && answered && now.split("/").at(-1) !== answered ? modelWords({ id: now, displayName: state!.model.displayName }) : "";
+}
+/// Only the chat's last message, settled, with no images, that changed no files.
+function canAskAgain(run: WorkspaceRun, files: number) {
+  const last = lastAsk();
+  return !state!.activeTurnId && !run.kind && !run.fromDrive && !run.fromRoutine && !run.attachments?.length && files === 0
+    && Boolean(last) && (last!.id === run.id || Boolean(versionsOf(run)?.turnIds.includes(last!.id)))
+    && ["completed", "failed", "cancelled", "interrupted"].includes(run.status);
+}
+/// ‹ 1 of 2 › between a message's answers; it moves only while the chat hasn't gone on.
+function versionArrows(run: WorkspaceRun) {
+  const group = versionsOf(run);
+  if (!group || group.turnIds.length < 2) return "";
+  const at = group.turnIds.indexOf(run.id), last = lastAsk(), open = !state!.activeTurnId && Boolean(last && group.turnIds.includes(last.id));
+  const arrow = (to: string | undefined, label: string, mark: string) =>
+    btn("choose-version", mark, { turnId: to ?? "" }, "version-arrow").replace("<button ", `<button aria-label="${label}" title="${label}"${to && open ? "" : " disabled"} `);
+  return `<span class="versions">${arrow(group.turnIds[at - 1], "Earlier answer", "‹")}<span class="version-n">${at + 1} of ${group.turnIds.length}</span>${arrow(group.turnIds[at + 1], "Later answer", "›")}</span>`;
+}
 /// A rewind's one line where the undone part was: what went back, and Redo
 /// until the next message.
 function rewindLine(rewind: Snapshot["rewinds"][number]) {
@@ -2027,14 +2052,16 @@ function runHTML(run: WorkspaceRun, index: number) {
         : "",
       receipt?.mode === "Plan" || run.planOnly ? "plan" : "",
       mailReply(run),
+      versionArrows(run),
     ].filter(Boolean);
     const answered = run.entries.some((e) => e.type === "assistant");
     const actions = [
       answered ? btn("copy-answer", `${ICON_COPY}Copy`, { id: run.id }, "receipt-action copy-answer") : "",
       files && !state!.activeTurnId ? btn("undo-turn", `${ICON_UNDO}Undo changes`, { id: run.id }, "receipt-action") : "",
+      canAskAgain(run, files) ? btn("ask-again", `${ICON_AGAIN}${otherModel(run) ? `Ask again on ${h(otherModel(run))}` : "Ask again"}`, { turnId: run.id }, "receipt-action ask-again").replace("<button ", '<button title="Ask the same thing again; the answers share this spot with ‹ › to compare" ') : "",
     ].filter(Boolean).join("");
     // A turn that only answered needs no receipt: its time is on the ask.
-    const bare = run.status === "completed" && !files && !checks.length && !steps && !thought && !(receipt?.mode === "Plan" || run.planOnly) && !model && !mailReply(run);
+    const bare = run.status === "completed" && !files && !checks.length && !steps && !thought && !(receipt?.mode === "Plan" || run.planOnly) && !model && !mailReply(run) && !versionArrows(run);
     footer = bare ? "" : `<div class="turn-receipt">${parts.map((part) => `<span>${part}</span>`).join("")}${actions ? `<span class="receipt-actions">${actions}</span>` : ""}</div>`;
     if (files) footer += liveLine(run);
   }
@@ -2301,6 +2328,9 @@ function renderConversation() {
     // stopped in, or in place of the first turn it took back.
     const folded = rewoundBy(run);
     if (folded && (folded.toolCallId || folded.hiddenTurnIds.find((id) => state!.runs.some((item) => item.id === id)) !== run.id)) continue;
+    // Asked again: only the answer left showing takes the spot.
+    const versions = versionsOf(run);
+    if (versions && versions.chosen !== run.id) continue;
     ids.add(run.id);
     for (const entry of run.entries) if (entry.type === "tool" && entry.state === "running" && !entry.drafting) stepsSeenRunning.add(entry.toolCallId);
     const signature = JSON.stringify([
@@ -2322,6 +2352,9 @@ function renderConversation() {
       assistantDay(run, index),
       Boolean(state.assistant?.phone),
       state.rewinds.filter((rewind) => rewind.turnId === run.id || rewind.hiddenTurnIds.includes(run.id)),
+      versions ?? null,
+      lastAsk()?.id === run.id,
+      state.model.id,
       // A commit or merge step's tree: the turn redraws the moment it lands,
       // whatever else is streaming.
       run.entries.flatMap((entry) => entry.type === "tool" && entry.repo && entry.state === "done" ? [entry.toolCallId] : []),
@@ -5476,6 +5509,8 @@ async function dispatch(
     }
     return;
   }
+  if (action === "ask-again") { followLatest(); await api("ask-again", { turnId: args.turnId }); return; }
+  if (action === "choose-version") { if (args.turnId) await api("choose-version", { turnId: args.turnId }); return; }
   if (action === "edit-ask" || action === "retry-ask") {
     const run = state!.runs.find((run) => run.id === args.id);
     if (!run) return;

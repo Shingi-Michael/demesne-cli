@@ -47,6 +47,7 @@ export type EventType =
   | "turn.steered"
   | "session.rewound"
   | "session.rewind_redone"
+  | "session.version_chosen"
   | "turn.cancelled"
   | "turn.interrupted"
   | "turn.failed";
@@ -543,6 +544,16 @@ export interface SessionStateResponse {
   checkpoint?: SessionCheckpoint | null;
   /// Rewinds in force, oldest first.
   rewinds?: SessionRewindState[];
+  /// Asked again: the answers that share one spot, and the one in force.
+  versions?: TurnVersions[];
+}
+
+/// Ask again (pass 115): one message answered more than once, oldest first.
+/// The model reads only the chosen one; the others stay to compare.
+export interface TurnVersions {
+  groupId: string;
+  turnIds: string[];
+  chosen: string;
 }
 
 /// A rewind as the window draws it: the turns it folds away, where it cut
@@ -714,6 +725,14 @@ export function parseRewindSessionRequest(value: unknown): RewindSessionRequest 
     throw new ProtocolValidationError("toolCallId must be a non-empty string");
   }
   return { turnId: value.turnId.trim(), ...(typeof value.toolCallId === "string" ? { toolCallId: value.toolCallId.trim() } : {}) };
+}
+
+/// Ask again, or choose a version: the turn it's about.
+export interface TurnVersionRequest { turnId: string }
+export function parseTurnVersionRequest(value: unknown): TurnVersionRequest {
+  if (!isRecord(value)) throw new ProtocolValidationError("Request body must be a JSON object");
+  if (typeof value.turnId !== "string" || !value.turnId.trim() || value.turnId.length > 200) throw new ProtocolValidationError("turnId must be a non-empty string");
+  return { turnId: value.turnId.trim() };
 }
 
 export function parseSteerTurnRequest(value: unknown): SteerTurnRequest {

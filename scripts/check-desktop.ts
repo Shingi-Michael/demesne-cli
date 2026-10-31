@@ -17,6 +17,10 @@ const prompt = "Desktop smoke: update hello.ts and run its check";
 const followUp = "Desktop smoke: continue while the window is closed";
 const aside = "Desktop smoke: a second conversation";
 const asideDone = "A second conversation is here.";
+// A wide table: alignment, number columns and sideways scroll (pass 119 A).
+const smokeTable = ["| Model | Provider | Turns | Finished | Tool calls | Tool errors | Checks passed | Tok/s | First token | Drive runs | Notes |", "| --- | :---: | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+  "| GPT-6.1 Sol | ChatGPT | 281 | 96% | 3,412 | 41 | 88% | 58 | 0.8 s | 7 | Most of the month's work |", "| Qwen 3.8 27B | LM Studio on this Mac | 118 | 90% | 1,206 | 33 | 79% | 34 | 0.3 s | 2 | Fastest to start |",
+  "| `desktop-small` | Local | 9 | 100% | 22 | 0 | 100% | 120 | 0.1 s | 0 | — |"].join("\n");
 let asideAnswers = 0;
 // A sub-agent's turn: the chat asks an agent, the agent reads one file and
 // reasons (which must stay with it), then the chat answers.
@@ -225,7 +229,7 @@ const f = await fixture({
     }
     if (user === aside) {
       // Asked again, the same message gets a different answer.
-      yield { type: "text_delta", delta: asideAnswers++ ? "Asked again: another answer." : asideDone };
+      yield { type: "text_delta", delta: asideAnswers++ ? `Asked again: another answer.\n\n${smokeTable}\n\nThe first one did most of it.` : asideDone };
       yield { type: "finish", reason: "stop" };
       return;
     }
@@ -616,6 +620,18 @@ try {
   assert.equal((await askAgain.innerText()).trim(), "Ask again", "same model: plain Ask again");
   await askAgain.click();
   await textIncludes("Asked again: another answer.");
+  const table = page.locator("#conversation .md-table").last();
+  await table.waitFor();
+  assert.equal(await table.locator("thead th").nth(1).evaluate(node => node.className), "md-center", "the Markdown's :---: centres its column");
+  assert.equal(await table.locator("tbody td").nth(2).evaluate(node => getComputedStyle(node).textAlign), "right", "a column of numbers lines up on the right");
+  assert.equal(await table.locator("tbody td").first().evaluate(node => getComputedStyle(node).textAlign), "left", "words stay on the left");
+  assert(await table.locator(".md-scroll").evaluate(node => node.scrollWidth > node.clientWidth), "a wide table scrolls sideways instead of wrapping");
+  assert.equal(await table.locator("tbody tr").first().evaluate(node => node.getBoundingClientRect().height < 40), true, "each row keeps one line");
+  await table.hover();
+  await until(() => table.locator(".md-table-tools").evaluate(node => getComputedStyle(node).opacity === "1"), "Copy and CSV show on hover");
+  await capture("02-table");
+  await table.locator(".md-table-tools button", { hasText: "CSV" }).click();
+  await until(() => table.locator(".md-table-tools button", { hasText: "Copied" }).count().then(count => count === 1), "CSV copies the table");
   await until(() => page.locator("#conversation .versions .version-n").last().innerText().then(text => text === "2 of 2", () => false), "the answers share one spot");
   assert.equal(await page.locator("#conversation").innerText().then(text => text.includes(asideDone)), false, "only the answer showing takes the spot");
   await until(() => page.getByRole("button", { name: "Earlier answer" }).isEnabled(), "‹ goes back once the answer settles");

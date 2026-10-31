@@ -2,6 +2,7 @@ import { marked, Renderer, type Token, type TokensList } from "marked";
 import DOMPurify from "dompurify";
 import hljs from "highlight.js/lib/common";
 import katex from "katex";
+import { decorateTables } from "./md-table.ts";
 
 const escape = (value: string) =>
   value.replace(
@@ -86,7 +87,7 @@ function decorate(parsed: string): string {
       "span",
       "input",
     ],
-    ALLOWED_ATTR: ["href", "title", "class", "start", "data-math", "data-display", "type", "checked", "disabled"],
+    ALLOWED_ATTR: ["href", "title", "class", "start", "data-math", "data-display", "type", "checked", "disabled", "align"],
   });
   const wrapper = document.createElement("div");
   wrapper.innerHTML = safe;
@@ -99,6 +100,7 @@ function decorate(parsed: string): string {
     // A formula KaTeX cannot parse stays readable as its source.
     katex.render(element.dataset.math ?? "", element, { displayMode: display, throwOnError: false, output: "html", strict: "ignore", trust: false });
   }
+  decorateTables(wrapper);
   for (const block of wrapper.querySelectorAll("pre")) {
     const code = block.querySelector("code");
     if (!code) continue;

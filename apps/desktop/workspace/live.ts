@@ -31,6 +31,7 @@ import { FoundryPane, buildRequest } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
 import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
+import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
 import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
 import type { ContextParts, FoundryArtifact, FoundryArtifactDetail, PlanLimits, Routine } from "@demesne/protocol";
@@ -5506,6 +5507,16 @@ async function dispatch(
       editor.value +
         `${editor.value.endsWith(" ") || !editor.value ? "" : " "}@${args.path} `,
     );
+  }
+  if (action === "copy-table") {
+    const table = target?.closest(".md-table")?.querySelector("table");
+    if (!table || !target) return;
+    const { head, rows, aligns } = tableCells(table);
+    await api("copy", { text: args.format === "csv" ? tableCsv(head, rows) : tableMarkdown(head, rows, aligns) });
+    const label = target.textContent;
+    target.textContent = "Copied";
+    setTimeout(() => (target.textContent = label), 1500);
+    return;
   }
   if (action === "copy-code") {
     const text =

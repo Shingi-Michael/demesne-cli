@@ -1843,6 +1843,32 @@ function agentFold(run: WorkspaceRun, tool: ToolEntry) {
   }
   return `<div class="agent-steps" role="group">${body}</div>`;
 }
+/// Under the last turn that changed Demesne's own source: whether the app
+/// you're in runs it yet (its build is newer than the turn), and on a Mac,
+/// Rebuild and open. The open waits until nothing is working.
+let rebuildAsked = false;
+function liveLine(run: WorkspaceRun) {
+  const self = state!.selfBuild;
+  if (!self.source || run.status !== "completed" || !run.completedAt) return "";
+  const last = state!.runs.findLast((item) => item.status === "completed" && tools(item).some((tool) => tool.phase === "change" && tool.state === "done"));
+  if (last?.id !== run.id) return "";
+  if (self.builtAt && self.builtAt > Date.parse(run.completedAt)) return `<div class="live-build on"><i></i><span class="w">Running now</span></div>`;
+  const busy = self.state === "ready" && rebuildAsked && working();
+  const after = self.behind ? `<span class="sub">this folder is behind the app you're running</span>`
+    : !self.can ? ""
+    : self.state === "building" ? `<span class="spin"></span><span class="sub">Rebuilding · Demesne reopens when it's done</span>`
+    : busy ? `<span class="sub">Built · opens once nothing is working</span>`
+    : self.state === "failed" ? `<span class="sub danger" title="${h(self.error ?? "")}">The build failed</span>${btn("rebuild-app", "Try again", {}, "lb-go")}`
+    : btn("rebuild-app", "Rebuild and open", {}, "lb-go");
+  return `<div class="live-build"><i></i><span class="w">Changed, not running yet</span><span class="sp"></span>${after}</div>`;
+}
+const working = () => Boolean(state?.activeTurnId || state?.busy || state?.sessions.some((item) => item.status === "running" || item.status === "queued"));
+/// Once the build is ready and nothing works, swap it in and quit; it reopens.
+function rebuildWhenIdle() {
+  if (!rebuildAsked || state?.selfBuild.state !== "ready" || working()) return;
+  rebuildAsked = false;
+  void api("rebuild-open", {}).then(() => api("desktop-quit", {})).catch((error) => notice(error instanceof Error ? error.message : String(error)));
+}
 function runHTML(run: WorkspaceRun, index: number) {
   const rewound = rewoundBy(run);
   if (rewound) return rewindLine(rewound);
@@ -1976,6 +2002,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     // A turn that only answered needs no receipt: its time is on the ask.
     const bare = run.status === "completed" && !files && !checks.length && !steps && !thought && !(receipt?.mode === "Plan" || run.planOnly) && !model && !mailReply(run);
     footer = bare ? "" : `<div class="turn-receipt">${parts.map((part) => `<span>${part}</span>`).join("")}${actions ? `<span class="receipt-actions">${actions}</span>` : ""}</div>`;
+    if (files) footer += liveLine(run);
   }
   const trail = "";
   const answered = run.entries.some((e) => e.type === "assistant");
@@ -5043,6 +5070,7 @@ async function dispatch(
     if(label)label.textContent=open ? "Show trace" : "Collapse";
     return;
   }
+  if (action === "rebuild-app") { rebuildAsked = true; return api("rebuild-app", {}); }
   if (action === "question-control") return questionAction(args.action, questionById(args.id) ?? pendingQuestion());
   if (action === "question-pick") {
     snap(target, { scale: [0.96, 1], duration: 280 });
@@ -5579,6 +5607,7 @@ function renderState(next: Snapshot) {
   renderCompletion();
   renderSetup();
   renderNotifications();
+  rebuildWhenIdle();
   if (
     !editor.disabled &&
     !overlay &&

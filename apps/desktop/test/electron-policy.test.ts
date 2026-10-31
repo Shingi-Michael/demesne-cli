@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, foundryDocument, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, exportedSource, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
 import { ASSEMBLE_SCRIPT, assembledDocument, scriptText } from "../electron/foundry-assemble.ts";
 
 test("project switching may reload only the exact main application document", () => {
@@ -66,9 +66,9 @@ test("Foundry frames accept only artifact URLs and block the network", () => {
   expect(foundryURL("https://artifact/abc")).toBe(false);
   expect(FOUNDRY_CSP).toContain("default-src 'none'");
   expect(FOUNDRY_CSP).not.toContain("connect-src");
-  expect(FOUNDRY_CSP).toMatch(/script-src 'unsafe-inline' https:\/\/cdnjs\.cloudflare\.com https:\/\/cdn\.jsdelivr\.net https:\/\/unpkg\.com;/);
-  expect(FOUNDRY_CSP).toContain("style-src 'unsafe-inline' https://fonts.googleapis.com;");
-  expect(FOUNDRY_CSP).toContain("font-src data: https://fonts.gstatic.com;");
+  expect(FOUNDRY_CSP).toMatch(/script-src 'unsafe-inline' foundry: https:\/\/cdnjs\.cloudflare\.com https:\/\/cdn\.jsdelivr\.net https:\/\/unpkg\.com;/);
+  expect(FOUNDRY_CSP).toContain("style-src 'unsafe-inline' foundry: https://fonts.googleapis.com;");
+  expect(FOUNDRY_CSP).toContain("font-src data: foundry: https://fonts.gstatic.com;");
   expect(FOUNDRY_CSP).toContain("form-action 'none'");
   // SVG renders as an image, so a script inside it never runs.
   const page = foundryDocument("svg", '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', "Logo");
@@ -90,6 +90,9 @@ test("a version's first show carries the assembly: the library, the previous ver
   expect(scriptText("</script><!--")).toBe('"<\\/script><\\!--"');
   expect(JSON.parse(scriptText("</script>").replace("<\\/", "</"))).toBe("</script>");
   expect(assembledDocument(source, "L", null)).toContain("window.__demesnePrevious=null;");
+  // A page that loads anime.js from the kit is not served it twice.
+  expect(assembledDocument(source, "", null)).not.toContain("<script></script>");
+  expect(assembledDocument(source, "", null)).toContain(ASSEMBLE_SCRIPT);
   // The script shows the page whatever happens and never animates under reduced motion.
   expect(ASSEMBLE_SCRIPT).toContain("prefers-reduced-motion: reduce");
   expect(ASSEMBLE_SCRIPT).toContain("setTimeout(show, 4000)");
@@ -123,4 +126,26 @@ test("simple full screen starts below the camera notch, and only where there is 
   expect(notchInset(screen(1512, 982, 0))).toBe(38);
   expect(notchInset(screen(1440, 900, 0))).toBe(0);
   expect(notchInset(screen(1512, 982, 0, false))).toBe(0);
+});
+
+test("the kit is served at foundry://kit/<file>, only the files it has, and inlined on export", () => {
+  expect(foundryKitFile("foundry://kit/base.css")).toBe("base.css");
+  expect(foundryKitFile("foundry://kit/anime.js")).toBe("anime.js");
+  expect(foundryKitFile("foundry://kit/fonts/inter-latin-500-normal.woff2")).toBe("fonts/inter-latin-500-normal.woff2");
+  expect(FOUNDRY_KIT["anime.js"]!.path).toBe("vendor/anime.umd.min.js");
+  expect(foundryKitFile("foundry://kit/../index.html")).toBeNull();
+  expect(foundryKitFile("foundry://kit/other.css")).toBeNull();
+  expect(foundryKitFile("foundry://artifact/base.css")).toBeNull();
+  expect(foundryKitFile("foundry://user:pw@kit/base.css")).toBeNull();
+  expect(foundryURL("foundry://kit/base.css")).toBe(false);
+  const kit = { style: '@font-face{font-family:Inter;src:url(foundry://kit/fonts/inter-latin-400-normal.woff2) format("woff2")}\n:root{--ink:#111}\nbody{color:var(--ink)}\n', script: 'window.anime={};if(1<2){}//</script>' };
+  const source = '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="foundry://kit/base.css">\n<script src="foundry://kit/anime.js"></script><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces"></head><body><h1>Garden</h1></body></html>';
+  const out = exportedSource(source, kit);
+  expect(out).not.toContain("foundry://");
+  expect(out).toContain("<style>\n:root{--ink:#111}\nbody{color:var(--ink)}\n</style>");
+  expect(out).toContain("<script>window.anime={};if(1<2){}//<\\/script></script>");
+  expect(out).toContain("fonts.googleapis.com/css2?family=Fraunces");
+  expect(out).toContain("<h1>Garden</h1>");
+  // A page without the kit is exported as it is.
+  expect(exportedSource("<p>plain</p>", kit)).toBe("<p>plain</p>");
 });

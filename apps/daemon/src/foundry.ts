@@ -17,17 +17,24 @@ export const FOUNDRY_TOOL_NAMES = new Set(["foundry_read", "foundry_save", "foun
 /// Where an artifact may load from (the frame's policy allows exactly this).
 export const FOUNDRY_LIBRARY_HOSTS = ["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com"] as const;
 
-const FILE_RULES = "HTML is one self-contained document (inline CSS and JS); the only outside loads are pinned scripts from "
-  + FOUNDRY_LIBRARY_HOSTS.join(", ") + " (react@18.3.1, never react@18) and Google Fonts; everything else is blocked, so images are inline SVG or data URIs. "
+/// The kit every page starts from, served to its frame from inside the app
+/// (apps/desktop/foundry-kit, policy.ts FOUNDRY_KIT): Demesne's type,
+/// colours, light and dark, buttons, inputs, tables, cards, and anime.js.
+export const FOUNDRY_KIT_STYLE = "foundry://kit/base.css", FOUNDRY_KIT_SCRIPT = "foundry://kit/anime.js";
+
+const FILE_RULES = `HTML is one document that starts with <link rel="stylesheet" href="${FOUNDRY_KIT_STYLE}"> (the kit: light and dark from the system, Inter at 14px, `
+  + "one ink with --secondary/--muted/--hair/--tone tints, --accent, radii 8 and 12; plain elements styled; classes .container(.narrow) .card(.outlined/.raised) .row(.between) .stack .grid(.two/.three) "
+  + `.pill(.accent/.ok/.warn/.bad) .tabs .list .eyebrow .muted .secondary .sp; buttons .primary .quiet .danger .small) and, when it moves, <script src="${FOUNDRY_KIT_SCRIPT}"></script> (anime.js 4 as window.anime). `
+  + "Other outside loads: pinned scripts from " + FOUNDRY_LIBRARY_HOSTS.join(", ") + " (react@18.3.1, never react@18) and Google Fonts; everything else is blocked, so images are inline SVG or data URIs. "
   + "SVG is one <svg> with a viewBox. Under 512 KB.";
 
 /// The design brief every artifact follows, so Foundry's work reads as one
-/// hand; the tokens are Demesne's own, so a prototype of Demesne matches the app.
-export const DESIGN_BRIEF = "Design brief: a title of two to four words. Colours as :root custom properties, redefined under @media (prefers-color-scheme: dark); "
-  + "an explicit body background. One ink and its tints: text 100%, secondary 76%, muted 56%, hairlines 8%, tones 4%; no solid grey outlines or drop shadows on flat things; "
-  + "radii 8 and 12px; 13 to 15px system or Inter type at 1.5 line height; motion 140 to 220ms only under prefers-reduced-motion: no-preference. "
-  + "Works at phone width with 16px gutters and no horizontal scroll. Real content, never lorem ipsum. No gradient heroes, emoji bullets, purple on white, glassmorphism or other stock AI looks. "
-  + "Interactive mockups have working controls. Demesne's own UI: neutral greys, hairlines, 13px base, no menus or side panels.";
+/// competent hand: the kit carries the look, the page brings content,
+/// layout and its own character.
+export const DESIGN_BRIEF = "Design brief: a title of two to four words. Lean on the kit: write real content and layout, little CSS of your own, and use its variables for anything you add "
+  + "(never fixed greys or shadows on flat things). Give the page its own character by setting --accent, and --ink/--paper for a tinted page, on :root, plus at most one display face from Google Fonts for headings if it fits. "
+  + "Works at phone width with no horizontal scroll. Real content, never lorem ipsum; interactive mockups have working controls. No gradient heroes, emoji bullets, purple on white, glassmorphism or other stock AI looks. "
+  + "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce. Demesne's own UI: the kit as it is, no menus or side panels.";
 
 const GUIDE = FILE_RULES + " " + DESIGN_BRIEF;
 

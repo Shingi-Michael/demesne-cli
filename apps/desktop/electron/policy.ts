@@ -61,14 +61,41 @@ export function previewURL(value: string) {
 export function foundryURL(value: string) {
   try { const url = new URL(value); return url.protocol === "foundry:" && url.hostname === "artifact" && /^\/[\w-]{1,200}$/.test(url.pathname) && !url.username && !url.password && !url.port; } catch { return false; }
 }
+/** The Foundry kit, served to every artifact frame from inside the app at
+ * foundry://kit/<file>: the base stylesheet a page starts from, anime.js,
+ * and Inter. Each file's place in the app's ui folder and its type. */
+export const FOUNDRY_KIT: Record<string, { path: string; type: string }> = {
+  "base.css": { path: "kit/base.css", type: "text/css; charset=utf-8" },
+  "anime.js": { path: "vendor/anime.umd.min.js", type: "application/javascript; charset=utf-8" },
+  ...Object.fromEntries([400, 500, 600].map((weight) => [`fonts/inter-latin-${weight}-normal.woff2`, { path: `vendor/fonts/inter-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
+};
+export const FOUNDRY_KIT_STYLE = "foundry://kit/base.css", FOUNDRY_KIT_SCRIPT = "foundry://kit/anime.js";
+/** The kit file a foundry://kit/<file> address names, or null. */
+export function foundryKitFile(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "foundry:" || url.hostname !== "kit" || url.username || url.password || url.port) return null;
+    const name = url.pathname.slice(1);
+    return Object.hasOwn(FOUNDRY_KIT, name) ? name : null;
+  } catch { return null; }
+}
+/** A page as it leaves Demesne (Export): the kit it leaned on is inlined,
+ * so the file stands on its own. The fonts fall back to the system's. */
+export function exportedSource(source: string, kit: { style: string; script: string }) {
+  const tag = (name: string, address: string) => new RegExp(`<${name}\\b[^>]*\\b(?:href|src)=["']?${address.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}["']?[^>]*>(?:\\s*</${name}>)?`, "gi");
+  const style = kit.style.replace(/@font-face\{[^}]*foundry:\/\/kit\/[^}]*\}\n?/g, "");
+  return source
+    .replace(tag("link", FOUNDRY_KIT_STYLE), () => `<style>\n${style}</style>`)
+    .replace(tag("script", FOUNDRY_KIT_SCRIPT), () => `<script>${kit.script.replace(/<\//g, "<\\/")}</script>`);
+}
 /** Where an artifact may load libraries and fonts from: the same short list
  * Claude's artifacts allow, so a chart, React or a real typeface works. */
 export const FOUNDRY_SCRIPT_HOSTS = ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net", "https://unpkg.com"] as const;
 export const FOUNDRY_FONT_HOSTS = { styles: "https://fonts.googleapis.com", files: "https://fonts.gstatic.com" } as const;
-/** What an artifact frame may do: run its own inline code, load pinned
- * libraries from the hosts above and Google Fonts, and nothing else: no
- * fetch, no forms, no other origins. */
-export const FOUNDRY_CSP = `default-src 'none'; script-src 'unsafe-inline' ${FOUNDRY_SCRIPT_HOSTS.join(" ")}; style-src 'unsafe-inline' ${FOUNDRY_FONT_HOSTS.styles}; img-src data: blob:; font-src data: ${FOUNDRY_FONT_HOSTS.files}; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:`;
+/** What an artifact frame may do: run its own inline code, load the kit,
+ * pinned libraries from the hosts above and Google Fonts, and nothing
+ * else: no fetch, no forms, no other origins. */
+export const FOUNDRY_CSP = `default-src 'none'; script-src 'unsafe-inline' foundry: ${FOUNDRY_SCRIPT_HOSTS.join(" ")}; style-src 'unsafe-inline' foundry: ${FOUNDRY_FONT_HOSTS.styles}; img-src data: blob:; font-src data: foundry: ${FOUNDRY_FONT_HOSTS.files}; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:`;
 /** The first show of a version assembles the page: anime.js and the
  * assembly script ride along, with the previous version to diff against. */
 export interface FoundryAssembly { library: string; previous: string | null }

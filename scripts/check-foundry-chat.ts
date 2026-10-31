@@ -12,14 +12,12 @@ const response = Promise.withResolvers<void>();
 /// once the pane has opened on the title.
 const making = Promise.withResolvers<void>();
 let first = true;
-const mockup = (blue = false) => `<!doctype html><html><head><meta charset="utf-8"><style>
-body{margin:0;padding:40px;font:16px system-ui;background:${blue ? "#eaf2ff" : "#f4f1eb"};color:#18342c}
-main{max-width:520px;margin:auto}small{letter-spacing:.15em}h1{font-size:38px;margin:16px 0}
-button,input{font:inherit;border:1px solid #9aaea5;border-radius:10px;padding:12px;margin:8px 0}
-button{background:${blue ? "#3158ba" : "#285b48"};color:white;cursor:pointer}input{display:block;width:90%}
-</style></head><body><main><small>FOUNDRY · LIVE MOCKUP</small><h1>A little room to grow</h1>
+// The page leans on the kit, as the brief asks: base.css for its look, anime.js for its motion.
+const mockup = (blue = false) => `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="foundry://kit/base.css"><script src="foundry://kit/anime.js"></script><style>
+:root{--accent:${blue ? "#3158ba" : "#285b48"}}body{padding:24px}h1{font-size:38px;margin:16px 0}input{margin:8px 0}
+</style></head><body><main class="container narrow"><span class="eyebrow">Foundry · live mockup</span><h1>A little room to grow</h1>
 <p>Try this mockup right inside the conversation.</p><input aria-label="Your idea" placeholder="Name your next idea">
-<button id="counter" onclick="this.textContent='Planted '+(++window.plants)">Plant an idea</button>
+<button id="counter" class="primary" onclick="this.textContent='Planted '+(++window.plants)">Plant an idea</button>
 <script>window.plants=0;</script></main></body></html>`;
 const f = await fixture({
   providerId: "fixture", modelId: "foundry-chat",
@@ -107,6 +105,9 @@ try {
     const inner = page!.frames().find(item => item.url().includes("assemble=1"));
     assert(inner, "the assembling frame is reachable");
     await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined && document.documentElement.style.visibility === "" && [...document.querySelectorAll("main, main > *")].every(el => !(el as HTMLElement).style.transform)));
+    // The kit reached the page: its stylesheet and its anime.js (the assembly brought no second copy).
+    assert.equal(await inner.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--radius").trim()), "8px", "foundry://kit/base.css is served to the frame");
+    assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), 2, "a page that loads anime.js from the kit is not served it twice");
     assert.equal(await inner.evaluate(() => typeof (window as unknown as { __demesnePrevious: unknown }).__demesnePrevious), previous === "none" ? "object" : "string");
   };
   await assembled("none");

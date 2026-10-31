@@ -18,8 +18,11 @@ export async function prepareUi(out: string) {
   mkdirSync(join(out, "vendor/fonts"), { recursive: true });
   for (const weight of [400, 500]) cpSync(join(desktop, "node_modules/@fontsource/jetbrains-mono/files", `jetbrains-mono-latin-${weight}-normal.woff2`), join(out, "vendor/fonts", `jetbrains-mono-latin-${weight}-normal.woff2`));
   for (const weight of [400, 500, 600]) cpSync(join(desktop, "node_modules/@fontsource/inter/files", `inter-latin-${weight}-normal.woff2`), join(out, "vendor/fonts", `inter-latin-${weight}-normal.woff2`));
-  // anime.js rides into an artifact frame for its first show (foundry-assemble.ts).
+  // anime.js rides into an artifact frame for its first show (foundry-assemble.ts) and is part of the Foundry kit.
   cpSync(join(desktop, "node_modules/animejs/dist/bundles/anime.umd.min.js"), join(out, "vendor/anime.umd.min.js"));
+  // The Foundry kit: what every page the agent makes starts from (served as foundry://kit/…, policy.ts FOUNDRY_KIT).
+  mkdirSync(join(out, "kit"), { recursive: true });
+  cpSync(join(desktop, "foundry-kit/base.css"), join(out, "kit/base.css"));
   mkdirSync(join(out, "vendor/katex"), { recursive: true });
   cpSync(join(desktop, "node_modules/katex/dist/katex.min.css"), join(out, "vendor/katex/katex.min.css"));
   cpSync(join(desktop, "node_modules/katex/dist/fonts"), join(out, "vendor/katex/fonts"), { recursive: true });

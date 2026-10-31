@@ -23,6 +23,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Fixed
 
+- On the Mac, Demesne comes to the front when it opens, once. Opened from a terminal or script it could stay behind the app that launched it, with its window present but hidden.
 - A chat whose project folder was removed (a deleted worktree) no longer makes the daemon throw ENOENT when the window lists its files; the daemon answers "The project folder is gone".
 - The daemon log no longer grows without end: past 5 MB it moves to `daemon.log.1` (replacing the one before) when a daemon starts. One Mac's had reached 28 MB.
 - The green button goes straight to full screen on the Mac: the window no longer grows, snaps back and grows again.

@@ -37,6 +37,17 @@ async function quit() {
 }
 app.on("before-quit", event => { if (!exited) { event.preventDefault(); void quit(); } });
 app.on("activate", () => { window?.show(); window?.focus(); });
+/// macOS's cooperative activation can leave a just-launched app behind the
+/// app that launched it (a terminal, a script): the window opens but stays in
+/// back, with no window reported until something brings it forward. On its
+/// first show, Demesne asks to come to the front once; never after, so it
+/// never steals focus while you work elsewhere.
+let launchedToFront = false;
+function launchToFront() {
+  if (launchedToFront || process.platform !== "darwin") return;
+  launchedToFront = true;
+  app.focus({ steal: true });
+}
 
 void app.whenReady().then(async () => {
   const base = app.getAppPath();
@@ -229,7 +240,7 @@ void app.whenReady().then(async () => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
     validateRequest(method, args);
     if (quitting) throw new Error("The desktop app is closing");
-    if (method === "desktop-ready") { window?.show(); window?.focus(); return null; }
+    if (method === "desktop-ready") { window?.show(); window?.focus(); launchToFront(); return null; }
     if (method === "quit" || method === "desktop-quit") { void quit(); return null; }
     // Hot reload the renderer when the installed app has been updated, so the
     // running window loads the new UI without the user relaunching. The host

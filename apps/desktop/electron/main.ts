@@ -263,6 +263,16 @@ void app.whenReady().then(async () => {
       return null;
     }
     // Working: the Dock icon's progress bar runs without an end while anything works.
+    // Talk instead of typing (pass 115): the Mac's own Dictation, started in
+    // the composer that has focus. Words arrive live, grey until they settle,
+    // on the Mac's own speech recognition; nothing sends until Enter.
+    if (method === "desktop-dictate") {
+      if (process.platform !== "darwin") throw new Error("Talking uses the Mac's Dictation");
+      window?.focus();
+      window?.webContents.focus();
+      Menu.sendActionToFirstResponder("startDictation:");
+      return null;
+    }
     if (method === "desktop-working") {
       window?.setProgressBar((args as Record<string, unknown>).on === true ? 2 : -1, { mode: "indeterminate" });
       return null;

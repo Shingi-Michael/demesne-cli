@@ -336,6 +336,7 @@ async function open(workspace = false, welcome = false, extraEnv: Record<string,
   await until(() => evaluate<string>("return document.getElementById('sidebar-sessions')?.dataset.workspace;").then(value => value === f.workspace, () => false), "the sidebar shows the project");
   // A model with no name reads in words, not its raw id (after the reload settles).
   await until(() => page.locator("#composer-model").innerText().then(text => text.startsWith("Desktop Test"), () => false), "a model with no name reads in words, not its raw id");
+  assert.equal(await page.locator("#composer-talk").isVisible(), process.platform === "darwin", "Talk (the Mac's Dictation) is in the Mac app only");
   assert.equal(await page.evaluate(() => typeof (window as any).require), "undefined", "No Node in the renderer");
   assert.equal(await page.evaluate(() => typeof (window as any).process), "undefined", "No process or environment in the renderer");
   const isolation = await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.getLastWebPreferences());

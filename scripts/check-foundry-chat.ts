@@ -41,7 +41,7 @@ const f = await fixture({
       assert(tools.some(tool => tool.name === "foundry_edit"));
       const read = JSON.parse(current[0]!.content ?? "{}") as { version: number };
       yield call("foundry_edit", { id: previous.id, base_version: read.version, note: "Blue",
-        edits: [{ find: "#f4f1eb", replace: "#eaf2ff" }, { find: "#285b48", replace: "#3158ba" }] });
+        edits: [{ find: "#285b48", replace: "#3158ba" }] });
       yield { type: "finish", reason: "tool_calls" }; return;
     }
     if (!current.length) {
@@ -117,9 +117,9 @@ try {
   await motion.getByRole("button", { name: "Arrive" }).waitFor();
   await eventually(async () => (await motion.locator(".mo-time").textContent())?.startsWith("0.70s / 0.70s") ?? false);
   await motion.getByRole("button", { name: "Replay" }).click();
-  await eventually(async () => (await motion.getByRole("button", { name: "Pause" }).count()) === 1);
-  await motion.getByRole("button", { name: "Pause" }).click();
-  await eventually(async () => (await motion.getByRole("button", { name: "Play" }).count()) === 1);
+  await eventually(async () => (await motion.getByRole("button", { name: "Pause", exact: true }).count()) === 1);
+  await motion.getByRole("button", { name: "Pause", exact: true }).click();
+  await eventually(async () => (await motion.getByRole("button", { name: "Play", exact: true }).count()) === 1);
   await motion.locator(".mo-scrub").fill("500");
   await eventually(async () => (await motion.locator(".mo-time").textContent())?.startsWith("0.35s") ?? false);
   console.log("Motion line passed.");

@@ -300,12 +300,26 @@ export class FoundryPane {
     }
   }
 
+  /// The motion line as last built, with its time and scrubber at zero.
+  private motionShape = "";
   private renderMotion() {
     const line = this.state && this.state.view === "preview" ? motionLine(this.motions, this.motionState, this.motionCurrent, this.slow) : "";
     // The scrubber is redrawn only when it isn't being held, so a drag isn't fought.
     const held = this.motion.querySelector<HTMLInputElement>(".mo-scrub:active");
     if (held && line) { const time = this.motion.querySelector(".mo-time"); if (time && this.motionState) time.textContent = `${seconds(this.motionState.currentTime)} / ${seconds(this.motionState.duration)}`; return; }
     this.motion.hidden = !line;
+    // A tick only moves the scrubber and the time: the buttons are rebuilt
+    // only when what they say changes, so a click that lands mid-motion
+    // isn't lost to a button replaced between press and release.
+    const state = this.motionState;
+    const shape = state ? motionLine(this.motions, { ...state, currentTime: 0, progress: 0 }, this.motionCurrent, this.slow) : line;
+    if (line && shape === this.motionShape && state) {
+      const scrub = this.motion.querySelector<HTMLInputElement>(".mo-scrub"), time = this.motion.querySelector(".mo-time");
+      if (scrub) scrub.value = String(Math.round(state.progress * 1000));
+      if (time) time.textContent = `${seconds(state.currentTime)} / ${seconds(state.duration)}`;
+      return;
+    }
+    this.motionShape = line ? shape : "";
     if (this.motion.innerHTML !== line) this.motion.innerHTML = line;
   }
 

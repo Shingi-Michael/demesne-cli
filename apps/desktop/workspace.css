@@ -1710,4 +1710,11 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop .catch-up { display: flex; align-items: baseline; gap: 9px; margin: 6px 0 14px; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--blossom, #f2b6c8) 7%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blossom, #f2b6c8) 20%, transparent); font-size: 12.5px; color: var(--t2); }
 .desktop .catch-up > i { width: 6px; height: 6px; border-radius: 50%; background: var(--blossom, #f2b6c8); flex: none; transform: translateY(-1px); }
 .desktop .catch-up b { font-weight: 600; color: var(--t1); }
+/* Big pastes fold up (pass 115): a chip in the composer and in the sent message. */
+.desktop #attach-row .att.paste { gap: 8px; padding: 0 26px 0 8px; height: 32px; max-width: 260px; font-size: 12px; color: var(--t2); }
+.desktop .pc-ic { display: inline-grid; place-items: center; flex: none; width: 22px; height: 18px; border-radius: 4px; background: var(--tone2); font: 600 8px var(--mono, ui-monospace, monospace); color: var(--t3); letter-spacing: .02em; }
+.desktop .request .paste-chip { display: block; margin-top: 6px; }
+.desktop .request .paste-chip summary { display: inline-flex; align-items: center; gap: 7px; padding: 3px 9px 3px 5px; border-radius: 8px; background: var(--tone2); box-shadow: inset 0 0 0 1px var(--hair); font-size: 12px; color: var(--t2); cursor: pointer; list-style: none; }
+.desktop .request .paste-chip summary::-webkit-details-marker { display: none; }
+.desktop .request .paste-chip pre { margin: 6px 0 0; max-height: 320px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--tone); font: 11.5px/16px var(--mono, ui-monospace, monospace); color: var(--t2); white-space: pre-wrap; text-align: left; }
 

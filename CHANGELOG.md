@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
+- Big pastes fold up: paste 30 lines or more (or a very long line) into the composer and it becomes one chip, "Pasted text · 840 lines", instead of a wall of text; × takes it back. It's sent whole, and the sent message shows the same chip, which unfolds on a click.
 - Since you looked: open a chat that worked while you were elsewhere and a line before the first turn you didn't see says what happened (turns finished, files changed, how the checks went, what waits for you), worked out from the turns with no model call. The chat opens at that line so you read on from where you left.
 - The Dock shows Demesne working: while any chat, queued chat or Drive mission works, the icon's progress bar runs; it clears once nothing works. The badge still counts the chats waiting on you.
 - Answer from the notification: when a chat waits on you while Demesne is in the background, its banner says the question itself and carries its suggestions as buttons and a reply field, or Allow once and Deny for an approval. Your pick or reply goes straight to that chat, open or not.

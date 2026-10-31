@@ -143,6 +143,8 @@ export function createDaemonApp(options: {
   systemPrompt?: string;
   authToken?: string;
   version?: string;
+  /// The build id (scripts/build-version.ts), so the app can tell a daemon from an older build.
+  build?: string;
   inferenceSlots?: number;
   providerInferenceSlots?: Record<string, number>;
   allowlistPath?: string;
@@ -741,6 +743,7 @@ export function createDaemonApp(options: {
           // model server is down and /v1/models cannot be served.
           ...(processor.contextCapacity !== undefined ? { contextCapacity: processor.contextCapacity } : {}),
           ...(options.version ? { version: options.version } : {}),
+          ...(options.build ? { build: options.build } : {}),
         });
       }
 

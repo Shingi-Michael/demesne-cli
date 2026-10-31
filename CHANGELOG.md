@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
+- The app keeps its daemon current: a daemon left running from an older build of the app is restarted from the bundled one once nothing is working, instead of serving old code until someone restarts it by hand. Builds now carry an id (commit and build time) that `/healthz` reports as `build`.
 - The motion line's buttons no longer get rebuilt on every tick of a playing motion, so a click on Pause or a motion name that lands mid-motion isn't lost.
 - A Foundry page that moves by itself (the kit's anime.js) no longer gets the first-show assembly on top of its own motion: the two animated the same pieces, anime.js cancelled the page's, and the page was left faded and short of its marks with the motion line stuck near the start.
 - The agent offers Foundry while it works: when the question is how something should look or flow, it says it will mock it in Foundry and makes it, instead of describing it in words, and offers a mockup when one would help you decide.

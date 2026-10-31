@@ -14,7 +14,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { homedir, userInfo } from "node:os";
-import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted } from "@demesne/client";
+import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted, type HealthResponse } from "@demesne/client";
 import { DEFAULT_AGENT_LIMITS, loadConfig, parseConfigFile, updateUserConfig } from "@demesne/config";
 import {
   themeByName,
@@ -98,6 +98,14 @@ const argsRecord = (value: unknown) => {
   if (!isRecord(value)) throw new Error("Invalid action arguments");
   return value;
 };
+/// Which build this app is (scripts/build-version.ts); empty when run from source.
+const APP_BUILD = process.env.DEMESNE_BUILD_ID || "";
+/// The app replaces a daemon from another build of itself, never one run from
+/// source or by hand: both builds must be stamped, and they must differ.
+export function olderDaemon(app: string, daemon: string | undefined) {
+  return !!app && !!daemon && app !== daemon;
+}
+
 export function daemonAddress(value: string) {
   const url = new URL(value);
   if (
@@ -443,6 +451,7 @@ export class WorkspaceHost {
     this.publish();
     try {
       const health = await this.client.health();
+      if (await this.replaceOlderDaemon(health)) return;
       // Older daemons may not yet have theme persistence. Built-ins still work.
       try { await this.refreshThemes(); } catch {}
       if (!this.themeRefreshTimer) {
@@ -536,6 +545,43 @@ export class WorkspaceHost {
       this.settings.dataDirectory,
       env,
     );
+  }
+  /// A daemon keeps running when the window closes, so after the app is
+  /// updated the one listening can be an older build serving old code. The
+  /// app restarts it from its bundled daemon once nothing is working (a turn
+  /// or Drive is never cut off); until then it checks again every half
+  /// minute and Settings shows the restart as waiting.
+  private replacingDaemon = false;
+  private olderDaemonTimer: ReturnType<typeof setTimeout> | null = null;
+  private async replaceOlderDaemon(health: HealthResponse) {
+    if (!olderDaemon(APP_BUILD, health.build) || this.replacingDaemon || managedDaemonBy(this.settings.dataDirectory)) return false;
+    // Only an app that bundles its daemon has a newer one to start.
+    if (!existsSync(join(dirname(process.execPath), "../demesned"))) return false;
+    let control: ReturnType<WorkspaceHost["daemonControl"]>;
+    try { control = this.daemonControl(); } catch { return false; }
+    const status = await this.client.status().catch(() => null);
+    const busy = !status || status.active.length > 0 || status.activeInferences > 0 || status.queuedInferences > 0
+      || (this.driveState && ["running", "waiting", "blocked"].includes(this.driveState.status));
+    if (busy) {
+      this.restartFor.add("app.update");
+      if (!this.olderDaemonTimer && !this.disposed) {
+        this.olderDaemonTimer = setTimeout(() => {
+          this.olderDaemonTimer = null;
+          if (this.disposed || this.connection !== "online") return;
+          void this.client.health().then((next) => this.replaceOlderDaemon(next)).catch(() => {});
+        }, 30_000);
+        this.olderDaemonTimer.unref?.();
+      }
+      return false;
+    }
+    this.replacingDaemon = true;
+    try {
+      const stopped = await stopDaemon(control);
+      if (!stopped.stopped && stopped.message !== "Daemon is not running.") return false;
+      await this.startDaemon();
+      this.restartFor.delete("app.update");
+      return true;
+    } catch { return false; } finally { this.replacingDaemon = false; }
   }
   async startDaemon() {
     const result = await startDaemon(this.daemonControl());

@@ -3,10 +3,10 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DemesneClient } from "../../../packages/client/src/index.ts";
-import type { PermissionMode, SessionStateResponse } from "@demesne/protocol";
+import type { ModelMessage, PermissionMode, SessionStateResponse } from "@demesne/protocol";
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
-import { applyFoundryEdits, DESIGN_BRIEF, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
+import { applyFoundryEdits, DESIGN_BRIEF, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 import { selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 
 const context = { workspaceRoot: "/tmp", signal: new AbortController().signal };
@@ -237,4 +237,68 @@ test("foundry_edit applies exact edits to the version it read and refuses a stal
 test("applyFoundryEdits treats the replacement as plain text", () => {
   expect(applyFoundryEdits("price $1", [{ find: "$1", replace: "$&$1" }])).toBe("price $&$1");
   expect(applyFoundryEdits("x.y", [{ find: ".", replace: "-", all: true }])).toBe("x-y");
+});
+
+test("a page's source leaves the transcript once its turn is over, in the calls, the results and the Responses items", () => {
+  const page = "<h1>" + "a".repeat(100) + "</h1>";
+  const messages: ModelMessage[] = [
+    { role: "user", content: "Make a page" },
+    { role: "assistant", content: null, toolCalls: [{ id: "c1", name: "foundry_save", arguments: JSON.stringify({ title: "Garden", kind: "html", source: page }) }],
+      responses: { accountId: "acct", model: "m", output: [{ type: "reasoning", summary: [] }, { type: "function_call", call_id: "c1", name: "foundry_save", arguments: JSON.stringify({ title: "Garden", kind: "html", source: page }) }] } },
+    { role: "tool", toolCallId: "c1", content: JSON.stringify({ id: "art", version: 1 }) },
+    { role: "assistant", content: null, toolCalls: [{ id: "c2", name: "foundry_read", arguments: JSON.stringify({ id: "art" }) }] },
+    { role: "tool", toolCallId: "c2", content: JSON.stringify({ id: "art", version: 1, source: page, versions: [] }) },
+    { role: "assistant", content: null, toolCalls: [{ id: "c3", name: "foundry_edit", arguments: JSON.stringify({ id: "art", base_version: 1, edits: [{ find: "a", replace: "b" }] }) }] },
+    { role: "tool", toolCallId: "c3", content: JSON.stringify({ id: "art", version: 2 }) },
+    { role: "assistant", content: "Done." },
+  ];
+  const kept = structuredClone(messages);
+  const forgotten = forgetFoundrySources(messages);
+  expect(messages).toEqual(kept);
+  const text = JSON.stringify(forgotten);
+  expect(text).not.toContain("aaaa");
+  expect(text.split(FORGOTTEN_SOURCE)).toHaveLength(4);
+  const save = forgotten[1] as Extract<ModelMessage, { role: "assistant" }>;
+  expect(JSON.parse(save.toolCalls![0]!.arguments)).toEqual({ title: "Garden", kind: "html", source: FORGOTTEN_SOURCE });
+  expect(save.responses!.output[0]).toEqual({ type: "reasoning", summary: [] });
+  expect(JSON.parse(String(save.responses!.output[1]!.arguments))).toMatchObject({ source: FORGOTTEN_SOURCE });
+  expect(JSON.parse((forgotten[4] as Extract<ModelMessage, { role: "tool" }>).content)).toEqual({ id: "art", version: 1, source: FORGOTTEN_SOURCE, versions: [] });
+  // Edits are the agent's own small changes; they, and everything else, stay as they were.
+  expect(forgotten[5]).toEqual(messages[5]);
+  expect(forgotten[0]).toBe(messages[0]);
+  expect(forgotten[8]).toBe(messages[8]);
+});
+
+test("the next turn's request carries a stub where the earlier turn's page was, and the current turn keeps its own", async () => {
+  const page = "<h1>Garden one</h1>" + "<p>a paragraph of the page</p>".repeat(20);
+  const requests: ModelMessage[][] = [];
+  const { client } = daemon(async function* (messages) {
+    requests.push(structuredClone(messages));
+    const results = messages.filter(message => message.role === "tool");
+    const turn = messages.filter(message => message.role === "user").length;
+    const call = turn === 1 && results.length === 0 ? { name: "foundry_save", input: { title: "Tiny garden", kind: "html", source: page } }
+      : turn === 2 && results.length === 1 ? { name: "foundry_read", input: { id: JSON.parse(results[0]!.content).id } } : null;
+    if (call) {
+      yield { type: "tool_call_delta", index: 0, idDelta: `foundry-${turn}-${results.length}`, nameDelta: call.name, argumentsDelta: JSON.stringify(call.input) };
+      yield { type: "finish", reason: "tool_calls" };
+    } else {
+      yield { type: "text_delta", delta: "Saved to Foundry." };
+      yield { type: "finish", reason: "stop" };
+    }
+  });
+  const { session } = await client.createSession({ title: "Foundry history" });
+  await client.submitTurn(session.id, { content: "Make me a page", permissionMode: "ask" });
+  await completed(client, session.id);
+  await client.submitTurn(session.id, { content: "Now look at it", permissionMode: "ask" });
+  await completed(client, session.id);
+  // Turn 1, second round: the save just made is still in full.
+  expect(JSON.stringify(requests[1])).toContain(page);
+  // Turn 2, first round: the page is gone from history, its title and version are not.
+  const later = JSON.stringify(requests[2]);
+  expect(later).not.toContain("a paragraph of the page");
+  expect(later).toContain(FORGOTTEN_SOURCE);
+  expect(later).toContain("Tiny garden");
+  // Turn 2, second round: what foundry_read gave back this turn is there in full.
+  expect(JSON.stringify(requests[3])).toContain(page);
+  expect(requests[3]!.filter((message) => JSON.stringify(message).includes("a paragraph of the page"))).toHaveLength(1);
 });

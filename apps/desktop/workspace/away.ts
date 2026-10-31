@@ -10,7 +10,7 @@ import { isDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 /// question that opens the chat.
 export type AwayAsk =
   | { kind: "permission"; id: string; verb: string; target: string; rule: string | null; allowedBefore: number }
-  | { kind: "question"; text: string };
+  | { kind: "question"; text: string; id?: string; index?: number; revision?: number; suggestions?: string[] };
 
 /// The first approval or question a chat waits on. A pending approval's
 /// summary is "tool: {arguments}", cut at 500 characters.
@@ -30,8 +30,10 @@ export function waitingAsk(pending: PendingPermissionSnapshot[], questions: Ques
     return { kind: "permission", id: permission.id, verb, target: clip(target, 60), rule: permission.rule ?? null, allowedBefore: permission.allowedBefore ?? 0 };
   }
   const question = questions.find((item) => item.status !== "answered" && item.status !== "cancelled") ?? questions[0];
-  const text = question?.questions[question.answers?.length ?? 0]?.question ?? question?.questions[0]?.question;
-  return text ? { kind: "question", text: clip(text, 120) } : null;
+  const index = question?.answers?.length ?? 0, item = question?.questions[index] ?? question?.questions[0];
+  if (!question || !item?.question) return null;
+  // What a notification needs to answer it in place.
+  return { kind: "question", text: clip(item.question, 120), id: question.id, index, revision: question.revision ?? 0, suggestions: (item.multiple ? [] : item.suggestions ?? []).slice(0, 3) };
 }
 
 /// The last prompt you sent, in full; never recall background-agent or system turns.

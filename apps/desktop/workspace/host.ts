@@ -1841,6 +1841,22 @@ export class WorkspaceHost {
       }
       return;
     }
+    // A notification answers a chat's question without opening it.
+    if (method === "away-answer") {
+      const sessionId = string(args.session, "session", 200), id = string(args.id, "question id", 200),
+        ask = this.waitingAsks.get(sessionId), answer = string(args.answer, "answer", 2000).trim();
+      if (ask?.kind !== "question" || ask.id !== id || ask.index === undefined) throw new Error("This question is no longer waiting.");
+      if (!answer) throw new Error("The answer is empty");
+      try {
+        await this.client.questionAction(id, { action: "answer", index: ask.index, revision: ask.revision ?? 0, answer: { answer, source: args.source === "suggestion" ? "suggestion" : "typed" } });
+      } finally {
+        this.waitingAsks.delete(sessionId);
+        this.waitingSessions.delete(sessionId);
+        this.publish();
+        void this.refreshSessions();
+      }
+      return;
+    }
     // Build the app from this chat's folder; "rebuild-open" then swaps it in
     // as the window quits.
     if (method === "rebuild-app") {

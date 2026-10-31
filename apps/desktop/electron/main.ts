@@ -264,10 +264,18 @@ void app.whenReady().then(async () => {
     }
     // Native notifications on Linux, macOS and Windows; clicking opens the chat.
     if (method === "desktop-notify") {
-      const { title, body, sessionId, path } = args as Record<string, unknown>;
+      const { title, body, sessionId, path, key, actions, reply } = args as Record<string, unknown>;
       if (typeof title !== "string" || typeof body !== "string") return null;
       if (!Notification.isSupported()) { log("Native notifications are unavailable on this desktop"); return null; }
-      const banner = new Notification({ title: title.slice(0, 120), body: body.slice(0, 240) });
+      // A question's suggestions (or Allow and Deny) as buttons, and a reply
+      // field: the answer goes back to the page under the banner's key.
+      const buttons = Array.isArray(actions) ? actions.filter((item): item is string => typeof item === "string").slice(0, 3).map((text) => ({ type: "button" as const, text: text.slice(0, 40) })) : [];
+      const banner = new Notification({ title: title.slice(0, 120), body: body.slice(0, 240), actions: buttons, hasReply: typeof reply === "string", replyPlaceholder: typeof reply === "string" ? reply.slice(0, 60) : undefined });
+      if (typeof key === "string") {
+        const answered = (detail: { index?: number; text?: string }) => { notifications.delete(banner); emit("demesne:desktop-action", { action: "notify-answer", key, ...detail }); };
+        banner.on("action", (_event, index) => answered({ index }));
+        banner.on("reply", (_event, text) => answered({ text }));
+      }
       notifications.add(banner);
       banner.once("close", () => notifications.delete(banner));
       banner.once("failed", (_event, error) => { notifications.delete(banner); log(`Notification failed: ${error}`); });

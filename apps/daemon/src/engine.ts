@@ -8,6 +8,7 @@ import { DemesneStore, NotFoundError, type SnapshotFile } from "@demesne/storage
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import type { TurnInference } from "./processor.ts";
+import { askName } from "./chat-name.ts";
 import { providerStreamLimits } from "./provider-limits.ts";
 import { recordedToolChanges } from "./tool-change-preview.ts";
 import { PermissionBroker } from "./permissions.ts";
@@ -62,6 +63,9 @@ interface AgentEngineOptions extends AgentConfig {
   providerEventLimit?: number;
   /// Another configured model's call, for sub-agents on `subagentModel`.
   inferenceFor?: (model: string, thinkingEnabled: boolean | undefined) => TurnInference;
+  /// Name a chat from its first answer (chat-name.ts). Off in tests, whose
+  /// scripted processors would hand the naming call a turn's next reply.
+  nameChats?: boolean;
   /// Models a sub-agent may be asked to run on, offered to the agent by name.
   subagentModels?: () => SubagentModel[];
   /// The model's own presets and compositions, per session.
@@ -168,6 +172,7 @@ export class AgentEngine {
     this.running.add(turnId);
     try {
       await this.runInference(turnId, inference, signal, used);
+      if (sessionId) void this.nameChat(turnId, sessionId, inference).catch(() => {});
     } finally {
       // Words that arrived too late stay with the window, which sends them next.
       this.running.delete(turnId);
@@ -176,6 +181,24 @@ export class AgentEngine {
       if (late.length && sessionId) this.options.lateAnswers?.(sessionId, turnId, late.map((steer) => steer.text));
       if (sessionId) for (const item of used) await item.release?.(sessionId);
     }
+  }
+
+  /// After a chat's first turn, its model names it in a few words (chat-name.ts):
+  /// only chats a person is in, only once, and never over a name given meanwhile.
+  private async nameChat(turnId: string, sessionId: string, inference: TurnInference) {
+    if (!this.options.nameChats) return;
+    const turn = this.store.getTurn(turnId), session = this.store.getSession(sessionId);
+    if (!turn || !session || turn.status !== "completed" || turn.kind || turn.fromDrive || turn.fromRoutine || turn.permissionMode !== "ask") return;
+    if (this.options.assistantChat?.(sessionId) || session.turns.filter((item) => !item.kind).length !== 1) return;
+    const answered = this.store.getModelContextTranscript(sessionId).filter((item) => item.turnId === turnId && item.message.role === "assistant")
+      .map((item) => typeof item.message.content === "string" ? item.message.content : "").filter(Boolean).at(-1) ?? "";
+    const before = session.title;
+    let namer = inference;
+    if (inference.thinkingEnabled !== false && this.options.inferenceFor) try { namer = this.options.inferenceFor(inference.modelId, false); } catch { /* its own call names it */ }
+    const lease = await this.scheduler.for(namer.providerId).acquire(turnId, new AbortController().signal);
+    let name: string | null;
+    try { name = await askName(namer, turn.content, answered); } finally { lease.release(); }
+    if (name && name !== before && this.store.getSession(sessionId)?.title === before) this.store.renameSession(sessionId, name);
   }
 
   private async runInference(turnId: string, initial: TurnInference, signal: AbortSignal, used = new Set<TurnInference>()): Promise<void> {

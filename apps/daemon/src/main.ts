@@ -80,6 +80,7 @@ try {
   app = createDaemonApp({
     databasePath: join(dataDirectory, "demesne.sqlite"),
     processor,
+    nameChats: true,
     localProviders: [config.provider, ...Object.values(config.additionalProviders ?? {})].filter(isLocalProvider)
       .map((item) => item.id ?? "openai-compatible"),
     reloadProviders: () => reloadProviders(processor),

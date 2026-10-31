@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
+- A Foundry page that names its motions (`demesne.motion("Arrive", timeline)`, in the kit's anime.js) gets one thin line under the page in the pane: play or pause, a scrubber, the motions by name, half speed, Replay. The frame and the pane talk by postMessage; a page without named motions shows no line.
 - Foundry pages start from a kit served from inside the app (`foundry://kit/base.css`: Inter, one ink and its tints, hairlines, radii, light and dark, buttons, inputs, tables, cards; `foundry://kit/anime.js` for motion), and the design brief tells the model to lean on it: content, layout and its own accent, little CSS of its own. Pages read as one hand and cost fewer tokens to write; Export inlines the kit so the file stands alone.
 - Foundry costs a chat less: the tools' text is a third shorter and no longer repeated in the system prompt, and a page's source leaves the history once the turn that made or read it is over (a one-line stub names the artifact; `foundry_read` brings the text back). A 20 KB page used to ride along with every request for the rest of its chat.
 - Home's cherry blossom is a still anime-style drawing: two boughs with cel-shaded blossoms, a moon and stars at night, a blue sky with clouds by day. The swaying photographed boughs and falling petals are gone, and with them the start screen's constant redrawing.

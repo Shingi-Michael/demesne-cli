@@ -132,7 +132,8 @@ test("the kit is served at foundry://kit/<file>, only the files it has, and inli
   expect(foundryKitFile("foundry://kit/base.css")).toBe("base.css");
   expect(foundryKitFile("foundry://kit/anime.js")).toBe("anime.js");
   expect(foundryKitFile("foundry://kit/fonts/inter-latin-500-normal.woff2")).toBe("fonts/inter-latin-500-normal.woff2");
-  expect(FOUNDRY_KIT["anime.js"]!.path).toBe("vendor/anime.umd.min.js");
+  expect(FOUNDRY_KIT["anime.js"]).toEqual({ path: "vendor/anime.umd.min.js", type: "application/javascript; charset=utf-8", then: "kit/motion.js" });
+  expect(FOUNDRY_KIT["base.css"]!.then).toBeUndefined();
   expect(foundryKitFile("foundry://kit/../index.html")).toBeNull();
   expect(foundryKitFile("foundry://kit/other.css")).toBeNull();
   expect(foundryKitFile("foundry://artifact/base.css")).toBeNull();

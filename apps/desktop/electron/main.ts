@@ -151,7 +151,7 @@ void app.whenReady().then(async () => {
   // anime.js (bundled with the app, never fetched) and the assembly script,
   // and a revision gets the version before it to find what changed.
   let assembleLibrary: string | undefined;
-  const kitFile = (name: string) => readFileSync(join(base, "ui", FOUNDRY_KIT[name]!.path));
+  const kitFile = (name: string) => { const file = FOUNDRY_KIT[name]!; return Buffer.concat([readFileSync(join(base, "ui", file.path)), ...(file.then ? [Buffer.from("\n"), readFileSync(join(base, "ui", file.then))] : [])]); };
   await session.protocol.handle("foundry", async request => {
     // The kit: the frames' origins are opaque, so the fonts need the CORS header.
     const kit = foundryKitFile(request.url);

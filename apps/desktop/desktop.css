@@ -101,6 +101,8 @@ body.desktop {
   --ok: var(--citron);
   --bad: var(--signal);
   --warn: var(--thinking);
+  /* Cherry Blossom: a soft pink beside the blue. Blue stays on what you press; pink marks where you are. */
+  --blossom: #f2b6c8; --dusk: linear-gradient(135deg, var(--acc), var(--blossom)); --on-dusk: #14151a;
   --acc-soft: color-mix(in srgb, var(--acc) 12%, transparent); --ok-soft: color-mix(in srgb, var(--ok) 12%, transparent); --bad-soft: color-mix(in srgb, var(--bad) 12%, transparent); --warn-soft: color-mix(in srgb, var(--warn) 13%, transparent);
 }
 /* Demesne's own desktop appearance: graphite, with one blue accent. The
@@ -130,6 +132,7 @@ html[data-theme="demesne-light"] body.desktop {
   --t1: #1b1c1f; --t2: #4a4e55; --t3: #7a7f86; --t4: #a3a7ad;
   --strong: #1b1c1f; --paper: #2a2d33; --secondary: #4a4e55; --muted: #7a7f86;
   --acc: #2f6fd0; --ok: #2f9e5e; --bad: #d64e4e; --warn: #b87a12;
+  --blossom: #c76a8c; --on-dusk: #ffffff;
   --acc-soft: rgba(47, 111, 208, 0.1); --ok-soft: rgba(47, 158, 94, 0.12); --bad-soft: rgba(214, 78, 78, 0.1); --warn-soft: rgba(184, 122, 18, 0.12);
   --electric: #2f6fd0; --electricBright: #1f63c9; --citron: #2f9e5e; --signal: #d64e4e; --thinking: #b87a12; --inspect: #2f6fd0; --execute: #b87a12;
   --accentSurface: #e4ecf8; --menuSelection: #f3f2ef; --tileSelection: #e4ecf8; --thinkingSurface: #f5efe2; --errorSurface: #f8e8e8;

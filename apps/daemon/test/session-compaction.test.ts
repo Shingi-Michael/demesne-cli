@@ -15,6 +15,9 @@ const summary = JSON.stringify({ schemaVersion: 1, goal: "Improve the parser", c
   constraints: [{ id: "REQ-01", text: "Preserve Unicode support" }], decisions: [{ id: "DEC-01", status: "active", text: "Use a shared lexer", supersedes: [] }],
   files: [{ path: "src/parser.ts", facts: ["Parser delegates to the lexer"], changes: [] }], validation: [], unresolved: [{ id: "OPEN-01", text: "Run parser tests" }] });
 
+/// Priorities send /compact to the model; without them it stitches the turns' notes.
+const SUMMARIZE = { instructions: "Keep the parser work" };
+
 async function fixture(run: (value: {
   client: DemesneClient; id: string; initialMessages: unknown[]; originalTurns: string[]; db: Database;
   requests: ProviderMessage[][]; consume: (submitted: SubmitTurnResponse) => Promise<EventEnvelope[]>;
@@ -126,10 +129,10 @@ test("manual compaction preserves the journal and tool pairs, persists a summary
 
 test("repeat compaction merges the checkpoint and only summarizes newly old turns", async () => {
   await fixture(async ({ client, id, requests, consume }) => {
-    await consume(await client.compactSession(id));
+    await consume(await client.compactSession(id, SUMMARIZE));
     const first = (await client.getSessionState(id)).checkpoint!;
     await consume(await client.submitTurn(id, { content: "One more task" }));
-    const events = await consume(await client.compactSession(id));
+    const events = await consume(await client.compactSession(id, SUMMARIZE));
     expect(events.at(-1)?.type).toBe("turn.completed");
     const second = (await client.getSessionState(id)).checkpoint!;
     expect(second.id).not.toBe(first.id);
@@ -144,7 +147,7 @@ test("repeat compaction merges the checkpoint and only summarizes newly old turn
 
 test("compaction summarizes stopped findings and can retain an interrupted turn at the checkpoint boundary", async () => {
   await fixture(async ({ client, id, requests, consume, restart }) => {
-    expect((await consume(await client.compactSession(id))).at(-1)?.type).toBe("turn.completed");
+    expect((await consume(await client.compactSession(id, SUMMARIZE))).at(-1)?.type).toBe("turn.completed");
     expect(requests[0]?.[1]?.content).toContain("Historical turn ended interrupted");
     expect(requests[0]?.[1]?.content).toContain("OLD_SOURCE_0");
     const checkpoint = (await client.getSessionState(id)).checkpoint!;
@@ -160,7 +163,7 @@ test("compaction summarizes stopped findings and can retain an interrupted turn 
 
 test.each(["malformed", "truncated", "empty", "tools"] as const)("%s summary failure never changes the active context", async (failure) => {
   await fixture(async ({ client, id, db, consume, setStream }) => {
-    await consume(await client.compactSession(id));
+    await consume(await client.compactSession(id, SUMMARIZE));
     const previous = (await client.getSessionState(id)).checkpoint!;
     await consume(await client.submitTurn(id, { content: "Another task" }));
     setStream(async function* () {
@@ -168,7 +171,7 @@ test.each(["malformed", "truncated", "empty", "tools"] as const)("%s summary fai
       else if (failure !== "empty") yield { type: "text_delta", delta: failure === "malformed" ? "not JSON" : summary };
       yield { type: "finish", reason: failure === "truncated" ? "length" : "stop" };
     });
-    const events = await consume(await client.compactSession(id));
+    const events = await consume(await client.compactSession(id, SUMMARIZE));
     expect(events.at(-1)?.type).toBe("turn.failed");
     expect(events.at(-1)?.payload.message).toContain("Previous context remains active");
     expect(events.some((event) => event.type === "session.compacted" || event.type === "tool.call_requested")).toBe(false);
@@ -185,9 +188,9 @@ test("cancellation and busy-session checks leave the cursor unchanged and releas
       started();
       await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
     });
-    const submitted = await client.compactSession(id);
+    const submitted = await client.compactSession(id, SUMMARIZE);
     await ready;
-    await expect(client.compactSession(id)).rejects.toThrow("active turn");
+    await expect(client.compactSession(id, SUMMARIZE)).rejects.toThrow("active turn");
     await expect(client.submitTurn(id, { content: "Cannot interleave" })).rejects.toThrow("active turn");
     await client.cancelTurn(submitted.turn.id);
     expect((await consume(submitted)).at(-1)?.type).toBe("turn.cancelled");
@@ -211,7 +214,7 @@ test("short histories skip inference and invalid instructions do not create a tu
 
 test("a larger summary is not installed", async () => {
   await fixture(async ({ client, id, consume }) => {
-    const events = await consume(await client.compactSession(id));
+    const events = await consume(await client.compactSession(id, SUMMARIZE));
     expect(events.at(-1)?.type).toBe("turn.completed");
     const state = await client.getSessionState(id);
     expect(state.checkpoint).toBeNull();
@@ -221,7 +224,7 @@ test("a larger summary is not installed", async () => {
 
 test("oversized source messages use bounded rolling summaries instead of dropping source material", async () => {
   await fixture(async ({ client, id, requests, consume, db }) => {
-    const submitted = await client.compactSession(id);
+    const submitted = await client.compactSession(id, SUMMARIZE);
     const events = await consume(submitted);
     expect(events.at(-1)?.type).toBe("turn.completed");
     expect(requests.length).toBeGreaterThan(1);
@@ -236,7 +239,7 @@ test("oversized source messages use bounded rolling summaries instead of droppin
 
 test("splitting quote-heavy source makes progress without repeatedly escaping fragments", async () => {
   await fixture(async ({ client, id, requests, consume }) => {
-    expect((await consume(await client.compactSession(id))).at(-1)?.type).toBe("turn.completed");
+    expect((await consume(await client.compactSession(id, SUMMARIZE))).at(-1)?.type).toBe("turn.completed");
     expect(requests.length).toBeGreaterThan(2);
     expect(requests.length).toBeLessThan(32);
     expect((await client.getSessionState(id)).checkpoint).not.toBeNull();
@@ -245,7 +248,7 @@ test("splitting quote-heavy source makes progress without repeatedly escaping fr
 
 test.each(["partial", "full"] as const)("%s undo invalidates a checkpoint and restores annotated full history", async (mode) => {
   await fixture(async ({ client, id, originalTurns, requests, consume, restart, db }) => {
-    await consume(await client.compactSession(id));
+    await consume(await client.compactSession(id, SUMMARIZE));
     const checkpoint = (await client.getSessionState(id)).checkpoint!;
     expect(checkpoint).not.toBeNull();
     const reverted = await client.undo(id, { turnId: originalTurns[0], ...(mode === "partial" ? { paths: ["src/parser.ts"] } : {}) });
@@ -274,7 +277,7 @@ test("undo during summarization prevents committing a stale checkpoint", async (
       yield { type: "text_delta", delta: summary };
       yield { type: "finish", reason: "stop" };
     });
-    const submitted = await client.compactSession(id);
+    const submitted = await client.compactSession(id, SUMMARIZE);
     try {
       await ready;
       await client.undo(id, { turnId: originalTurns[0], paths: ["src/parser.ts"] });
@@ -294,7 +297,7 @@ test("a persistence failure rolls back the checkpoint, context cursor, and compl
     try {
       writer.run(`CREATE TRIGGER reject_compaction BEFORE INSERT ON events WHEN new.type = 'session.compacted'
         BEGIN SELECT RAISE(ABORT, 'Injected checkpoint failure'); END;`);
-      const submitted = await client.compactSession(id);
+      const submitted = await client.compactSession(id, SUMMARIZE);
       const events = await consume(submitted);
       expect(events.at(-1)?.type).toBe("turn.failed");
       expect(events.some((event) => event.type === "session.compacted" || event.type === "message.delta")).toBe(false);
@@ -313,7 +316,7 @@ test("shutdown cancels a summary without publishing a checkpoint", async () => {
     setStream(async function* (_messages, _tools, signal): AsyncGenerator<ProviderStreamEvent> {
       started(); await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
     });
-    await client.compactSession(id); await ready; await close(); await restart();
+    await client.compactSession(id, SUMMARIZE); await ready; await close(); await restart();
     expect((await client.getSessionState(id)).checkpoint).toBeNull();
   });
 });
@@ -449,10 +452,39 @@ test("the assistant's chat summarizes itself once a request fills three quarters
   }, { assistant: true });
 });
 
-test("other chats are only summarized when you ask", async () => {
-  await fixture(async ({ client, id, consume, setStream }) => {
-    setStream(usingTokens(30000));
+test("other chats compact themselves from notes, with no model call, once a request fills three quarters of the room", async () => {
+  await fixture(async ({ client, id, consume, setStream, requests }) => {
+    setStream(usingTokens(23000));
     await consume(await client.submitTurn(id, { content: "Keep going" }));
     expect((await settledTurns(client, id, 6)).map((turn) => turn.kind)).not.toContain("compaction");
+    setStream(usingTokens(24000));
+    await consume(await client.submitTurn(id, { content: "Never push to main. Keep going" }));
+    const before = requests.length;
+    const turns = await settledTurns(client, id, 8);
+    expect(turns.at(-1)).toMatchObject({ kind: "compaction", status: "completed", content: "/compact" });
+    expect(requests.length).toBe(before);
+    const checkpoint = (await client.getSessionState(id)).checkpoint!;
+    expect(checkpoint.notes).toHaveLength(5);
+    expect(checkpoint.notes![0]).toContain("You asked: Request 0: preserve Unicode support");
+    expect(checkpoint.summary).toContain("### Turn notes, oldest first");
+    expect(checkpoint.summary).not.toContain("OLD_SOURCE_0");
   });
+});
+
+test("past two fifths of the window the model writes a hidden note, kept for compaction and never shown", async () => {
+  await fixture(async ({ client, id, consume, setStream, requests, db }) => {
+    setStream(async function* () {
+      yield { type: "text_delta", delta: "Done.\n\n<turn-" };
+      yield { type: "text_delta", delta: "note>\nDecided: a shared lexer\nKeep: the port is 4317\n</turn-note>" };
+      yield { type: "finish", reason: "stop" };
+      yield { type: "usage", usage: { inputTokens: 9000, outputTokens: 40, totalTokens: 9040 } };
+    });
+    await consume(await client.submitTurn(id, { content: "Finish the parser" }));
+    expect(requests.at(-1)![0]?.content).toContain("<turn-note>");
+    const state = await client.getSessionState(id);
+    expect(state.session.turns.at(-1)?.responseText).toBe("Done.");
+    expect(state.latestProviderCall?.contextPlan?.parts?.keep).toEqual([]);
+    const stored = db.query("SELECT content FROM model_messages ORDER BY id DESC LIMIT 1").get() as { content: string };
+    expect(stored.content).toContain("Decided: a shared lexer");
+  }, { capacity: 16384 });
 });

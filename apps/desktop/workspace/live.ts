@@ -1074,10 +1074,16 @@ function contextHalf(c: ReturnType<typeof context>) {
   const biggest = parts?.largest.length
     ? `<div class="context-sub">Biggest in it</div><div class="context-big">${parts.largest.map((item) => `<span title="${h(item.label)}">${h(item.label)}</span><em>${tokensShort(item.tokens)}</em>`).join("")}</div>`
     : "";
+  // Compaction from notes (pass 114): the Keep list, then which turns are notes and which are whole.
+  const keep = parts?.keep?.length
+    ? `<div class="context-sub">Keep · ${parts.keep.length}</div><div class="context-keep">${parts.keep.slice(-6).map((line) => `<span>${h(line)}</span>`).join("")}${parts.keep.length > 6 ? `<em>and ${parts.keep.length - 6} earlier</em>` : ""}</div>` : "";
+  const noted = parts?.notedTurns ?? 0, whole = parts?.wholeTurns ?? 0;
+  const lane = noted
+    ? `<div class="context-sub">Turns · ${noted} ${noted === 1 ? "note" : "notes"}, ${whole} whole</div><div class="context-lane">${`<i class="note"></i>`.repeat(Math.min(noted, 40))}${"<i></i>".repeat(Math.min(whole, 20))}</div>` : "";
   return `<div class="context-head"><span>Context</span><span>${c.percentage}% · ${c.estimated ? "~" : ""}${tokensShort(used)} of ${capacity ? tokensShort(capacity) : "—"}</span></div>` +
     (contextWords(c) ? `<p class="context-say">${contextWords(c)}</p>` : "") +
     `<div class="context-bar">${shown.map((piece) => `<i class="tone-${piece.tone}" style="width:${share(piece.tokens).toFixed(2)}%"></i>`).join("")}</div>` +
-    `<div class="context-legend">${shown.map((piece) => `<u class="tone-${piece.tone}"></u><span>${piece.name}</span><em>${tokensShort(piece.tokens)}</em>`).join("")}</div>` + biggest;
+    `<div class="context-legend">${shown.map((piece) => `<u class="tone-${piece.tone}"></u><span>${piece.name}</span><em>${tokensShort(piece.tokens)}</em>`).join("")}</div>` + keep + lane + biggest;
 }
 /// One sentence: room left in turns, and what Demesne does when it fills.
 function contextWords(c: ReturnType<typeof context>) {
@@ -1085,7 +1091,9 @@ function contextWords(c: ReturnType<typeof context>) {
   if (!plan || !c.fresh || !plan.maximumPlannedInputTokens || !c.capacity) return "";
   if (plan.budgetStatus !== "within_soft_limit") return "This chat is full enough that Demesne is shortening old command output to make room. Compacting starts it again from a summary.";
   const soft = Math.round((plan.maximumPlannedInputTokens / c.capacity) * 100);
-  const after = `${soft >= 95 ? "Near full" : `Past ${soft}%`}, Demesne shortens old command output first, and you can compact at any time.`;
+  const after = plan.parts?.keep
+    ? "Demesne compacts it by itself from each turn's note before it fills."
+    : `${soft >= 95 ? "Near full" : `Past ${soft}%`}, Demesne shortens old command output first, and you can compact at any time.`;
   const perTurn = plan.parts?.tokensPerTurn;
   if (!perTurn) return after;
   const turns = Math.floor((plan.maximumPlannedInputTokens - plan.estimatedInputTokens) / perTurn);

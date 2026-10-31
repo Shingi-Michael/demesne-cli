@@ -293,6 +293,11 @@ export interface ContextParts {
   toolOutputTokens: number;
   largest: { label: string; tokens: number }[];
   tokensPerTurn: number | null;
+  /// Compaction from notes: the Keep list, the older turns already
+  /// swapped for their notes, and the turns still whole.
+  keep?: string[];
+  notedTurns?: number;
+  wholeTurns?: number;
 }
 
 export interface ProviderCallSnapshot {
@@ -383,6 +388,9 @@ export interface SessionCheckpoint {
   beforeTokens: number;
   afterTokens: number;
   contextPlan: ContextPlan;
+  /// Set when the checkpoint was stitched from turn notes, not summarized.
+  keep?: string[];
+  notes?: string[];
 }
 
 export interface CompactSessionRequest {

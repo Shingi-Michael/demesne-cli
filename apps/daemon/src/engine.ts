@@ -29,6 +29,7 @@ import {
   planContextRequest,
   type ContextPlanner,
 } from "./context-planner.ts";
+import { keepLines, NOTE_INSTRUCTION, NoteFilter, NOTES_FROM, roughTokens } from "./turn-notes.ts";
 
 interface AssembledToolCall {
   id: string;
@@ -244,6 +245,15 @@ export class AgentEngine {
         FOUNDRY_TOOL_NAMES.has(definition.name) || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
     const checkpoint = themefy ? null : this.store.getSessionCheckpoint(session.id);
     const checkpointMessages: ProviderMessage[] = checkpoint ? [{ role: "assistant", content: checkpoint.summary }] : [];
+    // Past NOTES_FROM of the window the model ends each answer with a hidden
+    // note, so compacting later swaps old turns for notes with no model call.
+    const noting = !themefy && !assistant && Boolean(inference.contextCapacity)
+      && roughTokens([...checkpointMessages, ...history.flatMap((entry) => entry.messages)]) >= inference.contextCapacity! * NOTES_FROM;
+    const notesState = noting || checkpoint?.notes ? {
+      keep: keepLines(history.flatMap((entry) => entry.messages), checkpoint?.keep),
+      notedTurns: checkpoint?.notes?.length ?? 0,
+      wholeTurns: history.length,
+    } : null;
     let totalToolCalls = 0;
     let totalToolResultBytes = 0;
     let visibleCharacters = 0;
@@ -270,7 +280,7 @@ export class AgentEngine {
         planOnly: turn.planOnly, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),
         attended: turn.permissionMode === "ask" && !turn.fromDrive && !turn.fromRoutine, providerVision: this.options.providerVision, configured: this.configuredSystemPrompt, sessionContext: this.options.sessionContext?.(session.id) ?? undefined });
       const unplannedMessages: ProviderMessage[] = [
-        { role: "system", content: systemPrompt + (finalizing
+        { role: "system", content: systemPrompt + (noting ? NOTE_INSTRUCTION : "") + (finalizing
           ? `\n${budgetReason}. Tools are unavailable for this final status request. Report what was actually done, checks and their outcomes, and the specific next steps. Distinguish unfinished work from completed work. The user can send a follow-up to continue from this saved context.` : "") },
         ...checkpointMessages,
         ...historyMessages,
@@ -293,8 +303,10 @@ export class AgentEngine {
           || (inference.vision && attached.length)
           ? (inference.maxOutputTokens ?? 1536) + 4096 : inference.maxOutputTokens,
       });
+      if (notesState && contextPlan.parts) Object.assign(contextPlan.parts, notesState);
       const assembled = new Map<number, AssembledToolCall>();
       let roundText = "";
+      const noteFilter = new NoteFilter();
       let responses: import("@demesne/protocol").ResponsesState | undefined;
       let roundHasReasoning = false;
       let finishReason: string | undefined;
@@ -348,7 +360,8 @@ export class AgentEngine {
               visibleCharacters += event.delta.length;
               if (visibleCharacters > streamLimits.turnCharacterLimit) throw new Error("Model output exceeded the turn limit");
               roundText += event.delta;
-              this.store.appendMessageDelta(turnId, event.delta);
+              const visible = noteFilter.push(event.delta);
+              if (visible) this.store.appendMessageDelta(turnId, visible);
             } else if (event.type === "usage") {
               usageEventCount += 1;
               if (usageEventCount > 1) throw new Error("Provider stream emitted multiple usage events");
@@ -373,6 +386,8 @@ export class AgentEngine {
             }
           }
           for (const call of assembled.values()) this.flushToolDraft(turnId, call, true);
+          const held = noteFilter.end();
+          if (held) this.store.appendMessageDelta(turnId, held);
           // A transport completion marker does not mean the model finished its
           // answer. Validate before settling the call or executing any tools.
           assertModelResponseComplete({ finishReason, outputTokens, maxOutputTokens: inference.maxOutputTokens,

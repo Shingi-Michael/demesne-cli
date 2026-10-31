@@ -544,24 +544,72 @@
   white-space: pre;
   color: var(--paper);
 }
+/* Tables, pass 119 A (Quiet lines): plain-case headers, one fine line under
+   each row, no frame. One line per row; a wide table scrolls sideways inside
+   the answer, and its right edge fades while there is more to see. */
+.markdown > .md-table { margin: 0 0 10px; }
+.md-table { position: relative; min-width: 0; }
+.md-scroll {
+  overflow-x: auto;
+  scrollbar-width: none;
+  --md-edge: 0px;
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--md-edge)), transparent);
+  animation: md-edge linear both;
+  animation-timeline: scroll(self inline);
+}
+.md-scroll::-webkit-scrollbar { display: none; }
+@property --md-edge { syntax: "<length>"; inherits: false; initial-value: 0px; }
+/* Only a table that overflows has a scroll timeline, so only it fades. */
+@keyframes md-edge { from { --md-edge: 36px; } 96% { --md-edge: 36px; } to { --md-edge: 0px; } }
 .markdown table {
-  border-collapse: collapse;
-  min-width: 70%;
-  font-size: 13px;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 100%;
+  font-size: 13.5px;
   line-height: 20px;
 }
-.markdown th {
-  text-transform: uppercase;
-  font-weight: 400;
-  font-size: 12px;
-  color: var(--muted);
-  border-bottom: 1px solid var(--rule);
-}
-.markdown td,
-.markdown th {
+.markdown th,
+.markdown td {
   text-align: left;
-  padding: 3px 12px 3px 0;
+  white-space: nowrap;
+  padding: 8px 18px 8px 0;
+  border-bottom: 1px solid var(--hair, color-mix(in srgb, var(--paper) 8%, transparent));
 }
+.markdown th {
+  padding-top: 0;
+  padding-bottom: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t3, var(--muted));
+  border-bottom-color: var(--hair2, color-mix(in srgb, var(--paper) 13%, transparent));
+}
+.markdown td { color: var(--t1, var(--paper)); }
+.markdown tbody tr:last-child td { border-bottom: 0; }
+.markdown th:last-child,
+.markdown td:last-child { padding-right: 0; }
+.markdown tbody tr:hover td { background: var(--tone, color-mix(in srgb, var(--paper) 3.5%, transparent)); }
+.markdown .md-right { text-align: right; font-variant-numeric: tabular-nums; }
+.markdown .md-center { text-align: center; }
+.md-table-tools {
+  position: absolute;
+  top: -26px;
+  right: 0;
+  z-index: 1;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+.md-table:hover .md-table-tools,
+.md-table:focus-within .md-table-tools { opacity: 1; pointer-events: auto; }
+.md-table-tools button {
+  padding: 2px 7px;
+  border-radius: 6px;
+  color: var(--t3, var(--muted));
+  font-size: 12px;
+}
+.md-table-tools button:hover { color: var(--t1, var(--paper)); background: var(--tone2, color-mix(in srgb, var(--paper) 7%, transparent)); }
 .markdown blockquote {
   border-left: 2px solid var(--borderBright);
   padding: 6px 12px;

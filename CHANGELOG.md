@@ -23,6 +23,8 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Fixed
 
+- A chat whose project folder was removed (a deleted worktree) no longer makes the daemon throw ENOENT when the window lists its files; the daemon answers "The project folder is gone".
+- The daemon log no longer grows without end: past 5 MB it moves to `daemon.log.1` (replacing the one before) when a daemon starts. One Mac's had reached 28 MB.
 - The green button goes straight to full screen on the Mac: the window no longer grows, snaps back and grows again.
 - The buttons drawn in Mac full screen work with the sidebar open too: its drag region was still taking their clicks.
 - The assistant's Windows tasks and the window no longer fight over the daemon. `install.ps1` writes `daemon.managed` in the data directory, naming the task as the daemon's owner; while it exists the window waits for that daemon instead of starting one of its own, whatever `[daemon] auto_start` says; **Start daemon** says who runs it, and Settings › **Restart the daemon** stops it and waits for the task to bring it back. Stopping a task now stops its program too (`keep-running.ps1` ties the two with a Windows job object), and a copy left from before is stopped the next time the task starts, instead of the new daemon failing on "data directory is already in use" every five seconds.

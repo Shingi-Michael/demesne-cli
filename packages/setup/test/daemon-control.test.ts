@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   daemonHealth,
   resolveDaemonCommand,
+  rotateLog,
   startDaemon,
   stopDaemon,
   type DaemonControlDependencies,
@@ -280,4 +281,19 @@ describe("stopDaemon", () => {
     expect(result.stopped).toBe(false);
     expect(result.message).toContain("not running");
   });
+});
+
+test("a daemon log past its limit moves to daemon.log.1 when a daemon starts, replacing the one before", () => {
+  const dir = mkdtempSync(join(tmpdir(), "demesne-log-"));
+  const log = join(dir, "daemon.log");
+  rotateLog(log, 10);
+  expect(existsSync(`${log}.1`)).toBe(false);
+  writeFileSync(log, "short");
+  rotateLog(log, 10);
+  expect(readFileSync(log, "utf8")).toBe("short");
+  writeFileSync(`${log}.1`, "older");
+  writeFileSync(log, "a much longer log");
+  rotateLog(log, 10);
+  expect(existsSync(log)).toBe(false);
+  expect(readFileSync(`${log}.1`, "utf8")).toBe("a much longer log");
 });

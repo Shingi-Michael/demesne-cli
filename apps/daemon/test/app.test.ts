@@ -1693,6 +1693,13 @@ describe("Demesne daemon", () => {
     });
     const listing = await jsonRequest<WorkspaceFilesResponse>(running.url, `/v1/sessions/${created.session.id}/files`);
     expect(listing.files).toEqual(["src/main.ts"]);
+    // The folder removed (a deleted worktree): the listing says so instead of throwing.
+    rmSync(workspace, { recursive: true, force: true });
+    for (const query of ["", "?details=1"]) {
+      const gone = await fetch(`${running.url}/v1/sessions/${created.session.id}/files${query}`);
+      expect(gone.status).toBe(410);
+      expect(((await gone.json()) as { error: { code: string } }).error.code).toBe("workspace_missing");
+    }
   });
 
   test("persisted allowlist rules skip the permission prompt", async () => {

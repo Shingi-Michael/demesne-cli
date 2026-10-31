@@ -1303,6 +1303,8 @@ export function createDaemonApp(options: {
         const session = store.getSession(path[2]!);
         if (!session) return apiError("not_found", "Session not found", 404);
         if (!session.workspace) return apiError("invalid_state", "Session has no workspace", 409);
+        // A chat whose folder was removed (a deleted worktree) says so instead of throwing ENOENT.
+        if (!existsSync(session.workspace.root)) return apiError("workspace_missing", "The project folder is gone", 410);
         if (url.searchParams.get("details") === "1") return json({ entries: workspaceFileInfo(session.workspace.root) });
         return json({ files: listWorkspaceFiles(session.workspace.root) });
       }

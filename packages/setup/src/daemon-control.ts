@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /// Daemon lifecycle management for the desktop host: health probes, starting a detached
@@ -135,6 +135,13 @@ export function managedDaemonMessage(dataDirectory: string, by: string): string 
     + `If it stays down, start that task again; remove ${join(dataDirectory, MANAGED_DAEMON_FILE)} if it's gone for good.`;
 }
 
+/// The daemon log past this size moves to daemon.log.1 (replacing the one
+/// before) when a daemon starts, so it can never grow without end.
+export const DAEMON_LOG_LIMIT = 5 * 1024 * 1024;
+export function rotateLog(path: string, limit = DAEMON_LOG_LIMIT) {
+  try { if (statSync(path).size > limit) renameSync(path, `${path}.1`); } catch { /* No log yet. */ }
+}
+
 export async function startDaemon(
   deps: DaemonControlDependencies,
   options: { timeoutMs?: number } = {},
@@ -170,6 +177,7 @@ export async function startDaemon(
 
   const logPath = join(deps.dataDirectory, "daemon.log");
   mkdirSync(deps.dataDirectory, { recursive: true, mode: 0o700 });
+  rotateLog(logPath);
   const logFd = openSync(logPath, "a", 0o600);
   let child: SpawnedDaemon;
   try {

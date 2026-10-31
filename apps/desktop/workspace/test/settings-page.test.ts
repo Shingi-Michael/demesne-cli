@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { glassAlphas, GLASS_DEFAULT, homeWords, notifyKinds, parseNumber, ruleWords, settingsNav, settingsPage, settingsSearch, shortNumber, SETTINGS_ORDER, type SettingsInfo, type SettingsView } from "../settings-page.ts";
+import { ruleGroups, glassAlphas, GLASS_DEFAULT, homeWords, notifyKinds, parseNumber, ruleWords, settingsNav, settingsPage, settingsSearch, shortNumber, SETTINGS_ORDER, type SettingsInfo, type SettingsView } from "../settings-page.ts";
 
 const info: SettingsInfo = {
   home: "/Users/mike",
@@ -80,24 +80,34 @@ test("every section draws, and the list has fourteen with Overview first", () =>
 
 test("permissions list the rules, the trusted folders and the score, kept short", () => {
   const html = settingsPage(view({ section: "permissions" }));
-  expect(html).toContain("<code>bun test</code>");
+  expect(html).toContain(">bun test</code>");
   expect(html).toContain("in the project&#39;s config");
   // Only your own rule can be taken back; the project's has no ×.
   expect(html.match(/Ask again about/g)).toHaveLength(1);
   expect(html).toContain('pm-mode on" aria-pressed="true"');
   expect(html).toContain("<code title=\"/Users/mike/projects/demesne-cli\">~/projects/demesne-cli</code>");
   expect(html).toContain("asked you 12 times this week");
-  // Many rules and folders fold after a few.
-  const many = { ...info, allow: Array.from({ length: 30 }, (_, i) => ({ rule: `run_command:cmd-${i}`, mine: true })), trusted: Array.from({ length: 9 }, (_, i) => `/Users/mike/p${i}`) };
+  // Many rules sit in groups by program, one short line each; a group unfolds its rules.
+  const long682 = `grep -rn ${"apps/cli/src/main.ts ".repeat(32)}`.trim();
+  const many = { ...info, allow: [
+    ...Array.from({ length: 15 }, (_, i) => ({ rule: `run_command:git log -${i}`, mine: true })),
+    ...Array.from({ length: 11 }, (_, i) => ({ rule: `run_command:grep -n x${i} apps/cli/src/main.ts`, mine: true })),
+    { rule: `run_command:${long682}`, mine: true }, { rule: "run_command:pwd", mine: true },
+    { rule: "edit_file:apps/desktop", mine: true }, { rule: "edit_file:.github/workflows", mine: true },
+  ], trusted: Array.from({ length: 9 }, (_, i) => `/Users/mike/p${i}`) };
+  expect(ruleGroups(many.allow).map((group) => [group.head, group.rules.length])).toEqual([["git", 15], ["grep", 12], ["edits", 2], ["pwd", 1]]);
   const short = settingsPage(view({ section: "permissions", info: many }));
-  expect(short.match(/class="pm-chip"/g)).toHaveLength(12);
-  expect(short).toContain("+18 more");
+  expect(short.match(/class="pm-chip pm-group/g)).toHaveLength(3);
+  expect(short).toContain("<code>git</code><small>15</small>");
+  expect(short).toContain(">pwd</code>");
+  expect(short).not.toContain("log -14");
   expect(short.match(/class="pm-folder"/g)).toHaveLength(4);
   expect(short).toContain("Show all 9");
-  const long = settingsPage(view({ section: "permissions", info: many, fold: "rules" }));
-  expect(long.match(/class="pm-chip"/g)).toHaveLength(30);
+  const open = settingsPage(view({ section: "permissions", info: many, fold: "rules:grep" }));
+  expect(open.match(/class="pm-rule"/g)).toHaveLength(12);
+  expect(open).toContain('aria-expanded="true"');
   // Search still finds a rule.
-  expect(settingsSearch(view({ query: "cmd-29", info: many })).found.map(({ page }) => page.id)).toEqual(["permissions"]);
+  expect(settingsSearch(view({ query: "log -14", info: many })).found.map(({ page }) => page.id)).toEqual(["permissions"]);
 });
 
 test("a setting the daemon reads at start says so until it restarts", () => {

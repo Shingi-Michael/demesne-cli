@@ -1231,8 +1231,15 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .pm-folder code { overflow: hidden; color: var(--t1); font: 11.5px "JetBrains Mono", ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .pm-more-row { color: var(--t3); font-size: 12px; }
 .pm-more-row:hover { color: var(--t1); }
-.pm-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px 0 8px; border-radius: 7px; box-shadow: inset 0 0 0 1px var(--hair2); }
-.pm-chip code { font: 11.5px "JetBrains Mono", ui-monospace, monospace; color: var(--t1); }
+.pm-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; height: 26px; padding: 0 4px 0 8px; border-radius: 7px; box-shadow: inset 0 0 0 1px var(--hair2); }
+.pm-chip code, .pm-rule code { min-width: 0; overflow: hidden; font: 11.5px "JetBrains Mono", ui-monospace, monospace; color: var(--t1); text-overflow: ellipsis; white-space: nowrap; }
+.pm-chip.pm-group { padding-right: 8px; cursor: pointer; }
+.pm-chip.pm-group:hover, .pm-chip.pm-group.on { background: var(--tone2); }
+.pm-rules { margin-top: 8px; max-height: 260px; overflow-y: auto; }
+.pm-rule { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 32px; padding: 0 6px 0 12px; box-shadow: inset 0 -1px 0 var(--hair); }
+.pm-rule small { color: var(--t4); font-size: 11px; }
+.pm-rule button { flex: none; width: 18px; height: 18px; border-radius: 5px; color: var(--t3); font-size: 13px; line-height: 1; }
+.pm-rule button:hover { background: var(--tone2); color: var(--t1); }
 .pm-chip small { color: var(--t4); font-size: 11px; padding-right: 4px; }
 .pm-chip button { width: 18px; height: 18px; border-radius: 5px; color: var(--t3); font-size: 13px; line-height: 1; }
 .pm-chip button:hover { background: var(--tone2); color: var(--t1); }

@@ -40,7 +40,7 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 #sidebar-sessions { min-height: 0; }
 .sidebar-session { display: flex; align-items: center; gap: 11px; width: 100%; height: 32px; padding: 0 10px; border-radius: 8px; color: var(--t2); text-align: left; font-size: 13.5px; white-space: nowrap; }
 /* Hover and the open chat draw a hairline outline; the row keeps its background. */
-.sidebar-session:hover { box-shadow: inset 0 0 0 1px var(--hair); }
+.sidebar-session:hover, .sidebar-item:hover > .sidebar-session { box-shadow: inset 0 0 0 1px var(--hair); }
 .sidebar-session.selected { box-shadow: inset 0 0 0 1px var(--hair); color: var(--t1); }
 /* Each state has its own shape, not only its own colour: a ring needs you,
    a filled dot is a new reply, a spinner works, a cross failed. A settled

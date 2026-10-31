@@ -870,26 +870,41 @@ async function showGlance(row: HTMLElement) {
   }
   row.setAttribute("aria-describedby", "sidebar-glance");
 }
-document.getElementById("desktop-sidebar")?.addEventListener("pointerover", (event) => {
-  const row = (event.target as Element).closest<HTMLElement>(".sidebar-session[data-updated]");
+// A click puts the card away, and it stays away for that chat until the
+// pointer goes to another one (the row is redrawn under it after a click).
+let glanceQuiet = "";
+const glanceId = (row: HTMLElement | null) => row ? String(JSON.parse(row.dataset.args ?? "{}").id ?? "") : "";
+function glanceOver(row: HTMLElement | null) {
   if (row === glanceRow) return;
+  const id = glanceId(row);
+  // The same chat redrawn: carry on with the new row, card and all.
+  if (row && glanceRow && !glanceRow.isConnected && id === glanceId(glanceRow)) {
+    glanceRow = row;
+    if (!document.getElementById("sidebar-glance")) { clearTimeout(glanceTimer); glanceTimer = setTimeout(() => void showGlance(row), 450); }
+    return;
+  }
   hideGlance();
-  if (!row) return;
+  if (id !== glanceQuiet) glanceQuiet = "";
+  if (!row || id === glanceQuiet) return;
   glanceRow = row;
   glanceTimer = setTimeout(() => void showGlance(row), 450);
-});
-document.getElementById("desktop-sidebar")?.addEventListener("pointerleave", hideGlance);
+}
+function glanceDown(event: PointerEvent) {
+  const row = (event.target as Element).closest<HTMLElement>(".sidebar-item, .bar-tab")?.querySelector<HTMLElement>("[data-updated]") ?? null;
+  hideGlance();
+  glanceQuiet = glanceId(row);
+}
+// A row's Pin, Archive and bell belong to the row, so pointing at them keeps its card.
+document.getElementById("desktop-sidebar")?.addEventListener("pointerover", (event) =>
+  glanceOver((event.target as Element).closest<HTMLElement>(".sidebar-item")?.querySelector<HTMLElement>(".sidebar-session[data-updated]") ?? null));
+document.getElementById("desktop-sidebar")?.addEventListener("pointerleave", () => { hideGlance(); glanceQuiet = ""; });
+document.getElementById("desktop-sidebar")?.addEventListener("pointerdown", glanceDown);
 // The tabs glance the same way, except the one you're on.
 const tabStrip = document.getElementById("workspace-tabs");
-tabStrip?.addEventListener("pointerover", (event) => {
-  const row = (event.target as Element).closest<HTMLElement>(".bar-tab:not(.on) [data-updated]");
-  if (row === glanceRow) return;
-  hideGlance();
-  if (!row) return;
-  glanceRow = row;
-  glanceTimer = setTimeout(() => void showGlance(row), 450);
-});
-tabStrip?.addEventListener("pointerleave", hideGlance);
+tabStrip?.addEventListener("pointerover", (event) =>
+  glanceOver((event.target as Element).closest<HTMLElement>(".bar-tab:not(.on)")?.querySelector<HTMLElement>("[data-updated]") ?? null));
+tabStrip?.addEventListener("pointerleave", () => { hideGlance(); glanceQuiet = ""; });
+tabStrip?.addEventListener("pointerdown", glanceDown);
 // A middle click closes a tab.
 tabStrip?.addEventListener("auxclick", (event) => {
   const id = (event.target as Element).closest<HTMLElement>(".bar-tab[data-tab]")?.dataset.tab;

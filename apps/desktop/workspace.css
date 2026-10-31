@@ -1657,3 +1657,30 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop #overlay .menu-actions button.primary { background: var(--acc); color: var(--on-dusk); }
 .desktop #overlay .menu-actions button.danger { background: var(--bad-soft); color: var(--bad); }
 .desktop #overlay.sheet { max-height: min(560px, calc(100% - 120px)); }
+
+/* Context and your plan (pass 112 A): the context ring and the plan's mark
+   open one card, the chat's context explained on top, the plan's windows below. */
+.desktop #composer .composer-bar #composer-limit { cursor: pointer; }
+.desktop #composer .composer-bar #composer-limit:hover, .desktop #composer .composer-bar #composer-limit.on { background: var(--tone2); color: var(--t1); }
+.desktop #composer .composer-bar #composer-limit.on .ring { outline: none; }
+.desktop #context-card { width: 320px; }
+.desktop #context-card .context-head { font-size: 13px; color: var(--t1); font-weight: 600; margin-bottom: 6px; }
+.desktop #context-card .context-head span + span { font-weight: 400; color: var(--t3); font-size: 12px; }
+.desktop #context-card .context-say { margin: 0 0 10px; line-height: 18px; color: var(--t2); }
+.desktop #context-card .context-say b { font-weight: 500; color: var(--t1); }
+.desktop #context-card .context-bar { gap: 1px; }
+.desktop #context-card .tone-i { background: var(--blossom, #f2b6c8); }
+.desktop #context-card .tone-o { background: var(--ok); }
+.desktop #context-card .context-sub { margin: 12px 0 5px; font-size: 11.5px; color: var(--t4); }
+.desktop #context-card .context-big { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; }
+.desktop #context-card .context-big span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop #context-card :is(.context-big, .plan-window) em { font-style: normal; color: var(--t3); font-variant-numeric: tabular-nums; }
+.desktop #context-card .context-divider { height: 1px; background: var(--hair); margin: 12px -14px; }
+.desktop #context-card .plan-window { margin-top: 8px; }
+.desktop #context-card .plan-window > div:first-child { display: flex; justify-content: space-between; gap: 8px; }
+.desktop #context-card .plan-window .context-bar { height: 5px; margin: 4px 0 0; }
+.desktop #context-card .plan-window .context-bar i { background: var(--acc); }
+.desktop #context-card .plan-window.warn .context-bar i { background: var(--warn); }
+.desktop #context-card .plan-window.warn em { color: var(--warn); }
+.desktop #context-card .context-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 11px; padding-top: 9px; box-shadow: 0 -1px 0 var(--hair); font-size: 12px; color: var(--t3); }
+.desktop #context-card .context-foot .context-compact { margin: 0; }

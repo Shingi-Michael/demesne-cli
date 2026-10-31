@@ -1,4 +1,4 @@
-import type { ContextBudgetStatus, ContextCompactionAction, ContextPlan } from "@demesne/protocol";
+import type { ContextBudgetStatus, ContextCompactionAction, ContextParts, ContextPlan } from "@demesne/protocol";
 import type { ProviderMessage, ProviderToolDefinition } from "@demesne/providers";
 
 const ESTIMATOR_METHOD = "openai-json-utf8-bytes-divisor-3" as const;
@@ -31,10 +31,12 @@ export interface PlannedContextRequest {
 
 export type ContextPlanner = (input: ContextPlannerInput) => PlannedContextRequest;
 
-export const planRawContextRequest: ContextPlanner = (input) => planContextRequestInternal({
-  ...input,
-  historicalTurns: [],
-}, false, false);
+export const planRawContextRequest: ContextPlanner = (input) => {
+  const planned = planContextRequestInternal({ ...input, historicalTurns: [] }, false, false);
+  // Nothing is dropped here, but the card still wants the turns' sizes.
+  planned.plan.parts = contextParts(planned.messages, input.messages, input.historicalTurns, planned.plan.estimatedMessageTokens);
+  return planned;
+};
 
 // Measurement-only policy for comparing soft-boundary compaction with hard-boundary compaction.
 export const planDelayedHardContextRequest: ContextPlanner = (input) => {
@@ -296,8 +298,80 @@ function planContextRequestInternal(
       estimatedToolDefinitionTokens,
       budgetStatus: budgetStatus(estimatedInputTokens, capacityTokens, maximumPlannedInputTokens, hardInputLimitTokens),
       actions,
+      parts: contextParts(messages, input.messages, input.historicalTurns, estimatedMessageTokens),
     },
   };
+}
+
+const LARGEST_SHOWN = 3;
+const LARGEST_MINIMUM_TOKENS = 500;
+const TURNS_MEASURED = 3;
+
+/// Splits the planned messages into instructions, conversation and tool
+/// output by their serialized size, scaled to the message estimate so the
+/// parts add up to it. Turn sizes come from the messages before any
+/// compaction, whose indices the historical turns describe.
+export function contextParts(
+  planned: ProviderMessage[],
+  original: ProviderMessage[],
+  historicalTurns: HistoricalContextTurn[],
+  estimatedMessageTokens: number,
+): ContextParts {
+  const calls = new Map<string, { name: string; arguments: string }>();
+  for (const message of planned) {
+    if (message.role === "assistant") for (const call of message.toolCalls ?? []) calls.set(call.id, call);
+  }
+  const bytes = { instruction: 0, conversation: 0, tool: 0 };
+  const outputs: { label: string; bytes: number }[] = [];
+  for (const message of planned) {
+    const size = Buffer.byteLength(JSON.stringify(serializeMessage(message)), "utf8");
+    if (message.role === "system") bytes.instruction += size;
+    else if (message.role === "tool") {
+      bytes.tool += size;
+      outputs.push({ label: toolOutputLabel(calls.get(message.toolCallId)), bytes: size });
+    } else bytes.conversation += size;
+  }
+  const total = bytes.instruction + bytes.conversation + bytes.tool;
+  const tokens = (size: number) => (total ? Math.round((size / total) * estimatedMessageTokens) : 0);
+  const instructionTokens = tokens(bytes.instruction), toolOutputTokens = tokens(bytes.tool);
+  const turns = historicalTurns.slice(-TURNS_MEASURED).map((turn) =>
+    estimateMessageTokens(jsonArrayByteLength(original.slice(turn.startMessageIndex, turn.endMessageIndex)
+      .map((message) => JSON.stringify(serializeMessage(message)))), turn.endMessageIndex - turn.startMessageIndex)
+  );
+  return {
+    instructionTokens,
+    conversationTokens: Math.max(0, estimatedMessageTokens - instructionTokens - toolOutputTokens),
+    toolOutputTokens,
+    largest: outputs
+      .sort((a, b) => b.bytes - a.bytes)
+      .slice(0, LARGEST_SHOWN)
+      .map((output) => ({ label: output.label, tokens: tokens(output.bytes) }))
+      .filter((output) => output.tokens >= LARGEST_MINIMUM_TOKENS),
+    tokensPerTurn: turns.length ? Math.round(turns.reduce((sum, size) => sum + size, 0) / turns.length) : null,
+  };
+}
+
+/// "Read workspace/live.ts", "Ran bun test": a tool output named by its call.
+function toolOutputLabel(call: { name: string; arguments: string } | undefined): string {
+  if (!call) return "Tool output";
+  let input: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(call.arguments);
+    if (isRecord(parsed)) input = parsed;
+  } catch {
+    // A call whose arguments don't parse is still named by its tool.
+  }
+  const text = (value: unknown) => (typeof value === "string" ? value : "");
+  if (call.name === "read_file" && text(input.path)) return `Read ${text(input.path)}`;
+  if (call.name === "read_files" && Array.isArray(input.files)) return `Read ${input.files.length} files`;
+  if (call.name === "run_command" && text(input.command)) return `Ran ${text(input.command)}`;
+  if (text(input.path)) return `${humanToolName(call.name)} ${text(input.path)}`;
+  return humanToolName(call.name);
+}
+
+function humanToolName(name: string): string {
+  const words = name.replace(/^mcp__/, "").replace(/[_-]+/g, " ").trim();
+  return words ? words[0]!.toUpperCase() + words.slice(1) : "Tool output";
 }
 
 function collectFileReadOccurrences(

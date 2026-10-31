@@ -35,7 +35,7 @@ import { glanceHTML, type Glance } from "./glance.ts";
 import { backChoices, backState } from "./back-later.ts";
 import { agoWords, prHandable, prHandText, prStanding } from "./pr-row.ts";
 import { pullRequestNews, type SessionPullRequest } from "../../../packages/protocol/src/pull-requests.ts";
-import { PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, PLAN_LIMIT_SHOWN, planUsed, planWindows } from "@demesne/protocol";
+import { PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, planUsed, planWindows } from "@demesne/protocol";
 import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.ts";
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval, WorkspaceQuestion } from "./session-model.ts";
@@ -1008,27 +1008,74 @@ function worthCompacting(percentage: number | null | undefined) {
   return (percentage ?? 0) >= 50;
 }
 
+/// The context ring and the plan mark open one card (pass 112 A): what the
+/// chat holds and how long it lasts on top, your plan's windows below.
 function renderContextCard() {
-  const card = el("context-card"), ring = el("composer-context");
-  const c = context(), plan = state?.provider?.contextPlan;
-  const open = contextCardOpen && inSession() && c.percentage != null;
-  ring.setAttribute("aria-expanded", String(open));
-  ring.classList.toggle("on", open);
+  const card = el("context-card"), ring = el("composer-context"), mark = el("composer-limit");
+  const c = context(), limits = currentPlan();
+  const showContext = inSession() && c.percentage != null, showPlan = Boolean(limits && planWindows(limits).length);
+  const open = contextCardOpen && (showContext || showPlan);
+  for (const node of [ring, mark]) {
+    node.setAttribute("aria-expanded", String(open));
+    node.classList.toggle("on", open);
+  }
   card.hidden = !open;
   if (!open) return;
-  const capacity = c.capacity ?? 0;
-  const parts = plan
-    ? [
-        { name: "Conversation", tokens: plan.estimatedMessageTokens, tone: "a" },
-        { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" },
-        // What is kept free depends on the model; a new one's comes with its first request.
-        ...(c.fresh ? [{ name: "Kept free for replies", tokens: plan.reserves.totalTokens ?? 0, tone: "c" }] : []),
-      ]
-    : [{ name: "Conversation", tokens: c.used ?? 0, tone: "a" }];
-  const free = Math.max(0, capacity - parts.reduce((sum, part) => sum + part.tokens, 0));
-  const share = (tokens: number) => (capacity ? (tokens / capacity) * 100 : 0);
-  card.innerHTML = `<div class="context-head"><span>Context</span><span>${c.percentage}% · ${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span></div><div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div><div class="context-legend">${[...parts, { name: "Free", tokens: free, tone: "free" }].filter((part) => part.tokens > 0).map((part) => `<u class="tone-${part.tone}"></u><span>${part.name}</span><em>${tokensShort(part.tokens)}</em>`).join("")}</div>${worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : ""}`;
+  const compact = worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : "";
+  const halves = [showContext ? contextHalf(c) : "", showPlan ? planHalf(limits!) : ""].filter(Boolean);
+  const drive = showPlan ? `<span>${planUsed(limits!)!.window.usedPercent >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`}</span>` : "<span></span>";
+  card.innerHTML = halves.join('<div class="context-divider"></div>') + (showPlan || compact ? `<div class="context-foot">${drive}${compact}</div>` : "");
 }
+/// What is in the chat, in words first: how many more turns like the last
+/// few fit, then the parts and the biggest single things.
+function contextHalf(c: ReturnType<typeof context>) {
+  const plan = state?.provider?.contextPlan, parts = plan?.parts;
+  const capacity = c.capacity ?? 0, used = c.used ?? 0;
+  const kept = c.fresh ? plan?.reserves.totalTokens ?? 0 : 0;
+  const pieces = parts
+    ? [
+        { name: "Instructions", tokens: parts.instructionTokens, tone: "i" },
+        { name: "Tools", tokens: plan!.estimatedToolDefinitionTokens, tone: "b" },
+        { name: "Your messages and replies", tokens: parts.conversationTokens, tone: "a" },
+        { name: "Files and command output", tokens: parts.toolOutputTokens, tone: "o" },
+      ]
+    : plan
+      ? [{ name: "Conversation", tokens: plan.estimatedMessageTokens, tone: "a" }, { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" }]
+      : [{ name: "Conversation", tokens: used, tone: "a" }];
+  // What is kept free depends on the model; a new one's comes with its first request.
+  if (kept) pieces.push({ name: "Kept free for the answer", tokens: kept, tone: "c" });
+  const share = (tokens: number) => (capacity ? (tokens / capacity) * 100 : 0);
+  const shown = pieces.filter((piece) => piece.tokens > 0);
+  const biggest = parts?.largest.length
+    ? `<div class="context-sub">Biggest in it</div><div class="context-big">${parts.largest.map((item) => `<span title="${h(item.label)}">${h(item.label)}</span><em>${tokensShort(item.tokens)}</em>`).join("")}</div>`
+    : "";
+  return `<div class="context-head"><span>Context</span><span>${c.percentage}% · ${c.estimated ? "~" : ""}${tokensShort(used)} of ${capacity ? tokensShort(capacity) : "—"}</span></div>` +
+    (contextWords(c) ? `<p class="context-say">${contextWords(c)}</p>` : "") +
+    `<div class="context-bar">${shown.map((piece) => `<i class="tone-${piece.tone}" style="width:${share(piece.tokens).toFixed(2)}%"></i>`).join("")}</div>` +
+    `<div class="context-legend">${shown.map((piece) => `<u class="tone-${piece.tone}"></u><span>${piece.name}</span><em>${tokensShort(piece.tokens)}</em>`).join("")}</div>` + biggest;
+}
+/// One sentence: room left in turns, and what Demesne does when it fills.
+function contextWords(c: ReturnType<typeof context>) {
+  const plan = state?.provider?.contextPlan;
+  if (!plan || !c.fresh || !plan.maximumPlannedInputTokens || !c.capacity) return "";
+  if (plan.budgetStatus !== "within_soft_limit") return "This chat is full enough that Demesne is shortening old command output to make room. Compacting starts it again from a summary.";
+  const soft = Math.round((plan.maximumPlannedInputTokens / c.capacity) * 100);
+  const after = `${soft >= 95 ? "Near full" : `Past ${soft}%`}, Demesne shortens old command output first, and you can compact at any time.`;
+  const perTurn = plan.parts?.tokensPerTurn;
+  if (!perTurn) return after;
+  const turns = Math.floor((plan.maximumPlannedInputTokens - plan.estimatedInputTokens) / perTurn);
+  if (turns < 1) return `About one more turn like the last few fits. ${after}`;
+  return `About <b>${turns > 50 ? "50+" : turns} more turns</b> like the last few fit. ${after}`;
+}
+function planHalf(limits: PlanLimits) {
+  const rows = planWindows(limits).map(({ name, window }) => {
+    const used = Math.round(window.usedPercent);
+    return `<div class="plan-window${used >= PLAN_LIMIT_AMBER ? " warn" : ""}"><div><span>${name === "weekly" ? "This week" : `${name[0]!.toUpperCase()}${name.slice(1)} window`}</span><em>${used}% used${resetWords(window.resetsAt).replace(",", " ·")}</em></div><div class="context-bar"><i style="width:${used}%"></i></div></div>`;
+  });
+  return `<div class="context-head plan-head"><span>${h(planName(limits))}</span>${limits.plan ? `<span>${h(capital(limits.plan))}</span>` : ""}</div>${rows.join("")}`;
+}
+const capital = (word: string) => `${word[0]!.toUpperCase()}${word.slice(1)}`;
+const planName = (limits: PlanLimits) => `${capital(limits.provider)} plan`;
 /// The cards on the right: what this chat changed, its preview, its context
 /// once half full, the agents near its edits and the connectors it called.
 /// A card shows only while the chat uses it, and a chat that uses none has
@@ -1236,15 +1283,17 @@ function renderStatus() {
   renderTabs();
   el("header").innerHTML = inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : "";
 }
-/// Your plan's limit (pass 75 D): nothing under half; past it a small ring
-/// and the fuller window's percentage sit beside the model word, amber from
-/// 75%. Pointing at it gives the resets, the week, and Drive's rule.
+/// Your plan's mark (pass 112 A): a small ring and the fuller window's
+/// percentage beside the context ring, from 0%, amber from 75%. It opens
+/// the context card, whose lower half gives each window and its reset.
 let planLimits: PlanLimits[] = [], planLimitsAt = 0, planLimitsTurn: string | null = null, planLimitSignature = "";
 async function loadPlanLimits() {
   planLimitsAt = Date.now();
   try { planLimits = await api<PlanLimits[]>("plan-limits") ?? []; } catch { return; }
   renderPlanLimit();
+  renderContextCard();
 }
+const currentPlan = () => (state ? planLimits.find((item) => item.provider === state!.model.provider) : undefined);
 const resetWords = (at: string | null) => {
   if (!at) return "";
   const date = new Date(at), time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -1253,19 +1302,18 @@ const resetWords = (at: string | null) => {
 function renderPlanLimit() {
   const node = document.getElementById("composer-limit");
   if (!node || !state) return;
-  const limits = planLimits.find((item) => item.provider === state!.model.provider);
+  const limits = currentPlan();
   const top = limits && planUsed(limits);
   const used = top ? Math.round(top.window.usedPercent) : 0;
   const signature = JSON.stringify([limits, used, Math.floor(Date.now() / 60_000)]);
   if (signature === planLimitSignature) return;
   planLimitSignature = signature;
-  node.hidden = !top || used < PLAN_LIMIT_SHOWN;
-  if (node.hidden || !limits || !top) { node.innerHTML = ""; node.removeAttribute("title"); return; }
+  node.hidden = !top;
+  if (!limits || !top) { node.innerHTML = ""; node.removeAttribute("title"); return; }
   node.classList.toggle("warn", used >= PLAN_LIMIT_AMBER);
-  node.innerHTML = `<span class="ring" style="--usage:${used}%"></span>${used}% of your ${h(top.name)} limit`;
-  const plan = limits.plan ? `${limits.provider} ${limits.plan[0]!.toUpperCase()}${limits.plan.slice(1)}` : `${limits.provider} plan`;
-  const windows = planWindows(limits).map(({ name, window }) => `${name === "weekly" ? "This week" : `${name[0]!.toUpperCase()}${name.slice(1)} window`} ${Math.round(window.usedPercent)}%${resetWords(window.resetsAt)}`);
-  node.title = [plan, ...windows, used >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`].join("\n");
+  node.innerHTML = `<span class="ring" style="--usage:${used}%"></span>${used}%`;
+  node.title = `${planName(limits)}: ${used}% of your ${top.name} limit`;
+  node.setAttribute("aria-label", node.title);
 }
 // Each answer brings fresh numbers: look right after a turn ends, every 20
 // seconds while one works, and every minute otherwise.

@@ -1081,7 +1081,7 @@ try {
   await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
   // The ring unfolds the context breakdown above it until Esc.
   await page.locator("#composer-context").click();
-  await until(() => page.locator("#context-card").innerText().then(text => text.includes("Conversation") && text.includes("Tools") && text.includes(`${percentage}%`)), "context breakdown unfolds");
+  await until(() => page.locator("#context-card").innerText().then(text => text.includes("Instructions") && text.includes("Your messages and replies") && text.includes("Tools") && text.includes(`${percentage}%`)), "context breakdown unfolds");
   if (percentage < 50) assert.equal(await page.locator("#context-card .context-compact").count(), 0, "Compact now waits until the context is half full");
   await capture("04-context");
   await page.keyboard.press("Escape");
@@ -1143,13 +1143,21 @@ try {
   await open();
   await reopenChat(sessionId);
   await textIncludes(afterClose);
-  // Your plan's limit: past half, the fuller window sits beside the model word, amber from 75%.
+  // Your plan's mark: the fuller window beside the context ring, amber from 75%.
   const limitWord = page.locator("#composer-limit");
   await limitWord.waitFor();
-  assert.equal((await limitWord.textContent())?.trim(), "78% of your 5-hour limit", "the plan's fuller window shows under the composer");
+  assert.equal((await limitWord.textContent())?.trim(), "78%", "the plan's fuller window shows under the composer");
   assert.match(await limitWord.getAttribute("class") ?? "", /\bwarn\b/, "amber from 75%");
-  const limitTip = await limitWord.getAttribute("title") ?? "";
-  assert.match(limitTip, /^test Plus\n5-hour window 78%, resets .+\nThis week 41%\nDrive pauses its own runs at 90%$/, `the tooltip gives resets, the week and Drive's rule: ${limitTip}`);
+  assert.equal(await limitWord.getAttribute("title"), "Test plan: 78% of your 5-hour limit", "the mark names the plan and its window");
+  // It opens the context card, whose lower half gives each window, its reset and Drive's rule.
+  await limitWord.click();
+  const contextCard = page.locator("#context-card");
+  await contextCard.waitFor();
+  const cardText = (await contextCard.innerText()).replace(/\s+/g, " ");
+  assert.match(cardText, /Test plan Plus 5-hour window 78% used · resets .+ This week 41% used Drive pauses its own runs at 90%/, `the plan's half of the card: ${cardText}`);
+  await capture("06-context-and-plan");
+  await page.keyboard.press("Escape");
+  await until(() => contextCard.isHidden(), "Esc closes the context card");
   assert.equal((await f.client.planLimits()).limits[0]?.primary?.usedPercent, 78, "the daemon serves the provider's numbers");
   await capture("06-plan-limit");
   await capture("06-work-survived-close");

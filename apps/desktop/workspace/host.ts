@@ -60,6 +60,7 @@ import { pointSourceIn } from "./point-source.ts";
 import type { PointPick } from "./point.ts";
 import { WorkspaceSession } from "./session-model.ts";
 import { lastAsk, waitingAsk, type AwayAsk } from "./away.ts";
+import { SelfBuilder } from "./self-build.ts";
 import { glanceOf } from "./glance.ts";
 import { backState } from "./back-later.ts";
 import { DEFAULT_DRIVE_LIMITS } from "@demesne/protocol";
@@ -200,6 +201,11 @@ export class WorkspaceHost {
   /// Settings › Clean up sessions: what's worth deleting, what you ticked,
   /// and whether Delete was pressed once (it asks twice).
   cleanup: { candidates: import("@demesne/protocol").SessionCleanupCandidate[]; selected: string[]; loading: boolean; armed: boolean; message: string | null; staleDays: number } = { candidates: [], selected: [], loading: false, armed: false, message: null, staleDays: 30 };
+  /// "Changed, not running yet": Demesne rebuilding itself from a chat's folder.
+  readonly selfBuilder = new SelfBuilder({
+    app: APP_BUILD, execPath: process.execPath, home: homedir(), platform: process.platform,
+    logDir: () => this.settings.dataDirectory, changed: () => this.publish(),
+  });
   /// New breakages, and the worktree fix for them.
   readonly breakage = new BreakageWatch({
     client: () => this.client,
@@ -406,6 +412,7 @@ export class WorkspaceHost {
       systemThemeSource: this.themeLibrary?.systemSource ?? null,
       commands: this.slashCommands(),
       workspace: this.current?.session.workspace?.root ?? (this.options.projectless ? "" : this.workspace),
+      selfBuild: this.selfBuilder.view(this.current?.session.workspace?.root ?? null),
       drive: this.driveState,
       // Drive's project memory for this workspace (shown in Session).
       driveMemory: this.drive?.memoryEntries ?? [],
@@ -1833,6 +1840,20 @@ export class WorkspaceHost {
         void this.refreshSessions();
       }
       return;
+    }
+    // Build the app from this chat's folder; "rebuild-open" then swaps it in
+    // as the window quits.
+    if (method === "rebuild-app") {
+      const root = this.current?.session.workspace?.root;
+      if (!root) throw new Error("This chat has no project folder");
+      void this.selfBuilder.build(root);
+      return null;
+    }
+    if (method === "rebuild-open") {
+      const root = this.current?.session.workspace?.root;
+      if (!root) throw new Error("This chat has no project folder");
+      this.selfBuilder.swap(root, process.ppid);
+      return null;
     }
     if (method === "question-action") {
       if (!this.current) throw new Error("Choose a session first");

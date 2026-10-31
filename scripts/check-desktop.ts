@@ -421,6 +421,8 @@ try {
   await click("toggle-steps");
   assert(await evaluate<boolean>("return document.getElementById('cards').hidden;"), "a chat that uses no card has no column on the right");
   // Native notifications: record them in the main process, and look away from the window.
+  // The Dock's working bar: record what the window sets.
+  await desktop.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]!; (globalThis as any).progress = []; w.setProgressBar = (value: number) => { (globalThis as any).progress.push(value); }; });
   await desktop.evaluate(({ Notification }) => { (globalThis as any).banners = []; Notification.isSupported = () => true; Notification.prototype.show = function () { (globalThis as any).banners.push({ title: this.title, body: this.body, actions: this.actions.map(action => action.text) }); }; });
   await page.evaluate(() => { document.hasFocus = () => false; });
   await type(prompt);
@@ -468,6 +470,7 @@ try {
   await click("permission", { decision: "allow_once" });
   await textIncludes(completed);
   await until(() => desktop!.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body === "Finished")), "completion notifies by default while unfocused");
+  await until(() => desktop!.evaluate(() => (globalThis as any).progress as number[]).then(values => values.includes(2) && values.at(-1) === -1), "the Dock shows the turn working, then nothing once it's done");
   await page.evaluate(() => { delete (document as any).hasFocus; });
   assert.equal(readFileSync(join(f.workspace, "hello.ts"), "utf8"), "export const greeting = 'after';\n");
   const sessions = await f.client.listSessions();

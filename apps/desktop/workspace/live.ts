@@ -813,6 +813,9 @@ function renderSidebar() {
   const needsYou = sessions.filter((item) => item.id === current?.id ? Boolean(waiting) : item.waiting).length;
   if (badge) badge.hidden = !needsYou;
   document.dispatchEvent(new CustomEvent("demesne:needs-you", { detail: needsYou }));
+  // And while anything works (a chat, a queued one, Drive), the Dock shows it working.
+  const busyNow = Boolean(state?.activeTurnId || sessions.some((item) => item.status === "running" || item.status === "queued") || (pinned && pinned.status === "running"));
+  document.dispatchEvent(new CustomEvent("demesne:working", { detail: busyNow }));
   if (branchButton) branchButton.hidden = !review.length;
   if (ring) {
     const steps = pinned ? driveTaskList(pinned) : [];

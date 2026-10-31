@@ -17,6 +17,7 @@ const mockup = (blue = false) => `<!doctype html><html><head><meta charset="utf-
 :root{--accent:${blue ? "#3158ba" : "#285b48"}}body{padding:24px}h1{font-size:38px;margin:16px 0}input{margin:8px 0}
 </style></head><body><main class="container narrow"><span class="eyebrow">Foundry · live mockup</span><h1>A little room to grow</h1>
 <p>Try this mockup right inside the conversation.</p><input aria-label="Your idea" placeholder="Name your next idea">
+<div class="row"><div class="card" data-option="A · Pills">A · Pills</div><div class="card" data-option="B · Joined">B · Joined</div></div>
 <button id="counter" class="primary" onclick="this.textContent='Planted '+(++window.plants)">Plant an idea</button>
 <script>window.plants=0;var tl=anime.createTimeline({autoplay:false});tl.add("h1",{opacity:[0,1],duration:400}).add("button",{y:[8,0],duration:300});demesne.motion("Arrive",tl);tl.play();</script></main></body></html>`;
 const f = await fixture({
@@ -26,6 +27,7 @@ const f = await fixture({
     const at = messages.findLastIndex(message => message.role === "user");
     const request = messages[at]?.content ?? "";
     const current = messages.slice(at + 1).filter(message => message.role === "tool");
+    if (/^I pick /.test(request)) { yield { type: "text_delta", delta: "Going with that." }; yield { type: "finish", reason: "stop" }; return; }
     const blue = /blue/i.test(request);
     const previous = messages.slice(0, at).filter(message => message.role === "tool").map(message => {
       try { return JSON.parse(message.content ?? "{}"); } catch { return {}; }
@@ -198,6 +200,15 @@ try {
   await pane.waitFor({ state: "hidden" });
   await chips.first().click();
   await frame.getByRole("button", { name: "Plant an idea" }).waitFor();
+  // Options the page marked get a Pick button on hover; it sends the choice to the chat.
+  await frame.locator('[data-option="B · Joined"]').hover({ position: { x: 4, y: 4 } });
+  const pick = frame.locator("button.demesne-pick");
+  await pick.waitFor();
+  assert.equal(await pick.textContent(), "Pick B", "the button names the option's letter");
+  await pick.click();
+  await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.some(turn => turn.content === "I pick B · Joined"));
+  await page.locator("#conversation .request").filter({ hasText: "I pick B · Joined" }).waitFor();
+  console.log("PASS: Pick on a page's option sends the choice to the chat.");
   assert.deepEqual(errors, []);
   console.log("PASS: graphics and sanitized documents open in the pane; chips and the pane return when the chat is reopened; Esc closes it.");
 } catch (error) {

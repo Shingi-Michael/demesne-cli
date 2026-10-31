@@ -100,6 +100,14 @@ test("a version's first show carries the assembly: the library, the previous ver
   expect(foundryDocument("svg", svg, "Logo")).not.toContain("@keyframes");
 });
 
+test("a page that marks options gets the Pick runtime, and only that page", () => {
+  const options = '<div data-option="A · Pills">A</div><div data-option="B · Joined">B</div>';
+  expect(foundryDocument("html", options, "Tabs")).toBe(`${options}\n<script src="foundry://kit/pick.js"></script>`);
+  expect(foundryDocument("html", "<p>no options</p>", "Plain")).toBe("<p>no options</p>");
+  expect(FOUNDRY_KIT["pick.js"]).toEqual({ path: "kit/pick.js", type: "application/javascript; charset=utf-8" });
+  expect(foundryKitFile("foundry://kit/pick.js")).toBe("pick.js");
+});
+
 test("the Mac's blur is hud unless DEMESNE_VIBRANCY names a real material", () => {
   expect(macVibrancy({})).toBe("hud");
   expect(macVibrancy({ DEMESNE_VIBRANCY: "fullscreen-ui" })).toBe("fullscreen-ui");

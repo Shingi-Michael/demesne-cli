@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { FoundryArtifactDetail } from "@demesne/protocol";
-import { frameSource, motionLine, motionMessage, neighbours, paneHead, paneMakingHead } from "../foundry-pane.ts";
+import { frameSource, motionLine, motionMessage, neighbours, paneHead, paneMakingHead, pickMessage } from "../foundry-pane.ts";
 
 const versions = [3, 2, 1].map((version) => ({ version, createdAt: "2026-10-27T22:00:00.000Z", sessionId: null, turnId: null, note: version === 3 ? "Blue" : "", byteLength: 10 }));
 const detail: FoundryArtifactDetail = { id: "garden", title: "Tiny garden", kind: "html", workspace: null, sessionId: "s1", createdAt: versions[2]!.createdAt, updatedAt: versions[0]!.createdAt, version: 3, source: "<h1>Garden</h1>", versions };
@@ -92,4 +92,13 @@ test("the motion line: play or pause, the scrubber, the time, the motions by nam
   expect(fresh).toContain("0.00s / 0.30s");
   expect(fresh).toContain('data-name="Switch &lt;plan&gt;" aria-pressed="true"');
   expect(motionLine(motions, null, null, false)).toContain("0.00s / 1.20s");
+});
+
+test("a page's Pick sends its option's words, one line, and nothing else", () => {
+  expect(pickMessage({ demesne: "pick", option: "  B ·\n Joined " })).toBe("B · Joined");
+  expect(pickMessage({ demesne: "pick", option: "" })).toBeNull();
+  expect(pickMessage({ demesne: "pick", option: "x".repeat(121) })).toBeNull();
+  expect(pickMessage({ demesne: "pick", option: 3 })).toBeNull();
+  expect(pickMessage({ demesne: "motion", option: "A" })).toBeNull();
+  expect(pickMessage("pick")).toBeNull();
 });

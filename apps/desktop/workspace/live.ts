@@ -2575,6 +2575,12 @@ const pane = new FoundryPane(el("pane"), {
     runNodes.forEach((item) => item.artifacts.mark());
   },
   assembleDocument,
+  // A pick on the page goes to the chat as a message; while a turn works it waits for that turn.
+  pick: (option) => {
+    if (!state?.session) return;
+    followLatest();
+    void act(() => api("submit", { text: `I pick ${option}`, wait: Boolean(state?.activeTurnId) }));
+  },
 });
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;

@@ -30,6 +30,8 @@ export interface PaneOptions {
   assembleDocument?(root: HTMLElement, previousHTML: string | null): void;
   /// The page's Pick button chose one of its options ("B · Joined").
   pick?(option: string): void;
+  /// Build this: the chat makes the page real code.
+  build?(detail: FoundryArtifactDetail, version: number): void;
 }
 
 /** The frame's address; the first show of a version asks for the assembly. */
@@ -56,7 +58,7 @@ export function paneMakingHead(title: string) {
 
 /// The one line above the page: the title, the version and its arrows (the
 /// version's note on hover), and the icons. An error takes the middle.
-export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState, error = "") {
+export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState, error = "", build = false) {
   const title = detail?.title ?? (error ? "Couldn't open it" : "Loading…");
   const near = detail ? neighbours(detail.versions, state.version) : { earlier: null, later: null, latest: state.version };
   const version = detail?.versions.find((item) => item.version === state.version);
@@ -70,12 +72,18 @@ export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState,
     + (error ? `<span class="bad" role="alert" title="${h(error)}">${h(error)}</span>` : "")
     + `<span class="sp"></span>`
     + (detail && state.version !== near.latest ? button("restore", "Make this the latest", ' class="pane-word"') : "")
+    + (detail?.kind === "html" && build ? button("build", "Build this", ' class="pane-word pane-build" title="Turn this page into real code in the chat\'s project"') : "")
     + (detail && code ? tool("copy", "Copy the source", '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/>') : "")
     + (detail ? tool("code", "Code", '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>', ` aria-pressed="${code}"`) : "")
     + (detail?.kind === "html" ? tool("phone", "Phone width", '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>', ` aria-pressed="${state.phone}"`) : "")
     + (detail ? tool("export", "Export the file", '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>') : "")
     + button("close", icon('<path d="M6 6l12 12M18 6 6 18"/>'), ' aria-label="Close" title="Close (Esc)" class="pane-ico"');
 }
+
+/// Build this (pass 115): what goes to the chat so the model turns the page
+/// into the project's real code, with the page as the target it checks against.
+export const buildRequest = (title: string, id: string, version: number) =>
+  `Build this for real: the Foundry page "${title}" (id ${id}, v${version}). Read it with foundry_read (id ${id}, version ${version}), make this project's real code match it, and check your work against the page before you finish.`;
 
 /// The option a page's Pick button sent (foundry://kit/pick.js): its words,
 /// one line, or null for anything else.
@@ -301,6 +309,7 @@ export class FoundryPane {
       if (action === "copy") { await this.options.copy(detail.source); this.options.notice("Copied the source"); }
       else if (action === "export") await this.options.export(state.id, state.version);
       else if (action === "foundry") this.options.openFoundry(state.id, state.version);
+      else if (action === "build") this.options.build?.(detail, state.version);
       else if (action === "restore") { const saved = await this.options.restore(detail); await this.show(saved.id, saved.version); }
     } catch (reason) {
       this.error = reason instanceof Error ? reason.message : String(reason);
@@ -345,7 +354,7 @@ export class FoundryPane {
       }
       return;
     }
-    this.head.innerHTML = paneHead(detail, state, this.error);
+    this.head.innerHTML = paneHead(detail, state, this.error, Boolean(this.options.build));
     const code = state.view === "code";
     this.code.hidden = !code;
     this.stage.hidden = code;

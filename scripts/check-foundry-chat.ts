@@ -4,7 +4,7 @@
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fixture, eventually } from "../apps/desktop/workspace/test/fixture.ts";
 
 const response = Promise.withResolvers<void>();
@@ -27,6 +27,7 @@ const f = await fixture({
     const at = messages.findLastIndex(message => message.role === "user");
     const request = messages[at]?.content ?? "";
     const current = messages.slice(at + 1).filter(message => message.role === "tool");
+    if (/^Build this for real/.test(request)) { yield { type: "text_delta", delta: "Building it in the project." }; yield { type: "finish", reason: "stop" }; return; }
     if (/^I pick /.test(request)) { yield { type: "text_delta", delta: "Going with that." }; yield { type: "finish", reason: "stop" }; return; }
     const blue = /blue/i.test(request);
     const previous = messages.slice(0, at).filter(message => message.role === "tool").map(message => {
@@ -209,6 +210,15 @@ try {
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.some(turn => turn.content === "I pick B · Joined"));
   await page.locator("#conversation .request").filter({ hasText: "I pick B · Joined" }).waitFor();
   console.log("PASS: Pick on a page's option sends the choice to the chat.");
+  // Build this: a page from Just a chat first asks which project it's for,
+  // then the chat moves there and starts on it with the page as its target.
+  await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
+  await pane.getByRole("button", { name: "Build this" }).click();
+  const moveTo = page.locator("#plain-line .where-opt").filter({ hasText: basename(f.workspace) });
+  await moveTo.first().click();
+  await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.some(turn => turn.content.startsWith(`Build this for real: the Foundry page "Idea garden" (id ${artifact.id}`)));
+  assert.equal((await f.client.getSessionState(artifact.sessionId!)).session.workspace?.root, f.workspace, "the chat moved into the project it builds in");
+  console.log("PASS: Build this asks a plain chat for its project, moves it there and starts building.");
   assert.deepEqual(errors, []);
   console.log("PASS: graphics and sanitized documents open in the pane; chips and the pane return when the chat is reopened; Esc closes it.");
 } catch (error) {

@@ -1542,6 +1542,7 @@ b.pane-title { padding: 0 6px; }
 .pane-head button:hover { color: var(--t1); background: var(--tone); }
 .pane-head button[aria-pressed="true"] { color: var(--t1); background: var(--tone2); }
 .pane-head button:disabled { opacity: 0.35; cursor: default; background: none; }
+.pane-head button.pane-build { color: var(--t1); box-shadow: inset 0 0 0 1px var(--hair2); }
 .pane-vers button { padding: 0 4px; }
 .pane-head .pane-ico { width: 28px; padding: 0; justify-content: center; }
 .pane-head .ico { width: 14px; height: 14px; }

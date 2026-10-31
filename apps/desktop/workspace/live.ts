@@ -27,7 +27,7 @@ import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { RepoFlowView } from "./repo-flow.ts";
-import { FoundryPane } from "./foundry-pane.ts";
+import { FoundryPane, buildRequest } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
 import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
@@ -84,6 +84,23 @@ const el = <T extends HTMLElement = HTMLElement>(id: string) =>
 const editor = document.querySelector<HTMLTextAreaElement>("textarea")!;
 /// Big pastes waiting in the composer, as chips.
 const pastes: Paste[] = [];
+/// Build this from Just a chat: the request waits (across the move to
+/// another project's window) until the chat is in a project, for ten minutes.
+const buildWaits = {
+  read: (): { sessionId: string; text: string; at: number } | null => {
+    try { const value = JSON.parse(localStorage.getItem("demesne-build-waits") ?? "null"); return value && Date.now() - value.at < 600_000 ? value : null; } catch { return null; }
+  },
+  write: (value: { sessionId: string; text: string; at: number } | null) => {
+    try { if (value) localStorage.setItem("demesne-build-waits", JSON.stringify(value)); else localStorage.removeItem("demesne-build-waits"); } catch {}
+  },
+};
+function sendWaitingBuild() {
+  const waiting = buildWaits.read();
+  if (!waiting || !state?.session || state.session.id !== waiting.sessionId || isPlain() || state.activeTurnId) return;
+  buildWaits.write(null);
+  followLatest();
+  void act(() => api("submit", { text: waiting.text }));
+}
 const h = (value: unknown) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -2580,6 +2597,20 @@ const pane = new FoundryPane(el("pane"), {
     if (!state?.session) return;
     followLatest();
     void act(() => api("submit", { text: `I pick ${option}`, wait: Boolean(state?.activeTurnId) }));
+  },
+  // Build this: in a project the chat starts on it; a page from Just a chat
+  // first asks which project it's for, with the request waiting in the composer.
+  build: (detail, version) => {
+    if (!state?.session) return;
+    const text = buildRequest(detail.title, detail.id, version);
+    if (isPlain()) {
+      buildWaits.write({ sessionId: state.session.id, text, at: Date.now() });
+      toggleWhere("move");
+      notice("Which project is this page for? Once the chat moves there, it starts building.");
+      return;
+    }
+    followLatest();
+    void act(() => api("submit", { text, wait: Boolean(state?.activeTurnId) }));
   },
 });
 let archivedChats: ChatsPageChat[] | null = null;
@@ -5664,6 +5695,7 @@ function renderState(next: Snapshot) {
   renderSetup();
   renderNotifications();
   rebuildWhenIdle();
+  sendWaitingBuild();
   if (
     !editor.disabled &&
     !overlay &&

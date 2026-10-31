@@ -16,7 +16,7 @@ import type { ThemeStore } from "./themes.ts";
 import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "./repo-flow.ts";
-import { FOUNDRY_TOOL_NAMES } from "./foundry.ts";
+import { forgetFoundrySources, FOUNDRY_TOOL_NAMES } from "./foundry.ts";
 import { ASSISTANT_TOOL_NAMES, assistantBasePrompt, assistantStamp } from "./assistant.ts";
 import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
@@ -240,7 +240,8 @@ export class AgentEngine {
       if (totalToolCalls >= maxToolCalls) budgetReason ??= `Reached the configured ${maxToolCalls} tool-call allowance`;
       const finalizing = budgetReason !== undefined;
       const requestDefinitions = finalizing ? [] : definitions;
-      const historyMessages = history.flatMap((entry) => entry.messages);
+      // A page made in an earlier turn is stored; its source need not ride along.
+      const historyMessages = history.flatMap((entry) => forgetFoundrySources(entry.messages));
       const systemPrompt = themefy ? THEMEFY_PROMPT : assistant ? assistantSystemPrompt({ home: session.workspace?.root, definitions, planOnly: turn.planOnly })
         : agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
         planOnly: turn.planOnly, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),
@@ -1041,6 +1042,12 @@ function isContextOverflow(error: unknown): boolean {
 /// model formats for that instead of for a web chat.
 export const ANSWER_FORMAT_GUIDANCE = "Answers are shown as Markdown in the Demesne desktop app, in a conversation column about 90 characters wide. Rendered: headings, bold, italic, `code`, fenced code blocks with a language, lists (nested, numbered, - [ ] tasks), block quotes, links, and tables. Lead with the outcome. Use short paragraphs and lists; headings only for longer answers. Use a table only to compare items across a few attributes: at most 5 short columns, no paragraphs in cells, otherwise use a list. Keep file paths and commands in `code`. No emoji or decorative rules.";
 
+/// Foundry in a chat, in one breath: the tool descriptions carry the rules,
+/// so this only says when to reach for it and how the preview works.
+export const FOUNDRY_GUIDANCE = "Foundry is available in this chat: when the person asks for a mockup, design, page, game, graphic or document, make it with foundry_save. "
+  + "The preview appears in the chat by itself, so describe it briefly and never paste the source or a code block instead. To change one, foundry_read it, then foundry_edit "
+  + "(exact find and replace on the version you read); rewrite with foundry_save only when most of it changes. Report it saved only after the tool succeeds.";
+
 export function agentSystemPrompt(options: { workspaceRoot?: string; definitions: ProviderToolDefinition[]; content?: string;
   planOnly?: boolean; autoApprove?: boolean; acceptEdits?: boolean; providerVision?: boolean; configured?: string; sessionContext?: string }): string {
   const base = options.configured?.trim() || defaultSystemPrompt(options.workspaceRoot, options.autoApprove === true && !options.planOnly);
@@ -1050,7 +1057,7 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; definitions
       ? "\nImage tools can save images to the session, but this provider has visual inputs disabled. Do not claim to have inspected image pixels; use browser text/DOM results for inspection." : "");
   const guidance = [ANSWER_FORMAT_GUIDANCE, turnToolGuidance(options.content ?? ""), planModeGuidance(options.planOnly === true),
     options.definitions.some((tool) => tool.name === "foundry_save")
-      ? "Foundry is available in this chat, with or without a project. A successful foundry_save automatically displays the artifact as an interactive preview inside this conversation. When the person invokes Foundry or asks for a mockup, design, interactive page, game, graphic or document, create it with foundry_save. Use HTML with working controls for interactive mockups. Deliver the artifact through the tool, then briefly describe it; do not substitute a fenced code block or ask the person to save a file or leave the chat. For changes to an existing artifact, read it with foundry_read, then make small changes with foundry_edit (exact find and replace against the version you read) and only rewrite the whole source with foundry_save when most of it changes; always pass base_version so a version you have not seen is never overwritten. Only report it saved after the tool succeeds. Follow the design brief in the tool descriptions: HTML is self-contained apart from pinned libraries and Google Fonts; the preview blocks everything else."
+      ? FOUNDRY_GUIDANCE
       : null,
     !options.planOnly && options.autoApprove
       ? "Session auto-approve is enabled: the user authorizes all tool approvals, including file changes, host commands and publishing, within the requested task. Execute necessary actions without requesting tool approval. Follow explicit read-only or no-edit instructions; workspace restrictions and tool validation still apply."

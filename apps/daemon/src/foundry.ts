@@ -3,9 +3,12 @@
 /// save is a new version, so revisions never lose the earlier work. A revision
 /// names the version it was read from, so a version the agent has not seen is
 /// never overwritten; small changes go through foundry_edit as exact find and
-/// replace, like edits to a file.
+/// replace, like edits to a file. The tools ride along in every chat, so
+/// their text is kept short, and a page's source leaves the transcript
+/// once its turn is over (forgetFoundrySources): the artifact is stored,
+/// and foundry_read brings it back when the agent needs it.
 import type { DemesneStore } from "@demesne/storage";
-import { FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, type FoundryKind } from "@demesne/protocol";
+import { FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, type FoundryKind, type ModelMessage } from "@demesne/protocol";
 import type { AgentTool } from "./tools.ts";
 
 // Foundry stores artifacts in Demesne, so these tools need no project folder.
@@ -14,20 +17,68 @@ export const FOUNDRY_TOOL_NAMES = new Set(["foundry_read", "foundry_save", "foun
 /// Where an artifact may load from (the frame's policy allows exactly this).
 export const FOUNDRY_LIBRARY_HOSTS = ["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com"] as const;
 
-const FILE_RULES = "HTML is one document with inline CSS and JS. The only outside resources allowed are scripts from "
-  + FOUNDRY_LIBRARY_HOSTS.join(", ") + " at an exact pinned version (react@18.3.1, never react or react@18) and Google Fonts stylesheets; "
-  + "every other request (fetch, images, other hosts) is blocked, so images are inline SVG or data URIs. SVG must be one <svg> element with a viewBox. Markdown is a document. Keep sources under 512 KB.";
+const FILE_RULES = "HTML is one self-contained document (inline CSS and JS); the only outside loads are pinned scripts from "
+  + FOUNDRY_LIBRARY_HOSTS.join(", ") + " (react@18.3.1, never react@18) and Google Fonts; everything else is blocked, so images are inline SVG or data URIs. "
+  + "SVG is one <svg> with a viewBox. Under 512 KB.";
 
 /// The design brief every artifact follows, so Foundry's work reads as one
 /// hand; the tokens are Demesne's own, so a prototype of Demesne matches the app.
-export const DESIGN_BRIEF = "Design brief: a title of two to four words. Define every colour as a custom property on :root and redefine them for dark mode under "
-  + "@media (prefers-color-scheme: dark); give body an explicit background. One ink and tints of it: text at full strength, secondary text at 76%, muted at 56%, "
-  + "hairlines at 8% and tones at 4% (no solid 1px grey outlines, no drop shadows on flat things), radii 8px and 12px, a 13px to 15px system or Inter type ramp with 1.5 line height, "
-  + "motion 140 to 220ms under prefers-reduced-motion: no-preference. Works at phone width with 16px side gutters and no horizontal scroll. "
-  + "Real content, not lorem ipsum. No gradient heroes, emoji bullets, purple-on-white, glassmorphism or other stock AI looks. "
-  + "Interactive mockups have working controls. When the person asks for Demesne's own UI, use Demesne's look: neutral greys, hairlines, 13px base, no menus or side panels.";
+export const DESIGN_BRIEF = "Design brief: a title of two to four words. Colours as :root custom properties, redefined under @media (prefers-color-scheme: dark); "
+  + "an explicit body background. One ink and its tints: text 100%, secondary 76%, muted 56%, hairlines 8%, tones 4%; no solid grey outlines or drop shadows on flat things; "
+  + "radii 8 and 12px; 13 to 15px system or Inter type at 1.5 line height; motion 140 to 220ms only under prefers-reduced-motion: no-preference. "
+  + "Works at phone width with 16px gutters and no horizontal scroll. Real content, never lorem ipsum. No gradient heroes, emoji bullets, purple on white, glassmorphism or other stock AI looks. "
+  + "Interactive mockups have working controls. Demesne's own UI: neutral greys, hairlines, 13px base, no menus or side panels.";
 
 const GUIDE = FILE_RULES + " " + DESIGN_BRIEF;
+
+/// What stands in for a page's source once its turn is over.
+export const FORGOTTEN_SOURCE = "[source omitted from history; foundry_read the artifact for it]";
+
+const forget = (value: unknown, callName: string) =>
+  callName === "foundry_save" && isRecord(value) && typeof value.source === "string" ? { ...value, source: FORGOTTEN_SOURCE }
+    : callName === "foundry_read" && isRecord(value) && typeof value.source === "string" ? { ...value, source: FORGOTTEN_SOURCE }
+    : null;
+
+const forgetJSON = (text: string, callName: string) => {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return null; }
+  const forgotten = forget(parsed, callName);
+  return forgotten ? JSON.stringify(forgotten) : null;
+};
+
+/// A finished turn's messages without the page sources in them: the source
+/// the agent sent to foundry_save and the one foundry_read gave back, in
+/// the tool calls, their results and the retained Responses items alike.
+/// The artifact itself is kept, so the agent reads it again when it needs
+/// the text; what stays is the title, kind, version and note.
+export function forgetFoundrySources<T extends ModelMessage>(messages: T[]): T[] {
+  const names = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const call of message.toolCalls ?? []) names.set(call.id, call.name);
+  }
+  return messages.map((message) => {
+    if (message.role === "assistant" && message.toolCalls?.some((call) => FOUNDRY_TOOL_NAMES.has(call.name))) {
+      const toolCalls = message.toolCalls.map((call) => {
+        const forgotten = forgetJSON(call.arguments, call.name);
+        return forgotten ? { ...call, arguments: forgotten } : call;
+      });
+      const responses = message.responses
+        ? { ...message.responses, output: message.responses.output.map((item) => {
+          if (item.type !== "function_call" || typeof item.arguments !== "string") return item;
+          const forgotten = forgetJSON(item.arguments, names.get(String(item.call_id)) ?? "");
+          return forgotten ? { ...item, arguments: forgotten } : item;
+        }) }
+        : undefined;
+      return { ...message, toolCalls, ...(responses ? { responses } : {}) };
+    }
+    if (message.role === "tool" && names.get(message.toolCallId) === "foundry_read") {
+      const forgotten = forgetJSON(message.content, "foundry_read");
+      return forgotten ? { ...message, content: forgotten } : message;
+    }
+    return message;
+  });
+}
 
 const clean = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : undefined;
 
@@ -49,20 +100,18 @@ export function foundrySaveTool(store: DemesneStore): AgentTool {
   return {
     definition: {
       name: "foundry_save",
-      description: "Create a design, prototype, graphic or document with an interactive preview directly in the chat, and save it to Foundry. "
-        + "Use for anything the person wants made as an artifact (a landing page, UI mockup, logo, icon, diagram, chart, one-pager). "
-        + "Omit id to create a new artifact; pass the id of an existing one to replace its whole source as a new version, with base_version set to the version you read "
-        + "(for small changes use foundry_edit instead). "
-        + GUIDE + " Returns the artifact id and version.",
+      description: "Make a design, prototype, graphic or document as a Foundry artifact (landing page, UI mockup, logo, diagram, chart, one-pager); it previews in the chat. "
+        + "Omit id to create; pass id and base_version to replace the whole source as a new version (small changes: foundry_edit). "
+        + GUIDE,
       inputSchema: {
         type: "object",
         properties: {
-          id: { type: "string", description: "Existing artifact to revise. Omit to create." },
+          id: { type: "string", description: "Omit to create." },
           title: { type: "string", maxLength: 200 },
           kind: { type: "string", enum: [...FOUNDRY_KINDS], description: "Required when creating." },
           source: { type: "string", description: "The complete source." },
-          base_version: { type: "integer", minimum: 1, description: "When revising: the version you read. The save is refused if the artifact has moved past it." },
-          note: { type: "string", maxLength: 300, description: "What this version changed, in a few words." },
+          base_version: { type: "integer", minimum: 1, description: "When revising: the version you read." },
+          note: { type: "string", maxLength: 300, description: "What changed, in a few words." },
         },
         required: ["source"],
         additionalProperties: false,
@@ -109,29 +158,28 @@ export function foundryEditTool(store: DemesneStore): AgentTool {
   return {
     definition: {
       name: "foundry_edit",
-      description: "Change part of an existing Foundry artifact without resending it: exact find-and-replace edits applied to the version you read, saved as a new version. "
-        + "Prefer this over foundry_save for any revision that leaves most of the source as it is. Each find must match the current source exactly once (set all to replace every occurrence). "
-        + "The edits are refused if the artifact has moved past base_version. Returns the new version.",
+      description: "Change part of a Foundry artifact without resending it: exact find-and-replace edits on the version you read, saved as a new version. "
+        + "Each find must match exactly once (all: true replaces every occurrence). Refused if the artifact moved past base_version.",
       inputSchema: {
         type: "object",
         properties: {
-          id: { type: "string", description: "The artifact to change." },
-          base_version: { type: "integer", minimum: 1, description: "The version you read, from foundry_read or your last save." },
+          id: { type: "string" },
+          base_version: { type: "integer", minimum: 1, description: "The version you read." },
           edits: {
             type: "array", minItems: 1, maxItems: 50,
             items: {
               type: "object",
               properties: {
-                find: { type: "string", minLength: 1, description: "Text copied exactly from the current source." },
-                replace: { type: "string", description: "Its replacement; empty deletes it." },
-                all: { type: "boolean", description: "Replace every occurrence instead of requiring exactly one." },
+                find: { type: "string", minLength: 1, description: "Exact text from the current source." },
+                replace: { type: "string" },
+                all: { type: "boolean", description: "Replace every occurrence." },
               },
               required: ["find", "replace"],
               additionalProperties: false,
             },
           },
-          title: { type: "string", maxLength: 200, description: "A new title, if it changes." },
-          note: { type: "string", maxLength: 300, description: "What this version changed, in a few words." },
+          title: { type: "string", maxLength: 200 },
+          note: { type: "string", maxLength: 300, description: "What changed, in a few words." },
         },
         required: ["id", "base_version", "edits"],
         additionalProperties: false,
@@ -169,7 +217,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
   return {
     definition: {
       name: "foundry_read",
-      description: "Read Foundry artifacts. Without id, lists them (newest first). With id, returns that artifact's current source (or an earlier version) and its version number, which you pass as base_version to foundry_edit or foundry_save.",
+      description: "List Foundry artifacts (no id), or read one's current source (or a version) with the version number you pass as base_version to foundry_edit or foundry_save.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "string" }, version: { type: "integer", minimum: 1 } },

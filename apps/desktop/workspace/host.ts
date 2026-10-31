@@ -560,8 +560,10 @@ export class WorkspaceHost {
     let control: ReturnType<WorkspaceHost["daemonControl"]>;
     try { control = this.daemonControl(); } catch { return false; }
     const status = await this.client.status().catch(() => null);
+    // A Drive mission parked as blocked waits on nothing the daemon is doing,
+    // so it doesn't hold the restart back the way a running one does.
     const busy = !status || status.active.length > 0 || status.activeInferences > 0 || status.queuedInferences > 0
-      || (this.driveState && ["running", "waiting", "blocked"].includes(this.driveState.status));
+      || (this.driveState && ["running", "waiting"].includes(this.driveState.status));
     if (busy) {
       this.restartFor.add("app.update");
       if (!this.olderDaemonTimer && !this.disposed) {

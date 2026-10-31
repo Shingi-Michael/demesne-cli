@@ -412,6 +412,18 @@ try {
   await page.locator("textarea").press("ArrowUp");
   assert.equal(await page.locator("textarea").inputValue(), "Keep this draft", "Up never replaces an existing draft");
   await page.locator("textarea").fill("");
+  // A big paste folds into one chip instead of a wall of text; × takes it back.
+  await page.locator("textarea").evaluate((editor) => {
+    const data = new DataTransfer();
+    data.setData("text/plain", Array.from({ length: 40 }, (_, i) => `log line ${i + 1}`).join("\n"));
+    editor.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  const pasteChip = page.locator("#attach-row .att.paste");
+  await until(() => pasteChip.isVisible(), "a big paste folds into a chip");
+  assert.equal((await pasteChip.innerText()).replace(/\s+/g, " ").replace("×", "").trim(), "TXT Pasted text · 40 lines", "the chip counts the lines");
+  assert.equal(await page.locator("textarea").inputValue(), "", "the paste stays out of the text box");
+  await pasteChip.getByRole("button", { name: "Remove the pasted text" }).click();
+  await until(() => pasteChip.count().then(n => n === 0), "× takes the paste back");
   await click("toggle-steps");
   await trace.waitFor({ state: "visible" });
   await thinkingToggle.click();

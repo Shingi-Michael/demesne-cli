@@ -25,6 +25,7 @@ import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
+import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FoundryPane } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
@@ -81,6 +82,8 @@ declare global {
 const el = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id)! as T;
 const editor = document.querySelector<HTMLTextAreaElement>("textarea")!;
+/// Big pastes waiting in the composer, as chips.
+const pastes: Paste[] = [];
 const h = (value: unknown) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -1877,6 +1880,12 @@ function rebuildWhenIdle() {
   rebuildAsked = false;
   void api("rebuild-open", {}).then(() => api("desktop-quit", {})).catch((error) => notice(error instanceof Error ? error.message : String(error)));
 }
+/// A sent message, its big pastes shown folded as they were in the composer.
+function requestText(content: string) {
+  return splitPastes(content).map((part) => part.kind === "text" ? h(part.text)
+    : `<details class="paste-chip"><summary title="${h(part.text.split("\n").slice(0, 6).join("\n"))}">${PASTE_ICON}${h(pasteLabel(part.text))}</summary><pre>${h(part.text)}</pre></details>`).join("");
+}
+const PASTE_ICON = '<span class="pc-ic" aria-hidden="true">TXT</span>';
 function runHTML(run: WorkspaceRun, index: number) {
   const rewound = rewoundBy(run);
   if (rewound) return rewindLine(rewound);
@@ -2020,7 +2029,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     ? `<div class="request-att">${run.attachments.map((image) => attachmentPreviews.has(image.id)
       ? `<img src="${attachmentPreviews.get(image.id)}" alt="${h(image.filename)}" title="${h(image.filename)}">`
       : `<span class="att-name" title="${h(`${image.width}×${image.height}`)}">${h(image.filename)}</span>`).join("")}</div>` : "";
-  const request = answerAsked(run) ?? mailRequest(run) ?? driveReport(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+  const request = answerAsked(run) ?? mailRequest(run) ?? driveReport(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${requestText(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
   const review = reviewOpen.has(run.id) && !live ? reviewHTML(run.id) : "";
   const day = assistantDay(run, index);
   return `${day ? `<div class="day-line"><span>${h(day)}</span></div>` : ""}${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}</div>${queued}`;
@@ -3152,6 +3161,7 @@ function renderComposer() {
     diffNotes.size,
     pointed.map((point) => point.id).join(),
     state.attachments.map((image) => image.id).join(),
+    pastes.map((paste) => paste.id).join(),
   ]);
   if (
     signature === composerSignature &&
@@ -3215,13 +3225,13 @@ function renderComposer() {
   // / and @, and a draft shows ↵ send instead. The start screen keeps / and
   // @ and adds ↵ once there is something to send.
   const armed = Date.now() < stopArmed;
-  const draft = Boolean(editor.value.trim()) || diffNotes.size > 0 || pointed.length > 0 || state.attachments.length > 0, session = inSession();
+  const draft = Boolean(editor.value.trim()) || diffNotes.size > 0 || pointed.length > 0 || state.attachments.length > 0 || pastes.length > 0, session = inSession();
   const attachRow = el("attach-row");
-  attachRow.hidden = !state.attachments.length || Boolean(question);
+  attachRow.hidden = (!state.attachments.length && !pastes.length) || Boolean(question);
   attachRow.innerHTML = state.attachments.map((image) => {
     const preview = attachmentPreviews.get(image.id);
     return `<span class="att" title="${h(`${image.filename} · ${image.width}×${image.height}`)}">${preview ? `<img src="${preview}" alt="${h(image.filename)}">` : `<span class="att-name">${h(image.filename)}</span>`}${btn("detach", "×", { id: image.id }, "att-x").replace("<button ", `<button aria-label="Remove ${h(image.filename)}" `)}</span>`;
-  }).join("");
+  }).join("") + pastes.map((paste) => `<span class="att paste" title="${h(paste.text.split("\n").slice(0, 8).join("\n"))}">${PASTE_ICON}<span class="att-name">${h(pasteLabel(paste.text))}</span>${btn("unpaste", "×", { id: paste.id }, "att-x").replace("<button ", '<button aria-label="Remove the pasted text" ')}</span>`).join("");
   // While a turn runs the send button is Stop; Enter queues what you type.
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${asking ? `${k("Enter")} send instead` : `${k("↵")} steer · ${k("⌥↵")} after this turn`}</span>` : ""}<span class="stop-word">■ Stop</span>`
@@ -4607,6 +4617,8 @@ async function submitText(value = editor.value, wait = false) {
   if (!state) return;
   // Notes on the diff open the next message; a message may be only notes.
   const notes = !pendingQuestion() && !value.startsWith("/") ? [pointMessage(pointed), notesMessage([...diffNotes.values()])].filter(Boolean).join("\n\n") : "";
+  // Folded pastes go after the words, whole.
+  if (pastes.length && !value.startsWith("/")) { value = withPastes(value, pastes); pastes.length = 0; }
   if (!value.trim() && !notes && !state.attachments.length) return;
   if (notes) {
     value = value.trim() ? `${notes}\n\n${value}` : notes;
@@ -5076,6 +5088,7 @@ async function dispatch(
   if (action === "cycle-mode") return cycleMode();
   if (action === "attach-pick") { el<HTMLInputElement>("attach-input").click(); return; }
   if (action === "detach") return api("detach", { id: args.id });
+  if (action === "unpaste") { const at = pastes.findIndex((paste) => paste.id === args.id); if (at >= 0) pastes.splice(at, 1); renderComposer(); return; }
   if (action === "keep-remove") { await editKeep({ remove: String(args.line ?? "") }); return; }
   if (action === "context-card") {
     contextCardOpen = !contextCardOpen;
@@ -5939,6 +5952,13 @@ el<HTMLInputElement>("attach-input").addEventListener("change", (event) => {
   if (files.length) void act(() => attachFiles(files));
 });
 editor.addEventListener("paste", (event) => {
+  const text = event.clipboardData?.getData("text/plain") ?? "";
+  if (!event.clipboardData?.files.length && foldsUp(text)) {
+    event.preventDefault();
+    pastes.push({ id: crypto.randomUUID(), text });
+    renderComposer();
+    return;
+  }
   const files = [...event.clipboardData?.files ?? []].filter((file) => file.type.startsWith("image/"));
   if (!files.length || !state?.session) return;
   event.preventDefault();

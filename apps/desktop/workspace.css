@@ -1238,6 +1238,9 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .pm-rules { margin-top: 8px; max-height: 260px; overflow-y: auto; }
 .pm-rule { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 32px; padding: 0 6px 0 12px; box-shadow: inset 0 -1px 0 var(--hair); }
 .pm-rule small { color: var(--t4); font-size: 11px; }
+.pm-rule code { flex: 1; }
+.pm-rule em, .pm-chip em { flex: none; color: var(--t3); font-size: 11px; font-style: normal; }
+.pm-rule em + code { margin-left: -4px; }
 .pm-rule button { flex: none; width: 18px; height: 18px; border-radius: 5px; color: var(--t3); font-size: 13px; line-height: 1; }
 .pm-rule button:hover { background: var(--tone2); color: var(--t1); }
 .pm-chip small { color: var(--t4); font-size: 11px; padding-right: 4px; }

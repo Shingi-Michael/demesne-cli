@@ -106,6 +106,12 @@ test("permissions list the rules, the trusted folders and the score, kept short"
   const open = settingsPage(view({ section: "permissions", info: many, fold: "rules:grep" }));
   expect(open.match(/class="pm-rule"/g)).toHaveLength(12);
   expect(open).toContain('aria-expanded="true"');
+  // Past three one-offs, they share one "other" group; file rules say what they let it do.
+  const oneOffs = [...many.allow, ...["awk NR==FNR", "diff -u a b", "date"].map((command) => ({ rule: `run_command:${command}`, mine: true })), { rule: "delete_path:donkeys.py", mine: true }, { rule: "edit_file:donkeys.py", mine: true }];
+  expect(ruleGroups(oneOffs).map((group) => [group.head, group.rules.length])).toEqual([["git", 15], ["grep", 12], ["edits", 3], ["other", 5]]);
+  const others = settingsPage(view({ section: "permissions", info: { ...info, allow: oneOffs }, fold: "rules:other" }));
+  expect(others).toContain("<em>delete</em><code");
+  expect(others.match(/class="pm-rule"/g)).toHaveLength(5);
   // Search still finds a rule.
   expect(settingsSearch(view({ query: "log -14", info: many })).found.map(({ page }) => page.id)).toEqual(["permissions"]);
 });

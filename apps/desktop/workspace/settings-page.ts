@@ -119,7 +119,20 @@ export function ruleGroups<T extends { rule: string }>(rules: readonly T[]): { h
       : files[tool] ?? (tool.startsWith("mcp__") ? tool.split("__")[1] || "connectors" : tool.replace(/_/g, " "));
     groups.set(head, [...(groups.get(head) ?? []), item]);
   }
-  return [...groups].map(([head, items]) => ({ head, rules: items })).sort((a, b) => b.rules.length - a.rules.length || a.head.localeCompare(b.head));
+  const sorted = [...groups].map(([head, items]) => ({ head, rules: items })).sort((a, b) => b.rules.length - a.rules.length || a.head.localeCompare(b.head));
+  // One-offs (a long awk, a diff) would each take a chip; past a few they
+  // share one "other" group at the end.
+  const singles = sorted.filter((group) => group.rules.length === 1);
+  if (singles.length <= SINGLES_SHOWN) return sorted;
+  return [...sorted.filter((group) => group.rules.length > 1), { head: "other", rules: singles.flatMap((group) => group.rules) }];
+}
+const SINGLES_SHOWN = 3;
+
+/// What a file rule lets it do (edit, delete), so two rules on one path read
+/// apart; empty for commands and connectors.
+export function ruleVerb(rule: string): string {
+  const tool = rule.slice(0, Math.max(0, rule.indexOf(":")));
+  return ({ edit_file: "edit", write_file: "new file", delete_path: "delete", move_path: "move", apply_patch: "patch" } as Record<string, string>)[tool] ?? "";
 }
 
 /// Long numbers said short: 2,000,000 tokens is 2M.
@@ -464,7 +477,8 @@ function permissionsTop(view: SettingsView): string {
   const groups = ruleGroups(rules), openGroup = view.fold.startsWith("rules:") ? view.fold.slice(6) : null;
   const ruleRow = ({ rule, mine }: { rule: string; mine: boolean }) => {
     const said = ruleWords(rule);
-    return `<div class="pm-rule"><code title="${h(`${said.what}\n${said.how}${mine ? "" : " · in the project's config"}`)}">${h(said.what)}</code>${mine ? `<button type="button" aria-label="Ask again about ${h(said.what)}" data-action="allow-rule-remove" data-args="${h(JSON.stringify({ rule }))}">×</button>` : "<small>project</small>"}</div>`;
+    const verb = ruleVerb(rule);
+    return `<div class="pm-rule">${verb ? `<em>${h(verb)}</em>` : ""}<code title="${h(`${said.what}\n${said.how}${mine ? "" : " · in the project's config"}`)}">${h(said.what)}</code>${mine ? `<button type="button" aria-label="Ask again about ${h(said.what)}" data-action="allow-rule-remove" data-args="${h(JSON.stringify({ rule }))}">×</button>` : "<small>project</small>"}</div>`;
   };
   const chips = info === null ? "" : `<div class="st-head"><span>It no longer asks about</span><span>${rules.length ? `${rules.length} · × asks again` : ""}</span></div>` + (rules.length
     ? `<div class="pm-chips">${groups.map((group) => group.rules.length === 1

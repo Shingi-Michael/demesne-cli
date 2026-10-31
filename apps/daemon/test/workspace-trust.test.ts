@@ -59,8 +59,14 @@ test("Settings lists the trusted folders, without Drive's worktrees, and can tak
   trust.trust(workspace);
   trust.trust(join(worktrees, "fix-1"));
   try {
+    // Like a Mac after weeks of Drive: worktrees made elsewhere and folders that are gone stay trusted but unlisted.
+    const elsewhere = join(root, "other", ".demesne-worktrees", "fix-2");
+    mkdirSync(elsewhere, { recursive: true });
+    trust.trust(elsewhere);
+    for (let i = 0; i < 20; i++) trust.trust(join(root, `gone-${i}`));
     const listed = await (await app.fetch(new Request("http://localhost/v1/trusted"))).json() as { trusted: string[] };
     expect(listed.trusted).toEqual([workspace]);
+    expect(trust.isTrusted(elsewhere)).toBe(true);
     const forget = await app.fetch(new Request("http://localhost/v1/trusted/forget", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ root: workspace }) }));
     expect(((await forget.json()) as { trusted: string[] }).trusted).toEqual([]);
     expect(trust.isTrusted(workspace)).toBe(false);

@@ -913,7 +913,7 @@ try {
   await until(() => tokens.inputValue().then(value => value === "400,000"), "a typed Drive limit is saved");
   assert.match(readFileSync(join(f.home, ".demesne/config.toml"), "utf8"), /max_tokens = 400000/, "Drive's token limit lands in config.toml");
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Permissions" }).click();
-  await until(() => page.locator("#page .st-row", { hasText: "Its chats read its files" }).count().then(count => count >= 1), "the trusted folders are listed");
+  await until(() => page.locator("#page .pm-folder").count().then(count => count >= 1), "the trusted folders are listed");
   assert.equal(await page.locator("#page .pm-mode").count(), 4, "the four modes are cards");
   await capture("02-permissions");
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Usage" }).click();

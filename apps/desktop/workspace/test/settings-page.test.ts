@@ -78,15 +78,26 @@ test("every section draws, and the list has fourteen with Overview first", () =>
   expect(nav).toMatch(/st-nav on"[^>]*>.*Permissions<\/span><span class="st-nav-n">2</);
 });
 
-test("permissions list the rules, the trusted folders and the score", () => {
+test("permissions list the rules, the trusted folders and the score, kept short", () => {
   const html = settingsPage(view({ section: "permissions" }));
   expect(html).toContain("<code>bun test</code>");
   expect(html).toContain("in the project&#39;s config");
   // Only your own rule can be taken back; the project's has no ×.
   expect(html.match(/Ask again about/g)).toHaveLength(1);
-  expect(html).toContain('pm-mode on" aria-pressed="true" data-action="permission-mode" data-args="{&quot;mode&quot;:&quot;ask&quot;}"');
-  expect(html).toContain("<code>~/projects/demesne-cli</code>");
-  expect(html).toContain("Asked you 12 times this week, 31 the week before.");
+  expect(html).toContain('pm-mode on" aria-pressed="true"');
+  expect(html).toContain("<code title=\"/Users/mike/projects/demesne-cli\">~/projects/demesne-cli</code>");
+  expect(html).toContain("asked you 12 times this week");
+  // Many rules and folders fold after a few.
+  const many = { ...info, allow: Array.from({ length: 30 }, (_, i) => ({ rule: `run_command:cmd-${i}`, mine: true })), trusted: Array.from({ length: 9 }, (_, i) => `/Users/mike/p${i}`) };
+  const short = settingsPage(view({ section: "permissions", info: many }));
+  expect(short.match(/class="pm-chip"/g)).toHaveLength(12);
+  expect(short).toContain("+18 more");
+  expect(short.match(/class="pm-folder"/g)).toHaveLength(4);
+  expect(short).toContain("Show all 9");
+  const long = settingsPage(view({ section: "permissions", info: many, fold: "rules" }));
+  expect(long.match(/class="pm-chip"/g)).toHaveLength(30);
+  // Search still finds a rule.
+  expect(settingsSearch(view({ query: "cmd-29", info: many })).found.map(({ page }) => page.id)).toEqual(["permissions"]);
 });
 
 test("a setting the daemon reads at start says so until it restarts", () => {

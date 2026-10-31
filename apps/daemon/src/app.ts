@@ -90,6 +90,7 @@ import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, InferenceSchedulers } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 export { PlaceholderTurnProcessor, type TurnProcessor } from "./processor.ts";
@@ -441,10 +442,15 @@ export function createDaemonApp(options: {
   // Every chat in a project is told what Drive has and is doing; Drive's
   // own sessions in its worktrees are not.
   const driveWorktrees = options.worktreeRoot ?? join(dirname(dirname(options.databasePath)), ".demesne-worktrees");
-  // The folders you said you trust; Drive's worktrees (trusted on their own) stay out.
+  // The folders you said you trust, as Settings lists them: real projects
+  // only. Drive's worktrees (wherever they were made), folders that are gone,
+  // and throwaway temp folders stay trusted but unlisted. A daemon whose own
+  // data lives in temp (a test copy) lists its temp folders too.
   const trustedRoots = () => {
-    const data = dirname(options.databasePath);
-    return workspaceTrust.list().filter((root) => !inDriveWorktree(root) && root !== data && !root.startsWith(`${data}/`));
+    const data = dirname(options.databasePath), temp = canonicalTemp();
+    const listTemp = within(data, temp);
+    return workspaceTrust.list().filter((root) => !inDriveWorktree(root) && !root.split(/[\\/]/).includes(".demesne-worktrees")
+      && root !== data && !root.startsWith(`${data}/`) && (listTemp || !within(root, temp)) && existsSync(root));
   };
   const inDriveWorktree = (root: string) => root === driveWorktrees || root.startsWith(`${driveWorktrees}/`);
   // The ideas a chat sees and can run: the window's order, less ones Drive has in hand.
@@ -1983,4 +1989,14 @@ function json(value: unknown, status = 200): Response {
 function apiError(code: string, message: string, status: number): Response {
   const body: ApiErrorBody = { error: { code, message } };
   return json(body, status);
+}
+
+/// The system's temp folder, through any symlink (/var → /private/var on the Mac).
+function canonicalTemp(): string {
+  try { return realpathSync(tmpdir()); } catch { return tmpdir(); }
+}
+function within(path: string, folder: string): boolean {
+  let real = path;
+  try { real = realpathSync(path); } catch { /* gone: compare as written */ }
+  return [path, real].some((item) => item === folder || item.startsWith(`${folder}/`) || item.startsWith("/private/tmp/") || (folder.startsWith("/private/var/folders/") && item.startsWith(folder.slice("/private".length))));
 }

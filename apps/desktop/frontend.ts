@@ -24,8 +24,7 @@ const el = <T extends HTMLElement = HTMLElement>(id: string) => {
 };
 const shell = el("desktop-shell"), home = el("desktop-home"), app = el("app"),
   toolbar = el("desktop-toolbar"), errorPanel = el("desktop-error"),
-  startStatus = el("desktop-start-status"), projectsList = el("sidebar-projects"), searchField = el<HTMLInputElement>("sidebar-search"),
-  chooser = el<HTMLButtonElement>("desktop-choose-project");
+  startStatus = el("desktop-start-status"), projectsList = el("sidebar-projects"), searchField = el<HTMLInputElement>("sidebar-search");
 const native = window.demesneDesktop;
 const invoke: DesktopInvoke = <T>(command: string, args?: Record<string, unknown>) => {
   if (!native) return Promise.reject(new Error("Open Demesne with its desktop launcher. This page requires the native application bridge."));
@@ -56,10 +55,9 @@ const errorMessage = (error: unknown): string => {
 function setBusy(value: boolean, message?: string) {
   busy = value;
   shell.setAttribute("aria-busy", String(value));
-  for (const id of ["desktop-choose-project", "desktop-error-choose", "desktop-retry"])
+  for (const id of ["desktop-error-choose", "desktop-retry"])
     el<HTMLButtonElement>(id).disabled = value;
   for (const button of projectsList.querySelectorAll<HTMLButtonElement>("button")) button.disabled = value;
-  for (const button of el("desktop-recent-list").querySelectorAll<HTMLButtonElement>("button")) button.disabled = value;
   if (message !== undefined) {
     startStatus.textContent = message;
     startStatus.dataset.error = "false";
@@ -93,30 +91,8 @@ function showActionError(error: unknown) {
     setTimeout(() => { notice.hidden = true; }, 6000);
   }
 }
-function recentButton(path: string) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.title = path;
-  const title = document.createElement("strong");
-  title.textContent = projectName(path);
-  const detail = document.createElement("small");
-  detail.textContent = path;
-  const copy = document.createElement("span"), arrow = document.createElement("span");
-  copy.append(title, detail);
-  arrow.className = "desktop-recent-arrow";
-  arrow.textContent = "↗";
-  arrow.setAttribute("aria-hidden", "true");
-  button.append(copy, arrow);
-  button.addEventListener("click", () => { void openProject(path); });
-  return button;
-}
 function renderProjects() {
-  const list = el("desktop-recent-list");
-  list.replaceChildren(...recentProjects.slice(0, 6).map((path) => recentButton(path)));
-  el("desktop-recent").hidden = !recentProjects.length;
-  if (workspace) {
-    document.title = `${projectName(workspace)} — Demesne`;
-  }
+  document.title = workspace ? `${projectName(workspace)} — Demesne` : "Demesne";
   el("sidebar-sessions").dataset.projects = JSON.stringify(recentProjects);
   el("sidebar-sessions").dataset.workspace = workspace ?? "";
 }
@@ -127,16 +103,8 @@ async function applyBootstrap(result: DesktopBootstrap) {
   workspace = result.workspace;
   recentProjects = [...new Set(result.recentProjects.filter((path) => typeof path === "string"))];
   renderProjects();
-  if (!workspace) {
-    home.hidden = false;
-    toolbar.hidden = app.hidden = errorPanel.hidden = true;
-    el("desktop-sidebar").hidden = true;
-    setBusy(false, "");
-    chooser.focus({ preventScroll: true });
-    await request("desktop-ready");
-    return;
-  }
-  if (!result.snapshot) throw new Error("The project opened without a workspace connection. Try again to restart the desktop backend.");
+  // With no project yet, Home still opens, as Just a chat.
+  if (!result.snapshot) throw new Error("Demesne opened without a workspace connection. Try again to restart the desktop backend.");
   // Each WorkspaceHost has its own revision sequence and UI listeners. Reloading
   // makes project changes atomic, resets StateReceiver, and avoids double mounts.
   if (mounted && previous !== workspace) {
@@ -167,7 +135,7 @@ async function openProject(path?: string, sessionId?: string, fresh?: { draft: s
     setBusy(false);
   }
 }
-for (const id of ["desktop-choose-project", "desktop-error-choose", "sidebar-open-project"])
+for (const id of ["desktop-error-choose", "sidebar-open-project"])
   el(id).addEventListener("click", () => { void openProject(); });
 document.addEventListener("demesne:open-project", (event) => {
   const { path, sessionId, fresh, draft } = (event as CustomEvent<{ path?: string; sessionId?: string; fresh?: boolean; draft?: string }>).detail;

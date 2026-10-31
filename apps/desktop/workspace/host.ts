@@ -78,6 +78,9 @@ export interface WorkspaceHostOptions {
   /// Opens on Home: an empty chat, with no project ("plain") or in this
   /// one, using again one left empty, rather than the last chat.
   home?: "plain" | "project";
+  /// No project is open yet: every chat here is Just a chat, and the folder
+  /// the host stands in is never shown as a project.
+  projectless?: boolean;
   /// Desktop hosts use trusted native IPC instead of command-line OS utilities.
   copy?: (text: string) => Promise<void>;
   open?: (path: string) => Promise<void>;
@@ -408,7 +411,7 @@ export class WorkspaceHost {
       themeCanUndo: this.themeLibrary?.canUndo ?? false,
       systemThemeSource: this.themeLibrary?.systemSource ?? null,
       commands: this.slashCommands(),
-      workspace: this.current?.session.workspace?.root ?? this.workspace,
+      workspace: this.current?.session.workspace?.root ?? (this.options.projectless ? "" : this.workspace),
       selfBuild: this.selfBuilder.view(this.current?.session.workspace?.root ?? null),
       drive: this.driveState,
       // Drive's project memory for this workspace (shown in Session).
@@ -633,6 +636,7 @@ export class WorkspaceHost {
   /// A plain chat has no project: no files, commands or Drive. With
   /// `reuse`, an empty chat already there is opened rather than piling up.
   async newSession(title?: string, options: { plain?: boolean; reuse?: boolean } = {}) {
+    if (this.options.projectless) options = { ...options, plain: true };
     if (options.reuse && !title) {
       // The assistant's chat is never a new chat, even while it's empty.
       const empty = this.sessions.filter((session) => session.id !== this.assistant?.sessionId && (options.plain ? !session.workspace : session.workspace?.root === this.workspace) && !session.turns.length)

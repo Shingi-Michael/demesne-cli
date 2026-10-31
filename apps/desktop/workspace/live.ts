@@ -453,7 +453,7 @@ const SIDEBAR_ROWS = 6;
 const expandedProjectChats = new Set<string>();
 const projectOrder = new SidebarProjectOrder(
   document.getElementById("sidebar-sessions"),
-  () => state ? [document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace, ...JSON.parse(document.getElementById("sidebar-sessions")?.dataset.projects ?? "[]")] : [],
+  () => state ? [document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace, ...JSON.parse(document.getElementById("sidebar-sessions")?.dataset.projects ?? "[]")].filter(Boolean) : [],
   renderSidebar,
 );
 /// How the list is laid out: by project, by day, or by what each chat

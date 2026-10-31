@@ -94,17 +94,19 @@ test("saved theme selections survive project opening and OS appearance changes",
 test("desktop sidecar starts without a project and keeps malformed IPC recoverable", async () => {
   const f = await fixture(), sidecar = new Sidecar(f);
   try {
+    // No project yet: Home opens anyway, as Just a chat, and no project is kept.
     const booted = bootstrap(await sidecar.value("desktop-bootstrap"));
-    expect(booted).toMatchObject({ workspace: null, recentProjects: [], snapshot: null });
+    expect(booted).toMatchObject({ workspace: null, recentProjects: [] });
+    expect(booted.snapshot!.session!.workspace).toBeNull();
+    expect(booted.snapshot!.workspace).toBe("");
     expect(typeof booted.userName).toBe("string");
-    expect(await f.client.listSessions()).toHaveLength(0);
+    expect((await f.client.listSessions()).every(session => !session.workspace)).toBe(true);
     sidecar.raw("{broken json\n");
     sidecar.send({ kind: "request", id: 100, method: "submit", args: null });
     sidecar.send({ kind: "request", id: 101, method: "filesystem/path", args: {} });
     await eventually(() => sidecar.messages.some(message => message.kind === "response" && message.id === 101));
     expect(sidecar.messages.some(message => message.kind === "protocol-error")).toBe(true);
     expect(sidecar.messages.find(message => message.kind === "response" && message.id === 100)).toMatchObject({ ok: false });
-    expect((await sidecar.request("submit", { text: "No project" }))).toMatchObject({ ok: false, error: "Choose a project first" });
     expect(bootstrap(await sidecar.value("desktop-bootstrap")).workspace).toBeNull();
     expect(JSON.stringify(sidecar.messages)).not.toContain("graphics-test-token");
   } finally { expect(await sidecar.close()).toBe(0); await f.close(); }

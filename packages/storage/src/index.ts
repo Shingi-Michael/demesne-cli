@@ -767,7 +767,10 @@ export class DemesneStore {
       `).get(id) as ProviderCallRow | null;
       const checkpoint = this.getSessionCheckpoint(id);
       const snapshot = latestProviderCall ? mapProviderCallSnapshot(latestProviderCall) : null;
-      if (snapshot && checkpoint && checkpoint.turnId === latestProviderCall?.turn_id) snapshot.contextPlan = checkpoint.contextPlan;
+      // The meter follows the checkpoint once compacted: a summarizing call
+      // shares its turn, and a checkpoint stitched from notes (no call) is newer.
+      if (snapshot && checkpoint && (checkpoint.turnId === latestProviderCall?.turn_id
+        || (checkpoint.notes && checkpoint.createdAt >= (latestProviderCall as ProviderCallRow & { started_at: string }).started_at))) snapshot.contextPlan = checkpoint.contextPlan;
       return {
         session,
         lastEventId: latest.id,

@@ -70,8 +70,9 @@ const READS = new Set(["list_files", "read_file", "read_files", "search_files", 
 const PAGE = new Set(["foundry_save", "foundry_edit"]);
 const MAX_ROUNDS = 4;
 
-interface Outcome { calls: string[]; text: string; rounds: number; wroteFile: string | null }
-let current: Outcome = { calls: [], text: "", rounds: 0, wroteFile: null };
+interface Outcome { calls: string[]; text: string; rounds: number; wroteFile: string | null; error: string | null }
+const fresh = (): Outcome => ({ calls: [], text: "", rounds: 0, wroteFile: null, error: null });
+let current = fresh();
 let canned: { user: string; answer: string } | null = null;
 
 const lastUser = (messages: { role: string; content?: unknown }[]) => {
@@ -90,6 +91,7 @@ async function* round(stream: AsyncIterable<ProviderStreamEvent>, messages: { ro
   current.rounds++;
   const held: ProviderStreamEvent[] = [], calls = new Map<number, { name: string; args: string }>();
   let finish: ProviderStreamEvent | null = null;
+  try {
   for await (const event of stream) {
     if (event.type === "text_delta") { current.text += event.delta; yield event; }
     else if (event.type === "tool_call_delta") {
@@ -100,6 +102,7 @@ async function* round(stream: AsyncIterable<ProviderStreamEvent>, messages: { ro
     else if (event.type === "finish") finish = event;
     else yield event;
   }
+  } catch (error) { current.error = error instanceof Error ? error.message : String(error); throw error; }
   const names = [...calls.values()].map((call) => call.name);
   current.calls.push(...names);
   for (const call of calls.values()) if (/write|edit_file|create_file|apply_patch/.test(call.name) && /\.html?\b/.test(call.args)) current.wroteFile = call.name;
@@ -114,10 +117,13 @@ async function* round(stream: AsyncIterable<ProviderStreamEvent>, messages: { ro
 }
 
 function watched(processor: TurnProcessor): TurnProcessor {
-  const inference = (real: TurnInference): TurnInference => new Proxy(real, {
-    get: (target, key, receiver) => key === "stream"
-      ? (messages: Parameters<TurnInference["stream"]>[0], ...rest: unknown[]) => round((target.stream as (...args: unknown[]) => AsyncIterable<ProviderStreamEvent>).call(target, messages, ...rest), messages)
-      : Reflect.get(target, key, receiver),
+  // A plain copy: the real inference can be frozen, which a Proxy may not misreport.
+  const inference = (real: TurnInference): TurnInference => ({
+    providerId: real.providerId, modelId: real.modelId, profile: real.profile, thinkingEnabled: real.thinkingEnabled,
+    preservesPromptCache: real.preservesPromptCache, vision: real.vision, contextCapacity: real.contextCapacity,
+    maxOutputTokens: real.maxOutputTokens, temperature: real.temperature, seed: real.seed,
+    ...(real.release ? { release: (cacheKey?: string) => real.release!(cacheKey) } : {}),
+    stream: (messages, tools, signal, options) => round(real.stream(messages, tools, signal, options), messages),
   });
   return new Proxy(processor, {
     get: (target, key, receiver) => {
@@ -160,6 +166,11 @@ const fake: TurnProcessor = {
     if (/show|look|page|age/i.test(asked)) { yield call("foundry_save", { title: "Try", kind: "html", source: "<p>hi</p>" }); yield { type: "finish", reason: "tool_calls" }; return; }
     yield { type: "text_delta", delta: "Done in words." }; yield { type: "finish", reason: "stop" };
   },
+  // Frozen, like a real provider's: the path the real run takes.
+  createTurnInference(thinkingEnabled) {
+    return Object.freeze({ providerId: "fake", modelId: "stand-in", profile: null, thinkingEnabled, preservesPromptCache: false, contextCapacity: 262144,
+      stream: (messages: Parameters<TurnInference["stream"]>[0], tools: Parameters<TurnInference["stream"]>[1], signal: AbortSignal) => fake.stream(messages, tools, signal, thinkingEnabled) });
+  },
 };
 const processor = process.argv.includes("--fake") ? fake : createProcessor(config, dataDirectory, await signedInAccounts(dataDirectory));
 if (!processor) throw new Error("No provider is configured in ~/.demesne/config.toml");
@@ -195,7 +206,7 @@ try {
         await settle(session.id);
       }
       canned = null;
-      current = { calls: [], text: "", rounds: 0, wroteFile: null };
+      current = fresh();
       await client.submitTurn(session.id, {
         content: item.prompt,
         permissionMode: item.where === "drive" || item.where === "mail" ? "allow" : "ask",
@@ -204,10 +215,11 @@ try {
       });
       const status = await settle(session.id);
       const made = current.calls.some((name) => PAGE.has(name));
-      const pass = made === (item.expect === "page");
+      // A turn that didn't finish says nothing about the model's choice.
+      const pass = status === "completed" && made === (item.expect === "page");
       results.push({ ...item, run, made, pass, status, ...current });
       const said = current.text.replace(/\s+/g, " ").trim().slice(0, 90);
-      console.log(`${pass ? "PASS" : "FAIL"}  ${item.expect === "page" ? "page" : "none"}  ${item.where.padEnd(7)} ${item.id.padEnd(20)} calls: ${current.calls.join(", ") || "-"}${current.wroteFile ? "  (wrote an HTML file)" : ""}${status !== "completed" ? `  [${status}]` : ""}${!made && /foundry|mock/i.test(current.text) ? "  (offered)" : ""}\n      ${said}`);
+      console.log(`${status !== "completed" ? "ERROR" : pass ? "PASS" : "FAIL"}  ${item.expect === "page" ? "page" : "none"}  ${item.where.padEnd(7)} ${item.id.padEnd(20)} calls: ${current.calls.join(", ") || "-"}${current.wroteFile ? "  (wrote an HTML file)" : ""}${status !== "completed" ? `  [${status}]` : ""}${!made && /foundry|mock/i.test(current.text) ? "  (offered)" : ""}\n      ${current.error ? `error: ${current.error}` : said}`);
     }
   }
 } finally {
@@ -219,4 +231,7 @@ const score = (list: typeof results) => `${list.filter((item) => item.pass).leng
 console.log(`\nShould make a page: ${score(results.filter((item) => item.expect === "page"))}`);
 console.log(`Should not: ${score(results.filter((item) => item.expect === "none"))}`);
 console.log(`All: ${score(results)}`);
+const errors = results.filter((item) => item.status !== "completed").length;
+if (errors) console.log(`${errors} turn(s) didn't finish; their scores mean nothing.`);
 if (out) writeFileSync(out, JSON.stringify({ model: `${processor.providerId} ${processor.modelId}`, results }, null, 2));
+if (errors) process.exit(1);

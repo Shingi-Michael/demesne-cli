@@ -448,6 +448,11 @@ export class DemesneClient {
     });
   }
 
+  /// Adds a line to a chat's Keep list, or takes one off; returns the list.
+  async editKeep(sessionId: string, change: { add?: string; remove?: string }): Promise<{ keep: string[] }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/keep`, { method: "POST", body: JSON.stringify(change) });
+  }
+
   async compactSession(sessionId: string, request: CompactSessionRequest = {}): Promise<SubmitTurnResponse> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/compact`, { method: "POST", body: JSON.stringify(request) });
   }

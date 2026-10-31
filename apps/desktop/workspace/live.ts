@@ -31,7 +31,7 @@ import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
-import type { FoundryArtifact, FoundryArtifactDetail, PlanLimits, Routine } from "@demesne/protocol";
+import type { ContextParts, FoundryArtifact, FoundryArtifactDetail, PlanLimits, Routine } from "@demesne/protocol";
 import { glanceHTML, type Glance } from "./glance.ts";
 import { backChoices, backState } from "./back-later.ts";
 import { agoWords, prHandable, prHandText, prStanding } from "./pr-row.ts";
@@ -233,6 +233,7 @@ const verb = (tool: ToolEntry) =>
     git_status: "Git",
     git_history: "History",
     session_tools: "Tool",
+    recall_turn: "Recalled",
     subagent: "Agent",
     foundry_save: "Made",
     foundry_edit: "Changed",
@@ -1049,7 +1050,34 @@ function renderContextCard() {
   const compact = worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : "";
   const halves = [showContext ? contextHalf(c) : "", showPlan ? planHalf(limits!) : ""].filter(Boolean);
   const drive = showPlan ? `<span>${planUsed(limits!)!.window.usedPercent >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`}</span>` : "<span></span>";
-  card.innerHTML = halves.join('<div class="context-divider"></div>') + (showPlan || compact ? `<div class="context-foot">${drive}${compact}</div>` : "");
+  const html = halves.join('<div class="context-divider"></div>') + (showPlan || compact ? `<div class="context-foot">${drive}${compact}</div>` : "");
+  if (html === card.dataset.html) return;
+  // A line being typed into Keep survives the card redrawing around it.
+  const typing = card.querySelector<HTMLInputElement>(".context-keep-add");
+  const draft = typing?.value ?? "", focused = typing === document.activeElement;
+  card.innerHTML = html;
+  card.dataset.html = html;
+  const input = card.querySelector<HTMLInputElement>(".context-keep-add");
+  if (input && draft) input.value = draft;
+  if (input && focused) input.focus();
+  card.onkeydown = (event) => {
+    const target = event.target as HTMLInputElement;
+    if (event.key !== "Enter" || !target.classList.contains("context-keep-add") || !target.value.trim()) return;
+    event.preventDefault();
+    void editKeep({ add: target.value.trim() }).then(() => { target.value = ""; });
+  };
+}
+/// The Keep list as you just edited it, until the next request reads it back.
+let keepNow: { session: string; basis: string; keep: string[] } | null = null;
+async function editKeep(change: { add?: string; remove?: string }) {
+  const session = state?.session?.id, basis = JSON.stringify(state?.provider?.contextPlan?.parts?.keep ?? null);
+  const keep = await api<string[]>("keep", change);
+  if (session && keep) keepNow = { session, basis, keep };
+  renderContextCard();
+}
+function keepShown(parts: ContextParts | undefined) {
+  if (!parts?.keep) return undefined;
+  return keepNow && keepNow.session === state?.session?.id && keepNow.basis === JSON.stringify(parts.keep) ? keepNow.keep : parts.keep;
 }
 /// What is in the chat, in words first: how many more turns like the last
 /// few fit, then the parts and the biggest single things.
@@ -1075,8 +1103,9 @@ function contextHalf(c: ReturnType<typeof context>) {
     ? `<div class="context-sub">Biggest in it</div><div class="context-big">${parts.largest.map((item) => `<span title="${h(item.label)}">${h(item.label)}</span><em>${tokensShort(item.tokens)}</em>`).join("")}</div>`
     : "";
   // Compaction from notes (pass 114): the Keep list, then which turns are notes and which are whole.
-  const keep = parts?.keep?.length
-    ? `<div class="context-sub">Keep · ${parts.keep.length}</div><div class="context-keep">${parts.keep.slice(-6).map((line) => `<span>${h(line)}</span>`).join("")}${parts.keep.length > 6 ? `<em>and ${parts.keep.length - 6} earlier</em>` : ""}</div>` : "";
+  const lines = keepShown(parts);
+  const keep = lines
+    ? `<div class="context-sub">Keep${lines.length ? ` · ${lines.length}` : ""}</div><div class="context-keep">${lines.slice(-6).map((line) => `<span>${h(line)}${btn("keep-remove", "×", { line }, "context-keep-remove").replace("<button ", `<button title="Take off Keep" aria-label="Take off Keep: ${h(line)}" `)}</span>`).join("")}${lines.length > 6 ? `<em>and ${lines.length - 6} earlier</em>` : ""}<input class="context-keep-add" type="text" maxlength="300" placeholder="Add something to keep" aria-label="Add something to keep"></div>` : "";
   const noted = parts?.notedTurns ?? 0, whole = parts?.wholeTurns ?? 0;
   const lane = noted
     ? `<div class="context-sub">Turns · ${noted} ${noted === 1 ? "note" : "notes"}, ${whole} whole</div><div class="context-lane">${`<i class="note"></i>`.repeat(Math.min(noted, 40))}${"<i></i>".repeat(Math.min(whole, 20))}</div>` : "";
@@ -4956,6 +4985,7 @@ async function dispatch(
   if (action === "cycle-mode") return cycleMode();
   if (action === "attach-pick") { el<HTMLInputElement>("attach-input").click(); return; }
   if (action === "detach") return api("detach", { id: args.id });
+  if (action === "keep-remove") { await editKeep({ remove: String(args.line ?? "") }); return; }
   if (action === "context-card") {
     contextCardOpen = !contextCardOpen;
     renderContextCard();

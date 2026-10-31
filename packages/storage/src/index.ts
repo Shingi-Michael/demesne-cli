@@ -830,6 +830,18 @@ export class DemesneStore {
     return this.readModelTranscript(sessionId, true);
   }
 
+  /// One chat turn's model messages, compacted or not: what recall_turn brings back.
+  getTurnModelMessages(sessionId: string, turnId: string): ModelMessage[] {
+    const rows = this.database.query(`
+      SELECT model_messages.id, model_messages.turn_id, model_messages.role, model_messages.content,
+              model_messages.tool_call_id, model_messages.tool_calls_json, model_messages.image_artifact_ids_json, model_messages.responses_json
+      FROM model_messages JOIN turns ON turns.id = model_messages.turn_id
+      WHERE model_messages.session_id = ? AND model_messages.turn_id = ? AND turns.kind = 'chat'
+      ORDER BY model_messages.id
+    `).all(sessionId, turnId) as ModelMessageRow[];
+    return rows.map((row) => mapModelMessage(row).message);
+  }
+
   private readModelTranscript(sessionId: string, includeStopped: boolean): StoredModelMessage[] {
     const session = this.getSessionOrThrow(sessionId);
     const rows = this.database.query(`

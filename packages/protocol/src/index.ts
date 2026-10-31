@@ -391,6 +391,8 @@ export interface SessionCheckpoint {
   /// Set when the checkpoint was stitched from turn notes, not summarized.
   keep?: string[];
   notes?: string[];
+  /// The turn each note stands for ("" for an earlier summary), for recall_turn.
+  noteTurnIds?: string[];
 }
 
 export interface CompactSessionRequest {

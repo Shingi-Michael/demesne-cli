@@ -22,7 +22,7 @@ async function fixture(run: (value: {
   client: DemesneClient; id: string; initialMessages: unknown[]; originalTurns: string[]; db: Database;
   requests: ProviderMessage[][]; consume: (submitted: SubmitTurnResponse) => Promise<EventEnvelope[]>;
   restart: () => Promise<void>; setStream: (stream: TurnProcessor["stream"]) => void; close: () => Promise<void>;
-}) => Promise<void>, options: { count?: number; size?: number; capacity?: number; source?: string; undo?: boolean; stopped?: number[]; assistant?: boolean } = {}) {
+}) => Promise<void>, options: { count?: number; size?: number; capacity?: number; source?: string; undo?: boolean; stopped?: number[]; assistant?: boolean; compactAwayMs?: number } = {}) {
   const root = mkdtempSync(join(tmpdir(), "demesne-compaction-"));
   mkdirSync(join(root, "data"));
   const databasePath = join(root, "data/state.sqlite");
@@ -66,7 +66,7 @@ async function fixture(run: (value: {
       requests.push(structuredClone(args[0]));
       yield* implementation(...args);
     } };
-  const appOptions = { databasePath, processor };
+  const appOptions = { databasePath, processor, ...(options.compactAwayMs ? { compactAwayMs: options.compactAwayMs } : {}) };
   let app = createDaemonApp(appOptions);
   const db = new Database(databasePath, { readonly: true });
   const client = new DemesneClient({ server: "http://localhost", fetch: ((input: string | URL | Request, init?: RequestInit) =>
@@ -487,4 +487,54 @@ test("past two fifths of the window the model writes a hidden note, kept for com
     const stored = db.query("SELECT content FROM model_messages ORDER BY id DESC LIMIT 1").get() as { content: string };
     expect(stored.content).toContain("Decided: a shared lexer");
   }, { capacity: 16384 });
+});
+
+test("a turn swapped for its note can be recalled whole", async () => {
+  await fixture(async ({ client, id, consume, setStream, requests }) => {
+    await consume(await client.compactSession(id));
+    const checkpoint = (await client.getSessionState(id)).checkpoint!;
+    expect(checkpoint.noteTurnIds).toHaveLength(3);
+    let offered: string[] = [];
+    setStream(async function* (messages, tools) {
+      offered = tools.map((tool) => tool.name);
+      if (!messages.some((message) => message.role === "tool" && message.toolCallId === "recall")) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "recall", nameDelta: "recall_turn", argumentsDelta: '{"note":1}' };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", delta: "It read the parser." };
+        yield { type: "finish", reason: "stop" };
+      }
+      yield { type: "usage", usage: { inputTokens: 2000, outputTokens: 20, totalTokens: 2020 } };
+    });
+    await consume(await client.submitTurn(id, { content: "What exactly did the first turn read?" }));
+    expect(offered).toContain("recall_turn");
+    const recalled = requests.at(-1)!.find((message) => message.role === "tool" && message.toolCallId === "recall");
+    expect(recalled?.content).toContain("User: Request 0: preserve Unicode support");
+    expect(recalled?.content).toContain("OLD_SOURCE_0");
+  });
+});
+
+test("the Keep list takes your additions and removals, and compaction carries them", async () => {
+  await fixture(async ({ client, id, consume }) => {
+    await client.request(`/v1/sessions/${id}/keep`, { method: "POST", body: JSON.stringify({ add: "The port is 4317" }) });
+    const { keep } = await client.editKeep(id, { add: "Never push to main" });
+    expect(keep).toEqual(["The port is 4317", "Never push to main"]);
+    expect((await client.editKeep(id, { remove: "the port is 4317" })).keep).toEqual(["Never push to main"]);
+    await consume(await client.compactSession(id));
+    const checkpoint = (await client.getSessionState(id)).checkpoint!;
+    expect(checkpoint.keep).toEqual(["Never push to main"]);
+    expect(checkpoint.summary).toContain("- Never push to main");
+  });
+});
+
+test("a chat past two fifths compacts from its notes once it has sat idle long enough for the cache to go cold", async () => {
+  await fixture(async ({ client, id, consume, setStream }) => {
+    setStream(usingTokens(14000));
+    await consume(await client.submitTurn(id, { content: "Keep going" }));
+    expect((await client.getSessionState(id)).checkpoint).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const turns = await settledTurns(client, id, 7);
+    expect(turns.at(-1)).toMatchObject({ kind: "compaction", status: "completed" });
+    expect((await client.getSessionState(id)).checkpoint?.notes).toHaveLength(4);
+  }, { compactAwayMs: 50 });
 });

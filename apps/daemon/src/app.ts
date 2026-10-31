@@ -47,7 +47,7 @@ import { DemesneStore, InvalidStateError, NotFoundError, QuestionStateError } fr
 import { PlaceholderTurnProcessor, snapshotTurnInference, type TurnInference, type TurnProcessor } from "./processor.ts";
 import { AgentEngine } from "./engine.ts";
 import { SessionCompactor } from "./session-compaction.ts";
-import { AUTO_COMPACT_AT } from "./turn-notes.ts";
+import { AUTO_COMPACT_AT, CACHE_COLD_MS, KeepEdits, keepLines, NOTES_FROM } from "./turn-notes.ts";
 import type { ContextPlanner } from "./context-planner.ts";
 import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
@@ -168,6 +168,8 @@ export function createDaemonApp(options: {
   providerFirstEventTimeoutMs?: number;
   providerRequestTimeoutMs?: number;
   providerEventLimit?: number;
+  /// How long a chat sits idle before it compacts while you're away (tests shorten it).
+  compactAwayMs?: number;
   questionTimeoutMs?: number;
   theme?: string;
   /// Allows fixture tests to keep repository signals real while isolating
@@ -346,6 +348,7 @@ export function createDaemonApp(options: {
     log: (message) => console.warn(message),
   }) : null;
   if (heartbeat) tools.register(heartbeatTool(heartbeat));
+  const keepEdits = new KeepEdits(join(dirname(options.databasePath), "keep"));
   const engine = new AgentEngine(
     store,
     tools,
@@ -366,6 +369,7 @@ export function createDaemonApp(options: {
       fallbackInference: (current, tried) => processor.createFallbackInference?.(current.thinkingEnabled, tried) ?? null,
       subagentModels: () => subagentModels(),
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
+      keepEdits,
       sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
       assistantChat: (sessionId: string) => sessionId === assistantChat.existing(),
       lateAnswers: (sessionId: string, turnId: string, texts: string[]) => void answerTurn(sessionId, turnId, texts.join("\n"), undefined),
@@ -374,7 +378,7 @@ export function createDaemonApp(options: {
     },
   );
   const activeTurns = new Set<Promise<void>>();
-  const compactor = new SessionCompactor(store, scheduler, tools, options, (sessionId) => sessionId !== assistantChat.existing());
+  const compactor = new SessionCompactor(store, scheduler, tools, options, (sessionId) => sessionId !== assistantChat.existing(), keepEdits);
   const activeControllers = new Map<string, AbortController>();
   const activeStreamClosers = new Set<() => void>();
   const driveLifecycle = new AbortController();
@@ -548,9 +552,32 @@ export function createDaemonApp(options: {
           } catch (error) {
             console.error(`Could not schedule compaction after turn ${turn.id}`, error);
           }
-        }
+        } else if (since > 2 && !busy) compactWhenAway(turn.sessionId, turn.id, inference);
       }
     }
+  }
+
+  /// Compacting while you're away (pass 114): once a chat has sat idle
+  /// long enough that its provider's prompt cache is cold, a chat past
+  /// NOTES_FROM swaps its older turns for their notes before you come back.
+  const awayTimers = new Map<string, ReturnType<typeof setTimeout>>(), compactAwayMs = options.compactAwayMs ?? CACHE_COLD_MS;
+  function compactWhenAway(sessionId: string, turnId: string, inference: TurnInference) {
+    clearTimeout(awayTimers.get(sessionId));
+    const timer = setTimeout(() => {
+      awayTimers.delete(sessionId);
+      if (closing) return;
+      const state = store.getSessionState(sessionId);
+      if (state?.session.turns.at(-1)?.id !== turnId) return;
+      const used = state.latestProviderCall?.usage?.inputTokens ?? state.latestProviderCall?.contextPlan?.estimatedInputTokens;
+      if (!used || !inference.contextCapacity || used < inference.contextCapacity * NOTES_FROM) return;
+      try {
+        queueTurn(store.createTurn(sessionId, "/compact", "deny", false, false, "compaction").turn, inference);
+      } catch (error) {
+        console.error(`Could not compact ${sessionId} while you were away`, error);
+      }
+    }, compactAwayMs);
+    timer.unref?.();
+    awayTimers.set(sessionId, timer);
   }
 
   async function undoSession(sessionId: string, request: UndoSessionRequest): Promise<Response> {
@@ -1353,6 +1380,17 @@ export function createDaemonApp(options: {
         return json({ ...state, session, sessionGrants: permissions.listGrants(path[2]!) });
       }
 
+      // The chat's Keep list: add a line, or take one off (pass 114).
+      if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "keep") {
+        const body = await readJson(request);
+        const text = (key: string) => isRecord(body) && typeof body[key] === "string" && (body[key] as string).trim() ? (body[key] as string).slice(0, 300) : undefined;
+        const add = text("add"), remove = text("remove");
+        if (!add && !remove) return apiError("invalid_request", "Pass add or remove", 400);
+        if (!store.getSession(path[2]!)) return apiError("not_found", "Session not found", 404);
+        const edits = keepEdits.update(path[2]!, { add, remove });
+        const messages = store.getModelContextTranscript(path[2]!).map((entry) => entry.message);
+        return json({ keep: keepLines(messages, store.getSessionCheckpoint(path[2]!)?.keep, edits) });
+      }
       if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "compact") {
         const body = parseCompactSessionRequest(await readJson(request));
         const inference = inferenceIn(path[2]!, false);
@@ -1642,6 +1680,7 @@ export function createDaemonApp(options: {
 
   async function closeApplication(): Promise<void> {
       closing = true;
+      for (const timer of awayTimers.values()) clearTimeout(timer);
       driveLifecycle.abort(new DOMException("Daemon shutting down", "AbortError"));
       clearInterval(driveAutoTimer);
       clearInterval(routinesTimer);

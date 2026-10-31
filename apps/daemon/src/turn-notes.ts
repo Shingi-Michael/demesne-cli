@@ -1,4 +1,6 @@
-import type { ProviderMessage } from "@demesne/providers";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { ProviderMessage, ProviderToolDefinition } from "@demesne/providers";
 
 /// Compaction from notes (pass 114). Once a chat is past NOTES_FROM of its
 /// window, the model ends each answer with a short hidden note, and every
@@ -14,6 +16,11 @@ export const NOTES_FROM = 0.4;
 /// Share of the room for input (the window less the reply) at which a chat
 /// compacts itself after a turn.
 export const AUTO_COMPACT_AT = 0.75;
+/// How long a chat sits idle before its provider's prompt cache is surely
+/// cold: compacting then costs nothing a next request wouldn't pay anyway.
+export const CACHE_COLD_MS = 10 * 60_000;
+const RECALL_CHARACTERS = 24_000;
+const RECALL_RESULT_CHARACTERS = 6_000;
 const MAX_KEEP = 24;
 const MAX_LINE = 300;
 
@@ -112,8 +119,9 @@ export function turnNote(messages: ProviderMessage[]): string {
 }
 
 /// The user's standing rules ("never…", "always…", "from now on…") and the
-/// model's Keep lines, newest last, without repeats.
-export function keepLines(messages: ProviderMessage[], previous: string[] = []): string[] {
+/// model's Keep lines, newest last, without repeats; then the user's own
+/// additions, less what they removed.
+export function keepLines(messages: ProviderMessage[], previous: string[] = [], edits: KeepEdit = { added: [], removed: [] }): string[] {
   const found = [...previous];
   for (const message of messages) {
     if (message.role === "user") {
@@ -126,13 +134,85 @@ export function keepLines(messages: ProviderMessage[], previous: string[] = []):
       for (const line of splitNote(message.content).lines) if (/^keep:/i.test(line)) found.push(line.replace(/^keep:\s*/i, ""));
     }
   }
-  const seen = new Set<string>();
+  found.push(...edits.added);
+  const seen = new Set(edits.removed.map(keepKey));
   return found.filter((line) => {
-    const key = line.toLowerCase().replace(/\W+/g, " ").trim();
+    const key = keepKey(line);
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
   }).slice(-MAX_KEEP);
+}
+
+const keepKey = (line: string) => line.toLowerCase().replace(/\W+/g, " ").trim();
+
+export interface KeepEdit { added: string[]; removed: string[] }
+
+/// What you added to or took off a chat's Keep list, one small file per chat.
+export class KeepEdits {
+  constructor(private readonly directory: string) {}
+  private path(sessionId: string) {
+    if (!/^[A-Za-z0-9-]{1,100}$/.test(sessionId)) throw new Error("Invalid session id");
+    return join(this.directory, `${sessionId}.json`);
+  }
+  read(sessionId: string): KeepEdit {
+    const path = this.path(sessionId);
+    if (!existsSync(path)) return { added: [], removed: [] };
+    try {
+      const value = JSON.parse(readFileSync(path, "utf8")) as Partial<KeepEdit>;
+      return { added: value.added ?? [], removed: value.removed ?? [] };
+    } catch {
+      return { added: [], removed: [] };
+    }
+  }
+  update(sessionId: string, change: { add?: string; remove?: string }): KeepEdit {
+    const edit = this.read(sessionId);
+    const add = change.add?.trim(), remove = change.remove?.trim();
+    if (add) {
+      edit.removed = edit.removed.filter((line) => keepKey(line) !== keepKey(add));
+      edit.added = [...edit.added.filter((line) => keepKey(line) !== keepKey(add)), clip(add)];
+    }
+    if (remove) {
+      edit.added = edit.added.filter((line) => keepKey(line) !== keepKey(remove));
+      edit.removed = [...edit.removed.filter((line) => keepKey(line) !== keepKey(remove)), remove];
+    }
+    mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+    const path = this.path(sessionId), temp = `${path}.${process.pid}.tmp`;
+    writeFileSync(temp, JSON.stringify(edit), { mode: 0o600 });
+    renameSync(temp, path);
+    return edit;
+  }
+}
+
+export const RECALL_TURN = "recall_turn";
+export const recallTurnDefinition: ProviderToolDefinition = {
+  name: RECALL_TURN,
+  description: "Bring back the full text of one earlier turn that was swapped for a note: its messages, tool calls and their output. Use it when a note isn't enough, for an exact error, value, command output or diff. Pass the note's number from the turn notes.",
+  inputSchema: {
+    type: "object",
+    properties: { note: { type: "integer", minimum: 1, description: "The turn note's number" } },
+    required: ["note"],
+    additionalProperties: false,
+  },
+};
+
+/// One recalled turn, as plain text: long tool output is cut, and so is the whole.
+export function recallText(messages: ProviderMessage[]): string {
+  const calls = new Map<string, string>();
+  const parts: string[] = [];
+  for (const message of messages) {
+    if (message.role === "user") parts.push(`User: ${message.content}`);
+    if (message.role === "assistant") {
+      const text = message.content ? splitNote(message.content).text.trim() : "";
+      if (text) parts.push(`Assistant: ${text}`);
+      for (const call of message.toolCalls ?? []) {
+        calls.set(call.id, call.name);
+        parts.push(`Tool call ${call.name}: ${call.arguments}`);
+      }
+    }
+    if (message.role === "tool") parts.push(`Tool result ${calls.get(message.toolCallId) ?? ""}: ${clip(message.content, RECALL_RESULT_CHARACTERS)}`);
+  }
+  return clip(parts.join("\n\n"), RECALL_CHARACTERS);
 }
 
 /// The checkpoint the model reads in place of the older turns.

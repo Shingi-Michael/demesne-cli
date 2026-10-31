@@ -623,4 +623,33 @@ describe("context planner", () => {
       planned.plan.originalEstimatedInputTokens - planned.plan.estimatedInputTokens,
     );
   });
+
+  test("parts say what the planned messages hold, for the context card", () => {
+    const messages: ProviderMessage[] = [
+      { role: "system", content: "You are Demesne. ".repeat(40) },
+      { role: "user", content: "Run the check" },
+      { role: "assistant", content: null, toolCalls: [
+        { id: "read", name: "read_file", arguments: JSON.stringify({ path: "workspace/live.ts" }) },
+        { id: "run", name: "run_command", arguments: JSON.stringify({ command: "bun run desktop:check" }) },
+      ] },
+      { role: "tool", toolCallId: "read", content: "line\n".repeat(1_000) },
+      { role: "tool", toolCallId: "run", content: "ok\n".repeat(600) },
+      { role: "assistant", content: "Done." },
+      { role: "user", content: "Thanks" },
+    ];
+
+    const { plan } = planRawContextRequest({
+      messages,
+      tools: [],
+      historicalTurns: [{ id: "first", startMessageIndex: 1, endMessageIndex: 6 }],
+      capacityTokens: 100_000,
+      outputReserveTokens: 1_000,
+    });
+
+    const parts = plan.parts!;
+    expect(parts.instructionTokens + parts.conversationTokens + parts.toolOutputTokens).toBe(plan.estimatedMessageTokens);
+    expect(parts.toolOutputTokens).toBeGreaterThan(parts.instructionTokens);
+    expect(parts.largest.map((item) => item.label)).toEqual(["Read workspace/live.ts", "Ran bun run desktop:check"]);
+    expect(parts.tokensPerTurn).toBeGreaterThan(parts.toolOutputTokens);
+  });
 });

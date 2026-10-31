@@ -21,9 +21,8 @@ export interface PlanLimits {
 }
 export interface PlanLimitsResponse { limits: PlanLimits[] }
 
-/// Under this nothing shows; from AMBER it turns amber; at DRIVE_PAUSE Drive
-/// stops starting runs of its own, so it never spends the last of a window.
-export const PLAN_LIMIT_SHOWN = 50;
+/// From AMBER the plan's mark turns amber; at DRIVE_PAUSE Drive stops
+/// starting runs of its own, so it never spends the last of a window.
 export const PLAN_LIMIT_AMBER = 75;
 export const PLAN_LIMIT_DRIVE_PAUSE = 90;
 

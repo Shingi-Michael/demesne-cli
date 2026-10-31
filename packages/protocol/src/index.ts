@@ -281,6 +281,18 @@ export interface ContextPlan {
   estimatedToolDefinitionTokens: number;
   budgetStatus: ContextBudgetStatus;
   actions: ContextCompactionAction[];
+  /// What the planned messages hold, for the context card: shares of
+  /// estimatedMessageTokens, the biggest tool outputs, and how much the
+  /// last few finished turns each added.
+  parts?: ContextParts;
+}
+
+export interface ContextParts {
+  instructionTokens: number;
+  conversationTokens: number;
+  toolOutputTokens: number;
+  largest: { label: string; tokens: number }[];
+  tokensPerTurn: number | null;
 }
 
 export interface ProviderCallSnapshot {

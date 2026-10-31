@@ -194,7 +194,13 @@ async function settle(sessionId: string, timeout = 240_000) {
   }
 }
 
-const results: (Case & { run: number; made: boolean; pass: boolean; status: string } & Outcome)[] = [];
+/// Why a turn neither passed nor failed: it stopped to ask the person first
+/// (`ask_user` before any page, a fair move on a vague ask that the eval
+/// can't answer), or it was still reading when the eval's round cap ended it.
+const unscored = (outcome: Outcome) => outcome.calls.some((name) => PAGE.has(name)) ? null
+  : outcome.calls.find((name) => !READS.has(name)) === "ask_user" ? "asked"
+  : outcome.rounds >= MAX_ROUNDS && outcome.calls.every((name) => READS.has(name)) ? "capped" : null;
+const results: (Case & { run: number; made: boolean; pass: boolean; status: string; aside: string | null } & Outcome)[] = [];
 console.log(`Model: ${processor.providerId} ${processor.modelId}\n`);
 try {
   for (let run = 1; run <= runs; run++) {
@@ -217,9 +223,10 @@ try {
       const made = current.calls.some((name) => PAGE.has(name));
       // A turn that didn't finish says nothing about the model's choice.
       const pass = status === "completed" && made === (item.expect === "page");
-      results.push({ ...item, run, made, pass, status, ...current });
+      const aside = status === "completed" && !pass ? unscored(current) : null;
+      results.push({ ...item, run, made, pass, status, aside, ...current });
       const said = current.text.replace(/\s+/g, " ").trim().slice(0, 90);
-      console.log(`${status !== "completed" ? "ERROR" : pass ? "PASS" : "FAIL"}  ${item.expect === "page" ? "page" : "none"}  ${item.where.padEnd(7)} ${item.id.padEnd(20)} calls: ${current.calls.join(", ") || "-"}${current.wroteFile ? "  (wrote an HTML file)" : ""}${status !== "completed" ? `  [${status}]` : ""}${!made && /foundry|mock/i.test(current.text) ? "  (offered)" : ""}\n      ${current.error ? `error: ${current.error}` : said}`);
+      console.log(`${status !== "completed" ? "ERROR" : pass ? "PASS" : aside ? aside.toUpperCase().padEnd(4) : "FAIL"}  ${item.expect === "page" ? "page" : "none"}  ${item.where.padEnd(7)} ${item.id.padEnd(20)} calls: ${current.calls.join(", ") || "-"}${current.wroteFile ? "  (wrote an HTML file)" : ""}${status !== "completed" ? `  [${status}]` : ""}${!made && /foundry|mock/i.test(current.text) ? "  (offered)" : ""}\n      ${current.error ? `error: ${current.error}` : said}`);
     }
   }
 } finally {
@@ -227,10 +234,13 @@ try {
   await app.close();
   rmSync(root, { recursive: true, force: true });
 }
+const scored = results.filter((item) => !item.aside);
 const score = (list: typeof results) => `${list.filter((item) => item.pass).length}/${list.length}`;
-console.log(`\nShould make a page: ${score(results.filter((item) => item.expect === "page"))}`);
-console.log(`Should not: ${score(results.filter((item) => item.expect === "none"))}`);
-console.log(`All: ${score(results)}`);
+console.log(`\nShould make a page: ${score(scored.filter((item) => item.expect === "page"))}`);
+console.log(`Should not: ${score(scored.filter((item) => item.expect === "none"))}`);
+console.log(`All: ${score(scored)}`);
+const asked = results.filter((item) => item.aside === "asked").length, capped = results.filter((item) => item.aside === "capped").length;
+if (asked || capped) console.log(`Left out of the scores: ${[asked && `${asked} asked you first`, capped && `${capped} still reading at the round cap`].filter(Boolean).join(", ")}.`);
 const errors = results.filter((item) => item.status !== "completed").length;
 if (errors) console.log(`${errors} turn(s) didn't finish; their scores mean nothing.`);
 if (out) writeFileSync(out, JSON.stringify({ model: `${processor.providerId} ${processor.modelId}`, results }, null, 2));

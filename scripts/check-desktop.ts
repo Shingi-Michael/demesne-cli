@@ -905,6 +905,17 @@ try {
   await page.locator("#page .st-inks button[aria-label='Neutral']").click();
   await until(() => page.evaluate(() => document.documentElement.dataset.ink === undefined), "back to the Neutral ink");
   // The rows backed by config.toml and the daemon.
+  // A config with many "Always" rules, some of them very long one-off
+  // commands (Mike had 61, the longest 682 characters), stays short and tidy.
+  // Written before the Drive step, whose save reads config.toml again.
+  const configPath = join(f.home, ".demesne/config.toml");
+  const manyRules = [
+    ...Array.from({ length: 15 }, (_, i) => `run_command:zzgit log -${i}`),
+    ...Array.from({ length: 12 }, (_, i) => `run_command:zzbun test zz${i}`),
+    ...Array.from({ length: 30 }, (_, i) => `run_command:zzgrep -rn zz${i} ${"apps/cli/src/workbench/controller.ts ".repeat(i === 0 ? 18 : 2).trim()}`),
+    "run_command:zzpwd", "run_command:zzdate", "edit_file:zz/apps/desktop", "edit_file:zz/.github/workflows",
+  ];
+  writeFileSync(configPath, `${readFileSync(configPath, "utf8")}\n[permissions]\nallow = [${manyRules.map((rule) => JSON.stringify(rule)).join(", ")}]\n`);
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Drive" }).click();
   const tokens = page.getByRole("textbox", { name: "Tokens" });
   await tokens.waitFor();
@@ -915,7 +926,18 @@ try {
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Permissions" }).click();
   await until(() => page.locator("#page .pm-folder").count().then(count => count >= 1), "the trusted folders are listed");
   assert.equal(await page.locator("#page .pm-mode").count(), 4, "the four modes are cards");
+  await until(() => page.locator("#page .pm-group").count().then(count => count === 4), "61 rules sit in groups by program");
+  const chipBoxes = await page.locator("#page .pm-chips .pm-chip").evaluateAll((chips) => chips.map((chip) => { const box = chip.getBoundingClientRect(), code = chip.querySelector("code")!; return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, height: box.height, spills: code.scrollHeight > code.clientHeight + 1 }; }));
+  assert(chipBoxes.every((box) => box.height <= 28 && !box.spills), "every rule chip is one line");
+  assert(chipBoxes.every((a, i) => chipBoxes.every((b, j) => i === j || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5 || a.right <= b.left + 0.5 || b.right <= a.left + 0.5)), "rule chips never overlap");
+  const rulesHeight = await page.locator("#page .pm-chips").evaluate((node) => node.getBoundingClientRect().height);
+  assert(rulesHeight < 100, `the rules take a couple of lines, not a wall: ${rulesHeight}px`);
   await capture("02-permissions");
+  await page.locator("#page .pm-group").filter({ hasText: "zzgrep" }).click();
+  await until(() => page.locator("#page .pm-rule").count().then(count => count === 30), "a group unfolds its rules");
+  const rowHeights = await page.locator("#page .pm-rule").evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
+  assert(rowHeights.every((height) => height <= 33), "each unfolded rule is one line, the full text on hover");
+  await capture("02-permissions-rules");
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Usage" }).click();
   await page.locator('#page .cp-title').filter({ hasText: "Usage" }).waitFor();
   await capture("02-usage");

@@ -108,6 +108,20 @@ export function ruleWords(rule: string): { what: string; how: string } {
   return value ? { what: value, how: `${verb} in this folder and below` } : { what: tool.replace(/_/g, " "), how: "Every time" };
 }
 
+/// Rules grouped by what they let run: a command's first word (grep, wc), or
+/// the tool's own words; the biggest groups first.
+export function ruleGroups<T extends { rule: string }>(rules: readonly T[]): { head: string; rules: T[] }[] {
+  const groups = new Map<string, T[]>();
+  for (const item of rules) {
+    const at = item.rule.indexOf(":"), tool = at < 0 ? item.rule : item.rule.slice(0, at);
+    const files: Record<string, string> = { edit_file: "edits", write_file: "new files", delete_path: "deletes", move_path: "moves", apply_patch: "patches" };
+    const head = tool === "run_command" ? (ruleWords(item.rule).what.trim().split(/\s+/)[0] || "commands")
+      : files[tool] ?? (tool.startsWith("mcp__") ? tool.split("__")[1] || "connectors" : tool.replace(/_/g, " "));
+    groups.set(head, [...(groups.get(head) ?? []), item]);
+  }
+  return [...groups].map(([head, items]) => ({ head, rules: items })).sort((a, b) => b.rules.length - a.rules.length || a.head.localeCompare(b.head));
+}
+
 /// Long numbers said short: 2,000,000 tokens is 2M.
 export function shortNumber(value: number) {
   if (value >= 1_000_000 && value % 100_000 === 0) return `${value / 1_000_000}M`;
@@ -440,17 +454,23 @@ function usageTop(view: SettingsView, scores: ModelScore[]): string {
 
 /// Permissions, kept short: the modes in one row, the rules as chips and the
 /// trusted folders as one-line rows, each list folded after a few.
-const RULES_SHOWN = 12, TRUSTED_SHOWN = 4;
+const TRUSTED_SHOWN = 4;
 function permissionsTop(view: SettingsView): string {
   const mode = view.permissions.mode, info = view.info, rules = info?.allow ?? [], asks = view.permissions.asks;
   const current = MODES.find(([id]) => id === mode);
   const modes = mode ? `<div class="st-head"><span>This chat</span><span>${asks && (asks.thisWeek || asks.lastWeek) ? `asked you ${asks.thisWeek} ${asks.thisWeek === 1 ? "time" : "times"} this week · ` : ""}⇧⇥ changes it</span></div><div class="pm-modes">${MODES.map(([id, label, line, free]) => `<button type="button" class="pm-mode${mode === id ? " on" : ""}" aria-pressed="${mode === id}" title="${h(line)}" data-action="permission-mode" data-args="${h(JSON.stringify({ mode: id }))}"><b>${h(label)}</b><span class="pm-can">${(["read", "edit", "run"] as const).map((can) => `<em${(free as readonly string[]).includes(can) ? ' class="free"' : ""}>${can}</em>`).join("")}</span></button>`).join("")}</div>${current ? `<p class="st-hint">${h(current[2])}. Green is what it does without asking.</p>` : ""}` : "";
-  const allRules = view.fold === "rules";
+  // Rules sit in groups by what they run (grep · 34), one short line each; a
+  // group unfolds its rules as one-line rows, each with ×.
+  const groups = ruleGroups(rules), openGroup = view.fold.startsWith("rules:") ? view.fold.slice(6) : null;
+  const ruleRow = ({ rule, mine }: { rule: string; mine: boolean }) => {
+    const said = ruleWords(rule);
+    return `<div class="pm-rule"><code title="${h(`${said.what}\n${said.how}${mine ? "" : " · in the project's config"}`)}">${h(said.what)}</code>${mine ? `<button type="button" aria-label="Ask again about ${h(said.what)}" data-action="allow-rule-remove" data-args="${h(JSON.stringify({ rule }))}">×</button>` : "<small>project</small>"}</div>`;
+  };
   const chips = info === null ? "" : `<div class="st-head"><span>It no longer asks about</span><span>${rules.length ? `${rules.length} · × asks again` : ""}</span></div>` + (rules.length
-    ? `<div class="pm-chips">${(allRules ? rules : rules.slice(0, RULES_SHOWN)).map(({ rule, mine }) => {
-      const said = ruleWords(rule);
-      return `<span class="pm-chip" title="${h(`${said.how}${mine ? "" : " · in the project's config"}`)}"><code>${h(said.what)}</code>${mine ? `<button type="button" aria-label="Ask again about ${h(said.what)}" data-action="allow-rule-remove" data-args="${h(JSON.stringify({ rule }))}">×</button>` : "<small>project</small>"}</span>`;
-    }).join("")}${rules.length > RULES_SHOWN ? `<button type="button" class="pm-more" data-action="settings-fold" data-args='{"fold":"rules"}'>${allRules ? "Fewer" : `+${rules.length - RULES_SHOWN} more`}</button>` : ""}</div>`
+    ? `<div class="pm-chips">${groups.map((group) => group.rules.length === 1
+      ? `<span class="pm-chip">${ruleRow(group.rules[0]!).replace('<div class="pm-rule">', "").replace(/<\/div>$/, "")}</span>`
+      : `<button type="button" class="pm-chip pm-group${openGroup === group.head ? " on" : ""}" aria-expanded="${openGroup === group.head}" data-action="settings-fold" data-args="${h(JSON.stringify({ fold: `rules:${group.head}` }))}"><code>${h(group.head)}</code><small>${group.rules.length}</small></button>`).join("")}</div>`
+      + (openGroup && groups.some((group) => group.head === openGroup) ? `<div class="st-group pm-rules">${groups.find((group) => group.head === openGroup)!.rules.map(ruleRow).join("")}</div>` : "")
     : `<p class="st-hint pm-empty">Nothing yet. Always on an approval adds one here.</p>`);
   const trusted = info?.trusted, allTrusted = view.fold === "trusted";
   const folders = info === null ? "" : `<div class="st-head"><span>Trusted folders</span><span>${trusted?.length ? `${trusted.length} · their chats read files and run commands` : ""}</span></div>` + (trusted === null || trusted === undefined

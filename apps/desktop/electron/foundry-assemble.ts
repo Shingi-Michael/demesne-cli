@@ -97,8 +97,9 @@ export const ASSEMBLE_SCRIPT = String.raw`(function () {
 /** Text that is safe inside a script element: no sequence can close it early. */
 export const scriptText = (value: unknown) => JSON.stringify(value).replace(/<\//g, "<\\/").replace(/<!--/g, "<\\!--");
 
-/** The frame's page with the assembly appended: anime.js, the previous
- * version to diff against (or null), then the script above. */
+/** The frame's page with the assembly appended: anime.js (unless the page
+ * loads it from the kit itself), the previous version to diff against (or
+ * null), then the script above. */
 export function assembledDocument(source: string, library: string, previous: string | null) {
-  return `${source}\n<script>${library}</script>\n<script>window.__demesnePrevious=${scriptText(previous)};${ASSEMBLE_SCRIPT}</script>`;
+  return `${source}\n${library ? `<script>${library}</script>\n` : ""}<script>window.__demesnePrevious=${scriptText(previous)};${ASSEMBLE_SCRIPT}</script>`;
 }

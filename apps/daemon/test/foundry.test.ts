@@ -195,12 +195,14 @@ test("artifact identity reaches live events and old replay without rewriting the
   } finally { store.close(); }
 });
 
-test("the tools carry the design brief and the library rules", () => {
+test("the tools carry the design brief, the kit and the library rules", () => {
   const store = new DemesneStore(":memory:");
   try {
     const text = JSON.stringify(foundrySaveTool(store).definition);
     expect(text).toContain("cdnjs.cloudflare.com");
-    expect(text).toContain("prefers-color-scheme: dark");
+    expect(text).toContain('href=\\"foundry://kit/base.css\\"');
+    expect(text).toContain('src=\\"foundry://kit/anime.js\\"');
+    expect(text).toContain("prefers-reduced-motion: reduce");
     expect(JSON.stringify(foundryEditTool(store).definition)).toContain("base_version");
     expect(DESIGN_BRIEF).toContain("phone width");
     expect(JSON.stringify(foundryReadTool(store).definition)).toContain("base_version");

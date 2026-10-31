@@ -6,9 +6,9 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, liquidGlass, macVibrancy, notchInset, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, FOUNDRY_KIT_SCRIPT, foundryKitFile, liquidGlass, macVibrancy, notchInset, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
-protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true } }]);
+protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true } }]);
 app.setName("Demesne");
 // Match the installed Windows shortcut identity so native toasts can appear.
 if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
@@ -151,7 +151,11 @@ void app.whenReady().then(async () => {
   // anime.js (bundled with the app, never fetched) and the assembly script,
   // and a revision gets the version before it to find what changed.
   let assembleLibrary: string | undefined;
+  const kitFile = (name: string) => readFileSync(join(base, "ui", FOUNDRY_KIT[name]!.path));
   await session.protocol.handle("foundry", async request => {
+    // The kit: the frames' origins are opaque, so the fonts need the CORS header.
+    const kit = foundryKitFile(request.url);
+    if (kit) return new Response(kitFile(kit), { headers: { "Content-Type": FOUNDRY_KIT[kit]!.type, "Access-Control-Allow-Origin": "*", "X-Content-Type-Options": "nosniff", "Cache-Control": "max-age=3600" } });
     if (!foundryURL(request.url)) return new Response("Not found", { status: 404 });
     try {
       const url = new URL(request.url), version = Number(url.searchParams.get("v")), id = decodeURIComponent(url.pathname.slice(1));
@@ -164,7 +168,7 @@ void app.whenReady().then(async () => {
         if (found.kind === "html" && found.version > 1) {
           try { const before = await backend!.request("foundry-get", { id, version: found.version - 1 }) as { kind: string; source: string }; if (before.kind === "html") previous = before.source; } catch {}
         }
-        assembly = { library: assembleLibrary, previous };
+        assembly = { library: found.source.includes(FOUNDRY_KIT_SCRIPT) ? "" : assembleLibrary, previous };
       }
       return new Response(foundryDocument(found.kind, found.source, found.title, assembly), { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
     } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }
@@ -304,7 +308,7 @@ void app.whenReady().then(async () => {
       const name = `${found.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "").trim().slice(0, 80) || "artifact"}.${extension}`;
       const selected = await dialog.showSaveDialog(window!, { title: "Export from Foundry", defaultPath: join(app.getPath("downloads"), name) });
       if (selected.canceled || !selected.filePath) return null;
-      await writeFile(selected.filePath, found.source, "utf8");
+      await writeFile(selected.filePath, found.kind === "html" ? exportedSource(found.source, { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8") }) : found.source, "utf8");
       return { path: selected.filePath };
     }
     // A folder for a chat to move into: the path, or null when cancelled.

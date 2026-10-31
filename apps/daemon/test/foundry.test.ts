@@ -84,6 +84,7 @@ for (const permissionMode of ["ask", "allow", "deny"] as PermissionMode[]) {
     expect(offered[0]).not.toContain("run_command");
     expect(offered[0]).not.toContain("subagent");
     expect(prompt).toContain("Foundry is available in this chat");
+    expect(prompt).toContain("say you'll mock it in Foundry and make it");
     const { artifacts } = await client.foundryList();
     expect(artifacts).toHaveLength(1);
     const artifact = await client.foundryGet(artifacts[0]!.id);

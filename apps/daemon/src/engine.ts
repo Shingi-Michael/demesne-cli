@@ -1046,7 +1046,8 @@ export const ANSWER_FORMAT_GUIDANCE = "Answers are shown as Markdown in the Deme
 /// so this only says when to reach for it and how the preview works.
 export const FOUNDRY_GUIDANCE = "Foundry is available in this chat: when the person asks for a mockup, design, page, game, graphic or document, make it with foundry_save. "
   + "The preview appears in the chat by itself, so describe it briefly and never paste the source or a code block instead. To change one, foundry_read it, then foundry_edit "
-  + "(exact find and replace on the version you read); rewrite with foundry_save only when most of it changes. Report it saved only after the tool succeeds.";
+  + "(exact find and replace on the version you read); rewrite with foundry_save only when most of it changes. Report it saved only after the tool succeeds. "
+  + "While you work, when the question is how something should look or flow (a screen, a layout, a state, a chart, a choice between designs), say you'll mock it in Foundry and make it, instead of describing it in words; when a mockup would help the person decide, offer one in a sentence.";
 
 export function agentSystemPrompt(options: { workspaceRoot?: string; definitions: ProviderToolDefinition[]; content?: string;
   planOnly?: boolean; autoApprove?: boolean; acceptEdits?: boolean; providerVision?: boolean; configured?: string; sessionContext?: string }): string {

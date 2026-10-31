@@ -37,21 +37,10 @@ body.desktop { overflow: hidden; }
 .desktop-home-content, .desktop-error-content { width: 540px; max-width: 100%; padding: 20px 0; }
 .desktop-home-wordmark { display: inline-block; font-size: 15px; margin-bottom: 32px; }
 .desktop-home h1, .desktop-error h1 { font-size: 25px; font-weight: 400; letter-spacing: -0.7px; line-height: 36px; color: var(--strong); }
-#desktop-home-description { color: var(--secondary); font-size: 13px; margin: 10px 0 26px; }
 .desktop-primary { display: flex; align-items: center; justify-content: space-between; gap: 30px; min-height: 42px; padding: 10px 14px; border: 1px solid var(--borderBright); border-radius: 6px; background: var(--surface); color: var(--electric); font-size: 13px; text-align: left; }
 .desktop-primary:hover { background: var(--accentSurface); border-color: var(--electric); }
 .desktop-primary:disabled { opacity: 0.55; cursor: progress; }
 .desktop-home-note { margin-top: 14px; font-size: 11px; line-height: 18px; color: var(--muted); }
-.desktop-recent { margin-top: 32px; }
-.desktop-recent h2 { font-size: 11px; letter-spacing: 0.7px; margin-bottom: 8px; }
-#desktop-recent-list { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--surface); }
-#desktop-recent-list button { display: flex; align-items: center; gap: 14px; width: 100%; padding: 12px 14px; text-align: left; }
-#desktop-recent-list button + button { border-top: 1px solid var(--rule); }
-#desktop-recent-list button:hover { background: var(--raised); }
-#desktop-recent-list button span { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
-#desktop-recent-list strong { color: var(--paper); font-size: 13px; }
-#desktop-recent-list small { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#desktop-recent-list .desktop-recent-arrow { flex: none; color: var(--muted); }
 .desktop-start-status { min-height: 18px; margin-top: 22px; font-size: 11px; color: var(--muted); }
 .desktop-start-status[data-error="true"] { color: var(--signal); }
 #desktop-error-message { color: var(--secondary); font-size: 13px; line-height: 22px; margin: 16px 0 22px; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -62,7 +51,6 @@ body.desktop { overflow: hidden; }
 @media (max-height: 680px) {
   .desktop-home, .desktop-error { align-items: flex-start; padding: 30px 40px; }
   .desktop-home-wordmark { margin-bottom: 22px; }
-  .desktop-recent { margin-top: 24px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .desktop * { scroll-behavior: auto; }

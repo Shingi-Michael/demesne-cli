@@ -95,6 +95,8 @@ export class DesktopHost {
   private ready: Promise<void>;
   private darkAppearance = true;
   private explicitTheme = false;
+  /// Whether the open host is Home with no project yet, rather than a project.
+  private projectless = false;
   constructor(private options: DesktopHostOptions) {
     const settings = loadCliSettings({ serverOverride: options.server });
     this.preferencePath = join(settings.dataDirectory, "desktop-ui.json");
@@ -103,17 +105,21 @@ export class DesktopHost {
     // Every launch lands on Home, unless it was asked for a chat or a
     // message: as Just a chat, or in the project it was opened with.
     const home = !options.sessionId && !options.startup?.prompt;
-    this.ready = workspace ? this.select(workspace, undefined, options.workspace === undefined ? { home } : { fresh: home }).then(() => {}).catch(error => {
-      this.send({ kind: "protocol-error", error: `Could not restore project: ${error instanceof Error ? error.message : String(error)}` });
-    }) : Promise.resolve();
+    // With no project yet, Home opens anyway, as Just a chat; the host stands
+    // in a folder of its own that is never shown or kept as a project.
+    const base = join(settings.dataDirectory, "chats");
+    if (!workspace) mkdirSync(base, { recursive: true, mode: 0o700 });
+    this.ready = this.select(workspace ?? base, undefined, !workspace ? { home: true, projectless: true } : options.workspace === undefined ? { home } : { fresh: home }).then(() => {}).catch(error => {
+      this.send({ kind: "protocol-error", error: `Could not ${workspace ? "restore project" : "open Home"}: ${error instanceof Error ? error.message : String(error)}` });
+    });
   }
   private send(message: DesktopOutput) { if (!this.closed) this.options.send(message); }
   bootstrap(): DesktopBootstrap {
-    return { workspace: this.host?.workspace ?? null, recentProjects: [...this.prefs.recentProjects], snapshot: this.host?.snapshot() ?? null, userName: userFirstName() };
+    return { workspace: this.projectless ? null : this.host?.workspace ?? null, recentProjects: [...this.prefs.recentProjects], snapshot: this.host?.snapshot() ?? null, userName: userFirstName() };
   }
   /// `home` opens on an empty chat with no project; `fresh` opens an empty
   /// chat in the project, carrying `draft` (picked from Home's where word).
-  private async select(path: unknown, sessionId?: unknown, open: { home?: boolean; fresh?: boolean; draft?: unknown } = {}): Promise<DesktopBootstrap> {
+  private async select(path: unknown, sessionId?: unknown, open: { home?: boolean; fresh?: boolean; draft?: unknown; projectless?: boolean } = {}): Promise<DesktopBootstrap> {
     const workspace = desktopWorkspace(path);
     if (sessionId !== undefined && (typeof sessionId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(sessionId)))
       throw new Error("Invalid session id");
@@ -155,7 +161,8 @@ export class DesktopHost {
           this.rememberSession(state);
           this.send({ kind: "update", update: encoder.encode(state) });
         } },
-        drive: true,
+        drive: !open.projectless,
+        ...(open.projectless ? { projectless: true } : {}),
         ...(open.home ? { home: "plain" as const } : open.fresh ? { home: "project" as const } : {}),
         copy: text => this.native("copy", { text }),
         open: path => this.native("open", { path }),
@@ -186,10 +193,11 @@ export class DesktopHost {
       }
       if (candidate.settings.theme === "auto" && !candidate.hasSavedTheme) candidate.theme = this.darkAppearance ? "demesne" : "demesne-light";
       if (this.closed) { candidate.dispose(); return this.bootstrap(); }
-      const prefs = { ...this.prefs, lastWorkspace: workspace, recentProjects: [workspace, ...this.prefs.recentProjects.filter(item => item !== workspace)].slice(0, 10) };
-      writePreferences(this.preferencePath, prefs);
+      const prefs = open.projectless ? this.prefs : { ...this.prefs, lastWorkspace: workspace, recentProjects: [workspace, ...this.prefs.recentProjects.filter(item => item !== workspace)].slice(0, 10) };
+      if (!open.projectless) writePreferences(this.preferencePath, prefs);
       this.host?.dispose();
       this.host = candidate;
+      this.projectless = open.projectless === true;
       this.explicitTheme = false;
       this.generation = generation;
       this.encoder = encoder;
@@ -203,7 +211,7 @@ export class DesktopHost {
     finally { this.switching = false; }
   }
   private rememberSession(state: WorkspaceSnapshot) {
-    if (!this.host || state.session?.workspace?.root !== this.host.workspace) return;
+    if (!this.host || this.projectless || state.session?.workspace?.root !== this.host.workspace) return;
     const key = sessionKey(this.host.api.server, this.host.workspace), id = state.session.id;
     if (this.prefs.lastSessions[key] === id) return;
     const lastSessions = Object.fromEntries([...Object.entries(this.prefs.lastSessions).filter(([existing]) => existing !== key), [key, id]].slice(-40));

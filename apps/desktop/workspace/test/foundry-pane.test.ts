@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { FoundryArtifactDetail } from "@demesne/protocol";
-import { frameSource, motionLine, motionMessage, neighbours, paneHead, paneMakingHead, pickMessage } from "../foundry-pane.ts";
+import { frameSource, motionLine, motionMessage, neighbours, paneHead, paneMakingHead, pickMessage, buildRequest } from "../foundry-pane.ts";
 
 const versions = [3, 2, 1].map((version) => ({ version, createdAt: "2026-10-27T22:00:00.000Z", sessionId: null, turnId: null, note: version === 3 ? "Blue" : "", byteLength: 10 }));
 const detail: FoundryArtifactDetail = { id: "garden", title: "Tiny garden", kind: "html", workspace: null, sessionId: "s1", createdAt: versions[2]!.createdAt, updatedAt: versions[0]!.createdAt, version: 3, source: "<h1>Garden</h1>", versions };
@@ -101,4 +101,13 @@ test("a page's Pick sends its option's words, one line, and nothing else", () =>
   expect(pickMessage({ demesne: "pick", option: 3 })).toBeNull();
   expect(pickMessage({ demesne: "motion", option: "A" })).toBeNull();
   expect(pickMessage("pick")).toBeNull();
+});
+
+test("Build this is on an HTML page's line, and asks the chat to make it real", () => {
+  const detail = { id: "a1", title: "Settings", kind: "html", version: 3, versions: [{ version: 3 }], source: "" } as unknown as FoundryArtifactDetail;
+  const state = { id: "a1", version: 3, view: "preview" as const, phone: false };
+  expect(paneHead(detail, state, "", true)).toContain('data-pane="build"');
+  expect(paneHead(detail, state, "", false)).not.toContain('data-pane="build"');
+  expect(paneHead({ ...detail, kind: "svg" } as FoundryArtifactDetail, state, "", true)).not.toContain('data-pane="build"');
+  expect(buildRequest("Settings", "a1", 3)).toBe('Build this for real: the Foundry page "Settings" (id a1, v3). Read it with foundry_read (id a1, version 3), make this project\'s real code match it, and check your work against the page before you finish.');
 });

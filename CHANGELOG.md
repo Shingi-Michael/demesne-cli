@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
+- Build this: an HTML Foundry page's line has **Build this**, which asks the chat to turn the page into the project's real code, reading the page with `foundry_read` and checking its work against it. A page from Just a chat first asks which project it's for (the Move to a project choices open) and starts building once the chat is there.
 - Pick an option on a Foundry page: when a page shows options (marked `data-option="B · Joined"`, which the model now does), hovering one shows a small Pick button; a click sends "I pick B · Joined" to the chat (after the running turn, if one is working), so the next version starts from it.
 - Big pastes fold up: paste 30 lines or more (or a very long line) into the composer and it becomes one chip, "Pasted text · 840 lines", instead of a wall of text; × takes it back. It's sent whole, and the sent message shows the same chip, which unfolds on a click.
 - Since you looked: open a chat that worked while you were elsewhere and a line before the first turn you didn't see says what happened (turns finished, files changed, how the checks went, what waits for you), worked out from the turns with no model call. The chat opens at that line so you read on from where you left.

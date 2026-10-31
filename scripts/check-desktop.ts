@@ -258,7 +258,7 @@ writeFileSync(join(f.workspace, "site.html"), '<h1>Fieldnote preview</h1>\n<butt
 writeFileSync(join(f.workspace, "serve.ts"), "const server = Bun.serve({ port: 0, fetch: () => new Response('<h1>Fieldnote preview</h1><button id=\"save\">Save</button>', { headers: { 'content-type': 'text/html' } }) });\nconsole.log(`  \\u001b[32mLocal:\\u001b[39m http://localhost:${server.port}/`);\n");
 writeFileSync(join(f.workspace, "check.ts"), "import {readFileSync} from 'node:fs';if(!readFileSync('hello.ts','utf8').includes(\"'after'\"))throw new Error('Wrong file');console.log('DESKTOP_CHECK_PASSED');\n");
 const git = (...values: string[]) => execFileSync("git", ["-C", f.workspace, ...values], { stdio: "pipe" });
-git("init", "-q"); git("add", ".");
+git("init", "-q", "-b", "master"); git("add", ".");
 git("-c", "user.name=Desktop Test", "-c", "user.email=test@example.com", "commit", "-qm", "Fixture baseline");
 
 let desktop: ElectronApplication | undefined, page: Page;
@@ -817,7 +817,8 @@ try {
   await page.keyboard.press("Escape");
   await until(() => page.getByRole("searchbox", { name: "Search settings" }).inputValue().then(value => value === ""), "Esc clears the search");
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Appearance" }).click();
-  assert.equal(await page.locator("#page [data-glass]").count(), 0, "no Glass slider when DEMESNE_GLASS=0 keeps the window solid");
+  // DEMESNE_GLASS=0 turns glass off on Linux and Windows; the Mac always has it (policy.ts desktopGlass).
+  assert.equal(await page.locator("#page [data-glass]").count(), process.platform === "darwin" ? 1 : 0, "the Glass slider follows desktopGlass: always on the Mac, off with DEMESNE_GLASS=0 elsewhere");
   await page.locator("#page .st-word").first().click();
   await page.locator("#page .st-choice").first().waitFor();
   await capture("02-themes");

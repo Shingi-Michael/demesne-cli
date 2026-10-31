@@ -60,8 +60,8 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 /* Renaming edits the name where it sits: the row takes the selected tone,
    no field box, no ring, and the text doesn't move. */
 .sidebar-rename { display: flex; align-items: center; gap: 11px; height: 32px; padding: 0 10px; border-radius: var(--r); background: var(--tone); }
-.sidebar-rename input { flex: 1; min-width: 0; height: 24px; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: var(--t1); font: inherit; font-size: 13.5px !important; outline: none; caret-color: var(--acc); }
-.sidebar-rename input::selection { background: color-mix(in srgb, var(--acc) 30%, transparent); color: var(--t1); }
+.sidebar-rename input { flex: 1; min-width: 0; height: 24px; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: var(--t1); font: inherit; font-size: 13.5px !important; outline: none; caret-color: var(--blossom); }
+.sidebar-rename input::selection { background: color-mix(in srgb, var(--blossom) 30%, transparent); color: var(--t1); }
 #sidebar-projects { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; padding-bottom: 12px; }
 .sidebar-project { position: relative; margin-bottom: 6px; }
 .sidebar-project.dragging { opacity: 0.45; }
@@ -213,7 +213,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .away .away-link.bad { box-shadow: 0 1.5px 0 var(--bad); }
 .away .away-link.live { box-shadow: 0 1.5px 0 var(--acc); }
 .away-bar { position: relative; display: block; max-width: 600px; height: 1.5px; margin: 2px 0 0; overflow: hidden; background: var(--hair); border-radius: 1px; }
-.away-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 40%; background: var(--acc); }
+.away-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 40%; background: linear-gradient(90deg, var(--acc), var(--blossom)); }
 @media (prefers-reduced-motion: no-preference) { .away-bar::after { animation: away-sweep 1.8s var(--ease, ease) infinite; } }
 @keyframes away-sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 .away-fold { display: flex; flex-direction: column; gap: 4px; width: 100%; margin: 8px 0 4px; padding-left: 12px; box-shadow: -1px 0 0 var(--hair2); }
@@ -500,7 +500,8 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .live-app.start #composer textarea { min-height: 44px; }
 .desktop #composer .send { position: absolute; right: 9px; bottom: 7px; display: grid; place-items: center; width: 30px; height: 30px; margin: 0; padding: 0; border-radius: 8px; background: transparent; color: var(--t4); box-shadow: none; }
 .desktop #composer .send:hover:not(:disabled) { background: var(--surface2); color: var(--t1); }
-.desktop #composer.has-draft .send { color: var(--t1); }
+.desktop #composer.has-draft .send { background: var(--dusk); color: var(--on-dusk); }
+.desktop #composer.has-draft .send:hover:not(:disabled) { background: var(--dusk); color: var(--on-dusk); filter: brightness(1.06); }
 .desktop #composer .send .ico { width: 17px; height: 17px; stroke-width: 2; }
 .desktop #composer .send > kbd, .desktop #composer .send #send-label, .desktop #composer .send #tokens, .desktop #composer .send .send-stop { display: none; }
 .desktop #composer .send .send-arrow { display: block; }
@@ -1616,3 +1617,13 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .repo-flow .rf-replay:hover { background: var(--tone2); }
 .repo-flow .rf-replay:focus-visible, .repo-flow summary:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 .repo-flow .rf-replay:disabled { opacity: .45; cursor: default; }
+
+/* Cherry Blossom (pass 108 C): where you are is pink, what you press stays blue. */
+body.desktop textarea, body.desktop input { caret-color: var(--blossom); }
+body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, transparent); }
+.sidebar-session.selected .sidebar-session-mark:not(.warn, .acc, .working, .bad) { visibility: visible; width: 6px; height: 6px; margin: 0 5px; background: var(--blossom); }
+.bar-tab.on .sidebar-session-mark:not(.warn, .acc, .working, .bad) { box-shadow: none; background: var(--blossom); }
+.bar-tab.on::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 1.5px; border-radius: 1px; background: var(--blossom); pointer-events: none; }
+.sidebar-release { margin-top: auto; padding: 0 10px 8px; font-size: 11px; color: var(--blossom); white-space: nowrap; }
+.sidebar-release + .sidebar-foot { margin-top: 0; }
+#desktop-shell.sidebar-collapsed .sidebar-release { display: none; }

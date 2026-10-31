@@ -913,7 +913,8 @@ try {
     ...Array.from({ length: 15 }, (_, i) => `run_command:zzgit log -${i}`),
     ...Array.from({ length: 12 }, (_, i) => `run_command:zzbun test zz${i}`),
     ...Array.from({ length: 30 }, (_, i) => `run_command:zzgrep -rn zz${i} ${"apps/cli/src/workbench/controller.ts ".repeat(i === 0 ? 18 : 2).trim()}`),
-    "run_command:zzpwd", "run_command:zzdate", "edit_file:zz/apps/desktop", "edit_file:zz/.github/workflows",
+    "run_command:zzpwd", "run_command:zzdate", `run_command:zzawk NR==FNR{next}1 /dev/null ${"apps/cli/src/workbench/controller.ts ".repeat(6).trim()}`, "run_command:zzdiff -u a b",
+    "edit_file:zz/apps/desktop", "edit_file:zz/.github/workflows", "delete_path:zz/donkeys.py",
   ];
   writeFileSync(configPath, `${readFileSync(configPath, "utf8")}\n[permissions]\nallow = [${manyRules.map((rule) => JSON.stringify(rule)).join(", ")}]\n`);
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Drive" }).click();
@@ -926,7 +927,7 @@ try {
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Permissions" }).click();
   await until(() => page.locator("#page .pm-folder").count().then(count => count >= 1), "the trusted folders are listed");
   assert.equal(await page.locator("#page .pm-mode").count(), 4, "the four modes are cards");
-  await until(() => page.locator("#page .pm-group").count().then(count => count === 4), "61 rules sit in groups by program");
+  await until(() => page.locator("#page .pm-group").count().then(count => count === 5), "64 rules sit in groups by program, one-offs in other");
   const chipBoxes = await page.locator("#page .pm-chips .pm-chip").evaluateAll((chips) => chips.map((chip) => { const box = chip.getBoundingClientRect(), code = chip.querySelector("code")!; return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, height: box.height, spills: code.scrollHeight > code.clientHeight + 1 }; }));
   assert(chipBoxes.every((box) => box.height <= 28 && !box.spills), "every rule chip is one line");
   assert(chipBoxes.every((a, i) => chipBoxes.every((b, j) => i === j || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5 || a.right <= b.left + 0.5 || b.right <= a.left + 0.5)), "rule chips never overlap");

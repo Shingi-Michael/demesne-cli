@@ -1043,6 +1043,66 @@ describe("Demesne daemon", () => {
     expect((await redo()).status).toBe(409);
   });
 
+  test("asks the last message again: the answers share one spot and the model reads only the one left showing", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "ws"), dataPath = join(directory, "data");
+    mkdirSync(workspacePath); mkdirSync(dataPath);
+    const script = [
+      [{ type: "text_delta" as const, delta: "answer one" }],
+      [{ type: "text_delta" as const, delta: "answer two" }],
+      [{ type: "text_delta" as const, delta: "next reply" }],
+      [{ type: "tool_call_delta" as const, index: 0, idDelta: "w", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "a.txt", content: "x\n" }) }],
+      [{ type: "text_delta" as const, delta: "wrote it" }],
+    ];
+    let round = 0;
+    const seen: ProviderMessage[][] = [];
+    const processor: TurnProcessor = {
+      providerId: "again-provider", modelId: "again-model",
+      async listModels() { return [{ id: this.modelId, provider: this.providerId }]; },
+      async *stream(messages) { seen.push(structuredClone(messages) as ProviderMessage[]); for (const chunk of script[round++] ?? []) yield chunk; },
+    };
+    const running = startApp(join(dataPath, "demesne.sqlite"), processor);
+    const created = await jsonRequest<CreateSessionResponse>(running.url, "/v1/sessions", { method: "POST", body: JSON.stringify({ title: "Again", workspacePath, trustWorkspace: true }) });
+    const id = created.session.id;
+    const settle = async (after: number) => {
+      for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${id}&after=${after}`, running.url))))
+        if (event.type === "turn.completed" || event.type === "turn.failed") break;
+    };
+    const send = async (content: string) => {
+      const submitted = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${id}/turns`, { method: "POST", body: JSON.stringify({ content, permissionMode: "allow" }) });
+      await settle(submitted.eventId);
+      return submitted.turn.id;
+    };
+    const post = (path: string, turnId: string) => fetch(new URL(`/v1/sessions/${id}/${path}`, running.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ turnId }) });
+    const first = await send("why does it restart twice?");
+    const again = await post("again", first);
+    expect(again.status).toBe(202);
+    const second = await again.json() as SubmitTurnResponse;
+    expect(second.turn.content).toBe("why does it restart twice?");
+    await settle(second.eventId);
+    // The second answer never saw the first.
+    expect(JSON.stringify(seen[1])).not.toContain("answer one");
+    let state = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${id}`);
+    expect(state.versions).toEqual([{ groupId: first, turnIds: [first, second.turn.id], chosen: second.turn.id }]);
+    // Leave the first showing: the chat goes on from it.
+    expect((await post("versions", first)).status).toBe(200);
+    state = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${id}`);
+    expect(state.versions?.[0]?.chosen).toBe(first);
+    await send("go on");
+    const read = JSON.stringify(seen[2]);
+    expect(read).toContain("answer one");
+    expect(read).not.toContain("answer two");
+    // Once the chat has gone on, the old message can't be asked again or switched.
+    expect((await post("again", first)).status).toBe(409);
+    expect((await post("versions", second.turn.id)).status).toBe(409);
+    // An answer that changed files goes back by rewinding, not by asking again.
+    const wrote = await send("write it");
+    const refused = await post("again", wrote);
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toContain("rewind");
+  });
+
   test("steers a running turn: the model reads the words after its current step and carries on", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

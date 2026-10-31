@@ -132,6 +132,10 @@ export class WorkspaceSession {
   get rewinds() {
     return this.state.rewinds ?? [];
   }
+  /// Ask again: messages answered more than once, and the answer in force.
+  get versions() {
+    return this.state.versions ?? [];
+  }
   get active() {
     return (
       this.session.turns.findLast(
@@ -168,6 +172,8 @@ export class WorkspaceSession {
         hiddenTurnIds: Array.isArray(p.hiddenTurnIds) ? p.hiddenTurnIds.map(String) : [],
         files: Array.isArray(p.files) ? p.files.map(String) : [], commands: Number(p.commands ?? 0), redoable: true,
       }];
+    if (event.type === "session.version_chosen" && typeof p.groupId === "string" && Array.isArray(p.turnIds) && typeof p.chosen === "string")
+      this.state.versions = [...(this.state.versions ?? []).filter((group) => group.groupId !== p.groupId), { groupId: p.groupId, turnIds: p.turnIds.map(String), chosen: p.chosen }];
     if (event.type === "session.rewind_redone") this.state.rewinds = (this.state.rewinds ?? []).filter((rewind) => rewind.id !== p.rewindId);
     if (event.type === "turn.created" && event.turnId)
       this.ensureTurn({

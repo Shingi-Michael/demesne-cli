@@ -16,6 +16,7 @@ import {
   parseSubmitTurnRequest,
   parseUndoSessionRequest,
   parseRewindSessionRequest,
+  parseTurnVersionRequest,
   parseSteerTurnRequest,
   parseUpdateSessionRequest,
   ProtocolValidationError,
@@ -722,6 +723,43 @@ export function createDaemonApp(options: {
     if (!turn || turn.kind === "themefy" || turn.kind === "compaction" || !engine.steer(turn.id, request))
       return apiError("invalid_state", "Nothing is running to steer; send it as a message", 409);
     return json({ steerId: request.id, turnId: turn.id });
+  }
+
+  /// Ask again (pass 115): the chat's last message answered once more, by the
+  /// model in use now. The answers share one spot and the model reads only the
+  /// one left showing. Only an answer that changed no files (Rewind handles
+  /// those), with no images, and nothing working.
+  function askAgain(sessionId: string, turnId: string): Response {
+    const session = store.getSession(sessionId);
+    if (!session) return apiError("not_found", `Session not found: ${sessionId}`, 404);
+    if (session.turns.some((turn) => turn.status === "running" || turn.status === "queued")) return apiError("invalid_state", "Wait for the running turn before asking again", 409);
+    const turn = session.turns.find((item) => item.id === turnId);
+    if (!turn) return apiError("not_found", `Turn not found: ${turnId}`, 404);
+    const group = store.turnVersionGroup(sessionId, turnId);
+    const last = session.turns.filter((item) => !item.kind).at(-1);
+    if (turn.kind || !last || !group.turnIds.includes(last.id)) return apiError("invalid_state", "Only the chat's last message can be asked again", 409);
+    if (turn.attachments?.length) return apiError("invalid_state", "A message with images can't be asked again yet", 409);
+    if (group.turnIds.some((id) => store.turnChangedFiles(id))) return apiError("invalid_state", "This answer changed files; rewind to ask again", 409);
+    let inference: TurnInference;
+    try { inference = inferenceIn(sessionId, turn.thinkingEnabled ?? undefined); }
+    catch (error) { return apiError("not_supported", error instanceof Error ? error.message : String(error), 400); }
+    const { turn: next, event } = store.createTurn(sessionId, turn.content, turn.permissionMode, turn.thinkingEnabled ?? undefined, turn.planOnly ?? false);
+    store.recordTurnVersion(sessionId, turnId, next.id);
+    queueTurn(next, inference);
+    const response: SubmitTurnResponse = { turn: next, eventId: event.eventId };
+    return json(response, 202);
+  }
+
+  /// Leave another answer showing: the chat goes on from it.
+  function chooseVersion(sessionId: string, turnId: string): Response {
+    const session = store.getSession(sessionId);
+    if (!session) return apiError("not_found", `Session not found: ${sessionId}`, 404);
+    if (session.turns.some((turn) => turn.status === "running" || turn.status === "queued")) return apiError("invalid_state", "Wait for the running turn before switching answers", 409);
+    const group = store.turnVersionGroup(sessionId, turnId);
+    const last = session.turns.filter((item) => !item.kind).at(-1);
+    if (!last || !group.turnIds.includes(last.id)) return apiError("invalid_state", "The chat has gone on from this answer", 409);
+    try { return json({ ...store.turnVersionGroup(sessionId, turnId), eventId: store.chooseTurnVersion(sessionId, turnId).eventId }); }
+    catch (error) { if (error instanceof InvalidStateError) return apiError("invalid_state", error.message, 409); throw error; }
   }
 
   async function redoRewind(sessionId: string): Promise<Response> {
@@ -1580,6 +1618,12 @@ export function createDaemonApp(options: {
       }
       if (request.method === "POST" && path[0] === "v1" && path[1] === "sessions" && path[3] === "steer" && path.length === 4) {
         return steerSession(path[2]!, parseSteerTurnRequest(await readOptionalJson(request)));
+      }
+      if (request.method === "POST" && path[0] === "v1" && path[1] === "sessions" && path[3] === "again" && path.length === 4) {
+        return askAgain(path[2]!, parseTurnVersionRequest(await readJson(request)).turnId);
+      }
+      if (request.method === "POST" && path[0] === "v1" && path[1] === "sessions" && path[3] === "versions" && path.length === 4) {
+        return chooseVersion(path[2]!, parseTurnVersionRequest(await readJson(request)).turnId);
       }
       if (request.method === "POST" && path[0] === "v1" && path[1] === "sessions" && path[3] === "rewind" && path.length === 4) {
         return rewindSession(path[2]!, parseRewindSessionRequest(await readOptionalJson(request)));

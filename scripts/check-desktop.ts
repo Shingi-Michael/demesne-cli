@@ -17,6 +17,7 @@ const prompt = "Desktop smoke: update hello.ts and run its check";
 const followUp = "Desktop smoke: continue while the window is closed";
 const aside = "Desktop smoke: a second conversation";
 const asideDone = "A second conversation is here.";
+let asideAnswers = 0;
 // A sub-agent's turn: the chat asks an agent, the agent reads one file and
 // reasons (which must stay with it), then the chat answers.
 const agentPrompt = "Desktop smoke: ask an agent where the greeting lives", agentTask = "Find the greeting", agentAsk = "Where is the greeting defined?";
@@ -223,7 +224,8 @@ const f = await fixture({
       return;
     }
     if (user === aside) {
-      yield { type: "text_delta", delta: asideDone };
+      // Asked again, the same message gets a different answer.
+      yield { type: "text_delta", delta: asideAnswers++ ? "Asked again: another answer." : asideDone };
       yield { type: "finish", reason: "stop" };
       return;
     }
@@ -606,6 +608,20 @@ try {
   assert.equal(await page.locator("#sidebar-projects .sidebar-session", { hasText: "New chat" }).count(), 0, "An empty chat is not listed under Chats");
   await type(aside);
   await textIncludes(asideDone);
+  // Ask again: the same message answered once more; the answers share one
+  // spot with ‹ 1 of 2 ›, and the one left showing is what the chat goes on from.
+  const askAgain = page.locator("#conversation .ask-again").last();
+  await until(() => askAgain.isVisible(), "the last answer offers Ask again");
+  assert.equal((await askAgain.innerText()).trim(), "Ask again", "same model: plain Ask again");
+  await askAgain.click();
+  await textIncludes("Asked again: another answer.");
+  await until(() => page.locator("#conversation .versions .version-n").last().innerText().then(text => text === "2 of 2", () => false), "the answers share one spot");
+  assert.equal(await page.locator("#conversation").innerText().then(text => text.includes(asideDone)), false, "only the answer showing takes the spot");
+  await until(() => page.getByRole("button", { name: "Earlier answer" }).isEnabled(), "‹ goes back once the answer settles");
+  await page.getByRole("button", { name: "Earlier answer" }).click();
+  await textIncludes(asideDone);
+  await until(() => page.locator("#conversation .versions .version-n").last().innerText().then(text => text === "1 of 2", () => false), "‹ leaves the first answer showing");
+  await capture("02-ask-again");
   await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === 2), "the second conversation joins the list once it has a turn");
   // It is Just a chat: listed under Just a chat below the projects, and it
   // ends with one quiet line that can move it into a project.

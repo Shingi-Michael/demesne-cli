@@ -35,6 +35,7 @@ import {
   type TurnStatus,
   type ToolFileChange,
   type SessionRewindState,
+  type TurnVersions,
   derivePersistedRule,
   openedPullRequest,
 } from "@demesne/protocol";
@@ -777,6 +778,7 @@ export class DemesneStore {
         latestProviderCall: snapshot,
         checkpoint,
         rewinds: this.rewindStates(id),
+        versions: this.turnVersions(id),
         pendingQuestions: this.userQuestions.list(id),
         answeredQuestions: this.userQuestions.answered(id),
         pendingPermissions: rows.map((row) => {
@@ -859,6 +861,7 @@ export class DemesneStore {
         AND (sessions.context_start_message_id IS NULL OR model_messages.id >= sessions.context_start_message_id)
         AND NOT EXISTS (SELECT 1 FROM session_rewinds r WHERE r.session_id = model_messages.session_id AND r.redone_at IS NULL
           AND model_messages.id > r.cut_message_id AND model_messages.id <= r.until_message_id)
+        AND NOT EXISTS (SELECT 1 FROM turn_versions v WHERE v.turn_id = model_messages.turn_id AND v.chosen = 0)
       ORDER BY model_messages.id
     `).all(sessionId, includeStopped ? 1 : 0) as ModelMessageRow[];
     // The model learns where you stopped it: a step rewind ends mid-turn.
@@ -1051,6 +1054,56 @@ export class DemesneStore {
       id: rewind.id, turnId: rewind.turnId, toolCallId: rewind.toolCallId, hiddenTurnIds: this.rewoundTurnIds(sessionId, rewind),
       files: rewind.files.map((file) => file.path), commands: rewind.commands, redoable: rewind.id === redoable,
     }));
+  }
+
+  /// Ask again: each message answered more than once, its answers oldest first.
+  turnVersions(sessionId: string): TurnVersions[] {
+    const rows = this.database.query("SELECT turn_id, group_id, chosen FROM turn_versions WHERE session_id = ? ORDER BY created_at, rowid")
+      .all(sessionId) as Array<{ turn_id: string; group_id: string; chosen: number }>;
+    const groups = new Map<string, TurnVersions>();
+    for (const row of rows) {
+      const group = groups.get(row.group_id) ?? { groupId: row.group_id, turnIds: [], chosen: "" };
+      group.turnIds.push(row.turn_id);
+      if (row.chosen) group.chosen = row.turn_id;
+      groups.set(row.group_id, group);
+    }
+    return [...groups.values()];
+  }
+
+  /// The answers a turn shares its spot with (just itself when never asked again).
+  turnVersionGroup(sessionId: string, turnId: string): TurnVersions {
+    return this.turnVersions(sessionId).find((group) => group.turnIds.includes(turnId)) ?? { groupId: turnId, turnIds: [turnId], chosen: turnId };
+  }
+
+  /// Whether a turn changed any file (its undo snapshots).
+  turnChangedFiles(turnId: string): boolean {
+    return Boolean(this.database.query("SELECT 1 FROM turn_snapshots WHERE turn_id = ? LIMIT 1").get(turnId));
+  }
+
+  /// A new answer to the same message joins the old one's spot and is chosen.
+  recordTurnVersion(sessionId: string, ofTurnId: string, newTurnId: string): EventEnvelope {
+    const event = this.database.transaction(() => {
+      const now = new Date().toISOString();
+      const group = this.turnVersionGroup(sessionId, ofTurnId).groupId;
+      this.database.query("INSERT OR IGNORE INTO turn_versions (turn_id, group_id, session_id, chosen, created_at) VALUES (?, ?, ?, 0, ?)").run(ofTurnId, group, sessionId, now);
+      this.database.query("UPDATE turn_versions SET chosen = 0 WHERE group_id = ? AND session_id = ?").run(group, sessionId);
+      this.database.query("INSERT INTO turn_versions (turn_id, group_id, session_id, chosen, created_at) VALUES (?, ?, ?, 1, ?)").run(newTurnId, group, sessionId, now);
+      return this.insertEvent("session.version_chosen", sessionId, null, { ...this.turnVersionGroup(sessionId, newTurnId) }, now);
+    })();
+    this.eventSink?.(event);
+    return event;
+  }
+
+  /// Leave a different answer showing: the model reads that one from now on.
+  chooseTurnVersion(sessionId: string, turnId: string): EventEnvelope {
+    const event = this.database.transaction(() => {
+      const group = this.turnVersionGroup(sessionId, turnId);
+      if (group.turnIds.length < 2) throw new InvalidStateError("This message has only one answer");
+      this.database.query("UPDATE turn_versions SET chosen = CASE WHEN turn_id = ? THEN 1 ELSE 0 END WHERE group_id = ? AND session_id = ?").run(turnId, group.groupId, sessionId);
+      return this.insertEvent("session.version_chosen", sessionId, null, { ...this.turnVersionGroup(sessionId, turnId) }, new Date().toISOString());
+    })();
+    this.eventSink?.(event);
+    return event;
   }
 
   activeRewinds(sessionId: string): SessionRewind[] {
@@ -1997,6 +2050,14 @@ export class DemesneStore {
       created_at TEXT NOT NULL,
       redone_at TEXT
     ); CREATE INDEX IF NOT EXISTS session_rewinds_session ON session_rewinds(session_id);`);
+    // Ask again: answers to one message that share one spot; chosen = 1 is the one the model reads.
+    this.database.run(`CREATE TABLE IF NOT EXISTS turn_versions (
+      turn_id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      chosen INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    ); CREATE INDEX IF NOT EXISTS turn_versions_session ON turn_versions(session_id);`);
     this.database.run(`CREATE TABLE IF NOT EXISTS session_checkpoints (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

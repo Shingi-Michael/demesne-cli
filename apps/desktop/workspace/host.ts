@@ -389,6 +389,7 @@ export class WorkspaceHost {
       provider: this.current?.provider ?? null,
       checkpoint: this.current?.state.checkpoint ?? null,
       rewinds: this.current?.rewinds ?? [],
+      versions: this.current?.versions ?? [],
       approvals: [...(this.current?.approvals.values() ?? [])],
       questions: [...(this.current?.questions.values() ?? [])],
       answered: Object.fromEntries(this.current?.answered ?? []),
@@ -2022,6 +2023,19 @@ export class WorkspaceHost {
       await this.refreshProcesses();
       this.publish();
       return result;
+    }
+    // Ask again (pass 115): the last message answered once more by the model
+    // in the composer now; ‹ › leaves another answer showing.
+    if (method === "ask-again") {
+      if (this.active) throw new Error("Wait for the current turn before asking again.");
+      const session = this.current!, result = await this.client.askAgain(session.session.id, string(args.turnId, "turn id", 200));
+      if (this.current === session) session.ensureTurn(result.turn);
+      this.publish();
+      return { turnId: result.turn.id };
+    }
+    if (method === "choose-version") {
+      if (this.active) throw new Error("Wait for the current turn before switching answers.");
+      return this.client.chooseVersion(this.current!.session.id, string(args.turnId, "turn id", 200));
     }
     if (method === "rewind" || method === "rewind-redo") {
       if (this.active) throw new Error("Wait for the current turn before rewinding.");

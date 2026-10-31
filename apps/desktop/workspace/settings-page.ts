@@ -179,7 +179,8 @@ export const GLASS_DEFAULT = 15;
 export const GLASS_SHARP_DEFAULT = 70;
 
 export interface SettingsRow { title: string; line?: string; control?: string; keywords?: string; fold?: string }
-interface Group { name: string; right?: string; rows: SettingsRow[]; hint?: string }
+/// A hidden group is only for search: its page draws the same things its own way.
+interface Group { name: string; right?: string; rows: SettingsRow[]; hint?: string; hidden?: boolean }
 interface Page { id: SettingsSection; title: string; sub: string; groups: Group[]; note?: string; html?: string }
 
 const toggle = (on: boolean, action: string, data: Record<string, unknown>, label: string) =>
@@ -256,10 +257,11 @@ function pages(view: SettingsView): Page[] {
     { name: "Drive", rows: [{ title: "Runs", line: runs ? `${landed} applied or opened as a PR` : "None in the last 30 days", control: `<span class="st-count">${runs}</span>`, keywords: "drive runs branches" }] },
   ] });
   const rules = info?.allow ?? [], mode = view.permissions.mode;
-  out.push({ id: "permissions", title: "Permissions", sub: "What it may do without asking. Green is what each mode does freely.", html: permissionsTop(view), groups: [
-    ...(info !== null && !rules.length ? [{ name: "It no longer asks about", rows: [{ title: "Nothing yet", line: "Always on an approval adds a rule here", keywords: "allow rule always learned approvals" }] }] : []),
-    { name: "Trusted folders", right: info?.trusted?.length ? String(info.trusted.length) : "", rows: info === null ? [{ title: "Reading…" }] : info.trusted === null ? [{ title: "The daemon can't list them", line: "Restart the daemon to update it" }] : info.trusted.length ? info.trusted.map((root) => ({ title: `\`${homeWords(root, view.home)}\``, line: "Its chats read its files and run its commands", control: link("trusted-forget", "Untrust", { root }, " quiet"), keywords: "trust folder project untrust" })) : [{ title: "None yet", line: "A folder asks once, the first time you open it" }] },
-  ], note: view.permissions.asks && (view.permissions.asks.thisWeek || view.permissions.asks.lastWeek) ? `Asked you ${view.permissions.asks.thisWeek} ${view.permissions.asks.thisWeek === 1 ? "time" : "times"} this week, ${view.permissions.asks.lastWeek} the week before.` : undefined });
+  out.push({ id: "permissions", title: "Permissions", sub: "What it may do without asking, and where.", html: permissionsTop(view), groups: [
+    { name: "Mode", hidden: true, rows: [{ title: "Mode", line: "Ask, Accept edits, Plan or Auto for this chat", keywords: "mode ask accept edits plan auto approvals" }] },
+    { name: "It no longer asks about", hidden: true, rows: rules.map(({ rule }) => ({ title: `\`${ruleWords(rule).what}\``, line: ruleWords(rule).how, keywords: "allow rule always learned approvals" })) },
+    { name: "Trusted folders", hidden: true, rows: (info?.trusted ?? []).map((root) => ({ title: `\`${homeWords(root, view.home)}\``, line: "A trusted folder", keywords: "trust folder project untrust" })) },
+  ] });
   const auto = view.drive.auto;
   out.push({ id: "drive", title: "Drive", sub: "Drive picks work on its own, each run on its own branch. It never pushes and never needs you.", groups: [
     { name: view.drive.project ? `In ${view.drive.project}` : "In a project", rows: [view.drive.project && auto
@@ -436,15 +438,27 @@ function usageTop(view: SettingsView, scores: ModelScore[]): string {
   return planCards + `<div class="st-head"><span>Turns a day</span><span>${all} in ${days} days</span></div><div class="us-chart" aria-hidden="true">${bars}</div><div class="us-axis"><span>${h(label(days - 1))}</span><span>${h(label(Math.floor(days / 2)))}</span><span>today</span></div><div class="us-legend">${series.map((item) => `<span><u style="background:${item.color}"></u>${h(item.name)}</span>`).join("")}</div>`;
 }
 
-/// Permissions: the four modes as cards, then the rules as chips you can take back.
+/// Permissions, kept short: the modes in one row, the rules as chips and the
+/// trusted folders as one-line rows, each list folded after a few.
+const RULES_SHOWN = 12, TRUSTED_SHOWN = 4;
 function permissionsTop(view: SettingsView): string {
-  const mode = view.permissions.mode, rules = view.info?.allow ?? [];
-  const modes = mode ? `<div class="st-head"><span>This chat</span><span>⇧⇥ in the composer</span></div><div class="pm-modes">${MODES.map(([id, label, line, free]) => `<button type="button" class="pm-mode${mode === id ? " on" : ""}" aria-pressed="${mode === id}" data-action="permission-mode" data-args="${h(JSON.stringify({ mode: id }))}"><b>${h(label)}</b><small>${h(line)}</small><span class="pm-can">${(["read", "edit", "run"] as const).map((can) => `<em${(free as readonly string[]).includes(can) ? ' class="free"' : ""}>${can}</em>`).join("")}</span></button>`).join("")}</div>` : "";
-  const chips = rules.length ? `<div class="st-head"><span>It no longer asks about</span><span>${rules.length} · × asks again</span></div><div class="pm-chips">${rules.map(({ rule, mine }) => {
-    const said = ruleWords(rule);
-    return `<span class="pm-chip" title="${h(`${said.how}${mine ? "" : " · in the project's config"}`)}"><code>${h(said.what)}</code>${mine ? "" : "<small>project</small>"}${mine ? `<button type="button" aria-label="Ask again about ${h(said.what)}" data-action="allow-rule-remove" data-args="${h(JSON.stringify({ rule }))}">×</button>` : ""}</span>`;
-  }).join("")}</div>` : "";
-  return modes + chips;
+  const mode = view.permissions.mode, info = view.info, rules = info?.allow ?? [], asks = view.permissions.asks;
+  const current = MODES.find(([id]) => id === mode);
+  const modes = mode ? `<div class="st-head"><span>This chat</span><span>${asks && (asks.thisWeek || asks.lastWeek) ? `asked you ${asks.thisWeek} ${asks.thisWeek === 1 ? "time" : "times"} this week · ` : ""}⇧⇥ changes it</span></div><div class="pm-modes">${MODES.map(([id, label, line, free]) => `<button type="button" class="pm-mode${mode === id ? " on" : ""}" aria-pressed="${mode === id}" title="${h(line)}" data-action="permission-mode" data-args="${h(JSON.stringify({ mode: id }))}"><b>${h(label)}</b><span class="pm-can">${(["read", "edit", "run"] as const).map((can) => `<em${(free as readonly string[]).includes(can) ? ' class="free"' : ""}>${can}</em>`).join("")}</span></button>`).join("")}</div>${current ? `<p class="st-hint">${h(current[2])}. Green is what it does without asking.</p>` : ""}` : "";
+  const allRules = view.fold === "rules";
+  const chips = info === null ? "" : `<div class="st-head"><span>It no longer asks about</span><span>${rules.length ? `${rules.length} · × asks again` : ""}</span></div>` + (rules.length
+    ? `<div class="pm-chips">${(allRules ? rules : rules.slice(0, RULES_SHOWN)).map(({ rule, mine }) => {
+      const said = ruleWords(rule);
+      return `<span class="pm-chip" title="${h(`${said.how}${mine ? "" : " · in the project's config"}`)}"><code>${h(said.what)}</code>${mine ? `<button type="button" aria-label="Ask again about ${h(said.what)}" data-action="allow-rule-remove" data-args="${h(JSON.stringify({ rule }))}">×</button>` : "<small>project</small>"}</span>`;
+    }).join("")}${rules.length > RULES_SHOWN ? `<button type="button" class="pm-more" data-action="settings-fold" data-args='{"fold":"rules"}'>${allRules ? "Fewer" : `+${rules.length - RULES_SHOWN} more`}</button>` : ""}</div>`
+    : `<p class="st-hint pm-empty">Nothing yet. Always on an approval adds one here.</p>`);
+  const trusted = info?.trusted, allTrusted = view.fold === "trusted";
+  const folders = info === null ? "" : `<div class="st-head"><span>Trusted folders</span><span>${trusted?.length ? `${trusted.length} · their chats read files and run commands` : ""}</span></div>` + (trusted === null || trusted === undefined
+    ? `<p class="st-hint pm-empty">The daemon can't list them until it restarts.</p>`
+    : trusted.length
+      ? `<div class="st-group pm-folders">${(allTrusted ? trusted : trusted.slice(0, TRUSTED_SHOWN)).map((root) => `<div class="pm-folder"><code title="${h(root)}">${h(homeWords(root, view.home))}</code>${link("trusted-forget", "Untrust", { root }, " quiet")}</div>`).join("")}${trusted.length > TRUSTED_SHOWN ? `<button type="button" class="pm-folder pm-more-row" data-action="settings-fold" data-args='{"fold":"trusted"}'>${allTrusted ? "Show fewer" : `Show all ${trusted.length}`}</button>` : ""}</div>`
+      : `<p class="st-hint pm-empty">None yet. A folder asks once, the first time you open it.</p>`);
+  return modes + chips + folders;
 }
 
 /// Plain words with `code`, escaped, with the searched words marked.
@@ -480,7 +494,7 @@ export function settingsPage(view: SettingsView) {
   }
   const page = pages(view).find((item) => item.id === view.section) ?? pages(view)[0]!;
   const note = page.note ? `<p class="st-note${page.id === "permissions" ? " foot" : ""}">${h(page.note)}${page.note.startsWith("Changed here") ? ` ${link("restart-daemon", "Restart now")}` : ""}</p>` : "";
-  return `<h1 class="cp-title">${h(page.title)}</h1>${page.sub ? `<p class="cp-lede">${h(page.sub)}</p>` : ""}${error}${page.id === "permissions" ? "" : note}${page.html ?? ""}${page.groups.map((group) => groupHtml(group, [])).join("")}${page.id === "permissions" ? note : ""}`;
+  return `<h1 class="cp-title">${h(page.title)}</h1>${page.sub ? `<p class="cp-lede">${h(page.sub)}</p>` : ""}${error}${note}${page.html ?? ""}${page.groups.filter((group) => !group.hidden).map((group) => groupHtml(group, [])).join("")}`;
 }
 
 /// The sidebar while Settings is open: Back to chats, the search, the list.

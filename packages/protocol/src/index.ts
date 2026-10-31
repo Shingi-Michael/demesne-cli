@@ -879,15 +879,17 @@ export interface QuestionState {
 export type QuestionActionRequest =
   | { action: "answer"; index: number; revision: number; answer: UserAnswer }
   | { action: "draft"; index: number; revision: number; text: string; draftVersion: number }
-  | { action: "pause" | "resume" | "cancel"; revision: number };
+  | { action: "pause" | "resume" | "cancel"; revision: number }
+  /// Takes back the last answer of a set not yet sent, to change it.
+  | { action: "back"; revision: number };
 
 export function parseQuestionActionRequest(value: unknown): QuestionActionRequest {
-  if (!isRecord(value) || !["answer", "draft", "pause", "resume", "cancel"].includes(String(value.action)))
-    throw new ProtocolValidationError("Expected a question answer, draft, pause, resume or cancel action");
+  if (!isRecord(value) || !["answer", "draft", "pause", "resume", "cancel", "back"].includes(String(value.action)))
+    throw new ProtocolValidationError("Expected a question answer, draft, pause, resume, cancel or back action");
   const revision = value.revision;
   if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0)
     throw new ProtocolValidationError("revision must be a non-negative integer");
-  if (value.action === "pause" || value.action === "resume" || value.action === "cancel") return { action: value.action, revision };
+  if (value.action === "pause" || value.action === "resume" || value.action === "cancel" || value.action === "back") return { action: value.action, revision };
   const index = value.index;
   if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || index >= MAX_USER_QUESTIONS)
     throw new ProtocolValidationError("index must identify the current question");

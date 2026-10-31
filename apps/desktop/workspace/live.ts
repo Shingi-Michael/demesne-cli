@@ -1618,6 +1618,17 @@ function askedLine(asked: { questions: { question: string }[]; answers: { answer
   const pairs = asked.questions.map((q, n) => `<span class="ask-q-was">${h(q.question)}</span><span class="ask-a">${h(asked.answers[n]?.answer ?? "Let it decide")}</span>`).join('<span class="ask-sep">·</span>');
   return `<div class="tool-row ask-asked"><span class="ask-tick" aria-hidden="true">✓</span><b>Asked</b>${pairs}</div>`;
 }
+/// "Waits for your answer: where to cache": an open question the agent has
+/// worked past, at the end of its steps, so what's left for you isn't up
+/// where it asked. It goes once you answer or the turn ends (the card then
+/// sits at the end itself); a click goes to the card.
+function parkedLines(run: WorkspaceRun) {
+  if (!active(run)) return "";
+  const asked = run.entries.map((entry) => entry.type === "tool" ? entry.toolCallId : undefined);
+  const last = run.entries.findLastIndex((entry) => entry.type === "tool");
+  return (state?.questions ?? []).filter((q) => q.open && q.turnId === run.id && (q.answers?.length ?? 0) < q.questions.length && asked.indexOf(q.toolCallId) >= 0 && asked.indexOf(q.toolCallId) < last)
+    .map((q) => btn("question-back", `<span class="ask-park" aria-hidden="true"></span><b>Waits for your answer</b><span class="ask-q-was">${h(q.questions[q.answers?.length ?? 0]!.question)}</span>`, { id: q.id }, "tool-row ask-parked")).join("");
+}
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   // An open question is a card at its step; one the turn waits on is asked
   // at the end of the conversation; an answered one folds into one line.
@@ -1872,6 +1883,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   }
   // Words you sent that the model hasn't read yet wait at the end of the guide.
   if (live && run.id === state!.activeTurnId) for (const steer of state!.steers ?? []) steps += steerLine(steer.text, true);
+  steps += parkedLines(run);
   flush();
   const receipt = run.receipt,
     checks = items.filter(
@@ -2867,7 +2879,7 @@ function cachedReply(id: string,index: number): {text:string;version:number} | n
   } catch { return null; }
 }
 function clearReply(id: string,index: number) { try { localStorage.removeItem(replyCacheKey(id,index)); } catch {} }
-async function questionAction(action: "pause" | "resume" | "cancel", q = pendingQuestion()) {
+async function questionAction(action: "pause" | "resume" | "cancel" | "back", q = pendingQuestion()) {
   if(!q)return;
   const index=q.answers?.length ?? 0;
   clearTimeout(draftTimer);
@@ -3307,6 +3319,7 @@ function questionCard(question: WorkspaceQuestion): string {
   const foot = answered || paused
     ? `<span>${answered ? "Answered" : "Paused"}</span>${btn("question-control", "Resume", { id, action: "resume" }, "ask-link")}`
     : [item.multiple ? btn("question-multi", picks.size ? `Done · ${picks.size} picked` : "Pick any that apply", { id }, "ask-done-btn", !picks.size) : "",
+      index > 0 ? btn("question-control", "Back", { id, action: "back" }, "ask-link ask-prev") : "",
       interview ? "" : btn("question-skip", "Let it decide", { id }, "ask-link"),
       question.open ? btn("question-dismiss", "Dismiss", { id }, "ask-link") : ""].filter(Boolean).join("");
   return `<div class="ask-card${question.open ? " open" : ""}" data-question="${h(id)}"><div class="ask-tag"><i></i>${tag}${total > 1 ? `<span>${Math.min(index + 1, total)} of ${total}</span>` : ""}</div>${trail ? `<ol class="ask-trail">${trail}</ol>` : ""}<p class="ask-text">${words}</p>${item.reason ? `<p class="ask-why">${h(item.reason)}</p>` : ""}${choices.length ? `<div class="ask-choices">${choices.map(choice).join("")}</div>` : ""}${own}<div class="ask-foot">${foot}</div></div>`;
@@ -3333,7 +3346,7 @@ function renderQuestion() {
     card.signature = signature;
     card.node.innerHTML = questionCard(question);
     const input = card.node.querySelector<HTMLInputElement>("[data-ask-own]");
-    if (input && !step) input.value = own;
+    if (input) input.value = step ? question.draft ?? "" : own;
     if (isNew || step) {
       const root = card.node.firstElementChild!;
       if (isNew && !settled) snap(root, { opacity: [0, 1], y: [12, 0], scale: [0.98, 1] });

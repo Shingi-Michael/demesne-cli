@@ -34,6 +34,8 @@ const habitPrompt = "Desktop smoke: check the version again";
 const steerWords = "not lexer, the bug is in parser.ts";
 let releaseSteer!: () => void;
 const steerGate = new Promise<void>(resolve => { releaseSteer = resolve; });
+let releaseAsk!: () => void;
+const askGate = new Promise<void>(resolve => { releaseAsk = resolve; });
 let overlapRound = 0;
 // A stand-in Heartbeat daemon: Claude Code works in this project on this
 // machine, Codex in the second project on a paired one.
@@ -194,10 +196,17 @@ const f = await fixture({
       return;
     }
     if (user === askPrompt) {
-      if (askRound++ === 0) {
+      const round = askRound++;
+      if (round === 1) {
+        // A step it takes past the question, so the question parks at the end.
+        yield { type: "tool_call_delta", index: 0, idDelta: "desktop-ask-read", nameDelta: "read_file", argumentsDelta: JSON.stringify({ path: "notes.ts" }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else if (round === 0) {
         yield { type: "tool_call_delta", index: 0, idDelta: "desktop-ask", nameDelta: "ask_user", argumentsDelta: JSON.stringify({ questions: [{ question: "Which direction do you want to take the CI failure now?", reason: "The last turn ended with a plan; I need your steer before acting.", suggestions: ["Scope the test job", "Fix the typecheck", "Paste the logs first"] }] }) };
         yield { type: "finish", reason: "tool_calls" };
       } else {
+        // Held while it has worked past the question.
+        await askGate;
         yield { type: "text_delta", delta: "Everything left depends on your pick." };
         yield { type: "finish", reason: "stop" };
       }
@@ -1416,7 +1425,15 @@ try {
   const ask = page.locator("#stage .ask-card");
   await until(() => ask.isVisible(), "the question shows in the conversation", 20_000);
   await until(() => desktop!.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body === "Has a question for you")), "a question notifies while unfocused");
-  // The turn carries on past the question and ends on its own.
+  // The turn carries on past the question; what it worked past leaves the
+  // question parked at the end of its steps until the turn ends.
+  const parked = page.locator("#stage .ask-parked");
+  await until(() => parked.isVisible(), "a question the agent worked past waits at the end of its steps", 20_000);
+  assert((await parked.innerText()).includes("Waits for your answer"), "the parked step says it waits for you");
+  await page.waitForTimeout(700);
+  await parked.scrollIntoViewIfNeeded();
+  await capture("13-question-parked");
+  releaseAsk();
   await textIncludes("Everything left depends on your pick.");
   await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the asking turn has ended");
   await page.waitForTimeout(300);
@@ -1425,6 +1442,8 @@ try {
   assert.equal(await page.locator(".tool-row", { hasText: "ask_user" }).count(), 0, "no step row names the tool");
   assert(!(await page.locator("#stage").innerText()).toLowerCase().includes("interview"), "nothing says interview");
   assert.equal(await ask.locator(".ask-choice").count(), 3, "the suggestions are answers to pick");
+  assert.equal(await parked.count(), 0, "a finished turn leaves only the card");
+  assert.equal(await ask.locator(".ask-prev").count(), 0, "a first question has no Back");
   assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Reply… the question stays in the chat");
   await page.waitForTimeout(500);
   await capture("13-question");

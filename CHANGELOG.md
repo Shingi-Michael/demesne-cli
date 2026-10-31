@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
+- Questions: a set of questions has Back, which takes your last answer back to change it (a typed answer returns to the field). While the agent works past an open question, the end of its steps says "Waits for your answer" with the question, and a click goes to the card.
 - A chat's tab gets a real name after its first answer: the chat's own model (thinking off) names it in 2 to 4 words from what was asked and answered ("Tab names", not the first prompt cut at sixty characters). Only chats a person is in, only once, and never over a name you gave it meanwhile; a slow or odd reply leaves the first-prompt name.
 - The app runs on Electron 44.10.0 (from 44.7.2: Chromium and Node security and bug fixes), with electron-builder 26.18 and sharp 0.35.5.
 - While the model works, the silver line under the turn says what it's doing and moves on as the work does: the heading of its latest thought, the step running now ("Reading live.ts"), fast steps counted ("Reading 5 files"), and what it has read so far. It is one line kept out of the turn's repaints, each phrase stays at least 2.4 seconds, phrases glide, and the shimmer slides over a bright copy of the words instead of repainting them, so it doesn't stutter. The thinking row and running steps no longer shine on their own.

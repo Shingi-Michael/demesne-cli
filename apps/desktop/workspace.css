@@ -858,6 +858,11 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .ask-asked .ask-q-was { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .desktop .ask-asked .ask-a { flex: none; color: var(--t1); }
 .desktop .ask-asked .ask-sep { color: var(--t4); }
+.desktop .tool-row.ask-parked { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: var(--t3); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.desktop .ask-parked .ask-park { flex: none; width: 7px; height: 7px; margin: 0 2.5px; border-radius: 50%; background: var(--warn); }
+.desktop .ask-parked b { flex: none; font-weight: 500; color: var(--warn); }
+.desktop .ask-parked .ask-q-was { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.desktop .ask-parked:hover .ask-q-was { color: var(--t1); }
 .desktop .request-asked { display: flex; justify-content: flex-end; margin: 4px 0 14px; }
 .desktop #ask-back { position: absolute; left: 50%; bottom: calc(100% + 8px); z-index: 3; display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 10px; border: 0; border-radius: 999px; transform: translateX(-50%);
   background: var(--panel, rgba(30,30,32,.95)); box-shadow: 0 0 0 1px var(--hair), 0 6px 20px rgba(0,0,0,.3); color: var(--t2); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }

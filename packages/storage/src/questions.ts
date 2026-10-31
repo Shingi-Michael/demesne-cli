@@ -77,6 +77,12 @@ export class QuestionRepository {
           this.db.query("UPDATE user_questions SET answers=?,status='waiting',draft='',draft_version=0,revision=revision+1 WHERE id=?")
             .run(JSON.stringify([...current.answers,action.answer]),id);
         }
+      } else if (action.action === "back") {
+        // A typed answer comes back as the draft, so changing it starts from it.
+        const last = current.answers.at(-1);
+        if (!last || current.answers.length >= current.questions.length) throw new QuestionStateError("There is no earlier answer to change");
+        this.db.query("UPDATE user_questions SET answers=?,draft=?,draft_version=0,revision=revision+1 WHERE id=?")
+          .run(JSON.stringify(current.answers.slice(0, -1)),last.source === "typed" ? last.answer ?? "" : "",id);
       } else {
         const status = action.action === "cancel" ? "cancelled" : action.action === "pause" ? "paused" : "waiting";
         this.db.query("UPDATE user_questions SET status=?,revision=revision+1 WHERE id=?").run(status,id);

@@ -62,11 +62,13 @@ export function foundryURL(value: string) {
   try { const url = new URL(value); return url.protocol === "foundry:" && url.hostname === "artifact" && /^\/[\w-]{1,200}$/.test(url.pathname) && !url.username && !url.password && !url.port; } catch { return false; }
 }
 /** The Foundry kit, served to every artifact frame from inside the app at
- * foundry://kit/<file>: the base stylesheet a page starts from, anime.js,
- * and Inter. Each file's place in the app's ui folder and its type. */
-export const FOUNDRY_KIT: Record<string, { path: string; type: string }> = {
+ * foundry://kit/<file>: the base stylesheet a page starts from, anime.js
+ * with the motion runtime, and Inter. Each file's place in the app's ui
+ * folder, its type, and a file served after it. */
+export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: string }> = {
   "base.css": { path: "kit/base.css", type: "text/css; charset=utf-8" },
-  "anime.js": { path: "vendor/anime.umd.min.js", type: "application/javascript; charset=utf-8" },
+  // anime.js, then the motion runtime (demesne.motion) that lets the pane scrub a page's motions.
+  "anime.js": { path: "vendor/anime.umd.min.js", type: "application/javascript; charset=utf-8", then: "kit/motion.js" },
   ...Object.fromEntries([400, 500, 600].map((weight) => [`fonts/inter-latin-${weight}-normal.woff2`, { path: `vendor/fonts/inter-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
 };
 export const FOUNDRY_KIT_STYLE = "foundry://kit/base.css", FOUNDRY_KIT_SCRIPT = "foundry://kit/anime.js";

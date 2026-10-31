@@ -18,7 +18,7 @@ const mockup = (blue = false) => `<!doctype html><html><head><meta charset="utf-
 </style></head><body><main class="container narrow"><span class="eyebrow">Foundry · live mockup</span><h1>A little room to grow</h1>
 <p>Try this mockup right inside the conversation.</p><input aria-label="Your idea" placeholder="Name your next idea">
 <button id="counter" class="primary" onclick="this.textContent='Planted '+(++window.plants)">Plant an idea</button>
-<script>window.plants=0;</script></main></body></html>`;
+<script>window.plants=0;var tl=anime.createTimeline({autoplay:false});tl.add("h1",{opacity:[0,1],duration:400}).add("button",{y:[8,0],duration:300});demesne.motion("Arrive",tl);tl.play();</script></main></body></html>`;
 const f = await fixture({
   providerId: "fixture", modelId: "foundry-chat",
   async listModels() { return [{ id: "foundry-chat", provider: "fixture", contextWindow: 262144 }]; },
@@ -111,6 +111,17 @@ try {
     assert.equal(await inner.evaluate(() => typeof (window as unknown as { __demesnePrevious: unknown }).__demesnePrevious), previous === "none" ? "object" : "string");
   };
   await assembled("none");
+  // The page named a motion: the thin line under the page plays, scrubs and replays it.
+  const motion = pane.locator(".pane-motion");
+  await motion.getByRole("button", { name: "Arrive" }).waitFor();
+  await eventually(async () => (await motion.locator(".mo-time").textContent())?.startsWith("0.70s / 0.70s") ?? false);
+  await motion.getByRole("button", { name: "Replay" }).click();
+  await eventually(async () => (await motion.getByRole("button", { name: "Pause" }).count()) === 1);
+  await motion.getByRole("button", { name: "Pause" }).click();
+  await eventually(async () => (await motion.getByRole("button", { name: "Play" }).count()) === 1);
+  await motion.locator(".mo-scrub").fill("500");
+  await eventually(async () => (await motion.locator(".mo-time").textContent())?.startsWith("0.35s") ?? false);
+  console.log("Motion line passed.");
   assert(await page.locator("#page").isHidden(), "Foundry stays beside the chat");
   assert.equal(await page.locator("#conversation iframe").count(), 0, "Nothing live runs in the conversation");
   assert.equal(await chips.first().getAttribute("aria-pressed"), "true", "The open chip is marked");

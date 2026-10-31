@@ -20,6 +20,7 @@ import type { ProviderToolDefinition } from "@demesne/providers";
 import { isRecord, MAX_QUESTION_SUGGESTIONS, MAX_USER_QUESTIONS, parseUserQuestions, parseAnswerQuestionsRequest, type UserAnswer, type UserQuestion, type QuestionMode } from "@demesne/protocol";
 import { applyEdits, EditApplyError, type EditHunk } from "./edit-engine.ts";
 import { backgroundProcesses } from "./background.ts";
+import { checkTypes } from "./type-check.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
 
 const LIST_FILES_PATH_BUDGET_BYTES = 28 * 1024;
@@ -616,6 +617,7 @@ function editFileTool(): AgentTool {
         "Replace mode applies ordered hunks; each hunk needs oldText with enough surrounding context to be unique unless all:true replaces every match.",
         "Matching falls back from exact text to trimmed-line windows to whitespace-tolerant comparison, so indentation drift is tolerated.",
         "Append mode adds newText after a trailing newline. Creating a new file requires empty oldText (or append mode) and no edits array.",
+        "For a TypeScript file in a project with TypeScript installed, the result carries the file's type errors (types) and any new errors the edit caused in other files (typesElsewhere); fix them before moving on.",
       ].join(" "),
       inputSchema: {
         type: "object",
@@ -677,7 +679,7 @@ function editFileTool(): AgentTool {
         const content = hunks[0]!.newText;
         if (Buffer.byteLength(content) > FILE_LIMIT_BYTES) throw new Error("result exceeds 1 MiB");
         writeFileSync(absolute, content, { encoding: "utf8", flag: "wx", mode: 0o644 });
-        return JSON.stringify({ path, created: true, bytes: Buffer.byteLength(content), strategy: "create", replacements: 0 });
+        return JSON.stringify({ path, created: true, bytes: Buffer.byteLength(content), strategy: "create", replacements: 0, ...await checkTypes(context.workspaceRoot, path, context.signal) });
       }
 
       const stat = lstatSync(absolute);
@@ -731,7 +733,7 @@ function editFileTool(): AgentTool {
       } finally {
         if (existsSync(temporary)) unlinkSync(temporary);
       }
-      return JSON.stringify({ path, created: false, bytes: Buffer.byteLength(updated), strategy, replacements });
+      return JSON.stringify({ path, created: false, bytes: Buffer.byteLength(updated), strategy, replacements, ...await checkTypes(context.workspaceRoot, path, context.signal) });
     },
   };
 }
@@ -815,7 +817,7 @@ function writeFileTool(): AgentTool {
       } finally {
         if (existsSync(temporary)) unlinkSync(temporary);
       }
-      return JSON.stringify({ path, created: !exists, bytes: Buffer.byteLength(content) });
+      return JSON.stringify({ path, created: !exists, bytes: Buffer.byteLength(content), ...await checkTypes(context.workspaceRoot, path, context.signal) });
     },
   };
 }

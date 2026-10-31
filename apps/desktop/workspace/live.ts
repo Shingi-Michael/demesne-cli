@@ -82,6 +82,8 @@ declare global {
 const el = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id)! as T;
 const editor = document.querySelector<HTMLTextAreaElement>("textarea")!;
+// Talk instead of typing: the Mac's own Dictation, only in the Mac app.
+el("composer-talk").hidden = !(window.demesne.mode === "desktop" && /Mac/i.test(navigator.platform));
 /// Big pastes waiting in the composer, as chips.
 const pastes: Paste[] = [];
 /// Build this from Just a chat: the request waits (across the move to
@@ -5509,6 +5511,8 @@ async function dispatch(
     }
     return;
   }
+  // Talk: the Mac's Dictation into the composer; Enter still sends.
+  if (action === "talk") { editor.focus({ preventScroll: true }); await api("desktop-dictate"); return; }
   if (action === "ask-again") { followLatest(); await api("ask-again", { turnId: args.turnId }); return; }
   if (action === "choose-version") { if (args.turnId) await api("choose-version", { turnId: args.turnId }); return; }
   if (action === "edit-ask" || action === "retry-ask") {

@@ -23,6 +23,7 @@ import { scheduledPage } from "./scheduled-page.ts";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
+import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FoundryPane } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
@@ -102,6 +103,29 @@ const isPlain = (snapshot: Snapshot | null = state) => Boolean(snapshot?.session
 const inAssistant = (snapshot: Snapshot | null = state) => Boolean(snapshot?.assistant && snapshot.session?.id === snapshot.assistant.sessionId);
 const inSession = (snapshot: Snapshot | null = state) =>
   Boolean(snapshot && (snapshot.runs.length || (snapshot.drive && snapshot.drive.homeSessionId === snapshot.session?.id) || inAssistant(snapshot)));
+/// The working line under a live turn: waiting on you or writing a command
+/// is said at once; otherwise the model's latest thought and its steps take
+/// turns (working-line.ts).
+function workingLine(line: WorkingLine, run: WorkspaceRun) {
+  if (!active(run)) return line.update(null);
+  const steps = tools(run), latest = steps.findLast((tool) => tool.state === "running" || tool.waiting);
+  const fixed = pendingQuestion() ? "Waiting for your answer"
+    : latest?.waiting ? `Waiting for your approval${latest.name === "run_command" ? "" : ` · ${verb(latest)}`}`
+      : latest?.drafting ? "Writing a command…" : undefined;
+  const thinking = run.entries.findLast((entry) => entry.type === "reasoning");
+  line.update(workingPhrases({
+    fixed,
+    thinking: thinking?.type === "reasoning" ? thinking.raw : null,
+    steps: steps.filter((tool) => !tool.drafting).map((tool) => ({ verb: verb(tool), target: stepTarget(tool), startedAt: tool.startedAt, running: tool.state === "running" })),
+  }, Date.now()), fixed !== undefined);
+}
+/// A step's target in a few words: a file's name, a command's program, a page's title.
+function stepTarget(tool: ToolEntry) {
+  if (tool.name === "run_command") return (tool.detail ?? "").replace(/^\$\s*/, "").replace(/^\S*\//, "");
+  if (tool.name === "foundry_save" || tool.name === "foundry_edit") return typeof tool.input.title === "string" ? tool.input.title : "";
+  const path = String(tool.input.path ?? tool.detail ?? "");
+  return tool.name === "subagent" ? "" : path.split("/").at(-1) ?? path;
+}
 /// The thinking level each /model row would switch to: picked with ←→,
 /// else the current choice for the current model, else the model's default.
 const modelLevels = new Map<string, string>();
@@ -269,6 +293,7 @@ const expanded = new Set<string>(),
       node: HTMLElement;
       content: HTMLElement;
       artifacts: FoundryChatArtifacts;
+      working: WorkingLine;
       run?: WorkspaceRun;
       views: Map<number, MarkdownView>;
     }
@@ -1619,9 +1644,9 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
               : `<span class="muted">${h(mark(tool.state))}</span> ${h(tool.state)}`;
   const row = btn(
     canFold ? "step" : "tool",
-    // A running step keeps its own icon and only its words shine: the cube
-    // means thinking or working overall, not one tool.
-    `${stepIcon(tool)}<span class="verb">${now && !served ? shine(verb(tool)) : served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    // A running step keeps its own icon and plain words: the working line
+    // under the turn carries the cube and the silver.
+    `${stepIcon(tool)}<span class="verb">${served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -1811,7 +1836,7 @@ function runHTML(run: WorkspaceRun, index: number) {
       flush();
       const live = active(run) && i === run.entries.length - 1;
       const open = detailsOpen.has(key) || (live && !detailsClosed.has(key));
-      body += `<div class="thinking thinking-main ${live ? "live" : ""}"><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${live ? spinner() : CHEVRON}${live ? shine("Thinking") : `Thought for ${duration(entry.durationMs)}`}<span class="thinking-disclosure">${open ? "Collapse" : "Show trace"}</span></button><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div></div>`;
+      body += `<div class="thinking thinking-main ${live ? "live" : ""}"><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${CHEVRON}${live ? "Thinking" : `Thought for ${duration(entry.durationMs)}`}<span class="thinking-disclosure">${open ? "Collapse" : "Show trace"}</span></button><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div></div>`;
     }
     if (entry.type === "tool") {
       const group: ToolEntry[] = [entry];
@@ -1903,26 +1928,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     const bare = run.status === "completed" && !files && !checks.length && !steps && !thought && !(receipt?.mode === "Plan" || run.planOnly) && !model && !mailReply(run);
     footer = bare ? "" : `<div class="turn-receipt">${parts.map((part) => `<span>${part}</span>`).join("")}${actions ? `<span class="receipt-actions">${actions}</span>` : ""}</div>`;
   }
-  const latestTool = items.findLast(
-      (tool) => tool.state === "running" || tool.waiting,
-    ),
-    phase = pendingQuestion()
-      ? "Waiting for your answer · "
-      : latestTool?.waiting
-        ? latestTool.name === "run_command" ? "Waiting for your approval" : "Waiting for your approval · "
-        : latestTool?.drafting
-          // A command still being written isn't typed out here: its row
-          // shows it once it's complete.
-          ? "Writing a command…"
-          : latestTool
-            ? latestTool.name === "run_command" ? "Running command" : `${verb(latestTool)} `
-            : "Thinking";
-  // The live thinking row already says "Thinking"; don't repeat it here.
-  const thinkingLive = run.entries.at(-1)?.type === "reasoning" && !latestTool && !pendingQuestion();
   const trail = "";
-  const activity = live && !thinkingLive && !(latestTool && !latestTool.drafting)
-    ? `<div class="live-activity">${spinner()}${shine(phase + (latestTool?.drafting || latestTool?.name === "run_command" ? "" : latestTool?.detail ?? "") + "…")}</div>`
-    : "";
   const answered = run.entries.some((e) => e.type === "assistant");
   const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}${canRewind(run) ? btn("rewind", "rewind", { turnId: run.id }).replace("<button ", '<button title="Put the files and the chat back to just before this message" ') : ""}</span>`;
   const queued = live && state!.queue.trim() ? `<div class="next-line"><span class="next-label">NEXT</span><span class="next-text">${h(state!.queue.trim())}</span>${btn("queue-action", "edit", { action: "edit" })}${btn("queue-action", "send now", { action: "now" })}${btn("queue-action", "×", { action: "drop" }, "next-drop")}</div>` : "";
@@ -1933,7 +1939,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   const request = answerAsked(run) ?? mailRequest(run) ?? driveReport(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${h(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
   const review = reviewOpen.has(run.id) && !live ? reviewHTML(run.id) : "";
   const day = assistantDay(run, index);
-  return `${day ? `<div class="day-line"><span>${h(day)}</span></div>` : ""}${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}${activity}</div>${queued}`;
+  return `${day ? `<div class="day-line"><span>${h(day)}</span></div>` : ""}${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}</div>${queued}`;
 }
 /// The turn's changed files under its receipt: a header line per file, its
 /// changes with a little context, and the notes left on its lines.
@@ -2221,9 +2227,11 @@ function renderConversation() {
         open: (artifact) => pane.show(artifact.id, artifact.version),
         isOpen: (artifact) => pane.isOpen(artifact.id, artifact.version),
       });
-      node.append(content, artifacts.element);
+      // The working line stays out of the turn's repaints, so streaming never restarts it.
+      const working = new WorkingLine(spinner);
+      node.append(content, working.element, artifacts.element);
       root.append(node);
-      saved = { node, content, artifacts, signature: "", views: new Map() };
+      saved = { node, content, artifacts, working, signature: "", views: new Map() };
       runNodes.set(run.id, saved);
     }
     // Expanding inserts earlier turns before the retained turns already mounted.
@@ -2262,6 +2270,7 @@ function renderConversation() {
     const rewind = rewindIn(run);
     const at = rewind && run.entries.findIndex((entry) => entry.type === "tool" && entry.toolCallId === rewind.toolCallId);
     saved.artifacts.update(rewoundBy(run) ? [] : typeof at === "number" && at >= 0 ? run.entries.slice(0, at + 1) : run.entries);
+    workingLine(saved.working, run);
     saved.signature = signature;
     saved.run = run;
     changed = true;
@@ -2269,6 +2278,7 @@ function renderConversation() {
   for (const [id, saved] of runNodes)
     if (!ids.has(id)) {
       saved.artifacts.dispose();
+      saved.working.dispose();
       saved.node.remove();
       runNodes.delete(id);
       changed = true;

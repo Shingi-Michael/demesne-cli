@@ -399,6 +399,33 @@
 .live-activity img {
   flex: none;
 }
+/* The working line (working-line.ts): one element kept across repaints, a
+   fixed height so nothing below it moves, phrases that glide with transform
+   and opacity only, and a shimmer that is a bright copy of the words seen
+   through a soft window. Window and copy move opposite ways on one clock, so
+   the copy holds still while the window sweeps and nothing repaints. */
+.working-line { height: 24px; margin-top: 14px; padding: 0; contain: layout paint; }
+.working-line[hidden] { display: none; }
+.wl-mark { display: contents; }
+.wl-line { position: relative; flex: 1; min-width: 0; height: 20px; overflow: hidden; }
+.wl-words { position: absolute; inset: 0; }
+.wl-word { position: absolute; inset: 0 auto 0 0; max-width: 100%; overflow: hidden; color: var(--t3); text-overflow: ellipsis; white-space: nowrap; }
+.wl-copy .wl-word { color: var(--t1); }
+.wl-glint { position: absolute; inset: 0; overflow: hidden; pointer-events: none; -webkit-mask-image: linear-gradient(90deg, transparent 30%, #000 50%, transparent 70%); mask-image: linear-gradient(90deg, transparent 30%, #000 50%, transparent 70%); }
+.wl-copy { position: absolute; inset: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .wl-word { transition: transform 420ms cubic-bezier(.32, .72, 0, 1), opacity 420ms cubic-bezier(.32, .72, 0, 1); will-change: transform, opacity; }
+  .wl-word.in { transform: translateY(9px); opacity: 0; }
+  .wl-word.out { transform: translateY(-9px); opacity: 0; }
+  .wl-glint { animation: wl-window 3.2s cubic-bezier(.45, 0, .55, 1) infinite; will-change: transform; }
+  .wl-copy { animation: wl-copy 3.2s cubic-bezier(.45, 0, .55, 1) infinite; will-change: transform; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wl-glint { display: none; }
+  .wl-word.out { display: none; }
+}
+@keyframes wl-window { 0% { transform: translateX(-100%); } 70%, 100% { transform: translateX(100%); } }
+@keyframes wl-copy { 0% { transform: translateX(100%); } 70%, 100% { transform: translateX(-100%); } }
 .copy-answer {
   opacity: 0;
 }

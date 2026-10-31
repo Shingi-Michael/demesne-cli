@@ -332,7 +332,8 @@ async function open(workspace = false, welcome = false, extraEnv: Record<string,
   await until(() => evaluate<boolean>("const editor=document.querySelector('textarea');return !!editor && editor.getBoundingClientRect().width>0 && document.body.innerText.includes('Desktop Test');"), "connected desktop project", 30_000);
   // Opening the project reloads the page, so this waits out the navigation.
   await until(() => evaluate<string>("return document.getElementById('sidebar-sessions')?.dataset.workspace;").then(value => value === f.workspace, () => false), "the sidebar shows the project");
-  assert((await page.locator("#composer-model").innerText()).startsWith("Desktop Test"), "a model with no name reads in words, not its raw id");
+  // A model with no name reads in words, not its raw id (after the reload settles).
+  await until(() => page.locator("#composer-model").innerText().then(text => text.startsWith("Desktop Test"), () => false), "a model with no name reads in words, not its raw id");
   assert.equal(await page.evaluate(() => typeof (window as any).require), "undefined", "No Node in the renderer");
   assert.equal(await page.evaluate(() => typeof (window as any).process), "undefined", "No process or environment in the renderer");
   const isolation = await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.getLastWebPreferences());

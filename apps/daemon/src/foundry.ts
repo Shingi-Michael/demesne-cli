@@ -26,6 +26,7 @@ const FILE_RULES = `HTML is one document that starts with <link rel="stylesheet"
   + "one ink with --secondary/--muted/--hair/--tone tints, --accent, radii 8 and 12; plain elements styled; classes .container(.narrow) .card(.outlined/.raised) .row(.between) .stack .grid(.two/.three) "
   + `.pill(.accent/.ok/.warn/.bad) .tabs .list .eyebrow .muted .secondary .sp; buttons .primary .quiet .danger .small) and, when it moves, <script src="${FOUNDRY_KIT_SCRIPT}"></script> (anime.js 4 as window.anime; name each motion with demesne.motion("Arrive", timeline) so the person can play and scrub it under the page). `
   + "Other outside loads: pinned scripts from " + FOUNDRY_LIBRARY_HOSTS.join(", ") + " (react@18.3.1, never react@18) and Google Fonts; everything else is blocked, so images are inline SVG or data URIs. "
+  + "When a page shows options to choose between, mark each option's element with data-option=\"B · Joined\" (its letter and name): the person gets a Pick button on it that sends their choice to the chat. "
   + "SVG is one <svg> with a viewBox. Under 512 KB.";
 
 /// The design brief every artifact follows, so Foundry's work reads as one

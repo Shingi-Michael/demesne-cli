@@ -69,9 +69,14 @@ export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: st
   "base.css": { path: "kit/base.css", type: "text/css; charset=utf-8" },
   // anime.js, then the motion runtime (demesne.motion) that lets the pane scrub a page's motions.
   "anime.js": { path: "vendor/anime.umd.min.js", type: "application/javascript; charset=utf-8", then: "kit/motion.js" },
+  // Pick an option: pages that mark options with data-option get a Pick button on hover.
+  "pick.js": { path: "kit/pick.js", type: "application/javascript; charset=utf-8" },
   ...Object.fromEntries([400, 500, 600].map((weight) => [`fonts/inter-latin-${weight}-normal.woff2`, { path: `vendor/fonts/inter-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
 };
 export const FOUNDRY_KIT_STYLE = "foundry://kit/base.css", FOUNDRY_KIT_SCRIPT = "foundry://kit/anime.js";
+export const FOUNDRY_PICK_SCRIPT = "foundry://kit/pick.js";
+/** A page that marks options (data-option) gets the Pick runtime after it. */
+export const withPick = (html: string) => /\bdata-option\b/.test(html) ? `${html}\n<script src="${FOUNDRY_PICK_SCRIPT}"></script>` : html;
 /** The kit file a foundry://kit/<file> address names, or null. */
 export function foundryKitFile(value: string): string | null {
   try {
@@ -104,7 +109,7 @@ export interface FoundryAssembly { library: string; previous: string | null }
 /** The page an artifact frame shows: HTML as written, SVG as an image (so it runs no script). */
 export function foundryDocument(kind: string, source: string, title: string, assembly?: FoundryAssembly) {
   const esc = (text: string) => text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);
-  if (kind === "html") return assembly ? assembledDocument(source, assembly.library, assembly.previous) : source;
+  if (kind === "html") return withPick(assembly ? assembledDocument(source, assembly.library, assembly.previous) : source);
   if (kind === "svg") return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>html,body{margin:0;height:100%;background:transparent}body{display:grid;place-items:center}img{max-width:92%;max-height:92%}${assembly ? "@media(prefers-reduced-motion:no-preference){img{animation:in 600ms cubic-bezier(.2,.8,.2,1)}@keyframes in{from{opacity:0;transform:scale(.6) rotate(-6deg)}}}" : ""}</style><img alt="${esc(title)}" src="data:image/svg+xml;base64,${Buffer.from(source).toString("base64")}">`;
   return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><pre style="white-space:pre-wrap;font:14px/1.6 system-ui;padding:24px">${esc(source)}</pre>`;
 }

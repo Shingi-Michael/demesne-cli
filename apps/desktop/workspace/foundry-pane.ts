@@ -28,6 +28,8 @@ export interface PaneOptions {
   /// A document drawn in the pane assembles on its first show (assemble.ts);
   /// `previousHTML` is the version before it, for a revision.
   assembleDocument?(root: HTMLElement, previousHTML: string | null): void;
+  /// The page's Pick button chose one of its options ("B · Joined").
+  pick?(option: string): void;
 }
 
 /** The frame's address; the first show of a version asks for the assembly. */
@@ -73,6 +75,16 @@ export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState,
     + (detail?.kind === "html" ? tool("phone", "Phone width", '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>', ` aria-pressed="${state.phone}"`) : "")
     + (detail ? tool("export", "Export the file", '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>') : "")
     + button("close", icon('<path d="M6 6l12 12M18 6 6 18"/>'), ' aria-label="Close" title="Close (Esc)" class="pane-ico"');
+}
+
+/// The option a page's Pick button sent (foundry://kit/pick.js): its words,
+/// one line, or null for anything else.
+export function pickMessage(data: unknown): string | null {
+  if (!data || typeof data !== "object" || (data as Record<string, unknown>).demesne !== "pick") return null;
+  const option = (data as Record<string, unknown>).option;
+  if (typeof option !== "string") return null;
+  const words = option.replace(/\s+/g, " ").trim();
+  return words && words.length <= 120 ? words : null;
 }
 
 /// A motion the page named with demesne.motion(name, timeline) (the kit's
@@ -162,6 +174,8 @@ export class FoundryPane {
     window.addEventListener("message", (event) => {
       const frame = this.stage.querySelector<HTMLIFrameElement>("iframe.pane-frame");
       if (!frame || event.source !== frame.contentWindow) return;
+      const picked = pickMessage(event.data);
+      if (picked) { this.options.pick?.(picked); return; }
       const message = motionMessage(event.data);
       if (!message) return;
       if ("motions" in message) { this.motions = message.motions; this.motionCurrent = message.current ?? this.motionCurrent; if (this.motionState && !this.motions.some((item) => item.name === this.motionState!.name)) this.motionState = null; }

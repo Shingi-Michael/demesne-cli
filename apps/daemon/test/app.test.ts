@@ -37,7 +37,8 @@ function plainChatToolOverhead(): number {
   try {
     const definitions = [foundryReadTool(store).definition, foundrySaveTool(store).definition, foundryEditTool(store).definition];
     const estimate = (tools: typeof definitions) => planRawContextRequest({
-      messages: [{ role: "system", content: agentSystemPrompt({ definitions: tools }) }], tools, historicalTurns: [],
+      // These tests submit turns without a permission mode ("deny"): nobody is at the window.
+      messages: [{ role: "system", content: agentSystemPrompt({ definitions: tools, attended: false }) }], tools, historicalTurns: [],
     }).plan.estimatedInputTokens;
     return estimate(definitions) - estimate([]);
   } finally { store.close(); }

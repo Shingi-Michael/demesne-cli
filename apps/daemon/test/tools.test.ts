@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalWorkspace, listWorkspaceFiles, ToolRegistry } from "../src/tools.ts";
-import { agentSystemPrompt, ANSWER_FORMAT_GUIDANCE, defaultSystemPrompt, planModeDefinitions, planModeGuidance, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
+import { agentSystemPrompt, ANSWER_FORMAT_GUIDANCE, defaultSystemPrompt, FOUNDRY_GUIDANCE, FOUNDRY_UNATTENDED_GUIDANCE, planModeDefinitions, planModeGuidance, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 import { applyEdits, EditApplyError } from "../src/edit-engine.ts";
 
 const temporaryDirectories: string[] = [];
@@ -43,6 +43,23 @@ describe("built-in tools", () => {
     expect(planModeDefinitions(definitions, false)).toEqual(definitions);
     expect(planModeGuidance(true)).toContain("read-only");
     expect(planModeGuidance(false)).toBeNull();
+  });
+
+  test("plan mode keeps Foundry: a page changes no project files", () => {
+    const foundry = [{ name: "foundry_save" }, { name: "foundry_edit" }, { name: "foundry_read" }, { name: "write_file" }].map((tool) => ({ ...tool, description: "", inputSchema: {} }));
+    expect(planModeDefinitions(foundry, true).map((tool) => tool.name)).toEqual(["foundry_save", "foundry_edit", "foundry_read"]);
+    expect(planModeGuidance(true)).toContain("Foundry pages are allowed");
+  });
+
+  test("Foundry goes by the answer's shape when someone is there, and only on request when nobody is", () => {
+    const definitions = [{ name: "foundry_save", description: "", inputSchema: {} }];
+    const attended = agentSystemPrompt({ workspaceRoot: "/workspace", definitions });
+    expect(attended).toContain(FOUNDRY_GUIDANCE);
+    expect(attended).toContain("\"Show me\"");
+    const away = agentSystemPrompt({ workspaceRoot: "/workspace", definitions, attended: false });
+    expect(away).toContain(FOUNDRY_UNATTENDED_GUIDANCE);
+    expect(away).not.toContain(FOUNDRY_GUIDANCE);
+    expect(agentSystemPrompt({ workspaceRoot: "/workspace", definitions: [] })).not.toContain("Foundry");
   });
 
   test("lists workspace files for mentions without sensitive or dependency paths", () => {    const root = workspace();

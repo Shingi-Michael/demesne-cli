@@ -208,3 +208,22 @@ test("an answer given while the turn still works reaches it after its current st
   expect(done.session.turns).toHaveLength(1);
   expect(done.session.turns[0]!.responseText).toContain('Answer to your question "Cache where?": On disk');
 });
+
+test("Back takes the last answer of an unsent set back, a typed one into the draft",async()=>{
+  const f=fixture();await f.app.close();const store=new DemesneStore(f.databasePath);
+  try{
+    const {session}=store.createSession("Back"),{turn}=store.createTurn(session.id,"Ask three","ask");store.startTurn(turn.id);
+    const {providerCallId}=store.startProviderCall(turn.id,"fixture","fixture");
+    const {toolCallId}=store.recordToolCall(turn.id,providerCallId,"ask","ask_user","{}");store.startToolCall(toolCallId);
+    const {questionId}=store.requestQuestions(toolCallId,[{question:"Where?",suggestions:["Disk"]},{question:"How long?",suggestions:[]},{question:"Who?",suggestions:[]}]);
+    let q=store.userQuestions.get(questionId)!;
+    expect(()=>store.updateQuestion(questionId,{action:"back",revision:q.revision})).toThrow("no earlier answer");
+    q=store.updateQuestion(questionId,{action:"answer",index:0,revision:q.revision,answer:{answer:"Disk",source:"suggestion"}});
+    q=store.updateQuestion(questionId,{action:"answer",index:1,revision:q.revision,answer:{answer:"a week",source:"typed"}});
+    q=store.updateQuestion(questionId,{action:"back",revision:q.revision});
+    expect(q.answers).toEqual([{answer:"Disk",source:"suggestion"}]);expect(q.draft).toBe("a week");expect(q.status).toBe("waiting");
+    q=store.updateQuestion(questionId,{action:"back",revision:q.revision});
+    expect(q.answers).toEqual([]);expect(q.draft).toBe("");
+    expect(()=>store.updateQuestion(questionId,{action:"back",revision:q.revision-1})).toThrow("changed");
+  }finally{store.close();}
+});

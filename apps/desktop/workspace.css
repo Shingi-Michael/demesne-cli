@@ -173,7 +173,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 #desktop-shell.sidebar-collapsed:not(.sidebar-peek) #desktop-sidebar > :not(.sidebar-rail) { display: none; }
 #desktop-shell.sidebar-collapsed .sidebar-rail { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 6px; width: 40px; }
 #rail-expand { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 8px; border-radius: 8px; }
-#rail-expand .project-mark { width: 32px; height: 32px; font-size: 14px; line-height: 32px; }
+#rail-expand .brand-symbol { width: 26px; height: 26px; }
 .rail-button { position: relative; width: 36px; height: 36px; border-radius: 8px; }
 .rail-button.on { background: var(--surface2); color: var(--t1); }
 .rail-badge { position: absolute; right: 5px; top: 5px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--warn); background: var(--side); }
@@ -316,6 +316,10 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 /* One visual language across setup, choosers, approvals, and work panels. */
 .desktop-home-content, .desktop-error-content { width: 660px; }
 .desktop-home-wordmark { display: flex; align-items: center; gap: 10px; font-size: 17px; color: var(--strong); margin-bottom: 54px; }
+/* The mark draws its d in the text colour; the blossom keeps its own pink. */
+.brand-symbol { display: block; flex: none; width: 24px; height: 24px; color: var(--t1); }
+.brand-symbol svg { display: block; width: 100%; height: 100%; }
+.brand-version { align-self: flex-end; margin-left: 2px; padding-bottom: 2px; font-size: 11.5px; font-weight: 500; color: #e0457a; }
 .desktop-home .hero-eyebrow { display: block; margin-bottom: 14px; }
 .desktop-home h1 { font-size: clamp(30px, 4vw, 44px); line-height: 1.15; font-weight: 550; letter-spacing: -1.5px; }
 #desktop-home-description { font-size: 16px; line-height: 1.7; max-width: 510px; margin: 18px 0 28px; }

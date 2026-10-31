@@ -1737,7 +1737,7 @@ function runHTML(run: WorkspaceRun, index: number) {
       key = `${run.id}:${entry.id}`;
     if (entry.type === "assistant") {
       flush();
-      body += `<div class="answer"><span class="answer-mark" aria-hidden="true">d.</span><div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div></div>`;
+      body += `<div class="answer"><span class="answer-mark" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span><div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div></div>`;
     }
     if (fold && (entry.type === "reasoning" || entry.type === "tool")) {
       // Folded steps keep their trees: a commit or merge stays drawn.

@@ -6,6 +6,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
+- You don't have to say "Foundry": the model decides by the shape of the best answer (something to look at, click or compare gets a page, made in that turn), `foundry_save` reads as "show the person something", plan mode can make pages, and Drive, routines and mail make one only when asked. `scripts/eval-foundry-inference.ts` scores it against your own model.
 - The app starts the daemon it bundles: it looked for it one folder too high, so starting a daemon fell back to whatever `demesned` was on PATH (possibly an older install), and replacing a daemon from another build never happened.
 - The app keeps its daemon current: a daemon left running from an older build of the app is restarted from the bundled one once nothing is working, instead of serving old code until someone restarts it by hand. Builds now carry an id (commit and build time) that `/healthz` reports as `build`.
 - The motion line's buttons no longer get rebuilt on every tick of a playing motion, so a click on Pause or a motion name that lands mid-motion isn't lost.

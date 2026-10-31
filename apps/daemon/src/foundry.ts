@@ -107,7 +107,7 @@ export function foundrySaveTool(store: DemesneStore): AgentTool {
   return {
     definition: {
       name: "foundry_save",
-      description: "Make a design, prototype, graphic or document as a Foundry artifact (landing page, UI mockup, logo, diagram, chart, one-pager); it previews in the chat. "
+      description: "Show the person something they can see, click or compare: a screen or layout, a flow, an interactive prototype, a small game or tool, a chart or diagram, a logo or palette, a page or one-pager. It opens live beside the chat. "
         + "Omit id to create; pass id and base_version to replace the whole source as a new version (small changes: foundry_edit). "
         + GUIDE,
       inputSchema: {

@@ -83,8 +83,12 @@ for (const permissionMode of ["ask", "allow", "deny"] as PermissionMode[]) {
     expect(offered[0]).not.toContain("write_file");
     expect(offered[0]).not.toContain("run_command");
     expect(offered[0]).not.toContain("subagent");
-    expect(prompt).toContain("Foundry is available in this chat");
-    expect(prompt).toContain("say you'll mock it in Foundry and make it");
+    // Only a chat someone is in ("ask") makes pages on its own; Auto turns make one when asked.
+    if (permissionMode === "ask") {
+      expect(prompt).toContain("Foundry (foundry_save) is how you show the person something");
+      expect(prompt).toContain("Decide by what the best answer is, not by the words used");
+      expect(prompt).toContain("Make it in this turn rather than offering or asking first");
+    } else expect(prompt).toContain("nobody is watching this turn");
     const { artifacts } = await client.foundryList();
     expect(artifacts).toHaveLength(1);
     const artifact = await client.foundryGet(artifacts[0]!.id);
@@ -112,15 +116,15 @@ test("Foundry in a chat without a project does not enable filesystem tool execut
   expect(existsSync(join(root, "blocked.txt"))).toBe(false);
 });
 
-test("plan mode can read Foundry but rejects artifact changes without a project", async () => {
+test("plan mode reads and makes Foundry pages, which change no project files", async () => {
   const offered: string[][] = [];
-  let denial = "";
+  let saved = "";
   const { client } = daemon(async function* (messages, tools) {
     offered.push(tools.map(tool => tool.name));
     const results = messages.filter(message => message.role === "tool");
     if (results.length === 2) {
-      denial = results[1]!.content ?? "";
-      yield { type: "text_delta", delta: "Plan only." };
+      saved = results[1]!.content ?? "";
+      yield { type: "text_delta", delta: "Here it is." };
       yield { type: "finish", reason: "stop" }; return;
     }
     const call = results.length === 0 ? { name: "foundry_read", input: { id: artifact.id } }
@@ -132,11 +136,9 @@ test("plan mode can read Foundry but rejects artifact changes without a project"
   const { session } = await client.createSession({ title: "Plan" });
   await client.submitTurn(session.id, { content: "Plan changes to the Foundry document", planOnly: true });
   await completed(client, session.id);
-  expect(offered[0]).toContain("foundry_read");
-  expect(offered[0]).not.toContain("foundry_save");
-  expect(offered[0]).not.toContain("foundry_edit");
-  expect(denial).toContain("not available in plan mode");
-  expect((await client.foundryGet(artifact.id)).version).toBe(1);
+  expect(offered[0]).toEqual(expect.arrayContaining(["foundry_read", "foundry_save", "foundry_edit"]));
+  expect(saved).not.toContain("not available in plan mode");
+  expect((await client.foundryGet(artifact.id)).version).toBe(2);
 });
 
 test("foundry_save creates an artifact and keeps every version", async () => {

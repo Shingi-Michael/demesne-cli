@@ -4042,34 +4042,34 @@ function renderOverlay() {
     subtitle = state.providers.loading ? "checking…" : `using ${state.model.provider}`;
     noun = "providers";
     filter = false;
-    footerNote = state.providers.message ?? "Enter signs in or out · Codex uses your Codex plan, ChatGPT is metered as credits, OpenRouter uses hosted models";
+    footerNote = state.providers.message ?? "Codex uses your Codex plan, ChatGPT is metered as credits, OpenRouter uses hosted models.";
     overlayRows = state.providers.items.map((item) => {
       const signing = state!.providers.signingIn === item.key;
       return {
         label: `${item.label}${item.active ? " ●" : ""}`,
         value: signing ? "Waiting for your browser…" : item.detail,
-        group: item.kind === "local" ? "LOCAL" : item.kind === "api-key" ? "API KEY" : "ACCOUNTS",
+        group: item.kind === "local" ? "On this computer" : item.kind === "api-key" ? "API keys" : "Accounts",
         action: signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "",
         data: { key: item.key },
-        hint: signing ? "cancel ↵" : item.status === "signed-in" ? "sign out ↵" : item.status === "signed-out" ? "sign in ↗" : "",
+        hint: signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : item.status === "signed-out" ? "Sign in ↗" : "",
       };
     });
-    overlayRows.push({ label: "Provider setup", value: state.model.provider, group: "SETUP", action: "setup", data: {}, hint: "setup ↵" });
+    overlayRows.push({ label: "Provider setup", value: state.model.provider, group: "Setup", action: "setup", data: {}, hint: "Open" });
   } else if (overlay === "cleanup") {
     const { candidates, selected, loading, armed, message, staleDays } = state.cleanup;
     const chosen = new Set(selected);
-    title = "Clean up sessions";
+    title = "Clean up chats";
     subtitle = loading ? "looking…" : `${chosen.size} of ${candidates.length} selected`;
     filter = false;
-    footerNote = message ?? "Deleting can't be undone · the open session and running ones are never listed";
-    const GROUPS: Record<string, string> = { empty: "EMPTY", missing: "FOLDER GONE", archived: "ARCHIVED", unfinished: "NEVER FINISHED", quick: "QUICK QUESTIONS", stale: `NOT USED IN ${staleDays}+ DAYS` };
+    footerNote = message ?? "Deleting can't be undone. The open chat and running ones are never listed.";
+    const GROUPS: Record<string, string> = { empty: "Empty", missing: "Folder gone", archived: "Archived", unfinished: "Never finished", quick: "Quick questions", stale: `Not used in ${staleDays}+ days` };
     const order = Object.keys(GROUPS);
     const here = state.workspace;
     overlayRows = candidates.length
       ? [
           {
-            label: armed ? `Delete ${chosen.size} session${chosen.size === 1 ? "" : "s"} for good?` : chosen.size ? `Delete ${chosen.size} selected` : "Nothing selected",
-            value: armed ? "press ↵ again to delete · Esc to cancel" : "",
+            label: armed ? `Delete ${chosen.size} chat${chosen.size === 1 ? "" : "s"} for good?` : chosen.size ? `Delete ${chosen.size} selected` : "Nothing selected",
+            value: armed ? "Press Enter again to delete" : "",
             action: chosen.size ? "cleanup-delete" : "",
             data: {},
             hint: armed ? "confirm" : "",
@@ -4092,30 +4092,30 @@ function renderOverlay() {
     title = "Theme";
     subtitle = "saved on this device";
     noun = "themes";
-    overlayRows = [...(state.themeCanUndo ? [{label:"Undo last theme change",value:"restore previous palette",action:"theme-undo",data:{},group:"ACTIONS"}] : []),...state.themes.map((name) => ({
+    overlayRows = [...(state.themeCanUndo ? [{label:"Undo last theme change",value:"restore previous palette",action:"theme-undo",data:{},group:"Undo"}] : []),...state.themes.map((name) => ({
       label: state!.themeOptions.find(t=>t.name === name)?.label ?? name,
       value: name === state!.theme ? "current" : "",
       action: "theme",
       data: { name },
       group:
-        name.startsWith("custom-") ? "YOUR THEMES" : name.includes("light") ||
+        name.startsWith("custom-") ? "Your themes" : name.includes("light") ||
         name.includes("latte") ||
         name === "github-light"
-          ? "LIGHT"
-          : "DARK",
-    })).sort((a,b)=>["YOUR THEMES","DARK","LIGHT"].indexOf(a.group)-["YOUR THEMES","DARK","LIGHT"].indexOf(b.group))];
+          ? "Light"
+          : "Dark",
+    })).sort((a,b)=>["Your themes","Dark","Light"].indexOf(a.group)-["Your themes","Dark","Light"].indexOf(b.group))];
   } else if (overlay === "sessions") {
-    title = "Sessions";
-    noun = "sessions";
+    title = "Chats";
+    noun = "chats";
     overlayRows = state.sessions.map((session) => ({
       label: session.title,
       value: `${session.turns} turns · ${age(session.updatedAt)}`,
       action: "select-session",
       data: { id: session.id },
-      hint: session.id === state!.session?.id ? "● current" : "",
+      hint: session.id === state!.session?.id ? "Open now" : "",
     }));
     // Cleanup sits at the end of the list it tidies.
-    if (!overlayQuery) overlayRows.push({ label: "Clean up sessions", value: "delete empty, quick and old ones", action: "overlay", data: { name: "cleanup" }, hint: "/cleanup" });
+    if (!overlayQuery) overlayRows.push({ label: "Clean up chats", value: "Delete empty, quick and old ones", action: "overlay", data: { name: "cleanup" }, hint: "" });
   } else if (overlay === "session") {
     title = "This conversation";
     subtitle = state.session?.title ?? "";
@@ -4129,25 +4129,25 @@ function renderOverlay() {
     ];
   } else if (overlay === "rename") {
     el("overlay").innerHTML =
-      `<div class="modal-title">Rename session</div><form id="rename-form"><div class="filter-wrap"><input name="title" aria-label="Session title" value="${h(overlayQuery || state.session?.title)}" maxlength="200"></div><div class="menu-footer"><button type="submit">${k("Enter")} save</button>${btn("close-overlay", `${k("Esc")} cancel`)}</div></form>`;
+      `<div class="modal-title">Rename chat</div><form id="rename-form"><div class="filter-wrap"><input name="title" aria-label="Chat title" value="${h(overlayQuery || state.session?.title)}" maxlength="200"></div><div class="menu-actions">${btn("close-overlay", "Cancel")}<button type="submit" class="primary">Save</button></div></form>`;
     return;
   } else if (overlay === "confirm-archive" || overlay === "confirm-undo") {
     title =
       overlay === "confirm-archive"
-        ? "Archive this session?"
+        ? "Archive this chat?"
         : undoTurnId && state!.runs.find((run) => run.id === undoTurnId) ? `Undo turn ${state!.runs.find((run) => run.id === undoTurnId)!.number}’s changes?` : "Undo the last turn’s changes?";
     el("overlay").innerHTML =
-      `<div class="modal-title">${title}</div><p class="empty">${overlay === "confirm-archive" ? "The session remains recoverable in the daemon archive." : "This reverts the file changes recorded for that turn. Changes made separately on disk may prevent a revert."}</p><div class="menu-footer">${btn(overlay === "confirm-archive" ? "archive" : "undo", "Confirm", overlay === "confirm-undo" && undoTurnId ? { turnId: undoTurnId } : {}, "danger")}${btn("close-overlay", `${k("Esc")} cancel`)}</div>`;
+      `<div class="modal-title">${title}</div><p class="empty">${overlay === "confirm-archive" ? "You can bring it back from Archived chats in Settings." : "This reverts the file changes recorded for that turn. Changes made separately on disk may prevent a revert."}</p><div class="menu-actions">${btn("close-overlay", "Cancel")}${btn(overlay === "confirm-archive" ? "archive" : "undo", overlay === "confirm-archive" ? "Archive" : "Undo changes", overlay === "confirm-undo" && undoTurnId ? { turnId: undoTurnId } : {}, "danger")}</div>`;
     return;
   } else {
     title = "Commands";
     filter = false;
     overlayRows = state.commands.map((command) => ({
-      label: command.name,
+      label: plainName(command.name),
       value: command.description,
       action: "complete-command",
       data: { name: command.name },
-      group: sectionTitle(command.section).toUpperCase(),
+      group: sectionTitle(command.section),
     }));
   }
   const allCount = overlay === "models" ? models.length : overlayRows.length;
@@ -4173,7 +4173,7 @@ function renderOverlay() {
         group +
         btn(
           "choose-row",
-          `<span class="name">${h(row.label)}</span><span class="value">${h(row.value)}</span><span class="hint">${h(row.hint ?? "")}${index === overlayIndex ? ` ${k("↵")}` : ""}</span>`,
+          `<span class="name">${h(row.label)}</span><span class="value">${h(row.value)}</span><span class="hint">${h(row.hint ?? "")}</span>`,
           { index },
           `menu-row ${index === overlayIndex ? "selected" : ""}`,
         ).replace("<button ", row.description ? `<button title="${h(row.description)}" ` : "<button ")
@@ -4182,7 +4182,7 @@ function renderOverlay() {
     .join("");
   if (overlay === "models") renderModelPopover(hidden);
   else el("overlay").innerHTML =
-    `<div class="modal-title">${title} <span>${h(subtitle)}</span>${btn("close-overlay", "×", {}, "dialog-close").replace("<button ", '<button aria-label="Close dialog" ')}${noun ? `<small>${overlayQuery ? `${overlayRows.length} of ` : ""}${allCount} ${noun}</small>` : ""}</div>${filter ? `<div class="filter-wrap"><input id="chooser-filter" placeholder="filter" aria-label="Filter ${title}" value="${h(overlayQuery)}" autocomplete="off"></div>` : ""}<div class="menu-list">${rows || `<div class="empty">No matches.</div>`}${hidden ? `<div class="empty">${hidden} more · keep typing to narrow</div>` : ""}</div><div class="menu-footer">${k("↑↓")} select ${k("↵")} change ${btn("close-overlay", `${k("Esc")} close`)}<span class="right">${footerNote}</span></div>`;
+    `<div class="modal-title">${title} <span>${h(subtitle)}</span>${btn("close-overlay", "×", {}, "dialog-close").replace("<button ", '<button aria-label="Close dialog" ')}${noun ? `<small>${overlayQuery ? `${overlayRows.length} of ` : ""}${allCount} ${noun}</small>` : ""}</div>${filter ? `<div class="filter-wrap"><input id="chooser-filter" placeholder="Search" aria-label="Filter ${title}" value="${h(overlayQuery)}" autocomplete="off"></div>` : ""}<div class="menu-list">${rows || (overlay === "cleanup" ? "" : `<div class="empty">No matches.</div>`)}${hidden ? `<div class="empty">${hidden} more · keep typing to narrow</div>` : ""}</div>${footerNote ? `<div class="menu-note">${h(footerNote)}</div>` : ""}`;
   if (hasFocus) {
     const input = el("overlay").querySelector<HTMLInputElement>("input");
     input?.focus({ preventScroll: true });

@@ -394,6 +394,20 @@ try {
   // While it thinks, the working line under the turn carries the cube and the silver words.
   const working = page.locator(".working-line").last();
   assert((await working.locator(".cube-mark svg polygon").count()) >= 8, "the working cube draws its cubelets");
+  // The turning cube parts past its 12px box; nothing around it may cut it off.
+  assert.equal(await working.locator(".cube-mark").evaluate((mark) => {
+    const box = mark.getBoundingClientRect();
+    for (let node = mark.parentElement; node && node !== document.body; node = node.parentElement) {
+      const style = getComputedStyle(node), clip = node.getBoundingClientRect();
+      if ((/paint|strict|content/.test(style.contain) || style.overflow !== "visible") && (box.left - 5 < clip.left || box.right + 5 > clip.right || box.top - 5 < clip.top || box.bottom + 5 > clip.bottom)) return node.className || node.tagName;
+    }
+    return "";
+  }), "", "the working cube has room to turn");
+  // It sits in the answer mark's column and the words line up with the answer text.
+  const [markBox, wordsBox] = await Promise.all([working.locator(".wl-mark").boundingBox(), working.locator(".wl-line").boundingBox()]);
+  const answerBox = await page.locator(".answer").first().boundingBox().catch(() => null);
+  assert(markBox && wordsBox && Math.abs(markBox.width - 20) < 0.5 && Math.abs(wordsBox.x - markBox.x - 32) < 0.5, `the cube has the mark's 20px column, the words start 32px in: ${JSON.stringify({ markBox, wordsBox })}`);
+  if (answerBox) assert(Math.abs(answerBox.x - markBox!.x) < 0.5, "the cube sits under the answer's mark");
   assert.equal(await page.locator("#sidebar-sessions .cube-mark").count(), 0, "one cube on screen: the sidebar shows a dot");
   assert(await page.locator("#sidebar-sessions .sidebar-session-mark.working").count() > 0, "the working chat breathes a dot in the sidebar");
   assert.equal(await thinkingToggle.locator(".shine, .cube-mark").count(), 0, "the thinking row is quiet: one silver line, one cube");

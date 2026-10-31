@@ -1525,30 +1525,29 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fd-chip-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .fd-chip-text b { overflow: hidden; color: var(--t1); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .fd-chip-text span { color: var(--t3); font-size: 12px; }
+.fd-chip.fd-edited { display: inline-block; gap: 0; padding: 3px 8px; color: var(--t4); font-size: 12.5px; }
+.fd-chip.fd-edited b { color: var(--t2); font-weight: 500; }
 
 /* The pane: the artifact beside the conversation, edge to edge, with one
    line above it and one below. The cards column yields to it. */
 #pane { display: none; }
 .desktop .live-app.pane-on #pane:not([hidden]) { display: flex; flex-direction: column; flex: none; width: clamp(380px, 52%, 960px); min-width: 0; border-left: 1px solid var(--hair); background: var(--surface); }
 .desktop .live-app.pane-on #cards { display: none; }
-.pane-head, .pane-foot { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 14px; color: var(--t3); font-size: 12.5px; white-space: nowrap; }
-.pane-head { height: 40px; border-bottom: 1px solid var(--hair); }
-.pane-foot { height: 34px; gap: 12px; padding-right: 14px; border-top: 1px solid var(--hair); font-size: 12px; color: var(--t4); }
+.pane-head { flex: none; display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px 0 8px; border-bottom: 1px solid var(--hair); color: var(--t3); font-size: 12.5px; white-space: nowrap; }
 .pane-making { margin-left: 2px; color: var(--t4); }
-.pane-head .sp, .pane-foot .sp { flex: 1; }
+.pane-head .sp { flex: 1; }
 .pane-title { min-width: 0; overflow: hidden; color: var(--t1); font-weight: 500; text-overflow: ellipsis; }
+b.pane-title { padding: 0 6px; }
+.pane-head button.pane-title { display: block; flex: 0 1 auto; color: var(--t1); font-weight: 500; line-height: 24px; }
+.pane-head .bad { min-width: 0; overflow: hidden; margin-left: 6px; color: var(--bad); text-overflow: ellipsis; }
 .pane-vers { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; color: var(--t4); font-variant-numeric: tabular-nums; }
-.pane-head button, .pane-foot button { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: none; color: var(--t3); font: inherit; font-size: 12.5px; cursor: pointer; transition: background-color 140ms var(--ease), color 140ms var(--ease); }
-.pane-head button:hover, .pane-foot button:hover { color: var(--t1); background: var(--tone); }
+.pane-head button { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: none; color: var(--t3); font: inherit; font-size: 12.5px; cursor: pointer; transition: background-color 140ms var(--ease), color 140ms var(--ease); }
+.pane-head button:hover { color: var(--t1); background: var(--tone); }
 .pane-head button[aria-pressed="true"] { color: var(--t1); background: var(--tone2); }
 .pane-head button:disabled { opacity: 0.35; cursor: default; background: none; }
 .pane-vers button { padding: 0 4px; }
+.pane-head .pane-ico { width: 28px; padding: 0; justify-content: center; }
 .pane-head .ico { width: 14px; height: 14px; }
-.pane-seg { display: inline-flex; gap: 1px; padding: 2px; border-radius: var(--r); }
-.pane-foot b { color: var(--t3); font-weight: 500; }
-.pane-foot .note { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.pane-foot button { height: 22px; padding: 0 6px; font-size: 12px; }
-.pane-foot .bad { color: var(--bad); }
 .pane-motion { flex: none; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px 0 8px; border-top: 1px solid var(--hair); color: var(--t4); font-size: 12px; white-space: nowrap; }
 .pane-motion button { display: inline-flex; align-items: center; height: 22px; padding: 0 6px; border: 0; border-radius: var(--r-sm); background: none; color: var(--t3); font: inherit; font-size: 12px; cursor: pointer; }
 .pane-motion button:hover { color: var(--t1); background: var(--tone); }
@@ -1568,7 +1567,7 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .pane-stage.phone .pane-frame { width: 390px; max-width: 100%; height: calc(100% - 32px); border-radius: 14px; box-shadow: 0 0 0 1px var(--hair2); }
 .pane-doc { flex: 1; max-width: 760px; margin: 0 auto; padding: 28px 32px; overflow: auto; scrollbar-width: none; color: var(--t1); }
 .pane-code { flex: 1; margin: 0; padding: 16px 18px; overflow: auto; font: 12px/1.65 "JetBrains Mono", monospace; color: var(--t2); white-space: pre; }
-@media (prefers-reduced-motion: reduce) { .fd-chip, .pane-frame, .pane-head button, .pane-foot button { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .fd-chip, .pane-frame, .pane-head button { transition: none; } }
 
 /* Git history replays as a whole after success. Text occupies separate bands. */
 .repo-flow { box-sizing: border-box; width: calc(100% - 22px); max-width: calc(100% - 22px); min-width: 0; margin: 4px 0 10px 22px; padding: 0 14px; background: color-mix(in srgb, var(--t3) 3%, var(--surface)); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--hair); }

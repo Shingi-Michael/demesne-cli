@@ -142,32 +142,38 @@ try {
   console.log("Step folding kept the page's state.");
   await pane.getByRole("button", { name: "Phone width" }).click();
   assert.equal(await pane.getByRole("button", { name: "Phone width" }).getAttribute("aria-pressed"), "true");
+  // One line above the page and nothing below it: no foot, no Revise, Copy only in code view.
+  assert.equal(await pane.locator(".pane-foot").count(), 0, "the pane has no foot");
+  assert.equal(await pane.getByRole("button", { name: "Revise" }).count(), 0, "the composer revises, not the pane");
+  assert.equal(await pane.getByRole("button", { name: "Copy the source" }).count(), 0, "Copy is only in code view");
   await pane.getByRole("button", { name: "Code", exact: true }).click();
   await pane.locator(".pane-code").filter({ hasText: "window.plants=0" }).waitFor();
-  await pane.getByRole("button", { name: "Preview", exact: true }).click();
+  await pane.getByRole("button", { name: "Copy the source" }).waitFor();
+  await pane.getByRole("button", { name: "Code", exact: true }).click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
   console.log("PASS: /foundry makes a chip and opens the pane; the page's state survives streaming, completion, step folding and the pane's controls.");
 
   await editor.fill("Make it blue"); await editor.press("Enter");
-  await chips.nth(1).filter({ hasText: "Prototype · v2" }).waitFor();
+  // The artifact keeps its one chip; the turn that changed it says so in a quiet line.
+  await chips.nth(1).filter({ hasText: "Edited Idea garden · v2" }).waitFor();
+  assert.equal(await chips.nth(1).locator(".fd-chip-ic").count(), 0, "a change is a line, not a second chip");
   await eventually(async () => (await f.client.foundryGet(artifact.id)).version === 2);
   assert.equal(await chips.nth(1).getAttribute("data-artifact-id"), artifact.id);
   assert.match((await f.client.foundryGet(artifact.id)).source, /#3158ba/);
   assert.equal((await f.client.foundryGet(artifact.id)).versions[0]!.note, "Blue");
   // The pane follows the chat onto the new version; the arrows walk back.
-  await pane.locator(".pane-foot").filter({ hasText: "v2" }).waitFor();
+  await pane.locator(".pane-v").filter({ hasText: "v2" }).waitFor();
   await frame.getByRole("heading", { name: "A little room to grow" }).waitFor();
   // A revision's first show is the page's own motion again, with no assembly diff.
   await assembled();
   assert.equal(await chips.nth(1).getAttribute("aria-pressed"), "true");
   assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "false");
   await pane.getByRole("button", { name: "Earlier version" }).click();
-  await pane.locator(".pane-foot").filter({ hasText: "Make this the latest" }).waitFor();
+  await pane.getByRole("button", { name: "Make this the latest" }).waitFor();
   assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "true");
   await pane.getByRole("button", { name: "Later version" }).click();
-  await pane.locator(".pane-foot").filter({ hasText: "Blue" }).waitFor();
-  await pane.getByRole("button", { name: "Revise", exact: true }).click();
-  await eventually(async () => (await editor.inputValue()).includes(artifact.id));
+  await eventually(async () => (await pane.locator(".pane-v").getAttribute("title"))?.startsWith("Blue") ?? false);
+  assert.equal(await pane.getByRole("button", { name: "Make this the latest" }).count(), 0, "the latest needs no Make this the latest");
   console.log("PASS: a follow-up edits the artifact in place (foundry_edit); the pane moves to v2 and walks the versions.");
 
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");

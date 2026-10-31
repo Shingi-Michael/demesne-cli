@@ -4011,7 +4011,7 @@ setInterval(() => {
 function renderNotifications() {
   if (!state || window.demesne.mode !== "desktop" || state.connection !== "online") return;
   const current = state.session, looking = document.hasFocus();
-  const alerts = new Map<string, { title: string; body: string; kind: NotifyKind; sessionId?: string; path?: string }>();
+  const alerts = new Map<string, { title: string; body: string; kind: NotifyKind; sessionId?: string; path?: string; ask?: NotifyAsk }>();
   for (const item of state.sessions) {
     // Whatever happened before the app opened is old news.
     if (Date.parse(item.updatedAt) < notifyFrom) continue;
@@ -4021,8 +4021,18 @@ function renderNotifications() {
     if (waits) {
       const approval = mine ? state.approvals[0] : undefined, input = (approval?.input ?? {}) as Record<string, unknown>;
       const asked = approval?.overlap ? `${approval.overlap.agents[0]?.name ?? "Another agent"} changed ${approval.overlap.path.split("/").pop()}` : approval?.name === "run_command" ? `Wants to run: ${Array.isArray(input.argv) ? input.argv.join(" ") : String(input.command ?? "")}` : approval ? `Wants to ${approval.name.replace(/_/g, " ")}${input.path ? ` ${String(input.path).split("/").pop()}` : ""}` : "";
-      const body = asked || (mine && state.questions.length ? "Has a question for you" : "Is waiting for you");
-      alerts.set(`${item.id}:wait:${item.updatedAt}`, { title, body, kind: "wait", ...where });
+      // What the banner can answer by itself: a question's suggestions and a
+      // reply field, or Allow once and Deny.
+      const question = mine ? state.questions.find((q) => (q.answers?.length ?? 0) < q.questions.length) : undefined;
+      const current = question?.questions[question.answers?.length ?? 0];
+      const away = !mine ? item.ask : null;
+      const ask: NotifyAsk | undefined = approval ? { kind: "permission", id: approval.id, actions: ["Allow once", "Deny"] }
+        : question && current ? { kind: "question", id: question.id, actions: current.multiple ? [] : (current.suggestions ?? []).slice(0, 3) }
+        : away?.kind === "permission" ? { kind: "permission", id: away.id, sessionId: item.id, actions: ["Allow once", "Deny"] }
+        : away?.kind === "question" && away.id ? { kind: "question", id: away.id, sessionId: item.id, actions: away.suggestions ?? [] }
+        : undefined;
+      const body = asked || current?.question || (away?.kind === "question" ? away.text : "") || (mine && state.questions.length ? "Has a question for you" : "Is waiting for you");
+      alerts.set(`${item.id}:wait:${item.updatedAt}`, { title, body, kind: "wait", ...where, ...(ask ? { ask } : {}) });
     } else if (item.status === "failed") alerts.set(`${item.id}:failed:${item.updatedAt}`, { title, body: "Stopped with an error", kind: "error", ...where });
     else if (item.status === "completed") alerts.set(`${item.id}:done:${item.updatedAt}`, { title, body: "Finished", kind: "done", ...where });
   }
@@ -4032,11 +4042,28 @@ function renderNotifications() {
   for (const job of reviewJobs()) if (job.status === "ready") alerts.set(`drive:${job.id}`, { title: "Drive", body: `${job.title} is ready to review${job.diff ? ` · +${job.diff.additions} −${job.diff.deletions}` : ""}`, kind: "drive", ...(job.sessionId ? { sessionId: job.sessionId } : {}) });
   const fresh = notified ? [...alerts].filter(([key]) => !notified!.has(key)) : [];
   notified = new Set([...(notified ?? []), ...alerts.keys()]);
-  for (const [, { kind, ...alert }] of fresh) {
+  for (const [key, { kind, ask, ...alert }] of fresh) {
     if (!notifyOn[kind] || looking) continue;
-    void api("desktop-notify", alert).catch(() => {});
+    if (ask) notifyAsks.set(key, ask);
+    void api("desktop-notify", { ...alert, ...(ask ? { key, actions: ask.actions, ...(ask.kind === "question" ? { reply: "Your answer" } : {}) } : {}) }).catch(() => {});
   }
 }
+/// A banner that can answer for you: its question or approval, and in which
+/// chat (none: the one that's open).
+interface NotifyAsk { kind: "question" | "permission"; id: string; sessionId?: string; actions: string[] }
+const notifyAsks = new Map<string, NotifyAsk>();
+// A button or reply on a banner answers its chat from wherever you are.
+document.addEventListener("demesne:notify-answer", (event) => {
+  const { key, index, text } = (event as CustomEvent<{ key?: string; index?: number; text?: string }>).detail ?? {};
+  const ask = key ? notifyAsks.get(key) : undefined;
+  if (!ask) return;
+  notifyAsks.delete(key!);
+  const choice = index !== undefined ? ask.actions[index] : undefined, typed = text?.trim();
+  const done = ask.kind === "permission"
+    ? (choice ? (ask.sessionId ? api("away-permission", { session: ask.sessionId, id: ask.id, decision: choice === "Deny" ? "deny" : "allow_once" }) : api("permission", { id: ask.id, decision: choice === "Deny" ? "deny" : "allow_once" })) : null)
+    : (typed || choice) ? (ask.sessionId ? api("away-answer", { session: ask.sessionId, id: ask.id, answer: typed || choice, source: typed ? "typed" : "suggestion" }) : answerQuestion(typed || choice!, typed ? "typed" : "suggestion", questionById(ask.id))) : null;
+  void Promise.resolve(done).catch((error) => notice(error instanceof Error ? error.message : String(error)));
+});
 // A banner's click comes back here and opens its chat.
 document.addEventListener("demesne:open-chat", (event) => {
   const { sessionId, path } = (event as CustomEvent<{ sessionId?: string; path?: string }>).detail ?? {};

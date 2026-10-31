@@ -330,7 +330,8 @@ async function open(workspace = false, welcome = false, extraEnv: Record<string,
     await page.locator("#sidebar-open-project").click();
   }
   await until(() => evaluate<boolean>("const editor=document.querySelector('textarea');return !!editor && editor.getBoundingClientRect().width>0 && document.body.innerText.includes('Desktop Test');"), "connected desktop project", 30_000);
-  assert.equal(await evaluate("return document.getElementById('sidebar-sessions')?.dataset.workspace;"), f.workspace);
+  // Opening the project reloads the page, so this waits out the navigation.
+  await until(() => evaluate<string>("return document.getElementById('sidebar-sessions')?.dataset.workspace;").then(value => value === f.workspace, () => false), "the sidebar shows the project");
   assert((await page.locator("#composer-model").innerText()).startsWith("Desktop Test"), "a model with no name reads in words, not its raw id");
   assert.equal(await page.evaluate(() => typeof (window as any).require), "undefined", "No Node in the renderer");
   assert.equal(await page.evaluate(() => typeof (window as any).process), "undefined", "No process or environment in the renderer");
@@ -420,11 +421,12 @@ try {
   await click("toggle-steps");
   assert(await evaluate<boolean>("return document.getElementById('cards').hidden;"), "a chat that uses no card has no column on the right");
   // Native notifications: record them in the main process, and look away from the window.
-  await desktop.evaluate(({ Notification }) => { (globalThis as any).banners = []; Notification.isSupported = () => true; Notification.prototype.show = function () { (globalThis as any).banners.push({ title: this.title, body: this.body }); }; });
+  await desktop.evaluate(({ Notification }) => { (globalThis as any).banners = []; Notification.isSupported = () => true; Notification.prototype.show = function () { (globalThis as any).banners.push({ title: this.title, body: this.body, actions: this.actions.map(action => action.text) }); }; });
   await page.evaluate(() => { document.hasFocus = () => false; });
   await type(prompt);
   await until(() => evaluate<boolean>("return Array.from(document.querySelectorAll('#approval .approval-row')).some(element => element.textContent.includes(arguments[0]));", ["Edit"]), "file approval visible");
   await until(() => desktop.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body.startsWith("Wants to edit"))), "an unfocused waiting approval sends a native notification");
+  assert.deepEqual((await desktop.evaluate(() => (globalThis as any).banners as { body: string; actions: string[] }[])).find(banner => banner.body.startsWith("Wants to edit"))!.actions, ["Allow once", "Deny"], "the approval's banner can answer it");
   await page.evaluate(() => { delete (document as any).hasFocus; });
   await capture("02-file-approval");
   // New chat lands on Home as Just a chat; the where word under the
@@ -1422,13 +1424,15 @@ try {
   await desktop!.evaluate(({ Notification }) => {
     (globalThis as any).banners = [];
     Notification.isSupported = () => true;
-    Notification.prototype.show = function () { (globalThis as any).banners.push({ title: this.title, body: this.body }); };
+    Notification.prototype.show = function () { (globalThis as any).banners.push({ title: this.title, body: this.body, actions: this.actions.map(action => action.text), reply: this.hasReply }); (globalThis as any).lastBanner = this; };
   });
   await page.evaluate(() => { document.hasFocus = () => false; });
   await type(askPrompt);
   const ask = page.locator("#stage .ask-card");
   await until(() => ask.isVisible(), "the question shows in the conversation", 20_000);
-  await until(() => desktop!.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body === "Has a question for you")), "a question notifies while unfocused");
+  await until(() => desktop!.evaluate(() => (globalThis as any).banners as { body: string }[]).then(banners => banners.some(banner => banner.body === "Which direction do you want to take the CI failure now?")), "a question notifies while unfocused, saying the question");
+  // The banner carries the suggestions and a reply field; keep it to answer from later.
+  assert.deepEqual(await desktop!.evaluate(() => { const banner = (globalThis as any).lastBanner; (globalThis as any).asked = banner; return { actions: banner.actions.map((action: { text: string }) => action.text), reply: banner.hasReply }; }), { actions: ["Scope the test job", "Fix the typecheck", "Paste the logs first"], reply: true }, "the question's banner can answer it");
   // The turn carries on past the question; what it worked past leaves the
   // question parked at the end of its steps until the turn ends.
   const parked = page.locator("#stage .ask-parked");
@@ -1460,7 +1464,8 @@ try {
   assert.equal(await ask.getAttribute("data-held"), "1", "typing never redraws the question");
   assert.equal(await evaluate<string>("return window.demesneInspect?.().host.questionDraft ?? '';"), "", "the composer doesn't answer an open question");
   await page.locator("textarea").fill("");
-  await page.locator("textarea").press("1");
+  // Answered from the banner's first button, as from Notification Center.
+  await desktop!.evaluate(() => (globalThis as any).asked.emit("action", {}, 0));
   await textIncludes("Scoping the test job then.");
   await until(() => page.locator("#stage .ask-asked", { hasText: "Scope the test job" }).first().isVisible(), "the answered question folds into one Asked line");
   await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the focused answer has completed");

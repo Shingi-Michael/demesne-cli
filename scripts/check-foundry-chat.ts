@@ -134,6 +134,16 @@ try {
   await frame.getByRole("button", { name: "Plant an idea" }).click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
   console.log("Initial pane interaction passed.");
+  // A page in place of the chat hides the chat's pane; going back brings it
+  // back as it was, without reloading the page in it.
+  await page.locator(".sidebar-settings").click();
+  await page.locator('#page[data-kind="settings"]').waitFor();
+  await eventually(async () => await pane.isHidden());
+  await page.locator(".sidebar-settings").click();
+  await eventually(async () => await page.locator("#page").isHidden());
+  await eventually(async () => await pane.isVisible());
+  await frame.getByRole("button", { name: "Planted 1" }).waitFor();
+  console.log("Pane hides behind pages passed.");
   await frame.getByRole("textbox", { name: "Your idea" }).fill("Keep my idea");
   response.resolve();
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");

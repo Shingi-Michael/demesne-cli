@@ -193,6 +193,8 @@ export class FoundryPane {
     // Esc closes the pane, unless something that handles its own Esc has focus.
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || !this.state || event.defaultPrevented || event.isComposing) return;
+      // A page covers the chat, so its pane is hidden: Esc belongs to the page.
+      if (this.root.closest(".paging")) return;
       const target = event.target instanceof Element ? event.target : null;
       if (target && (target.matches("input, textarea, select, [contenteditable]") || target.closest("#overlay, .popover, [role=dialog]"))) return;
       event.preventDefault();

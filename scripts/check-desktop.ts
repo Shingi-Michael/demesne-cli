@@ -1010,14 +1010,14 @@ try {
   assert.equal(await page.locator("#overlay .mp-stop").count(), 0, "no dots");
   const g = (await groove.boundingBox())!;
   assert(g.x >= panel.x && g.x + g.width <= panel.x + panel.width, "the groove sits inside the panel");
-  assert.equal(await page.locator("#overlay .mp-level").innerText(), "Low");
+  assert.equal(await page.locator("#overlay .mp-level").innerText(), "Medium", "a model that offers levels starts on Medium");
   // Dragging it fills smoothly and settles on the nearest level when let go.
   await page.mouse.move(g.x + 4, g.y + g.height / 2);
   await page.mouse.down();
   await page.mouse.move(g.x + g.width * 0.55, g.y + g.height / 2, { steps: 6 });
   const mid = await evaluate<number>("return document.querySelector('#overlay .mp-fill')?.getBoundingClientRect().width ?? 0;");
   assert(Math.abs(mid - g.width * 0.55) < 4, "the fill follows the pointer while dragging");
-  assert.equal(await page.locator("#overlay .mp-level").innerText(), "Extra high", "the word follows the fill to the nearest level");
+  assert.equal(await page.locator("#overlay .mp-level").innerText(), "High", "the word follows the fill to the nearest level (6 levels, 55% → High)");
   await page.mouse.move(g.x + g.width - 2, g.y + g.height / 2, { steps: 4 });
   assert.equal(await page.locator("#overlay .mp-level").innerText(), "Ultra", "the far end is the top level");
   // Letting go keeps the picker open, and the model in use takes the level.
@@ -1077,7 +1077,7 @@ try {
   // The receipt opens the turn's steps; the edit's row unfolds its diff in place.
   await click("toggle-steps", { id: completedSession.turns.find(turn => turn.content === prompt)!.id });
   await click("step");
-  await until(() => evaluate<boolean>("return !!document.querySelector('.step-fold')?.innerText.includes('after');"), "inline diff visible");
+  await until(() => evaluate<boolean>("return !!document.querySelector('.file-edit')?.innerText.includes('after');"), "the edit's row unfolds its diff in place");
   await capture("03-changes");
   // "N files changed" unfolds the turn's diffs under the answer; a note on a
   // line waits in the composer for the next message.

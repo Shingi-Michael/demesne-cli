@@ -1,3 +1,4 @@
+import { resolveReasoningLevel } from "@demesne/protocol";
 import { THEMES } from "../../../packages/brand/src/theme.ts";
 import { matchedRanges, matchesWords } from "./model-search.ts";
 import { modelCardHTML } from "./model-card.ts";
@@ -158,7 +159,7 @@ const modelLevels = new Map<string, string>();
 function modelLevel(model: ModelDescriptor): string | undefined {
   const levels = model.reasoningLevels;
   if (!levels?.length) return undefined;
-  return modelLevels.get(model.id) ?? (model.id === state?.model.id ? state.reasoning : undefined) ?? model.defaultReasoningLevel ?? levels[0];
+  return resolveReasoningLevel(model, modelLevels.get(model.id) ?? (model.id === state?.model.id ? state.reasoning : undefined));
 }
 /// Thinking reads as Markdown (ChatGPT's summaries are "**Checking the
 /// bound**" sections; local models write math), except a very long trace,
@@ -5770,6 +5771,12 @@ let renderedPalette: Snapshot["palette"] | null = null,
   bannerSignature = "";
 function renderState(next: Snapshot) {
   if (state && next.revision < state.revision) return;
+  if (state?.session?.id !== next.session?.id) {
+    thinkingDrag = null;
+    modelLevels.clear();
+    modelHighlightSignature = "";
+    overlaySignature = "";
+  }
   const wasStart = !state?.runs.length;
   const editorFocused = document.activeElement === editor;
   state = next;

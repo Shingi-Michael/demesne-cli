@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { isRecord, planLimitsFromEvent, planLimitsFromHeaders, type ModelDescriptor, type PlanLimits } from "@demesne/protocol";
-import { ProviderError, readEventData, readLimitedText, thinkingOffLevel, type ProviderAdapter, type ProviderMessage, type ProviderRequest, type ProviderStreamEvent } from "./index.ts";
+import { defaultThinkingLevel, isRecord, planLimitsFromEvent, planLimitsFromHeaders, type ModelDescriptor, type PlanLimits } from "@demesne/protocol";
+import { ProviderError, readEventData, readLimitedText, type ProviderAdapter, type ProviderMessage, type ProviderRequest, type ProviderStreamEvent } from "./index.ts";
 
 import { randomUUID } from "node:crypto";
 
@@ -40,7 +40,7 @@ const SOL = "gpt-6.1-sol";
 const SOL_REASONING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 function solDescriptor(): ModelDescriptor {
   return { id: SOL, displayName: "GPT-6.1 Sol", provider: "ChatGPT", contextWindow: 1_050_000, maxOutputTokens: 128_000,
-    reasoningLevels: [...SOL_REASONING_LEVELS], defaultReasoningLevel: thinkingOffLevel(SOL_REASONING_LEVELS) };
+    reasoningLevels: [...SOL_REASONING_LEVELS], defaultReasoningLevel: defaultThinkingLevel(SOL_REASONING_LEVELS) };
 }
 const integer = (n: unknown): number | undefined => typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : undefined;
 const count = (n: unknown): number | null => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : null;
@@ -92,7 +92,7 @@ export class ResponsesProvider implements ProviderAdapter {
       return [{ id: this.route.modelPrefix + m.slug, displayName: typeof m.display_name === "string" ? m.display_name : m.slug, provider: this.id,
         contextWindow: integer(m.context_window) ?? this.options.contextWindow,
         maxOutputTokens: integer(m.max_output_tokens),
-        ...(levels.length ? { reasoningLevels: levels, defaultReasoningLevel: thinkingOffLevel(levels) } : {}) }];
+        ...(levels.length ? { reasoningLevels: levels, defaultReasoningLevel: defaultThinkingLevel(levels) } : {}) }];
     });
     this.listedSol = models.find(model => model.id === SOL);
     // Do not probe from discovery or inject every documented model. A selected
@@ -113,11 +113,12 @@ export class ResponsesProvider implements ProviderAdapter {
     return this.listedSol ? { ...this.listedSol, ...(this.listedSol.reasoningLevels ? { reasoningLevels: [...this.listedSol.reasoningLevels] } : {}) } : solDescriptor();
   }
   async *stream(request: ProviderRequest, signal: AbortSignal): AsyncGenerator<ProviderStreamEvent> {
-    // Thinking starts off (or at its lowest) unless a level was chosen.
+    // Medium is the default where supported; an explicit choice always wins.
+    const slug = request.model.slice(this.route.modelPrefix.length);
     const sol = this.route.sol && request.model === SOL;
     if (!request.reasoningLevel && request.thinkingEnabled !== false) {
-      const levels = sol ? this.listedSol?.reasoningLevels ?? SOL_REASONING_LEVELS : this.levels.get(request.model);
-      if (levels?.length) request = { ...request, reasoningLevel: thinkingOffLevel(levels) };
+      const levels = sol ? this.listedSol?.reasoningLevels ?? SOL_REASONING_LEVELS : this.levels.get(slug);
+      if (levels?.length) request = { ...request, reasoningLevel: defaultThinkingLevel(levels) };
     }
     if (sol && request.reasoningLevel) {
       const levels = this.listedSol?.reasoningLevels ?? SOL_REASONING_LEVELS;
@@ -135,7 +136,7 @@ export class ResponsesProvider implements ProviderAdapter {
       // The chosen effort, and a readable summary of the model's reasoning
       // (shown as its thinking) when the model offers one.
       ...(() => {
-        const summary = this.summaries.has(request.model) && request.thinkingEnabled !== false;
+        const summary = this.summaries.has(slug) && request.thinkingEnabled !== false;
         return request.reasoningLevel || summary ? { reasoning: { ...(request.reasoningLevel ? { effort: request.reasoningLevel } : {}), ...(summary ? { summary: "auto" } : {}) } } : {};
       })(),
       input: this.input(request.messages, request.model), include: ["reasoning.encrypted_content"],

@@ -24,7 +24,7 @@ test("only explicitly configured Sol is retained when omitted, with no inference
     const models = await p.listModels();
     expect(models.map(model => model.id)).toEqual(configuredModel === "gpt-6.1-sol" ? ["first", "second", "gpt-6.1-sol"] : ["first", "second"]);
     if (configuredModel === "gpt-6.1-sol") expect(models[2]).toEqual({ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", provider: "ChatGPT", contextWindow: 1_050_000, maxOutputTokens: 128_000,
-      reasoningLevels: ["low", "medium", "high", "xhigh", "max"], defaultReasoningLevel: "low" });
+      reasoningLevels: ["low", "medium", "high", "xhigh", "max"], defaultReasoningLevel: "medium" });
   }
   expect(calls).toHaveLength(4);
 });
@@ -132,13 +132,13 @@ test("the catalog's thinking levels are listed, and a chosen level is sent with 
     bodies.push(JSON.parse(String(init?.body))); return responseStream();
   }) as unknown as typeof fetch });
   const models = await p.listModels();
-  // Thinking starts at the model's lowest level, whatever the catalog suggests.
-  expect(models[0]).toMatchObject({ id: "astra", reasoningLevels: ["low", "medium", "high", "xhigh"], defaultReasoningLevel: "low" });
+  // Thinking defaults to medium when supported, whatever the catalog suggests.
+  expect(models[0]).toMatchObject({ id: "astra", reasoningLevels: ["low", "medium", "high", "xhigh"], defaultReasoningLevel: "medium" });
   expect(models[1]).not.toHaveProperty("reasoningLevels");
   await collect(p, { ...request, model: "astra", reasoningLevel: "xhigh" });
   expect(bodies[0].reasoning).toEqual({ effort: "xhigh", summary: "auto" });
   await collect(p, { ...request, model: "astra" });
-  expect(bodies[1].reasoning).toEqual({ effort: "low", summary: "auto" });
+  expect(bodies[1].reasoning).toEqual({ effort: "medium", summary: "auto" });
   await collect(p, { ...request, model: "plain" });
   expect(bodies[2]).not.toHaveProperty("reasoning");
 });

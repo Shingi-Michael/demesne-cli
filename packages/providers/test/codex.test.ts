@@ -83,3 +83,16 @@ test("tool calls whose arguments arrive whole, with no deltas, and several calls
   const q = new CodexProvider({ accountId: "acct-1", accessToken: async () => "access", fetch: (async () => new Response(bad.map(e => `data: ${JSON.stringify(e)}\n\n`).join(""), { headers: { "Content-Type": "text/event-stream" } })) as unknown as typeof fetch });
   await expect(collect(q)).rejects.toThrow("conflicting tool call data");
 });
+
+test("Codex's prefixed model uses medium by default on the wire, and honors an explicit effort", async () => {
+  const bodies: Record<string, any>[] = [];
+  const p = new CodexProvider({ accountId: "acct", accessToken: async () => "access", fetch: (async (url, init) => {
+    if (String(url).includes("/models?")) return Response.json({ models: [{ slug: "gpt-6.1-sol", visibility: "list", supports_reasoning_summaries: true,
+      supported_reasoning_levels: ["low", "medium", "high"].map(effort => ({ effort })) }] });
+    bodies.push(JSON.parse(String(init?.body))); return codexStream();
+  }) as typeof fetch });
+  expect((await p.listModels())[0]?.defaultReasoningLevel).toBe("medium");
+  await collect(p);
+  await collect(p, { ...request, reasoningLevel: "low" });
+  expect(bodies.map(body => body.reasoning)).toEqual([{ effort: "medium", summary: "auto" }, { effort: "low", summary: "auto" }]);
+});

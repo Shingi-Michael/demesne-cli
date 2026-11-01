@@ -46,6 +46,7 @@ import { markNear, timelineMarks, type Mark, type TurnFacts } from "./timeline.t
 import type { WorkspaceHost } from "./host.ts";
 import type { WorkspaceRun, WorkspaceApproval, WorkspaceQuestion } from "./session-model.ts";
 import { chatChanges, chatServers, contextInUse } from "./cards.ts";
+import { whereCard } from "./where-card.ts";
 import { OpenTabs } from "./tabs.ts";
 import type {
   ToolEntry,
@@ -1204,15 +1205,20 @@ function renderCards() {
   const here = root && files.length ? s.agents.filter((agent) => agent.project === projectSlug(root)) : [];
   const servers = chatServers(s.connectors.servers, used.map((t) => t.name));
   const showContext = c.percentage != null && contextInUse(c.percentage);
-  if (!files.length && !previews.length && !showContext && !here.length && !servers.length) return hide();
+  // Where (pass 121 E) leads in a project chat; a plain chat only gets it
+  // while the daemon isn't fine, so the chat keeps its width otherwise.
+  const where = whereCard({ root, branch: s.session?.workspace?.gitBranch, model: s.model, reasoning: s.reasoning, connection: s.connection, server: s.server, changed: files.length, context: !showContext && c.percentage != null && c.used != null && c.capacity ? { percentage: c.percentage, used: c.used, capacity: c.capacity } : null });
+  const showWhere = Boolean(root) || where.state !== "";
+  if (!showWhere && !files.length && !previews.length && !showContext && !here.length && !servers.length) return hide();
   app.classList.add("cards-on");
   app.classList.toggle("cards-context", showContext);
   aside.hidden = false;
-  const signature = JSON.stringify([c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsFolded]]);
+  const signature = JSON.stringify([c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsFolded], showWhere && where]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
   const out: string[] = [];
+  if (showWhere) out.push(card("where", where.head, where.summary, where.body).replace('<section class="card', `<section title="${h(where.title)}" class="card${where.state ? ` wh-${where.state}` : ""}`));
   if (showContext && c.percentage != null) {
     const capacity = c.capacity ?? 0;
     const parts = plan

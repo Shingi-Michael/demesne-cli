@@ -453,7 +453,8 @@ try {
   await thinkingToggle.click();
   await trace.waitFor({ state: "visible" });
   await click("toggle-steps");
-  assert(await evaluate<boolean>("return document.getElementById('cards').hidden;"), "a chat that uses no card has no column on the right");
+  // A project chat that uses no other card has only Where on the right (pass 121 E).
+  assert.deepEqual(await evaluate<string[]>("return [...document.querySelectorAll('#cards > .card')].map(card => card.dataset.card);"), ["where"], "a chat that uses no card has only Where on the right");
   // Native notifications: record them in the main process, and look away from the window.
   // The Dock's working bar: record what the window sets.
   await desktop.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]!; (globalThis as any).progress = []; w.setProgressBar = (value: number) => { (globalThis as any).progress.push(value); }; });
@@ -1175,15 +1176,23 @@ try {
   assert(compacted && compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
   // The cards on the right show only what this chat uses (pass 86 A): its
-  // own edit brings Changes in; there is no Environment card and no switch,
-  // and Context waits until half full, so the composer's ring stays.
+  // own edit brings Changes in; Where leads in a project chat (pass 121 E),
+  // there is no switch, and Context waits until half full, so the composer's
+  // ring stays.
   await until(() => page.locator("#cards [data-card=changes]").innerText().then(text => text.includes("+1") && text.includes("−1") && text.includes("Commit & PR")), "the Changes card lists what this chat changed");
   assert.equal(await page.locator("#cards [data-card=environment]").count(), 0, "there is no Environment card");
+  const where = page.locator("#cards [data-card=where]");
+  assert.equal(await page.locator("#cards > .card").first().getAttribute("data-card"), "where", "Where is the first card");
+  assert.equal(await where.locator(".wh-tile").innerText(), "W", "the monogram is the project's letter");
+  assert.equal(await where.locator(".wh-who .wh-name").innerText(), "workspace", "the project's name");
+  assert.match(await where.locator(".wh-lines").innerText(), /Branch[\s\S]*1 changed[\s\S]*Runs on\s*This computer\s*online/, "the branch with what this chat changed, and where it runs");
+  assert.equal(await where.locator(".wh-note").count(), 0, "the daemon says nothing while it's fine");
+  await capture("02-where");
   assert.equal(await page.locator(".header-cards").count(), 0, "the top bar has no cards switch");
   if (percentage < 50) assert.equal(await page.locator("#cards [data-card=context]").count(), 0, "Context waits until the chat is half full");
   const cardInsets = await page.locator("#cards").evaluate((cards) => {
     const panel = cards.getBoundingClientRect();
-    const first = cards.querySelector("[data-card=changes]")!.getBoundingClientRect();
+    const first = cards.querySelector(":scope > .card")!.getBoundingClientRect();
     return { top: first.top - panel.top, right: panel.right - first.right };
   });
   assert.equal(cardInsets.top, cardInsets.right, "the cards have matching top and right insets");

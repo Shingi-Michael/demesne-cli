@@ -19,6 +19,8 @@ test("the line takes turns with the thought and the step running now, all of it 
   expect(workingPhrases({ thinking: null, steps: burst }, now + DWELL)).toEqual(["Reading d.ts"]);
   // While it thinks between steps, it says what it has read for this.
   expect(workingPhrases({ thinking: "**Planning a short name**", steps: burst.map((item) => ({ ...item, running: false })) }, now)).toEqual(["Planning a short name", "4 files read so far"]);
+  // A read of several files counts each one.
+  expect(workingPhrases({ thinking: null, steps: burst.map((item, n) => ({ ...item, running: false, files: n === 0 ? 3 : 1 })) }, now)).toEqual(["6 files read so far"]);
   // Nothing to say yet is "Thinking"; waiting on you says only that.
   expect(workingPhrases({ thinking: "plain thought", steps: [] }, now)).toEqual(["Thinking"]);
   expect(workingPhrases({ thinking: "**A heading**", steps: [], fixed: "Waiting for your answer" }, now)).toEqual(["Waiting for your answer"]);

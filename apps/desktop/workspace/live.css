@@ -2614,3 +2614,29 @@ button:disabled {
   display: none;
 }
 
+/* A stretch of finished reads, edits and writes, folded to one line
+   (pass 122 A): the verb, the dim part that says what was new, read and
+   touched last, a chevron, and the totals on the right. */
+.steps .explored.stretch > summary .files {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.steps .explored.stretch > summary .chev {
+  width: 12px;
+  height: 12px;
+  margin-left: -3px;
+  color: var(--muted);
+  transition: transform 120ms ease;
+}
+.steps .explored.stretch[open] > summary .chev {
+  transform: rotate(180deg);
+}
+/* A file by its name first; the folder reads quieter after it. */
+.steps .tool-row .target .dir {
+  color: var(--muted);
+}

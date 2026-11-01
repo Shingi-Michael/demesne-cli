@@ -57,3 +57,29 @@ test("Codex's usage-limit error names the plan and Manage usage, and a namespace
   const namespaced = new CodexProvider({ accountId: "acct-1", accessToken: async () => "access", fetch: (async () => responseStream({ tool: true })) as unknown as typeof fetch });
   await expect(collect(namespaced)).rejects.toThrow(/unknown tool call/);
 });
+
+test("tool calls whose arguments arrive whole, with no deltas, and several calls in one round", async () => {
+  const call = (id: string, args: string) => ({ type: "function_call", id: `fc_${id}`, call_id: id, name: "read_file", arguments: args, status: "completed" });
+  const a = call("call_a", '{"path": "a.txt"}'), b = call("call_b", '{"path":"b.txt"}');
+  const events = [
+    // Codex's route sent this call's arguments only in the done events.
+    { type: "response.output_item.added", output_index: 0, item: { ...a, arguments: "", status: "in_progress" } },
+    { type: "response.function_call_arguments.done", output_index: 0, item_id: a.id, arguments: a.arguments },
+    { type: "response.output_item.done", output_index: 0, item: a },
+    // A streamed part, the rest only in output_item.done.
+    { type: "response.output_item.added", output_index: 1, item: { ...b, arguments: "", status: "in_progress" } },
+    { type: "response.function_call_arguments.delta", output_index: 1, delta: '{"path":' },
+    { type: "response.output_item.done", output_index: 1, item: b },
+    { type: "response.completed", response: { status: "completed", output: [a, b], usage: { input_tokens: 20, output_tokens: 15, total_tokens: 35 } } },
+  ];
+  const p = new CodexProvider({ accountId: "acct-1", accessToken: async () => "access", fetch: (async () => new Response(events.map(e => `data: ${JSON.stringify(e)}\n\n`).join(""), { headers: { "Content-Type": "text/event-stream" } })) as unknown as typeof fetch });
+  const out = await collect(p);
+  const args = new Map<number, string>();
+  for (const e of out) if (e.type === "tool_call_delta") args.set(e.index, (args.get(e.index) ?? "") + e.argumentsDelta);
+  expect([...args.entries()]).toEqual([[0, a.arguments], [1, b.arguments]]);
+  expect(out.at(-1)).toEqual({ type: "finish", reason: "tool_calls" });
+  // Done text that contradicts what was streamed is still refused.
+  const bad = [events[3], { ...events[4], delta: '{"file":' }, events[5], events[6]];
+  const q = new CodexProvider({ accountId: "acct-1", accessToken: async () => "access", fetch: (async () => new Response(bad.map(e => `data: ${JSON.stringify(e)}\n\n`).join(""), { headers: { "Content-Type": "text/event-stream" } })) as unknown as typeof fetch });
+  await expect(collect(q)).rejects.toThrow("conflicting tool call data");
+});

@@ -187,6 +187,18 @@ export class ResponsesProvider implements ProviderAdapter {
         if (call.arguments.length > 128 * 1024) throw new ProviderError(`${this.id} tool arguments exceeded the limit.`);
         yield { type: "tool_call_delta", index: call.index, idDelta: "", nameDelta: "", argumentsDelta: event.delta };
       }
+      // The arguments can also arrive whole, with no deltas (the Codex route
+      // does this for some calls): add what the deltas didn't carry. Text
+      // that contradicts the streamed part is still refused.
+      if (event.type === "response.function_call_arguments.done" || (event.type === "response.output_item.done" && isRecord(event.item) && event.item.type === "function_call")) {
+        const call = calls.get(Number(event.output_index)), final = event.type === "response.function_call_arguments.done" ? event.arguments : isRecord(event.item) ? event.item.arguments : undefined;
+        if (call && !call.done && typeof final === "string" && final.length > call.arguments.length && final.startsWith(call.arguments)) {
+          if (final.length > 128 * 1024) throw new ProviderError(`${this.id} tool arguments exceeded the limit.`);
+          const rest = final.slice(call.arguments.length);
+          call.arguments = final;
+          yield { type: "tool_call_delta", index: call.index, idDelta: "", nameDelta: "", argumentsDelta: rest };
+        }
+      }
       if (event.type === "response.output_item.done" && isRecord(event.item) && event.item.type === "function_call") {
         const call = calls.get(Number(event.output_index));
         if (!call || event.item.call_id !== call.id || event.item.arguments !== call.arguments || names.get(String(event.item.name)) !== call.name || (event.item.namespace ?? null) !== this.route.namespace) throw new ProviderError(`${this.id} returned conflicting tool call data.`);

@@ -1,8 +1,15 @@
 import { expect, test } from "bun:test";
 import type { ModelMessage } from "@demesne/protocol";
-import { forgetOldReads, KEEP_UNDER } from "../src/forget-reads.ts";
+import { CUT_AFTER_CHARS, cutPoint, forgetOldReads, forgetOldReadsInHistory, KEEP_UNDER } from "../src/forget-reads.ts";
 
-const big = (path: string) => JSON.stringify({ path, content: `${"export const line = 1;\n".repeat(200)}` });
+const big = (path: string, lines = 200) => JSON.stringify({ path, content: `${"export const line = 1;\n".repeat(lines)}` });
+const readTurn = (chars: number): ModelMessage[] => [
+  { role: "user", content: "read" },
+  { role: "assistant", content: null, toolCalls: [{ id: `r${chars}`, name: "read_file", arguments: "{}" }] },
+  { role: "tool", toolCallId: `r${chars}`, content: "x".repeat(chars) },
+  { role: "assistant", content: "ok" },
+];
+const chat = (): ModelMessage[] => [{ role: "user", content: "hi" }, { role: "assistant", content: "hello" }];
 
 test("an earlier turn keeps a note of its long reads, and everything else whole", () => {
   const command = `${"compiling…\n".repeat(300)}1178 pass\n0 fail\nexit 0`;
@@ -35,6 +42,27 @@ test("an earlier turn keeps a note of its long reads, and everything else whole"
   expect(forgetOldReads(messages)).toEqual(out);
 });
 
+test("the last two turns stay whole; older ones are cut in one step once their reads pile up", () => {
+  const step = Math.floor(CUT_AFTER_CHARS / 2.5);
+  // Two turns back is never cut, however large.
+  expect(cutPoint([readTurn(CUT_AFTER_CHARS * 3), chat()])).toBe(0);
+  // Older reads under the limit stay whole.
+  expect(cutPoint([readTurn(step), readTurn(step), chat(), chat()])).toBe(0);
+  // Past it, every turn but the last two is cut at once...
+  const turns = [readTurn(step), readTurn(step), readTurn(step), chat(), chat()];
+  expect(cutPoint(turns)).toBe(3);
+  // ...and the cut holds while new turns arrive, until reads pile up again.
+  expect(cutPoint([...turns, chat()])).toBe(3);
+  expect(cutPoint([...turns, chat(), chat()])).toBe(3);
+  const cut = forgetOldReadsInHistory(turns);
+  expect((cut[0]![2] as { content: string }).content).toContain("[From an earlier turn:");
+  expect(cut[3]).toBe(turns[3]!);
+  // A history that grows one turn at a time agrees with itself at every length.
+  const grown = Array.from({ length: 12 }, (_, i) => i % 3 === 2 ? chat() : readTurn(step));
+  let last = 0;
+  for (let length = 1; length <= grown.length; length++) { const at = cutPoint(grown.slice(0, length)); expect(at).toBeGreaterThanOrEqual(last); last = at; }
+});
+
 test("the next turn's request carries the note; the turn that read it saw it whole", async () => {
   const { DemesneStore } = await import("@demesne/storage");
   const { AgentEngine } = await import("../src/engine.ts");
@@ -47,7 +75,7 @@ test("the next turn's request carries the note; the turn that read it saw it who
   const workspace = realpathSync(mkdtempSync(join(tmpdir(), "demesne-forget-")));
   const store = new DemesneStore(":memory:");
   const { session } = store.createSession("Reads", workspace);
-  const text = big("src/greeting.ts");
+  const text = big("src/greeting.ts", Math.ceil(CUT_AFTER_CHARS / 20));
   const tools = new ToolRegistry([{ definition: { name: "read_file", description: "read", inputSchema: { type: "object" } }, permission: () => null, async execute() { return text; } }]);
   const schedulers = new InferenceSchedulers(new InferenceScheduler(1), "test");
   const engine = new AgentEngine(store, tools, new PermissionBroker(), schedulers);
@@ -62,9 +90,11 @@ test("the next turn's request carries the note; the turn that read it saw it who
   try {
     const first = store.createTurn(session.id, "What does greeting.ts say?", "deny").turn;
     await engine.run(first.id, inference as never, new AbortController().signal);
-    const second = store.createTurn(session.id, "Thanks", "deny").turn;
-    await engine.run(second.id, inference as never, new AbortController().signal);
+    // The next two turns still carry it whole; the one after that, a note.
+    for (const words of ["Thanks", "And?", "Bye"]) await engine.run(store.createTurn(session.id, words, "deny").turn.id, inference as never, new AbortController().signal);
     expect(seen[1]).toEqual([text]);
+    expect(seen[2]).toEqual([text]);
+    expect(seen[3]).toEqual([text]);
     expect(seen.at(-1)).toHaveLength(1);
     expect(seen.at(-1)![0]).toContain("[From an earlier turn:");
     expect(seen.at(-1)![0]).toContain("src/greeting.ts");

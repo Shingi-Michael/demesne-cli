@@ -18,7 +18,7 @@ import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "./repo-flow.ts";
 import { forgetFoundrySources, FOUNDRY_TOOL_NAMES } from "./foundry.ts";
-import { forgetOldReads } from "./forget-reads.ts";
+import { forgetOldReadsInHistory } from "./forget-reads.ts";
 import { ASSISTANT_TOOL_NAMES, assistantBasePrompt, assistantStamp } from "./assistant.ts";
 import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
@@ -284,7 +284,7 @@ export class AgentEngine {
       const requestDefinitions = finalizing ? [] : definitions;
       // A page made in an earlier turn is stored, and a file read then can be
       // read again: neither needs to ride along in full.
-      const historyMessages = history.flatMap((entry) => forgetOldReads(forgetFoundrySources(entry.messages)));
+      const historyMessages = forgetOldReadsInHistory(history.map((entry) => forgetFoundrySources(entry.messages))).flat();
       const systemPrompt = themefy ? THEMEFY_PROMPT : assistant ? assistantSystemPrompt({ home: session.workspace?.root, definitions, planOnly: turn.planOnly })
         : agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
         planOnly: turn.planOnly, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),

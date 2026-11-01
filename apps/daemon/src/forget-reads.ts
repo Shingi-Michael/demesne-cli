@@ -5,8 +5,8 @@
 /// what each large read-style result was (the paths, the start of the text)
 /// and the model reads again when it needs the current text, which is also
 /// fresher than the copy it had. Edits, answers, questions and short results
-/// stay whole. Like forgetFoundrySources, this only touches earlier turns,
-/// so the turn in progress keeps everything it has seen.
+/// stay whole. Only turns before the cut point (cutPoint) are touched: the
+/// last two finished turns and the turn in progress keep everything.
 import { isRecord, type ModelMessage } from "@demesne/protocol";
 
 /// Tools whose output can be fetched again, and so need not be carried.
@@ -56,4 +56,45 @@ export function forgetOldReads<T extends ModelMessage>(messages: T[]): T[] {
     if (!tool || !REREADABLE_TOOLS.has(tool)) return message;
     return { ...message, content: forgottenResult(tool, message.content) };
   });
+}
+
+/// Recent turns stay whole: a follow-up about what was just read answers
+/// from the cached copy instead of reading again (measured on the Codex plan,
+/// trimming the last turns too cost more rounds and more uncached tokens).
+export const KEEP_RECENT_TURNS = 2;
+/// Older turns are cut to notes in one step once their long read-style
+/// output passes this many characters (~30k tokens), then left alone until
+/// it piles up again. Cutting rarely, all at once, keeps the cached prefix
+/// valid in between, where trimming a turn every time would not.
+export const CUT_AFTER_CHARS = 120_000;
+
+const longOutput = (messages: ModelMessage[]) => {
+  const names = new Map<string, string>();
+  let total = 0;
+  for (const message of messages) {
+    if (message.role === "assistant") for (const call of message.toolCalls ?? []) names.set(call.id, call.name);
+    else if (message.role === "tool" && message.content.length > KEEP_UNDER && REREADABLE_TOOLS.has(names.get(message.toolCallId) ?? "")) total += message.content.length;
+  }
+  return total;
+};
+
+/// How many of the earliest turns are cut to notes: worked out from the
+/// history alone, as if it grew one turn at a time, so every round and
+/// every later turn agrees on it until the next cut.
+export function cutPoint(turns: ModelMessage[][]): number {
+  const sizes = turns.map(longOutput);
+  let cut = 0, pending = 0, counted = 0;
+  for (let length = 1; length <= turns.length; length++) {
+    const end = length - KEEP_RECENT_TURNS;
+    while (counted < end) pending += sizes[counted++]!;
+    if (end > cut && pending > CUT_AFTER_CHARS) { cut = end; pending = 0; }
+  }
+  return cut;
+}
+
+/// The history's turns, the ones before the cut point with their long reads
+/// as notes.
+export function forgetOldReadsInHistory<T extends ModelMessage>(turns: T[][]): T[][] {
+  const cut = cutPoint(turns);
+  return turns.map((messages, index) => index < cut ? forgetOldReads(messages) : messages);
 }

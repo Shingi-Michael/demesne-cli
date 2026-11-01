@@ -20,7 +20,7 @@ export interface WorkSignal {
   /// The model's thinking, as it streamed (summaries are "**Heading**" sections).
   thinking: string | null;
   /// The turn's steps in order: what each does to what, and when it started.
-  steps: readonly { verb: string; target: string; startedAt: number; running: boolean }[];
+  steps: readonly { verb: string; target: string; startedAt: number; running: boolean; /** How many files one read step read (a read of three files is three). */ files?: number }[];
   /// While it waits on you or writes a command, the line says only this.
   fixed?: string;
 }
@@ -47,7 +47,7 @@ export function workingPhrases(signal: WorkSignal, now: number): string[] {
     const burst = signal.steps.filter((item) => item.verb === current.verb && item.startedAt > now - DWELL).length;
     step = burst > 2 && PLURAL[current.verb] ? `${DOING[current.verb] ?? current.verb} ${burst} ${PLURAL[current.verb]}` : `${DOING[current.verb] ?? current.verb}${current.target ? ` ${current.target}` : ""}`;
   }
-  const reads = current ? 0 : signal.steps.filter((item) => item.verb === "Read").length;
+  const reads = current ? 0 : signal.steps.filter((item) => item.verb === "Read").reduce((sum, item) => sum + (item.files ?? 1), 0);
   const phrases = [thought, step, reads ? `${reads} file${reads > 1 ? "s" : ""} read so far` : ""].filter((item): item is string => !!item);
   return phrases.length ? phrases.map((item) => item.length > 60 ? `${item.slice(0, 59)}…` : item) : ["Thinking"];
 }

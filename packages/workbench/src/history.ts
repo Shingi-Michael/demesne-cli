@@ -19,6 +19,8 @@ export function toolTarget(name: string, input: Record<string, unknown>): string
   if (name === "move_path" && typeof input.from === "string" && typeof input.to === "string") return `${input.from} → ${input.to}`;
   if (typeof input.path === "string") return input.path;
   if (Array.isArray(input.paths) && input.paths.every((value) => typeof value === "string")) return input.paths.length === 1 ? input.paths[0] : `${input.paths.length} files`;
+  // read_files: the one file, or how many.
+  if (Array.isArray(input.files) && input.files.length) { const paths = input.files.map((file) => typeof file === "object" && file && typeof (file as { path?: unknown }).path === "string" ? (file as { path: string }).path : ""); return paths.length === 1 && paths[0] ? paths[0] : `${paths.length} files`; }
   // A command reads as `bun test`, not `/opt/homebrew/Cellar/bun/1.4.0/bin/bun
   // test`: the program's own path is shortened to its name. Its arguments,
   // and the full argv in the tool's details, stay as they are.

@@ -59,6 +59,8 @@ test("command completion retains failure status, exit codes and both output stre
 test("a command's row names the program, not its install path; its arguments stay whole", () => {
   expect(toolTarget("run_command", { argv: ["/opt/homebrew/Cellar/bun/1.4.0/bin/bun", "test", "src/a b.ts"] })).toBe("$ bun test src/a b.ts");
   expect(toolTarget("run_command", { argv: ["git", "status"] })).toBe("$ git status");
+  expect(toolTarget("read_files", { files: [{ path: "src/a.ts" }] })).toBe("src/a.ts");
+  expect(toolTarget("read_files", { files: [{ path: "src/a.ts" }, { path: "src/b.ts", offset: 10 }] })).toBe("2 files");
   expect(toolTarget("run_command", { argv: ["./scripts/build.sh", "/tmp/out"] })).toBe("$ build.sh /tmp/out");
 });
 

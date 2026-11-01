@@ -17,6 +17,7 @@ import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
 import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
 import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
+import { fileName, readPaths, stretchWords, stretches } from "./steps-fold.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
@@ -143,13 +144,14 @@ function workingLine(line: WorkingLine, run: WorkspaceRun) {
   line.update(workingPhrases({
     fixed,
     thinking: thinking?.type === "reasoning" ? thinking.raw : null,
-    steps: steps.filter((tool) => !tool.drafting).map((tool) => ({ verb: verb(tool), target: stepTarget(tool), startedAt: tool.startedAt, running: tool.state === "running" })),
+    steps: steps.filter((tool) => !tool.drafting).map((tool) => ({ verb: verb(tool), target: stepTarget(tool), startedAt: tool.startedAt, running: tool.state === "running", files: tool.name === "read_files" ? readPaths(tool).length || 1 : 1 })),
   }, Date.now()), fixed !== undefined);
 }
 /// A step's target in a few words: a file's name, a command's program, a page's title.
 function stepTarget(tool: ToolEntry) {
   if (tool.name === "run_command") return (tool.detail ?? "").replace(/^\$\s*/, "").replace(/^\S*\//, "");
   if (tool.name === "foundry_save" || tool.name === "foundry_edit") return typeof tool.input.title === "string" ? tool.input.title : "";
+  if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? `${paths.length} files` : fileName(paths[0] ?? tool.detail ?? ""); }
   const path = String(tool.input.path ?? tool.detail ?? "");
   return tool.name === "subagent" ? "" : path.split("/").at(-1) ?? path;
 }
@@ -1633,6 +1635,10 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   // A command by its program's name: the full path is on hover.
   if (tool.name === "run_command") return h(base.replace(/^\S*\//, ""));
+  // A file by its name first, the folder dim after it; a read of several
+  // files names each one. The full paths are on hover.
+  if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? paths.map((path) => `<span class="name">${h(fileName(path))}</span>`).join(", ") : paths[0] ? fileFirst(paths[0]) : h(base); }
+  if (FILE_TOOLS.has(tool.name) && !tool.drafting && base && !/\s/.test(base)) return fileFirst(base);
   if (tool.name !== "subagent" || tool.state !== "running") return h(base);
   // Still being written by the model: not running yet.
   if (tool.drafting) return `${h(base || "…")}<span class="muted"> · writing</span>`;
@@ -1640,6 +1646,13 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   const model = tool.subagentModel ?? state!.model.id;
   const phrase = matchMedia("(prefers-reduced-motion: reduce)").matches ? "working" : subagentPhrase(slot, Date.now(), model);
   return `${h(base)}<span class="muted"> · </span><span class="phrase" data-subagent-phrase data-slot="${slot}" data-model="${h(model)}">${h(phrase)}</span>`;
+}
+/// Tools whose target is one path.
+const FILE_TOOLS = new Set(["read_file", "write_file", "edit_file", "view_image", "delete_path", "list_files"]);
+/// "live.ts apps/desktop/workspace": the name you read, the folder you don't.
+function fileFirst(path: string) {
+  const at = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return at < 0 ? `<span class="name">${h(path)}</span>` : `<span class="name">${h(path.slice(at + 1))}</span> <span class="dir">${h(path.slice(0, at))}</span>`;
 }
 /// "3 steps": how far a sub-agent has got, on the right of its row.
 function subagentSteps(tool: ToolEntry) {
@@ -1736,7 +1749,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     canFold ? "step" : "tool",
     // A running step keeps its own icon and plain words: the working line
     // under the turn carries the cube and the silver.
-    `${stepIcon(tool)}<span class="verb">${served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    `${stepIcon(tool)}<span class="verb">${served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.name === "read_files" ? readPaths(tool).join("\n") || tool.detail || tool.name : tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -2001,29 +2014,28 @@ function runHTML(run: WorkspaceRun, index: number) {
       body += `<div class="thinking thinking-main ${live ? "live" : ""}"><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${CHEVRON}${live ? "Thinking" : `Thought for ${duration(entry.durationMs)}`}<span class="thinking-disclosure">${open ? "Collapse" : "Show trace"}</span></button><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div></div>`;
     }
     if (entry.type === "tool") {
-      const group: ToolEntry[] = [entry];
+      // Theme questions stand together; otherwise finished reads, edits and
+      // writes up to the next command (or the step running now) are one
+      // line, "Changed 9 files · 2 new · read 7 · live.ts, host.ts".
       let j = i + 1;
-      // A sub-agent stands alone: its row unfolds its own guide.
-      if (entry.phase === "inspect" && entry.state === "done" && !entry.waiting && entry.name !== "subagent")
-        while (j < run.entries.length) {
-          const next = run.entries[j];
-          if (
-            next?.type !== "tool" ||
-            next.phase !== "inspect" ||
-            next.state !== "done" ||
-            next.waiting ||
-            next.name === "subagent"
-          )
-            break;
-          group.push(next);
-          j++;
-        }
-      if (group.length >= 3) {
-        const sum = group.reduce((n, t) => n + (t.durationMs ?? 0), 0);
-        const summary=run.kind === "themefy" ? `Theme questions · ${group.filter(tool=>tool.name === "ask_user").length}${group.some(tool=>tool.name === "apply_theme" && tool.state === "done")?" · palette applied":""}` : `Explored · ${group.length} reads`;
-        steps += `<details class="explored" data-detail="${key}"${detailsOpen.has(key) ? " open" : ""}><summary>${stepIcon(group[0]!)}<span class="verb">${h(summary)}</span><span class="sp"></span><small class="meta">${duration(sum)}</small></summary><div>${group.map((tool) => toolRow(run, tool)).join("")}</div></details>`;
-        i = j - 1;
-      } else steps += toolRow(run, entry);
+      while (j < run.entries.length && run.entries[j]!.type === "tool") j++;
+      const group = run.entries.slice(i, j) as ToolEntry[];
+      const themed: ToolEntry[] = [];
+      if (run.kind === "themefy") for (const tool of group) { if (tool.phase === "inspect" && tool.state === "done" && !tool.waiting && tool.name !== "subagent") themed.push(tool); else break; }
+      if (themed.length >= 3) {
+        const sum = themed.reduce((n, t) => n + (t.durationMs ?? 0), 0);
+        const summary = `Theme questions · ${themed.filter((tool) => tool.name === "ask_user").length}${themed.some((tool) => tool.name === "apply_theme" && tool.state === "done") ? " · palette applied" : ""}`;
+        steps += `<details class="explored" data-detail="${key}"${detailsOpen.has(key) ? " open" : ""}><summary>${stepIcon(themed[0]!)}<span class="verb">${h(summary)}</span><span class="sp"></span><small class="meta">${duration(sum)}</small></summary><div>${themed.map((tool) => toolRow(run, tool)).join("")}</div></details>`;
+        i += themed.length - 1;
+        continue;
+      }
+      for (const part of stretches(group)) {
+        if (part.kind === "one") { steps += toolRow(run, part.tool); continue; }
+        const words = stretchWords(part.tools, (tool) => totals(run, tool as ToolEntry)), first = part.tools[0]!, stretchKey = `${run.id}:${first.id}`;
+        const meta = words.changed ? counts(words) : `<span class="success">✓</span> ${duration(words.durationMs)}`;
+        steps += `<details class="explored stretch" data-detail="${stretchKey}"${detailsOpen.has(stretchKey) ? " open" : ""}><summary>${stepIconFor(words.changed ? "edit" : "read")}<span class="verb">${h(words.verb)}</span>${words.files ? `<span class="files">${h(words.files)}</span>` : ""}${CHEVRON}<span class="sp"></span><small class="meta">${meta}</small></summary><div>${part.tools.map((tool) => toolRow(run, tool)).join("")}</div></details>`;
+      }
+      i = j - 1;
     }
     if (entry.type === "notice" && !entry.closesTurn) {
       if (entry.steer) { steps += steerLine(entry.text); continue; }

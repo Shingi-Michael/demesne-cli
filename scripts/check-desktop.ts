@@ -41,6 +41,9 @@ let releaseSteer!: () => void;
 const steerGate = new Promise<void>(resolve => { releaseSteer = resolve; });
 let releaseAsk!: () => void;
 const askGate = new Promise<void>(resolve => { releaseAsk = resolve; });
+const stretchPrompt = "Desktop smoke: a stretch of steps";
+let releaseStretch!: () => void, stretchRound = 0;
+const stretchGate = new Promise<void>(resolve => { releaseStretch = resolve; });
 let overlapRound = 0;
 // A stand-in Heartbeat daemon: Claude Code works in this project on this
 // machine, Codex in the second project on a paired one.
@@ -188,6 +191,15 @@ const f = await fixture({
       await steerGate;
       yield { type: "tool_call_delta", index: 0, idDelta: "desktop-steer", nameDelta: "read_file", argumentsDelta: JSON.stringify({ path: "notes.ts" }) };
       yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
+    if (user === stretchPrompt) {
+      // Three reads in a row, then held: the window shows them as one line.
+      const round = stretchRound++;
+      if (round === 0) yield { type: "tool_call_delta", index: 0, idDelta: "stretch-reads", nameDelta: "read_files", argumentsDelta: JSON.stringify({ files: [{ path: "notes.ts" }, { path: "hello.ts" }] }) };
+      else if (round === 1) yield { type: "tool_call_delta", index: 0, idDelta: "stretch-read", nameDelta: "read_file", argumentsDelta: JSON.stringify({ path: "hello.ts" }) };
+      else { await stretchGate; yield { type: "text_delta", delta: "Three files read." }; }
+      yield { type: "finish", reason: round < 2 ? "tool_calls" : "stop" };
       return;
     }
     if (typeof user === "string" && user.includes(steerWords)) {
@@ -1598,6 +1610,21 @@ try {
   const steered = page.locator("#stage .tool-row.steer:not(.pending)");
   await until(() => steered.isVisible(), "the words sit where the model read them");
   assert((await steered.innerText()).includes(`you: ${steerWords}`));
+  // Finished reads, edits and writes between two commands are one line while
+  // the turn works (pass 122 A); it opens to a row per step, each file by
+  // its name first.
+  await type(stretchPrompt);
+  const stretch = page.locator("#stage .steps .explored.stretch").last();
+  await until(() => stretch.locator("summary .verb").innerText().then(text => text === "Read 3 files").catch(() => false), "three finished reads fold into one line", 20_000);
+  assert.equal(await page.locator("#stage .steps > .tool-row", { hasText: "read_files" }).count(), 0, "no row names the read tool");
+  assert.equal(await stretch.locator(".tool-row").count(), 2, "the stretch keeps its two steps");
+  assert(!(await stretch.locator(".tool-row").first().isVisible()), "the steps wait folded");
+  await stretch.locator("summary").click();
+  await until(() => stretch.locator(".tool-row").first().isVisible(), "the line opens to its rows");
+  assert.deepEqual(await stretch.locator(".tool-row .target").allInnerTexts(), ["notes.ts, hello.ts", "hello.ts"], "a read of two files names both");
+  await capture("15-stretch");
+  releaseStretch();
+  await textIncludes("Three files read.");
   assert.equal(await page.locator("#stage .request", { hasText: steerWords }).count(), 0, "steering is not a new message");
   await capture("15-steered");
   // Something broke: Drive's line says so and unfolds in place; no box on

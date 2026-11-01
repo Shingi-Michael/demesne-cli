@@ -98,6 +98,10 @@ function touchedFiles(toolName: string, input: unknown): string[] {
   return writeTargets(toolName, input);
 }
 
+/// Tool calls one round may run; a model asking for more gets the rest
+/// back as "not run". Calls streamed past STREAMED_TOOLS_LIMIT end the turn.
+const TOOLS_PER_ROUND = 8, STREAMED_TOOLS_LIMIT = 32;
+
 export class AgentEngine {
   constructor(
     private readonly store: DemesneStore,
@@ -377,7 +381,7 @@ export class AgentEngine {
             } else if (event.type === "response_state") {
               responses = event.state;
             } else {
-              if (event.index >= 8) throw new Error("Model requested too many tools in one round");
+              if (event.index >= STREAMED_TOOLS_LIMIT) throw new Error("Model requested too many tools in one round");
               const call = assembled.get(event.index) ?? { id: "", name: "", arguments: "" };
               call.id += event.idDelta;
               call.name += event.nameDelta;
@@ -522,7 +526,10 @@ export class AgentEngine {
         continue;
       }
 
-      const allReadOnly = callRecords.every(({ call }) => {
+      // Up to TOOLS_PER_ROUND run; any past that are answered "not run" so
+      // the model asks again next round instead of the turn failing.
+      const runRecords = callRecords.slice(0, TOOLS_PER_ROUND), skippedRecords = callRecords.slice(TOOLS_PER_ROUND);
+      const allReadOnly = runRecords.every(({ call }) => {
         if (call.name === SUBAGENT_TOOL) return true;
         const tool = this.tools.get(call.name);
         if (!tool) return false;
@@ -534,9 +541,9 @@ export class AgentEngine {
         }
       });
 
-      if (allReadOnly && callRecords.length > 1) {
+      if (allReadOnly && runRecords.length > 1) {
         const results = await Promise.all(
-          callRecords.map(async ({ call, toolCallId }) => {
+          runRecords.map(async ({ call, toolCallId }) => {
             const imageArtifactIds: string[] = [];
             const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal, turn.planOnly === true, imageArtifactIds, inference);
             return { call, result, imageArtifactIds };
@@ -549,7 +556,7 @@ export class AgentEngine {
           this.store.appendModelMessage(turnId, toolMessage);
         }
       } else {
-        for (const { call, toolCallId } of callRecords) {
+        for (const { call, toolCallId } of runRecords) {
           const imageArtifactIds: string[] = [];
           const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal, turn.planOnly === true, imageArtifactIds, inference);
           totalToolResultBytes += Buffer.byteLength(result);
@@ -565,6 +572,13 @@ export class AgentEngine {
             return;
           }
         }
+      }
+      for (const { call, toolCallId } of skippedRecords) {
+        const result = `Not run: at most ${TOOLS_PER_ROUND} tool calls run in one round. Call it again in your next round if you still need it.`;
+        this.store.settleToolCall(toolCallId, "denied", result);
+        const toolMessage = { role: "tool" as const, toolCallId: call.id, content: result };
+        currentMessages.push(toolMessage);
+        this.store.appendModelMessage(turnId, toolMessage);
       }
       if (totalToolResultBytes >= 4 * 1024 * 1024) budgetReason = "Reached the 4 MiB tool-result allowance";
       if (!themefy) this.deliverSteers(turnId, currentMessages, callRecords.at(-1)!.toolCallId);

@@ -20,7 +20,7 @@ function harness() {
   };
   const block = source.slice(source.indexOf("let thinkingDrag:"), source.indexOf("// Pointing at a model"));
   const js = new Bun.Transpiler({ loader: "ts" }).transformSync(block);
-  new Function("document", "el", "levelWord", "renderOverlay", "modelLevels", "act", "api", `let overlay = "models", overlaySignature = "same", state = {model:{id:"test"}}; ${js}`)(
+  new Function("document", "el", "levelWord", "renderOverlay", "modelLevels", "act", "api", `let overlay = "models", overlaySignature = "same", state = {model:{id:"test"}}; const updateModelHighlight = renderOverlay; ${js}`)(
     { addEventListener: (name: string, fn: any) => { handlers[name] = fn; } },
     () => ({ querySelector: () => groove }), (s: string) => s,
     () => { renders++; }, levels, (fn: () => unknown) => fn(),

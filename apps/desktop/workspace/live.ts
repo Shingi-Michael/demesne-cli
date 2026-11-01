@@ -2257,7 +2257,7 @@ function patchStream(
     const entry = run.entries[i]!,
       previous = before.entries[i]!;
     if (entry === previous) continue;
-    if (draftOnly(entry, previous)) continue;
+    if (draftOnly(entry, previous) || runningRowOnly(entry, previous, run.id)) continue;
     if (
       entry.type !== "assistant" ||
       previous.type !== "assistant" ||
@@ -2283,6 +2283,14 @@ function draftOnly(entry: WorkspaceRun["entries"][number], previous: WorkspaceRu
   return entry.type === "tool" && previous.type === "tool" && entry.id === previous.id && entry.name === previous.name &&
     Boolean(entry.drafting) && Boolean(previous.drafting) && entry.state === previous.state && !entry.waiting && !previous.waiting;
 }
+// Closed running rows can update progress without detaching the answer text.
+// Open folds and structural changes still take the full rendering path.
+function runningRowOnly(entry: WorkspaceRun["entries"][number], previous: WorkspaceRun["entries"][number], runId: string) {
+  return entry.type === "tool" && previous.type === "tool" && entry.id === previous.id && entry.name === previous.name &&
+    entry.phase === previous.phase && entry.state === "running" && previous.state === "running" &&
+    !entry.drafting && !previous.drafting && !entry.waiting && !previous.waiting && !entry.repo && !previous.repo &&
+    !stepOpen.has(`${runId}:${entry.id}`);
+}
 function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry) {
   const args = JSON.stringify({ runId: run.id, id: tool.id });
   const row = [...content.querySelectorAll<HTMLButtonElement>("button.tool-row")].find((node) => node.dataset.args === args);
@@ -2301,7 +2309,22 @@ function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry)
     if (part === ".verb" ? was.textContent !== now.textContent : was.innerHTML !== now.innerHTML) was.replaceWith(now);
   }
   row.querySelector(".target")?.setAttribute("title", title);
+  for (const attr of [...row.attributes]) if (!fresh.hasAttribute(attr.name)) row.removeAttribute(attr.name);
+  for (const attr of [...fresh.attributes]) if (row.getAttribute(attr.name) !== attr.value) row.setAttribute(attr.name, attr.value);
   return true;
+}
+// Attach the new shell before moving retained answers. Chromium's state-
+// preserving move keeps streaming text animations alive through tool boundaries.
+function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, retained: Array<[HTMLElement, HTMLElement]>) {
+  const old = [...content.childNodes];
+  content.append(fragment);
+  for (const [slot, element] of retained) {
+    const parent = slot.parentElement!;
+    if (element.isConnected && parent.moveBefore) parent.moveBefore(element, slot);
+    else parent.insertBefore(element, slot);
+    slot.remove();
+  }
+  for (const node of old) if (!retained.some(([, element]) => element === node)) node.remove();
 }
 function revealCompactedTurn(id: string) {
   if (!state?.checkpoint) return;
@@ -2407,6 +2430,7 @@ function renderConversation() {
     if (saved.signature !== signature || !patchStream(saved, run)) {
       const template = document.createElement("template");
       template.innerHTML = runHTML(run, index);
+      const retainedMarkdown: Array<[HTMLElement, HTMLElement]> = [];
       for (const slot of template.content.querySelectorAll<HTMLElement>(
         "[data-entry]",
       )) {
@@ -2421,9 +2445,9 @@ function renderConversation() {
         view.element.dataset.answer = run.id;
         view.element.dataset.entry = String(id);
         view.update(splitNextPrompt(entry.raw).text, run.status === "running");
-        slot.replaceWith(view.element);
+        retainedMarkdown.push([slot, view.element]);
       }
-      saved.content.replaceChildren(template.content);
+      replaceTurnShell(saved.content, template.content, retainedMarkdown);
       placeRepoFlows(saved.content, run);
       placeFileEdits(saved.content, run);
       const retained = new Set(
@@ -4013,6 +4037,12 @@ async function openOverlay(name: OverlayName, query = "") {
   overlaySignature = "";
   completionDismissed = true;
   el("completion").hidden = true;
+  if (name === "models") {
+    modelLevels.clear();
+    modelIndexPending = true;
+    modelsMore = false;
+    modelsLoading = true;
+  }
   renderOverlay();
   if (name === "providers") {
     void act(() => api("providers-refresh"));
@@ -4020,15 +4050,13 @@ async function openOverlay(name: OverlayName, query = "") {
   }
   if (name === "cleanup") void act(() => api("cleanup-scan"));
   if (name === "models") {
-    modelLevels.clear();
-    modelIndexPending = true;
-    modelsMore = false;
-    // Opens at once with the last list; the host answers from its cache.
-    modelsLoading = true;
-    const [result, scores] = await Promise.all([act(() => api<ModelDescriptor[]>("models")), api<ModelScoreboardResponse>("model-scores").catch(() => null)]);
+    // Catalog availability must not wait on the usage scoreboard.
+    void api<ModelScoreboardResponse>("model-scores").then(scores => {
+      modelScores = new Map(scores.models.map(score => [`${score.provider}\u0000${score.model}`, score]));
+    }).catch(() => {});
+    const result = await act(() => api<ModelDescriptor[]>("models"));
     modelsLoading = false;
     if (Array.isArray(result)) models = result;
-    if (scores) modelScores = new Map(scores.models.map((score) => [`${score.provider}\u0000${score.model}`, score]));
     overlaySignature = "";
     if (overlay === "models") renderOverlay();
   }
@@ -4083,6 +4111,7 @@ const marked = (text: string, query: string) => {
 /// your models, then how hard the highlighted one thinks, as a track with a
 /// stop per level. More models unfolds in the same panel.
 function renderModelPopover(hidden: number) {
+  modelHighlightSignature = "";
   let lastGroup = "";
   const counts = new Map<string, number>();
   for (const model of models) counts.set(model.provider, (counts.get(model.provider) ?? 0) + 1);
@@ -4105,6 +4134,21 @@ function renderModelPopover(hidden: number) {
       .replace("<button ", `<button data-index="${index}" ${title ? `title="${h(String(title))}" ` : ""}`);
   };
   const rows = overlayRows.map((row, index) => [row, index] as const);
+  const thinking = modelThinkingHTML();
+  const short = rows.filter(([row]) => row.kind === "short").map(([row, index]) => item(row, index)).join("");
+  const rest = rows.filter(([row]) => row.kind === "rest").map(([row, index]) => item(row, index)).join("");
+  const more = rows.filter(([row]) => row.kind === "more").map(([row, index]) => item(row, index)).join("");
+  const empty = modelsLoading && !models.length ? "Loading models…" : overlayQuery ? "No matches." : "No models.";
+  const list = (overlayQuery ? rest : short + (rest ? `<div class="mp-sep"></div>${rest}` : "")) || `<div class="mp-empty">${empty}</div>`;
+  el("overlay").innerHTML =
+    `<div class="mp"><label class="mp-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="chooser-filter" placeholder="Search ${models.length || ""} models" aria-label="Filter models" value="${h(overlayQuery)}" autocomplete="off" spellcheck="false"></label>` +
+    `<div class="mp-list">${list}${hidden ? `<div class="mp-empty">${hidden} more · keep typing</div>` : ""}</div>` +
+    `<div class="mp-sep"></div>${thinking}${more ? `<div class="mp-sep"></div>${more}` : ""}` +
+    (overlayQuery ? `<div class="mp-hint">${k("↵")} switch ${k("↑↓")} choose ${k("Esc")} close</div>` : "") + `</div>`;
+  el("overlay").querySelector(".mp-row.selected")?.scrollIntoView({ block: "nearest" });
+  if (modelCardOpen) placeModelCard(overlayIndex);
+}
+function modelThinkingHTML() {
   const highlighted = overlayRows[overlayIndex],
     model = models.find((item) => item.id === (highlighted?.action === "model" ? highlighted.data.id : state!.model.id)),
     levels = model?.reasoningLevels ?? [],
@@ -4119,19 +4163,29 @@ function renderModelPopover(hidden: number) {
   const thinking = n && model
     ? `<div class="mp-thinking" role="slider" tabindex="-1" aria-label="Thinking" aria-valuemin="0" aria-valuemax="${n - 1}" aria-valuenow="${Math.max(0, at)}" aria-valuetext="${h(level ? levelWord(level) : "")}" data-model="${h(model.id)}" data-levels="${h(JSON.stringify(levels))}" title="Drag, click or ←→"><span class="mp-fill" style="width:${at >= 0 ? share(at) : 0}%"></span>${notches}<span class="mp-thinking-label">Thinking</span><span class="mp-level">${level ? h(levelWord(level)) : ""}</span></div>`
     : `<div class="mp-thinking none"><span class="mp-thinking-label">Thinking</span><span class="mp-level off">None</span></div>`;
-  const short = rows.filter(([row]) => row.kind === "short").map(([row, index]) => item(row, index)).join("");
-  const rest = rows.filter(([row]) => row.kind === "rest").map(([row, index]) => item(row, index)).join("");
-  const more = rows.filter(([row]) => row.kind === "more").map(([row, index]) => item(row, index)).join("");
-  const empty = modelsLoading && !models.length ? "Loading models…" : overlayQuery ? "No matches." : "No models.";
-  const list = (overlayQuery ? rest : short + (rest ? `<div class="mp-sep"></div>${rest}` : "")) || `<div class="mp-empty">${empty}</div>`;
-  el("overlay").innerHTML =
-    `<div class="mp"><label class="mp-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="chooser-filter" placeholder="Search ${models.length || ""} models" aria-label="Filter models" value="${h(overlayQuery)}" autocomplete="off" spellcheck="false"></label>` +
-    `<div class="mp-list">${list}${hidden ? `<div class="mp-empty">${hidden} more · keep typing</div>` : ""}</div>` +
-    `<div class="mp-sep"></div>${thinking}${more ? `<div class="mp-sep"></div>${more}` : ""}` +
-    (overlayQuery ? `<div class="mp-hint">${k("↵")} switch ${k("↑↓")} choose ${k("Esc")} close</div>` : "") + `</div>`;
-  el("overlay").querySelector(".mp-row.selected")?.scrollIntoView({ block: "nearest" });
-  // An open card follows the highlight, from the pointer or the arrow keys.
-  if (modelCardOpen) placeModelCard(overlayIndex);
+  return thinking;
+}
+// Hover must not replace the button beneath the pointer or reset the list's scroll.
+let modelHighlightSignature = "";
+function updateModelHighlight() {
+  const signature = JSON.stringify([overlayIndex, state?.reasoning, [...modelLevels]]);
+  if (signature === modelHighlightSignature) return;
+  modelHighlightSignature = signature;
+  for (const row of overlayRows) {
+    const model = row.action === "model" ? models.find(model => model.id === row.data.id) : undefined;
+    if (model) row.data.reasoning = modelLevel(model);
+  }
+  for (const row of el("overlay").querySelectorAll<HTMLElement>(".mp-row"))
+    row.classList.toggle("selected", Number(row.dataset.index) === overlayIndex);
+  const groove = el("overlay").querySelector<HTMLElement>(".mp-thinking");
+  const html = modelThinkingHTML();
+  if (groove && groove.dataset.rendered !== html) {
+    const next = document.createElement("template");
+    next.innerHTML = html;
+    const fresh = next.content.firstElementChild as HTMLElement;
+    fresh.dataset.rendered = html;
+    groove.replaceWith(fresh);
+  }
 }
 /// Pass 82 A: resting on a model in the picker opens a small card beside the
 /// panel, level with the row. A quarter-second rest opens it; once open it
@@ -4289,7 +4343,9 @@ function renderOverlay() {
   const focused = el("overlay").querySelector<HTMLInputElement>("input"),
     hasFocus = focused === document.activeElement,
     selection = focused?.selectionStart;
-  const signature = JSON.stringify([
+  const signature = overlay === "models"
+    ? JSON.stringify([overlay, overlayQuery, state.model.id, models, modelsMore, modelsLoading])
+    : JSON.stringify([
     overlay,
     overlayQuery,
     overlayIndex,
@@ -4305,7 +4361,10 @@ function renderOverlay() {
     state.themeCanUndo,
     modelsMore,
   ]);
-  if (signature === overlaySignature) return;
+  if (signature === overlaySignature) {
+    if (overlay === "models") updateModelHighlight();
+    return;
+  }
   overlaySignature = signature;
   overlayRows = [];
   let title = "",
@@ -5904,8 +5963,9 @@ document.addEventListener("pointerdown", (event) => {
   paintGroove(groove, f, index, levels);
 });
 document.addEventListener("pointermove", (event) => {
+  if (!thinkingDrag || event.pointerId !== thinkingDrag.pointer) return;
   const groove = grooveOf();
-  if (!thinkingDrag || event.pointerId !== thinkingDrag.pointer || !groove) return;
+  if (!groove) return;
   groove.classList.add("drag");
   const { f, index } = grooveAt(groove, event.clientX, thinkingDrag.levels.length);
   paintGroove(groove, f, index, thinkingDrag.levels);
@@ -5917,14 +5977,12 @@ const settleGroove = (event: PointerEvent) => {
   groove?.classList.remove("drag");
   if (groove?.hasPointerCapture(event.pointerId)) groove.releasePointerCapture(event.pointerId);
   // Cancellation must repaint even when the host state hasn't changed.
-  overlaySignature = "";
-  if (!groove || overlay !== "models" || groove.dataset.model !== drag.model || event.type === "pointercancel") { renderOverlay(); return; }
+  if (!groove || overlay !== "models" || groove.dataset.model !== drag.model || event.type === "pointercancel") { overlaySignature = ""; renderOverlay(); return; }
   // The picker stays open: the level is kept for that model, and for the
   // model in use it applies at once.
   const { index } = grooveAt(groove, event.clientX, drag.levels.length), reasoning = drag.levels[index]!;
   modelLevels.set(drag.model, reasoning);
-  overlaySignature = "";
-  renderOverlay();
+  updateModelHighlight();
   if (drag.model === state?.model.id) void act(() => api("model", { id: drag.model, reasoning }));
 };
 document.addEventListener("pointerup", settleGroove);
@@ -5936,7 +5994,7 @@ document.addEventListener("mouseover", (event) => {
   const index = Number((event.target as Element).closest?.<HTMLElement>("#overlay .mp-row")?.dataset.index ?? NaN);
   // Off the rows, the card goes; on a model row it opens or follows.
   if (Number.isNaN(index) || overlayRows[index]?.action !== "model") { if (modelCardOpen || modelCardTimer) hideModelCard(); if (Number.isNaN(index)) return; }
-  if (index !== overlayIndex) { overlayIndex = index; renderOverlay(); }
+  if (index !== overlayIndex) { overlayIndex = index; updateModelHighlight(); }
   if (overlayRows[index]?.action === "model") pointModelCard(index);
 });
 document.addEventListener("submit", (event) => {
@@ -6322,9 +6380,10 @@ document.addEventListener("keydown", (event) => {
       if (model && levels?.length) {
         event.preventDefault();
         const at = Math.max(0, levels.indexOf(modelLevel(model) ?? levels[0]!));
-        modelLevels.set(model.id, levels[(at + (key === "arrowright" ? 1 : -1) + levels.length) % levels.length]!);
-        overlaySignature = "";
-        renderOverlay();
+        const reasoning = levels[Math.max(0, Math.min(levels.length - 1, at + (key === "arrowright" ? 1 : -1)))]!;
+        modelLevels.set(model.id, reasoning);
+        updateModelHighlight();
+        if (model.id === state.model.id) void act(() => api("model", { id: model.id, reasoning }));
         return;
       }
     }

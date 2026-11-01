@@ -776,7 +776,11 @@ export class WorkspaceHost {
     this.busy = true;
     this.publish();
     try {
+      // Finish any choice made in the previous chat before reading preferences.
+      await this.modelChange;
       const state = await this.client.getSessionState(id);
+      if (state.session.preferredModel && state.session.preferredModel !== this.model.id)
+        await this.changeModel(state.session.preferredModel);
       // A chat that came back is done coming back once you open it.
       if (backState(state.session.backAt, Date.now(), this.mergedPullRequests.has(id)) === "back") void this.client.updateSession(id, { backAt: null }).then(() => this.refreshSessions()).catch(() => {});
       const events = await replaySession(
@@ -901,6 +905,31 @@ export class WorkspaceHost {
     this.modelCache = { at: Date.now(), models: fresh };
     fresh.catch(() => { if (this.modelCache?.models === fresh) this.modelCache = cache; });
     return cache ? cache.models.catch(() => fresh) : fresh;
+  }
+  // Model activation is daemon-wide. Serialize choices so slow responses cannot
+  // overwrite a newer selection or save it onto a different chat.
+  private modelChange: Promise<void> = Promise.resolve();
+  private changeModel(id: string, reasoning?: string, selected?: WorkspaceSession) {
+    const change = this.modelChange.then(async () => {
+      await this.client.setModel(id, reasoning);
+      this.reasoning = reasoning;
+      if (this.model.id !== id) {
+        const models = await this.models().catch(() => []);
+        this.model = models.find(model => model.id === id) ?? { id, provider: "" };
+        if (!this.model.contextWindow) {
+          const health = await this.client.health().catch(() => null);
+          if (health?.contextCapacity && health.model.split("/").at(-1) === id.split("/").at(-1))
+            this.model = { ...this.model, contextWindow: health.contextCapacity };
+        }
+      }
+      if (selected) {
+        const result = await this.client.updateSession(selected.session.id, { preferredModel: id });
+        selected.session.preferredModel = result.session.preferredModel;
+      }
+      this.publish();
+    });
+    this.modelChange = change.catch(() => {});
+    return change;
   }
   private async applyStartup() {
     const startup = this.options.startup;
@@ -1703,25 +1732,8 @@ export class WorkspaceHost {
       const id = string(args.id, "model", 1000);
       const reasoning = args.reasoning === undefined ? undefined : string(args.reasoning, "reasoning", 16);
       if (reasoning !== undefined && !/^[a-z]{1,16}$/.test(reasoning)) throw new Error("Invalid reasoning");
-      await this.client.setModel(id, reasoning);
-      this.reasoning = reasoning;
-      const models = await this.models();
-      this.model = models.find((model) => model.id === id) ?? {
-        id,
-        provider: this.model.provider,
-      };
-      // The context size has to follow the switch: when the list doesn't
-      // say, the daemon knows the active model's.
-      if (!this.model.contextWindow) {
-        const health = await this.client.health().catch(() => null);
-        if (health?.contextCapacity && health.model.split("/").at(-1) === id.split("/").at(-1))
-          this.model = { ...this.model, contextWindow: health.contextCapacity };
-      }
-      if (this.current)
-        await this.client.updateSession(this.current.session.id, {
-          preferredModel: id,
-        });
-      this.publish();
+      if (this.busy) throw new Error("Wait for the current session action to finish.");
+      await this.changeModel(id, reasoning, this.current ?? undefined);
       return;
     }
     if (method === "themefy") {

@@ -4251,6 +4251,8 @@ async function driveAction(method: string, args: Record<string, unknown> = {}): 
 
 function renderOverlay() {
   if (!state) return;
+  // Keep the dragged element and its geometry stable through host updates.
+  if (thinkingDrag && overlay === "models") return;
   el("overlay").hidden = !overlay;
   el("overlay").dataset.screen = overlay ?? "";
   el("overlay").setAttribute("role", "dialog");
@@ -5851,7 +5853,7 @@ let thinkingDrag: { pointer: number; model: string; levels: string[] } | null = 
 const grooveOf = () => el("overlay").querySelector<HTMLElement>(".mp-thinking[data-levels]");
 function grooveAt(groove: HTMLElement, x: number, count: number) {
   const box = groove.getBoundingClientRect(), f = Math.max(0, Math.min(1, (x - box.left) / Math.max(1, box.width)));
-  return { f, index: Math.max(0, Math.min(count - 1, Math.ceil(f * count) - 1)) };
+  return { f, index: Math.max(0, Math.min(count - 1, Math.round(f * count) - 1)) };
 }
 function paintGroove(groove: HTMLElement, f: number, index: number, levels: string[]) {
   const fill = groove.querySelector<HTMLElement>(".mp-fill"), word = groove.querySelector<HTMLElement>(".mp-level");
@@ -5868,6 +5870,7 @@ document.addEventListener("pointerdown", (event) => {
   const levels = JSON.parse(groove.dataset.levels ?? "[]") as string[];
   if (!levels.length) return;
   thinkingDrag = { pointer: event.pointerId, model: groove.dataset.model ?? "", levels };
+  groove.setPointerCapture(event.pointerId);
   groove.classList.add("drag");
   const { f, index } = grooveAt(groove, event.clientX, levels.length);
   paintGroove(groove, f, index, levels);
@@ -5884,7 +5887,10 @@ const settleGroove = (event: PointerEvent) => {
   const drag = thinkingDrag, groove = grooveOf();
   thinkingDrag = null;
   groove?.classList.remove("drag");
-  if (!groove || event.type === "pointercancel") { renderOverlay(); return; }
+  if (groove?.hasPointerCapture(event.pointerId)) groove.releasePointerCapture(event.pointerId);
+  // Cancellation must repaint even when the host state hasn't changed.
+  overlaySignature = "";
+  if (!groove || overlay !== "models" || groove.dataset.model !== drag.model || event.type === "pointercancel") { renderOverlay(); return; }
   // The picker stays open: the level is kept for that model, and for the
   // model in use it applies at once.
   const { index } = grooveAt(groove, event.clientX, drag.levels.length), reasoning = drag.levels[index]!;

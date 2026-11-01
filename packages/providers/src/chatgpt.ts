@@ -128,7 +128,7 @@ export class ResponsesProvider implements ProviderAdapter {
     const instructions = this.route.instructions ? request.messages.filter(m => m.role === "system").map(m => m.content).join("\n\n") : "";
     const response = await this.request("responses", { signal, method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       model: request.model.slice(this.route.modelPrefix.length), store: false, stream: true,
-      ...(this.route.instructions ? { instructions, tool_choice: "auto", parallel_tool_calls: false } : {}),
+      ...(this.route.instructions ? { instructions, tool_choice: "auto", parallel_tool_calls: true } : {}),
       // Each tool round resends the conversation; the key lets the plan route
       // reuse its cached prefix instead of reprocessing every token.
       ...(request.cacheKey ? { prompt_cache_key: request.cacheKey } : {}),

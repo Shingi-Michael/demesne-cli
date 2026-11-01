@@ -8,6 +8,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Changed
 
+- Fewer rounds on the Codex plan: the Codex route asked for one tool call per round (`parallel_tool_calls: false`), so 535 of 547 tool rounds in two weeks made a single call while the prompt asked the model to batch its reads. It now allows several. A round runs up to 8 (read-only ones together); calls past 8 come back "not run" so the model asks again, instead of the turn failing.
 - The working cube is back in place: the working line no longer clips its left side while it turns, and the cube now sits under the answer's d. mark with the silver words lined up with the answer text.
 - Permissions: the rules it no longer asks about sit in groups by what they run (grep 30, git 15, edits 2), one short line each, instead of a wall of long commands that wrapped over each other. A click on a group unfolds its rules as one-line rows (the full text on hover), each with × to ask again. Past three one-off rules, they share one "other" chip, and file rules say what they allow (edit, delete) so two rules on one file read apart.
 - Talk instead of typing (Mac): a microphone beside + in the composer starts the Mac's own Dictation in the composer. Your words appear as you say them (grey until they settle), stay yours to edit, and nothing sends until you press Enter. Holding or double-pressing fn (the Mac's Dictation shortcut) works the same.

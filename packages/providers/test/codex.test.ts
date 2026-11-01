@@ -35,7 +35,7 @@ test("sends the slug, Codex's headers, system text as instructions and plain fun
   }) as unknown as typeof fetch });
   const first = await collect(p);
   expect(headers[0]!.get("chatgpt-account-id")).toBe("acct-1"); expect(headers[0]!.get("session_id")).toBe("session-1"); expect(headers[0]!.get("originator")).toBe("codex_cli_rs");
-  expect(bodies[0]).toEqual({ model: "gpt-6.1-sol", store: false, stream: true, instructions: "Be helpful", tool_choice: "auto", parallel_tool_calls: false, prompt_cache_key: "session-1",
+  expect(bodies[0]).toEqual({ model: "gpt-6.1-sol", store: false, stream: true, instructions: "Be helpful", tool_choice: "auto", parallel_tool_calls: true, prompt_cache_key: "session-1",
     input: [{ role: "user", content: "Inspect input.txt" }], include: ["reasoning.encrypted_content"],
     tools: [{ type: "function", name: "read_file", description: "Read a file", parameters: request.tools![0]!.inputSchema, strict: false }] });
   expect(first.find(e => e.type === "tool_call_delta")).toMatchObject({ nameDelta: "read_file", idDelta: "call_1" });

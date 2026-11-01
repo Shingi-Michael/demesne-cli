@@ -1633,8 +1633,9 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 /* The pane: the artifact beside the conversation, edge to edge, with one
    line above it and one below. The cards column yields to it. */
 #pane { display: none; }
-.desktop .live-app.pane-on #pane:not([hidden]) { display: flex; flex-direction: column; flex: none; width: clamp(380px, 52%, 960px); min-width: 0; border-left: 1px solid var(--hair); background: var(--surface); }
-.desktop .live-app.pane-on #cards { display: none; }
+.desktop .live-app.pane-on:not(.paging) #pane:not([hidden]) { display: flex; flex-direction: column; flex: none; width: clamp(380px, 52%, 960px); min-width: 0; border-left: 1px solid var(--hair); background: var(--surface); }
+/* A page (Settings, Scheduled, All chats…) hides the chat's pane; it comes back with the chat. */
+.desktop .live-app.pane-on:not(.paging) #cards { display: none; }
 .pane-head { flex: none; display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px 0 8px; border-bottom: 1px solid var(--hair); color: var(--t3); font-size: 12.5px; white-space: nowrap; }
 .pane-making { margin-left: 2px; color: var(--t4); }
 .pane-head .sp { flex: 1; }

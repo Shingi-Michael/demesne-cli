@@ -477,14 +477,22 @@ export function createDaemonApp(options: {
   let closing = false;
   let closePromise: Promise<void> | undefined;
 
-  /// The call a turn in `sessionId` runs on: the daemon's selected model,
-  /// or for the assistant's chat its own pinned model, however the picker
+  /// Each turn captures its chat's model/effort, or the daemon selection for
+  /// older chats without a preference. The assistant retains its pinned model,
+  /// however the picker
   /// is set. A pinned model nobody serves fails the turn rather than
   /// sending the assistant's reading elsewhere.
   function inferenceIn(sessionId: string, thinkingEnabled: boolean | undefined): TurnInference {
-    if (!options.assistantModel || sessionId !== assistantChat.existing()) return snapshotTurnInference(processor, thinkingEnabled);
+    const session = store.getSession(sessionId);
+    if (!options.assistantModel || sessionId !== assistantChat.existing()) {
+      const hasPreference = session?.preferredModel || session?.preferredReasoning;
+      return snapshotTurnInference(processor, thinkingEnabled, hasPreference ? {
+        ...(session?.preferredModel ? { model: session.preferredModel } : {}),
+        reasoning: session?.preferredReasoning ?? null,
+      } : undefined);
+    }
     try {
-      return snapshotTurnInference(processor, thinkingEnabled, { model: options.assistantModel });
+      return snapshotTurnInference(processor, thinkingEnabled, { model: options.assistantModel, ...(session?.preferredModel === options.assistantModel ? { reasoning: session.preferredReasoning ?? null } : {}) });
     } catch (error) {
       throw new Error(`The assistant's chat runs only on ${options.assistantModel} ([assistant] model, or the [provider] model), which no configured provider serves: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -1161,7 +1169,7 @@ export function createDaemonApp(options: {
         }
         if (processor && typeof processor.setModel === "function") {
           processor.setModel(modelName, reasoning);
-          return json({ status: "ok", model: modelName, ...(reasoning ? { reasoning } : {}) });
+          return json({ status: "ok", model: modelName, ...(processor.reasoning ? { reasoning: processor.reasoning } : {}) });
         }
         return apiError("not_supported", "Model switching is not supported by this processor", 400);
       }
@@ -1241,8 +1249,8 @@ export function createDaemonApp(options: {
           session = renamed.session;
           eventId = renamed.event.eventId;
         }
-        if (body.preferredModel !== undefined) {
-          session = store.setSessionPreferredModel(path[2]!, body.preferredModel);
+        if (body.preferredModel !== undefined || body.preferredReasoning !== undefined) {
+          session = store.setSessionInference(path[2]!, body);
         }
         if (body.pinned !== undefined) session = store.setSessionPinned(path[2]!, body.pinned);
         if (body.backAt !== undefined) session = store.setSessionBackAt(path[2]!, body.backAt);

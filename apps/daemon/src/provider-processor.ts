@@ -5,7 +5,7 @@ import type {
   ProviderStreamEvent,
   ProviderToolDefinition,
 } from "@demesne/providers";
-import type { PlanLimits, RuntimeProfileStatus } from "@demesne/protocol";
+import { resolveReasoningLevel, type ModelDescriptor, type PlanLimits, type RuntimeProfileStatus } from "@demesne/protocol";
 import type { RuntimeProfileVerifier } from "./ollama-runtime.ts";
 import type { InferenceOverrides, StreamOptions, TurnInference, TurnProcessor } from "./processor.ts";
 
@@ -16,6 +16,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
   private currentModelId: string;
   private currentReasoning: string | undefined;
   private modelGeneration = 0;
+  private readonly discoveredModels = new Map<string, ModelDescriptor>();
   private readonly discoveredContextCapacities = new Map<string, number>();
   private readonly allowedModelIds: ReadonlySet<string> | undefined;
 
@@ -46,7 +47,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
   }
 
   get reasoning(): string | undefined {
-    return this.currentReasoning;
+    return this.requestReasoning(this.currentModelId, undefined) ?? this.provider.configuredReasoning;
   }
 
   setModel(modelId: string, reasoning?: string): void {
@@ -92,6 +93,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
       ? discovered.filter((model) => this.allowedModelIds!.has(model.id))
       : discovered;
     for (const model of models) {
+      this.discoveredModels.set(model.id, model);
       if (model.contextWindow) this.discoveredContextCapacities.set(model.id, model.contextWindow);
     }
     return models;
@@ -105,7 +107,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
     const requestDefaults = { ...this.requestDefaults };
     // The chosen thinking level belongs to the selected model; another model
     // (a sub-agent's) runs at its own default.
-    if (model === this.currentModelId && this.currentReasoning) requestDefaults.reasoningLevel = this.currentReasoning;
+    requestDefaults.reasoningLevel = this.requestReasoning(model, thinkingEnabled, overrides?.reasoning);
     // A cap only ever lowers the configured output limit.
     if (overrides?.maxOutputTokens) requestDefaults.maxOutputTokens = Math.min(requestDefaults.maxOutputTokens ?? overrides.maxOutputTokens, overrides.maxOutputTokens);
     const contextCapacity = this.effectiveContextCapacity(model);
@@ -130,6 +132,19 @@ export class ProviderTurnProcessor implements TurnProcessor {
     });
   }
 
+  private requestReasoning(model: string, thinkingEnabled: boolean | undefined, override?: string | null): string | undefined {
+    const chosen = override !== undefined ? override : model === this.currentModelId ? this.currentReasoning : undefined;
+    if (chosen) return resolveReasoningLevel(this.discoveredModels.get(model), chosen);
+    // A null per-chat override means reset to this model's default, not the
+    // effort of another chat currently selected on the same provider.
+    if (override !== null && this.requestDefaults.reasoningLevel) return this.requestDefaults.reasoningLevel;
+    if (thinkingEnabled !== undefined) return undefined;
+    // Leave explicit adapter configuration to the adapter, including its
+    // precedence for the per-turn thinking flag. Discovery must not override it.
+    if (override !== null && this.provider.configuredReasoning) return undefined;
+    return resolveReasoningLevel(this.discoveredModels.get(model));
+  }
+
   private effectiveContextCapacity(model: string): number | undefined {
     const limits = [
       this.configuredContextCapacity,
@@ -151,7 +166,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
       inference.modelId,
       this.modelGeneration,
       { maxOutputTokens: inference.maxOutputTokens, temperature: inference.temperature, seed: inference.seed,
-        ...(this.currentReasoning ? { reasoningLevel: this.currentReasoning } : {}) },
+        ...(this.requestReasoning(inference.modelId, thinkingEnabled) ? { reasoningLevel: this.requestReasoning(inference.modelId, thinkingEnabled) } : {}) },
       messages,
       tools,
       signal,

@@ -453,9 +453,9 @@ export interface Session {
   backAt?: string | null;
   /// The pull request this chat opened, kept for its row.
   prUrl?: string | null;
-  /// Model this session was last switched to through the CLI. It is a hint for
-  /// the user, not an automatic daemon-side switch.
+  /// Model and effort selected for this chat, restored by clients and turns.
   preferredModel?: string | null;
+  preferredReasoning?: string | null;
   /// Session-wide approval policy; older clients and fixtures may omit it.
   /// Stored sessions always return a boolean and default to false.
   autoApprove?: boolean;
@@ -506,6 +506,7 @@ export interface UpdateSessionRequest {
   acceptEdits?: boolean;
   title?: string;
   preferredModel?: string | null;
+  preferredReasoning?: string | null;
 }
 
 export interface UpdateSessionResponse {
@@ -785,6 +786,11 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
       update.preferredModel = null;
     }
   }
+  if (value.preferredReasoning !== undefined) {
+    if (value.preferredReasoning !== null && (typeof value.preferredReasoning !== "string" || !/^[a-z]{1,16}$/.test(value.preferredReasoning)))
+      throw new ProtocolValidationError("preferredReasoning must be a thinking level or null");
+    update.preferredReasoning = value.preferredReasoning;
+  }
   if (value.autoApprove !== undefined) {
     if (typeof value.autoApprove !== "boolean") throw new ProtocolValidationError("autoApprove must be a boolean");
     update.autoApprove = value.autoApprove;
@@ -816,8 +822,8 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
       throw new ProtocolValidationError("prUrl must be a GitHub pull request link or null");
     update.prUrl = value.prUrl;
   }
-  if (update.title === undefined && update.preferredModel === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.workspacePath === undefined && update.pinned === undefined && update.backAt === undefined && update.prUrl === undefined) {
-    throw new ProtocolValidationError("title, preferredModel, autoApprove, acceptEdits, pinned, backAt, prUrl or workspacePath is required");
+  if (update.title === undefined && update.preferredModel === undefined && update.preferredReasoning === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.workspacePath === undefined && update.pinned === undefined && update.backAt === undefined && update.prUrl === undefined) {
+    throw new ProtocolValidationError("title, preferredModel, preferredReasoning, autoApprove, acceptEdits, pinned, backAt, prUrl or workspacePath is required");
   }
   return update;
 }
@@ -1133,4 +1139,18 @@ export interface FoundryArtifactDetail extends FoundryArtifact {
 
 export interface FoundryListResponse {
   artifacts: FoundryArtifact[];
+}
+
+/// Medium wherever supported; never invent an effort for a model without one.
+export function defaultThinkingLevel(levels: readonly string[] | undefined, fallback?: string): string | undefined {
+  if (!levels?.length) return undefined;
+  return levels.includes("medium") ? "medium"
+    : fallback && levels.includes(fallback) ? fallback
+    : ["off", "none", "minimal"].find(level => levels.includes(level)) ?? levels[0];
+}
+export function resolveReasoningLevel(model: Pick<ModelDescriptor, "reasoningLevels" | "defaultReasoningLevel"> | undefined, preferred?: string | null): string | undefined {
+  const levels = model?.reasoningLevels;
+  // Undiscovered capabilities cannot disprove an explicit saved choice.
+  if (preferred && (!levels || levels.includes(preferred))) return preferred;
+  return defaultThinkingLevel(levels, model?.defaultReasoningLevel);
 }

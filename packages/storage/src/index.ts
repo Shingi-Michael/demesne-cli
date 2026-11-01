@@ -108,6 +108,7 @@ interface SessionRow {
   back_at: string | null;
   pr_url: string | null;
   preferred_model: string | null;
+  preferred_reasoning: string | null;
   auto_approve: number;
   accept_edits: number;
 }
@@ -386,7 +387,7 @@ export class DemesneStore {
     const row = this.database
       .query(`
         SELECT sessions.id, sessions.title, sessions.created_at, sessions.updated_at,
-               sessions.workspace_id, sessions.archived_at, sessions.pinned_at, sessions.back_at, sessions.pr_url, sessions.preferred_model, sessions.auto_approve, sessions.accept_edits,
+               sessions.workspace_id, sessions.archived_at, sessions.pinned_at, sessions.back_at, sessions.pr_url, sessions.preferred_model, sessions.preferred_reasoning, sessions.auto_approve, sessions.accept_edits,
                workspaces.root AS workspace_root
         FROM sessions
         LEFT JOIN workspaces ON workspaces.id = sessions.workspace_id
@@ -412,6 +413,7 @@ export class DemesneStore {
       ...(row.back_at ? { backAt: row.back_at } : {}),
       ...(row.pr_url ? { prUrl: row.pr_url } : {}),
       ...(row.preferred_model ? { preferredModel: row.preferred_model } : {}),
+      ...(row.preferred_reasoning ? { preferredReasoning: row.preferred_reasoning } : {}),
       turns: turns.map(mapTurn),
     };
   }
@@ -446,9 +448,6 @@ export class DemesneStore {
     return result;
   }
 
-  /// Records the model a session was last switched to. The daemon does not
-  /// auto-switch: the preference is a hint so resuming a session can tell the
-  /// user which model it used without forcing an expensive model reload.
   /// A pinned chat leads the sidebar, above its project.
   setSessionPinned(id: string, pinned: boolean): Session {
     return this.database.transaction(() => {
@@ -477,9 +476,18 @@ export class DemesneStore {
   }
 
   setSessionPreferredModel(id: string, model: string | null): Session {
+    return this.setSessionInference(id, { preferredModel: model });
+  }
+
+  /// Save the pair atomically. A different model without an explicit effort
+  /// resets effort, rather than inheriting an incompatible previous choice.
+  setSessionInference(id: string, update: { preferredModel?: string | null; preferredReasoning?: string | null }): Session {
     return this.database.transaction(() => {
-      this.getSessionOrThrow(id);
-      this.database.query("UPDATE sessions SET preferred_model = ? WHERE id = ?").run(model, id);
+      const session = this.getSessionOrThrow(id);
+      const model = update.preferredModel === undefined ? session.preferredModel ?? null : update.preferredModel;
+      const reasoning = update.preferredReasoning !== undefined ? update.preferredReasoning
+        : model !== (session.preferredModel ?? null) ? null : session.preferredReasoning ?? null;
+      this.database.query("UPDATE sessions SET preferred_model = ?, preferred_reasoning = ? WHERE id = ?").run(model, reasoning, id);
       return this.getSessionOrThrow(id);
     })();
   }
@@ -2184,6 +2192,9 @@ export class DemesneStore {
     }
     if (!this.hasColumn("sessions", "preferred_model")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN preferred_model TEXT");
+    }
+    if (!this.hasColumn("sessions", "preferred_reasoning")) {
+      this.database.run("ALTER TABLE sessions ADD COLUMN preferred_reasoning TEXT");
     }
     if (!this.hasColumn("sessions", "auto_approve")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN auto_approve INTEGER NOT NULL DEFAULT 0 CHECK (auto_approve IN (0, 1))");

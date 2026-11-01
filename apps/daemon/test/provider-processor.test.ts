@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ProviderAdapter, ProviderRequest } from "@demesne/providers";
+import { OpenAICompatibleProvider, type ProviderAdapter, type ProviderRequest } from "@demesne/providers";
 import type { RuntimeProfileVerifier } from "../src/ollama-runtime.ts";
 import { ProviderTurnProcessor } from "../src/provider-processor.ts";
 import { snapshotTurnInference, type TurnProcessor } from "../src/processor.ts";
@@ -268,3 +268,27 @@ function verifierStub(verify: RuntimeProfileVerifier["verify"]): RuntimeProfileV
     },
   };
 }
+
+test.each(["high", "none"] as const)("discovery does not override explicit provider effort %s with medium", async reasoningEffort => {
+  const efforts: unknown[] = [];
+  const provider = new OpenAICompatibleProvider({ baseUrl: "https://openrouter.ai/api/v1", reasoningEffort, fetch: (async (url, init) => {
+    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "model", supported_parameters: ["reasoning"] }] });
+    efforts.push(JSON.parse(String(init?.body)).reasoning?.effort);
+    return new Response("data: [DONE]\n\n");
+  }) as typeof fetch });
+  const processor = new ProviderTurnProcessor(provider, "model");
+  for (const discover of [false, true]) {
+    if (discover) await processor.listModels();
+    for await (const _ of processor.createTurnInference(undefined).stream([], [], new AbortController().signal)) { /* consume */ }
+  }
+  expect(efforts).toEqual([reasoningEffort, reasoningEffort]);
+});
+
+test("direct stream and inference snapshot both retain explicit processor effort", async () => {
+  const efforts: Array<string | undefined> = [];
+  const provider: ProviderAdapter = { id: "test", async listModels() { return []; }, async *stream(request) { efforts.push(request.reasoningLevel); } };
+  const processor = new ProviderTurnProcessor(provider, "model", { reasoningLevel: "high" });
+  for await (const _ of processor.stream([], [], new AbortController().signal, false)) { /* consume */ }
+  for await (const _ of processor.createTurnInference(false).stream([], [], new AbortController().signal)) { /* consume */ }
+  expect(efforts).toEqual(["high", "high"]);
+});

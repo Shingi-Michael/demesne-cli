@@ -57,3 +57,16 @@ test("Codex's usage-limit error names the plan and Manage usage, and a namespace
   const namespaced = new CodexProvider({ accountId: "acct-1", accessToken: async () => "access", fetch: (async () => responseStream({ tool: true })) as unknown as typeof fetch });
   await expect(collect(namespaced)).rejects.toThrow(/unknown tool call/);
 });
+
+test("Codex's prefixed model uses medium by default on the wire, and honors an explicit effort", async () => {
+  const bodies: Record<string, any>[] = [];
+  const p = new CodexProvider({ accountId: "acct", accessToken: async () => "access", fetch: (async (url, init) => {
+    if (String(url).includes("/models?")) return Response.json({ models: [{ slug: "gpt-6.1-sol", visibility: "list", supports_reasoning_summaries: true,
+      supported_reasoning_levels: ["low", "medium", "high"].map(effort => ({ effort })) }] });
+    bodies.push(JSON.parse(String(init?.body))); return codexStream();
+  }) as typeof fetch });
+  expect((await p.listModels())[0]?.defaultReasoningLevel).toBe("medium");
+  await collect(p);
+  await collect(p, { ...request, reasoningLevel: "low" });
+  expect(bodies.map(body => body.reasoning)).toEqual([{ effort: "medium", summary: "auto" }, { effort: "low", summary: "auto" }]);
+});

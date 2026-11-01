@@ -30,6 +30,7 @@ describe("WorkspaceHost reconnect", () => {
         installed: [],
         system: { enabled: false, path: "" },
       }),
+      listModels: async () => [],
       listSessions: async () => [],
       createSession: async () => ({ session: { id: "s1" } }),
       getSessionState: async () => ({
@@ -104,6 +105,7 @@ describe("WorkspaceHost reconnect", () => {
         return { model: "qwen3-4b", provider: "local", contextCapacity: 65536, reasoning: undefined };
       },
       themes: async () => ({ version: 1, selected: { name: "demesne-dark", roles: {} }, custom: [], installed: [], system: { enabled: false, path: "" } }),
+      listModels: async () => [],
       listSessions: async () => [],
       createSession: async () => ({ session: { id: "s1" } }),
       getSessionState: async () => ({ session: { id: "s1", workspace: null, turns: [] }, events: [], pendingPermissions: [], userQuestions: [], checkpoints: [] }),

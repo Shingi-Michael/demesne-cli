@@ -1,3 +1,4 @@
+import { resolveReasoningLevel } from "@demesne/protocol";
 import { ChatGPTAuth, type ChatGPTAccount } from "@demesne/chatgpt-auth";
 import { configuredChatGPTAccount } from "@demesne/setup/chatgpt-auth.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
@@ -779,8 +780,7 @@ export class WorkspaceHost {
       // Finish any choice made in the previous chat before reading preferences.
       await this.modelChange;
       const state = await this.client.getSessionState(id);
-      if (state.session.preferredModel && state.session.preferredModel !== this.model.id)
-        await this.changeModel(state.session.preferredModel);
+      await this.changeModel(state.session.preferredModel || this.model.id, state.session.preferredReasoning ?? undefined, undefined, true);
       // A chat that came back is done coming back once you open it.
       if (backState(state.session.backAt, Date.now(), this.mergedPullRequests.has(id)) === "back") void this.client.updateSession(id, { backAt: null }).then(() => this.refreshSessions()).catch(() => {});
       const events = await replaySession(
@@ -909,13 +909,17 @@ export class WorkspaceHost {
   // Model activation is daemon-wide. Serialize choices so slow responses cannot
   // overwrite a newer selection or save it onto a different chat.
   private modelChange: Promise<void> = Promise.resolve();
-  private changeModel(id: string, reasoning?: string, selected?: WorkspaceSession) {
+  private changeModel(id: string, reasoning?: string, selected?: WorkspaceSession, restoring = false) {
     const change = this.modelChange.then(async () => {
-      await this.client.setModel(id, reasoning);
-      this.reasoning = reasoning;
-      if (this.model.id !== id) {
-        const models = await this.models().catch(() => []);
-        this.model = models.find(model => model.id === id) ?? { id, provider: "" };
+      if (!id) return;
+      const models = await this.models().catch(() => []);
+      const model = models.find(model => model.id === id) ?? (this.model.id === id ? this.model : { id, provider: "" });
+      const effective = resolveReasoningLevel(model, reasoning);
+      if (!restoring || this.model.id !== id || this.reasoning !== effective)
+        await this.client.setModel(id, effective);
+      this.reasoning = effective;
+      if (this.model.id !== id || model !== this.model) {
+        this.model = model;
         if (!this.model.contextWindow) {
           const health = await this.client.health().catch(() => null);
           if (health?.contextCapacity && health.model.split("/").at(-1) === id.split("/").at(-1))
@@ -923,8 +927,9 @@ export class WorkspaceHost {
         }
       }
       if (selected) {
-        const result = await this.client.updateSession(selected.session.id, { preferredModel: id });
+        const result = await this.client.updateSession(selected.session.id, { preferredModel: id, preferredReasoning: effective ?? null });
         selected.session.preferredModel = result.session.preferredModel;
+        selected.session.preferredReasoning = result.session.preferredReasoning;
       }
       this.publish();
     });
@@ -1159,6 +1164,15 @@ export class WorkspaceHost {
     this.error = null;
     this.publish();
     try {
+      await this.modelChange;
+      if (this.current !== session) throw new Error("The session changed. Try the action again.");
+      // Pin a chat's initial choice too, so another window cannot change the
+      // model/effort of its next turn by moving the daemon-wide picker.
+      if (this.model.id && (!session.session.preferredModel || (session.session.preferredModel === this.model.id && !session.session.preferredReasoning && this.reasoning))) {
+        const { session: saved } = await this.client.updateSession(id, { preferredModel: this.model.id, preferredReasoning: this.reasoning ?? null });
+        session.session.preferredModel = saved.preferredModel;
+        session.session.preferredReasoning = saved.preferredReasoning;
+      }
       const expanded = expandMentions(
         content,
         this.files.map((file) => file.path),

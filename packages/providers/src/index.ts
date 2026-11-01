@@ -1,4 +1,4 @@
-import { isRecord, type ModelDescriptor, type ModelMessage, type ModelToolCall, type TokenUsage } from "@demesne/protocol";
+import { defaultThinkingLevel, isRecord, type ModelDescriptor, type ModelMessage, type ModelToolCall, type TokenUsage } from "@demesne/protocol";
 
 const MODEL_RESPONSE_LIMIT = 1024 * 1024;
 const STREAM_EVENT_LIMIT = 1024 * 1024;
@@ -33,9 +33,6 @@ export interface ProviderRequest {
 /// Local and open models whose chat template switches thinking on and off.
 const SWITCHABLE_THINKING = /qwen3|qwq|deepseek-r1/i;
 const EFFORTS = ["low", "medium", "high"];
-/// Thinking starts off: a model's default level is its "off" (or "none",
-/// "minimal"), else its lowest. A chosen level always wins.
-export const thinkingOffLevel = (levels: readonly string[]) => ["off", "none", "minimal"].find((level) => levels.includes(level)) ?? levels[0];
 
 export type ProviderStreamEvent =
   | { type: "response_state"; state: import("@demesne/protocol").ResponsesState }
@@ -47,6 +44,8 @@ export type ProviderStreamEvent =
 
 export interface ProviderAdapter {
   readonly id: string;
+  /// Explicit provider configuration, stronger than implicit UI defaults.
+  readonly configuredReasoning?: string;
   /// The model can look at images: attached images go to it as pixels.
   readonly vision?: boolean;
   listModels(signal?: AbortSignal): Promise<ModelDescriptor[]>;
@@ -84,11 +83,12 @@ export interface OpenAICompatibleOptions {
 export class OpenAICompatibleProvider implements ProviderAdapter {
   readonly id: string;
   readonly vision: boolean;
+  readonly configuredReasoning: string | undefined;
   private readonly baseUrl: URL;
   private readonly apiKey: string | undefined;
   private readonly includeUsage: boolean;
   private readonly reasoningEffort: OpenAICompatibleOptions["reasoningEffort"];
-  /// Listed models that can turn thinking off; they start with it off.
+  /// Listed reasoning models; effort-capable models start at medium.
   private readonly thinkingModels = new Set<string>();
   private readonly openRouterIgnore: readonly string[];
   private readonly configuredContextWindow: number | undefined;
@@ -101,6 +101,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     this.vision = options.vision === true;
     this.includeUsage = options.includeUsage ?? true;
     this.reasoningEffort = options.reasoningEffort;
+    this.configuredReasoning = options.reasoningEffort === "none" ? "off" : options.reasoningEffort;
     this.openRouterIgnore = [...(options.openRouterIgnore ?? [])];
     this.configuredContextWindow = options.contextWindow;
     this.fetchImplementation = options.fetch ?? fetch;
@@ -140,7 +141,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
         ...(typeof value.owned_by === "string" ? { ownedBy: value.owned_by } : {}),
         ...(contextWindow ? { contextWindow } : {}),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
-        ...(reasoningLevels ? { reasoningLevels, defaultReasoningLevel: thinkingOffLevel(reasoningLevels) } : {}),
+        ...(reasoningLevels ? { reasoningLevels, defaultReasoningLevel: defaultThinkingLevel(reasoningLevels) } : {}),
       }];
     });
     if (this.id !== "ollama") return models.map((model) => this.withConfiguredContext(model));
@@ -155,9 +156,10 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
 
   async *stream(request: ProviderRequest, signal: AbortSignal): AsyncGenerator<ProviderStreamEvent> {
     // A chosen level wins over the turn's on/off and the configured effort.
-    // With none of those, a model that can switch thinking starts with it off.
+    // Otherwise prefer medium for listed effort-capable models; binary local
+    // templates keep their supported off/on fallback.
     const level = request.reasoningLevel
-      ?? (request.thinkingEnabled === undefined && !this.reasoningEffort && (this.thinkingModels.has(request.model) || (this.baseUrl.hostname !== "openrouter.ai" && SWITCHABLE_THINKING.test(request.model))) ? "off" : undefined);
+      ?? (request.thinkingEnabled === undefined && !this.reasoningEffort && (this.thinkingModels.has(request.model) || (this.baseUrl.hostname !== "openrouter.ai" && SWITCHABLE_THINKING.test(request.model))) ? this.baseUrl.hostname === "openrouter.ai" ? "medium" : "off" : undefined);
     const thinkingEnabled = level === "off" ? false : level ? true : request.thinkingEnabled;
     const reasoningEffort = thinkingEnabled === false
       ? "none"

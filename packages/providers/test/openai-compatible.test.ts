@@ -322,7 +322,7 @@ describe("OpenAICompatibleProvider", () => {
       { id: "llama-3", provider: "openai-compatible" },
     ]);
     const routed = await list("https://openrouter.ai/api/v1", [{ id: "a/think", supported_parameters: ["tools", "reasoning"] }, { id: "b/plain", supported_parameters: ["tools"] }]);
-    expect(routed.map((model) => [model.id, model.reasoningLevels, model.defaultReasoningLevel])).toEqual([["a/think", ["off", "low", "medium", "high"], "off"], ["b/plain", undefined, undefined]]);
+    expect(routed.map((model) => [model.id, model.reasoningLevels, model.defaultReasoningLevel])).toEqual([["a/think", ["off", "low", "medium", "high"], "medium"], ["b/plain", undefined, undefined]]);
   });
 
   test("rejects cleartext non-loopback endpoints", () => {
@@ -431,4 +431,16 @@ describe("OpenAICompatibleProvider", () => {
       { role: "tool", tool_call_id: "prior", content: "result" },
     ]);
   });
+});
+
+test("OpenRouter sends medium by default only for known reasoning models", async () => {
+  const bodies: Record<string, any>[] = [];
+  const provider = new OpenAICompatibleProvider({ baseUrl: "https://openrouter.ai/api/v1", fetch: (async (url, init) => {
+    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "think", supported_parameters: ["reasoning"] }, { id: "plain" }] });
+    bodies.push(JSON.parse(String(init?.body))); return new Response("data: [DONE]\n\n");
+  }) as typeof fetch });
+  await provider.listModels();
+  for (const request of [{ model: "think" }, { model: "plain" }, { model: "think", reasoningLevel: "high" }, { model: "think", reasoningLevel: "off" }])
+    for await (const _ of provider.stream({ ...request, messages: [] }, new AbortController().signal)) { /* consume */ }
+  expect(bodies.map(body => body.reasoning)).toEqual([{ effort: "medium" }, undefined, { effort: "high" }, { effort: "none" }]);
 });

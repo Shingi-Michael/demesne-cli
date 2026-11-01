@@ -59,7 +59,7 @@ export interface TurnProcessor {
 
 /// Per-call adjustments: Drive's cap on a single decision's output, or the
 /// model a sub-agent runs on (any configured provider's model).
-export interface InferenceOverrides { maxOutputTokens?: number; model?: string }
+export interface InferenceOverrides { maxOutputTokens?: number; model?: string; reasoning?: string | null }
 
 export function snapshotTurnInference(
   processor: TurnProcessor,

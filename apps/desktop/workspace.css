@@ -783,6 +783,50 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .card-dot { width: 7px; height: 7px; margin: 0 3.5px; border-radius: 50%; flex: none; background: var(--t4); }
 .desktop #cards .card-dot.ready { background: var(--ok); }
 .desktop #cards .card-dot.failed { background: var(--danger, #e5484d); }
+/* Where: the card that says where this chat runs (pass 121 E). The head is
+   a monogram tile, the project and its folder, and the model with its effort
+   as three dots; the daemon shows only as a coloured edge and a note when it
+   isn't fine. */
+.desktop #cards [data-card="where"] .card-head { align-items: center; gap: 10px; padding: 11px 12px 9px; }
+.desktop #cards [data-card="where"] .card-title { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.desktop #cards [data-card="where"] .card-chev { order: 3; }
+.desktop #cards [data-card="where"] .card-sum { order: 4; margin-left: 0; }
+.desktop #cards [data-card="where"]:not(.folded) .card-sum { display: none; }
+.desktop #cards [data-card="where"].folded .card-title .wh-who, .desktop #cards [data-card="where"].folded .card-title .wh-model { display: none; }
+.desktop #cards [data-card="where"].folded .card-head { padding: 8px 12px; }
+.desktop #cards [data-card="where"].folded .wh-tile { width: 22px; height: 22px; font-size: 11px; border-radius: 6px; }
+.desktop #cards .wh-tile { flex: none; width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-weight: 700; font-size: 15px; letter-spacing: -0.02em; color: #1b1c1f; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.desktop #cards .wh-pink { background: linear-gradient(135deg, #f6cbd8, #f2b6c8); }
+.desktop #cards .wh-blue { background: linear-gradient(135deg, #c6d9f6, #a9c4ee); }
+.desktop #cards .wh-green { background: linear-gradient(135deg, #bfe3cd, #9ed3b4); }
+.desktop #cards .wh-amber { background: linear-gradient(135deg, #f3dcb0, #ebc98a); }
+.desktop #cards .wh-lilac { background: linear-gradient(135deg, #dcd0f4, #c6b4ec); }
+.desktop #cards .wh-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.desktop #cards .wh-model { flex: none; max-width: 46%; display: flex; flex-direction: column; align-items: flex-end; text-align: right; font-weight: 500; }
+.desktop #cards .wh-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; color: var(--t1); }
+.desktop #cards .wh-sub { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 400; line-height: 16px; color: var(--t3); }
+.desktop #cards .wh-sub em { font-style: normal; color: var(--t4); }
+.desktop #cards .wh-eff { display: inline-flex; gap: 3px; align-items: center; margin-left: 6px; vertical-align: 1px; }
+.desktop #cards .wh-eff i { width: 5px; height: 5px; border-radius: 50%; background: var(--t4); }
+.desktop #cards .wh-eff i.on { background: var(--t2); }
+.desktop #cards [data-card="where"] { overflow: hidden; }
+.desktop #cards [data-card="where"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: transparent; }
+.desktop #cards [data-card="where"] { position: relative; }
+.desktop #cards [data-card="where"].wh-wait::before { background: var(--warn); }
+.desktop #cards [data-card="where"].wh-off::before { background: var(--bad); }
+.desktop #cards [data-card="where"] .card-body { padding: 0 12px 11px; gap: 0; }
+.desktop #cards .wh-note { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 6px 9px; border-radius: var(--r-sm); background: var(--tone2); font-size: 12px; color: var(--t2); }
+.desktop #cards .wh-note.wait { color: var(--warn); }
+.desktop #cards .wh-note.off { color: var(--bad); }
+.desktop #cards .wh-note .card-btn { margin-left: auto; padding: 2px 9px; }
+.desktop #cards .wh-pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.desktop #cards .wh-lines { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; font-size: 12px; }
+.desktop #cards .wh-k { color: var(--t3); }
+.desktop #cards .wh-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); }
+.desktop #cards .wh-v em { font-style: normal; color: var(--t3); }
+.desktop #cards .wh-v .card-meter { width: 40px; margin-left: 6px; vertical-align: middle; }
+.desktop #cards .wh-r { color: var(--t3); font-size: 11.5px; text-align: right; }
+.desktop #cards .wh-chip { display: inline-block; padding: 0 6px; border-radius: 5px; background: var(--tone2); font: 11px/18px var(--mono); color: var(--t2); }
 .desktop #cards .counts { display: inline-flex; gap: 6px; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: no-preference) {
   .desktop #cards .card-chev { transition: transform 160ms var(--ease), opacity 140ms var(--ease); }

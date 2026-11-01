@@ -1825,3 +1825,36 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop .request .paste-chip summary::-webkit-details-marker { display: none; }
 .desktop .request .paste-chip pre { margin: 6px 0 0; max-height: 320px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--tone); font: 11.5px/16px var(--mono, ui-monospace, monospace); color: var(--t2); white-space: pre-wrap; text-align: left; }
 
+/* Recorded file edits, opened explicitly from a compact chat row. */
+.file-edit { box-sizing: border-box; width: calc(100% - 22px); max-width: calc(100% - 22px); min-width: 0; margin: 6px 0 12px 22px; border: 1px solid var(--hair); border-radius: 12px; background: var(--surface); color: var(--t2); overflow: hidden; }
+.response > .file-edit, .step-fold > .file-edit { width: 100%; max-width: 100%; margin-left: 0; }
+.file-edit .fe-head { padding: 12px 14px; display: flex; gap: 8px 12px; align-items: baseline; flex-wrap: wrap; border-bottom: 1px solid var(--hair); }
+.file-edit .fe-path { flex: 1 1 200px; min-width: 0; font: 500 12px/1.6 "JetBrains Mono", monospace; color: var(--t1); overflow-wrap: anywhere; white-space: pre-wrap; }
+.file-edit .fe-kind { font-size: 11px; color: var(--t4); }
+.file-edit .fe-file-picker { display: flex; align-items: center; gap: 8px; flex: 1 1 100%; min-width: 0; font-size: 11px; }
+.file-edit select { min-width: 0; max-width: 100%; flex: 1; background: var(--surface); color: var(--t2); border: 1px solid var(--hair); border-radius: 6px; padding: 5px; }
+.file-edit .fe-controls { display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: center; padding: 10px 14px; }
+.file-edit .fe-modes { display: flex; gap: 3px; }
+.file-edit button { font: 11px/1.5 Inter, system-ui, sans-serif; border: 1px solid transparent; border-radius: 7px; padding: 5px 9px; min-height: 30px; background: transparent; color: var(--t3); cursor: pointer; }
+.file-edit button:hover { background: var(--tone2); color: var(--t1); }
+.file-edit button[aria-pressed="true"] { background: var(--tone2); border-color: var(--hair); color: var(--t1); }
+.file-edit button:focus-visible, .file-edit select:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.file-edit button:disabled { opacity: .45; cursor: default; }
+.file-edit .fe-counts { margin-left: auto; color: var(--t4); font: 11px/1.6 "JetBrains Mono", monospace; }
+.file-edit .fe-body { padding: 0 14px 14px; min-width: 0; display: grid; gap: 14px; }
+.file-edit .fe-region { min-width: 0; transform-origin: top; }
+.file-edit .fe-region-label { display: flex; align-items: center; gap: 9px; color: var(--t4); font-size: 11px; padding: 5px 0 8px; }
+.file-edit .fe-region-label::after { content: ''; height: 1px; flex: 1; background: var(--hair); }
+.file-edit .fe-lines { border-left: 1px solid var(--hair); min-width: 0; }
+.file-edit .fe-line { display: grid; grid-template-columns: 5ch 1.5ch minmax(0, 1fr); gap: 6px; min-width: 0; min-height: 24px; padding: 3px 8px; font: 11px/1.7 "JetBrains Mono", monospace; }
+.file-edit .fe-line-number, .file-edit .fe-mark { color: var(--t4); user-select: none; }
+.file-edit .fe-line-number { text-align: right; }
+.file-edit .fe-code { min-width: 0; font: inherit; color: inherit; background: none; border: 0; padding: 0; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+.file-edit .fe-line.added { background: color-mix(in srgb, var(--ok) 10%, transparent); color: var(--ok); }
+.file-edit .fe-line.removed { background: color-mix(in srgb, var(--bad) 10%, transparent); color: var(--bad); }
+.file-edit .fe-line.added .fe-mark, .file-edit .fe-line.removed .fe-mark { color: inherit; }
+.file-edit .fe-gap, .file-edit .fe-notice { font-size: 11px; line-height: 1.6; color: var(--t4); overflow-wrap: anywhere; padding: 4px 8px; }
+.file-edit .fe-more { justify-self: start; border-color: var(--hair); }
+.file-edit .fe-footer { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; padding: 10px 14px; border-top: 1px solid var(--hair); background: var(--tone2); }
+.file-edit .fe-status { flex: 1 1 170px; min-width: 0; color: var(--t3); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.file-edit .fe-replay { border-color: var(--hair); color: var(--t2); margin-left: auto; }

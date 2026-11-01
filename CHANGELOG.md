@@ -4,6 +4,8 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ## [Unreleased]
 
+- Recorded file edits open on demand from compact chat rows, with Before / Diff / After views, wrapped code, line numbers and replay. Diffs stay collapsed by default.
+
 ### Changed
 
 - The working cube is back in place: the working line no longer clips its left side while it turns, and the cube now sits under the answer's d. mark with the silver words lined up with the answer text.

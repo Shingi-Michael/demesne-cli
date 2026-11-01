@@ -27,6 +27,7 @@ import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { RepoFlowView } from "./repo-flow.ts";
+import { FileEditView } from "./file-edit.ts";
 import { FoundryPane, buildRequest } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
 import { animate, spring, stagger } from "animejs";
@@ -348,6 +349,8 @@ function toldNotes(drive: NonNullable<Snapshot["drive"]>) {
 const stepsOpen = new Set<string>();
 /// Steps whose diff or output is unfolded in place, keyed run:tool.
 const stepOpen = new Set<string>();
+// File diffs are opt-in: keep the chat compact until an edit row is opened.
+const fileEditsOpen = new Set<string>();
 /// Live previews: the page a running dev server serves unfolds under the
 /// step that started it. Phone width and "show output" are per step.
 const previewPhone = new Set<string>(), previewOutput = new Set<string>(), previewSeen = new Set<string>();
@@ -1707,7 +1710,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     const asked = tool.toolCallId ? state?.answered[tool.toolCallId] : undefined;
     if (asked) return askedLine(asked);
   }
-  const key = `${run.id}:${tool.id}`, open = stepOpen.has(key), canFold = foldable(tool);
+  const key = `${run.id}:${tool.id}`, open = hasFileEdit(tool) ? fileEditsOpen.has(key) : stepOpen.has(key), canFold = foldable(tool);
   const now = tool.state === "running" || tool.drafting, served = serving(tool)?.serves;
   const meta = served ? `<span class="pv-live" aria-hidden="true"></span>${h(new URL(served).host)}` : tool.waiting
     ? `<span class="amber">${tool.name === "ask_user" || state?.questions.some((q) => q.toolCallId === tool.toolCallId) ? "waiting for your answer" : "waiting for you"}</span>`
@@ -1741,7 +1744,21 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   // A commit or a merge draws the tree under its step (repo-flow.ts); the
   // drawing itself is kept across repaints and dropped into this slot.
   const tree = tool.repo && tool.state === "done" ? repoSlot(tool) : "";
-  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + tree + (open && canFold ? stepFold(run, tool) : "");
+  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + tree + (hasFileEdit(tool) ? (open ? fileEditSlot(tool) : "") : open && canFold ? stepFold(run, tool) : "");
+}
+const hasFileEdit = (tool: ToolEntry) => tool.phase === "change" && tool.state === "done" && Boolean(tool.changes?.length);
+const fileEditSlot = (tool: ToolEntry) => `<div data-file-edit="${h(tool.toolCallId)}"></div>`;
+const fileEditViews = new Map<string, FileEditView>();
+function placeFileEdits(container: ParentNode, run: WorkspaceRun) {
+  for (const slot of container.querySelectorAll<HTMLElement>("[data-file-edit]")) {
+    const tool = run.entries.find((entry): entry is ToolEntry => entry.type === "tool" && entry.toolCallId === slot.dataset.fileEdit);
+    if (!tool?.changes?.length) continue;
+    const key = `${run.id}:${tool.toolCallId}`;
+    let view = fileEditViews.get(key);
+    if (!view) { view = new FileEditView(tool.changes, tool.state === "done"); fileEditViews.set(key, view); }
+    slot.replaceWith(view.element);
+    view.render(stepsSeenRunning.has(tool.toolCallId) || (tool.startedAt >= windowOpenedAt && Date.now() - tool.startedAt < 30_000));
+  }
 }
 const repoSlot = (tool: ToolEntry) => `<div class="repo-flow-slot" data-repo-flow="${h(tool.toolCallId)}"></div>`;
 /// The trees drawn under commit and merge steps, by tool call. Each plays
@@ -1831,6 +1848,7 @@ function rewindLine(rewind: Snapshot["rewinds"][number]) {
 function stepFold(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === "subagent") return agentFold(run, tool);
   if (tool.phase === "change") {
+    if (tool.changes?.length) return `<div class="step-fold">${fileEditSlot(tool)}</div>`;
     const files = tool.changes?.length ? tool.changes.map((change) => ({ path: change.path, before: change.before ?? "", after: change.after ?? "" })) : tool.diff ? [{ path: String(tool.input.path ?? tool.detail ?? ""), before: tool.diff.oldText, after: tool.diff.newText }] : [];
     const blocks = files.map((file) => {
       const rows = codeDiff(file.before, file.after).rows, keep = new Set<number>();
@@ -1966,6 +1984,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     if (fold && (entry.type === "reasoning" || entry.type === "tool")) {
       // Folded steps keep their trees: a commit or merge stays drawn.
       if (entry.type === "tool" && entry.repo && entry.state === "done") { flush(); body += repoSlot(entry); }
+      if (entry.type === "tool" && hasFileEdit(entry) && fileEditsOpen.has(key)) { flush(); body += fileEditSlot(entry); }
       continue;
     }
     if (entry.type === "reasoning") {
@@ -2340,6 +2359,7 @@ function renderConversation() {
       index === state.runs.length - 1,
       expanded.has(run.id),
       stepsOpen.has(run.id),
+      [...fileEditsOpen].filter(key => key.startsWith(`${run.id}:`)),
       // Unfolded steps, and the recorded output a command's fold shows.
       [...stepOpen].filter((key) => key.startsWith(`${run.id}:`)).map((key) => {
         const tool = run.entries.find((entry) => entry.type === "tool" && String(entry.id) === key.slice(run.id.length + 1));
@@ -2360,7 +2380,7 @@ function renderConversation() {
       state.model.id,
       // A commit or merge step's tree: the turn redraws the moment it lands,
       // whatever else is streaming.
-      run.entries.flatMap((entry) => entry.type === "tool" && entry.repo && entry.state === "done" ? [entry.toolCallId] : []),
+      run.entries.flatMap((entry) => entry.type === "tool" && (entry.repo || entry.changes?.length) && entry.state === "done" ? [entry.toolCallId] : []),
     ]);
     let saved = runNodes.get(run.id);
     if (!saved) {
@@ -2405,6 +2425,7 @@ function renderConversation() {
       }
       saved.content.replaceChildren(template.content);
       placeRepoFlows(saved.content, run);
+      placeFileEdits(saved.content, run);
       const retained = new Set(
         [...saved.node.querySelectorAll<HTMLElement>("[data-entry]")].map(
           (node) => Number(node.dataset.entry),
@@ -2429,6 +2450,11 @@ function renderConversation() {
       runNodes.delete(id);
       changed = true;
     }
+  const editKeys = new Set(state.runs.flatMap(run => run.entries.flatMap(entry => entry.type === "tool" && entry.changes?.length ? [`${run.id}:${entry.toolCallId}`] : [])));
+  for (const [key, view] of fileEditViews) {
+    if (!editKeys.has(key)) { view.dispose(); fileEditViews.delete(key); }
+    else if (!view.element.isConnected) view.suspend();
+  }
   // While Foundry writes a page, the pane opens on its title; the page then
   // assembles in it the moment the save lands.
   const writing = state.activeTurnId ? state.runs.find((run) => run.id === state!.activeTurnId) : undefined;
@@ -5358,7 +5384,9 @@ async function dispatch(
   }
   if (action === "step") {
     const key = `${args.runId}:${args.id}`;
-    stepOpen.has(key) ? stepOpen.delete(key) : stepOpen.add(key);
+    const edit = state!.runs.find(run => run.id === args.runId)?.entries.find(entry => entry.id === args.id);
+    if (edit?.type === "tool" && hasFileEdit(edit)) fileEditsOpen.has(key) ? fileEditsOpen.delete(key) : fileEditsOpen.add(key);
+    else stepOpen.has(key) ? stepOpen.delete(key) : stepOpen.add(key);
     follow = false;
     renderConversation();
     // A command's recorded output loads when its row first opens.

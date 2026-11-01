@@ -63,10 +63,12 @@ export function forgetOldReads<T extends ModelMessage>(messages: T[]): T[] {
 /// trimming the last turns too cost more rounds and more uncached tokens).
 export const KEEP_RECENT_TURNS = 2;
 /// Older turns are cut to notes in one step once their long read-style
-/// output passes this many characters (~30k tokens), then left alone until
+/// output passes this many characters (~60k tokens), then left alone until
 /// it piles up again. Cutting rarely, all at once, keeps the cached prefix
-/// valid in between, where trimming a turn every time would not.
-export const CUT_AFTER_CHARS = 120_000;
+/// valid in between, where trimming a turn every time would not. A cut
+/// costs one uncached rebuild and pays back on every later round, so it
+/// waits for a lot to come off (at 120k a short chat lost a little, measured).
+export const CUT_AFTER_CHARS = 240_000;
 
 const longOutput = (messages: ModelMessage[]) => {
   const names = new Map<string, string>();

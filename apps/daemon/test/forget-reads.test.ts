@@ -75,7 +75,7 @@ test("the next turn's request carries the note; the turn that read it saw it who
   const workspace = realpathSync(mkdtempSync(join(tmpdir(), "demesne-forget-")));
   const store = new DemesneStore(":memory:");
   const { session } = store.createSession("Reads", workspace);
-  const text = big("src/greeting.ts", Math.ceil(CUT_AFTER_CHARS / 20));
+  const text = big("src/greeting.ts", Math.ceil((CUT_AFTER_CHARS + 5_000) / 23));
   const tools = new ToolRegistry([{ definition: { name: "read_file", description: "read", inputSchema: { type: "object" } }, permission: () => null, async execute() { return text; } }]);
   const schedulers = new InferenceSchedulers(new InferenceScheduler(1), "test");
   const engine = new AgentEngine(store, tools, new PermissionBroker(), schedulers);

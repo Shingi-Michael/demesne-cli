@@ -915,8 +915,13 @@ export class WorkspaceHost {
       const models = await this.models().catch(() => []);
       const model = models.find(model => model.id === id) ?? (this.model.id === id ? this.model : { id, provider: "" });
       const effective = resolveReasoningLevel(model, reasoning);
-      if (!restoring || this.model.id !== id || this.reasoning !== effective)
-        await this.client.setModel(id, effective);
+      if (!restoring || this.model.id !== id || this.reasoning !== effective) {
+        // Opening a chat only tries to bring back its model: if the daemon
+        // can't switch, the chat opens on the model already running instead
+        // of the whole window going offline.
+        try { await this.client.setModel(id, effective); }
+        catch (error) { if (!restoring) throw error; return; }
+      }
       this.reasoning = effective;
       if (this.model.id !== id || model !== this.model) {
         this.model = model;

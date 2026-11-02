@@ -64,7 +64,15 @@ export const LOOK_MEASURE = String.raw`(() => {
   }
 
   // Text that can barely be read against what is behind it.
-  const rgba = (value) => { const m = value.match(/[\d.]+/g); return m ? m.map(Number).concat(m.length < 4 ? [1] : []).slice(0, 4) : null; };
+  // rgb()/rgba() in 0-255; color(srgb r g b / a) (what color-mix() gives) in 0-1; other spaces are skipped.
+  const rgba = (value) => {
+    const m = value.match(/-?[\d.]+(?:e-?\d+)?/g);
+    if (!m) return null;
+    const n = m.map(Number), alpha = (list) => list.concat(list.length < 4 ? [1] : []).slice(0, 4);
+    if (value.startsWith("rgb")) return alpha(n);
+    if (value.startsWith("color(srgb ")) return alpha(n.slice(0, 3).map((v) => v * 255).concat(n.slice(3)));
+    return null;
+  };
   const lum = ([r, g, b]) => { const c = [r, g, b].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
   const behind = (el) => {
     for (let at = el; at; at = at.parentElement) {

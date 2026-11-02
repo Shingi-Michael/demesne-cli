@@ -618,7 +618,11 @@ try {
   assert.equal(await page.locator(".sidebar-session:not([aria-current]) .sidebar-session-mark").evaluateAll(marks => marks.filter(mark => getComputedStyle(mark).visibility === "visible").length), 0, "Settled chats carry no mark");
   await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
   assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "false");
-  assert(await page.locator("#rail-expand").isVisible(), "The folded sidebar is a rail");
+  // On the Mac the traffic lights own the rail's top, so its mark hides and
+  // the toolbar's toggle unfolds the sidebar (#433).
+  const macChrome = await page.evaluate(() => document.documentElement.classList.contains("mac-chrome"));
+  assert(await page.locator(".sidebar-rail").isVisible(), "The folded sidebar is a rail");
+  assert.equal(await page.locator("#rail-expand").isVisible(), !macChrome, macChrome ? "the Mac's rail leaves the mark to the traffic lights" : "the rail starts with the mark");
   assert(!await page.locator("#sidebar-sessions").isVisible(), "The rail hides the list");
   await capture("02-rail");
   // Resting on the rail's empty space peeks the whole sidebar out over the panel.
@@ -631,8 +635,8 @@ try {
   await capture("02-rail-peek");
   await page.locator(".sidebar-session[aria-current='page']").click();
   await until(() => page.locator("#desktop-shell.sidebar-peek").count().then(count => count === 0), "picking a chat puts the peek away");
-  assert(await page.locator("#rail-expand").isVisible(), "and the rail is back");
-  await page.locator("#rail-expand").click();
+  assert(await page.locator(".sidebar-rail").isVisible(), "and the rail is back");
+  await page.locator(macChrome ? "#desktop-toggle-sidebar" : "#rail-expand").click();
   // Rest on a chat: after a moment its card says where it stands.
   await page.locator(".sidebar-session[aria-current='page']").hover();
   const glance = page.locator("#sidebar-glance");

@@ -14,6 +14,10 @@ app.setName("Demesne");
 /// `--foundry-look=<job>`: render one Foundry page off screen for the daemon and quit (foundry-look.ts).
 const lookJob = lookJobPath(process.argv);
 if (lookJob) runFoundryLook(lookJob);
+// The bundle is marked LSUIElement so the look's off-screen copies never get
+// a Dock icon at launch (macOS decides that from Info.plist, before any code
+// runs); the app itself becomes a regular Dock app here.
+else if (process.platform === "darwin") app.setActivationPolicy("regular");
 // Match the installed Windows shortcut identity so native toasts can appear.
 if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
 const userData = app.commandLine.getSwitchValue("user-data-dir");

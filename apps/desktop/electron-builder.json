@@ -32,7 +32,10 @@
       "dir"
     ],
     "category": "public.app-category.developer-tools",
-    "identity": null
+    "identity": null,
+    "extendInfo": {
+      "LSUIElement": true
+    }
   },
   "linux": {
     "target": [

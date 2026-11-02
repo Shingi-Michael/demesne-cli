@@ -33,9 +33,8 @@ export function runFoundryLook(path: string) {
   app.commandLine.appendSwitch("force-device-scale-factor", "1");
   // Pages show their settled state: motion is off, as the brief asks under reduced motion.
   app.commandLine.appendSwitch("force-prefers-reduced-motion");
-  // A background app from the start, so no Dock icon flashes while it renders.
+  // The bundle starts as a background app (LSUIElement), so it stays one: no Dock icon.
   if (process.platform === "darwin") app.setActivationPolicy("accessory");
-  app.dock?.hide();
   let finished = false;
   const done = (result: LookResult | { error: string }) => {
     if (finished) return;

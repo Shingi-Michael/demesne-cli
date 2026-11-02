@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import { formatDriveReport, splitNextPrompt, type CommandRecord, type DriveAway, type DriveAwayRequest, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveFixStatus, type DriveSignal, type Turn } from "@demesne/protocol";
+import { formatDriveReport, formatThreadReport, splitNextPrompt, type CommandRecord, type DriveAway, type DriveAwayRequest, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveFixStatus, type DriveSignal, type DriveThread, type Turn } from "@demesne/protocol";
 
 /// Drive's unattended work, each piece in its own git worktree on its own
 /// branch: fixes for breakages, Next proposals you press Run on, and /drive
@@ -19,6 +19,8 @@ export interface FixHost {
   cancel(turnId: string): void;
   commands(sessionId: string): CommandRecord[];
   activity(turnId: string): { steps: number; last: string | null };
+  /// Whether the chat waits on the person: an approval or a question.
+  waiting?(sessionId: string): boolean;
   /// Called once a job is applied, opened as a PR, or discarded, with the
   /// status it had before; Drive's calibration records proposal outcomes here.
   settled?(fix: DriveFix, before: DriveFixStatus): void;
@@ -69,6 +71,25 @@ ${fix.signals.length ? `\nEvidence:\n${fix.signals.map((signal) => `- ${signal.t
 
 End with two or three plain sentences: what you changed and how you checked it.`;
 }
+
+export function threadPrompt(fix: Pick<DriveFix, "branch" | "title"> & { thread: DriveThread }) {
+  return `You're one of the threads an orchestrator chat split a job into. You work in a separate git worktree on branch ${fix.branch}, so the user's own checkout and the other threads are untouched.
+
+Your job: ${fix.title}
+${fix.thread.brief}
+
+Files you claim: ${fix.thread.files.join(", ") || "(none listed)"}. Other threads own other files, so stay inside these. If the job truly needs a file outside them, say so at the end instead of editing it.
+
+1. Read the relevant code before changing anything.
+2. Make the change the job asks for, and nothing else: don't refactor or touch unrelated code.
+3. Run the checks that cover what you changed (tests, typecheck, lint) and confirm they pass.
+4. Don't install or upgrade dependencies (node_modules is shared with the user's checkout), and don't commit or push: demesne commits the result, and the person merges it from the orchestrator.
+
+End with two or three plain sentences: what you changed and how you checked it.`;
+}
+
+/// At most this many threads work at once in a project.
+export const MAX_THREADS = 3;
 
 const slugOf = (text: string, fallback: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32).replace(/-$/, "") || fallback;
 
@@ -126,7 +147,13 @@ export class DriveFixes {
 
   list(workspace: string): DriveFix[] {
     return this.fixes.filter((fix) => fix.workspace === workspace).map((fix) =>
-      fix.status === "running" && fix.turnId ? { ...fix, activity: this.host.activity(fix.turnId) } : fix);
+      fix.status === "running" && fix.turnId ? { ...fix, activity: this.host.activity(fix.turnId), ...(fix.sessionId && this.host.waiting?.(fix.sessionId) ? { waiting: true } : {}) } : fix);
+  }
+
+  /// The threads an orchestrator chat started, oldest first.
+  threads(from: string): DriveFix[] {
+    const workspace = this.fixes.find((fix) => fix.thread && fix.from === from)?.workspace;
+    return workspace ? this.list(workspace).filter((fix) => fix.thread && fix.from === from) : [];
   }
 
   get(id: string) { return this.fixes.find((fix) => fix.id === id); }
@@ -136,7 +163,7 @@ export class DriveFixes {
 
   async start(workspace: string, signals: DriveSignal[], proposal?: DriveFixProposal, mission?: string, from?: string): Promise<DriveFix> {
     // One at a time; a mission's worktree stays open until you apply or discard it.
-    const busy = this.fixes.find((fix) => fix.workspace === workspace && (fix.status === "starting" || fix.status === "running" || (fix.mission && ACTIVE.has(fix.status))));
+    const busy = this.fixes.find((fix) => fix.workspace === workspace && !fix.thread && (fix.status === "starting" || fix.status === "running" || (fix.mission && ACTIVE.has(fix.status))));
     if (busy) throw new Error(busy.mission ? "A Drive mission's worktree is still open for this project. Apply or discard it first." : proposal || mission ? "Drive is already working in a worktree for this project." : "A fix is already running for this project.");
     const top = await this.git(["git", "rev-parse", "--show-toplevel"], workspace);
     if (!top.ok) throw new Error("Fixing in a worktree needs a git repository.");
@@ -171,6 +198,50 @@ export class DriveFixes {
       await this.cleanup(fix, true);
     }
     return fix;
+  }
+
+  /// A thread: one job of an orchestrator chat's split, in its own worktree
+  /// and branch, side by side with the others. It reports back to the chat
+  /// that started it, and only the person merges it (Apply).
+  async startThread(workspace: string, from: string, job: { title: string } & DriveThread): Promise<DriveFix> {
+    const open = this.fixes.filter((fix) => fix.workspace === workspace && fix.thread && (fix.status === "starting" || fix.status === "running"));
+    if (open.length >= MAX_THREADS) throw new Error(`${MAX_THREADS} threads are already working in this project; wait for one to finish.`);
+    const top = await this.git(["git", "rev-parse", "--show-toplevel"], workspace);
+    if (!top.ok) throw new Error("Threads only work inside a project with a git repository.");
+    const base = await this.git(["git", "rev-parse", "HEAD"], workspace);
+    if (!base.ok) throw new Error("This repository has no commits yet.");
+    const id = randomUUID().slice(0, 8);
+    const title = firstLine(job.title).slice(0, 120) || "Thread";
+    const branch = `thread/${slugOf(title, "job")}-${id.slice(0, 4)}`;
+    const path = join(this.worktreeRoot, `${basename(top.out)}-${id}`);
+    const thread: DriveThread = { brief: job.brief.trim().slice(0, 4000), files: job.files.map((file) => file.trim()).filter(Boolean).slice(0, 40) };
+    const fix: DriveFix = { id, workspace, title, signals: [], from, thread, branch, path, base: base.out, sessionId: null, turnId: null, status: "starting", startedAt: new Date().toISOString(), finishedAt: null };
+    this.fixes.push(fix); this.save();
+    try {
+      mkdirSync(this.worktreeRoot, { recursive: true, mode: 0o700 });
+      const added = await this.git(["git", "worktree", "add", "-b", branch, path, fix.base], workspace, 120_000);
+      if (!added.ok) throw new Error(`Couldn't create the worktree: ${firstLine(added.err)}`);
+      fix.linked = await this.linkDependencies(top.out, path);
+      const sub = relative(top.out, workspace);
+      const sessionId = this.host.startSession(title, sub ? join(path, sub) : path);
+      const { turnId, done } = this.host.startTurn(sessionId, threadPrompt({ ...fix, thread }));
+      Object.assign(fix, { sessionId, turnId, status: "running" });
+      this.save();
+      this.done.set(id, done.then(() => this.finish(fix)).catch((error) => this.fail(fix, error)).finally(() => { this.done.delete(id); this.reportThread(fix); }));
+    } catch (error) {
+      this.fail(fix, error);
+      await this.cleanup(fix, true);
+    }
+    return fix;
+  }
+
+  /// A finished thread tells its orchestrator how it went.
+  private reportThread(fix: DriveFix) {
+    if (!fix.thread || !fix.from || !fix.sessionId || (fix.status !== "ready" && fix.status !== "failed")) return;
+    const others = this.fixes.filter((item) => item.thread && item.from === fix.from && item.workspace === fix.workspace && item.id !== fix.id && (item.status === "starting" || item.status === "running")).length;
+    this.host.report?.(fix.from, formatThreadReport({ title: fix.title, fix: fix.id, chat: fix.sessionId, branch: fix.branch, status: fix.status, working: others,
+      ...(fix.diff ? { diff: fix.diff } : {}), ...(fix.checks?.length ? { checks: fix.checks } : {}),
+      summary: fix.status === "failed" ? fix.error ?? "It stopped." : fix.summary ?? "" }));
   }
 
   /// Away mode: runs the proposals one after another, each as if you pressed
@@ -230,7 +301,7 @@ export class DriveFixes {
   working(workspace: string) { return Boolean(this.busy(workspace)) || this.away(workspace)?.status === "running"; }
 
   private busy(workspace: string) {
-    return this.fixes.find((fix) => fix.workspace === workspace && (fix.status === "starting" || fix.status === "running" || (fix.mission && ACTIVE.has(fix.status))));
+    return this.fixes.find((fix) => fix.workspace === workspace && !fix.thread && (fix.status === "starting" || fix.status === "running" || (fix.mission && ACTIVE.has(fix.status))));
   }
 
   private endAway(away: DriveAway, status: "finished" | "stopped", reason?: string, save = true) {
@@ -339,6 +410,8 @@ export class DriveFixes {
     }
     if (fix.status !== "ready") throw new Error(`The ${fix.proposal || fix.mission ? "change" : "fix"} isn't ready yet.`);
     if (action === "apply") {
+      // Words the person sent the thread after it finished may have changed more.
+      if (fix.thread) { await this.commit(fix); if (fix.status !== "ready") throw new Error(fix.error ?? "The thread isn't ready."); }
       const picked = await this.git(["git", "cherry-pick", `${fix.base}..${fix.branch}`], fix.workspace, 120_000);
       if (!picked.ok) {
         await this.git(["git", "cherry-pick", "--abort"], fix.workspace);

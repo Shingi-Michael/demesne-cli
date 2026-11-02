@@ -13,6 +13,7 @@ These guides describe the current implementation. They were last audited on **20
 | [Desktop app](desktop.md) | The Electron window: layout, development, bundles, lifecycle |
 | [Subagents and concurrency](subagents.md) | Routing, read-only tools, provider slots, Qwen sizing |
 | [Agent Drive](agent-drive.md) | NEXT, missions, project memory, check-ins, loop protection |
+| [Threads](threads.md) | An orchestrator chat and the threads it splits a job into, side by side |
 | [Questions and interviews](questions.md) | Typed composer answers, adaptive follow-ups, saved drafts, pause and recovery |
 | [Themefy and themes](themes.md) | LLM color interviews, instant palettes, saved themes, contrast validation and undo |
 | [Images](images.md) | What the daemon stores from tools, model vision, routes and limits |

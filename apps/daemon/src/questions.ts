@@ -62,6 +62,12 @@ export class QuestionBroker {
     return true;
   }
 
+  /// Whether any of these turns waits on the person's answer.
+  waitingIn(turnIds: string[]): boolean {
+    for (const pending of this.pending.values()) if (turnIds.includes(pending.turnId)) return true;
+    return false;
+  }
+
   cancelTurn(turnId: string, reason: unknown): void {
     for (const [questionId, pending] of this.pending) {
       if (pending.turnId !== turnId) continue;

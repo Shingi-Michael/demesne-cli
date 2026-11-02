@@ -114,6 +114,10 @@ export class DemesneClient {
   async driveFixes(workspace: string, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveFixesResponse> {
     return this.request(`/v1/drive/fixes?workspace=${encodeURIComponent(workspace)}`, { signal });
   }
+  /// The threads an orchestrator chat started; each merges or discards with driveFixAction.
+  async threads(from: string, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveFixesResponse> {
+    return this.request(`/v1/threads?from=${encodeURIComponent(from)}`, { signal });
+  }
   async startDriveFix(request: import("@demesne/protocol").DriveFixRequest): Promise<{ fix: import("@demesne/protocol").DriveFix }> {
     return this.request("/v1/drive/fixes", { method: "POST", body: JSON.stringify(request) });
   }

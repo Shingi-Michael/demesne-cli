@@ -74,6 +74,7 @@ import { personalFilesTool } from "./personal-files.ts";
 import { PersonalIndex, searchPersonalFilesTool } from "./personal-index.ts";
 import { notifyPhoneTool, routineMessage, type Phone } from "./notify-phone.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
+import { startThreadsTool } from "./threads.ts";
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
@@ -234,6 +235,7 @@ export function createDaemonApp(options: {
       questions.cancelTurn(turnId, controller.signal.reason);
     },
     commands: (sessionId) => store.commandsForSession(sessionId),
+    waiting: (sessionId) => permissions.waitingIn(sessionId) || questions.waitingIn(store.activeTurnIds(sessionId)),
     activity: (turnId) => {
       const rows = store.database.query("SELECT payload FROM events WHERE turn_id = ? AND type = 'tool.call_requested' ORDER BY id DESC").all(turnId) as { payload: string }[];
       let last: string | null = null;
@@ -465,11 +467,17 @@ export function createDaemonApp(options: {
     const row = store.database.query("SELECT w.root FROM sessions s JOIN workspaces w ON w.id = s.workspace_id WHERE s.id = ?").get(sessionId) as { root: string } | null;
     // The assistant's chat is told nothing of Drive, even in its own folder.
     if (!row || inDriveWorktree(row.root) || sessionId === assistantChat.existing()) return null;
-    return driveContext({ auto: driveAuto.state(row.root), ideas: chatIdeas(row.root).proposals, fixes: driveFixes.list(row.root), away: driveFixes.away(row.root) });
+    return driveContext({ auto: driveAuto.state(row.root), ideas: chatIdeas(row.root).proposals, fixes: driveFixes.list(row.root).filter((fix) => !fix.thread), away: driveFixes.away(row.root) });
   }
   tools.register(driveRunTool({
     ideas: (root) => inDriveWorktree(root) || !workspaceTrust.isTrusted(root) ? null : chatIdeas(root),
     run: (root, proposal, signals) => driveFixes.start(root, signals, proposal),
+  }));
+  tools.register(startThreadsTool({
+    refuse: (root, sessionId) => inDriveWorktree(root) || root.split(/[\\/]/).includes(".demesne-worktrees") ? "A thread can't start threads of its own."
+      : sessionId === assistantChat.existing() ? "Threads only work inside a project."
+      : !workspaceTrust.isTrusted(root) ? "Threads only work inside a project you trust." : null,
+    start: (root, from, job) => driveFixes.startThread(root, from, job),
   }));
   const activeDriveDecisions = new Set<Promise<unknown>>();
   const requestDrainWaiters = new Set<() => void>();
@@ -938,7 +946,13 @@ export function createDaemonApp(options: {
 
       // Worktree work (breakage fixes and Next proposals): list, start, and apply / open a PR / discard.
       if (request.method === "GET" && url.pathname === "/v1/drive/fixes") {
-        const response: DriveFixesResponse = { fixes: driveFixes.list(url.searchParams.get("workspace") ?? "") };
+        // Threads belong to their orchestrator chat, not to Drive.
+        const response: DriveFixesResponse = { fixes: driveFixes.list(url.searchParams.get("workspace") ?? "").filter((fix) => !fix.thread) };
+        return json(response);
+      }
+      // An orchestrator chat's threads; each merges (applies) or discards like any worktree job.
+      if (request.method === "GET" && url.pathname === "/v1/threads") {
+        const response: DriveFixesResponse = { fixes: driveFixes.threads(url.searchParams.get("from") ?? "") };
         return json(response);
       }
       if (request.method === "POST" && url.pathname === "/v1/drive/fixes") {

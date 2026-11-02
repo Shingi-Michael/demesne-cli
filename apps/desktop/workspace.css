@@ -1818,10 +1818,7 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop #context-card .context-bar { gap: 1px; }
 .desktop #context-card .tone-i { background: var(--blossom, #f2b6c8); }
 .desktop #context-card .tone-o { background: var(--ok); }
-.desktop #context-card .context-sub { margin: 12px 0 5px; font-size: 11.5px; color: var(--t4); }
-.desktop #context-card .context-big { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; }
-.desktop #context-card .context-big span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desktop #context-card :is(.context-big, .plan-window) em { font-style: normal; color: var(--t3); font-variant-numeric: tabular-nums; }
+.desktop #context-card .plan-window em { font-style: normal; color: var(--t3); font-variant-numeric: tabular-nums; }
 .desktop #context-card .context-divider { height: 1px; background: var(--hair); margin: 12px -14px; }
 .desktop #context-card .plan-window { margin-top: 8px; }
 .desktop #context-card .plan-window > div:first-child { display: flex; justify-content: space-between; gap: 8px; }
@@ -1832,20 +1829,6 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop #context-card .context-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 11px; padding-top: 9px; box-shadow: 0 -1px 0 var(--hair); font-size: 12px; color: var(--t3); }
 .desktop #context-card .context-foot .context-compact { margin: 0; }
 /* Compaction from notes (pass 114): the Keep list and the turns strip, pink for notes, blue for whole turns. */
-.desktop #context-card .context-keep { display: flex; flex-direction: column; gap: 3px; }
-.desktop #context-card .context-keep span { display: flex; gap: 7px; align-items: baseline; }
-.desktop #context-card .context-keep span::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--blossom, #f2b6c8); transform: translateY(-2px); }
-.desktop #context-card .context-lane { display: flex; gap: 2px; }
-.desktop #context-card .context-lane i { flex: 1; height: 10px; border-radius: 2px; background: color-mix(in srgb, var(--acc) 75%, transparent); }
-.desktop #context-card .context-lane i.note { background: color-mix(in srgb, var(--blossom, #f2b6c8) 60%, transparent); }
-.desktop #context-card .context-keep em { font-style: normal; color: var(--t4); font-size: 11.5px; }
-.desktop #context-card .context-keep span { position: relative; padding-right: 18px; }
-.desktop #context-card .context-keep-remove { position: absolute; right: 0; top: 0; padding: 0 4px; border: 0; background: none; color: var(--t4); font: inherit; line-height: 18px; cursor: pointer; opacity: 0; }
-.desktop #context-card .context-keep span:hover .context-keep-remove, .desktop #context-card .context-keep-remove:focus-visible { opacity: 1; }
-.desktop #context-card .context-keep-remove:hover { color: var(--t1); }
-.desktop #context-card .context-keep-add { margin-top: 4px; padding: 4px 8px; border: 0; border-radius: 7px; background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair); color: var(--t1); font: inherit; font-size: 12px; outline: none; }
-.desktop #context-card .context-keep-add:focus { box-shadow: inset 0 0 0 1px var(--line2); }
-.desktop #context-card .context-keep-add::placeholder { color: var(--t4); }
 /* Changed, not running yet (pass 115): under the last turn that changed Demesne's own source. */
 .desktop .live-build { display: flex; align-items: center; gap: 8px; margin: 10px 0 0 34px; padding: 6px 8px 6px 10px; border-radius: 9px; background: var(--tone, rgba(255,255,255,.035)); box-shadow: inset 0 0 0 1px var(--hair, rgba(255,255,255,.07)); font-size: 12.5px; color: var(--t3); }
 .desktop .live-build > i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }

@@ -166,23 +166,36 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
   .sidebar-row-actions { transition: none; }
 }
 .sidebar-empty { padding: 6px 10px; color: var(--t4); font-size: 12.5px; line-height: 1.5; }
-/* The rail: the sidebar folded to 60px, with dots for what needs you. */
+/* The rail (pass 129 A): the sidebar folded to a quiet 60px strip. One even
+   column of 36px buttons, your open chats as letter tiles with their state
+   dot, Drive and Settings at the foot. Labels show beside an icon on hover;
+   nothing slides out. */
 .sidebar-rail { display: none; }
 #desktop-shell.sidebar-collapsed { grid-template-columns: 60px minmax(0, 1fr); }
-/* The rail's mark sits on the toolbar's centre line (48px row). */
-#desktop-shell.sidebar-collapsed #desktop-sidebar { padding: 6px 10px 12px; align-items: center; }
-#desktop-shell.sidebar-collapsed:not(.sidebar-peek) #desktop-sidebar > :not(.sidebar-rail) { display: none; }
-#desktop-shell.sidebar-collapsed .sidebar-rail { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 6px; width: 40px; }
-#rail-expand { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 8px; border-radius: 8px; }
-#rail-expand .brand-symbol { width: 26px; height: 26px; }
-.rail-button { position: relative; width: 36px; height: 36px; border-radius: 8px; }
+#desktop-shell.sidebar-collapsed #desktop-sidebar { padding: 10px 10px 12px; align-items: center; overflow: visible; z-index: 85; }
+#desktop-shell.sidebar-collapsed #desktop-sidebar > :not(.sidebar-rail) { display: none; }
+#desktop-shell.sidebar-collapsed .sidebar-rail { display: flex; flex: 1; min-height: 0; flex-direction: column; align-items: center; gap: 4px; width: 40px; }
+.rail-button { position: relative; display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 9px; color: var(--t3); }
+.rail-button:hover { background: var(--surface2); color: var(--t1); }
 .rail-button.on { background: var(--surface2); color: var(--t1); }
-.rail-badge { position: absolute; right: 5px; top: 5px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--warn); background: var(--side); }
+.rail-button[hidden] { display: none; }
+.rail-badge { position: absolute; right: 6px; top: 6px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--warn); background: var(--side); }
 .rail-badge.blue { width: 7px; height: 7px; border: 0; background: var(--acc); box-shadow: 0 0 0 2px var(--side); }
-.rail-foot { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: auto; }
-.rail-ring { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: conic-gradient(var(--acc) 0 var(--progress, 0%), var(--surface3) 0); }
-.rail-ring i { display: block; width: 28px; height: 28px; border-radius: 50%; background: var(--side); }
-.rail-ring:hover i { background: var(--surface2); }
+.rail-chats { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 0; padding-top: 10px; margin-top: 6px; position: relative; }
+.rail-chats:empty { display: none; }
+.rail-chats::before { content: ""; position: absolute; top: 0; left: 8px; right: 8px; height: 1px; background: var(--hair, var(--line)); }
+.rail-chat { position: relative; display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--surface2); color: var(--t2); font-size: 12.5px; font-weight: 600; letter-spacing: 0; }
+.rail-chat:hover { background: var(--surface3); color: var(--t1); }
+.rail-chat.on { color: var(--t1); box-shadow: inset 0 0 0 1.5px var(--acc); }
+.rail-chat-dot { position: absolute; right: -2px; top: -2px; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--side); display: none; }
+.rail-chat-dot.working, .rail-chat-dot.acc { display: block; background: var(--acc); }
+.rail-chat-dot.warn { display: block; background: var(--warn); }
+.rail-chat-dot.bad { display: block; background: var(--bad, #e5484d); }
+.rail-foot { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: auto; }
+/* A label beside the icon, only on hover. */
+.sidebar-rail [data-tip]::after { content: attr(data-tip); position: absolute; left: 44px; top: 50%; transform: translate(-4px, -50%); padding: 4px 9px; border-radius: 7px; background: var(--panel, var(--surface2)); color: var(--t1); box-shadow: 0 0 0 1px var(--hair, var(--line)), 0 6px 20px rgb(0 0 0 / 0.22); font-size: 12px; font-weight: 500; line-height: 1.4; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 120ms var(--ease), transform 120ms var(--ease); z-index: 95; }
+.sidebar-rail [data-tip]:hover::after, .sidebar-rail [data-tip]:focus-visible::after { opacity: 1; transform: translate(0, -50%); transition-delay: 250ms; }
+@media (prefers-reduced-motion: reduce) { .sidebar-rail [data-tip]::after { transition: none; } }
 /* The top bar: the sidebar toggle, your tabs, and ⋯. */
 #desktop-toolbar { grid-column: 2; grid-row: 1; min-width: 0; height: 48px; padding: 0 18px 0 16px; gap: 10px; border: 0; background: var(--ink); z-index: 80; }
 #desktop-toggle-sidebar { color: var(--t3); display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; }
@@ -535,7 +548,7 @@ body.desktop { --hair: rgba(255, 255, 255, 0.08); --hair2: rgba(255, 255, 255, 0
 #desktop-sidebar { border-right: 0; }
 .sidebar-nav button, .sidebar-search, .sidebar-session, .sidebar-more { border-radius: var(--r); }
 .sidebar-search:focus-within, .sidebar-search:has(input:not(:placeholder-shown)) { background: var(--tone2); box-shadow: 0 0 0 1px var(--hair2); }
-#rail-expand, .rail-button { border-radius: var(--r); }
+.rail-button { border-radius: var(--r); }
 body.desktop kbd { border: 0; border-radius: var(--r-sm); background: var(--tone2); }
 #desktop-toggle-sidebar, #desktop-toolbar .header-more { border-radius: var(--r-sm); }
 /* Conversation: the guide is a hairline; folds and code are tones. */
@@ -1127,7 +1140,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
    with no fills; choices unfold under their row, numbers are typed. */
 #desktop-sidebar.settings-open > :is(.sidebar-nav, #sidebar-projects, #sidebar-order-status) { display: none; }
 #settings-nav { display: flex; flex: 1; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding-bottom: 12px; }
-#settings-nav[hidden], #desktop-shell.sidebar-collapsed:not(.sidebar-peek) #settings-nav { display: none; }
+#settings-nav[hidden], #desktop-shell.sidebar-collapsed #settings-nav { display: none; }
 .st-back { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; margin-bottom: 4px; border-radius: var(--r); color: var(--t3); font-size: 12.5px; text-align: left; }
 .st-back:hover { color: var(--t1); background: var(--surface2); }
 .st-back .ico { width: 14px; height: 14px; }
@@ -1413,11 +1426,9 @@ html.mac-chrome #desktop-sidebar > * { -webkit-app-region: no-drag; }
 html.mac-chrome #desktop-toolbar { -webkit-app-region: drag; }
 html.mac-chrome #desktop-toolbar :is(button, a, input, [role="button"], .bar-tab, header > *) { -webkit-app-region: no-drag; }
 html.mac-chrome #desktop-shell:has(#desktop-sidebar[hidden]) #desktop-toolbar { padding-left: 84px; }
-/* Folded on the Mac: the traffic lights own the rail's top, so the rail
-   starts under them without the mark (the toolbar's toggle unfolds it),
-   and the toolbar's first button clears them. */
-html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-sidebar { padding-top: 48px; }
-html.mac-chrome #desktop-shell.sidebar-collapsed #rail-expand { display: none; }
+/* Folded on the Mac: the traffic lights own the rail's top, so the strip
+   starts under them and the toolbar's first button clears them. */
+html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-sidebar { padding-top: 52px; }
 html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-toolbar { padding-left: 24px; }
 /* The Mac's simple full screen has no title bar, so the page draws the
    three buttons where the window's own sit (trafficLightPosition 18, 17). */
@@ -1539,15 +1550,7 @@ html.glass .bar-tab.on { background: var(--panel-glass, var(--panel)); }
 .desktop #composer .composer-bar #composer-limit.warn { color: var(--warn); }
 .desktop #composer .composer-bar #composer-limit.warn .ring { background: conic-gradient(var(--warn) 0 var(--usage, 0%), var(--surface3) 0); }
 
-/* The folded sidebar peeks out (pass 76 B): resting on the rail slides the
-   whole sidebar out over the panel, a solid sheet like the popovers. */
 #desktop-shell { position: relative; }
-#desktop-shell.sidebar-collapsed.sidebar-peek #desktop-sidebar { position: absolute; left: 0; top: 0; bottom: 0; z-index: 90; width: 256px; align-items: stretch; padding-top: 14px; padding-left: 12px; padding-right: 12px; padding-bottom: 10px; background: var(--panel, var(--side)); box-shadow: 1px 0 0 var(--hair), 14px 0 44px rgb(0 0 0 / 0.3); }
-#desktop-shell.sidebar-collapsed.sidebar-peek .sidebar-rail { display: none; }
-@media (prefers-reduced-motion: no-preference) {
-  #desktop-shell.sidebar-peek #desktop-sidebar { animation: sidebar-peek 180ms var(--ease) both; }
-}
-@keyframes sidebar-peek { from { opacity: 0; transform: translateX(-14px); } }
 
 /* Rest on a chat (pass 76 C): its card beside the row, a solid sheet like the
    popovers, with nothing to click. */

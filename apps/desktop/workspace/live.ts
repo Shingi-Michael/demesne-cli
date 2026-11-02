@@ -850,21 +850,19 @@ function renderSidebar() {
     (sameControl ?? (focused >= 0 ? buttons[Math.min(focused, buttons.length - 1)] : null) ?? document.getElementById("sidebar-search"))?.focus({ preventScroll: true });
   }
   renderTabs();
-  // The rail: a dot where something waits, a ring for Drive's progress.
-  const badge = document.getElementById("rail-sessions-badge"), ring = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
-  // Chats that need you: the rail's chats icon wears the amber ring, and
-  // the Dock icon counts them.
+  // The folded strip: Drive's dot while it works, and the branches waiting.
+  const driveButton = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
+  // Chats that need you count on the Dock icon.
   const needsYou = sessions.filter((item) => item.id === current?.id ? Boolean(waiting) : item.waiting).length;
-  if (badge) badge.hidden = !needsYou;
   document.dispatchEvent(new CustomEvent("demesne:needs-you", { detail: needsYou }));
   // And while anything works (a chat, a queued one, Drive), the Dock shows it working.
   const busyNow = Boolean(state?.activeTurnId || sessions.some((item) => item.status === "running" || item.status === "queued") || (pinned && pinned.status === "running"));
   document.dispatchEvent(new CustomEvent("demesne:working", { detail: busyNow }));
-  if (branchButton) branchButton.hidden = !review.length;
-  if (ring) {
-    const steps = pinned ? driveTaskList(pinned) : [];
-    ring.hidden = !pinned && !run.fix && !run.away;
-    ring.style.setProperty("--progress", `${steps.length ? Math.round(steps.filter((step) => step.mark === "✓").length / steps.length * 100) : run.fix || run.away ? 34 : 0}%`);
+  if (branchButton) { branchButton.hidden = !review.length; branchButton.dataset.tip = `${review.length} branch${review.length === 1 ? "" : "es"} to review`; }
+  if (driveButton) {
+    const driving = Boolean(pinned && pinned.status === "running") || Boolean(run.fix || run.away);
+    driveButton.querySelector<HTMLElement>(".rail-badge")!.hidden = !driving;
+    driveButton.dataset.tip = driving ? "Drive · working" : ideas ? `Drive · ${ideas} idea${ideas === 1 ? "" : "s"}` : "Drive";
   }
 }
 document.getElementById("sidebar-search")?.addEventListener("input", renderSidebar);
@@ -1498,6 +1496,19 @@ function chatTarget(id: string): [string, Record<string, unknown>] {
 const goChat = (id: string): Promise<unknown> => { const [action, args] = chatTarget(id); return dispatch(action, args); };
 /// The chat that needs you, other than the one you're on.
 const waitingElsewhere = () => state?.sessions.find((item) => item.waiting && item.id !== state!.session?.id && !deletedSessions.has(item.id));
+/// The folded strip's open chats (pass 129 A): a letter tile per open tab,
+/// with a dot when it works (blue) or waits for you (amber); the label shows
+/// beside it on hover.
+function renderRailChats(open: { item: Chat; tone: string; on: boolean }[]) {
+  const host = document.getElementById("rail-chats");
+  if (!host) return;
+  host.innerHTML = open.slice(0, 8).map(({ item, tone, on }) => {
+    const title = item.title || "New chat", about = STATE_WORDS[tone] ?? "";
+    const [action, args] = chatTarget(item.id);
+    const letter = (/[\p{L}\p{N}]/u.exec(title)?.[0] ?? "·").toUpperCase();
+    return `<button type="button" class="rail-chat${on ? " on" : ""}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-tip="${h(about ? `${title} · ${about}` : title)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${on ? ' aria-current="page"' : ""}>${h(letter)}${tone ? `<i class="rail-chat-dot ${tone}" aria-hidden="true"></i>` : ""}</button>`;
+  }).join("");
+}
 function renderTabs() {
   const strip = document.getElementById("workspace-tabs");
   if (!strip || !state) return;
@@ -1517,6 +1528,7 @@ function renderTabs() {
   const tones = shown.map((id) => chatTone(byId.get(id)!));
   const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, byId.get(id)!.updatedAt]), tones, chatOpen && current!.id, here, peek, call?.id, call?.title, rimNow?.words]);
   if (signature === tabsSignature) return;
+  renderRailChats(shown.map((id, index) => ({ item: byId.get(id)!, tone: tones[index]!, on: chatOpen && id === current!.id })));
   tabsSignature = signature;
   const tab = (id: string, tone: string) => {
     const item = byId.get(id)!, on = chatOpen && id === current!.id, title = item.title || "New chat", about = STATE_WORDS[tone] ?? "";
@@ -6445,7 +6457,7 @@ document.addEventListener("keydown", (event) => {
   if (ctrl && key === "k") {
     event.preventDefault();
     const search = document.getElementById("sidebar-search") as HTMLInputElement | null;
-    if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("rail-expand")?.click();
+    if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("desktop-toggle-sidebar")?.click();
     search?.focus();
     search?.select();
     return;

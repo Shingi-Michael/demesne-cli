@@ -6,10 +6,12 @@ import { readArtifact } from "./artifacts.ts";
  *  to the latest three messages that carry any. Durable transcripts contain
  *  IDs, never pixels. */
 export async function hydrateImageInputs(store: DemesneStore, sessionId: string, messages: ProviderMessage[], signal: AbortSignal,
-  include: { tools: boolean; attachments: boolean } = { tools: true, attachments: false }): Promise<ProviderMessage[]> {
+  include: { tools: boolean | ((filename: string) => boolean); attachments: boolean } = { tools: true, attachments: false }): Promise<ProviderMessage[]> {
   const ids = (role: "tool" | "user") => messages.flatMap((message) => message.role === role ? [message.imageArtifactIds ?? []] : []).filter((list) => list.length);
   const selected = new Set([
-    ...(include.tools ? ids("tool").flat().slice(-2) : []),
+    ...(include.tools === true ? ids("tool").flat().slice(-2)
+      // Only some tools' pictures: the latest two of those.
+      : include.tools ? ids("tool").flat().filter((id) => { const file = store.getImageArtifact(sessionId, id)?.filename; return file !== undefined && (include.tools as (filename: string) => boolean)(file); }).slice(-2) : []),
     ...(include.attachments ? ids("user").slice(-3).flat() : []),
   ]);
   return Promise.all(messages.map(async (message): Promise<ProviderMessage> => {

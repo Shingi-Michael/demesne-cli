@@ -1905,6 +1905,13 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop .live-app.threads-on:not(.paging) #thread-pane:not([hidden]) { position: relative; display: flex; flex-direction: column; flex: none; width: 50%; min-width: 0; border-left: 1px solid var(--hair); background: var(--surface); }
 .desktop .live-app.threads-on:not(.paging) :is(#cards, #pane) { display: none !important; }
 .tp-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 8px 10px 8px 18px; border-bottom: 1px solid var(--hair); }
+.tp-tabs { display: flex; gap: 4px; padding: 8px 10px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--hair); }
+.tp-tabs::-webkit-scrollbar { display: none; }
+.tp-tab { display: flex; align-items: center; gap: 7px; flex: 0 1 auto; min-width: 0; max-width: 220px; padding: 5px 10px; border-radius: 8px; color: var(--t3); font-size: 12.5px; white-space: nowrap; }
+.tp-tab span { overflow: hidden; text-overflow: ellipsis; }
+.tp-tab:hover { background: var(--tone); color: var(--t1); }
+.tp-tab.on { background: var(--tone2); color: var(--t1); }
+.tp-tab .th-ring { width: 14px; height: 14px; flex: none; }
 .tp-title { display: flex; flex-direction: column; min-width: 0; }
 .tp-title b { overflow: hidden; color: var(--t1); font-weight: 600; font-size: 13.5px; line-height: 19px; text-overflow: ellipsis; white-space: nowrap; }
 .tp-title span { overflow: hidden; color: var(--t3); font-size: 11.5px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }

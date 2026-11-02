@@ -94,10 +94,19 @@ export function threadsFootHTML(view: ThreadsView): string {
 /// The right half's head: the thread's name, where it works and how it is,
 /// then Merge once it is ready, and ×. Nothing else.
 export function threadHeadHTML(view: ThreadsView, fix: DriveFix): string {
-  const state = threadState(fix), index = view.list.indexOf(fix);
+  const state = threadState(fix);
   const how = { work: "working", you: "waits for you", ready: "ready", merged: "merged", failed: "stopped" }[state];
   const merge = state === "ready" ? button("thread-merge", view.busy === fix.id ? "Merging…" : "Merge", { id: fix.id }, "tp-merge", Boolean(view.busy)) : "";
-  return `<div class="tp-title"><b>${esc(fix.title)}</b><span>${esc(fix.branch)} · <span class="${state === "you" ? "amber" : state === "failed" ? "danger" : ""}">${how}</span>${view.list.length > 1 ? ` · ${index + 1} of ${view.list.length}` : ""}</span></div><span class="sp"></span>${merge}${button("thread-close", '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>', {}, "tp-x").replace("<button ", '<button aria-label="Close the thread" title="Close" ')}`;
+  return `<div class="tp-title"><b>${esc(fix.title)}</b><span>${esc(fix.branch)} · <span class="${state === "you" ? "amber" : state === "failed" ? "danger" : ""}">${how}</span></span></div><span class="sp"></span>${merge}${button("thread-close", '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>', {}, "tp-x").replace("<button ", '<button aria-label="Close the thread" title="Close" ')}`;
+}
+
+/// The thread side's own picker (pass 128 A): a tab per thread, with its
+/// ring, so any thread is one click away. ⌘[ and ⌘] step through them.
+export function threadTabsHTML(view: ThreadsView): string {
+  return `<div class="tp-tabs" role="tablist" aria-label="Threads">${view.list.map((fix) => {
+    const on = view.open === fix.id;
+    return `<button type="button" role="tab" class="tp-tab${on ? " on" : ""}" aria-selected="${on}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" title="${esc(fix.title)}">${ring(fix)}<span>${esc(fix.title)}</span></button>`;
+  }).join("")}</div>`;
 }
 
 /// What the orchestrator told the thread, at the top of its chat in place

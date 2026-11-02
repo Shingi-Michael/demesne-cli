@@ -10,7 +10,7 @@ import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
-import { threadBriefHTML, threadHeadHTML, threadListHTML, threadReportHTML, threadsFootHTML } from "./threads-view.ts";
+import { threadBriefHTML, threadHeadHTML, threadListHTML, threadReportHTML, threadsFootHTML, threadTabsHTML } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { mountSakura, type Sakura } from "./sakura.ts";
@@ -5854,12 +5854,13 @@ function renderThreadPane(fix: Snapshot["threads"]["list"][number] | null) {
   if (!fix || !state) { if (threadPaneFor) { host.innerHTML = ""; threadPaneSignature = threadPaneFor = ""; } return; }
   if (threadPaneFor !== fix.id) {
     threadPaneFor = fix.id; threadPaneSignature = "";
-    host.innerHTML = `<div class="tp-head"></div><div class="tp-conv"></div><div class="tp-foot"><div class="tp-asks"></div><form class="composer" id="tp-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></button></div><div class="composer-bar"><span class="sp"></span><button type="button" id="tp-model" class="cb" data-action="thread-models" title="Change this thread's model"></button></div></form></div>`;
+    host.innerHTML = `<div class="tp-tabs-host"></div><div class="tp-head"></div><div class="tp-conv"></div><div class="tp-foot"><div class="tp-asks"></div><form class="composer" id="tp-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></button></div><div class="composer-bar"><span class="sp"></span><button type="button" id="tp-model" class="cb" data-action="thread-models" title="Change this thread's model"></button></div></form></div>`;
   }
   const chat = state.threads.chat;
   const signature = JSON.stringify([fix, chat, state.threads.busy, state.threads.list.length, [...stepsOpen], [...stepOpen], [...detailsOpen], [...expanded]]);
   if (signature === threadPaneSignature) return;
   threadPaneSignature = signature;
+  host.querySelector<HTMLElement>(".tp-tabs-host")!.innerHTML = threadTabsHTML(state.threads);
   host.querySelector<HTMLElement>(".tp-head")!.innerHTML = threadHeadHTML(state.threads, fix);
   const chip = host.querySelector<HTMLElement>("#tp-model")!, chipHTML = threadModelWords();
   if (chip.innerHTML !== chipHTML) chip.innerHTML = chipHTML;
@@ -5894,6 +5895,15 @@ function sendToThread(form: HTMLFormElement) {
   form.classList.remove("has-draft");
   void api("thread-send", { text }).catch((error) => { input.value = text; notice(error instanceof Error ? error.message : String(error)); });
 }
+// ⌘[ and ⌘] step through the thread tabs while the split is up.
+document.addEventListener("keydown", (event) => {
+  if (!(event.metaKey || event.ctrlKey) || (event.key !== "[" && event.key !== "]") || !state || el("thread-pane").hidden) return;
+  const list = state.threads.list, at = list.findIndex((fix) => fix.id === state!.threads.open);
+  if (list.length < 2 || at < 0) return;
+  event.preventDefault();
+  const next = list[(at + (event.key === "]" ? 1 : -1) + list.length) % list.length]!;
+  void act(() => api("thread-open", { id: next.id }));
+});
 document.addEventListener("submit", (event) => {
   const form = (event.target as Element).closest<HTMLFormElement>("[data-thread-form]");
   if (!form) return;

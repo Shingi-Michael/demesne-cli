@@ -92,3 +92,39 @@ export function startThreadsTool(host: ThreadsHost): AgentTool {
     },
   };
 }
+
+export const MESSAGE_THREAD_TOOL = "message_thread";
+
+/// The orchestrator passing words to one of its threads: they steer it while
+/// it works, or start its next turn once it's back.
+export interface MessageThreadHost {
+  message(from: string, thread: string, text: string): { title: string; how: "steered" | "sent" };
+}
+
+export function messageThreadTool(host: MessageThreadHost): AgentTool {
+  return {
+    definition: {
+      name: MESSAGE_THREAD_TOOL,
+      description: "Pass words to one of the threads this chat started: a correction, a rule, an answer, or more to do. While the thread works it reads them after its current step; once it's back they start its next turn, and what it changes then is merged with it. Name the thread by its title (or its id from a thread report). Use it when the person asks you to tell a thread something; don't do a thread's work yourself.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          thread: { type: "string", description: "The thread's title, or its id" },
+          text: { type: "string", description: "What to tell it, in the person's words where you can" },
+        },
+        required: ["thread", "text"],
+        additionalProperties: false,
+      },
+    },
+    permission: () => null,
+    async execute(input, context) {
+      const value = (input ?? {}) as { thread?: unknown; text?: unknown };
+      const thread = typeof value.thread === "string" ? value.thread.trim() : "";
+      const text = typeof value.text === "string" ? value.text.trim() : "";
+      if (!thread || !text) throw new Error("message_thread needs a thread and the text");
+      if (!context.sessionId) throw new Error("Threads are messaged from their orchestrator chat");
+      const { title, how } = host.message(context.sessionId, thread, text.slice(0, 8000));
+      return how === "steered" ? `Told "${title}"; it reads this after its current step.` : `Sent to "${title}"; it's working on it now and reports back when done.`;
+    },
+  };
+}

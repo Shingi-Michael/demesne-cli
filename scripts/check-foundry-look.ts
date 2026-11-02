@@ -28,7 +28,7 @@ for (const issues of [desktop!.issues, phone!.issues]) {
   assert.match(all(issues), /p "Tomatoes" overlaps p "Basil"/);
 }
 // Kit colours (color-mix) read right in both schemes: no false contrast alarms on pills or tints.
-const pills = `<link rel="stylesheet" href="foundry://kit/base.css"><main class="container"><p class="secondary">Second line</p><span class="pill">Kit pill</span><span class="pill accent">Accent</span><p class="muted">Muted note</p></main>`;
+const pills = `<link rel="stylesheet" href="foundry://kit/base.css"><main class="container"><p class="secondary">Second line</p><span class="pill">Kit pill</span><span class="pill accent">Accent</span><p class="muted">Muted note</p><label><span style="color:transparent">✓</span><span style="color:var(--paper,#fff);background:var(--paper,#fff)">✓</span> Water</label></main>`;
 for (const scheme of ["light", "dark"]) {
   const quiet = await electronLook(command)({ kind: "html", title: "Kit", source: pills.replace("<main", `<main data-scheme="${scheme}"`).replace("<link", `<html data-theme="${scheme}"><link`) }, new AbortController().signal);
   assert(quiet);

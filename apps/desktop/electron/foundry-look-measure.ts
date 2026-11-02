@@ -87,11 +87,12 @@ export const LOOK_MEASURE = String.raw`(() => {
   for (const el of texts) {
     if (faint >= 4) break;
     const fg = rgba(getComputedStyle(el).color), bg = behind(el);
-    if (!fg || !bg) continue;
+    // Hidden on purpose (a transparent colour, or the background's own, like an unticked box's tick) is not faint.
+    if (!fg || !bg || fg[3] < 0.15) continue;
     const mix = fg.slice(0, 3).map((v, k) => v * fg[3] + bg[k] * (1 - fg[3]));
     const [hi, lo] = [lum(mix), lum(bg)].sort((x, y) => y - x);
     const ratio = (hi + 0.05) / (lo + 0.05);
-    if (ratio < 3) { faint++; say("Hard to read (" + ratio.toFixed(1) + ":1 contrast): " + label(el)); }
+    if (ratio > 1.05 && ratio < 3) { faint++; say("Hard to read (" + ratio.toFixed(1) + ":1 contrast): " + label(el)); }
   }
 
   for (const img of document.images) if (img.complete && !img.naturalWidth) say("Image did not load: " + label(img));

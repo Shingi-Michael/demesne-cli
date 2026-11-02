@@ -169,7 +169,8 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 /* The rail: the sidebar folded to 60px, with dots for what needs you. */
 .sidebar-rail { display: none; }
 #desktop-shell.sidebar-collapsed { grid-template-columns: 60px minmax(0, 1fr); }
-#desktop-shell.sidebar-collapsed #desktop-sidebar { padding: 14px 10px 12px; align-items: center; }
+/* The rail's mark sits on the toolbar's centre line (48px row). */
+#desktop-shell.sidebar-collapsed #desktop-sidebar { padding: 6px 10px 12px; align-items: center; }
 #desktop-shell.sidebar-collapsed:not(.sidebar-peek) #desktop-sidebar > :not(.sidebar-rail) { display: none; }
 #desktop-shell.sidebar-collapsed .sidebar-rail { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 6px; width: 40px; }
 #rail-expand { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 8px; border-radius: 8px; }
@@ -1411,6 +1412,12 @@ html.mac-chrome #desktop-sidebar > * { -webkit-app-region: no-drag; }
 html.mac-chrome #desktop-toolbar { -webkit-app-region: drag; }
 html.mac-chrome #desktop-toolbar :is(button, a, input, [role="button"], .bar-tab, header > *) { -webkit-app-region: no-drag; }
 html.mac-chrome #desktop-shell:has(#desktop-sidebar[hidden]) #desktop-toolbar { padding-left: 84px; }
+/* Folded on the Mac: the traffic lights own the rail's top, so the rail
+   starts under them without the mark (the toolbar's toggle unfolds it),
+   and the toolbar's first button clears them. */
+html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-sidebar { padding-top: 48px; }
+html.mac-chrome #desktop-shell.sidebar-collapsed #rail-expand { display: none; }
+html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-toolbar { padding-left: 24px; }
 /* The Mac's simple full screen has no title bar, so the page draws the
    three buttons where the window's own sit (trafficLightPosition 18, 17). */
 /* The window can't move there, so the drag regions go: they'd swallow the
@@ -1534,7 +1541,7 @@ html.glass .bar-tab.on { background: var(--panel-glass, var(--panel)); }
 /* The folded sidebar peeks out (pass 76 B): resting on the rail slides the
    whole sidebar out over the panel, a solid sheet like the popovers. */
 #desktop-shell { position: relative; }
-#desktop-shell.sidebar-collapsed.sidebar-peek #desktop-sidebar { position: absolute; left: 0; top: 0; bottom: 0; z-index: 90; width: 256px; align-items: stretch; padding-left: 12px; padding-right: 12px; padding-bottom: 10px; background: var(--panel, var(--side)); box-shadow: 1px 0 0 var(--hair), 14px 0 44px rgb(0 0 0 / 0.3); }
+#desktop-shell.sidebar-collapsed.sidebar-peek #desktop-sidebar { position: absolute; left: 0; top: 0; bottom: 0; z-index: 90; width: 256px; align-items: stretch; padding-top: 14px; padding-left: 12px; padding-right: 12px; padding-bottom: 10px; background: var(--panel, var(--side)); box-shadow: 1px 0 0 var(--hair), 14px 0 44px rgb(0 0 0 / 0.3); }
 #desktop-shell.sidebar-collapsed.sidebar-peek .sidebar-rail { display: none; }
 @media (prefers-reduced-motion: no-preference) {
   #desktop-shell.sidebar-peek #desktop-sidebar { animation: sidebar-peek 180ms var(--ease) both; }

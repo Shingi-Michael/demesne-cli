@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseThreadReport, type DriveFix } from "@demesne/protocol";
@@ -26,7 +26,7 @@ test("an orchestrator chat splits work into threads that run side by side, repor
   writeFileSync(join(workspace, "src", "b.ts"), "export const b = 1;\n");
   git(workspace, "init", "-q", "-b", "main"); git(workspace, "add", "-A"); git(workspace, "commit", "-qm", "init");
 
-  const reports: string[] = [], threadTools: string[][] = [];
+  const reports: string[] = [], threadTools: string[][] = [], told: string[] = [];
   const processor: TurnProcessor = { providerId: "test", modelId: "coder", async listModels() { return []; },
     async *stream(messages, tools) {
       const last = messages.at(-1)!;
@@ -36,6 +36,15 @@ test("an orchestrator chat splits work into threads that run side by side, repor
         threadTools.push((tools ?? []).map((tool) => tool.name));
         const file = said.includes("Bump a") ? "src/a.ts" : "src/b.ts";
         yield { type: "tool_call_delta" as const, index: 0, idDelta: "w", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: file, content: `export const ${file.includes("a.ts") ? "a" : "b"} = 2;\n` }) };
+        yield { type: "finish" as const, reason: "tool_calls" }; return;
+      }
+      if (last.role === "user" && said === "tell bump a to use 3") {
+        yield { type: "tool_call_delta" as const, index: 0, idDelta: "m", nameDelta: "message_thread", argumentsDelta: JSON.stringify({ thread: "bump a", text: "Use 3, not 2." }) };
+        yield { type: "finish" as const, reason: "tool_calls" }; return;
+      }
+      if (last.role === "user" && said === "Use 3, not 2.") {
+        told.push(said);
+        yield { type: "tool_call_delta" as const, index: 0, idDelta: "w3", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "src/a.ts", content: "export const a = 3;\n" }) };
         yield { type: "finish" as const, reason: "tool_calls" }; return;
       }
       if (last.role === "user" && said === "split it") {
@@ -73,10 +82,17 @@ test("an orchestrator chat splits work into threads that run side by side, repor
     const parsed = reports.map((report) => parseThreadReport(report)!);
     expect(parsed.map((report) => report.status)).toEqual(["ready", "ready"]);
     expect(Math.min(...parsed.map((report) => report.working))).toBe(0);
+    // The orchestrator passes words to a thread; the thread does the work.
+    const { body: { turn: ask } } = await call(`/v1/sessions/${session.id}/turns`, { method: "POST", body: JSON.stringify({ content: "tell bump a to use 3", permissionMode: "ask" }) });
+    expect(ask).toBeTruthy();
+    const thread = join(threads[0]!.path, "src", "a.ts");
+    for (let i = 0; i < 400 && !(existsSync(thread) && readFileSync(thread, "utf8") === "export const a = 3;\n"); i++) await Bun.sleep(25);
+    expect(told).toEqual(["Use 3, not 2."]);
+    for (let i = 0; i < 400 && (await call(`/v1/sessions/${threads[0]!.sessionId}`)).body.session.turns.some((turn: { status: string }) => turn.status === "running" || turn.status === "queued"); i++) await Bun.sleep(25);
     // Nothing reached the checkout until the person merges.
     expect(readFileSync(join(workspace, "src", "a.ts"), "utf8")).toBe("export const a = 1;\n");
     for (const fix of threads) expect((await call(`/v1/drive/fixes/${fix.id}/apply`, { method: "POST" })).body.fix.status).toBe("applied");
-    expect(readFileSync(join(workspace, "src", "a.ts"), "utf8")).toBe("export const a = 2;\n");
+    expect(readFileSync(join(workspace, "src", "a.ts"), "utf8")).toBe("export const a = 3;\n");
     expect(readFileSync(join(workspace, "src", "b.ts"), "utf8")).toBe("export const b = 2;\n");
   } finally {
     server.stop(true);

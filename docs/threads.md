@@ -6,6 +6,8 @@ A chat in a project can split a job into **threads**: up to three chats that wor
 
 Threads only exist inside a project. A plain chat on Home, the assistant's chat, and a thread itself can't start threads.
 
+You can talk to a thread directly in the right half, or ask the orchestrator to tell it something (`message_thread`): words reach a working thread after its current step, or start its next turn once it's back.
+
 A thread answers only to its orchestrator and to you: it isn't on Heartbeat (no address, no mail, no `heartbeat` tool).
 
 ## How a run goes
@@ -20,7 +22,7 @@ Words you send a thread after it finished are committed with it when you merge.
 
 ## Where it lives
 
-- Daemon: `apps/daemon/src/threads.ts` (the `start_threads` tool and claim checks), `DriveFixes.startThread` in `apps/daemon/src/drive-fixes.ts` (worktrees, the thread prompt, reports), `GET /v1/threads?from=<chat>`. Threads are worktree jobs like Drive's, kept out of Drive's own lists.
+- Daemon: `apps/daemon/src/threads.ts` (the `start_threads` and `message_thread` tools, claim checks), `DriveFixes.startThread` in `apps/daemon/src/drive-fixes.ts` (worktrees, the thread prompt, reports), `GET /v1/threads?from=<chat>`. Threads are worktree jobs like Drive's, kept out of Drive's own lists.
 - Report format: `packages/protocol/src/thread-report.ts`.
 - Window: `apps/desktop/workspace/thread-watch.ts` (follows the open thread's chat), `threads-view.ts` (list, rings, Merge bar), `renderThreads` in `live.ts`.
 - Checks: `apps/daemon/test/threads.test.ts`, `apps/desktop/workspace/test/threads-view.test.ts`, and the threads scenario in `scripts/check-desktop.ts` (capture `17-threads-*`).

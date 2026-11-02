@@ -75,9 +75,9 @@ import { personalFilesTool } from "./personal-files.ts";
 import { PersonalIndex, searchPersonalFilesTool } from "./personal-index.ts";
 import { notifyPhoneTool, routineMessage, type Phone } from "./notify-phone.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
-import { START_THREADS_TOOL, startThreadsTool } from "./threads.ts";
+import { MESSAGE_THREAD_TOOL, START_THREADS_TOOL, messageThreadTool, startThreadsTool } from "./threads.ts";
 /// What a thread never sees: Heartbeat, and starting threads of its own.
-const THREAD_HIDDEN_TOOLS: ReadonlySet<string> = new Set(["heartbeat", START_THREADS_TOOL]);
+const THREAD_HIDDEN_TOOLS: ReadonlySet<string> = new Set(["heartbeat", START_THREADS_TOOL, MESSAGE_THREAD_TOOL]);
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
@@ -493,6 +493,20 @@ export function createDaemonApp(options: {
   tools.register(driveRunTool({
     ideas: (root) => inDriveWorktree(root) || !workspaceTrust.isTrusted(root) ? null : chatIdeas(root),
     run: (root, proposal, signals) => driveFixes.start(root, signals, proposal),
+  }));
+  tools.register(messageThreadTool({
+    message: (from, name, text) => {
+      const list = driveFixes.threads(from).filter((fix) => fix.sessionId && fix.status !== "applied" && fix.status !== "discarded");
+      const wanted = name.toLowerCase();
+      const fix = list.find((item) => item.id === name) ?? list.find((item) => item.title.toLowerCase() === wanted) ?? list.find((item) => item.title.toLowerCase().includes(wanted));
+      if (!fix) throw new Error(list.length ? `No open thread called "${name}". Open threads: ${list.map((item) => `"${item.title}"`).join(", ")}` : "This chat has no open threads.");
+      const sessionId = fix.sessionId!;
+      const running = store.getSession(sessionId)?.turns.find((item) => item.status === "running");
+      if (running && engine.steer(running.id, { id: randomUUID(), text })) return { title: fix.title, how: "steered" };
+      const { turn } = store.createTurn(sessionId, text, "allow", true, false);
+      void queueTurn(turn, inferenceIn(sessionId, true));
+      return { title: fix.title, how: "sent" };
+    },
   }));
   tools.register(startThreadsTool({
     refuse: (root, sessionId) => inDriveWorktree(root) || root.split(/[\\/]/).includes(".demesne-worktrees") ? "A thread can't start threads of its own."
